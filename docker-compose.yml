@@ -1,6 +1,6 @@
 ﻿services:
   animarr:
-    image: ghcr.io/yourusername/animarr:latest   # or: build: .
+    image: ghcr.io/eduardpoul/animarr:latest   # or: build: .
     # build: .
     container_name: animarr
     restart: unless-stopped

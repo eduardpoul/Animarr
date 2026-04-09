@@ -21,7 +21,7 @@ It watches your media folders, renames files according to configurable patterns,
 ```yaml
 services:
   animarr:
-    image: ghcr.io/yourusername/animarr:latest
+    image: ghcr.io/eduardpoul/animarr:latest
     container_name: animarr
     restart: unless-stopped
     ports:
@@ -106,7 +106,7 @@ Managed in **Settings → Ignore Rules**.
 ## Building from source
 
 ```bash
-git clone https://github.com/yourusername/animarr
+git clone https://github.com/eduardpoul/Animarr
 cd animarr
 docker build -t animarr:latest .
 docker compose up -d
