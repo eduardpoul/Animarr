@@ -2,12 +2,13 @@
 @rendermode InteractiveServer
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject TorrentEngineService TorrentEngine
+@inject NavigationManager Nav
 
-<PageTitle>@L["torrent_history.title"]</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 <div style="display:flex;align-items:center;margin-bottom:16px;gap:12px;">
     <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["torrent_history.title"]</FluentLabel>
-    <FluentNavLink Href="/torrents" Style="font-size:13px;">@L["torrent_history.back_link"]</FluentNavLink>
+    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.ArrowLeft())" Title="@L["torrent_history.back_link"]" OnClick="@(() => Nav.NavigateTo("/torrents"))" />
 </div>
 
 @if (_loading)

@@ -238,7 +238,7 @@ public class TorrentEngineService : BackgroundService
             bool ratioReached = ratio > 0 && totalSize > 0 &&
                 (record.Uploaded + mgr.Monitor.DataBytesSent) >= (long)(totalSize * ratio);
 
-            if (record.StopAfterDownload || cfg.StopSeedingAfterDone || ratioReached)
+            if (record.StopAfterDownload || ratioReached)
                 await mgr.StopAsync();
         }
         else if (mgr.State == TorrentState.Error)
@@ -391,6 +391,31 @@ public class TorrentEngineService : BackgroundService
 
     public IList<ITorrentManagerFile>? GetFiles(string infoHash)
         => _managers.TryGetValue(infoHash, out var mgr) ? mgr.Files : null;
+
+    /// <summary>
+    /// Returns the set of absolute file paths that are not yet fully downloaded,
+    /// regardless of torrent state (downloading, paused, stopped, etc.).
+    /// RenameService uses this to prevent renaming incomplete files.
+    /// </summary>
+    public HashSet<string> GetIncompleteFilePaths()
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, mgr) in _managers)
+        {
+            if (mgr.Torrent is null) continue;
+            foreach (var file in mgr.Files)
+            {
+                if (file.Priority == Priority.DoNotDownload) continue;
+                if (file.BitField.Length == 0 || file.BitField.TrueCount < file.BitField.Length)
+                {
+                    var abs = System.IO.Path.Combine(mgr.SavePath, file.Path);
+                    result.Add(abs);
+                    result.Add(abs + ".!bt");
+                }
+            }
+        }
+        return result;
+    }
 
     /// <summary>
     /// After a file is renamed by the renamer, mark it DoNotDownload so MonoTorrent

@@ -23,6 +23,7 @@
   "torrents.btn_resume": "Resume",
   "torrents.btn_stop": "Stop",
   "torrents.btn_delete": "Delete",
+  "torrents.btn_edit": "Edit",
 
   "add_torrent.title": "Add Torrent",
   "add_torrent.btn_close": "Close",

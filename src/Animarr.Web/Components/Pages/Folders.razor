@@ -27,7 +27,7 @@ else
 {
     <FluentDataGrid Items="@_folders.AsQueryable()" TGridItem="FolderWatcher" ShowHover="true" Style="width:100%;">
         <PropertyColumn Property="@(f => f.Label)" Title="@(L["folders.col_name"])" Sortable="true" />
-        <PropertyColumn Property="@(f => f.Path)" Title="@(L["folders.col_path"])" />
+        <PropertyColumn Property="@(f => f.Path)" Title="@(L["folders.col_path"])" Style="min-width:260px;" />
         <TemplateColumn Title="@(L["folders.col_monitoring"])" Align="Align.Center">
             <FluentSwitch Value="@context.WatchEnabled"
                           ValueChanged="@(async (bool v) => await ToggleWatcher(context, v))" />
@@ -56,7 +56,7 @@ else
                 })
             }
         </TemplateColumn>
-        <TemplateColumn Title="@(L["folders.col_last_scan"])">
+        <TemplateColumn Title="@(L["folders.col_last_scan"])" Width="140px">
             @(context.LastScannedAt.HasValue
                 ? context.LastScannedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                 : "—")

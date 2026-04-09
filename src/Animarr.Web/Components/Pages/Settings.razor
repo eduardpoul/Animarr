@@ -174,9 +174,12 @@
 
                 <div>
                     <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_automation_title"]</FluentLabel>
-                    <FluentSwitch @bind-Value="_torrentCfg.AutoRenameAfterDownload">
-                        @L["settings.torrent_auto_rename_switch"]
-                    </FluentSwitch>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <FluentSwitch @bind-Value="_torrentCfg.AutoRenameAfterDownload">
+                            @L["settings.torrent_auto_rename_switch"]
+                        </FluentSwitch>
+
+                    </div>
                 </div>
 
                 <FluentDivider />

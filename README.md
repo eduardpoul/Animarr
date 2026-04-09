@@ -26,6 +26,8 @@ services:
     restart: unless-stopped
     ports:
       - "8450:8080"
+      - "6881:6881"      # Torrent (TCP)
+      - "6881:6881/udp"  # Torrent (UDP)
     environment:
       - TZ=UTC
     volumes:

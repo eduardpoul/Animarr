@@ -11,22 +11,21 @@
 
 <FluentStack Orientation="Orientation.Horizontal" Style="margin-bottom:16px;gap:10px;flex-wrap:wrap;"
              VerticalAlignment="VerticalAlignment.Bottom">
-    <FluentSelect TOption="string" @bind-Value="_filterFolder" Label="@(L["history.filter_folder_label"])" Style="min-width:200px;">
+    <FluentSelect TOption="string" Value="@_filterFolder" ValueChanged="@((string v) => { _filterFolder = v; StateHasChanged(); })" Label="@(L["history.filter_folder_label"])" Style="min-width:200px;">
         <FluentOption Value="">@L["history.filter_folder_all"]</FluentOption>
         @foreach (var f in _allFolders)
         {
             <FluentOption Value="@f.Id.ToString()">@f.Label</FluentOption>
         }
     </FluentSelect>
-    <FluentSelect TOption="string" @bind-Value="_filterStatus" Label="@(L["history.filter_status_label"])" Style="min-width:160px;">
+    <FluentSelect TOption="string" Value="@_filterStatus" ValueChanged="@((string v) => { _filterStatus = v; StateHasChanged(); })" Label="@(L["history.filter_status_label"])" Style="min-width:160px;">
         <FluentOption Value="">@L["history.filter_status_all"]</FluentOption>
         <FluentOption Value="Renamed">@L["history.status_renamed"]</FluentOption>
         <FluentOption Value="Skipped">@L["history.status_skipped"]</FluentOption>
         <FluentOption Value="Error">@L["history.status_error"]</FluentOption>
         <FluentOption Value="Reverted">@L["history.status_reverted"]</FluentOption>
     </FluentSelect>
-    <FluentButton OnClick="@(() => StateHasChanged())">@L["history.btn_apply_filter"]</FluentButton>
-    <FluentButton OnClick="ResetFilters">@L["history.btn_reset_filters"]</FluentButton>
+    <FluentButton IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@L["history.btn_reset_filters"]" OnClick="ResetFilters" />
 </FluentStack>
 
 @if (_loading)
@@ -37,10 +36,10 @@ else
 {
     <FluentDataGrid Items="@FilteredItems()" TGridItem="RenameHistory"
                     ShowHover="true" Pagination="@_pagination">
-        <TemplateColumn Title="@(L["history.col_date"])" Width="130px">
+        <TemplateColumn Title="@(L["history.col_date"])">
             @context.ProcessedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")
         </TemplateColumn>
-        <TemplateColumn Title="@(L["history.col_folder"])" Width="160px">
+        <TemplateColumn Title="@(L["history.col_folder"])">
             @(_allFolders.FirstOrDefault(f => f.Id == context.FolderId)?.Label ?? "—")
         </TemplateColumn>
         <TemplateColumn Title="@(L["history.col_original_name"])">
@@ -52,7 +51,7 @@ else
         <TemplateColumn Title="@(L["history.col_new_name"])">
             <code style="font-size:12px;">@Path.GetFileName(context.NewPath)</code>
         </TemplateColumn>
-        <TemplateColumn Title="@(L["history.col_status"])" Width="130px">
+        <TemplateColumn Title="@(L["history.col_status"])">
             <span class="@GetStatusClass(context.Status)">@GetStatusLabel(context.Status)</span>
         </TemplateColumn>
         <TemplateColumn Title="" Width="140px" Align="Align.End">
@@ -92,7 +91,7 @@ else
     private bool _loading = true;
     private string _filterFolder = "";
     private string _filterStatus = "";
-    private PaginationState _pagination = new() { ItemsPerPage = 25 };
+    private PaginationState _pagination = new() { ItemsPerPage = 50 };
 
     private bool _revertHidden = true;
     private RenameHistory? _revertTarget;

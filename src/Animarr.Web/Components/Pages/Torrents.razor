@@ -8,7 +8,7 @@
 @inject IToastService ToastService
 @inject NavigationManager Nav
 
-<PageTitle>@L["torrents.title"]</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 <div style="display:flex;align-items:center;margin-bottom:16px;gap:12px;">
     <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["torrents.title"]</FluentLabel>
@@ -41,7 +41,7 @@ else
         </TemplateColumn>
 
         <TemplateColumn Title="@(L["torrents.col_name"])" Sortable="false">
-            <div style="cursor:pointer;" @onclick="@(() => OpenDetails(context.InfoHash))">
+            <div>
                 <span style="font-size:13px;">@context.Name</span>
                 @if (context.State == TorrentState.Metadata)
                 {
@@ -74,7 +74,7 @@ else
             }
         </TemplateColumn>
 
-        <TemplateColumn Title="@(L["torrents.col_speed"])" Width="120px">
+        <TemplateColumn Title="@(L["torrents.col_speed"])" Width="160px">
             <span style="font-size:12px;">@FormatSpeed(context.DownloadRate) / @FormatSpeed(context.UploadRate)</span>
         </TemplateColumn>
 
@@ -86,8 +86,10 @@ else
             <span style="font-size:12px;">@context.Seeds+@context.Peers</span>
         </TemplateColumn>
 
-        <TemplateColumn Title="" Align="Align.End" Width="130px">
+        <TemplateColumn Title="" Align="Align.End" Width="155px">
             <div style="display:flex;gap:2px;">
+                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())"
+                              Title="@(L["torrents.btn_edit"])" OnClick="@(() => OpenDetails(context.InfoHash))" />
                 @if (context.State == TorrentState.Downloading || context.State == TorrentState.Metadata || context.State == TorrentState.Seeding)
                 {
                     <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Pause())"
@@ -196,18 +198,14 @@ else
         <div>
             <FluentLabel style="display:block;margin-bottom:4px;">@L["add_torrent.folder_label"]</FluentLabel>
             <div style="display:flex;align-items:center;gap:6px;">
-                <div style="flex:1;min-width:0;">
-                    <FluentSelect TOption="string"
-                                  Value="@_addFolderStr"
-                                  ValueChanged="v => { _addFolderStr = v; _addFolderWatcherId = _folders.FirstOrDefault(f => f.Id.ToString() == v)?.Id; _addCustomPath = string.Empty; _createSubfolderMode = false; }"
-                                  style="width:100%;">
-                        <FluentOption TOption="string" Value="">@L["add_torrent.folder_placeholder"]</FluentOption>
-                        @foreach (var f in _folders)
-                        {
-                            <FluentOption TOption="string" Value="@f.Id.ToString()">@f.Label (@System.IO.Path.GetFileName(f.Path.TrimEnd('/', '\\')))</FluentOption>
-                        }
-                    </FluentSelect>
-                </div>
+                <FluentCombobox TOption="FolderWatcher"
+                                Items="@_folders"
+                                OptionText="@(f => f.Label)"
+                                Autocomplete="ComboboxAutocomplete.Both"
+                                SelectedOption="@(_folders.FirstOrDefault(f => f.Id.ToString() == _addFolderStr))"
+                                SelectedOptionChanged="@((FolderWatcher? f) => { _addFolderStr = f?.Id.ToString() ?? ""; _addFolderWatcherId = f?.Id; _addCustomPath = string.Empty; _createSubfolderMode = false; })"
+                                Placeholder="@L["add_torrent.folder_placeholder"]"
+                                class="folder-combobox" />
                 <FluentButton Appearance="Appearance.Outline"
                               Title="@(L["add_torrent.create_subfolder_title"])"
                               OnClick="@(() => { _createSubfolderMode = !_createSubfolderMode; _newSubfolderName = string.Empty; })">+</FluentButton>
@@ -482,6 +480,7 @@ else
 
     // ---- Folder list for combobox ----
     private List<FolderWatcher> _folders = [];
+    private bool _defaultStopAfterDownload;
 
     // ---- Add panel file list state ----
     private List<TorrentFileEntry> _addFileEntries = [];
@@ -510,6 +509,12 @@ else
             .Where(f => !f.IsSection)
             .OrderBy(f => f.Label)
             .ToListAsync();
+        var cfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
+        if (cfg is not null)
+        {
+            _defaultStopAfterDownload = cfg.StopSeedingAfterDone;
+            _addStopAfterDownload = _defaultStopAfterDownload;
+        }
     }
 
     public void Dispose() => TorrentEngine.StateChanged -= OnTorrentStateChanged;
@@ -555,7 +560,7 @@ else
         _addDlLimit = 0;
         _addUlLimit = 0;
         _addStartPaused = false;
-        _addStopAfterDownload = false;
+        _addStopAfterDownload = _defaultStopAfterDownload;
         _addFlattenSubfolders = false;
         _createSubfolderMode = false;
         _newSubfolderName = "";

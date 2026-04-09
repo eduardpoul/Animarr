@@ -23,6 +23,7 @@
   "torrents.btn_resume": "Продолжить",
   "torrents.btn_stop": "Стоп",
   "torrents.btn_delete": "Удалить",
+  "torrents.btn_edit": "Редактировать",
 
   "add_torrent.title": "Добавить торрент",
   "add_torrent.btn_close": "Закрыть",
