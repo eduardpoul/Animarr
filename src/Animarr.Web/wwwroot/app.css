@@ -8,6 +8,12 @@ html, body {
     color: var(--neutral-foreground-rest, #242424);
 }
 
+/* Destination Folder combobox width */
+.folder-combobox {
+    min-width: 560px;
+    width: 100%;
+}
+
 /* FluentLayout renders as .fluent-layout — ensure it fills the viewport */
 .fluent-layout {
     height: 100vh !important;

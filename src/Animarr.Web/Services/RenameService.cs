@@ -63,9 +63,11 @@ public class RenameService(
 
         // Enumerate all files recursively
         var activeDownloads = torrentEngine.GetActiveDownloadFilePaths();
+        var incompleteFiles  = torrentEngine.GetIncompleteFilePaths();
         var files = Directory
             .EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories)
-            .Where(f => !activeDownloads.Contains(f) && !activeDownloads.Contains(f.TrimEnd('/')))
+            .Where(f => !activeDownloads.Contains(f) && !activeDownloads.Contains(f.TrimEnd('/'))
+                     && !incompleteFiles.Contains(f)  && !incompleteFiles.Contains(f.TrimEnd('/')))
             .OrderBy(f => f);
 
         var results = new List<RenamePreviewItem>();
@@ -179,6 +181,14 @@ public class RenameService(
         var effectiveIgnoreRules = globalIgnoreRules.Concat(folder.IgnoreRules).ToList();
 
         var item = matcher.EvaluateFile(filePath, effectivePatterns, effectiveIgnoreRules);
+
+        // Skip if the file is still being downloaded (not yet 100%)
+        var incompleteFiles = torrentEngine.GetIncompleteFilePaths();
+        if (incompleteFiles.Contains(filePath))
+        {
+            logger.LogDebug("[Watcher] Skipping rename — file not fully downloaded: {Path}", filePath);
+            return;
+        }
 
         var history = new RenameHistory
         {

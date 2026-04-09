@@ -5,7 +5,9 @@
     container_name: animarr
     restart: unless-stopped
     ports:
-      - "8450:8080"   # change left side to use a different host port
+      - "8450:8080"   # Web UI
+      - "6881:6881"   # Torrent (TCP) — required for incoming connections
+      - "6881:6881/udp"  # Torrent (UDP)
     environment:
       - TZ=UTC        # e.g. America/New_York, Europe/London, Asia/Tokyo
     volumes:
