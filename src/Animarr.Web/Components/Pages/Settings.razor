@@ -1,0 +1,302 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IOptions<AppSettings> AppSettingsOptions
+@inject IToastService ToastService
+@inject ThemeService ThemeService
+@inject TorrentEngineService TorrentEngine
+@inject IWebHostEnvironment Env
+
+<PageTitle>Animarr</PageTitle>
+
+<FluentLabel Typo="Typography.H4" Style="margin-bottom:20px;">@L["settings.title"]</FluentLabel>
+
+<FluentTabs @bind-ActiveTabId="_activeTab">
+
+    <!-- ============================================================ -->
+    <!-- TAB: General -->
+    <!-- ============================================================ -->
+    <FluentTab Id="general" Label="@(L["settings.tab_general"])">
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:24px;padding-top:16px;">
+
+            <div>
+                <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.section_appearance"]</FluentLabel>
+                <FluentSelect TOption="string"
+                              Value="@_themeStr"
+                              ValueChanged="OnThemeChanged"
+                              Label="@(L["settings.theme_label"])"
+                              style="width:240px;">
+                    <FluentOption TOption="string" Value="System">@L["settings.theme_system"]</FluentOption>
+                    <FluentOption TOption="string" Value="Dark">@L["settings.theme_dark"]</FluentOption>
+                    <FluentOption TOption="string" Value="Light">@L["settings.theme_light"]</FluentOption>
+                </FluentSelect>
+            </div>
+
+            <FluentDivider />
+
+            <div>
+                <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.section_language"]</FluentLabel>
+                <FluentSelect TOption="string"
+                              Value="@L.CurrentLanguage"
+                              ValueChanged="OnLanguageChanged"
+                              Label="@(L["settings.language_label"])"
+                              style="width:240px;">
+                    @foreach (var lang in L.SupportedLanguages)
+                    {
+                        <FluentOption TOption="string" Value="@lang.Code">@lang.Label</FluentOption>
+                    }
+                </FluentSelect>
+            </div>
+
+            <FluentDivider />
+
+            <div>
+                <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">@L["settings.section_app_params"]</FluentLabel>
+                <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:12px;">
+                    @L["settings.app_params_hint"]
+                </FluentLabel>
+                <div style="padding:16px;background:var(--neutral-layer-2,#f3f2f1);border-radius:6px;font-size:13px;line-height:2;">
+                    <div><b>@L["settings.param_watcher_delay"]</b> @_cfg.WatcherDelayMs ms</div>
+                    <div><b>@L["settings.param_video_ext"]</b> @string.Join(", ", _cfg.VideoExtensions)</div>
+                    <div><b>@L["settings.param_subtitles"]</b> @string.Join(", ", _cfg.SubtitleExtensions)</div>
+                    <div><b>@L["settings.param_images"]</b> @string.Join(", ", _cfg.ImageExtensions)</div>
+                </div>
+            </div>
+
+        </FluentStack>
+    </FluentTab>
+
+    <!-- ============================================================ -->
+    <!-- TAB: Ignore Rules -->
+    <!-- ============================================================ -->
+    <FluentTab Id="rules" Label="@(L["settings.tab_rules"])">
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:16px;padding-top:16px;">
+
+            @if (_loading)
+            {
+                <progress style="width:100%;height:4px;"></progress>
+            }
+            else
+            {
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:6px;">@L["settings.section_ignore_rules"]</FluentLabel>
+                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:14px;">
+                        @L["settings.ignore_rules_hint"]
+                    </FluentLabel>
+
+                    <FluentStack Orientation="Orientation.Horizontal" Style="margin-bottom:14px;gap:8px;"
+                                 VerticalAlignment="VerticalAlignment.Bottom">
+                        <FluentTextField @bind-Value="_newMask"
+                                         Placeholder="@(L["settings.new_mask_placeholder"])"
+                                         Label="@(L["settings.new_mask_label"])"
+                                         style="flex:1;" />
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@(new Icons.Regular.Size20.Add())"
+                                      OnClick="AddRule"
+                                      Disabled="@string.IsNullOrWhiteSpace(_newMask)">
+                            @L["settings.btn_add_mask"]
+                        </FluentButton>
+                    </FluentStack>
+
+                    <FluentDataGrid Items="@_rules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
+                        <PropertyColumn Property="@(r => r.Mask)" Title="@(L["settings.col_mask"])" />
+                        <TemplateColumn Title="" Align="Align.End" Width="100px">
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          IconStart="@(new Icons.Regular.Size20.Delete())"
+                                          OnClick="@(() => DeleteRule(context))">
+                                @L["settings.btn_delete_mask"]
+                            </FluentButton>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
+            }
+
+        </FluentStack>
+    </FluentTab>
+
+    <!-- ============================================================ -->
+    <!-- TAB: Torrent -->
+    <!-- ============================================================ -->
+    <FluentTab Id="torrent" Label="@(L["settings.tab_torrent"])">
+        @if (_torrentCfg is null)
+        {
+            <progress style="width:100%;height:4px;margin-top:16px;"></progress>
+        }
+        else
+        {
+            <FluentStack Orientation="Orientation.Vertical" Style="gap:20px;padding-top:16px;">
+
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_speed_title"]</FluentLabel>
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <FluentNumberField @bind-Value="_torrentCfg.GlobalDownloadLimit"
+                                           Label="@(L["settings.torrent_dl_limit_label"])"
+                                           Min="0" style="width:260px;" />
+                        <FluentNumberField @bind-Value="_torrentCfg.GlobalUploadLimit"
+                                           Label="@(L["settings.torrent_ul_limit_label"])"
+                                           Min="0" style="width:260px;" />
+                    </div>
+                </div>
+
+                <FluentDivider />
+
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_connections_title"]</FluentLabel>
+                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px;">
+                        <FluentNumberField @bind-Value="_torrentCfg.ListenPort"
+                                           Label="@(L["settings.torrent_port_label"])" Min="1024" Max="65535"
+                                           style="width:200px;" />
+                        <FluentNumberField @bind-Value="_torrentCfg.MaxConnections"
+                                           Label="@(L["settings.torrent_max_connections_label"])" Min="1" Max="2000"
+                                           style="width:200px;" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <FluentSwitch @bind-Value="_torrentCfg.EnableDHT">@L["settings.torrent_dht_switch"]</FluentSwitch>
+                        <FluentSwitch @bind-Value="_torrentCfg.EnableLSD">@L["settings.torrent_lsd_switch"]</FluentSwitch>
+                        <FluentSwitch @bind-Value="_torrentCfg.EnableUPnP">@L["settings.torrent_upnp_switch"]</FluentSwitch>
+                    </div>
+                </div>
+
+                <FluentDivider />
+
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_seeding_done_title"]</FluentLabel>
+                    <FluentSwitch @bind-Value="_torrentCfg.StopSeedingAfterDone">@L["settings.torrent_stop_after_done"]</FluentSwitch>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+                        <FluentLabel Style="font-size:13px;">@L["settings.torrent_stop_ratio_label"]</FluentLabel>
+                        <FluentNumberField @bind-Value="_torrentCfg.StopSeedingRatio"
+                                           Min="0" Step="0.1" style="width:120px;" />
+                        <FluentLabel Style="font-size:12px;color:var(--neutral-foreground-hint);">@L["settings.torrent_stop_ratio_hint"]</FluentLabel>
+                    </div>
+                </div>
+
+                <FluentDivider />
+
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_automation_title"]</FluentLabel>
+                    <FluentSwitch @bind-Value="_torrentCfg.AutoRenameAfterDownload">
+                        @L["settings.torrent_auto_rename_switch"]
+                    </FluentSwitch>
+                </div>
+
+                <FluentDivider />
+
+                <div>
+                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">@L["settings.torrent_service_title"]</FluentLabel>
+                    <div style="font-size:13px;color:var(--neutral-foreground-hint);">
+                        <div>@L["settings.torrent_cache_dir_label"] <code>@_torrentCfg.CacheDirectory</code></div>
+                    </div>
+                </div>
+
+                <div>
+                    <FluentButton Appearance="Appearance.Accent" OnClick="SaveTorrentSettingsAsync">
+                        @L["settings.btn_save_torrent"]
+                    </FluentButton>
+                </div>
+
+            </FluentStack>
+        }
+    </FluentTab>
+
+</FluentTabs>
+
+@code {
+    private List<IgnoreRule> _rules = [];
+    private bool _loading = true;
+    private string _newMask = "";
+    private AppSettings _cfg = new();
+    private string _themeStr = "System";
+    private string _activeTab = "general";
+    private TorrentConfig? _torrentCfg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _themeStr = ThemeService.Mode.ToString();
+        _cfg = AppSettingsOptions.Value;
+        await ReloadRulesAsync();
+        _loading = false;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _torrentCfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1) ?? new TorrentConfig();
+    }
+
+    private void OnThemeChanged(string value)
+    {
+        _themeStr = value;
+        if (Enum.TryParse<DesignThemeModes>(value, out var mode))
+            ThemeService.Set(mode);
+    }
+
+    private async Task OnLanguageChanged(string lang)
+    {
+        if (lang == L.CurrentLanguage) return;
+        await L.LoadAsync(lang, Env);
+        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_language_saved"]);
+    }
+
+    private async Task ReloadRulesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _rules = await db.IgnoreRules
+            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
+            .OrderBy(r => r.Mask)
+            .ToListAsync();
+    }
+
+    private async Task AddRule()
+    {
+        if (string.IsNullOrWhiteSpace(_newMask)) return;
+        var mask = _newMask.Trim().ToLowerInvariant();
+
+        if (_rules.Any(r => r.Mask.Equals(mask, StringComparison.OrdinalIgnoreCase)))
+        {
+            ToastService.ShowToast(ToastIntent.Warning, L["settings.toast_mask_exists"]);
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.IgnoreRules.Add(new IgnoreRule { Id = Guid.NewGuid(), Mask = mask, Scope = RuleScope.Global });
+        await db.SaveChangesAsync();
+        _newMask = "";
+        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_added", mask));
+        await ReloadRulesAsync();
+    }
+
+    private async Task DeleteRule(IgnoreRule rule)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.IgnoreRules.FindAsync(rule.Id);
+        if (entity is not null) { db.IgnoreRules.Remove(entity); await db.SaveChangesAsync(); }
+        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_deleted", rule.Mask));
+        await ReloadRulesAsync();
+    }
+
+    private async Task SaveTorrentSettingsAsync()
+    {
+        if (_torrentCfg is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
+        if (existing is null)
+        {
+            _torrentCfg.Id = 1;
+            db.TorrentConfig.Add(_torrentCfg);
+        }
+        else
+        {
+            existing.GlobalDownloadLimit = _torrentCfg.GlobalDownloadLimit;
+            existing.GlobalUploadLimit = _torrentCfg.GlobalUploadLimit;
+            existing.ListenPort = _torrentCfg.ListenPort;
+            existing.MaxConnections = _torrentCfg.MaxConnections;
+            existing.EnableDHT = _torrentCfg.EnableDHT;
+            existing.EnableLSD = _torrentCfg.EnableLSD;
+            existing.EnableUPnP = _torrentCfg.EnableUPnP;
+            existing.StopSeedingAfterDone = _torrentCfg.StopSeedingAfterDone;
+            existing.StopSeedingRatio = _torrentCfg.StopSeedingRatio;
+            existing.AutoRenameAfterDownload = _torrentCfg.AutoRenameAfterDownload;
+            existing.CacheDirectory = _torrentCfg.CacheDirectory;
+        }
+        await db.SaveChangesAsync();
+        await TorrentEngine.UpdateGlobalSettingsAsync(_torrentCfg);
+        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_torrent_saved"]);
+    }
+}

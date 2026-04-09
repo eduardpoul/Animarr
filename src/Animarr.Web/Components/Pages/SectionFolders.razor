@@ -1,0 +1,258 @@
+@page "/folders/{SectionId:guid}/subfolders"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FolderWatcherService WatcherService
+@inject NavigationManager Nav
+@inject IToastService ToastService
+
+<PageTitle>Animarr</PageTitle>
+
+@if (_loading)
+{
+    <progress style="width:100%;height:4px;"></progress>
+}
+else if (_section is null)
+{
+    <FluentLabel>@L["section_folders.not_found"] <a href="/folders">@L["section_folders.back_nav"]</a></FluentLabel>
+}
+else
+{
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:16px;gap:8px;">
+        <FluentStack Orientation="Orientation.Vertical" Style="flex:1;gap:2px;">
+            <FluentLabel Typo="Typography.H4" Style="margin:0;">@_section.Label</FluentLabel>
+            <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:12px;">@_section.Path</FluentLabel>
+        </FluentStack>
+        <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowSync())"
+                      OnClick="RefreshSection">
+            @L["section_folders.btn_refresh"]
+        </FluentButton>
+        <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
+                      OnClick="@(() => Nav.NavigateTo("/folders"))">
+            @L["section_folders.btn_back"]
+        </FluentButton>
+    </FluentStack>
+
+    @if (_children.Count == 0)
+    {
+        <FluentLabel>@L["section_folders.empty"]</FluentLabel>
+    }
+    else
+    {
+        <FluentDataGrid Items="@_children.AsQueryable()" TGridItem="FolderWatcher" ShowHover="true" Style="width:100%;">
+            <PropertyColumn Property="@(f => f.Label)" Title="@(L["section_folders.col_name"])" Sortable="true" />
+            <PropertyColumn Property="@(f => f.Path)" Title="@(L["section_folders.col_path"])" />
+            <TemplateColumn Title="@(L["section_folders.col_monitoring"])" Align="Align.Center">
+                <FluentSwitch Value="@context.WatchEnabled"
+                              ValueChanged="@(async (bool v) => await ToggleWatcher(context, v))" />
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["section_folders.col_last_scan"])">
+                @(context.LastScannedAt.HasValue
+                    ? context.LastScannedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    : "—")
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["section_folders.col_actions"])" Align="Align.End">
+                <FluentButton IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
+                              OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files?back={SectionId}"))">
+                    @L["section_folders.btn_files"]
+                </FluentButton>
+                <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+                              OnClick="@(() => OpenEdit(context))">
+                    @L["section_folders.btn_edit"]
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.Delete())"
+                              OnClick="@(() => AskDelete(context))">
+                    @L["section_folders.btn_delete"]
+                </FluentButton>
+            </TemplateColumn>
+        </FluentDataGrid>
+    }
+}
+
+<!-- =================== EDIT FOLDER PANEL =================== -->
+@if (_editTarget is not null)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="CloseEdit"></div>
+    <div style="position:fixed;top:0;right:0;width:400px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
+        <div style="display:flex;align-items:center;margin-bottom:20px;gap:8px;">
+            <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@_editTarget.Label</FluentLabel>
+            <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["section_folders.btn_close"])" OnClick="CloseEdit" />
+        </div>
+
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:16px;">
+            <div style="font-size:12px;color:var(--neutral-foreground-hint);">@_editTarget.Path</div>
+
+            <FluentDivider />
+
+            <FluentSwitch @bind-Value="_editRenameEnabled">@L["section_folders.switch_rename"]</FluentSwitch>
+
+            @if (_editRenameEnabled)
+            {
+                <FluentSelect TOption="string" @bind-Value="_editFolderTypeStr" Label="@(L["section_folders.content_type_label"])" style="width:100%;">
+                    <FluentOption TOption="string" Value="Auto">@L["section_folders.type_auto"]</FluentOption>
+                    <FluentOption TOption="string" Value="Series">@L["section_folders.type_series"]</FluentOption>
+                    <FluentOption TOption="string" Value="Movie">@L["section_folders.type_movie"]</FluentOption>
+                </FluentSelect>
+            }
+
+            <FluentDivider />
+
+            <div style="display:flex;gap:8px;">
+                <FluentButton Appearance="Appearance.Accent" OnClick="SaveEdit">@L["section_folders.btn_save"]</FluentButton>
+                <FluentButton OnClick="CloseEdit">@L["section_folders.btn_cancel"]</FluentButton>
+            </div>
+        </FluentStack>
+    </div>
+}
+
+<!-- Delete confirmation dialog -->
+<FluentDialog @bind-Hidden="_deleteHidden" Modal="true" TrapFocus="true" PreventScroll="true">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["section_folders.delete_title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentLabel>@L.Get("section_folders.delete_body", _deleteTarget?.Label)</FluentLabel>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmDelete">@L["section_folders.btn_delete_confirm"]</FluentButton>
+        <FluentButton OnClick="@(() => _deleteHidden = true)">@L["section_folders.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    [Parameter] public Guid SectionId { get; set; }
+
+    private FolderWatcher? _section;
+    private List<FolderWatcher> _children = [];
+    private bool _loading = true;
+
+    private bool _deleteHidden = true;
+    private FolderWatcher? _deleteTarget;
+
+    private FolderWatcher? _editTarget;
+    private bool _editRenameEnabled;
+    private string _editFolderTypeStr = "Auto";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _section  = await db.FolderWatchers.FindAsync(SectionId);
+        _children = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == SectionId)
+            .OrderBy(f => f.Label)
+            .ToListAsync();
+    }
+
+    private async Task RefreshSection()
+    {
+        if (_section is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var existingPaths = _children
+            .Select(f => f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!Directory.Exists(_section.Path))
+        {
+            ToastService.ShowToast(ToastIntent.Error, L["section_folders.toast_path_not_found"]);
+            return;
+        }
+
+        var subDirs = Directory.GetDirectories(_section.Path);
+        var toAdd = new List<FolderWatcher>();
+
+        foreach (var subDir in subDirs)
+        {
+            var norm = subDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (existingPaths.Contains(norm)) continue;
+
+            toAdd.Add(new FolderWatcher
+            {
+                Id              = Guid.NewGuid(),
+                Path            = norm,
+                Label           = Path.GetFileName(norm),
+                WatchEnabled    = _section.WatchEnabled,
+                FolderType      = _section.FolderType,
+                IsSection       = false,
+                ParentSectionId = _section.Id,
+                CreatedAt       = DateTime.UtcNow,
+            });
+        }
+
+        if (toAdd.Count > 0)
+        {
+            db.FolderWatchers.AddRange(toAdd);
+            await db.SaveChangesAsync();
+            foreach (var child in toAdd.Where(c => c.WatchEnabled))
+                await WatcherService.StartWatcherAsync(child.Id);
+
+            ToastService.ShowToast(ToastIntent.Success,
+                L.Get("section_folders.toast_found_subfolders", toAdd.Count));
+        }
+        else
+        {
+            ToastService.ShowToast(ToastIntent.Info, L["section_folders.toast_no_subfolders"]);
+        }
+
+        await LoadAsync();
+    }
+
+    private void AskDelete(FolderWatcher f) { _deleteTarget = f; _deleteHidden = false; }
+
+    private void OpenEdit(FolderWatcher f)
+    {
+        _editTarget = f;
+        _editRenameEnabled = f.RenameEnabled;
+        _editFolderTypeStr = f.FolderType.ToString();
+    }
+
+    private void CloseEdit() => _editTarget = null;
+
+    private async Task SaveEdit()
+    {
+        if (_editTarget is null) return;
+        var folderType = Enum.TryParse<FolderType>(_editFolderTypeStr, out var ft) ? ft : FolderType.Auto;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.FolderWatchers.FindAsync(_editTarget.Id);
+        if (entity is null) return;
+        entity.RenameEnabled = _editRenameEnabled;
+        entity.FolderType    = _editRenameEnabled ? folderType : FolderType.Auto;
+        await db.SaveChangesAsync();
+        ToastService.ShowToast(ToastIntent.Success, L.Get("section_folders.toast_updated", entity.Label));
+        _editTarget = null;
+        await LoadAsync();
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteTarget is null) return;
+        await WatcherService.StopWatcherAsync(_deleteTarget.Id);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.FolderWatchers.FindAsync(_deleteTarget.Id);
+        if (entity is not null) { db.FolderWatchers.Remove(entity); await db.SaveChangesAsync(); }
+        ToastService.ShowToast(ToastIntent.Success, L.Get("section_folders.toast_deleted", _deleteTarget.Label));
+        _deleteHidden = true;
+        _deleteTarget = null;
+        await LoadAsync();
+    }
+
+    private async Task ToggleWatcher(FolderWatcher folder, bool enabled)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.FolderWatchers.FindAsync(folder.Id);
+        if (entity is null) return;
+        entity.WatchEnabled = enabled;
+        await db.SaveChangesAsync();
+        folder.WatchEnabled = enabled;
+        if (enabled) await WatcherService.StartWatcherAsync(folder.Id);
+        else await WatcherService.StopWatcherAsync(folder.Id);
+        ToastService.ShowToast(ToastIntent.Info,
+            enabled ? L.Get("section_folders.toast_watcher_on", folder.Label) : L.Get("section_folders.toast_watcher_off", folder.Label));
+    }
+}

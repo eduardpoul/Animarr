@@ -1,0 +1,24 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# IDE files
+.vs/
+*.user
+
+# Deploy scripts (not needed in image)
+deploy/
+
+# NuGet
+**/.nuget/
+
+# Logs
+*.log
+
+# SQLite DB (dev local)
+*.db
+*.db-shm
+*.db-wal
+
+# Environment overrides
+.env

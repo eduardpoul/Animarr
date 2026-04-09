@@ -1,0 +1,204 @@
+﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<style>
+    /* ── Dialog chrome ───────────────────────────────────────────── */
+    #components-reconnect-modal {
+        border: none;
+        border-radius: 12px;
+        padding: 0;
+        width: 320px;
+        background: transparent;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    }
+
+    #components-reconnect-modal::backdrop {
+        background: rgba(0,0,0,0.45);
+        backdrop-filter: blur(2px);
+    }
+
+    /* ── Card ────────────────────────────────────────────────────── */
+    .animarr-reconnect-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 36px 32px 28px;
+        border-radius: 12px;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        /* dark default */
+        background: #1f1f1f;
+        color: #e0e0e0;
+        border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    /* light override: OS preference */
+    @@media (prefers-color-scheme: light) {
+        .animarr-reconnect-card {
+            background: #ffffff;
+            color: #1a1a1a;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+    }
+
+    /* light override: FluentUI explicit light theme (applied by JS to root element) */
+    :root[data-animarr-theme="light"] .animarr-reconnect-card {
+        background: #ffffff;
+        color: #1a1a1a;
+        border: 1px solid rgba(0,0,0,0.1);
+    }
+
+    :root[data-animarr-theme="dark"] .animarr-reconnect-card {
+        background: #1f1f1f;
+        color: #e0e0e0;
+        border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    /* ── Typography ──────────────────────────────────────────────── */
+    .animarr-reconnect-title {
+        font-size: 16px;
+        font-weight: 600;
+        text-align: center;
+        margin: 0;
+    }
+
+    .animarr-reconnect-subtitle {
+        font-size: 13px;
+        text-align: center;
+        opacity: 0.65;
+        margin: 0;
+        line-height: 1.5;
+    }
+
+    /* ── Spinner ─────────────────────────────────────────────────── */
+    .animarr-reconnect-spinner {
+        display: none;
+        gap: 6px;
+        margin: 4px 0;
+    }
+
+    .animarr-reconnect-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #0078d4;
+        animation: animarr-bounce 1.2s infinite ease-in-out;
+    }
+
+    .animarr-reconnect-spinner span:nth-child(2) { animation-delay: 0.2s; }
+    .animarr-reconnect-spinner span:nth-child(3) { animation-delay: 0.4s; }
+
+    @@keyframes animarr-bounce {
+        0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+        40%            { transform: scale(1);   opacity: 1;   }
+    }
+
+    /* ── State blocks ────────────────────────────────────────────── */
+    .animarr-reconnect-block { display: none; }
+
+    /* ── Button ──────────────────────────────────────────────────── */
+    .animarr-reconnect-btn {
+        display: none;
+        margin-top: 4px;
+        padding: 8px 24px;
+        border-radius: 6px;
+        border: none;
+        background: #0078d4;
+        color: white;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .animarr-reconnect-btn:hover  { background: #106ebe; }
+    .animarr-reconnect-btn:active { background: #005a9e; }
+
+    /* ── Visibility driven by data-reconnect-state ───────────────── */
+    #components-reconnect-modal[data-reconnect-state="connecting"] .animarr-reconnect-spinner,
+    #components-reconnect-modal[data-reconnect-state="waiting"]    .animarr-reconnect-spinner,
+    #components-reconnect-modal[data-reconnect-state="paused"]     .animarr-reconnect-spinner {
+        display: flex;
+    }
+
+    #components-reconnect-modal[data-reconnect-state="connecting"]   .animarr-reconnect-block-connecting,
+    #components-reconnect-modal[data-reconnect-state="waiting"]      .animarr-reconnect-block-waiting,
+    #components-reconnect-modal[data-reconnect-state="failed"]       .animarr-reconnect-block-failed,
+    #components-reconnect-modal[data-reconnect-state="paused"]       .animarr-reconnect-block-paused,
+    #components-reconnect-modal[data-reconnect-state="resume-failed"] .animarr-reconnect-block-resume-failed {
+        display: flex;
+    }
+
+    #components-reconnect-modal[data-reconnect-state="failed"]        #components-reconnect-button,
+    #components-reconnect-modal[data-reconnect-state="paused"]        #components-resume-button,
+    #components-reconnect-modal[data-reconnect-state="resume-failed"] #components-resume-button {
+        display: flex;
+    }
+</style>
+
+<dialog id="components-reconnect-modal" data-nosnippet>
+    <div class="animarr-reconnect-card">
+
+        <!-- Logo -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" width="56" height="56">
+            <rect width="56" height="56" rx="12" fill="#0078d4"/>
+            <text x="28" y="42" font-family="Arial, sans-serif" font-size="46" font-weight="900"
+                  text-anchor="middle" fill="white" letter-spacing="-2">A</text>
+            <line x1="39" y1="16" x2="39" y2="29" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+            <polyline points="34,25 39,31 44,25" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <line x1="34" y1="34" x2="44" y2="34" stroke="white" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+
+        <!-- Spinner (connecting / waiting / paused) -->
+        <div class="animarr-reconnect-spinner">
+            <span></span><span></span><span></span>
+        </div>
+
+        <!-- State: connecting (first attempt) -->
+        <div class="animarr-reconnect-block animarr-reconnect-block-connecting"
+             style="flex-direction:column;align-items:center;gap:4px;">
+            <p class="animarr-reconnect-title">Reconnecting&hellip;</p>
+        </div>
+
+        <!-- State: waiting between retries -->
+        <div class="animarr-reconnect-block animarr-reconnect-block-waiting"
+             style="flex-direction:column;align-items:center;gap:6px;">
+            <p class="animarr-reconnect-title">Connection lost</p>
+            <p class="animarr-reconnect-subtitle">
+                Retrying in <span id="components-seconds-to-next-attempt"
+                                  style="font-weight:700;color:#0078d4;"></span>s&hellip;
+            </p>
+        </div>
+
+        <!-- State: failed -->
+        <div class="animarr-reconnect-block animarr-reconnect-block-failed"
+             style="flex-direction:column;align-items:center;gap:6px;">
+            <p class="animarr-reconnect-title">Unable to reconnect</p>
+            <p class="animarr-reconnect-subtitle">The server could not be reached.</p>
+        </div>
+
+        <!-- State: paused by server -->
+        <div class="animarr-reconnect-block animarr-reconnect-block-paused"
+             style="flex-direction:column;align-items:center;gap:6px;">
+            <p class="animarr-reconnect-title">Session paused</p>
+            <p class="animarr-reconnect-subtitle">The server has paused this session.</p>
+        </div>
+
+        <!-- State: resume failed -->
+        <div class="animarr-reconnect-block animarr-reconnect-block-resume-failed"
+             style="flex-direction:column;align-items:center;gap:6px;">
+            <p class="animarr-reconnect-title">Resume failed</p>
+            <p class="animarr-reconnect-subtitle">Could not resume the session.</p>
+        </div>
+
+        <!-- Reconnect button (failed state) -->
+        <button id="components-reconnect-button" class="animarr-reconnect-btn">
+            Retry connection
+        </button>
+
+        <!-- Resume button (paused / resume-failed states) -->
+        <button id="components-resume-button" class="animarr-reconnect-btn">
+            Resume session
+        </button>
+
+    </div>
+</dialog>

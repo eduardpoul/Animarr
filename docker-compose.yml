@@ -1,0 +1,21 @@
+﻿services:
+  animarr:
+    image: ghcr.io/yourusername/animarr:latest   # or: build: .
+    # build: .
+    container_name: animarr
+    restart: unless-stopped
+    ports:
+      - "8450:8080"   # change left side to use a different host port
+    environment:
+      - TZ=UTC        # e.g. America/New_York, Europe/London, Asia/Tokyo
+    volumes:
+      # Persistent data: SQLite database + MonoTorrent fastresume state
+      - animarr-data:/app/data
+      # Media directories — add as many as you need.
+      # Left side = path on your host, right side = path inside container.
+      # Use the same right-side path when configuring a folder in Animarr.
+      - /your/media/path:/media:rw
+      # - /another/path:/media2:rw
+
+volumes:
+  animarr-data:
