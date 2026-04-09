@@ -1,0 +1,744 @@
+@page "/torrents"
+@rendermode InteractiveServer
+@implements IDisposable
+@using MonoTorrent
+@using MonoTorrent.Client
+@inject TorrentEngineService TorrentEngine
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IToastService ToastService
+@inject NavigationManager Nav
+
+<PageTitle>@L["torrents.title"]</PageTitle>
+
+<div style="display:flex;align-items:center;margin-bottom:16px;gap:12px;">
+    <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["torrents.title"]</FluentLabel>
+    <FluentButton Appearance="Appearance.Accent"
+                  IconStart="@(new Icons.Regular.Size20.Add())"
+                  Title="@(L["torrents.add_button"])"
+                  OnClick="@(() => { _addPanelOpen = true; _detailsHash = null; })" />
+    <FluentButton Appearance="Appearance.Stealth"
+                  IconStart="@(new Icons.Regular.Size20.History())"
+                  Title="@(L["torrents.history_button"])"
+                  OnClick="@(() => Nav.NavigateTo("/torrents/history"))" />
+</div>
+
+@{
+    var torrents = TorrentEngine.GetAll();
+}
+
+@if (torrents.Count == 0)
+{
+    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;">
+        @L["torrents.empty"]
+    </FluentLabel>
+}
+else
+{
+    <FluentDataGrid Items="@torrents.AsQueryable()" TGridItem="TorrentLiveStats"
+                    ShowHover="true" ResizableColumns="true" Style="font-size:13px;">
+        <TemplateColumn Title="" Width="18px">
+            <div style="width:10px;height:10px;border-radius:50%;background:@StatusColor(context);margin:auto;" title="@context.State.ToString()"></div>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_name"])" Sortable="false">
+            <div style="cursor:pointer;" @onclick="@(() => OpenDetails(context.InfoHash))">
+                <span style="font-size:13px;">@context.Name</span>
+                @if (context.State == TorrentState.Metadata)
+                {
+                    <span style="font-size:11px;color:var(--neutral-foreground-hint);margin-left:6px;">@L["torrents.state_loading_metadata"]</span>
+                }
+            </div>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_folder"])" Width="160px">
+            <span style="font-size:12px;color:var(--neutral-foreground-hint);" title="@context.SavePath">
+                @System.IO.Path.GetFileName(context.SavePath.TrimEnd('/', '\\'))
+            </span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_progress"])" Width="220px">
+            @if (context.State == TorrentState.Hashing)
+            {
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                    <progress style="width:180px;height:6px;"></progress>
+                    <span style="font-size:12px;color:var(--neutral-foreground-hint);white-space:nowrap;">@L["torrents.state_hashing"]</span>
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <progress value="@((int)context.Progress)" max="100"
+                              style="width:180px;height:6px;"></progress>
+                    <span style="font-size:12px;min-width:36px;">@context.Progress.ToString("F1")%</span>
+                </div>
+            }
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_speed"])" Width="120px">
+            <span style="font-size:12px;">@FormatSpeed(context.DownloadRate) / @FormatSpeed(context.UploadRate)</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_size"])" Width="160px">
+            <span style="font-size:12px;">@FormatBytesPair(context.Downloaded, context.TotalSize)</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_peers"])" Width="60px">
+            <span style="font-size:12px;">@context.Seeds+@context.Peers</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="" Align="Align.End" Width="130px">
+            <div style="display:flex;gap:2px;">
+                @if (context.State == TorrentState.Downloading || context.State == TorrentState.Metadata || context.State == TorrentState.Seeding)
+                {
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Pause())"
+                                  Title="@(L["torrents.btn_pause"])" OnClick="@(() => PauseAsync(context.InfoHash))" />
+                }
+                else if (context.State == TorrentState.Paused || context.State == TorrentState.Stopped)
+                {
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Play())"
+                                  Title="@(L["torrents.btn_resume"])" OnClick="@(() => ResumeAsync(context.InfoHash))" />
+                }
+                @if (context.State != TorrentState.Stopped)
+                {
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Stop())"
+                                  Title="@(L["torrents.btn_stop"])" OnClick="@(() => StopAsync(context.InfoHash))" />
+                }
+                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())"
+                              Title="@(L["torrents.btn_delete"])" OnClick="@(() => AskDelete(context.InfoHash, context.Name))" />
+            </div>
+        </TemplateColumn>
+    </FluentDataGrid>
+}
+
+<!-- =================== ADD TORRENT PANEL =================== -->
+@if (_addPanelOpen)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="CloseAddPanel"></div>
+    <div style="position:fixed;top:0;right:0;width:640px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
+    <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
+        <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["add_torrent.title"]</FluentLabel>
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["add_torrent.btn_close"])" OnClick="CloseAddPanel" />
+    </div>
+    <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
+        <FluentTextField @bind-Value="_addMagnet"
+                         Label="@(L["add_torrent.magnet_label"])"
+                         Placeholder="@(L["add_torrent.magnet_placeholder"])"
+                         style="width:100%;" />
+
+        <div>
+            <FluentLabel Style="font-size:13px;font-weight:600;margin-bottom:6px;">@L["add_torrent.torrent_file_label"]</FluentLabel>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <InputFile id="torrentFileInput" OnChange="OnTorrentFileSelected" accept=".torrent" style="display:none;" />
+                <label for="torrentFileInput" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;height:32px;padding:0 14px;border-radius:4px;background:var(--accent-fill-rest);color:var(--foreground-on-accent-rest);font-size:13px;font-weight:500;user-select:none;white-space:nowrap;transition:background .1s;">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M11.586 2H5.5A2.5 2.5 0 0 0 3 4.5v11A2.5 2.5 0 0 0 5.5 18h9a2.5 2.5 0 0 0 2.5-2.5V8.414L11.586 2zM11 3.5 15.5 8H12a1 1 0 0 1-1-1V3.5zM10 12v2.5a.5.5 0 0 1-1 0V12H6.5a.5.5 0 0 1 0-1H9V8.5a.5.5 0 0 1 1 0V11h2.5a.5.5 0 0 1 0 1H10z"/></svg>
+                    @L["add_torrent.select_file_button"]
+                </label>
+                @if (_torrentFileName is not null)
+                {
+                    <span style="flex:1;min-width:0;font-size:12px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@_torrentFileName">✓ @_torrentFileName</span>
+                }
+            </div>
+        </div>
+
+        @if (_addFileEntries.Count > 0)
+        {
+            <div style="width:100%;">
+                <div style="display:flex;align-items:center;margin-bottom:6px;gap:8px;width:100%;">
+                    <input type="checkbox"
+                           checked="@(_addFilePriorities.Count > 0 && _addFilePriorities.Values.All(v => v > 0))"
+                           @onchange="@(e => { bool chk = (bool)e.Value!; foreach (var k in _addFilePriorities.Keys.ToList()) _addFilePriorities[k] = chk ? 4 : 0; StateHasChanged(); })" />
+                    <FluentLabel Style="font-size:13px;font-weight:600;">Files (@_addFileEntries.Count)</FluentLabel>
+                </div>
+                <div style="max-height:calc(100vh - 400px);min-height:200px;overflow-y:auto;border:1px solid var(--neutral-stroke-rest);border-radius:4px;font-size:12px;">
+                    @foreach (var item in _addFlatTree)
+                    {
+                        @if (IsItemVisible(item))
+                        {
+                        @if (item.IsFolder)
+                        {
+                            var fp = item.FullPath!;
+                            var collapsed = _collapsedFolders.Contains(fp);
+                            var folderChecked = IsFolderChecked(fp);
+                            <div style="background:var(--neutral-layer-2);padding:4px 6px;padding-left:@(item.Depth * 12 + 6)px;font-weight:600;border-bottom:1px solid var(--neutral-stroke-rest);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+                                 @onclick="@(() => ToggleFolderCollapse(fp))">
+                                <span style="font-size:11px;width:12px;text-align:center;">@(collapsed ? "▶" : "▼")</span>
+                                <input type="checkbox" checked="@folderChecked"
+                                       @onclick:stopPropagation
+                                       @onchange="@(e => ToggleFolderCheck(fp))" />
+                                <span>📁 @item.Name</span>
+                            </div>
+                        }
+                        else
+                        {
+                            var fp = item.FullPath!;
+                            var prio = _addFilePriorities.GetValueOrDefault(fp, 4);
+                            <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;padding-left:@(item.Depth * 12 + 6)px;border-bottom:1px solid var(--neutral-layer-2);">
+                                <input type="checkbox" checked="@(prio != 0)"
+                                       @onchange="@(e => { bool chk = (bool)e.Value!; _addFilePriorities[fp] = chk ? 4 : 0; StateHasChanged(); })" />
+                                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@fp">@item.Name</span>
+                                <span style="color:var(--neutral-foreground-hint);flex-shrink:0;min-width:50px;text-align:right;">@FormatBytes(item.Length)</span>
+                                <select style="font-size:11px;padding:1px 2px;border:1px solid var(--neutral-stroke-rest);border-radius:3px;background:var(--neutral-layer-floating);color:var(--neutral-foreground-rest);min-width:90px;opacity:@(prio == 0 ? "0.4" : "1");"
+                                        value="@prio"
+                                        @onchange="@(e => _addFilePriorities[fp] = int.Parse(e.Value!.ToString()!))">
+                                    <option value="0">@L["file_priority.skip"]</option>
+                                    <option value="2">@L["file_priority.low"]</option>
+                                    <option value="4">@L["file_priority.normal"]</option>
+                                    <option value="6">@L["file_priority.high"]</option>
+                                </select>
+                            </div>
+                        }
+                        }
+                    }
+                </div>
+            </div>
+        }
+
+        <div>
+            <FluentLabel style="display:block;margin-bottom:4px;">@L["add_torrent.folder_label"]</FluentLabel>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <div style="flex:1;min-width:0;">
+                    <FluentSelect TOption="string"
+                                  Value="@_addFolderStr"
+                                  ValueChanged="v => { _addFolderStr = v; _addFolderWatcherId = _folders.FirstOrDefault(f => f.Id.ToString() == v)?.Id; _addCustomPath = string.Empty; _createSubfolderMode = false; }"
+                                  style="width:100%;">
+                        <FluentOption TOption="string" Value="">@L["add_torrent.folder_placeholder"]</FluentOption>
+                        @foreach (var f in _folders)
+                        {
+                            <FluentOption TOption="string" Value="@f.Id.ToString()">@f.Label (@System.IO.Path.GetFileName(f.Path.TrimEnd('/', '\\')))</FluentOption>
+                        }
+                    </FluentSelect>
+                </div>
+                <FluentButton Appearance="Appearance.Outline"
+                              Title="@(L["add_torrent.create_subfolder_title"])"
+                              OnClick="@(() => { _createSubfolderMode = !_createSubfolderMode; _newSubfolderName = string.Empty; })">+</FluentButton>
+            </div>
+            @if (_createSubfolderMode)
+            {
+                var baseFolder = _folders.FirstOrDefault(f => f.Id == _addFolderWatcherId);
+                <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+                    @if (baseFolder is not null)
+                    {
+                        <span style="font-size:12px;color:var(--neutral-foreground-hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;" title="@baseFolder.Path">@baseFolder.Path /</span>
+                        <FluentTextField @bind-Value="_newSubfolderName"
+                                         Placeholder="@(L["add_torrent.subfolder_placeholder"])"
+                                         style="flex:1;" />
+                        <FluentButton Appearance="Appearance.Accent"
+                                      Disabled="@string.IsNullOrWhiteSpace(_newSubfolderName)"
+                                      OnClick="@(() => { _addCustomPath = System.IO.Path.Combine(baseFolder.Path, _newSubfolderName.Trim()); _createSubfolderMode = false; })">✓</FluentButton>
+                    }
+                    else
+                    {
+                        <FluentTextField @bind-Value="_addCustomPath"
+                                         Placeholder="/mnt/media/MyShow"
+                                         style="flex:1;" />
+                        <FluentButton Appearance="Appearance.Accent"
+                                      Disabled="@string.IsNullOrWhiteSpace(_addCustomPath)"
+                                      OnClick="@(() => { _createSubfolderMode = false; })">✓</FluentButton>
+                    }
+                    <FluentButton OnClick="@(() => { _createSubfolderMode = false; _newSubfolderName = string.Empty; })">✕</FluentButton>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_addCustomPath))
+                {
+                    <div style="font-size:12px;color:var(--accent-fill-rest);margin-top:4px;">→ @_addCustomPath</div>
+                }
+            }
+        </div>
+
+        <FluentTextField @bind-Value="_addCustomPath"
+                         Label="@(L["add_torrent.custom_path_label"])"
+                         Placeholder="@(L["add_torrent.custom_path_placeholder"])"
+                         style="width:100%;" />
+
+        <div style="display:flex;gap:10px;">
+            <FluentNumberField @bind-Value="_addDlLimit" Label="@(L["add_torrent.dl_limit_label"])" Min="0"
+                               style="flex:1;" />
+            <FluentNumberField @bind-Value="_addUlLimit" Label="@(L["add_torrent.ul_limit_label"])" Min="0"
+                               style="flex:1;" />
+        </div>
+
+        <FluentSwitch @bind-Value="_addStartPaused">@L["add_torrent.start_paused"]</FluentSwitch>
+        <FluentSwitch @bind-Value="_addStopAfterDownload">@L["add_torrent.stop_after_download"]</FluentSwitch>
+        <FluentSwitch @bind-Value="_addFlattenSubfolders">@L["add_torrent.flatten_subfolders"]</FluentSwitch>
+
+        @if (_addFolderWatcherId.HasValue)
+        {
+            var selFolder = _folders.FirstOrDefault(f => f.Id == _addFolderWatcherId);
+            if (selFolder is not null)
+            {
+                <div style="font-size:12px;color:var(--neutral-foreground-hint);padding:4px 0;">
+                    @(selFolder.RenameEnabled ? L["add_torrent.auto_rename_enabled"] : L["add_torrent.auto_rename_disabled"])
+                </div>
+            }
+        }
+
+        @if (_addError is not null)
+        {
+            <FluentLabel Style="color:var(--error);font-size:13px;">@_addError</FluentLabel>
+        }
+
+        <div style="display:flex;gap:8px;">
+            <FluentButton Appearance="Appearance.Accent" OnClick="AddTorrentAsync"
+                          Disabled="@(_addBusy || (string.IsNullOrWhiteSpace(_addMagnet) && _torrentFileBytes is null))">
+                @if (_addBusy) { <span>@L["add_torrent.btn_adding"]</span> } else { <span>@L["add_torrent.btn_add"]</span> }
+            </FluentButton>
+            <FluentButton OnClick="CloseAddPanel">@L["add_torrent.btn_cancel"]</FluentButton>
+        </div>
+    </FluentStack>
+    </div>
+}
+
+<!-- =================== TORRENT DETAILS PANEL =================== -->
+@if (_detailsHash is not null)
+{
+    var live = TorrentEngine.Get(_detailsHash);
+    var files = TorrentEngine.GetFiles(_detailsHash);
+
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="@(() => _detailsHash = null)"></div>
+    <div style="position:fixed;top:0;right:0;width:720px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
+    <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
+        <h2 style="flex:1;margin:0;font-size:18px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(live?.Name ?? _detailsHash)</h2>
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())" Title="@(L["torrent_details.btn_edit"])" OnClick="@(() => Nav.NavigateTo($"/torrents/{_detailsHash}/edit"))" />
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["torrent_details.btn_close"])" OnClick="@(() => _detailsHash = null)" />
+    </div>
+        @if (live is not null)
+        {
+            <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
+
+                <!-- Info -->
+                <div style="font-size:13px;color:var(--neutral-foreground-hint);">
+                    <div>@L["torrent_details.path_label"] <b>@live.SavePath</b></div>
+                    <div>@L["torrent_details.hash_label"] <code style="font-size:11px;">@_detailsHash[..20]…</code></div>
+                </div>
+
+                <!-- Progress -->
+                <div style="align-self:stretch;">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;">
+                        <span>@FormatBytes(live.Downloaded) / @FormatBytes(live.TotalSize)</span>
+                        <b>@live.Progress.ToString("F1")%</b>
+                    </div>
+                    <div style="width:100%;height:8px;border-radius:4px;background:var(--neutral-stroke-rest);overflow:hidden;">
+                        <div style="height:100%;width:@(live.Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;background:var(--accent-fill-rest);transition:width .3s;border-radius:4px;"></div>
+                    </div>
+                    <div style="display:flex;gap:20px;font-size:12px;margin-top:6px;color:var(--neutral-foreground-hint);">
+                        <span>↓ @FormatSpeed(live.DownloadRate)</span>
+                        <span>↑ @FormatSpeed(live.UploadRate)</span>
+                        <span>Seeds: @live.Seeds</span>
+                        <span>Peers: @live.Peers</span>
+                    </div>
+                </div>
+
+                <FluentDivider />
+
+                <!-- Speed limits -->
+                <h3 style="margin:0;font-size:15px;font-weight:600;">@L["torrent_details.speed_limits_title"]</h3>
+                <div style="display:flex;gap:10px;align-items:flex-end;">
+                    <FluentNumberField @bind-Value="_detailsDlLimit" Label="@(L["torrent_details.dl_limit_label"])" Min="0" style="flex:1;" />
+                    <FluentNumberField @bind-Value="_detailsUlLimit" Label="@(L["torrent_details.ul_limit_label"])" Min="0" style="flex:1;" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="ApplySpeedLimits">@L["torrent_details.btn_apply"]</FluentButton>
+                </div>
+
+                <FluentDivider />
+
+                <!-- File tree -->
+                @if (!live.MetadataReceived)
+                {
+                    <div style="display:flex;align-items:center;gap:10px;color:var(--neutral-foreground-hint);font-size:13px;">
+                        <progress style="width:60px;height:4px;"></progress>
+                        <span>@L["torrent_details.loading_metadata"]</span>
+                    </div>
+                }
+                else if (files is not null && files.Count > 0)
+                {
+                    if (_detailsFlatTree.Count == 0) BuildDetailsFlatTree(_detailsHash!);
+                    var fileProgress = TorrentEngine.GetFileProgress(_detailsHash!);
+                    <h3 style="margin:0;font-size:15px;font-weight:600;">@L["torrent_details.files_section"] (@files.Count)</h3>
+                    <div style="align-self:stretch;max-height:calc(100vh - 480px);min-height:200px;overflow-y:auto;font-size:12px;border:1px solid var(--neutral-stroke-rest);border-radius:4px;">
+                        @foreach (var item in _detailsFlatTree)
+                        {
+                            @if (!_detailsCollapsedFolders.Any(cf => item.FullPath != null && item.FullPath.StartsWith(cf + "/")))
+                            {
+                            @if (item.IsFolder)
+                            {
+                                var fp = item.FullPath!;
+                                var collapsed = _detailsCollapsedFolders.Contains(fp);
+                                <div style="background:var(--neutral-layer-2);padding:4px 6px;padding-left:@(item.Depth * 12 + 6)px;font-weight:600;border-bottom:1px solid var(--neutral-stroke-rest);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+                                     @onclick="@(() => { if (_detailsCollapsedFolders.Contains(fp)) _detailsCollapsedFolders.Remove(fp); else _detailsCollapsedFolders.Add(fp); StateHasChanged(); })">
+                                    <span style="font-size:11px;width:12px;text-align:center;">@(collapsed ? "▶" : "▼")</span>
+                                    <span>📁 @item.Name</span>
+                                </div>
+                            }
+                            else
+                            {
+                                var fp = item.FullPath!;
+                                var matchedFile = files.FirstOrDefault(f => f.Path.Replace('\\', '/') == fp);
+                                var pct = fileProgress?.GetValueOrDefault(fp, 0) ?? 0;
+                                var prio = matchedFile is not null ? (int)matchedFile.Priority : 4;
+                                <div style="padding:3px 6px;padding-left:@(item.Depth * 12 + 6)px;border-bottom:1px solid var(--neutral-layer-2);">
+                                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">
+                                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@fp">@item.Name</span>
+                                        <span style="font-size:11px;color:var(--neutral-foreground-hint);flex-shrink:0;">@pct.ToString("F0")%</span>
+                                        <span style="font-size:11px;color:var(--neutral-foreground-hint);flex-shrink:0;min-width:52px;text-align:right;">@FormatBytes(item.Length)</span>
+                                        @if (matchedFile is not null)
+                                        {
+                                            <select style="font-size:11px;padding:1px 2px;border:1px solid var(--neutral-stroke-rest);border-radius:3px;background:var(--neutral-layer-floating);color:var(--neutral-foreground-rest);min-width:90px;opacity:@(prio == 0 ? "0.4" : "1");"
+                                                    value="@prio"
+                                                    @onchange="@(async e => await SetFilePriorityAsync(_detailsHash!, matchedFile.Path, int.Parse(e.Value!.ToString()!)))">
+                                                <option value="0">@L["file_priority.skip"]</option>
+                                                <option value="2">@L["file_priority.low"]</option>
+                                                <option value="4">@L["file_priority.normal"]</option>
+                                                <option value="6">@L["file_priority.high"]</option>
+                                            </select>
+                                        }
+                                    </div>
+                                    <div style="height:3px;border-radius:2px;background:var(--neutral-stroke-rest);overflow:hidden;">
+                                        <div style="height:100%;width:@(pct.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;background:var(--accent-fill-rest);transition:width .3s;"></div>
+                                    </div>
+                                </div>
+                            }
+                            }
+                        }
+                    </div>
+                    <div style="text-align:right;margin-top:4px;">
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())"
+                                      OnClick="@(() => Nav.NavigateTo($"/torrents/{_detailsHash}/edit"))">@L["torrent_details.btn_full_editor"]
+                        </FluentButton>
+                    </div>
+                }
+
+                <FluentDivider />
+
+                <!-- Controls -->
+                <h3 style="margin:0;font-size:15px;font-weight:600;">@L["torrent_details.controls_title"]</h3>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    @if (live.State == TorrentState.Downloading || live.State == TorrentState.Metadata || live.State == TorrentState.Seeding)
+                    {
+                        <FluentButton IconStart="@(new Icons.Regular.Size20.Pause())"
+                                      OnClick="@(() => PauseAsync(_detailsHash!))">@L["torrent_details.btn_pause"]</FluentButton>
+                    }
+                    @if (live.State == TorrentState.Paused || live.State == TorrentState.Stopped)
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@(new Icons.Regular.Size20.Play())"
+                                      OnClick="@(() => ResumeAsync(_detailsHash!))">@L["torrent_details.btn_resume"]</FluentButton>
+                    }
+                    @if (live.State != TorrentState.Stopped)
+                    {
+                        <FluentButton IconStart="@(new Icons.Regular.Size20.Stop())"
+                                      OnClick="@(() => StopAsync(_detailsHash!))">@L["torrent_details.btn_stop"]</FluentButton>
+                    }
+                    <FluentButton IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name))">@L["torrent_details.btn_delete"]</FluentButton>
+                    <FluentButton Appearance="Appearance.Outline"
+                                  IconStart="@(new Icons.Regular.Size20.DeleteDismiss())"
+                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name, deleteFiles: true))">
+                        @L["torrent_details.btn_delete_with_files"]
+                    </FluentButton>
+                </div>
+            </FluentStack>
+        }
+        else
+        {
+            <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["torrent_details.stopped_or_removed"]</FluentLabel>
+        }
+    </div>
+}
+
+<!-- =================== DELETE CONFIRM DIALOG =================== -->
+<FluentDialog @bind-Hidden="_deleteHidden" Modal="true" TrapFocus="true" PreventScroll="true">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["delete_torrent.title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentLabel>@L.Get("delete_torrent.body", _deleteName)</FluentLabel>
+        <FluentSwitch @bind-Value="_deleteFiles" Style="margin-top:10px;">@L["delete_torrent.delete_files_switch"]
+        </FluentSwitch>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmDeleteAsync">@L["delete_torrent.btn_confirm"]</FluentButton>
+        <FluentButton OnClick="@(() => _deleteHidden = true)">@L["delete_torrent.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    // ---- Add panel state ----
+    private bool _addPanelOpen;
+    private string _addMagnet = "";
+    private byte[]? _torrentFileBytes;
+    private string? _torrentFileName;
+    private string _addFolderStr = "";
+    private Guid? _addFolderWatcherId;
+    private string _addCustomPath = "";
+    private int _addDlLimit;
+    private int _addUlLimit;
+    private bool _addStartPaused;
+    private bool _addStopAfterDownload;
+    private bool _addFlattenSubfolders;
+    private bool _addBusy;
+    private string? _addError;
+
+    // ---- Subfolder creation state ----
+    private bool _createSubfolderMode;
+    private string _newSubfolderName = "";
+
+    // ---- Folder list for combobox ----
+    private List<FolderWatcher> _folders = [];
+
+    // ---- Add panel file list state ----
+    private List<TorrentFileEntry> _addFileEntries = [];
+    private Dictionary<string, int> _addFilePriorities = new();
+    private List<(bool IsFolder, string Name, string? FullPath, long Length, int Depth)> _addFlatTree = [];
+    private HashSet<string> _collapsedFolders = new();
+
+    // ---- Details panel state ----
+    private string? _detailsHash;
+    private int _detailsDlLimit;
+    private int _detailsUlLimit;
+    private List<(bool IsFolder, string Name, string? FullPath, long Length, int Depth)> _detailsFlatTree = [];
+    private HashSet<string> _detailsCollapsedFolders = new();
+
+    // ---- Delete dialog state ----
+    private bool _deleteHidden = true;
+    private string? _deleteHash;
+    private string _deleteName = "";
+    private bool _deleteFiles;
+
+    protected override async Task OnInitializedAsync()
+    {
+        TorrentEngine.StateChanged += OnTorrentStateChanged;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _folders = await db.FolderWatchers
+            .Where(f => !f.IsSection)
+            .OrderBy(f => f.Label)
+            .ToListAsync();
+    }
+
+    public void Dispose() => TorrentEngine.StateChanged -= OnTorrentStateChanged;
+
+    private void OnTorrentStateChanged()
+    {
+        if (_detailsHash is not null && _detailsFlatTree.Count == 0)
+            BuildDetailsFlatTree(_detailsHash);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenDetails(string infoHash)
+    {
+        _detailsHash = infoHash;
+        _detailsCollapsedFolders = new();
+        var live = TorrentEngine.Get(infoHash);
+        if (live is not null)
+        {
+            _detailsDlLimit = live.DownloadLimit / 1024;   // convert B/s → KB/s for display
+            _detailsUlLimit = live.UploadLimit / 1024;
+        }
+        BuildDetailsFlatTree(infoHash);
+        _addPanelOpen = false;
+    }
+
+    private void BuildDetailsFlatTree(string infoHash)
+    {
+        var files = TorrentEngine.GetFiles(infoHash);
+        if (files is null || files.Count == 0) return;
+        var entries = files.Select(f => new TorrentFileEntry(f.Path.Replace('\\', '/'), f.Length));
+        _detailsFlatTree = TorrentFileTree.Flatten(TorrentFileTree.BuildTree(entries));
+    }
+
+    private void CloseAddPanel()
+    {
+        _addPanelOpen = false;
+        _addMagnet = "";
+        _torrentFileBytes = null;
+        _torrentFileName = null;
+        _addFolderStr = "";
+        _addFolderWatcherId = null;
+        _addCustomPath = "";
+        _addDlLimit = 0;
+        _addUlLimit = 0;
+        _addStartPaused = false;
+        _addStopAfterDownload = false;
+        _addFlattenSubfolders = false;
+        _createSubfolderMode = false;
+        _newSubfolderName = "";
+        _addFileEntries = [];
+        _addFilePriorities = new();
+        _addFlatTree = [];
+        _collapsedFolders = new();
+        _addError = null;
+    }
+
+    private async Task OnTorrentFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        using var ms = new System.IO.MemoryStream();
+        await file.OpenReadStream(maxAllowedSize: 10_000_000).CopyToAsync(ms);
+        _torrentFileBytes = ms.ToArray();
+        _torrentFileName = file.Name;
+        _addMagnet = "";   // clear magnet if a file is selected
+
+        // Parse file list for priority selection
+        _addFileEntries = await TorrentEngineService.ParseTorrentFilesAsync(_torrentFileBytes);
+        _addFilePriorities = _addFileEntries.ToDictionary(f => f.Path.Replace('\\', '/'), _ => 4); // default Normal, normalized path
+        _addFlatTree = TorrentFileTree.Flatten(TorrentFileTree.BuildTree(_addFileEntries));
+        _collapsedFolders = new();
+    }
+
+    private bool IsItemVisible((bool IsFolder, string Name, string? FullPath, long Length, int Depth) item)
+    {
+        if (item.FullPath is null) return true;
+        return !_collapsedFolders.Any(cf => item.FullPath.StartsWith(cf + "/"));
+    }
+
+    private bool IsFolderChecked(string folderPath)
+    {
+        var matches = _addFilePriorities.Where(kv => kv.Key.StartsWith(folderPath + "/") || kv.Key == folderPath).ToList();
+        return matches.Count > 0 && matches.All(kv => kv.Value > 0);
+    }
+
+    private void ToggleFolderCheck(string folderPath)
+    {
+        bool allChecked = IsFolderChecked(folderPath);
+        foreach (var key in _addFilePriorities.Keys.Where(k => k.StartsWith(folderPath + "/") || k == folderPath).ToList())
+            _addFilePriorities[key] = allChecked ? 0 : 4;
+        StateHasChanged();
+    }
+
+    private void ToggleFolderCollapse(string folderPath)
+    {
+        if (_collapsedFolders.Contains(folderPath)) _collapsedFolders.Remove(folderPath);
+        else _collapsedFolders.Add(folderPath);
+        StateHasChanged();
+    }
+
+    private async Task AddTorrentAsync()
+    {
+        _addError = null;
+        var selectedFolder = _addFolderWatcherId.HasValue
+            ? _folders.FirstOrDefault(f => f.Id == _addFolderWatcherId)
+            : null;
+        var savePath = !string.IsNullOrWhiteSpace(_addCustomPath) ? _addCustomPath : (selectedFolder?.Path ?? "");
+        var autoRename = selectedFolder?.RenameEnabled ?? true;
+
+        if (string.IsNullOrWhiteSpace(savePath))
+        {
+            _addError = L["add_torrent.error_select_folder"];
+            return;
+        }
+
+        _addBusy = true;
+        try
+        {
+            if (_torrentFileBytes is not null)
+            {
+                await TorrentEngine.AddTorrentFileAsync(
+                    _torrentFileBytes, savePath, _addFolderWatcherId,
+                    _addDlLimit * 1024, _addUlLimit * 1024, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addFilePriorities.Count > 0 ? _addFilePriorities : null, _addFlattenSubfolders);
+            }
+            else if (!string.IsNullOrWhiteSpace(_addMagnet))
+            {
+                await TorrentEngine.AddMagnetAsync(
+                    _addMagnet.Trim(), savePath, _addFolderWatcherId,
+                    _addDlLimit * 1024, _addUlLimit * 1024, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addFlattenSubfolders);
+            }
+            ToastService.ShowToast(ToastIntent.Success, "Торрент добавлен.");
+            CloseAddPanel();
+        }
+        catch (Exception ex)
+        {
+            _addError = ex.Message;
+        }
+        finally
+        {
+            _addBusy = false;
+        }
+    }
+
+    private async Task PauseAsync(string infoHash)
+    {
+        await TorrentEngine.PauseAsync(infoHash);
+    }
+
+    private async Task ResumeAsync(string infoHash)
+    {
+        await TorrentEngine.ResumeAsync(infoHash);
+    }
+
+    private async Task StopAsync(string infoHash)
+    {
+        await TorrentEngine.StopAsync(infoHash);
+    }
+
+    private void AskDelete(string infoHash, string name, bool deleteFiles = false)
+    {
+        _deleteHash = infoHash;
+        _deleteName = name;
+        _deleteFiles = deleteFiles;
+        _deleteHidden = false;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteHash is null) return;
+        if (_detailsHash == _deleteHash) _detailsHash = null;
+        await TorrentEngine.RemoveAsync(_deleteHash, _deleteFiles);
+        ToastService.ShowToast(ToastIntent.Success, $"Торрент «{_deleteName}» удалён.");
+        _deleteHidden = true;
+        _deleteHash = null;
+    }
+
+    private async Task ApplySpeedLimits()
+    {
+        if (_detailsHash is null) return;
+        await TorrentEngine.SetSpeedLimitsAsync(_detailsHash,
+            _detailsDlLimit * 1024, _detailsUlLimit * 1024);
+        ToastService.ShowToast(ToastIntent.Success, "Лимиты обновлены.");
+    }
+
+    private async Task SetFilePriorityAsync(string infoHash, string filePath, int priority)
+    {
+        await TorrentEngine.SetFilePriorityAsync(infoHash, filePath, priority);
+    }
+
+    // ---- Formatting helpers ----
+
+    private static string StatusColor(TorrentLiveStats t) => t.State switch
+    {
+        TorrentState.Downloading => "#0078d4",
+        TorrentState.Metadata    => "#8764b8",
+        TorrentState.Seeding     => "#107c10",
+        TorrentState.Paused      => "#c8a600",
+        TorrentState.Stopped     => "#666",
+        TorrentState.Error       => "#c50f1f",
+        TorrentState.Hashing     => "#00b7c3",
+        _                        => "#999",
+    };
+
+    private static string FormatSpeed(long bytesPerSec)
+    {
+        if (bytesPerSec >= 1_048_576) return $"{bytesPerSec / 1_048_576.0:F1} MB/s";
+        if (bytesPerSec >= 1024)      return $"{bytesPerSec / 1024.0:F0} KB/s";
+        return $"{bytesPerSec} B/s";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+
+    // Shows "923 / 920 MB" — same unit, no duplication
+    private static string FormatBytesPair(long a, long b)
+    {
+        if (b >= 1_073_741_824)
+            return $"{a / 1_073_741_824.0:F1} / {b / 1_073_741_824.0:F2} GB";
+        if (b >= 1_048_576)
+            return $"{a / 1_048_576.0:F0} / {b / 1_048_576.0:F1} MB";
+        if (b >= 1024)
+            return $"{a / 1024.0:F0} / {b / 1024.0:F0} KB";
+        return $"{a} / {b} B";
+    }
+}

@@ -1,0 +1,155 @@
+@page "/renames"
+@page "/history"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IRenameService RenameService
+@inject IToastService ToastService
+
+<PageTitle>Animarr</PageTitle>
+
+<FluentLabel Typo="Typography.H4" Style="margin-bottom:16px;">@L["history.title"]</FluentLabel>
+
+<FluentStack Orientation="Orientation.Horizontal" Style="margin-bottom:16px;gap:10px;flex-wrap:wrap;"
+             VerticalAlignment="VerticalAlignment.Bottom">
+    <FluentSelect TOption="string" @bind-Value="_filterFolder" Label="@(L["history.filter_folder_label"])" Style="min-width:200px;">
+        <FluentOption Value="">@L["history.filter_folder_all"]</FluentOption>
+        @foreach (var f in _allFolders)
+        {
+            <FluentOption Value="@f.Id.ToString()">@f.Label</FluentOption>
+        }
+    </FluentSelect>
+    <FluentSelect TOption="string" @bind-Value="_filterStatus" Label="@(L["history.filter_status_label"])" Style="min-width:160px;">
+        <FluentOption Value="">@L["history.filter_status_all"]</FluentOption>
+        <FluentOption Value="Renamed">@L["history.status_renamed"]</FluentOption>
+        <FluentOption Value="Skipped">@L["history.status_skipped"]</FluentOption>
+        <FluentOption Value="Error">@L["history.status_error"]</FluentOption>
+        <FluentOption Value="Reverted">@L["history.status_reverted"]</FluentOption>
+    </FluentSelect>
+    <FluentButton OnClick="@(() => StateHasChanged())">@L["history.btn_apply_filter"]</FluentButton>
+    <FluentButton OnClick="ResetFilters">@L["history.btn_reset_filters"]</FluentButton>
+</FluentStack>
+
+@if (_loading)
+{
+    <progress style="width:100%;height:4px;"></progress>
+}
+else
+{
+    <FluentDataGrid Items="@FilteredItems()" TGridItem="RenameHistory"
+                    ShowHover="true" Pagination="@_pagination">
+        <TemplateColumn Title="@(L["history.col_date"])" Width="130px">
+            @context.ProcessedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["history.col_folder"])" Width="160px">
+            @(_allFolders.FirstOrDefault(f => f.Id == context.FolderId)?.Label ?? "—")
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["history.col_original_name"])">
+            <code style="font-size:12px;">@Path.GetFileName(context.OriginalPath)</code>
+        </TemplateColumn>
+        <TemplateColumn Title="" Width="28px" Align="Align.Center">
+            <span style="color:var(--neutral-foreground-hint);">→</span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["history.col_new_name"])">
+            <code style="font-size:12px;">@Path.GetFileName(context.NewPath)</code>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["history.col_status"])" Width="130px">
+            <span class="@GetStatusClass(context.Status)">@GetStatusLabel(context.Status)</span>
+        </TemplateColumn>
+        <TemplateColumn Title="" Width="140px" Align="Align.End">
+            @if (context.Status == RenameStatus.Renamed && !context.IsReverted)
+            {
+                <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowCounterclockwise())"
+                              OnClick="@(() => AskRevert(context))">
+                    @L["history.btn_revert"]
+                </FluentButton>
+            }
+        </TemplateColumn>
+    </FluentDataGrid>
+    <FluentPaginator State="@_pagination" />
+}
+
+<FluentDialog @bind-Hidden="_revertHidden" Modal="true" TrapFocus="true" PreventScroll="true">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["history.revert_dialog_title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentLabel>
+            @L["history.revert_dialog_body"]<br />
+            <b>@Path.GetFileName(_revertTarget?.NewPath ?? "")</b>
+            &nbsp;→&nbsp;
+            <b>@Path.GetFileName(_revertTarget?.OriginalPath ?? "")</b>
+        </FluentLabel>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmRevert">@L["history.btn_revert_confirm"]</FluentButton>
+        <FluentButton OnClick="@(() => _revertHidden = true)">@L["history.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    private List<RenameHistory> _history = [];
+    private List<FolderWatcher> _allFolders = [];
+    private bool _loading = true;
+    private string _filterFolder = "";
+    private string _filterStatus = "";
+    private PaginationState _pagination = new() { ItemsPerPage = 25 };
+
+    private bool _revertHidden = true;
+    private RenameHistory? _revertTarget;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _allFolders = await db.FolderWatchers.OrderBy(f => f.Label).ToListAsync();
+        _history = await db.RenameHistories.OrderByDescending(h => h.ProcessedAt).ToListAsync();
+    }
+
+    private void ResetFilters() { _filterFolder = ""; _filterStatus = ""; }
+
+    private IQueryable<RenameHistory> FilteredItems()
+    {
+        var q = _history.AsQueryable();
+        if (!string.IsNullOrEmpty(_filterFolder) && Guid.TryParse(_filterFolder, out var fid))
+            q = q.Where(h => h.FolderId == fid);
+        if (!string.IsNullOrEmpty(_filterStatus) && Enum.TryParse<RenameStatus>(_filterStatus, out var st))
+            q = q.Where(h => h.Status == st);
+        return q;
+    }
+
+    private void AskRevert(RenameHistory r) { _revertTarget = r; _revertHidden = false; }
+
+    private async Task ConfirmRevert()
+    {
+        if (_revertTarget is null) return;
+        var ok = await RenameService.RevertAsync(_revertTarget.Id);
+        ToastService.ShowToast(ok ? ToastIntent.Success : ToastIntent.Error,
+            ok ? L["history.toast_revert_ok"] : L["history.toast_revert_fail"]);
+        _revertHidden = true;
+        _revertTarget = null;
+        await LoadAsync();
+    }
+
+    private string GetStatusLabel(RenameStatus s) => s switch
+    {
+        RenameStatus.Renamed => L["history.status_renamed"],
+        RenameStatus.Skipped => L["history.status_skipped"],
+        RenameStatus.Error => L["history.status_error"],
+        RenameStatus.Reverted => L["history.status_reverted"],
+        _ => "—"
+    };
+
+    private static string GetStatusClass(RenameStatus s) => s switch
+    {
+        RenameStatus.Renamed => "status-badge status-renamed",
+        RenameStatus.Skipped => "status-badge status-skipped",
+        RenameStatus.Error => "status-badge status-error",
+        RenameStatus.Reverted => "status-badge status-reverted",
+        _ => "status-badge"
+    };
+}

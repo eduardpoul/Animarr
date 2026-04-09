@@ -1,0 +1,33 @@
+## Build outputs
+**/bin/
+**/obj/
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+## NuGet
+*.nupkg
+.nuget/
+
+## SQLite local DB
+*.db
+*.db-shm
+*.db-wal
+
+## Logs
+*.log
+logs/
+
+## Docker data volume (local)
+data/
+
+## Deploy scripts (private)
+deploy/
+
+## OS
+.DS_Store
+Thumbs.db

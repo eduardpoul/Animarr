@@ -1,0 +1,226 @@
+@page "/folders/{FolderId:guid}/files"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IRenameService RenameService
+@inject FolderWatcherService WatcherService
+@inject NavigationManager Nav
+@inject IToastService ToastService
+@using Microsoft.AspNetCore.WebUtilities
+
+<PageTitle>Animarr</PageTitle>
+
+@if (_loading)
+{
+    <progress style="width:100%;height:4px;"></progress>
+}
+else if (_folder is null)
+{
+    <FluentLabel>@L["folder_files.not_found"] <a href="/folders">@L["folder_files.back_link"]</a></FluentLabel>
+}
+else
+{
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:16px;">
+        <FluentStack Orientation="Orientation.Vertical" Style="flex:1;gap:2px;">
+            <FluentLabel Typo="Typography.H4" Style="margin:0;">@_folder.Label</FluentLabel>
+            <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:12px;">@_folder.Path</FluentLabel>
+        </FluentStack>
+        <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
+                      OnClick="GoBack">
+            @L["folder_files.btn_back"]
+        </FluentButton>
+        <FluentButton Appearance="Appearance.Accent"
+                      IconStart="@(new Icons.Regular.Size20.Search())"
+                      OnClick="ScanAsync"
+                      Disabled="@_scanning">
+            @(_scanning ? L["folder_files.btn_scanning"] : L["folder_files.btn_scan"])
+        </FluentButton>
+    </FluentStack>
+
+    @if (_scanning)
+    {
+        <progress style="width:100%;height:4px;margin-bottom:12px;"></progress>
+    }
+
+    @if (_previewItems is not null)
+    {
+        var visibleItems = _previewItems.Where(i => i.Status == PreviewStatus.WillRename || i.Status == PreviewStatus.Error).ToList();
+        var toRename = visibleItems.Count(i => i.Status == PreviewStatus.WillRename);
+        var selected = visibleItems.Count(i => i.Status == PreviewStatus.WillRename && i.IsSelected);
+
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center"
+                     Style="margin-bottom:12px;gap:8px;flex-wrap:wrap;">
+            <FluentLabel Style="flex:1;">@L.Get("folder_files.stats", _previewItems.Count, toRename, selected)</FluentLabel>
+            <FluentButton OnClick="SelectAll">@L["folder_files.btn_select_all"]</FluentButton>
+            <FluentButton OnClick="DeselectAll">@L["folder_files.btn_deselect_all"]</FluentButton>
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@(new Icons.Regular.Size20.Checkmark())"
+                          OnClick="ApplyAsync"
+                          Disabled="@(selected == 0 || _applying)">
+                @(_applying ? L["folder_files.btn_applying"] : L.Get("folder_files.btn_apply", selected))
+            </FluentButton>
+        </FluentStack>
+
+        <FluentDataGrid Items="@visibleItems.AsQueryable()" TGridItem="RenamePreviewItem" ShowHover="true">
+            <TemplateColumn Title="" Align="Align.Center" Width="44px">
+                @if (context.Status == PreviewStatus.WillRename)
+                {
+                    <FluentCheckbox @bind-Value="context.IsSelected" />
+                }
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["folder_files.col_original"])">
+                <code style="font-size:13px;">@context.OriginalName</code>
+            </TemplateColumn>
+            <TemplateColumn Title="" Width="28px" Align="Align.Center">
+                <span style="color:var(--neutral-foreground-hint);">→</span>
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["folder_files.col_new"])">
+                <code style="font-size:13px;color:@GetNameColor(context.Status);">
+                    @(context.NewName ?? "—")
+                </code>
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["folder_files.col_status"])" Width="140px">
+                <span class="@GetStatusClass(context.Status)">@GetStatusLabel(context.Status)</span>
+            </TemplateColumn>
+            <TemplateColumn Title="@(L["folder_files.col_reason"])">
+                <span style="font-size:12px;color:var(--neutral-foreground-hint);">@context.Reason</span>
+            </TemplateColumn>
+        </FluentDataGrid>
+    }
+
+    @if (_autoEvents.Count > 0)
+    {
+        <FluentDivider Style="margin:24px 0 12px;" />
+        <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">
+            @L.Get("folder_files.auto_rename_section", _autoEvents.Count)
+        </FluentLabel>
+        @foreach (var ev in _autoEvents)
+        {
+            <div style="font-family:monospace;font-size:13px;margin:3px 0;">
+                <span style="color:var(--neutral-foreground-hint);">@ev.From</span>
+                &nbsp;→&nbsp;
+                <span style="color:#107c10;">@ev.To</span>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid FolderId { get; set; }
+    [SupplyParameterFromQuery(Name = "back")] public string? BackId { get; set; }
+
+    private void GoBack()
+    {
+        if (Guid.TryParse(BackId, out var sectionId))
+            Nav.NavigateTo($"/folders/{sectionId}/subfolders");
+        else
+            Nav.NavigateTo("/folders");
+    }
+
+    private FolderWatcher? _folder;
+    private bool _loading = true;
+    private bool _scanning = false;
+    private bool _applying = false;
+    private List<RenamePreviewItem>? _previewItems;
+    private record AutoEvent(string From, string To);
+    private List<AutoEvent> _autoEvents = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _folder = await db.FolderWatchers.FindAsync(FolderId);
+        _loading = false;
+        WatcherService.FileRenamed += OnFileRenamed;
+    }
+
+    private void OnFileRenamed(Guid folderId, string from, string to)
+    {
+        if (folderId != FolderId) return;
+        _autoEvents.Insert(0, new AutoEvent(from, to));
+        if (_autoEvents.Count > 15) _autoEvents.RemoveAt(15);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ScanAsync()
+    {
+        _scanning = true;
+        _previewItems = null;
+        StateHasChanged();
+        try
+        {
+            _previewItems = await RenameService.ScanFolderAsync(FolderId);
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_scan_error", ex.Message));
+        }
+        finally
+        {
+            _scanning = false;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_previewItems is null) return;
+        _applying = true;
+        StateHasChanged();
+        try
+        {
+            var approved = _previewItems
+                .Where(i => i.IsSelected && i.Status == PreviewStatus.WillRename)
+                .ToList();
+            await RenameService.ApplyRenamesAsync(FolderId, approved);
+            var count = approved.Count;
+            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_renamed", count));
+            _previewItems = null;
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
+        finally
+        {
+            _applying = false;
+        }
+    }
+
+    private void SelectAll()
+        => _previewItems?
+            .Where(i => i.Status == PreviewStatus.WillRename)
+            .ToList()
+            .ForEach(i => i.IsSelected = true);
+
+    private void DeselectAll()
+        => _previewItems?
+            .Where(i => i.Status == PreviewStatus.WillRename)
+            .ToList()
+            .ForEach(i => i.IsSelected = false);
+
+    private string GetStatusLabel(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename => L["folder_files.status_will_rename"],
+        PreviewStatus.WillSkip => L["folder_files.status_will_skip"],
+        PreviewStatus.AlreadyCorrect => L["folder_files.status_already_correct"],
+        PreviewStatus.Error => L["folder_files.status_error"],
+        _ => "—"
+    };
+
+    private static string GetStatusClass(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename => "status-badge status-pending",
+        PreviewStatus.WillSkip => "status-badge status-skipped",
+        PreviewStatus.AlreadyCorrect => "status-badge status-renamed",
+        PreviewStatus.Error => "status-badge status-error",
+        _ => "status-badge"
+    };
+
+    private static string GetNameColor(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename => "#107c10",
+        PreviewStatus.Error => "#a80000",
+        _ => "inherit"
+    };
+
+    public void Dispose() => WatcherService.FileRenamed -= OnFileRenamed;
+}

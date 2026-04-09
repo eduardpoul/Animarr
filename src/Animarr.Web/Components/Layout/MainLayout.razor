@@ -1,0 +1,83 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject ThemeService ThemeService
+
+<FluentDesignTheme @bind-Mode="_themeMode" StorageName="animarr-theme" />
+
+<FluentLayout Style="height:100vh;display:flex;flex-direction:column;">
+    <FluentHeader Style="@($"display:flex;align-items:center;{HeaderStyle()}")">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="flex-shrink:0;">
+                <rect width="32" height="32" rx="6" fill="white" fill-opacity="0.15"/>
+                <text x="16" y="24" font-family="Arial, sans-serif" font-size="26" font-weight="900"
+                      text-anchor="middle" fill="white" letter-spacing="-1">A</text>
+                <line x1="22" y1="9" x2="22" y2="16" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                <polyline points="19.5,14 22,17.5 24.5,14" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <line x1="19.5" y1="19.5" x2="24.5" y2="19.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <FluentLabel Typo="Typography.H4" Style="margin:0;color:white;">Animarr</FluentLabel>
+        </div>
+    </FluentHeader>
+
+    <div style="flex:1;min-height:0;display:flex;flex-direction:row;overflow:hidden;">
+        <FluentNavMenu Width="220" Title="Navigation" Collapsible="true">
+            <FluentNavLink Href="/torrents" Icon="@(new Icons.Regular.Size20.ArrowDownload())" Match="NavLinkMatch.Prefix">
+                @L["nav.torrents"]
+            </FluentNavLink>
+            <FluentNavLink Href="/folders" Icon="@(new Icons.Regular.Size20.Folder())" Match="NavLinkMatch.Prefix">
+                @L["nav.folders"]
+            </FluentNavLink>
+            <FluentNavLink Href="/renames" Icon="@(new Icons.Regular.Size20.History())" Match="NavLinkMatch.Prefix">
+                @L["nav.history"]
+            </FluentNavLink>
+            <FluentNavLink Href="/patterns" Icon="@(new Icons.Regular.Size20.TextBulletListSquareEdit())" Match="NavLinkMatch.Prefix">
+                @L["nav.patterns"]
+            </FluentNavLink>
+            <FluentNavLink Href="/settings" Icon="@(new Icons.Regular.Size20.Settings())" Match="NavLinkMatch.Prefix">
+                @L["nav.settings"]
+            </FluentNavLink>
+        </FluentNavMenu>
+
+        <div style="flex:1;min-height:0;overflow-y:auto;padding:24px;background:var(--neutral-layer-1);color:var(--neutral-foreground-rest);">
+            @Body
+        </div>
+    </div>
+
+    <FluentFooter>
+        <FluentLabel Typo="Typography.Body" Style="padding: 8px 16px; color: var(--neutral-foreground-rest);">
+            @L["layout.footer_tagline"]
+        </FluentLabel>
+    </FluentFooter>
+</FluentLayout>
+
+<FluentToastProvider />
+<FluentDialogProvider />
+<FluentTooltipProvider />
+
+@code {
+    private DesignThemeModes _themeMode = DesignThemeModes.System;
+
+    protected override void OnInitialized()
+    {
+        _themeMode = ThemeService.Mode;
+        ThemeService.OnChange += OnThemeChanged;
+        L.LanguageChanged += OnLanguageChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        _themeMode = ThemeService.Mode;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ThemeService.OnChange -= OnThemeChanged;
+        L.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private string HeaderStyle() =>
+        _themeMode == DesignThemeModes.Dark ? "background-color:#1a3a5c;" : "";
+}

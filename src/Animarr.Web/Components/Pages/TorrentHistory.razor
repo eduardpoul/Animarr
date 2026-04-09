@@ -1,0 +1,110 @@
+@page "/torrents/history"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject TorrentEngineService TorrentEngine
+
+<PageTitle>@L["torrent_history.title"]</PageTitle>
+
+<div style="display:flex;align-items:center;margin-bottom:16px;gap:12px;">
+    <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["torrent_history.title"]</FluentLabel>
+    <FluentNavLink Href="/torrents" Style="font-size:13px;">@L["torrent_history.back_link"]</FluentNavLink>
+</div>
+
+@if (_loading)
+{
+    <progress style="width:100%;height:4px;"></progress>
+}
+else if (_records.Count == 0)
+{
+    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;">
+        @L["torrent_history.empty"]
+    </FluentLabel>
+}
+else
+{
+    <FluentDataGrid Items="@_records.AsQueryable()" TGridItem="TorrentRecord"
+                    ShowHover="true" Style="font-size:13px;" Pagination="@_pagination">
+        <TemplateColumn Title="" Width="18px">
+            <div style="width:10px;height:10px;border-radius:50%;background:@StateColor(context.State);margin:auto;"
+                 title="@context.State.ToString()"></div>
+        </TemplateColumn>
+
+        <PropertyColumn Property="@(r => r.Name)" Title="@(L["torrent_history.col_name"])" Sortable="true" />
+
+        <TemplateColumn Title="@(L["torrent_history.col_folder"])" Width="180px">
+            <span title="@context.SavePath" style="font-size:12px;color:var(--neutral-foreground-hint);">
+                @System.IO.Path.GetFileName(context.SavePath.TrimEnd('/', '\\'))
+            </span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrent_history.col_size"])" Width="90px">
+            <span style="font-size:12px;">@FormatBytes(context.TotalSize)</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrent_history.col_speed"])" Width="120px">
+            <span style="font-size:12px;">@FormatBytes(context.Downloaded) / @FormatBytes(context.Uploaded)</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrent_history.col_added"])" Width="140px">
+            <span style="font-size:12px;">@context.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrent_history.col_completed"])" Width="140px">
+            <span style="font-size:12px;">
+                @(context.CompletedAt.HasValue
+                    ? context.CompletedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    : "—")
+            </span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrent_history.col_status"])" Width="110px">
+            <span style="font-size:12px;">@StateLabel(context.State)</span>
+        </TemplateColumn>
+    </FluentDataGrid>
+
+    <FluentPaginator State="@_pagination" />
+}
+
+@code {
+    private List<TorrentRecord> _records = [];
+    private bool _loading = true;
+    private readonly PaginationState _pagination = new() { ItemsPerPage = 25 };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var all = await db.TorrentRecords
+            .Where(r => r.State == TorrentRecordState.Stopped ||
+                        r.State == TorrentRecordState.Error)
+            .OrderByDescending(r => r.AddedAt)
+            .ToListAsync();
+        // Exclude torrents still tracked by the engine (stopped but not removed)
+        _records = all.Where(r => TorrentEngine.Get(r.InfoHash) is null).ToList();
+        _loading = false;
+    }
+
+    private static string StateColor(TorrentRecordState state) => state switch
+    {
+        TorrentRecordState.Seeding  => "#107c10",
+        TorrentRecordState.Stopped  => "#666",
+        TorrentRecordState.Error    => "#c50f1f",
+        _                           => "#999",
+    };
+
+    private string StateLabel(TorrentRecordState state) => state switch
+    {
+        TorrentRecordState.Seeding  => L["torrent_history.state_seeding"],
+        TorrentRecordState.Stopped  => L["torrent_history.state_stopped"],
+        TorrentRecordState.Error    => L["torrent_history.state_error"],
+        TorrentRecordState.Paused   => L["torrent_history.state_paused"],
+        _                           => state.ToString(),
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+}
