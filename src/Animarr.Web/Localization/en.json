@@ -226,7 +226,7 @@
   "patterns.test_title": "Pattern Tester",
   "patterns.test_hint": "Enter a filename to check which pattern matches and what the resulting name will be.",
   "patterns.test_field_label": "Filename",
-  "patterns.test_placeholder": "SHIZA-1080-s1-e05.mkv",
+  "patterns.test_placeholder": "Shizen-1080-s1-e05.mkv",
   "patterns.test_button": "Test",
   "patterns.test_matched": "✓ Pattern matched",
   "patterns.test_season_label": "Season:",

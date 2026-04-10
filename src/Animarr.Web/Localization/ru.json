@@ -226,7 +226,7 @@
   "patterns.test_title": "Тест паттернов",
   "patterns.test_hint": "Введите имя файла, чтобы проверить какой паттерн совпадёт и какое имя получится.",
   "patterns.test_field_label": "Имя файла",
-  "patterns.test_placeholder": "SHIZA-1080-s1-e05.mkv",
+  "patterns.test_placeholder": "Shizen-1080-s1-e05.mkv",
   "patterns.test_button": "Проверить",
   "patterns.test_matched": "✓ Паттерн совпал",
   "patterns.test_season_label": "Сезон:",
