@@ -21,6 +21,8 @@ public class TorrentEngineService : BackgroundService
     /// <summary>FolderWatcherId per torrent (populated on add, available in stats).</summary>
     private readonly ConcurrentDictionary<string, Guid?> _folderWatchers = new();
     private readonly ConcurrentDictionary<string, bool> _autoRename = new();
+    /// <summary>Tracks ("hash:relPath") keys already marked IsDownloaded in DB to avoid redundant writes.</summary>
+    private readonly ConcurrentDictionary<string, byte> _markedDownloaded = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Fires every 500 ms and on any torrent state change.</summary>
     public event Action? StateChanged;
@@ -46,15 +48,10 @@ public class TorrentEngineService : BackgroundService
             await RestoreActiveTorrentsAsync(cfg);
 
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
-            int tickCount = 0;
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 UpdateLiveStats();
                 StateChanged?.Invoke();
-
-                // Every 4 ticks (~2s): auto-mark 100% downloaded files as DoNotDownload
-                if (++tickCount % 4 == 0)
-                    await AutoMarkCompletedFilesAsync();
             }
         }
         catch (OperationCanceledException) { }
@@ -142,6 +139,11 @@ public class TorrentEngineService : BackgroundService
                 _autoRename[record.InfoHash] = record.AutoRename;
 
                 await ApplyFileSelectionsAsync(mgr, record.FileSelections);
+
+                // Pre-populate so UpdateLiveStats doesn't re-mark already-downloaded files
+                foreach (var sel in record.FileSelections.Where(s => s.IsDownloaded))
+                    _markedDownloaded.TryAdd($"{record.InfoHash}:{sel.FilePath}", 0);
+
                 SubscribeEvents(mgr, record.InfoHash, cfg);
                 _managers[record.InfoHash] = mgr;
 
@@ -274,6 +276,10 @@ public class TorrentEngineService : BackgroundService
             record.TotalSize = mgr.Torrent.Size;
             record.State     = TorrentRecordState.Downloading;
             await ctx.SaveChangesAsync();
+
+            // Apply root folder remap for magnets (metadata just arrived)
+            if (record.SuppressRootFolder || !string.IsNullOrWhiteSpace(record.CustomRootFolderName))
+                await ApplyRootFolderRemapAsync(mgr, infoHash, record.SuppressRootFolder, record.CustomRootFolderName);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -288,28 +294,24 @@ public class TorrentEngineService : BackgroundService
     // Live stats
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Automatically sets Priority=DoNotDownload for any file that has reached 100%
-    /// so the renamer can safely rename it without the torrent re-verifying the old path.
-    /// </summary>
-    private async Task AutoMarkCompletedFilesAsync()
-    {
-        foreach (var mgr in _managers.Values)
-        {
-            if (mgr.Torrent is null) continue; // metadata not yet received
-            foreach (var file in mgr.Files)
-            {
-                if (file.Priority == Priority.DoNotDownload) continue;
-                if (file.BitField.Length > 0 && file.BitField.TrueCount == file.BitField.Length)
-                    await mgr.SetFilePriorityAsync(file, Priority.DoNotDownload);
-            }
-        }
-    }
-
     private void UpdateLiveStats()
     {
         foreach (var (hash, mgr) in _managers)
         {
+            // Detect newly-completed files and persist IsDownloaded flag
+            if (mgr.Torrent is not null)
+            {
+                foreach (var file in mgr.Files)
+                {
+                    if (file.Priority == Priority.DoNotDownload) continue;
+                    if (file.BitField.Length == 0 || file.BitField.TrueCount < file.BitField.Length) continue;
+
+                    var key = $"{hash}:{file.Path}";
+                    if (_markedDownloaded.TryAdd(key, 0))
+                        _ = Task.Run(async () => await MarkFileDownloadedAsync(hash, file.Path));
+                }
+            }
+
             _liveStats[hash] = new TorrentLiveStats(
                 InfoHash:         hash,
                 Name:             mgr.Torrent?.Name ?? _names.GetValueOrDefault(hash, hash[..Math.Min(8, hash.Length)]),
@@ -333,6 +335,36 @@ public class TorrentEngineService : BackgroundService
 
         foreach (var hash in _liveStats.Keys.Except(_managers.Keys).ToList())
             _liveStats.TryRemove(hash, out _);
+    }
+
+    private async Task MarkFileDownloadedAsync(string torrentHash, string relativePath)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            var record = await ctx.TorrentRecords
+                .Include(r => r.FileSelections)
+                .FirstOrDefaultAsync(r => r.InfoHash == torrentHash);
+            if (record is null) return;
+            var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == relativePath);
+            if (sel is null)
+            {
+                ctx.TorrentFileSelections.Add(new TorrentFileSelection
+                    { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = relativePath, Priority = 1, IsDownloaded = true });
+            }
+            else if (!sel.IsDownloaded)
+            {
+                sel.IsDownloaded = true;
+            }
+            else return;
+            await ctx.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to mark file downloaded: {Hash}:{Path}", torrentHash, relativePath);
+        }
     }
 
     private async Task PersistStatsAsync()
@@ -437,6 +469,84 @@ public class TorrentEngineService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Moves a file tracked by MonoTorrent: uses TorrentManager.MoveFileAsync so the torrent
+    /// continues seeding under the new path without interruption.
+    /// Returns true if the file belonged to a torrent, false if not found (caller should use File.Move).
+    /// </summary>
+    public async Task<bool> MoveFileAsync(string absOldPath, string absNewPath)
+    {
+        foreach (var (hash, mgr) in _managers)
+        {
+            var file = mgr.Files.FirstOrDefault(f =>
+                string.Equals(f.FullPath, absOldPath, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.DownloadIncompleteFullPath, absOldPath, StringComparison.OrdinalIgnoreCase));
+            if (file is null) continue;
+
+            var oldRelPath = file.Path;
+
+            // MonoTorrent moves the file on disk and updates internal path tracking
+            await mgr.MoveFileAsync(file, absNewPath);
+
+            // Derive new relative path
+            var newRelPath = absNewPath.StartsWith(mgr.SavePath, StringComparison.OrdinalIgnoreCase)
+                ? absNewPath[(mgr.SavePath.TrimEnd(Path.DirectorySeparatorChar, '/').Length + 1)..]
+                : Path.GetFileName(absNewPath);
+
+            // Update TorrentFileSelection.FilePath and keep _markedDownloaded in sync
+            var oldKey = $"{hash}:{oldRelPath}";
+            var newKey = $"{hash}:{newRelPath}";
+            if (_markedDownloaded.TryRemove(oldKey, out _))
+                _markedDownloaded.TryAdd(newKey, 0);
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            var record = await ctx.TorrentRecords.Include(r => r.FileSelections)
+                .FirstOrDefaultAsync(r => r.InfoHash == hash);
+            if (record is not null)
+            {
+                var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == oldRelPath);
+                if (sel is not null) sel.FilePath = newRelPath;
+                await ctx.SaveChangesAsync();
+            }
+
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// If any running torrent's SavePath equals <paramref name="dirPath"/>,
+    /// links it to <paramref name="folderId"/> in both the live cache and the database.
+    /// Called automatically when FolderWatcherService detects a new section subdirectory.
+    /// </summary>
+    public async Task TryLinkTorrentAsync(string dirPath, Guid folderId)
+    {
+        foreach (var (hash, mgr) in _managers)
+        {
+            if (!string.Equals(mgr.SavePath, dirPath, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            _folderWatchers[hash] = folderId;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == hash);
+            if (record is not null)
+            {
+                record.FolderWatcherId = folderId;
+                await ctx.SaveChangesAsync();
+                _logger.LogInformation("Auto-linked torrent {Hash} to folder {FolderId}", hash, folderId);
+            }
+
+            UpdateLiveStats();
+            StateChanged?.Invoke();
+            return; // one torrent per save path
+        }
+    }
+
     /// <summary>Returns per-file download progress 0–100. Key = normalized path.</summary>
     public Dictionary<string, double>? GetFileProgress(string infoHash)
     {
@@ -500,7 +610,7 @@ public class TorrentEngineService : BackgroundService
     public async Task<string> AddMagnetAsync(
         string magnetUri, string savePath, Guid? folderWatcherId,
         int dlLimit, int ulLimit, bool autoRename, bool startPaused, bool stopAfterDownload = false,
-        bool flattenSubfolders = false)
+        bool flattenSubfolders = false, bool suppressRootFolder = false, string? customRootFolderName = null)
     {
         var magnetLink = MagnetLink.Parse(magnetUri);
         var infoHash = magnetLink.InfoHashes.V1OrV2.ToHex();
@@ -533,6 +643,8 @@ public class TorrentEngineService : BackgroundService
         record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
         record.FlattenSubfolders  = flattenSubfolders;
+        record.SuppressRootFolder   = suppressRootFolder;
+        record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
         record.CompletedAt        = null;
         record.ErrorMessage       = null;
         await ctx.SaveChangesAsync();
@@ -554,7 +666,8 @@ public class TorrentEngineService : BackgroundService
     public async Task<string> AddTorrentFileAsync(
         byte[] torrentData, string savePath, Guid? folderWatcherId,
         int dlLimit, int ulLimit, bool autoRename, bool startPaused, bool stopAfterDownload = false,
-        Dictionary<string, int>? initialPriorities = null, bool flattenSubfolders = false)
+        Dictionary<string, int>? initialPriorities = null, bool flattenSubfolders = false,
+        bool suppressRootFolder = false, string? customRootFolderName = null)
     {
         var torrent = await Torrent.LoadAsync(torrentData);
         var infoHash = torrent.InfoHashes.V1OrV2.ToHex();
@@ -602,6 +715,8 @@ public class TorrentEngineService : BackgroundService
         record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
         record.FlattenSubfolders  = flattenSubfolders;
+        record.SuppressRootFolder   = suppressRootFolder;
+        record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
         record.CompletedAt        = null;
         record.ErrorMessage       = null;
         // Persist initial file priorities — use ExecuteDeleteAsync so EF change tracking
@@ -622,6 +737,10 @@ public class TorrentEngineService : BackgroundService
 
         SubscribeEvents(mgr, infoHash, cfg);
         _managers[infoHash] = mgr;
+
+        // Apply root folder remap for .torrent files (metadata already known)
+        if (suppressRootFolder || !string.IsNullOrWhiteSpace(customRootFolderName))
+            await ApplyRootFolderRemapAsync(mgr, infoHash, suppressRootFolder, customRootFolderName);
 
         if (!startPaused) await mgr.StartAsync();
 
@@ -749,6 +868,65 @@ public class TorrentEngineService : BackgroundService
             AllowLocalPeerDiscovery = cfg.EnableLSD,
         };
         await _engine.UpdateSettingsAsync(builder.ToSettings());
+    }
+
+    // -------------------------------------------------------------------------
+    // Root folder remapping
+    // -------------------------------------------------------------------------
+
+    private async Task ApplyRootFolderRemapAsync(
+        TorrentManager mgr, string infoHash, bool suppress, string? customName)
+    {
+        if (mgr.Files.Count == 0) return;
+
+        var roots = mgr.Files
+            .Select(f => f.Path.Replace('\\', '/').Split('/')[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (roots.Count != 1) return; // multiple roots or flat torrent
+
+        var oldRoot = roots[0];
+
+        if (!suppress && string.Equals(oldRoot, customName, StringComparison.OrdinalIgnoreCase))
+            return; // already correct name
+
+        foreach (var file in mgr.Files)
+        {
+            var relPath = file.Path.Replace('\\', '/');
+            string newRelPath;
+
+            if (suppress)
+            {
+                newRelPath = relPath.Length > oldRoot.Length + 1
+                    ? relPath[(oldRoot.Length + 1)..]
+                    : Path.GetFileName(relPath);
+            }
+            else
+            {
+                newRelPath = customName! + relPath[oldRoot.Length..];
+            }
+
+            var newAbsPath = Path.Combine(mgr.SavePath, newRelPath);
+            var dir = Path.GetDirectoryName(newAbsPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+            try
+            {
+                await mgr.MoveFileAsync(file, newAbsPath);
+                var oldKey = $"{infoHash}:{file.Path}";
+                var newKey = $"{infoHash}:{newRelPath}";
+                if (_markedDownloaded.TryRemove(oldKey, out _))
+                    _markedDownloaded.TryAdd(newKey, 0);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ApplyRootFolderRemap: failed to move {File}", file.Path);
+            }
+        }
+
+        _logger.LogInformation("RootFolderRemap [{Mode}] {Hash}: \"{Old}\" -> \"{New}\"",
+            suppress ? "suppress" : "rename", infoHash, oldRoot, suppress ? "(stripped)" : customName);
     }
 
     // -------------------------------------------------------------------------

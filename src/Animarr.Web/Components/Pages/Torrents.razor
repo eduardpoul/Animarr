@@ -60,7 +60,7 @@ else
             @if (context.State == TorrentState.Hashing)
             {
                 <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-                    <progress style="width:180px;height:6px;"></progress>
+                    <progress style="flex:1;min-width:60px;height:6px;"></progress>
                     <span style="font-size:12px;color:var(--neutral-foreground-hint);white-space:nowrap;">@L["torrents.state_hashing"]</span>
                 </div>
             }
@@ -68,7 +68,7 @@ else
             {
                 <div style="display:flex;align-items:center;gap:6px;">
                     <progress value="@((int)context.Progress)" max="100"
-                              style="width:180px;height:6px;"></progress>
+                              style="flex:1;min-width:60px;height:6px;"></progress>
                     <span style="font-size:12px;min-width:36px;">@context.Progress.ToString("F1")%</span>
                 </div>
             }
@@ -84,6 +84,10 @@ else
 
         <TemplateColumn Title="@(L["torrents.col_peers"])" Width="60px">
             <span style="font-size:12px;">@context.Seeds+@context.Peers</span>
+        </TemplateColumn>
+
+        <TemplateColumn Title="@(L["torrents.col_eta"])" Width="80px">
+            <span style="font-size:12px;color:var(--neutral-foreground-hint);">@FormatEta(context)</span>
         </TemplateColumn>
 
         <TemplateColumn Title="" Align="Align.End" Width="155px">
@@ -106,6 +110,7 @@ else
                                   Title="@(L["torrents.btn_stop"])" OnClick="@(() => StopAsync(context.InfoHash))" />
                 }
                 <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())"
+                              style="color:var(--error,#c50f1f);"
                               Title="@(L["torrents.btn_delete"])" OnClick="@(() => AskDelete(context.InfoHash, context.Name))" />
             </div>
         </TemplateColumn>
@@ -257,6 +262,35 @@ else
         <FluentSwitch @bind-Value="_addStartPaused">@L["add_torrent.start_paused"]</FluentSwitch>
         <FluentSwitch @bind-Value="_addStopAfterDownload">@L["add_torrent.stop_after_download"]</FluentSwitch>
         <FluentSwitch @bind-Value="_addFlattenSubfolders">@L["add_torrent.flatten_subfolders"]</FluentSwitch>
+
+        @{
+            // MonoTorrent always creates a root folder from torrent.Name for multi-file torrents.
+            // ParseTorrentFilesAsync returns paths without the info.name prefix, so we detect
+            // the root folder by: multiple files (always get a root folder) OR a file in a subdir.
+            var torrentHasRootFolder = _torrentFileBytes is not null
+                && _addFileEntries.Count > 0
+                && (_addFileEntries.Count > 1
+                    || _addFileEntries.Any(f => f.Path.Contains('/') || f.Path.Contains('\\')));
+        }
+        @if (torrentHasRootFolder && !_addFlattenSubfolders)
+        {
+            <div style="display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box;">
+                <FluentSwitch Value="_addSuppressRootFolder"
+                              ValueChanged="@((bool v) => { _addSuppressRootFolder = v; if (v) _addCustomRootFolderName = string.Empty; })">
+                    @L["add_torrent.suppress_root_folder"]
+                </FluentSwitch>
+                @if (!_addSuppressRootFolder)
+                {
+                    <div style="box-sizing:border-box;width:100%;">
+                        <FluentTextField @bind-Value="_addCustomRootFolderName"
+                                         Label="@(L["add_torrent.custom_root_folder_label"])"
+                                         Placeholder="@(L["add_torrent.custom_root_folder_placeholder"])"
+                                         style="width:100%;box-sizing:border-box;"
+                                         Width="100%" />
+                    </div>
+                }
+            </div>
+        }
 
         @if (_addFolderWatcherId.HasValue)
         {
@@ -425,8 +459,10 @@ else
                                       OnClick="@(() => StopAsync(_detailsHash!))">@L["torrent_details.btn_stop"]</FluentButton>
                     }
                     <FluentButton IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  style="color:var(--error,#c50f1f);"
                                   OnClick="@(() => AskDelete(_detailsHash!, live.Name))">@L["torrent_details.btn_delete"]</FluentButton>
                     <FluentButton Appearance="Appearance.Outline"
+                                  style="color:var(--error,#c50f1f);border-color:var(--error,#c50f1f);"
                                   IconStart="@(new Icons.Regular.Size20.DeleteDismiss())"
                                   OnClick="@(() => AskDelete(_detailsHash!, live.Name, deleteFiles: true))">
                         @L["torrent_details.btn_delete_with_files"]
@@ -471,6 +507,8 @@ else
     private bool _addStartPaused;
     private bool _addStopAfterDownload;
     private bool _addFlattenSubfolders;
+    private bool _addSuppressRootFolder;
+    private string _addCustomRootFolderName = "";
     private bool _addBusy;
     private string? _addError;
 
@@ -533,8 +571,8 @@ else
         var live = TorrentEngine.Get(infoHash);
         if (live is not null)
         {
-            _detailsDlLimit = live.DownloadLimit / 1024;   // convert B/s → KB/s for display
-            _detailsUlLimit = live.UploadLimit / 1024;
+            _detailsDlLimit = live.DownloadLimit / 125;   // convert B/s → Kbps for display
+            _detailsUlLimit = live.UploadLimit / 125;
         }
         BuildDetailsFlatTree(infoHash);
         _addPanelOpen = false;
@@ -562,6 +600,8 @@ else
         _addStartPaused = false;
         _addStopAfterDownload = _defaultStopAfterDownload;
         _addFlattenSubfolders = false;
+        _addSuppressRootFolder = false;
+        _addCustomRootFolderName = "";
         _createSubfolderMode = false;
         _newSubfolderName = "";
         _addFileEntries = [];
@@ -637,15 +677,16 @@ else
             {
                 await TorrentEngine.AddTorrentFileAsync(
                     _torrentFileBytes, savePath, _addFolderWatcherId,
-                    _addDlLimit * 1024, _addUlLimit * 1024, autoRename, _addStartPaused, _addStopAfterDownload,
-                    _addFilePriorities.Count > 0 ? _addFilePriorities : null, _addFlattenSubfolders);
+                    _addDlLimit * 125, _addUlLimit * 125, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addFilePriorities.Count > 0 ? _addFilePriorities : null, _addFlattenSubfolders,
+                    _addSuppressRootFolder, _addCustomRootFolderName);
             }
             else if (!string.IsNullOrWhiteSpace(_addMagnet))
             {
                 await TorrentEngine.AddMagnetAsync(
                     _addMagnet.Trim(), savePath, _addFolderWatcherId,
-                    _addDlLimit * 1024, _addUlLimit * 1024, autoRename, _addStartPaused, _addStopAfterDownload,
-                    _addFlattenSubfolders);
+                    _addDlLimit * 125, _addUlLimit * 125, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addFlattenSubfolders, _addSuppressRootFolder, _addCustomRootFolderName);
             }
             ToastService.ShowToast(ToastIntent.Success, "Торрент добавлен.");
             CloseAddPanel();
@@ -697,7 +738,7 @@ else
     {
         if (_detailsHash is null) return;
         await TorrentEngine.SetSpeedLimitsAsync(_detailsHash,
-            _detailsDlLimit * 1024, _detailsUlLimit * 1024);
+            _detailsDlLimit * 125, _detailsUlLimit * 125);
         ToastService.ShowToast(ToastIntent.Success, "Лимиты обновлены.");
     }
 
@@ -719,6 +760,16 @@ else
         TorrentState.Hashing     => "#00b7c3",
         _                        => "#999",
     };
+
+    private static string FormatEta(TorrentLiveStats s)
+    {
+        if (s.DownloadRate <= 0 || s.Progress >= 100) return "—";
+        var remaining = s.TotalSize * (1.0 - s.Progress / 100.0);
+        var seconds = remaining / s.DownloadRate;
+        if (seconds > 86400) return ">1d";
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.Hours > 0 ? $"{ts.Hours}h {ts.Minutes:D2}m" : $"{ts.Minutes}m {ts.Seconds:D2}s";
+    }
 
     private static string FormatSpeed(long bytesPerSec)
     {

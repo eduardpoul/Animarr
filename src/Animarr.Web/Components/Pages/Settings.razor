@@ -1,11 +1,13 @@
 @page "/settings"
 @rendermode InteractiveServer
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject IPatternMatchService Matcher
 @inject IOptions<AppSettings> AppSettingsOptions
 @inject IToastService ToastService
 @inject ThemeService ThemeService
 @inject TorrentEngineService TorrentEngine
 @inject IWebHostEnvironment Env
+@inject NavigationManager Nav
 
 <PageTitle>Animarr</PageTitle>
 
@@ -65,6 +67,122 @@
 
         </FluentStack>
     </FluentTab>
+
+    <!-- ============================================================ -->
+    <!-- TAB: Patterns -->
+    <!-- ============================================================ -->
+    <FluentTab Id="patterns" Label="@(L["settings.tab_patterns"])">
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:16px;padding-top:16px;">
+
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:4px;">
+                <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["patterns.title"]</FluentLabel>
+                <FluentButton Appearance="Appearance.Accent"
+                              IconStart="@(new Icons.Regular.Size20.Add())"
+                              OnClick="@(() => OpenPatternDialog(null))">
+                    @L["patterns.add_button"]
+                </FluentButton>
+            </FluentStack>
+
+            @if (_patternsLoading)
+            {
+                <progress style="width:100%;height:4px;"></progress>
+            }
+            else
+            {
+                <FluentDataGrid Items="@_patterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
+                    <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
+                        @context.Priority
+                    </TemplateColumn>
+                    <PropertyColumn Property="@(p => p.Name)" Title="@(L["patterns.col_name"])" />
+                    <TemplateColumn Title="@(L["patterns.col_regex"])">
+                        <code style="font-size:11px;word-break:break-all;">@context.Pattern</code>
+                    </TemplateColumn>
+                    <TemplateColumn Title="@(L["patterns.col_type"])" Width="140px">
+                        <FluentBadge Appearance="@(context.IsBuiltIn ? Appearance.Accent : Appearance.Neutral)">
+                            @(context.IsBuiltIn ? L["patterns.type_builtin"] : L["patterns.type_custom"])
+                        </FluentBadge>
+                    </TemplateColumn>
+                    <TemplateColumn Title="@(L["patterns.col_actions"])" Align="Align.End" Width="140px">
+                        @if (!context.IsBuiltIn)
+                        {
+                            <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+                                          OnClick="@(() => OpenPatternDialog(context))">
+                                @L["patterns.btn_edit"]
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          IconStart="@(new Icons.Regular.Size20.Delete())"
+                                          OnClick="@(() => DeletePattern(context))">
+                                @L["patterns.btn_delete"]
+                            </FluentButton>
+                        }
+                    </TemplateColumn>
+                </FluentDataGrid>
+
+                <FluentDivider Style="margin:28px 0 20px;" />
+
+                <FluentLabel Typo="Typography.H3" Style="margin-bottom:12px;">@L["patterns.test_title"]</FluentLabel>
+                <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:10px;">
+                    @L["patterns.test_hint"]
+                </FluentLabel>
+                <FluentStack Orientation="Orientation.Horizontal" Style="gap:10px;" VerticalAlignment="VerticalAlignment.Bottom">
+                    <FluentTextField @bind-Value="_testInput"
+                                     Label="@(L["patterns.test_field_label"])"
+                                     Placeholder="@(L["patterns.test_placeholder"])"
+                                     style="flex:1;" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="TestPattern">@L["patterns.test_button"]</FluentButton>
+                </FluentStack>
+
+                @if (_testResult is not null)
+                {
+                    <div style="margin-top:14px;padding:14px;background:var(--neutral-layer-2,#f3f2f1);border-radius:6px;">
+                        @if (_testResult.IsMatched)
+                        {
+                            <div style="color:#107c10;font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
+                            <div style="font-family:monospace;font-size:13px;line-height:1.8;">
+                                @L["patterns.test_season_label"] <b>@(_testResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b><br />
+                                @L["patterns.test_episode_label"] <b>@_testResult.Episode</b><br />
+                                @L["patterns.test_kind_label"] <b>@_testKind</b><br />
+                                @L["patterns.test_new_name_label"] <b style="color:#107c10;">@(_testNewName ?? "—")</b>
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="color:#a80000;font-weight:600;">@L["patterns.test_not_matched"]</div>
+                        }
+                    </div>
+                }
+            }
+
+        </FluentStack>
+    </FluentTab>
+
+    <!-- Add/Edit pattern dialog -->
+    <FluentDialog @bind-Hidden="_patternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
+        <FluentDialogHeader ShowDismiss="true">
+            <FluentLabel Typo="Typography.H4">
+                @(_patternEditTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
+            </FluentLabel>
+        </FluentDialogHeader>
+        <FluentDialogBody>
+            <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
+                <FluentTextField @bind-Value="_formName" Label="@(L["patterns.field_name_label"])" Placeholder="@(L["patterns.field_name_placeholder"])" style="width:100%;" />
+                <FluentTextField @bind-Value="_formPattern"
+                                 Label="@(L["patterns.field_regex_label"])"
+                                 Placeholder="@(L["patterns.field_regex_placeholder"])"
+                                 style="width:100%;font-family:monospace;" />
+                <FluentNumberField TValue="int" @bind-Value="_formPriority"
+                                   Label="@(L["patterns.field_priority_label"])"
+                                   Min="1" Max="999" style="width:160px;" />
+            </FluentStack>
+        </FluentDialogBody>
+        <FluentDialogFooter>
+            <FluentButton Appearance="Appearance.Accent" OnClick="SavePattern"
+                          Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern))">
+                @L["patterns.btn_save"]
+            </FluentButton>
+            <FluentButton OnClick="@(() => _patternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
+        </FluentDialogFooter>
+    </FluentDialog>
 
     <!-- ============================================================ -->
     <!-- TAB: Ignore Rules -->
@@ -129,10 +247,10 @@
                 <div>
                     <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_speed_title"]</FluentLabel>
                     <div style="display:flex;flex-direction:column;gap:10px;">
-                        <FluentNumberField @bind-Value="_torrentCfg.GlobalDownloadLimit"
+                        <FluentNumberField @bind-Value="_globalDlLimitKbps"
                                            Label="@(L["settings.torrent_dl_limit_label"])"
                                            Min="0" style="width:260px;" />
-                        <FluentNumberField @bind-Value="_torrentCfg.GlobalUploadLimit"
+                        <FluentNumberField @bind-Value="_globalUlLimitKbps"
                                            Label="@(L["settings.torrent_ul_limit_label"])"
                                            Min="0" style="width:260px;" />
                     </div>
@@ -204,6 +322,7 @@
 </FluentTabs>
 
 @code {
+    // ── General / Rules / Torrent state ──────────────────────────
     private List<IgnoreRule> _rules = [];
     private bool _loading = true;
     private string _newMask = "";
@@ -211,9 +330,31 @@
     private string _themeStr = "System";
     private string _activeTab = "general";
     private TorrentConfig? _torrentCfg;
+    private int _globalDlLimitKbps;
+    private int _globalUlLimitKbps;
+
+    // ── Patterns state ───────────────────────────────────────────
+    private List<RenamePattern> _patterns = [];
+    private bool _patternsLoading = true;
+
+    private bool _patternDialogHidden = true;
+    private RenamePattern? _patternEditTarget;
+    private string _formName = "";
+    private string _formPattern = "";
+    private int _formPriority = 100;
+
+    private string _testInput = "";
+    private ParseResult? _testResult;
+    private string? _testNewName;
+    private string _testKind = "";
 
     protected override async Task OnInitializedAsync()
     {
+        // honour ?tab=xxx redirects (e.g. from /patterns)
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var qs = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        if (qs["tab"] is { Length: > 0 } tab) _activeTab = tab;
+
         _themeStr = ThemeService.Mode.ToString();
         _cfg = AppSettingsOptions.Value;
         await ReloadRulesAsync();
@@ -221,6 +362,11 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
         _torrentCfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1) ?? new TorrentConfig();
+        _globalDlLimitKbps = _torrentCfg.GlobalDownloadLimit / 125;
+        _globalUlLimitKbps = _torrentCfg.GlobalUploadLimit / 125;
+
+        await LoadPatternsAsync();
+        _patternsLoading = false;
     }
 
     private void OnThemeChanged(string value)
@@ -274,9 +420,84 @@
         await ReloadRulesAsync();
     }
 
+    // ── Patterns methods ─────────────────────────────────────────
+    private async Task LoadPatternsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _patterns = await db.RenamePatterns
+            .Where(p => p.Scope == PatternScope.Global)
+            .OrderBy(p => p.Priority)
+            .ToListAsync();
+    }
+
+    private void OpenPatternDialog(RenamePattern? pattern)
+    {
+        _patternEditTarget = pattern;
+        _formName = pattern?.Name ?? "";
+        _formPattern = pattern?.Pattern ?? "";
+        _formPriority = pattern?.Priority ?? 100;
+        _patternDialogHidden = false;
+    }
+
+    private async Task SavePattern()
+    {
+        if (string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_patternEditTarget is null)
+        {
+            db.RenamePatterns.Add(new RenamePattern
+            {
+                Id = Guid.NewGuid(),
+                Name = _formName.Trim(),
+                Pattern = _formPattern.Trim(),
+                Priority = _formPriority,
+                Scope = PatternScope.Global,
+                IsBuiltIn = false,
+            });
+            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_added"]);
+        }
+        else
+        {
+            var entity = await db.RenamePatterns.FindAsync(_patternEditTarget.Id);
+            if (entity is null) return;
+            entity.Name = _formName.Trim();
+            entity.Pattern = _formPattern.Trim();
+            entity.Priority = _formPriority;
+            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
+        }
+
+        await db.SaveChangesAsync();
+        _patternDialogHidden = true;
+        await LoadPatternsAsync();
+    }
+
+    private async Task DeletePattern(RenamePattern pattern)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.RenamePatterns.FindAsync(pattern.Id);
+        if (entity is not null) { db.RenamePatterns.Remove(entity); await db.SaveChangesAsync(); }
+        ToastService.ShowToast(ToastIntent.Success, L.Get("patterns.toast_deleted", pattern.Name));
+        await LoadPatternsAsync();
+    }
+
+    private void TestPattern()
+    {
+        if (string.IsNullOrWhiteSpace(_testInput)) return;
+        var ext = Path.GetExtension(_testInput);
+        var kind = Matcher.DetermineFileKind(ext);
+        _testKind = kind.ToString();
+        _testResult = Matcher.ParseFileName(_testInput, _patterns);
+        _testNewName = _testResult.IsMatched
+            ? Matcher.BuildTargetName(_testResult, null, kind, ext)
+            : null;
+    }
+
     private async Task SaveTorrentSettingsAsync()
     {
         if (_torrentCfg is null) return;
+        _torrentCfg.GlobalDownloadLimit = _globalDlLimitKbps * 125;
+        _torrentCfg.GlobalUploadLimit   = _globalUlLimitKbps * 125;
         await using var db = await DbFactory.CreateDbContextAsync();
         var existing = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
         if (existing is null)

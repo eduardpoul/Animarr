@@ -31,13 +31,13 @@ public class RenameService(
             .ToListAsync(ct);
 
         var folderPatterns = folder.Patterns;
-        var excludedPatternIds = folderPatterns
-            .Where(p => p.IsExcluded)
-            .Select(p => p.Id)
+        var excludedGlobalPatternIds = folderPatterns
+            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
+            .Select(p => p.GlobalPatternId!.Value)
             .ToHashSet();
 
         var effectivePatterns = globalPatterns
-            .Where(p => !excludedPatternIds.Contains(p.Id))
+            .Where(p => !excludedGlobalPatternIds.Contains(p.Id))
             .Concat(folderPatterns.Where(p => !p.IsExcluded))
             .OrderBy(p => p.Priority)
             .ToList();
@@ -68,7 +68,7 @@ public class RenameService(
             .EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories)
             .Where(f => !activeDownloads.Contains(f) && !activeDownloads.Contains(f.TrimEnd('/'))
                      && !incompleteFiles.Contains(f)  && !incompleteFiles.Contains(f.TrimEnd('/')))
-            .OrderBy(f => f);
+            .OrderBy(f => f, NaturalStringComparer.Ordinal);
 
         var results = new List<RenamePreviewItem>();
         foreach (var filePath in files)
@@ -130,9 +130,11 @@ public class RenameService(
                     continue;
                 }
 
-                File.Move(item.OriginalPath, item.NewPath!);
+                var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
+                if (!moved) File.Move(item.OriginalPath, item.NewPath!);
                 historyEntry.Status = RenameStatus.Renamed;
-                logger.LogInformation("Renamed: {Old} → {New}", item.OriginalName, item.NewName);                await torrentEngine.SetFileDoNotDownloadByAbsPathAsync(item.OriginalPath);            }
+                logger.LogInformation("Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+            }
             catch (Exception ex)
             {
                 historyEntry.Status = RenameStatus.Error;
@@ -210,9 +212,11 @@ public class RenameService(
                 }
                 else
                 {
-                    File.Move(item.OriginalPath, item.NewPath!);
+                    var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
+                    if (!moved) File.Move(item.OriginalPath, item.NewPath!);
                     history.Status = RenameStatus.Renamed;
-                    logger.LogInformation("[Watcher] Renamed: {Old} → {New}", item.OriginalName, item.NewName);                    await torrentEngine.SetFileDoNotDownloadByAbsPathAsync(item.OriginalPath);                }
+                    logger.LogInformation("[Watcher] Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+                }
             }
             catch (Exception ex)
             {

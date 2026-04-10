@@ -7,7 +7,7 @@ It watches your media folders, renames files according to configurable patterns,
 
 - **Folder monitoring** — watches one or more directories and auto-renames new files as they arrive
 - **Pattern engine** — regex-based naming rules with named capture groups (`season`, `episode`); global patterns plus per-folder overrides and exclusions
-- **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits
+- **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits (Kbps)
 - **Section folders** — point Animarr at a root directory and it auto-imports each subdirectory as a separate monitored folder
 - **Ignore rules** — glob masks (e.g. `*.nfo`, `fanart*`) that skip files from renaming; global or per-folder
 - **Rename history** — full log with one-click revert per file
@@ -87,13 +87,28 @@ Patterns have a **priority** (lower = checked first) and a **scope**:
 - **Global** — applies to all folders of the matching type
 - **Folder override** — applies only to one specific folder; can also be set to *exclude* (suppress the global match for that folder)
 
+### Bare-number filenames
+
+Files named with a plain number (e.g. `1.mp4`, `12.mkv`) are automatically recognized as episode files even when no pattern matches. The number is used directly as the episode number and the file is renamed to the standard format (`01.mp4`, `S01E12.mkv` if a season folder is detected).
+
+## Explorer
+
+The **Explorer** page provides a folder-by-folder view of your media library.
+
+- Click any folder row to expand an inline file scan panel
+- Files are displayed as a **tree**: season subdirectories are shown as collapsible nodes; files inside each subdirectory are listed within their folder
+- Click a directory node to collapse/expand it (all nodes are expanded by default after a scan)
+- The scan panel shows original names, predicted new names, rename status, and reason for each file
+- Select individual files or use the header checkbox to bulk-select; apply renames with one click
+
 ## Torrent client
 
 - Add by magnet link or `.torrent` file
 - Select which files to download (per-file priority: Normal / High / Low / Skip)
 - **Create subfolder** (`+` button) — instantly create a new subdirectory inside a destination folder without leaving the add panel
 - **Flatten subfolders** — after download completes, all files from nested subdirectories are moved to the destination root (useful when a torrent wraps everything in an extra folder)
-- Global speed limits and per-torrent overrides
+- **Rename / strip root folder** — when a torrent contains a top-level folder, you can rename it or strip it entirely before files land in the destination
+- Speed limits are set in **Kbps** (kilobits per second), globally in Settings and per-torrent in the details panel
 - Auto-rename on completion — when a torrent finishes, the destination folder is scanned and renamed according to the folder's pattern
 
 ## Ignore rules
@@ -120,6 +135,11 @@ Or with .NET 10 SDK installed:
 cd src/Animarr.Web
 dotnet run
 ```
+
+## License
+
+Apache-2.0
+
 
 ## License
 
