@@ -22,8 +22,8 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
     private static readonly RenamePatternSeed[] BuiltInPatterns =
     [
         new(
-            "SHIZA",
-            // SHIZA-1080-s1-e5.mkv  /  SHIZA-1080p-s02-e12.mkv
+            "Shizen",
+            // Shizen-1080-s1-e5.mkv  /  Shizen-1080p-s02-e12.mkv
             @"(?i)[^.\s\[({-]+-\d+p?-s(?<season>\d+)-e(?<episode>\d+)",
             Priority: 10
         ),
@@ -34,25 +34,25 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
             Priority: 15
         ),
         new(
-            "AniLibria",
+            "AniVault",
             // [AniLibria] Attack on Titan - 05.mkv  /  [AniLibria.TV] Show - 12.mkv
             @"(?i)\[AniLibria(?:\.TV)?\]\s*[^\[\]-]+-\s*(?<episode>\d+)",
             Priority: 20
         ),
         new(
-            "HorribleSubs",
+            "AwfulSubs",
             // [HorribleSubs] Show - 05 [1080p].mkv
             @"(?i)\[HorribleSubs\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[\d+p\]",
             Priority: 30
         ),
         new(
-            "Erai-raws",
+            "RawBox",
             // [Erai-raws] Show - 05 [1080p].mkv
             @"(?i)\[Erai-raws\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[",
             Priority: 40
         ),
         new(
-            "SubsPlease",
+            "SubsYes",
             // [SubsPlease] Show - 05 (1080p).mkv
             @"(?i)\[SubsPlease\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\(",
             Priority: 50
