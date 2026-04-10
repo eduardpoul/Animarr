@@ -83,9 +83,19 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
             return new ParseResult(true, season, episode, isThumb);
         }
 
-        // Check if it's a thumb image with no episode info still
+        // Fallback: filename without extension is a pure integer → treat as episode number.
+        // e.g. "1.mp4", "01.mkv", "12.mp4" are already-named episode files.
         var fnLower = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
         var thumbOnly = fnLower.EndsWith("-thumb") || fnLower.EndsWith("_thumb");
+
+        // Fallback for bare-number thumb images: "1-thumb.jpg", "01_thumb.jpg" → episode=1, isThumb=true
+        var thumbNumMatch = System.Text.RegularExpressions.Regex.Match(fnLower, @"^0*(\d+)[_\-]thumb$");
+        if (thumbNumMatch.Success && int.TryParse(thumbNumMatch.Groups[1].Value, out var thumbEp) && thumbEp > 0)
+            return new ParseResult(true, null, thumbEp, true);
+
+        if (int.TryParse(fnLower, out var bareEp) && bareEp > 0)
+            return new ParseResult(true, null, bareEp, false);
+
         return new ParseResult(false, null, 0, thumbOnly);
     }
 

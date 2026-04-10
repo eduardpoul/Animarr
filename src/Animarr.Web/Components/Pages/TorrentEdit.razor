@@ -195,8 +195,8 @@ else
         _live = TorrentEngine.Get(Hash);
         if (_live is not null && !_speedInitialized)
         {
-            _dlLimit = _live.DownloadLimit / 1024;
-            _ulLimit = _live.UploadLimit / 1024;
+            _dlLimit = _live.DownloadLimit / 125;
+            _ulLimit = _live.UploadLimit / 125;
             _speedInitialized = true;
         }
 
@@ -217,8 +217,8 @@ else
         _live = TorrentEngine.Get(Hash);
         if (_live is not null && !_speedInitialized)
         {
-            _dlLimit = _live.DownloadLimit / 1024;
-            _ulLimit = _live.UploadLimit / 1024;
+            _dlLimit = _live.DownloadLimit / 125;
+            _ulLimit = _live.UploadLimit / 125;
             _speedInitialized = true;
         }
         TryLoadFiles();
@@ -261,7 +261,7 @@ else
 
     private async Task ApplySpeedAsync()
     {
-        await TorrentEngine.SetSpeedLimitsAsync(Hash, _dlLimit * 1024, _ulLimit * 1024);
+        await TorrentEngine.SetSpeedLimitsAsync(Hash, _dlLimit * 125, _ulLimit * 125);
         ToastService.ShowToast(ToastIntent.Success, L["torrent_edit.toast_limits_updated"]);
     }
 
