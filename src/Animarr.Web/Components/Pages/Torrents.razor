@@ -272,7 +272,7 @@ else
                 && (_addFileEntries.Count > 1
                     || _addFileEntries.Any(f => f.Path.Contains('/') || f.Path.Contains('\\')));
         }
-        @if (torrentHasRootFolder && !_addFlattenSubfolders)
+        @if (torrentHasRootFolder)
         {
             <div style="display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box;">
                 <FluentSwitch Value="_addSuppressRootFolder"

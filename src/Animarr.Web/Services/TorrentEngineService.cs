@@ -116,7 +116,7 @@ public class TorrentEngineService : BackgroundService
         {
             try
             {
-                var torrentSettings = BuildTorrentSettings(record.DownloadLimit, record.UploadLimit);
+                var torrentSettings = BuildTorrentSettings(record.DownloadLimit, record.UploadLimit, record.SuppressRootFolder);
                 TorrentManager mgr;
 
                 if (record.MagnetLink is not null)
@@ -277,9 +277,9 @@ public class TorrentEngineService : BackgroundService
             record.State     = TorrentRecordState.Downloading;
             await ctx.SaveChangesAsync();
 
-            // Apply root folder remap for magnets (metadata just arrived)
-            if (record.SuppressRootFolder || !string.IsNullOrWhiteSpace(record.CustomRootFolderName))
-                await ApplyRootFolderRemapAsync(mgr, infoHash, record.SuppressRootFolder, record.CustomRootFolderName);
+            // Apply root folder remap for magnets (metadata just arrived, suppress handled via CreateContainingDirectory)
+            if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
+                await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -619,7 +619,7 @@ public class TorrentEngineService : BackgroundService
             throw new InvalidOperationException("Торрент уже добавлен");
 
         var cfg = await LoadConfigAsync();
-        var torrentSettings = BuildTorrentSettings(dlLimit, ulLimit);
+        var torrentSettings = BuildTorrentSettings(dlLimit, ulLimit, suppressRootFolder);
         var mgr = await _engine.AddAsync(magnetLink, savePath, torrentSettings);
 
         using var scope = _scopeFactory.CreateScope();
@@ -664,6 +664,7 @@ public class TorrentEngineService : BackgroundService
     }
 
     public async Task<string> AddTorrentFileAsync(
+
         byte[] torrentData, string savePath, Guid? folderWatcherId,
         int dlLimit, int ulLimit, bool autoRename, bool startPaused, bool stopAfterDownload = false,
         Dictionary<string, int>? initialPriorities = null, bool flattenSubfolders = false,
@@ -680,7 +681,7 @@ public class TorrentEngineService : BackgroundService
         var torrentPath = Path.Combine(cfg.CacheDirectory, $"{infoHash}.torrent");
         await File.WriteAllBytesAsync(torrentPath, torrentData);
 
-        var torrentSettings = BuildTorrentSettings(dlLimit, ulLimit);
+        var torrentSettings = BuildTorrentSettings(dlLimit, ulLimit, suppressRootFolder);
         var mgr = await _engine.AddAsync(torrent, savePath, torrentSettings);
 
         // Apply initial priorities BEFORE starting so skipped files aren't downloaded
@@ -738,9 +739,9 @@ public class TorrentEngineService : BackgroundService
         SubscribeEvents(mgr, infoHash, cfg);
         _managers[infoHash] = mgr;
 
-        // Apply root folder remap for .torrent files (metadata already known)
-        if (suppressRootFolder || !string.IsNullOrWhiteSpace(customRootFolderName))
-            await ApplyRootFolderRemapAsync(mgr, infoHash, suppressRootFolder, customRootFolderName);
+        // Apply root folder rename for .torrent files (suppress is handled by CreateContainingDirectory=false)
+        if (!string.IsNullOrWhiteSpace(customRootFolderName))
+            await ApplyRootFolderRemapAsync(mgr, infoHash, customRootFolderName);
 
         if (!startPaused) await mgr.StartAsync();
 
@@ -776,8 +777,10 @@ public class TorrentEngineService : BackgroundService
     public async Task RemoveAsync(string infoHash, bool deleteFiles)
     {
         if (!_managers.TryGetValue(infoHash, out var mgr)) return;
-        if (mgr.State != TorrentState.Stopped)
+        if (mgr.State != TorrentState.Stopped && mgr.State != TorrentState.Stopping)
             await mgr.StopAsync();
+        while (mgr.State == TorrentState.Stopping)
+            await Task.Delay(100);
 
         await _engine.RemoveAsync(mgr,
             deleteFiles ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly);
@@ -874,50 +877,29 @@ public class TorrentEngineService : BackgroundService
     // Root folder remapping
     // -------------------------------------------------------------------------
 
+    // Renames the root containing directory for .torrent files and magnets with a custom folder name.
+    // Suppress (no root folder) is handled by CreateContainingDirectory=false in TorrentSettings.
     private async Task ApplyRootFolderRemapAsync(
-        TorrentManager mgr, string infoHash, bool suppress, string? customName)
+        TorrentManager mgr, string infoHash, string customName)
     {
         if (mgr.Files.Count == 0) return;
 
-        var roots = mgr.Files
-            .Select(f => f.Path.Replace('\\', '/').Split('/')[0])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // ContainingDirectory == SavePath for single-file torrents — nothing to rename
+        if (string.Equals(mgr.ContainingDirectory, mgr.SavePath, StringComparison.OrdinalIgnoreCase)) return;
 
-        if (roots.Count != 1) return; // multiple roots or flat torrent
-
-        var oldRoot = roots[0];
-
-        if (!suppress && string.Equals(oldRoot, customName, StringComparison.OrdinalIgnoreCase))
-            return; // already correct name
+        var targetDir = Path.Combine(mgr.SavePath, customName);
+        if (string.Equals(mgr.ContainingDirectory, targetDir, StringComparison.OrdinalIgnoreCase)) return;
 
         foreach (var file in mgr.Files)
         {
-            var relPath = file.Path.Replace('\\', '/');
-            string newRelPath;
-
-            if (suppress)
-            {
-                newRelPath = relPath.Length > oldRoot.Length + 1
-                    ? relPath[(oldRoot.Length + 1)..]
-                    : Path.GetFileName(relPath);
-            }
-            else
-            {
-                newRelPath = customName! + relPath[oldRoot.Length..];
-            }
-
-            var newAbsPath = Path.Combine(mgr.SavePath, newRelPath);
+            // file.Path is relative to ContainingDirectory (e.g. "ep1.mkv" or "Season1/ep1.mkv")
+            var newAbsPath = Path.Combine(targetDir, file.Path.Replace('/', Path.DirectorySeparatorChar));
             var dir = Path.GetDirectoryName(newAbsPath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
             try
             {
                 await mgr.MoveFileAsync(file, newAbsPath);
-                var oldKey = $"{infoHash}:{file.Path}";
-                var newKey = $"{infoHash}:{newRelPath}";
-                if (_markedDownloaded.TryRemove(oldKey, out _))
-                    _markedDownloaded.TryAdd(newKey, 0);
             }
             catch (Exception ex)
             {
@@ -925,16 +907,16 @@ public class TorrentEngineService : BackgroundService
             }
         }
 
-        _logger.LogInformation("RootFolderRemap [{Mode}] {Hash}: \"{Old}\" -> \"{New}\"",
-            suppress ? "suppress" : "rename", infoHash, oldRoot, suppress ? "(stripped)" : customName);
+        _logger.LogInformation("RootFolderRemap [rename] {Hash}: \"{OldDir}\" -> \"{NewName}\"",
+            infoHash, mgr.ContainingDirectory, customName);
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private static TorrentSettings BuildTorrentSettings(int dl, int ul)
-        => new TorrentSettingsBuilder { MaximumDownloadRate = dl, MaximumUploadRate = ul }.ToSettings();
+    private static TorrentSettings BuildTorrentSettings(int dl, int ul, bool suppressRootFolder = false)
+        => new TorrentSettingsBuilder { MaximumDownloadRate = dl, MaximumUploadRate = ul, CreateContainingDirectory = !suppressRootFolder }.ToSettings();
 
     private async Task SetRecordStateAsync(string infoHash, TorrentRecordState state)
     {
