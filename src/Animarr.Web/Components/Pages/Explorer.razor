@@ -1,10 +1,7 @@
 @page "/explorer"
 @rendermode InteractiveServer
-@implements IDisposable
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FolderWatcherService WatcherService
-@inject IRenameService RenameService
-@inject IPatternMatchService Matcher
 @inject IToastService ToastService
 
 <PageTitle>Animarr</PageTitle>
@@ -13,14 +10,15 @@
     <FluentLabel Typo="Typography.H4" Style="margin:0;flex:1;">@L["explorer.title"]</FluentLabel>
     <FluentButton Appearance="Appearance.Accent"
                   IconStart="@(new Icons.Regular.Size20.Add())"
-                  OnClick="@(() => OpenSectionDialog(null))">
-        @L["explorer.add_section_button"]
-    </FluentButton>
+                  Title="@(L["explorer.add_section_button"])"
+                  OnClick="@(() => OpenSectionDialog(null))" />
 </FluentStack>
 
 @if (_loading)
 {
-    <progress style="width:100%;height:4px;"></progress>
+    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
+        <FluentProgressRing />
+    </div>
 }
 else if (_sections.Count == 0 && _standalone.Count == 0)
 {
@@ -76,10 +74,12 @@ else
                                   Title="@L["explorer.tooltip_monitor"]"
                                   Style="min-width:unset;" />
 
-                    <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowSync())"
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.ArrowSync())"
                                   Title="@L["explorer.btn_refresh_tooltip"]"
                                   OnClick="@(() => RefreshSection(sect))" />
-                    <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.Edit())"
                                   Title="@L["folders.btn_edit"]"
                                   OnClick="@(() => OpenSectionDialog(sect))" />
                     <FluentButton Appearance="Appearance.Stealth"
@@ -105,7 +105,7 @@ else
                         var filesOpen = _openFiles.Contains(child.Id);
                         <div>
                             <div style="display:flex;align-items:center;gap:8px;padding:8px 14px 8px 48px;border-top:1px solid var(--neutral-stroke-subtle);cursor:pointer;user-select:none;"
-                                 @onclick="@(() => ToggleFilesOpen(child))">
+                                 @onclick="@(() => ToggleFilesOpen(child.Id))">
                                 <FluentIcon Value="@(filesOpen ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;opacity:0.7;" />
                                 <FluentIcon Value="@(filesOpen ? (Icon)(new Icons.Regular.Size20.FolderOpen()) : new Icons.Regular.Size20.Folder())" Style="flex-shrink:0;opacity:0.7;" />
                                 <div style="flex:1;min-width:0;">
@@ -124,7 +124,8 @@ else
                                                   ValueChanged="@(async (bool v) => await ToggleWatcher(child, v))"
                                                   Title="@L["explorer.tooltip_monitor"]"
                                                   Style="min-width:unset;" />
-                                    <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  IconStart="@(new Icons.Regular.Size20.Edit())"
                                                   Title="@L["folders.btn_edit"]"
                                                   OnClick="@(() => OpenEditPanel(child))" />
                                     <FluentButton Appearance="Appearance.Stealth"
@@ -135,7 +136,7 @@ else
                             </div>
                             @if (filesOpen)
                             {
-                                @FileScanPanel(child.Id)
+                                <FolderScanPanel Folder="child" />
                             }
                         </div>
                     }
@@ -154,7 +155,7 @@ else
                 var folderFilesOpen = _openFiles.Contains(folder.Id);
                 <div>
                     <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--neutral-stroke-subtle);cursor:pointer;user-select:none;"
-                         @onclick="@(() => ToggleFilesOpen(folder))">
+                         @onclick="@(() => ToggleFilesOpen(folder.Id))">
                         <FluentIcon Value="@(folderFilesOpen ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;" />
                         <FluentIcon Value="@(folderFilesOpen ? (Icon)(new Icons.Regular.Size20.FolderOpen()) : new Icons.Regular.Size20.Folder())" Style="flex-shrink:0;" />
                         <div style="flex:1;min-width:0;">
@@ -184,7 +185,7 @@ else
                     </div>
                     @if (folderFilesOpen)
                     {
-                        @FileScanPanel(folder.Id)
+                        <FolderScanPanel Folder="folder" />
                     }
                 </div>
             }
@@ -326,211 +327,13 @@ else
     </FluentDialogFooter>
 </FluentDialog>
 
-<!-- ================================================================ -->
-<!-- EDIT FOLDER PANEL -->
-<!-- ================================================================ -->
-@if (!_editPanelHidden)
+@if (_editTarget is not null)
 {
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="@(() => _editPanelHidden = true)"></div>
-    <div style="position:fixed;top:0;right:0;width:640px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
-
-        <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
-            <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(_editTarget?.Label ?? "")</FluentLabel>
-            <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["folders.btn_cancel"])" OnClick="@(() => _editPanelHidden = true)" />
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:16px;">
-
-            <!-- Basic settings -->
-            <div style="padding:14px;background:var(--neutral-layer-2);border-radius:6px;display:flex;flex-direction:column;gap:12px;width:100%;box-sizing:border-box;">
-                <FluentTextField @bind-Value="_editLabel"
-                                 Label="@(L["folders.field_name_label"])"
-                                 style="width:100%;" />
-                <FluentSwitch @bind-Value="_editWatch">@L["folders.switch_monitor"]</FluentSwitch>
-                <FluentSwitch @bind-Value="_editRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
-                @if (_editRenameEnabled)
-                {
-                    <FluentSelect TOption="string" @bind-Value="_editFolderTypeStr"
-                                  Label="@(L["folders.content_type_label"])" style="width:100%;">
-                        <FluentOption TOption="string" Value="Auto">@L["folders.content_type_auto"]</FluentOption>
-                        <FluentOption TOption="string" Value="Series">@L["folders.content_type_series"]</FluentOption>
-                        <FluentOption TOption="string" Value="Movie">@L["folders.content_type_movie"]</FluentOption>
-                    </FluentSelect>
-                }
-                <FluentButton Appearance="Appearance.Accent" OnClick="SaveEditFolder"
-                              Disabled="@string.IsNullOrWhiteSpace(_editLabel)">
-                    @L["folders.btn_save"]
-                </FluentButton>
-            </div>
-
-            <!-- Inherited (global) patterns -->
-            <FluentDivider />
-            <FluentLabel Typo="Typography.H3" Style="margin-bottom:2px;">@L["folder_detail.inherited_patterns_title"]</FluentLabel>
-            <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:4px;">@L["folder_detail.inherited_patterns_hint"]</FluentLabel>
-
-            @if (_inheritedPatterns.Count == 0)
-            {
-                <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.inherited_patterns_empty"]</FluentLabel>
-            }
-            else
-            {
-                <FluentDataGrid Items="@_inheritedPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
-                    <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
-                        <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Priority</span>
-                    </TemplateColumn>
-                    <TemplateColumn Title="@(L["patterns.col_name"])">
-                        <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Name</span>
-                    </TemplateColumn>
-                    <TemplateColumn Title="" Align="Align.End" Width="120px">
-                        @{var isDisabled = _disabledInheritedPatternIds.Contains(context.Id);}
-                        <FluentSwitch Value="@(!isDisabled)"
-                                      ValueChanged="@(async (bool v) => await ToggleInheritedPatternAsync(context, !v))"
-                                      Title="@(isDisabled ? L["folder_detail.inherited_pattern_disabled"] : L["folder_detail.inherited_pattern_active"])" />
-                    </TemplateColumn>
-                </FluentDataGrid>
-            }
-
-            <!-- Folder-specific patterns -->
-            <FluentDivider />
-            <div style="display:flex;align-items:center;gap:8px;">
-                <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["folder_detail.override_patterns_title"]</FluentLabel>
-                <FluentButton Appearance="Appearance.Accent"
-                              IconStart="@(new Icons.Regular.Size20.Add())"
-                              OnClick="@(() => OpenEditPatternDialog(null))">
-                    @L["patterns.add_button"]
-                </FluentButton>
-            </div>
-            <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.patterns_hint"]</FluentLabel>
-
-            @if (_editPatterns.Count == 0)
-            {
-                <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.patterns_empty"]</FluentLabel>
-            }
-            else
-            {
-                <FluentDataGrid Items="@_editPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
-                    <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
-                        @context.Priority
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(p => p.Name)" Title="@(L["patterns.col_name"])" />
-                    <TemplateColumn Title="@(L["patterns.col_regex"])">
-                        <code style="font-size:11px;word-break:break-all;">@context.Pattern</code>
-                    </TemplateColumn>
-                    <TemplateColumn Title="" Align="Align.End" Width="110px">
-                        <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                                      OnClick="@(() => OpenEditPatternDialog(context))">
-                            @L["patterns.btn_edit"]
-                        </FluentButton>
-                        <FluentButton Appearance="Appearance.Stealth"
-                                      IconStart="@(new Icons.Regular.Size20.Delete())"
-                                      OnClick="@(() => DeleteEditPatternAsync(context))">
-                            @L["patterns.btn_delete"]
-                        </FluentButton>
-                    </TemplateColumn>
-                </FluentDataGrid>
-            }
-
-            <!-- Pattern tester -->
-            <FluentDivider Style="margin:4px 0;" />
-            <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@L["patterns.test_title"]</FluentLabel>
-            <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.test_hint"]</FluentLabel>
-            <div style="display:flex;align-items:flex-end;gap:10px;">
-                <FluentTextField @bind-Value="_editTestInput"
-                                 Label="@(L["patterns.test_field_label"])"
-                                 Placeholder="@(L["patterns.test_placeholder"])"
-                                 style="flex:1;" />
-                <FluentButton Appearance="Appearance.Accent" OnClick="TestEditPattern">@L["patterns.test_button"]</FluentButton>
-            </div>
-            @if (_editTestResult is not null)
-            {
-                <div style="padding:12px;background:var(--neutral-layer-2);border-radius:6px;">
-                    @if (_editTestResult.IsMatched)
-                    {
-                        <div style="color:#107c10;font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
-                        <div style="font-family:monospace;font-size:13px;line-height:1.8;">
-                            @L["patterns.test_season_label"] <b>@(_editTestResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b><br />
-                            @L["patterns.test_episode_label"] <b>@_editTestResult.Episode</b><br />
-                            @L["patterns.test_kind_label"] <b>@_editTestKind</b><br />
-                            @L["patterns.test_new_name_label"] <b style="color:#107c10;">@(_editTestNewName ?? "—")</b>
-                        </div>
-                    }
-                    else
-                    {
-                        <div style="color:#a80000;font-weight:600;">@L["patterns.test_not_matched"]</div>
-                    }
-                </div>
-            }
-
-            <!-- Ignore rules -->
-            <FluentDivider />
-            <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@L["folder_detail.rules_title"]</FluentLabel>
-            <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.rules_hint"]</FluentLabel>
-            <div style="display:flex;align-items:flex-end;gap:8px;">
-                <FluentTextField @bind-Value="_editNewMask"
-                                 Placeholder="@(L["settings.new_mask_placeholder"])"
-                                 Label="@(L["settings.new_mask_label"])"
-                                 style="flex:1;" />
-                <FluentButton Appearance="Appearance.Accent"
-                              IconStart="@(new Icons.Regular.Size20.Add())"
-                              OnClick="AddEditRuleAsync"
-                              Disabled="@string.IsNullOrWhiteSpace(_editNewMask)">
-                    @L["settings.btn_add_mask"]
-                </FluentButton>
-            </div>
-            @if (_editRules.Count == 0)
-            {
-                <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.rules_empty"]</FluentLabel>
-            }
-            else
-            {
-                <FluentDataGrid Items="@_editRules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
-                    <PropertyColumn Property="@(r => r.Mask)" Title="@(L["settings.col_mask"])" />
-                    <TemplateColumn Title="" Align="Align.End" Width="100px">
-                        <FluentButton Appearance="Appearance.Stealth"
-                                      IconStart="@(new Icons.Regular.Size20.Delete())"
-                                      OnClick="@(() => DeleteEditRuleAsync(context))">
-                            @L["settings.btn_delete_mask"]
-                        </FluentButton>
-                    </TemplateColumn>
-                </FluentDataGrid>
-            }
-
-        </div>
-    </div>
+    <FolderEditPanel Folder="_editTarget" OnSaved="HandleEditSaved" OnClosed="CloseEditPanel" />
 }
 
-<!-- ================================================================ -->
-<!-- PATTERN ADD/EDIT DIALOG (inside edit panel) -->
-<!-- ================================================================ -->
-<FluentDialog @bind-Hidden="_editPatternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
-    <FluentDialogHeader ShowDismiss="true">
-        <FluentLabel Typo="Typography.H4">
-            @(_editPatternTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
-        </FluentLabel>
-    </FluentDialogHeader>
-    <FluentDialogBody>
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
-            <FluentTextField @bind-Value="_editPatternName"
-                             Label="@(L["patterns.field_name_label"])"
-                             Placeholder="@(L["patterns.field_name_placeholder"])"
-                             style="width:100%;" />
-            <FluentTextField @bind-Value="_editPatternRegex"
-                             Label="@(L["patterns.field_regex_label"])"
-                             Placeholder="@(L["patterns.field_regex_placeholder"])"
-                             style="width:100%;font-family:monospace;" />
-            <FluentNumberField TValue="int" @bind-Value="_editPatternPriority"
-                               Label="@(L["patterns.field_priority_label"])"
-                               Min="1" Max="999" style="width:160px;" />
-        </FluentStack>
-    </FluentDialogBody>
-    <FluentDialogFooter>
-        <FluentButton Appearance="Appearance.Accent" OnClick="SaveEditPatternAsync"
-                      Disabled="@(string.IsNullOrWhiteSpace(_editPatternName) || string.IsNullOrWhiteSpace(_editPatternRegex))">
-            @L["patterns.btn_save"]
-        </FluentButton>
-        <FluentButton OnClick="@(() => _editPatternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
-    </FluentDialogFooter>
-</FluentDialog>
+
+
 
 @code {
     private List<FolderWatcher> _sections = [];
@@ -554,40 +357,10 @@ else
     private List<string> _pickerChildren = [];
     private bool _pickerMode = false;
 
-    // ── Inline file scan ───────────────────────────────────────────
     private HashSet<Guid> _openFiles = [];
-    private Dictionary<Guid, List<RenamePreviewItem>?> _previews = new();
-    private HashSet<Guid> _scanBusy = [];
-    private HashSet<Guid> _applyBusy = [];
-    private Dictionary<Guid, List<(string From, string To)>> _autoRenameEvents = new();
-    private Dictionary<Guid, string> _folderPaths = new();
-    private Dictionary<string, bool> _expandedScanNodes = new();
 
     // ── Edit folder panel ──────────────────────────────────────────
-    private bool _editPanelHidden = true;
     private FolderWatcher? _editTarget;
-    private string _editLabel = "";
-    private bool _editWatch = true;
-    private bool _editRenameEnabled = true;
-    private string _editFolderTypeStr = "Auto";
-
-    // Edit panel – patterns
-    private List<RenamePattern> _editPatterns = [];
-    private List<RenamePattern> _inheritedPatterns = [];
-    private HashSet<Guid> _disabledInheritedPatternIds = [];
-    private bool _editPatternDialogHidden = true;
-    private RenamePattern? _editPatternTarget;
-    private string _editPatternName = "";
-    private string _editPatternRegex = "";
-    private int _editPatternPriority = 100;
-    private string _editTestInput = "";
-    private ParseResult? _editTestResult;
-    private string? _editTestNewName;
-    private string _editTestKind = "";
-
-    // Edit panel – ignore rules
-    private List<IgnoreRule> _editRules = [];
-    private string _editNewMask = "";
 
     // ── Delete dialog ──────────────────────────────────────────────
     private bool _deleteHidden = true;
@@ -602,10 +375,7 @@ else
         foreach (var s in _sections.Where(s => _children.ContainsKey(s.Id)))
             _expanded.Add(s.Id);
         _loading = false;
-        WatcherService.FileRenamed += OnFileRenamed;
     }
-
-    public void Dispose() => WatcherService.FileRenamed -= OnFileRenamed;
 
     private async Task LoadAsync()
     {
@@ -617,7 +387,6 @@ else
             .GroupBy(f => f.ParentSectionId!.Value)
             .ToDictionary(g => g.Key, g => g.ToList());
         _standalone = all.Where(f => !f.IsSection && !f.ParentSectionId.HasValue).ToList();
-        _folderPaths = all.ToDictionary(f => f.Id, f => f.Path);
     }
 
     private void ToggleExpand(Guid id)
@@ -625,507 +394,23 @@ else
         if (!_expanded.Remove(id)) _expanded.Add(id);
     }
 
-    // ── Inline file scan ───────────────────────────────────────────
-
-    private async Task ToggleFilesOpen(FolderWatcher folder)
+    private void ToggleFilesOpen(Guid id)
     {
-        if (_openFiles.Contains(folder.Id))
-        {
-            _openFiles.Remove(folder.Id);
-        }
-        else
-        {
-            _openFiles.Add(folder.Id);
-            if (!_previews.ContainsKey(folder.Id))
-                await ScanFolderAsync(folder.Id);
-        }
+        if (!_openFiles.Remove(id)) _openFiles.Add(id);
     }
 
-    private async Task ScanFolderAsync(Guid folderId)
+    // ── Edit panel ─────────────────────────────────────────────────
+
+    private void OpenEditPanel(FolderWatcher folder) => _editTarget = folder;
+
+    private async Task HandleEditSaved()
     {
-        _scanBusy.Add(folderId);
-        _previews[folderId] = null;
-        StateHasChanged();
-        try
-        {
-            _previews[folderId] = await RenameService.ScanFolderAsync(folderId);
-        }
-        catch (Exception ex)
-        {
-            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_scan_error", ex.Message));
-        }
-        finally
-        {
-            _scanBusy.Remove(folderId);
-            StateHasChanged();
-        }
-    }
-
-    private async Task ApplyFolderAsync(Guid folderId)
-    {
-        if (!_previews.TryGetValue(folderId, out var items) || items is null) return;
-        _applyBusy.Add(folderId);
-        StateHasChanged();
-        try
-        {
-            var approved = items.Where(i => i.IsSelected && i.Status == PreviewStatus.WillRename).ToList();
-            await RenameService.ApplyRenamesAsync(folderId, approved);
-            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_renamed", approved.Count));
-            _previews[folderId] = null;
-        }
-        catch (Exception ex)
-        {
-            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
-        }
-        finally
-        {
-            _applyBusy.Remove(folderId);
-            StateHasChanged();
-        }
-    }
-
-    private void FolderSelectToggle(Guid folderId, bool selectAll)
-    {
-        if (!_previews.TryGetValue(folderId, out var items) || items is null) return;
-        items.Where(i => i.Status == PreviewStatus.WillRename).ToList().ForEach(i => i.IsSelected = selectAll);
-    }
-
-    private void OnFileRenamed(Guid folderId, string from, string to)
-    {
-        if (!_openFiles.Contains(folderId)) return;
-        if (!_autoRenameEvents.ContainsKey(folderId))
-            _autoRenameEvents[folderId] = [];
-        var events = _autoRenameEvents[folderId];
-        events.Insert(0, (from, to));
-        if (events.Count > 15) events.RemoveAt(15);
-        InvokeAsync(StateHasChanged);
-    }
-
-    private RenderFragment FileScanPanel(Guid fId) => __builder =>
-    {
-        var scanning = _scanBusy.Contains(fId);
-        var applying = _applyBusy.Contains(fId);
-        _previews.TryGetValue(fId, out var items);
-        var renameable = items?.Where(i => i.Status == PreviewStatus.WillRename).ToList();
-        var selected   = renameable?.Count(i => i.IsSelected) ?? 0;
-        var allSelected = renameable is { Count: > 0 } && renameable.All(i => i.IsSelected);
-        var someSelected = selected > 0 && !allSelected;
-        _autoRenameEvents.TryGetValue(fId, out var autoEvents);
-
-        <div style="padding:12px 14px 14px 48px;background:var(--neutral-layer-3);border-top:1px solid var(--neutral-stroke-subtle);">
-            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                <FluentButton Appearance="Appearance.Accent"
-                              IconStart="@(new Icons.Regular.Size20.Search())"
-                              OnClick="@(() => ScanFolderAsync(fId))"
-                              Disabled="@scanning">
-                    @(scanning ? L["folder_files.btn_scanning"] : L["folder_files.btn_scan"])
-                </FluentButton>
-                @if (items is not null)
-                {
-                    <div style="display:flex;align-items:center;gap:6px;flex:1;">
-                        <FluentCheckbox Value="@allSelected"
-                                        Indeterminate="@someSelected"
-                                        ValueChanged="@((bool v) => FolderSelectToggle(fId, v || someSelected))"
-                                        Title="@(allSelected ? L["folder_files.btn_deselect_all"] : L["folder_files.btn_select_all"])"
-                                        Disabled="@(renameable is null || renameable.Count == 0)" />
-                        <FluentLabel Style="font-size:12px;">
-                            @L.Get("folder_files.stats", items.Count, renameable?.Count ?? 0, selected)
-                        </FluentLabel>
-                    </div>
-                    <FluentButton Appearance="Appearance.Accent"
-                                  IconStart="@(new Icons.Regular.Size20.Checkmark())"
-                                  OnClick="@(() => ApplyFolderAsync(fId))"
-                                  Disabled="@(selected == 0 || applying)">
-                        @(applying ? L["folder_files.btn_applying"] : L.Get("folder_files.btn_apply", selected))
-                    </FluentButton>
-                }
-            </FluentStack>
-
-            @if (scanning)
-            {
-                <progress style="width:100%;height:4px;margin-bottom:8px;"></progress>
-            }
-
-            @if (items is { Count: > 0 })
-            {
-                var tree = BuildScanTree(fId, items);
-                <div style="border:1px solid var(--neutral-stroke-subtle);border-radius:4px;overflow:hidden;">
-                    <!-- header row -->
-                    <div style="display:grid;grid-template-columns:44px 1fr 28px 1fr 140px 1fr;background:var(--neutral-layer-2);border-bottom:1px solid var(--neutral-stroke-subtle);font-size:12px;font-weight:600;color:var(--neutral-foreground-rest);">
-                        <div></div>
-                        <div style="padding:5px 4px;">@L["folder_files.col_original"]</div>
-                        <div></div>
-                        <div style="padding:5px 4px;">@L["folder_files.col_new"]</div>
-                        <div style="padding:5px 4px;">@L["folder_files.col_status"]</div>
-                        <div style="padding:5px 4px;">@L["folder_files.col_reason"]</div>
-                    </div>
-                    @RenderScanNodes(fId, tree.Children, 0)
-                </div>
-            }
-            else if (items is not null && !scanning)
-            {
-                <div style="font-size:13px;color:var(--neutral-foreground-hint);padding:6px 0;">
-                    @L["folder_files.status_already_correct"]
-                </div>
-            }
-
-            @if (autoEvents is { Count: > 0 })
-            {
-                <FluentDivider Style="margin:12px 0 8px;" />
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">
-                    @L.Get("folder_files.auto_rename_section", autoEvents.Count)
-                </FluentLabel>
-                @foreach (var ev in autoEvents)
-                {
-                    <div style="font-family:monospace;font-size:13px;margin:3px 0;">
-                        <span style="color:var(--neutral-foreground-hint);">@ev.From</span>
-                        &nbsp;→&nbsp;
-                        <span style="color:#107c10;">@ev.To</span>
-                    </div>
-                }
-            }
-        </div>
-    };
-
-    // ── Scan tree ──────────────────────────────────────────────────
-
-    private class ScanNode
-    {
-        public string Name { get; set; } = "";
-        public string RelPath { get; set; } = "";
-        public bool IsDir { get; set; }
-        public RenamePreviewItem? Item { get; set; }
-        public List<ScanNode> Children { get; } = [];
-        public int FileCount => IsDir ? Children.Sum(c => c.IsDir ? c.FileCount : 1) : 0;
-    }
-
-    private ScanNode BuildScanTree(Guid fId, List<RenamePreviewItem> items)
-    {
-        var root = new ScanNode { IsDir = true };
-        _folderPaths.TryGetValue(fId, out var baseDir);
-        baseDir ??= "";
-
-        foreach (var item in items)
-        {
-            string relPath;
-            try { relPath = Path.GetRelativePath(baseDir, item.OriginalPath); }
-            catch { relPath = Path.GetFileName(item.OriginalPath); }
-
-            var parts = relPath.Split(
-                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
-                StringSplitOptions.RemoveEmptyEntries);
-            InsertScanNode(root, parts, 0, item, "");
-        }
-        return root;
-    }
-
-    private static void InsertScanNode(ScanNode parent, string[] parts, int idx, RenamePreviewItem item, string relBase)
-    {
-        if (idx >= parts.Length) return;
-        var name = parts[idx];
-        var rel = relBase.Length > 0 ? relBase + "/" + name : name;
-
-        if (idx == parts.Length - 1)
-        {
-            parent.Children.Add(new ScanNode { Name = name, RelPath = rel, IsDir = false, Item = item });
-            return;
-        }
-
-        var dir = parent.Children.FirstOrDefault(c => c.IsDir && c.Name == name);
-        if (dir == null)
-        {
-            dir = new ScanNode { Name = name, RelPath = rel, IsDir = true };
-            parent.Children.Add(dir);
-        }
-        InsertScanNode(dir, parts, idx + 1, item, rel);
-    }
-
-    private RenderFragment RenderScanNodes(Guid fId, List<ScanNode> nodes, int depth) => __builder =>
-    {
-        // Folders first (natural order), then files (natural order)
-        var sorted = nodes
-            .OrderByDescending(n => n.IsDir)
-            .ThenBy(n => n.Name, NaturalStringComparer.Ordinal);
-        foreach (var node in sorted)
-        {
-            if (node.IsDir)
-            {
-                var key = $"{fId}|{node.RelPath}";
-                var exp = _expandedScanNodes.GetValueOrDefault(key, false);
-                var capturedKey = key;
-                var fc = node.FileCount;
-                <div style="display:flex;align-items:center;gap:6px;padding:5px 8px 5px @(depth * 16 + 8)px;background:var(--neutral-layer-2);cursor:pointer;border-bottom:1px solid var(--neutral-stroke-subtle);user-select:none;"
-                     @onclick="@(() => { _expandedScanNodes[capturedKey] = !_expandedScanNodes.GetValueOrDefault(capturedKey, false); })">
-                    <FluentIcon Value="@(exp ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;opacity:0.7;" />
-                    <FluentIcon Value="@(exp ? (Icon)(new Icons.Regular.Size16.FolderOpen()) : new Icons.Regular.Size16.Folder())" Style="flex-shrink:0;opacity:0.7;" />
-                    <span style="font-size:13px;font-weight:500;">@node.Name</span>
-                    <span style="font-size:12px;color:var(--neutral-foreground-hint);">(@fc)</span>
-                </div>
-                @if (exp)
-                {
-                    @RenderScanNodes(fId, node.Children, depth + 1)
-                }
-            }
-            else if (node.Item is { } item)
-            {
-                <div style="display:grid;grid-template-columns:44px 1fr 28px 1fr 140px 1fr;border-bottom:1px solid var(--neutral-stroke-subtle);align-items:center;">
-                    <div style="padding:4px 8px;display:flex;align-items:center;">
-                        <FluentCheckbox Value="@item.IsSelected"
-                                        ValueChanged="@((bool v) => item.IsSelected = v)"
-                                        Disabled="@(item.Status != PreviewStatus.WillRename)" />
-                    </div>
-                    <div style="padding:4px 4px 4px @(depth * 16 + 4)px;overflow:hidden;">
-                        <code style="font-size:13px;opacity:@(item.Status == PreviewStatus.WillRename ? 1.0 : 0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">@item.OriginalName</code>
-                    </div>
-                    <div style="padding:4px;text-align:center;">
-                        @if (item.Status == PreviewStatus.WillRename)
-                        {<span style="color:var(--neutral-foreground-hint);">→</span>}
-                    </div>
-                    <div style="padding:4px;overflow:hidden;">
-                        @if (item.NewName is not null)
-                        {<code style="font-size:13px;color:@GetNameColor(item.Status);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">@item.NewName</code>}
-                    </div>
-                    <div style="padding:4px;">
-                        <span class="@GetStatusClass(item.Status)">@GetStatusLabel(item.Status)</span>
-                    </div>
-                    <div style="padding:4px;overflow:hidden;">
-                        <span style="font-size:12px;color:var(--neutral-foreground-hint);">@item.Reason</span>
-                    </div>
-                </div>
-            }
-        }
-    };
-
-    private string GetStatusLabel(PreviewStatus s) => s switch
-    {
-        PreviewStatus.WillRename      => L["folder_files.status_will_rename"],
-        PreviewStatus.WillSkip        => L["folder_files.status_will_skip"],
-        PreviewStatus.AlreadyCorrect  => L["folder_files.status_already_correct"],
-        PreviewStatus.Error           => L["folder_files.status_error"],
-        _                             => "—"
-    };
-
-    private static string GetStatusClass(PreviewStatus s) => s switch
-    {
-        PreviewStatus.WillRename      => "status-badge status-pending",
-        PreviewStatus.WillSkip        => "status-badge status-skipped",
-        PreviewStatus.AlreadyCorrect  => "status-badge status-renamed",
-        PreviewStatus.Error           => "status-badge status-error",
-        _                             => "status-badge"
-    };
-
-    private static string GetNameColor(PreviewStatus s) => s switch
-    {
-        PreviewStatus.WillRename => "#107c10",
-        PreviewStatus.Error      => "#a80000",
-        _                        => "inherit"
-    };
-
-    // ── Edit folder panel ──────────────────────────────────────────
-
-    private async Task OpenEditPanel(FolderWatcher folder)
-    {
-        _editTarget           = folder;
-        _editLabel            = folder.Label;
-        _editWatch            = folder.WatchEnabled;
-        _editRenameEnabled    = folder.RenameEnabled;
-        _editFolderTypeStr    = folder.FolderType.ToString();
-        _editTestInput        = "";
-        _editTestResult       = null;
-        _editNewMask          = "";
-        _editPatternDialogHidden = true;
-
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _editPatterns = await db.RenamePatterns
-            .Where(p => p.FolderId == folder.Id && p.Scope == PatternScope.FolderOverride && !p.IsExcluded)
-            .OrderBy(p => p.Priority)
-            .ToListAsync();
-        _inheritedPatterns = await db.RenamePatterns
-            .Where(p => p.Scope == PatternScope.Global)
-            .OrderBy(p => p.Priority)
-            .ToListAsync();
-        _disabledInheritedPatternIds = (await db.RenamePatterns
-            .Where(p => p.FolderId == folder.Id && p.IsExcluded && p.GlobalPatternId.HasValue)
-            .Select(p => p.GlobalPatternId!.Value)
-            .ToListAsync()).ToHashSet();
-        _editRules = await db.IgnoreRules
-            .Where(r => r.FolderId == folder.Id && r.Scope == RuleScope.FolderOverride)
-            .OrderBy(r => r.Mask)
-            .ToListAsync();
-
-        _editPanelHidden = false;
-    }
-
-    private async Task SaveEditFolder()
-    {
-        if (_editTarget is null || string.IsNullOrWhiteSpace(_editLabel)) return;
-        var folderType = Enum.TryParse<FolderType>(_editFolderTypeStr, out var ft) ? ft : FolderType.Auto;
-
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var entity = await db.FolderWatchers.FindAsync(_editTarget.Id);
-        if (entity is null) return;
-
-        var wasEnabled = entity.WatchEnabled;
-        entity.Label         = _editLabel.Trim();
-        entity.WatchEnabled  = _editWatch;
-        entity.RenameEnabled = _editRenameEnabled;
-        entity.FolderType    = _editRenameEnabled ? folderType : FolderType.Auto;
-        await db.SaveChangesAsync();
-
-        if (!wasEnabled && _editWatch) await WatcherService.StartWatcherAsync(entity.Id);
-        else if (wasEnabled && !_editWatch) await WatcherService.StopWatcherAsync(entity.Id);
-
-        ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_folder_updated", entity.Label));
-        _editPanelHidden = true;
+        _editTarget = null;
         await LoadAsync();
     }
 
-    // ── Edit panel – patterns ──────────────────────────────────────
+    private void CloseEditPanel() => _editTarget = null;
 
-    private void OpenEditPatternDialog(RenamePattern? p)
-    {
-        _editPatternTarget   = p;
-        _editPatternName     = p?.Name ?? "";
-        _editPatternRegex    = p?.Pattern ?? "";
-        _editPatternPriority = p?.Priority ?? 100;
-        _editPatternDialogHidden = false;
-    }
-
-    private async Task SaveEditPatternAsync()
-    {
-        if (_editTarget is null || string.IsNullOrWhiteSpace(_editPatternName) || string.IsNullOrWhiteSpace(_editPatternRegex)) return;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        if (_editPatternTarget is null)
-        {
-            db.RenamePatterns.Add(new RenamePattern
-            {
-                Id        = Guid.NewGuid(),
-                Name      = _editPatternName.Trim(),
-                Pattern   = _editPatternRegex.Trim(),
-                Priority  = _editPatternPriority,
-                Scope     = PatternScope.FolderOverride,
-                FolderId  = _editTarget.Id,
-                IsBuiltIn = false,
-            });
-            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_added"]);
-        }
-        else
-        {
-            var entity = await db.RenamePatterns.FindAsync(_editPatternTarget.Id);
-            if (entity is null) return;
-            entity.Name     = _editPatternName.Trim();
-            entity.Pattern  = _editPatternRegex.Trim();
-            entity.Priority = _editPatternPriority;
-            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
-        }
-        await db.SaveChangesAsync();
-        _editPatternDialogHidden = true;
-        await ReloadEditPatternsAsync();
-    }
-
-    private async Task DeleteEditPatternAsync(RenamePattern p)
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var entity = await db.RenamePatterns.FindAsync(p.Id);
-        if (entity is not null) { db.RenamePatterns.Remove(entity); await db.SaveChangesAsync(); }
-        ToastService.ShowToast(ToastIntent.Success, L.Get("patterns.toast_deleted", p.Name));
-        await ReloadEditPatternsAsync();
-    }
-
-    private async Task ReloadEditPatternsAsync()
-    {
-        if (_editTarget is null) return;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _editPatterns = await db.RenamePatterns
-            .Where(p => p.FolderId == _editTarget.Id && p.Scope == PatternScope.FolderOverride && !p.IsExcluded)
-            .OrderBy(p => p.Priority)
-            .ToListAsync();
-    }
-
-    private async Task ToggleInheritedPatternAsync(RenamePattern globalPattern, bool disable)
-    {
-        if (_editTarget is null) return;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var existing = await db.RenamePatterns
-            .FirstOrDefaultAsync(p => p.FolderId == _editTarget.Id && p.IsExcluded && p.GlobalPatternId == globalPattern.Id);
-        if (disable && existing is null)
-        {
-            db.RenamePatterns.Add(new RenamePattern
-            {
-                Id              = Guid.NewGuid(),
-                Name            = $"Exclude: {globalPattern.Name}",
-                Pattern         = globalPattern.Pattern,
-                Scope           = PatternScope.FolderOverride,
-                FolderId        = _editTarget.Id,
-                IsExcluded      = true,
-                GlobalPatternId = globalPattern.Id,
-                Priority        = globalPattern.Priority,
-            });
-            _disabledInheritedPatternIds.Add(globalPattern.Id);
-        }
-        else if (!disable && existing is not null)
-        {
-            db.RenamePatterns.Remove(existing);
-            _disabledInheritedPatternIds.Remove(globalPattern.Id);
-        }
-        await db.SaveChangesAsync();
-    }
-
-    private void TestEditPattern()
-    {
-        if (string.IsNullOrWhiteSpace(_editTestInput)) return;
-        var ext  = Path.GetExtension(_editTestInput);
-        var kind = Matcher.DetermineFileKind(ext);
-        _editTestKind   = kind.ToString();
-        _editTestResult = Matcher.ParseFileName(_editTestInput, _editPatterns);
-        _editTestNewName = _editTestResult.IsMatched
-            ? Matcher.BuildTargetName(_editTestResult, null, kind, ext)
-            : null;
-    }
-
-    // ── Edit panel – ignore rules ──────────────────────────────────
-
-    private async Task AddEditRuleAsync()
-    {
-        if (_editTarget is null || string.IsNullOrWhiteSpace(_editNewMask)) return;
-        var mask = _editNewMask.Trim().ToLowerInvariant();
-        if (_editRules.Any(r => r.Mask.Equals(mask, StringComparison.OrdinalIgnoreCase)))
-        {
-            ToastService.ShowToast(ToastIntent.Warning, L["settings.toast_mask_exists"]);
-            return;
-        }
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.IgnoreRules.Add(new IgnoreRule
-        {
-            Id       = Guid.NewGuid(),
-            Mask     = mask,
-            Scope    = RuleScope.FolderOverride,
-            FolderId = _editTarget.Id,
-        });
-        await db.SaveChangesAsync();
-        _editNewMask = "";
-        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_added", mask));
-        await ReloadEditRulesAsync();
-    }
-
-    private async Task DeleteEditRuleAsync(IgnoreRule rule)
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var entity = await db.IgnoreRules.FindAsync(rule.Id);
-        if (entity is not null) { db.IgnoreRules.Remove(entity); await db.SaveChangesAsync(); }
-        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_deleted", rule.Mask));
-        await ReloadEditRulesAsync();
-    }
-
-    private async Task ReloadEditRulesAsync()
-    {
-        if (_editTarget is null) return;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _editRules = await db.IgnoreRules
-            .Where(r => r.FolderId == _editTarget.Id && r.Scope == RuleScope.FolderOverride)
-            .OrderBy(r => r.Mask)
-            .ToListAsync();
-    }
 
     // ── Section add/edit ───────────────────────────────────────────
 

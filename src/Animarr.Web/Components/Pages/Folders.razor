@@ -17,7 +17,9 @@
 
 @if (_loading)
 {
-    <progress style="width:100%;height:4px;"></progress>
+    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
+        <FluentProgressRing />
+    </div>
 }
 else if (_folders.Count == 0)
 {
@@ -64,20 +66,24 @@ else
         <TemplateColumn Title="@(L["folders.col_actions"])" Align="Align.End">
             @if (context.IsSection)
             {
-                <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowSync())"
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.ArrowSync())"
                               Title="@(L["folders.btn_find_subfolders"])"
                               OnClick="@(() => RefreshSection(context))" />
-                <FluentButton IconStart="@(new Icons.Regular.Size20.FolderOpen())"
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.FolderOpen())"
                               Title="@(L["folders.btn_subfolders"])"
                               OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/subfolders"))" />
             }
             else
             {
-                <FluentButton IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
                               Title="@(L["folders.btn_files"])"
                               OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files"))" />
             }
-            <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+            <FluentButton Appearance="Appearance.Stealth"
+                          IconStart="@(new Icons.Regular.Size20.Edit())"
                           Title="@(L["folders.btn_edit"])"
                           OnClick="@(() => OpenDialog(context))" />
             <FluentButton Appearance="Appearance.Stealth"

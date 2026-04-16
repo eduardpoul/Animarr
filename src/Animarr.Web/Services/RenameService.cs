@@ -98,54 +98,53 @@ public class RenameService(
         CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var toProcess = approved.Where(i => i.Status == PreviewStatus.WillRename && i.IsSelected).ToList();
 
-        foreach (var item in approved.Where(i => i.Status == PreviewStatus.WillRename && i.IsSelected))
+        // Write all intentions as Pending before touching any file.
+        // If the process crashes mid-run, SeedDataService.RecoverPendingHistoryAsync will resolve them on restart.
+        var histories = toProcess.Select(item => new RenameHistory
+        {
+            Id           = Guid.NewGuid(),
+            FolderId     = folderId,
+            OriginalPath = item.OriginalPath,
+            NewPath      = item.NewPath!,
+            Status       = RenameStatus.Pending,
+            ProcessedAt  = DateTime.UtcNow,
+        }).ToList();
+        db.RenameHistories.AddRange(histories);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var (item, history) in toProcess.Zip(histories))
         {
             ct.ThrowIfCancellationRequested();
-
-            var historyEntry = new RenameHistory
-            {
-                Id = Guid.NewGuid(),
-                FolderId = folderId,
-                OriginalPath = item.OriginalPath,
-                NewPath = item.NewPath!,
-                ProcessedAt = DateTime.UtcNow,
-            };
-
             try
             {
                 if (!File.Exists(item.OriginalPath))
                 {
-                    historyEntry.Status = RenameStatus.Error;
-                    historyEntry.ErrorMessage = "Source file no longer exists.";
-                    db.RenameHistories.Add(historyEntry);
-                    continue;
+                    history.Status = RenameStatus.Error;
+                    history.ErrorMessage = "Source file no longer exists.";
                 }
-
-                if (File.Exists(item.NewPath))
+                else if (File.Exists(item.NewPath))
                 {
-                    historyEntry.Status = RenameStatus.Skipped;
-                    historyEntry.ErrorMessage = "Target filename already exists.";
-                    db.RenameHistories.Add(historyEntry);
-                    continue;
+                    history.Status = RenameStatus.Skipped;
+                    history.ErrorMessage = "Target filename already exists.";
                 }
-
-                var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
-                if (!moved) File.Move(item.OriginalPath, item.NewPath!);
-                historyEntry.Status = RenameStatus.Renamed;
-                logger.LogInformation("Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+                else
+                {
+                    var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
+                    if (!moved) File.Move(item.OriginalPath, item.NewPath!);
+                    history.Status = RenameStatus.Renamed;
+                    logger.LogInformation("Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+                }
             }
             catch (Exception ex)
             {
-                historyEntry.Status = RenameStatus.Error;
-                historyEntry.ErrorMessage = ex.Message;
+                history.Status = RenameStatus.Error;
+                history.ErrorMessage = ex.Message;
                 logger.LogError(ex, "Failed to rename {File}", item.OriginalPath);
             }
-
-            db.RenameHistories.Add(historyEntry);
+            await db.SaveChangesAsync(ct);
         }
-
-        await db.SaveChangesAsync(ct);
     }
 
     // ─── Process single file (Watcher) ────────────────────────────────────────
@@ -165,15 +164,20 @@ public class RenameService(
             .Where(p => p.Scope == PatternScope.Global)
             .ToListAsync(ct);
 
-        var excludedIds = folder.Patterns
-            .Where(p => p.IsExcluded)
-            .Select(p => p.Id)
+        var excludedGlobalIds = folder.Patterns
+            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
+            .Select(p => p.GlobalPatternId!.Value)
             .ToHashSet();
 
+        var isMovieFolder = folder.FolderType == FolderType.Movie;
+
         var effectivePatterns = globalPatterns
-            .Where(p => !excludedIds.Contains(p.Id))
+            .Where(p => !excludedGlobalIds.Contains(p.Id))
             .Concat(folder.Patterns.Where(p => !p.IsExcluded))
             .OrderBy(p => p.Priority)
+            .Where(p => isMovieFolder
+                ? p.ApplicableTo == FolderType.Movie
+                : p.ApplicableTo != FolderType.Movie)
             .ToList();
 
         var globalIgnoreRules = await db.IgnoreRules
@@ -182,7 +186,8 @@ public class RenameService(
 
         var effectiveIgnoreRules = globalIgnoreRules.Concat(folder.IgnoreRules).ToList();
 
-        var item = matcher.EvaluateFile(filePath, effectivePatterns, effectiveIgnoreRules);
+        var item = matcher.EvaluateFile(filePath, effectivePatterns, effectiveIgnoreRules,
+            folder.FolderType, folder.IsSection, folder.Path);
 
         // Skip if the file is still being downloaded (not yet 100%)
         var incompleteFiles = torrentEngine.GetIncompleteFilePaths();
@@ -192,46 +197,47 @@ public class RenameService(
             return;
         }
 
+        if (item.Status != PreviewStatus.WillRename)
+        {
+            // Not going to rename — only write history for non-Skip outcomes to avoid noise
+            return;
+        }
+
+        // Write Pending intent before touching the file
         var history = new RenameHistory
         {
-            Id = Guid.NewGuid(),
-            FolderId = folderId,
+            Id           = Guid.NewGuid(),
+            FolderId     = folderId,
             OriginalPath = filePath,
-            NewPath = item.NewPath ?? filePath,
-            ProcessedAt = DateTime.UtcNow,
+            NewPath      = item.NewPath!,
+            Status       = RenameStatus.Pending,
+            ProcessedAt  = DateTime.UtcNow,
         };
-
-        if (item.Status == PreviewStatus.WillRename)
-        {
-            try
-            {
-                if (File.Exists(item.NewPath))
-                {
-                    history.Status = RenameStatus.Skipped;
-                    history.ErrorMessage = "Target filename already exists.";
-                }
-                else
-                {
-                    var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
-                    if (!moved) File.Move(item.OriginalPath, item.NewPath!);
-                    history.Status = RenameStatus.Renamed;
-                    logger.LogInformation("[Watcher] Renamed: {Old} → {New}", item.OriginalName, item.NewName);
-                }
-            }
-            catch (Exception ex)
-            {
-                history.Status = RenameStatus.Error;
-                history.ErrorMessage = ex.Message;
-                logger.LogError(ex, "[Watcher] Failed to rename {File}", filePath);
-            }
-        }
-        else
-        {
-            history.Status = RenameStatus.Skipped;
-            history.ErrorMessage = item.Reason;
-        }
-
         db.RenameHistories.Add(history);
+        await db.SaveChangesAsync(ct);
+
+        try
+        {
+            if (File.Exists(item.NewPath))
+            {
+                history.Status = RenameStatus.Skipped;
+                history.ErrorMessage = "Target filename already exists.";
+            }
+            else
+            {
+                var moved = await torrentEngine.MoveFileAsync(item.OriginalPath, item.NewPath!);
+                if (!moved) File.Move(item.OriginalPath, item.NewPath!);
+                history.Status = RenameStatus.Renamed;
+                logger.LogInformation("[Watcher] Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+            }
+        }
+        catch (Exception ex)
+        {
+            history.Status = RenameStatus.Error;
+            history.ErrorMessage = ex.Message;
+            logger.LogError(ex, "[Watcher] Failed to rename {File}", filePath);
+        }
+
         await db.SaveChangesAsync(ct);
     }
 

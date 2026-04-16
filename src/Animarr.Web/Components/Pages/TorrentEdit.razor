@@ -9,18 +9,16 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;">
+<div class="flex items-center mb-f-l gap-f-s">
     <FluentButton Appearance="Appearance.Stealth"
                   IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
                   Title="@(L["torrent_edit.btn_back"])"
                   OnClick="@(() => Nav.NavigateTo("/torrents"))" />
-    <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        @(_live?.Name ?? Hash)
-    </FluentLabel>
+    <FluentLabel Typo="Typography.H4" class="flex-1 truncate">@(_live?.Name ?? Hash)</FluentLabel>
     @if (_live is not null)
     {
-        <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:@StateColor();" title="@_live.State.ToString()"></div>
-        <span style="font-size:13px;color:var(--neutral-foreground-hint);">@_live.State</span>
+        <div class="fluent-status-dot fluent-status-dot--@StateColorClass()" title="@_live.State.ToString()"></div>
+        <span class="text-fluent-caption text-fluent-3">@_live.State</span>
     }
 </div>
 
@@ -30,20 +28,19 @@
 }
 else
 {
-    <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+    <div class="flex gap-f-xxl items-start flex-wrap">
 
         <!-- ── FILE TREE ─────────────────────────────────── -->
-        <div style="flex:1;min-width:320px;">
-            <div style="display:flex;align-items:center;margin-bottom:10px;gap:8px;">
+        <div class="flex-1 min-w-80">
+            <div class="flex items-center mb-f-s gap-f-s">
                 @if (_filesLoaded)
                 {
-                    <input type="checkbox"
-                           checked="@(_priorities.Count > 0 && _priorities.Values.All(v => v > 0))"
-                           @onchange="@(e => { bool chk = (bool)e.Value!; foreach (var k in _priorities.Keys.ToList()) _priorities[k] = chk ? 4 : 0; StateHasChanged(); })" />
+                    <FluentCheckbox Value="@(_priorities.Count > 0 && _priorities.Values.All(v => v > 0))"
+                                    ValueChanged="@((bool chk) => { foreach (var k in _priorities.Keys.ToList()) _priorities[k] = chk ? 4 : 0; StateHasChanged(); })" />
                 }
-                <h3 style="flex:1;margin:0;font-size:15px;font-weight:600;">
+                <FluentLabel Typo="Typography.H5" class="flex-1">
                     @L["torrent_edit.files_title"] @(_filesLoaded ? $"({_flatTree.Count(x => !x.IsFolder)})" : "")
-                </h3>
+                </FluentLabel>
                 @if (_filesLoaded)
                 {
                     <FluentButton Appearance="Appearance.Accent" Disabled="_saving" OnClick="SavePrioritiesAsync">
@@ -55,7 +52,7 @@ else
             @if (!_live.MetadataReceived)
             {
                 <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--neutral-foreground-hint);padding:12px;">
-                    <progress style="width:80px;height:4px;"></progress>
+                    <FluentProgress Width="80px" />
                     @L["torrent_edit.loading_metadata"]
                 </div>
             }
@@ -71,24 +68,26 @@ else
                             var fp = item.FullPath!;
                             var collapsed = _collapsedFolders.Contains(fp);
                             var folderChecked = IsFolderChecked(fp);
-                            <div style="background:var(--neutral-layer-2);padding:4px 6px;padding-left:@(item.Depth * 12 + 6)px;font-weight:600;border-bottom:1px solid var(--neutral-stroke-rest);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
-                                 @onclick="@(() => ToggleFolderCollapse(fp))">
-                                <span style="font-size:11px;width:12px;text-align:center;">@(collapsed ? "▶" : "▼")</span>
-                                <input type="checkbox" checked="@folderChecked"
-                                       @onclick:stopPropagation
-                                       @onchange="@(e => ToggleFolderCheck(fp))" />
-                                <span>📁 @item.Name</span>
-                            </div>
+                <div class="flex items-center gap-f-s px-f-s py-f-xxs text-fluent-caption font-semibold border-b border-fluent-border-2"
+                         style="background:var(--neutral-layer-2);padding-left:@(item.Depth * 12 + 6)px;cursor:pointer;user-select:none;"
+                         @onclick="@(() => ToggleFolderCollapse(fp))">
+                    <span class="text-fluent-caption w-3 text-center">@(collapsed ? "▶" : "▼")</span>
+                    <FluentCheckbox Value="@folderChecked"
+                                    @onclick:stopPropagation
+                                    ValueChanged="@((bool _) => ToggleFolderCheck(fp))" />
+                    <span>📁 @item.Name</span>
+                </div>
                         }
                         else
                         {
                             var fp = item.FullPath!;
                             var prio = _priorities.GetValueOrDefault(fp, 4);
-                            <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;padding-left:@(item.Depth * 12 + 6)px;border-bottom:1px solid var(--neutral-layer-2);">
-                                <input type="checkbox" checked="@(prio != 0)"
-                                       @onchange="@(e => { bool chk = (bool)e.Value!; _priorities[fp] = chk ? 4 : 0; StateHasChanged(); })" />
-                                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@fp">@item.Name</span>
-                                <span style="color:var(--neutral-foreground-hint);flex-shrink:0;min-width:50px;text-align:right;">@FormatBytes(item.Length)</span>
+                            <div class="flex items-center gap-f-xxs border-b border-fluent-border-3"
+                                 style="padding:3px 6px 3px @(item.Depth * 12 + 6)px;">
+                                <FluentCheckbox Value="@(prio != 0)"
+                                               ValueChanged="@((bool chk) => { _priorities[fp] = chk ? 4 : 0; StateHasChanged(); })" />
+                                <span class="flex-1 truncate text-fluent-caption" title="@fp">@item.Name</span>
+                                <span class="text-fluent-caption text-fluent-3 shrink-0 min-w-12 text-right">@FormatBytes(item.Length)</span>
                                 <select style="font-size:11px;padding:1px 2px;border:1px solid var(--neutral-stroke-rest);border-radius:3px;background:var(--neutral-layer-floating);color:var(--neutral-foreground-rest);min-width:90px;opacity:@(prio == 0 ? "0.4" : "1");"
                                         value="@prio"
                                         @onchange="@(e => _priorities[fp] = int.Parse(e.Value!.ToString()!))">
@@ -106,36 +105,36 @@ else
         </div>
 
         <!-- ── SETTINGS SIDEBAR ──────────────────────────── -->
-        <div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:16px;">
+        <div class="w-70 shrink-0 flex flex-col gap-f-l">
 
             <!-- Speed limits -->
-            <div style="border:1px solid var(--neutral-stroke-rest);border-radius:6px;padding:14px;">
-                <FluentLabel Typo="Typography.H4" Style="margin:0 0 12px 0;">@L["torrent_edit.speed_title"]</FluentLabel>
+            <div class="fluent-card">
+                <FluentLabel Typo="Typography.H5" class="mb-f-m">@L["torrent_edit.speed_title"]</FluentLabel>
                 <FluentNumberField @bind-Value="_dlLimit" Label="@(L["torrent_edit.dl_limit_label"])" Min="0" style="width:100%;margin-bottom:10px;" />
                 <FluentNumberField @bind-Value="_ulLimit" Label="@(L["torrent_edit.ul_limit_label"])" Min="0" style="width:100%;margin-bottom:10px;" />
                 <FluentButton Appearance="Appearance.Accent" OnClick="ApplySpeedAsync">@L["torrent_edit.btn_apply"]</FluentButton>
             </div>
 
             <!-- Options -->
-            <div style="border:1px solid var(--neutral-stroke-rest);border-radius:6px;padding:14px;">
-                <FluentLabel Typo="Typography.H4" Style="margin:0 0 12px 0;">@L["torrent_edit.options_title"]</FluentLabel>
+            <div class="fluent-card">
+                <FluentLabel Typo="Typography.H5" class="mb-f-m">@L["torrent_edit.options_title"]</FluentLabel>
                 <FluentSwitch Value="_stopAfterDownload" ValueChanged="OnStopAfterDownloadChanged">
                     @L["torrent_edit.stop_after_download"]
                 </FluentSwitch>
                 <div style="margin-top:10px;display:flex;align-items:center;gap:8px;opacity:0.65;">
-                    <FluentSwitch Value="_flattenSubfolders" Disabled="true">@L["torrent_edit.flatten_subfolders"]</FluentSwitch>
+                    <FluentSwitch Value="_skipSubfolderStructure" Disabled="true">@L["torrent_edit.flatten_subfolders"]</FluentSwitch>
                 </div>
             </div>
 
             <!-- Stats -->
-            <div style="border:1px solid var(--neutral-stroke-rest);border-radius:6px;padding:14px;">
-                <FluentLabel Typo="Typography.H4" Style="margin:0 0 10px 0;">@L["torrent_edit.stats_title"]</FluentLabel>
-                <div style="display:flex;flex-direction:column;gap:5px;font-size:13px;">
+            <div class="fluent-card">
+                <FluentLabel Typo="Typography.H5" class="mb-f-s">@L["torrent_edit.stats_title"]</FluentLabel>
+                <div class="flex flex-col gap-f-xxs text-fluent-body">
                     <div style="display:flex;justify-content:space-between;">
                         <span style="color:var(--neutral-foreground-hint);">@L["torrent_edit.stat_progress"]</span>
                         <b>@_live.Progress.ToString("F1")%</b>
                     </div>
-                    <progress value="@((int)_live.Progress)" max="100" style="width:100%;height:5px;"></progress>
+                    <FluentProgress Value="@((int)_live.Progress)" Max="100" Width="100%" />
                     <div style="display:flex;justify-content:space-between;margin-top:4px;">
                         <span style="color:var(--neutral-foreground-hint);">@L["torrent_edit.stat_downloaded"]</span>
                         <span>@FormatBytes(_live.Downloaded) / @FormatBytes(_live.TotalSize)</span>
@@ -171,7 +170,7 @@ else
     private int _dlLimit;
     private int _ulLimit;
     private bool _stopAfterDownload;
-    private bool _flattenSubfolders;
+    private bool _skipSubfolderStructure;
     private bool _saving;
     private bool _speedInitialized;
 
@@ -195,8 +194,8 @@ else
         _live = TorrentEngine.Get(Hash);
         if (_live is not null && !_speedInitialized)
         {
-            _dlLimit = _live.DownloadLimit / 125;
-            _ulLimit = _live.UploadLimit / 125;
+            _dlLimit = _live.DownloadLimit / 125000;
+            _ulLimit = _live.UploadLimit / 125000;
             _speedInitialized = true;
         }
 
@@ -206,7 +205,7 @@ else
         if (record is not null)
         {
             _stopAfterDownload   = record.StopAfterDownload;
-            _flattenSubfolders   = record.FlattenSubfolders;
+            _skipSubfolderStructure   = record.SkipSubfolderStructure;
         }
 
         TryLoadFiles();
@@ -217,8 +216,8 @@ else
         _live = TorrentEngine.Get(Hash);
         if (_live is not null && !_speedInitialized)
         {
-            _dlLimit = _live.DownloadLimit / 125;
-            _ulLimit = _live.UploadLimit / 125;
+            _dlLimit = _live.DownloadLimit / 125000;
+            _ulLimit = _live.UploadLimit / 125000;
             _speedInitialized = true;
         }
         TryLoadFiles();
@@ -261,7 +260,7 @@ else
 
     private async Task ApplySpeedAsync()
     {
-        await TorrentEngine.SetSpeedLimitsAsync(Hash, _dlLimit * 125, _ulLimit * 125);
+        await TorrentEngine.SetSpeedLimitsAsync(Hash, _dlLimit * 125000, _ulLimit * 125000);
         ToastService.ShowToast(ToastIntent.Success, L["torrent_edit.toast_limits_updated"]);
     }
 
@@ -292,16 +291,16 @@ else
         StateHasChanged();
     }
 
-    private string StateColor() => _live?.State switch
+    private string StateColorClass() => _live?.State switch
     {
-        TorrentState.Downloading => "#0078d4",
-        TorrentState.Metadata    => "#8764b8",
-        TorrentState.Seeding     => "#107c10",
-        TorrentState.Paused      => "#c8a600",
-        TorrentState.Stopped     => "#666",
-        TorrentState.Error       => "#c50f1f",
-        TorrentState.Hashing     => "#00b7c3",
-        _                        => "#999",
+        TorrentState.Downloading => "info",
+        TorrentState.Metadata    => "info",
+        TorrentState.Seeding     => "success",
+        TorrentState.Paused      => "warning",
+        TorrentState.Stopped     => "neutral",
+        TorrentState.Error       => "error",
+        TorrentState.Hashing     => "info",
+        _                        => "neutral",
     };
 
     private static string FormatSpeed(long bps)

@@ -1,0 +1,260 @@
+/* ============================================================
+   Tailwind CSS v4 — Animarr Web
+   Интеграция с Microsoft.FluentUI.AspNetCore.Components v4
+   ПРАВИЛО: FluentUI управляет компонентами и состоянием,
+            Tailwind управляет layout, spacing и адаптивностью.
+   ============================================================ */
+
+/* Подключаем только theme-vars + utilities.
+   НЕ импортируем preflight — он обнуляет padding/margin у всех
+   button/input/select, которые FluentUI рендерит как обычный HTML. */
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+/* Сканировать Razor-компоненты для обнаружения классов */
+@source "../Components/**/*.razor";
+@source "../Pages/**/*.razor";
+
+/* ── СТАТИЧЕСКИЕ ДИЗАЙН-ТОКЕНЫ ─────────────────────────────
+   Значения из FluentUI Design System (Fluent 2 / WinUI 3).
+   Порождают: bg-fluent-primary, text-fluent-1, p-f-m, rounded-fluent,
+              shadow-fluent-4, font-fluent, h-navbar, w-sidebar, …
+   ──────────────────────────────────────────────────────────── */
+@theme {
+    /* Шрифты */
+    --font-fluent: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono:   'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
+
+    /* Бренд-цвета (статические) */
+    --color-fluent-primary:         #0F6CBD;
+    --color-fluent-primary-hover:   #115EA3;
+    --color-fluent-primary-pressed: #0F548C;
+    --color-fluent-primary-light:   #EBF3FC;
+    --color-fluent-primary-tint:    #CFE4FD;
+
+    /* Нейтральный текст (статические fallback) */
+    --color-fluent-1:        #242424;
+    --color-fluent-2:        #424242;
+    --color-fluent-3:        #616161;
+    --color-fluent-4:        #898989;
+    --color-fluent-disabled: #BDBDBD;
+
+    /* Нейтральный фон (статические fallback) */
+    --color-fluent-bg:   #FFFFFF;
+    --color-fluent-bg-2: #FAFAFA;
+    --color-fluent-bg-3: #F5F5F5;
+    --color-fluent-bg-4: #F0F0F0;
+    --color-fluent-bg-5: #EBEBEB;
+
+    /* Границы (статические fallback) */
+    --color-fluent-border:   #D1D1D1;
+    --color-fluent-border-2: #E0E0E0;
+    --color-fluent-border-3: #F0F0F0;
+
+    /* Статусы */
+    --color-fluent-success:    #107C10;
+    --color-fluent-success-bg: #DFF6DD;
+    --color-fluent-error:      #D13438;
+    --color-fluent-error-bg:   #FDE7E9;
+    --color-fluent-warning:    #F7630C;
+    --color-fluent-warning-bg: #FFF4CE;
+    --color-fluent-info:       #0F6CBD;
+    --color-fluent-info-bg:    #EBF3FC;
+    --color-fluent-severe:     #BC4B09;
+    --color-fluent-severe-bg:  #FFF4CE;
+
+    /* 4px spacing-сетка → p-f-*, m-f-*, gap-f-*, w-f-*, h-f-* */
+    --spacing-f-xxs:  0.125rem;  /* 2px  */
+    --spacing-f-xs:   0.25rem;   /* 4px  */
+    --spacing-f-s:    0.5rem;    /* 8px  */
+    --spacing-f-m:    0.75rem;   /* 12px */
+    --spacing-f-l:    1rem;      /* 16px */
+    --spacing-f-xl:   1.25rem;   /* 20px */
+    --spacing-f-xxl:  1.5rem;    /* 24px */
+    --spacing-f-xxxl: 2rem;      /* 32px */
+    --spacing-f-4xl:  2.5rem;    /* 40px */
+    --spacing-f-5xl:  3rem;      /* 48px */
+    --spacing-f-6xl:  4rem;      /* 64px */
+
+    /* Радиусы → rounded-fluent, rounded-fluent-lg, … */
+    --radius-fluent-none: 0;
+    --radius-fluent-sm:   0.125rem; /* 2px  */
+    --radius-fluent:      0.25rem;  /* 4px  — кнопки, инпуты */
+    --radius-fluent-lg:   0.5rem;   /* 8px  — карточки, панели */
+    --radius-fluent-xl:   1rem;     /* 16px */
+    --radius-fluent-full: 9999px;   /* аватары */
+
+    /* Тени (Fluent Elevation) → shadow-fluent-* */
+    --shadow-fluent-2:  0 1px 2px rgba(0,0,0,0.14), 0 0 2px rgba(0,0,0,0.12);
+    --shadow-fluent-4:  0 2px 4px rgba(0,0,0,0.14), 0 0 2px rgba(0,0,0,0.12);
+    --shadow-fluent-8:  0 4px 8px rgba(0,0,0,0.14), 0 0 2px rgba(0,0,0,0.12);
+    --shadow-fluent-16: 0 8px 16px rgba(0,0,0,0.14), 0 0 2px rgba(0,0,0,0.12);
+    --shadow-fluent-28: 0 14px 28px rgba(0,0,0,0.14), 0 0 8px rgba(0,0,0,0.12);
+    --shadow-fluent-64: 0 32px 64px rgba(0,0,0,0.24), 0 0 8px rgba(0,0,0,0.20);
+
+    /* Фиксированные высоты → h-navbar, h-touch */
+    --height-navbar: 3rem;   /* 48px */
+    --height-touch:  2rem;   /* 32px */
+
+    /* Фиксированная ширина сайдбара → w-sidebar */
+    --width-sidebar: 13.75rem;  /* 220px */
+}
+
+/* ── АДАПТИВНЫЕ ТОКЕНЫ FLUENT UI (темная/светлая тема) ─────
+   @theme inline позволяет Tailwind-классам ссылаться на CSS-переменные,
+   которые FluentUI сам переключает между light/dark режимами.
+   Это единственный правильный способ поддержки тёмной темы FluentUI + Tailwind.
+   Порождают: bg-fluent-layer-1, text-fluent-fg, border-fluent-stroke, …
+   ──────────────────────────────────────────────────────────── */
+@theme inline {
+    /* Слои фона */
+    --color-fluent-layer-1:        var(--neutral-layer-1, #ffffff);
+    --color-fluent-layer-2:        var(--neutral-layer-2, #fafafa);
+    --color-fluent-layer-3:        var(--neutral-layer-3, #f5f5f5);
+    --color-fluent-layer-4:        var(--neutral-layer-4, #f0f0f0);
+    --color-fluent-layer-floating: var(--neutral-layer-floating, #ffffff);
+
+    /* Текст */
+    --color-fluent-fg:       var(--neutral-foreground-rest, #242424);
+    --color-fluent-fg-2:     var(--neutral-foreground-2, #424242);
+    --color-fluent-fg-hint:  var(--neutral-foreground-hint, #616161);
+    --color-fluent-fg-disabled: var(--neutral-foreground-disabled, #bdbdbd);
+
+    /* Границы (stroke) */
+    --color-fluent-stroke:        var(--neutral-stroke-rest, #d1d1d1);
+    --color-fluent-stroke-hover:  var(--neutral-stroke-hover, #ababab);
+    --color-fluent-stroke-subtle: var(--neutral-stroke-subtle, #e0e0e0);
+
+    /* Акцент */
+    --color-fluent-accent-fill:   var(--accent-fill-rest, #0f6cbd);
+    --color-fluent-accent-fg:     var(--accent-foreground-rest, #0f6cbd);
+}
+
+/* ── МИНИМАЛЬНЫЕ СБРОСЫ (совместимые с FluentUI) ───────────
+   Только box-sizing и body margin.
+   НЕ трогаем padding button/input/select/textarea.
+   ──────────────────────────────────────────────────────────── */
+@layer base {
+    *, ::before, ::after {
+        box-sizing: border-box;
+        /* Tailwind v4 sets --tw-ring-offset-color:#fff globally.
+           CSS custom properties inherit through shadow DOM boundaries,
+           so FluentUI FAST components pick up #fff as ring-offset color,
+           causing a white ring in dark mode / dark ring in light mode.
+           Transparent removes the artifact entirely. */
+        --tw-ring-offset-color: transparent;
+    }
+    body { margin: 0; }
+
+    /* Remove browser-default outline on FluentUI custom element hosts.
+       The plain selector alone does NOT override :focus-visible (higher specificity),
+       so we explicitly cover all focus states here.
+       FluentUI renders its own focus indicator inside the shadow DOM. */
+    fluent-select,
+    fluent-text-field,
+    fluent-number-field,
+    fluent-text-area,
+    fluent-combobox,
+    fluent-search,
+    fluent-button,
+    fluent-checkbox,
+    fluent-switch,
+    fluent-slider,
+    fluent-select:focus,
+    fluent-text-field:focus,
+    fluent-number-field:focus,
+    fluent-text-area:focus,
+    fluent-combobox:focus,
+    fluent-search:focus,
+    fluent-button:focus,
+    fluent-checkbox:focus,
+    fluent-switch:focus,
+    fluent-slider:focus,
+    fluent-select:focus-visible,
+    fluent-text-field:focus-visible,
+    fluent-number-field:focus-visible,
+    fluent-text-area:focus-visible,
+    fluent-combobox:focus-visible,
+    fluent-search:focus-visible,
+    fluent-button:focus-visible,
+    fluent-checkbox:focus-visible,
+    fluent-switch:focus-visible,
+    fluent-slider:focus-visible {
+        outline: none !important;
+        box-shadow: none;
+    }
+}
+
+/* ── ТИПОГРАФИКА ─────────────────────────────────────────── */
+@layer utilities {
+    .text-fluent-caption    { font-size: 0.75rem;  line-height: 1rem;     font-weight: 400; }
+    .text-fluent-body       { font-size: 0.875rem; line-height: 1.25rem;  font-weight: 400; }
+    .text-fluent-body-lg    { font-size: 1rem;     line-height: 1.375rem; font-weight: 400; }
+    .text-fluent-subtitle2  { font-size: 0.75rem;  line-height: 1rem;     font-weight: 600; }
+    .text-fluent-subtitle1  { font-size: 1rem;     line-height: 1.375rem; font-weight: 600; }
+    .text-fluent-title3     { font-size: 1.25rem;  line-height: 1.75rem;  font-weight: 600; }
+    .text-fluent-title2     { font-size: 1.5rem;   line-height: 2rem;     font-weight: 600; }
+    .text-fluent-title1     { font-size: 1.75rem;  line-height: 2.25rem;  font-weight: 700; }
+    .text-fluent-large-title{ font-size: 2.5rem;   line-height: 3.25rem;  font-weight: 700; }
+}
+
+/* ── КАСТОМНЫЕ КЛАССЫ КОМПОНЕНТОВ ────────────────────────── */
+@import './fluent-custom-classes.css';
+
+/* ── БАЗОВЫЕ СТИЛИ ПРИЛОЖЕНИЯ ────────────────────────────── */
+
+html, body {
+    font-family: var(--font-fluent);
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--neutral-layer-1, #ffffff);
+    color: var(--neutral-foreground-rest, #242424);
+}
+
+.fluent-layout {
+    height: 100vh !important;
+}
+
+/* Ширина комбобокса выбора папки */
+.folder-combobox {
+    min-width: 560px;
+    width: 100%;
+}
+
+a, .btn-link {
+    color: var(--accent-foreground-rest, #0F6CBD);
+}
+
+h1:focus { outline: none; }
+
+.valid.modified:not([type=checkbox]) { outline: 1px solid #26b050; }
+.invalid                              { outline: 1px solid red; }
+.validation-message                   { color: red; }
+
+#blazor-error-ui {
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+
+.blazor-error-boundary {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40' fill='none' stroke='%23FF0000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='20' cy='20' r='18'/%3E%3Cline x1='20' y1='13' x2='20' y2='22'/%3E%3Cline x1='20' y1='27' x2='20.01' y2='27'/%3E%3C/svg%3E") no-repeat 1rem/1.8rem, #b32121;
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: white;
+}
+

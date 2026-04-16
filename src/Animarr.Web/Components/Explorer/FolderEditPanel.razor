@@ -1,0 +1,430 @@
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IToastService ToastService
+@inject FolderWatcherService WatcherService
+@inject IPatternMatchService Matcher
+
+<!-- Backdrop -->
+<div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="@(() => OnClosed.InvokeAsync())"></div>
+
+<!-- Slide-in panel -->
+<div style="position:fixed;top:0;right:0;width:640px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;"
+     @onclick:stopPropagation>
+
+    <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
+        <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@Folder.Label</FluentLabel>
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["folders.btn_cancel"])" OnClick="@(() => OnClosed.InvokeAsync())" />
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px;">
+
+        <!-- Basic settings -->
+        <div style="padding:14px;background:var(--neutral-layer-2);border-radius:6px;display:flex;flex-direction:column;gap:12px;width:100%;box-sizing:border-box;">
+            <FluentTextField @bind-Value="_editLabel"
+                             Label="@(L["folders.field_name_label"])"
+                             style="width:100%;" />
+            <FluentSwitch @bind-Value="_editWatch">@L["folders.switch_monitor"]</FluentSwitch>
+            <FluentSwitch @bind-Value="_editRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
+            @if (_editRenameEnabled)
+            {
+                <FluentSelect TOption="string" @bind-Value="_editFolderTypeStr"
+                              Label="@(L["folders.content_type_label"])" style="width:100%;">
+                    <FluentOption TOption="string" Value="Auto">@L["folders.content_type_auto"]</FluentOption>
+                    <FluentOption TOption="string" Value="Series">@L["folders.content_type_series"]</FluentOption>
+                    <FluentOption TOption="string" Value="Movie">@L["folders.content_type_movie"]</FluentOption>
+                </FluentSelect>
+            }
+            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAsync"
+                          Disabled="@string.IsNullOrWhiteSpace(_editLabel)">
+                @L["folders.btn_save"]
+            </FluentButton>
+        </div>
+
+        <!-- Inherited (global) patterns -->
+        <FluentDivider />
+        <FluentLabel Typo="Typography.H3" Style="margin-bottom:2px;">@L["folder_detail.inherited_patterns_title"]</FluentLabel>
+        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:4px;">@L["folder_detail.inherited_patterns_hint"]</FluentLabel>
+
+        @if (_inheritedPatterns.Count == 0)
+        {
+            <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.inherited_patterns_empty"]</FluentLabel>
+        }
+        else
+        {
+            <FluentDataGrid Items="@_inheritedPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
+                <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
+                    <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Priority</span>
+                </TemplateColumn>
+                <TemplateColumn Title="@(L["patterns.col_name"])">
+                    <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Name</span>
+                </TemplateColumn>
+                <TemplateColumn Title="" Align="Align.End" Width="120px">
+                    @{var isDisabled = _disabledInheritedPatternIds.Contains(context.Id);}
+                    <FluentSwitch Value="@(!isDisabled)"
+                                  ValueChanged="@(async (bool v) => await ToggleInheritedPatternAsync(context, !v))"
+                                  Title="@(isDisabled ? L["folder_detail.inherited_pattern_disabled"] : L["folder_detail.inherited_pattern_active"])" />
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+
+        <!-- Folder-specific patterns -->
+        <FluentDivider />
+        <div style="display:flex;align-items:center;gap:8px;">
+            <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["folder_detail.override_patterns_title"]</FluentLabel>
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@(new Icons.Regular.Size20.Add())"
+                          Title="@(L["patterns.add_button"])"
+                          OnClick="@(() => OpenEditPatternDialog(null))" />
+        </div>
+        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.patterns_hint"]</FluentLabel>
+
+        @if (_editPatterns.Count == 0)
+        {
+            <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.patterns_empty"]</FluentLabel>
+        }
+        else
+        {
+            <FluentDataGrid Items="@_editPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
+                <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
+                    @context.Priority
+                </TemplateColumn>
+                <PropertyColumn Property="@(p => p.Name)" Title="@(L["patterns.col_name"])" />
+                <TemplateColumn Title="@(L["patterns.col_regex"])">
+                    <code style="font-size:11px;word-break:break-all;">@context.Pattern</code>
+                </TemplateColumn>
+                <TemplateColumn Title="" Align="Align.End" Width="110px">
+                    <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
+                                  Title="@(L["patterns.btn_edit"])"
+                                  OnClick="@(() => OpenEditPatternDialog(context))" />
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  Title="@(L["patterns.btn_delete"])"
+                                  OnClick="@(() => DeleteEditPatternAsync(context))" />
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+
+        <!-- Pattern tester -->
+        <FluentDivider Style="margin:4px 0;" />
+        <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@L["patterns.test_title"]</FluentLabel>
+        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.test_hint"]</FluentLabel>
+        <div style="display:flex;align-items:flex-end;gap:10px;">
+            <FluentTextField @bind-Value="_editTestInput"
+                             Label="@(L["patterns.test_field_label"])"
+                             Placeholder="@(L["patterns.test_placeholder"])"
+                             style="flex:1;" />
+            <FluentButton Appearance="Appearance.Accent" OnClick="TestEditPattern">@L["patterns.test_button"]</FluentButton>
+        </div>
+        @if (_editTestResult is not null)
+        {
+            <div style="padding:12px;background:var(--neutral-layer-2);border-radius:6px;">
+                @if (_editTestResult.IsMatched)
+                {
+                    <div style="color:var(--color-fluent-success);font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
+                    <div style="font-family:monospace;font-size:13px;line-height:1.8;">
+                        @L["patterns.test_season_label"] <b>@(_editTestResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b><br />
+                        @L["patterns.test_episode_label"] <b>@_editTestResult.Episode</b><br />
+                        @L["patterns.test_kind_label"] <b>@_editTestKind</b><br />
+                        @L["patterns.test_new_name_label"] <b style="color:var(--color-fluent-success);">@(_editTestNewName ?? "—")</b>
+                    </div>
+                }
+                else
+                {
+                    <div style="color:var(--color-fluent-error);font-weight:600;">@L["patterns.test_not_matched"]</div>
+                }
+            </div>
+        }
+
+        <!-- Ignore rules -->
+        <FluentDivider />
+        <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@L["folder_detail.rules_title"]</FluentLabel>
+        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.rules_hint"]</FluentLabel>
+        <div style="display:flex;align-items:flex-end;gap:8px;">
+            <FluentTextField @bind-Value="_editNewMask"
+                             Placeholder="@(L["settings.new_mask_placeholder"])"
+                             Label="@(L["settings.new_mask_label"])"
+                             style="flex:1;" />
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@(new Icons.Regular.Size20.Add())"
+                          OnClick="AddEditRuleAsync"
+                          Title="@(L["settings.btn_add_mask"])"
+                          Disabled="@string.IsNullOrWhiteSpace(_editNewMask)" />
+        </div>
+        @if (_editRules.Count == 0)
+        {
+            <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["folder_detail.rules_empty"]</FluentLabel>
+        }
+        else
+        {
+            <FluentDataGrid Items="@_editRules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
+                <PropertyColumn Property="@(r => r.Mask)" Title="@(L["settings.col_mask"])" />
+                <TemplateColumn Title="" Align="Align.End" Width="100px">
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  Title="@(L["settings.btn_delete_mask"])"
+                                  OnClick="@(() => DeleteEditRuleAsync(context))" />
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+
+    </div>
+</div>
+
+<!-- Pattern add/edit dialog -->
+<FluentDialog @bind-Hidden="_editPatternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H4">
+            @(_editPatternTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
+        </FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
+            <FluentTextField @bind-Value="_editPatternName"
+                             Label="@(L["patterns.field_name_label"])"
+                             Placeholder="@(L["patterns.field_name_placeholder"])"
+                             style="width:100%;" />
+            <FluentTextField @bind-Value="_editPatternRegex"
+                             Label="@(L["patterns.field_regex_label"])"
+                             Placeholder="@(L["patterns.field_regex_placeholder"])"
+                             style="width:100%;font-family:monospace;" />
+            <FluentNumberField TValue="int" @bind-Value="_editPatternPriority"
+                               Label="@(L["patterns.field_priority_label"])"
+                               Min="1" Max="999" style="width:160px;" />
+        </FluentStack>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="SaveEditPatternAsync"
+                      Disabled="@(string.IsNullOrWhiteSpace(_editPatternName) || string.IsNullOrWhiteSpace(_editPatternRegex))">
+            @L["patterns.btn_save"]
+        </FluentButton>
+        <FluentButton OnClick="@(() => _editPatternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    [Parameter, EditorRequired] public FolderWatcher Folder { get; set; } = null!;
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private Guid _loadedFolderId;
+
+    private string _editLabel = "";
+    private bool _editWatch = true;
+    private bool _editRenameEnabled = true;
+    private string _editFolderTypeStr = "Auto";
+
+    private List<RenamePattern> _editPatterns = [];
+    private List<RenamePattern> _inheritedPatterns = [];
+    private HashSet<Guid> _disabledInheritedPatternIds = [];
+    private bool _editPatternDialogHidden = true;
+    private RenamePattern? _editPatternTarget;
+    private string _editPatternName = "";
+    private string _editPatternRegex = "";
+    private int _editPatternPriority = 100;
+    private string _editTestInput = "";
+    private ParseResult? _editTestResult;
+    private string? _editTestNewName;
+    private string _editTestKind = "";
+
+    private List<IgnoreRule> _editRules = [];
+    private string _editNewMask = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Folder.Id == _loadedFolderId) return;
+        _loadedFolderId = Folder.Id;
+
+        _editLabel         = Folder.Label;
+        _editWatch         = Folder.WatchEnabled;
+        _editRenameEnabled = Folder.RenameEnabled;
+        _editFolderTypeStr = Folder.FolderType.ToString();
+        _editTestInput     = "";
+        _editTestResult    = null;
+        _editNewMask       = "";
+        _editPatternDialogHidden = true;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _editPatterns = await db.RenamePatterns
+            .Where(p => p.FolderId == Folder.Id && p.Scope == PatternScope.FolderOverride && !p.IsExcluded)
+            .OrderBy(p => p.Priority)
+            .ToListAsync();
+        _inheritedPatterns = await db.RenamePatterns
+            .Where(p => p.Scope == PatternScope.Global)
+            .OrderBy(p => p.Priority)
+            .ToListAsync();
+        _disabledInheritedPatternIds = (await db.RenamePatterns
+            .Where(p => p.FolderId == Folder.Id && p.IsExcluded && p.GlobalPatternId.HasValue)
+            .Select(p => p.GlobalPatternId!.Value)
+            .ToListAsync()).ToHashSet();
+        _editRules = await db.IgnoreRules
+            .Where(r => r.FolderId == Folder.Id && r.Scope == RuleScope.FolderOverride)
+            .OrderBy(r => r.Mask)
+            .ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_editLabel)) return;
+        var folderType = Enum.TryParse<FolderType>(_editFolderTypeStr, out var ft) ? ft : FolderType.Auto;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.FolderWatchers.FindAsync(Folder.Id);
+        if (entity is null) return;
+
+        var wasEnabled = entity.WatchEnabled;
+        entity.Label         = _editLabel.Trim();
+        entity.WatchEnabled  = _editWatch;
+        entity.RenameEnabled = _editRenameEnabled;
+        entity.FolderType    = _editRenameEnabled ? folderType : FolderType.Auto;
+        await db.SaveChangesAsync();
+
+        if (!wasEnabled && _editWatch) await WatcherService.StartWatcherAsync(entity.Id);
+        else if (wasEnabled && !_editWatch) await WatcherService.StopWatcherAsync(entity.Id);
+
+        ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_folder_updated", entity.Label));
+        await OnSaved.InvokeAsync();
+    }
+
+    // ── Patterns ──────────────────────────────────────────────────
+
+    private void OpenEditPatternDialog(RenamePattern? p)
+    {
+        _editPatternTarget   = p;
+        _editPatternName     = p?.Name ?? "";
+        _editPatternRegex    = p?.Pattern ?? "";
+        _editPatternPriority = p?.Priority ?? 100;
+        _editPatternDialogHidden = false;
+    }
+
+    private async Task SaveEditPatternAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_editPatternName) || string.IsNullOrWhiteSpace(_editPatternRegex)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_editPatternTarget is null)
+        {
+            db.RenamePatterns.Add(new RenamePattern
+            {
+                Id        = Guid.NewGuid(),
+                Name      = _editPatternName.Trim(),
+                Pattern   = _editPatternRegex.Trim(),
+                Priority  = _editPatternPriority,
+                Scope     = PatternScope.FolderOverride,
+                FolderId  = Folder.Id,
+                IsBuiltIn = false,
+            });
+            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_added"]);
+        }
+        else
+        {
+            var entity = await db.RenamePatterns.FindAsync(_editPatternTarget.Id);
+            if (entity is null) return;
+            entity.Name     = _editPatternName.Trim();
+            entity.Pattern  = _editPatternRegex.Trim();
+            entity.Priority = _editPatternPriority;
+            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
+        }
+        await db.SaveChangesAsync();
+        _editPatternDialogHidden = true;
+        await ReloadEditPatternsAsync();
+    }
+
+    private async Task DeleteEditPatternAsync(RenamePattern p)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.RenamePatterns.FindAsync(p.Id);
+        if (entity is not null) { db.RenamePatterns.Remove(entity); await db.SaveChangesAsync(); }
+        ToastService.ShowToast(ToastIntent.Success, L.Get("patterns.toast_deleted", p.Name));
+        await ReloadEditPatternsAsync();
+    }
+
+    private async Task ReloadEditPatternsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _editPatterns = await db.RenamePatterns
+            .Where(p => p.FolderId == Folder.Id && p.Scope == PatternScope.FolderOverride && !p.IsExcluded)
+            .OrderBy(p => p.Priority)
+            .ToListAsync();
+    }
+
+    private async Task ToggleInheritedPatternAsync(RenamePattern globalPattern, bool disable)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.RenamePatterns
+            .FirstOrDefaultAsync(p => p.FolderId == Folder.Id && p.IsExcluded && p.GlobalPatternId == globalPattern.Id);
+        if (disable && existing is null)
+        {
+            db.RenamePatterns.Add(new RenamePattern
+            {
+                Id              = Guid.NewGuid(),
+                Name            = $"Exclude: {globalPattern.Name}",
+                Pattern         = globalPattern.Pattern,
+                Scope           = PatternScope.FolderOverride,
+                FolderId        = Folder.Id,
+                IsExcluded      = true,
+                GlobalPatternId = globalPattern.Id,
+                Priority        = globalPattern.Priority,
+            });
+            _disabledInheritedPatternIds.Add(globalPattern.Id);
+        }
+        else if (!disable && existing is not null)
+        {
+            db.RenamePatterns.Remove(existing);
+            _disabledInheritedPatternIds.Remove(globalPattern.Id);
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private void TestEditPattern()
+    {
+        if (string.IsNullOrWhiteSpace(_editTestInput)) return;
+        var ext  = Path.GetExtension(_editTestInput);
+        var kind = Matcher.DetermineFileKind(ext);
+        _editTestKind    = kind.ToString();
+        _editTestResult  = Matcher.ParseFileName(_editTestInput, _editPatterns);
+        _editTestNewName = _editTestResult.IsMatched
+            ? Matcher.BuildTargetName(_editTestResult, null, kind, ext)
+            : null;
+    }
+
+    // ── Ignore rules ──────────────────────────────────────────────
+
+    private async Task AddEditRuleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_editNewMask)) return;
+        var mask = _editNewMask.Trim().ToLowerInvariant();
+        if (_editRules.Any(r => r.Mask.Equals(mask, StringComparison.OrdinalIgnoreCase)))
+        {
+            ToastService.ShowToast(ToastIntent.Warning, L["settings.toast_mask_exists"]);
+            return;
+        }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.IgnoreRules.Add(new IgnoreRule
+        {
+            Id       = Guid.NewGuid(),
+            Mask     = mask,
+            Scope    = RuleScope.FolderOverride,
+            FolderId = Folder.Id,
+        });
+        await db.SaveChangesAsync();
+        _editNewMask = "";
+        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_added", mask));
+        await ReloadEditRulesAsync();
+    }
+
+    private async Task DeleteEditRuleAsync(IgnoreRule rule)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.IgnoreRules.FindAsync(rule.Id);
+        if (entity is not null) { db.IgnoreRules.Remove(entity); await db.SaveChangesAsync(); }
+        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_deleted", rule.Mask));
+        await ReloadEditRulesAsync();
+    }
+
+    private async Task ReloadEditRulesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _editRules = await db.IgnoreRules
+            .Where(r => r.FolderId == Folder.Id && r.Scope == RuleScope.FolderOverride)
+            .OrderBy(r => r.Mask)
+            .ToListAsync();
+    }
+}

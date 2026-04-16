@@ -13,8 +13,42 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
     public async Task SeedAsync()
     {
         await using var db = await dbFactory.CreateDbContextAsync();
+        await RecoverPendingHistoryAsync(db);
         await SeedPatternsAsync(db);
         await SeedIgnoreRulesAsync(db);
+    }
+
+    // ─── Crash recovery ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves RenameHistory records left in Pending state by a previous crash.
+    /// If NewPath exists on disk, the rename completed — mark Renamed.
+    /// Otherwise the rename did not execute — mark Error.
+    /// </summary>
+    private async Task RecoverPendingHistoryAsync(AppDbContext db)
+    {
+        var stuck = await db.RenameHistories
+            .Where(h => h.Status == RenameStatus.Pending)
+            .ToListAsync();
+
+        if (stuck.Count == 0) return;
+
+        foreach (var h in stuck)
+        {
+            if (!File.Exists(h.OriginalPath) && File.Exists(h.NewPath))
+            {
+                h.Status       = RenameStatus.Renamed;
+                h.ErrorMessage = "Recovered: rename completed before crash";
+            }
+            else
+            {
+                h.Status       = RenameStatus.Error;
+                h.ErrorMessage = "Interrupted by service restart — file not renamed";
+            }
+        }
+
+        await db.SaveChangesAsync();
+        logger.LogInformation("Recovered {Count} pending rename history entries.", stuck.Count);
     }
 
     // ─── Patterns ───────────────────────────────────────────────────────────

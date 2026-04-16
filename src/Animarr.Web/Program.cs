@@ -30,6 +30,7 @@ builder.Services.AddSingleton<IPatternMatchService, PatternMatchService>();
 builder.Services.AddScoped<IRenameService, RenameService>();
 builder.Services.AddSingleton<FolderWatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderWatcherService>());
+builder.Services.AddHostedService<RenameQueueProcessorService>();
 builder.Services.AddSingleton<ThemeService>();
 builder.Services.AddSingleton<LocalizationService>();
 builder.Services.AddSingleton<TorrentEngineService>();
