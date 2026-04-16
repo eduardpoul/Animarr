@@ -30,37 +30,44 @@
 
 @if (_loading)
 {
-    <progress style="width:100%;height:4px;"></progress>
+    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
+        <FluentProgressRing />
+    </div>
 }
 else
 {
     <FluentDataGrid Items="@FilteredItems()" TGridItem="RenameHistory"
-                    ShowHover="true" Pagination="@_pagination">
-        <TemplateColumn Title="@(L["history.col_date"])">
+                    ShowHover="true" Pagination="@_pagination"
+                    RowSize="DataGridRowSize.Medium"
+                    Style="font-size:13px;width:100%;">
+        <TemplateColumn Title="@(L["history.col_date"])" Width="120px">
             @context.ProcessedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")
         </TemplateColumn>
-        <TemplateColumn Title="@(L["history.col_folder"])">
-            @(_allFolders.FirstOrDefault(f => f.Id == context.FolderId)?.Label ?? "—")
+        <TemplateColumn Title="@(L["history.col_folder"])" Width="130px">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;" title="@(_allFolders.FirstOrDefault(f => f.Id == context.FolderId)?.Label ?? "—")">
+                @(_allFolders.FirstOrDefault(f => f.Id == context.FolderId)?.Label ?? "—")
+            </span>
         </TemplateColumn>
         <TemplateColumn Title="@(L["history.col_original_name"])">
-            <code style="font-size:12px;">@Path.GetFileName(context.OriginalPath)</code>
+            <code style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">@Path.GetFileName(context.OriginalPath)</code>
         </TemplateColumn>
         <TemplateColumn Title="" Width="28px" Align="Align.Center">
             <span style="color:var(--neutral-foreground-hint);">→</span>
         </TemplateColumn>
         <TemplateColumn Title="@(L["history.col_new_name"])">
-            <code style="font-size:12px;">@Path.GetFileName(context.NewPath)</code>
+            <code style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">@Path.GetFileName(context.NewPath)</code>
         </TemplateColumn>
-        <TemplateColumn Title="@(L["history.col_status"])">
-            <span class="@GetStatusClass(context.Status)">@GetStatusLabel(context.Status)</span>
+        <TemplateColumn Title="@(L["history.col_status"])" Width="110px">
+            <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@GetStatusLabel(context.Status)</FluentBadge>
         </TemplateColumn>
-        <TemplateColumn Title="" Width="140px" Align="Align.End">
+        <TemplateColumn Title="" Width="52px" Align="Align.Center">
             @if (context.Status == RenameStatus.Renamed && !context.IsReverted)
             {
-                <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowCounterclockwise())"
-                              OnClick="@(() => AskRevert(context))">
-                    @L["history.btn_revert"]
-                </FluentButton>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.ArrowCounterclockwise())"
+                              Title="@(L["history.btn_revert"])"
+                              Style="margin-right:8px;"
+                              OnClick="@(() => AskRevert(context))" />
             }
         </TemplateColumn>
     </FluentDataGrid>
@@ -143,12 +150,9 @@ else
         _ => "—"
     };
 
-    private static string GetStatusClass(RenameStatus s) => s switch
+    private static Appearance GetStatusAppearance(RenameStatus s) => s switch
     {
-        RenameStatus.Renamed => "status-badge status-renamed",
-        RenameStatus.Skipped => "status-badge status-skipped",
-        RenameStatus.Error => "status-badge status-error",
-        RenameStatus.Reverted => "status-badge status-reverted",
-        _ => "status-badge"
+        RenameStatus.Renamed  => Appearance.Accent,
+        _                     => Appearance.Neutral
     };
 }

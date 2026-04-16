@@ -23,6 +23,8 @@ public class TorrentEngineService : BackgroundService
     private readonly ConcurrentDictionary<string, bool> _autoRename = new();
     /// <summary>Tracks ("hash:relPath") keys already marked IsDownloaded in DB to avoid redundant writes.</summary>
     private readonly ConcurrentDictionary<string, byte> _markedDownloaded = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Per-torrent lock that serializes MetadataReceived and StateChanged handlers (avoids concurrent SaveChanges on the same record).</summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _torrentLocks = new();
 
     /// <summary>Fires every 500 ms and on any torrent state change.</summary>
     public event Action? StateChanged;
@@ -93,6 +95,7 @@ public class TorrentEngineService : BackgroundService
             MaximumConnections      = cfg.MaxConnections,
             AllowPortForwarding     = cfg.EnableUPnP,
             AllowLocalPeerDiscovery = cfg.EnableLSD,
+            DhtEndPoint             = cfg.EnableDHT ? new IPEndPoint(IPAddress.Any, 0) : null,
         };
         builder.ListenEndPoints["ipv4"] = new IPEndPoint(IPAddress.Any, cfg.ListenPort);
 
@@ -144,7 +147,7 @@ public class TorrentEngineService : BackgroundService
                 foreach (var sel in record.FileSelections.Where(s => s.IsDownloaded))
                     _markedDownloaded.TryAdd($"{record.InfoHash}:{sel.FilePath}", 0);
 
-                SubscribeEvents(mgr, record.InfoHash, cfg);
+                SubscribeEvents(mgr, record.InfoHash);
                 _managers[record.InfoHash] = mgr;
 
                 if (record.State != TorrentRecordState.Paused)
@@ -174,20 +177,36 @@ public class TorrentEngineService : BackgroundService
     // Event subscriptions
     // -------------------------------------------------------------------------
 
-    private void SubscribeEvents(TorrentManager mgr, string infoHash, TorrentConfig cfg)
+    private void SubscribeEvents(TorrentManager mgr, string infoHash)
     {
+        var sem = _torrentLocks.GetOrAdd(infoHash, _ => new SemaphoreSlim(1, 1));
         mgr.TorrentStateChanged += (_, e) =>
         {
-            // When a magnet torrent transitions from Metadata state, metadata has just arrived
-            if (e.OldState == TorrentState.Metadata)
-                Task.Run(async () => await OnMetadataReceivedAsync(mgr, infoHash));
+            var oldState = e.OldState;
+            Task.Run(async () =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    // When a magnet torrent transitions from Metadata state, metadata has just arrived.
+                    // Run sequentially under the same lock to prevent concurrent SaveChanges on the same record.
+                    if (oldState == TorrentState.Metadata)
+                        await OnMetadataReceivedAsync(mgr, infoHash);
 
-            Task.Run(async () => await OnStateChangedAsync(mgr, infoHash, cfg));
+                    await OnStateChangedAsync(mgr, infoHash);
+                }
+                finally
+                {
+                    sem.Release();
+                }
+            });
         };
     }
 
-    private async Task OnStateChangedAsync(TorrentManager mgr, string infoHash, TorrentConfig cfg)
+    private async Task OnStateChangedAsync(TorrentManager mgr, string infoHash)
     {
+        // Always load fresh config so changes made after startup are respected (H-4 fix).
+        var cfg = await LoadConfigAsync();
         UpdateLiveStats();
         StateChanged?.Invoke();
 
@@ -227,11 +246,7 @@ public class TorrentEngineService : BackgroundService
                     }
                 }
 
-                if (record.FlattenSubfolders)
-                {
-                    try { FlattenToRoot(record.SavePath); }
-                    catch (Exception ex) { _logger.LogWarning(ex, "FlattenSubfolders failed for {Path}", record.SavePath); }
-                }
+
             }
 
             // Stop seeding check
@@ -240,7 +255,7 @@ public class TorrentEngineService : BackgroundService
             bool ratioReached = ratio > 0 && totalSize > 0 &&
                 (record.Uploaded + mgr.Monitor.DataBytesSent) >= (long)(totalSize * ratio);
 
-            if (record.StopAfterDownload || ratioReached)
+            if (record.StopAfterDownload || ratioReached || cfg.StopSeedingAfterDone)
                 await mgr.StopAsync();
         }
         else if (mgr.State == TorrentState.Error)
@@ -280,6 +295,10 @@ public class TorrentEngineService : BackgroundService
             // Apply root folder remap for magnets (metadata just arrived, suppress handled via CreateContainingDirectory)
             if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
                 await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
+
+            // Flatten subfolders for magnets: remap all file paths to savePath root before download starts
+            if (record.SkipSubfolderStructure)
+                await ApplyFlattenAsync(mgr, infoHash);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -642,7 +661,7 @@ public class TorrentEngineService : BackgroundService
         record.UploadLimit     = ulLimit;
         record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
-        record.FlattenSubfolders  = flattenSubfolders;
+        record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
         record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
         record.CompletedAt        = null;
@@ -653,7 +672,7 @@ public class TorrentEngineService : BackgroundService
         _folderWatchers[infoHash] = folderWatcherId;
         _autoRename[infoHash] = autoRename;
 
-        SubscribeEvents(mgr, infoHash, cfg);
+        SubscribeEvents(mgr, infoHash);
         _managers[infoHash] = mgr;
 
         if (!startPaused) await mgr.StartAsync();
@@ -715,7 +734,7 @@ public class TorrentEngineService : BackgroundService
         record.UploadLimit     = ulLimit;
         record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
-        record.FlattenSubfolders  = flattenSubfolders;
+        record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
         record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
         record.CompletedAt        = null;
@@ -736,12 +755,16 @@ public class TorrentEngineService : BackgroundService
         _folderWatchers[infoHash] = folderWatcherId;
         _autoRename[infoHash] = autoRename;
 
-        SubscribeEvents(mgr, infoHash, cfg);
+        SubscribeEvents(mgr, infoHash);
         _managers[infoHash] = mgr;
 
         // Apply root folder rename for .torrent files (suppress is handled by CreateContainingDirectory=false)
         if (!string.IsNullOrWhiteSpace(customRootFolderName))
             await ApplyRootFolderRemapAsync(mgr, infoHash, customRootFolderName);
+
+        // Flatten subfolders: remap all file paths to savePath root before download starts
+        if (flattenSubfolders)
+            await ApplyFlattenAsync(mgr, infoHash);
 
         if (!startPaused) await mgr.StartAsync();
 
@@ -951,21 +974,17 @@ public class TorrentEngineService : BackgroundService
         _                     => TorrentRecordState.Downloading,
     };
 
-    private static void FlattenToRoot(string rootPath)
+    private async Task ApplyFlattenAsync(TorrentManager mgr, string infoHash)
     {
-        if (!Directory.Exists(rootPath)) return;
-        foreach (var file in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories).ToList())
+        if (mgr.Files.Count == 0) return;
+        foreach (var file in mgr.Files)
         {
-            var dest = Path.Combine(rootPath, Path.GetFileName(file));
-            if (string.Equals(file, dest, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!File.Exists(dest))
-                File.Move(file, dest);
+            if (file.Priority == Priority.DoNotDownload) continue;
+            var dest = Path.Combine(mgr.SavePath, Path.GetFileName(file.Path));
+            if (string.Equals(file.FullPath, dest, StringComparison.OrdinalIgnoreCase)) continue;
+            try { await mgr.MoveFileAsync(file, dest); }
+            catch (Exception ex) { _logger.LogWarning(ex, "ApplyFlatten: failed to remap {File}", file.Path); }
         }
-        foreach (var dir in Directory.EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories)
-                                     .OrderByDescending(d => d.Length).ToList())
-        {
-            if (!Directory.EnumerateFileSystemEntries(dir).Any())
-                Directory.Delete(dir);
-        }
+        _logger.LogInformation("ApplyFlatten [{Hash}]: remapped {Count} files to root", infoHash, mgr.Files.Count);
     }
 }

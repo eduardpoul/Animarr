@@ -1,13 +1,14 @@
 ﻿@inherits LayoutComponentBase
 @implements IDisposable
 @inject ThemeService ThemeService
+@inject IJSRuntime JS
 
-<FluentDesignTheme @bind-Mode="_themeMode" StorageName="animarr-theme" />
+<FluentDesignTheme @bind-Mode="_themeMode" OfficeColor="@_accentColor" StorageName="animarr-theme" />
 
-<FluentLayout Style="height:100vh;display:flex;flex-direction:column;">
-    <FluentHeader Style="@($"display:flex;align-items:center;{HeaderStyle()}")">
-        <div style="display:flex;align-items:center;gap:10px;flex:1;">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="flex-shrink:0;">
+<FluentLayout class="h-screen flex flex-col">
+    <FluentHeader Style="@HeaderStyle()">
+        <div class="flex items-center gap-f-s flex-1">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" class="shrink-0">
                 <rect width="32" height="32" rx="6" fill="white" fill-opacity="0.15"/>
                 <text x="16" y="24" font-family="Arial, sans-serif" font-size="26" font-weight="900"
                       text-anchor="middle" fill="white" letter-spacing="-1">A</text>
@@ -18,15 +19,15 @@
             <FluentLabel Typo="Typography.H4" Style="margin:0;color:white;">Animarr</FluentLabel>
         </div>
         <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener noreferrer"
-           title="GitHub" style="color:white;opacity:0.65;display:flex;align-items:center;margin-right:12px;transition:opacity 0.15s;"
-           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.65'">
+           title="GitHub"
+           class="flex items-center mr-f-m text-white opacity-65 hover:opacity-100 transition-opacity duration-150">
             <svg height="22" width="22" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="white">
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
             </svg>
         </a>
     </FluentHeader>
 
-    <div style="flex:1;min-height:0;display:flex;flex-direction:row;overflow:hidden;">
+    <div class="flex-1 min-h-0 flex flex-row overflow-hidden">
         <FluentNavMenu Width="220" Title="Navigation" Collapsible="true">
             <FluentNavLink Href="/torrents" Icon="@(new Icons.Regular.Size20.ArrowDownload())" Match="NavLinkMatch.All">
                 @L["nav.torrents"]
@@ -45,13 +46,13 @@
             </FluentNavLink>
         </FluentNavMenu>
 
-        <div style="flex:1;min-height:0;overflow-y:auto;padding:24px;background:var(--neutral-layer-1);color:var(--neutral-foreground-rest);">
+        <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-f-xxl">
             @Body
         </div>
     </div>
 
     <FluentFooter>
-        <FluentLabel Typo="Typography.Body" Style="padding: 8px 16px; color: var(--neutral-foreground-rest);">
+        <FluentLabel Typo="Typography.Body" class="px-f-l py-f-xs text-fluent-body">
             @L["layout.footer_tagline"]
         </FluentLabel>
     </FluentFooter>
@@ -63,18 +64,45 @@
 
 @code {
     private DesignThemeModes _themeMode = DesignThemeModes.System;
+    private OfficeColor? _accentColor;
+    private const string AccentStorageKey = "animarr-accent";
 
     protected override void OnInitialized()
     {
         _themeMode = ThemeService.Mode;
+        _accentColor = ThemeService.AccentColor;
         ThemeService.OnChange += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", AccentStorageKey);
+            if (!string.IsNullOrEmpty(stored) && Enum.TryParse<OfficeColor>(stored, out var color))
+            {
+                ThemeService.SetAccentColor(color);
+                _accentColor = color;
+                StateHasChanged();
+            }
+        }
     }
 
     private void OnThemeChanged()
     {
         _themeMode = ThemeService.Mode;
-        InvokeAsync(StateHasChanged);
+        _accentColor = ThemeService.AccentColor;
+        InvokeAsync(SaveAccentColorAsync);
+    }
+
+    private async Task SaveAccentColorAsync()
+    {
+        if (_accentColor.HasValue)
+            await JS.InvokeVoidAsync("localStorage.setItem", AccentStorageKey, _accentColor.Value.ToString());
+        else
+            await JS.InvokeVoidAsync("localStorage.removeItem", AccentStorageKey);
+        StateHasChanged();
     }
 
     private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
@@ -86,5 +114,5 @@
     }
 
     private string HeaderStyle() =>
-        _themeMode == DesignThemeModes.Dark ? "background-color:#1a3a5c;" : "";
+        _themeMode == DesignThemeModes.Dark ? "background-color:var(--colorBrandBackground2);display:flex;align-items:center;" : "display:flex;align-items:center;";
 }

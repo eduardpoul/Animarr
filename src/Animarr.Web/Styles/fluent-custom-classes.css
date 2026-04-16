@@ -1,0 +1,186 @@
+/* ============================================================
+   Fluent UI + Tailwind — кастомные классы компонентов
+   Версия: 3.0 | Платформа: Blazor Web
+   ПРАВИЛО: использовать CSS-переменные из @theme где возможно.
+            var(--neutral-*) — FluentUI runtime vars (адаптируются к теме).
+            var(--spacing-f-*) / var(--radius-fluent*) — из @theme.
+   ============================================================ */
+
+@layer components {
+
+    /* ── КНОПКИ ───────────────────────────────────────────── */
+
+    .fluent-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--spacing-f-xs, 0.25rem);
+        min-height: var(--height-touch, 2rem);
+        padding: 0 var(--spacing-f-m, 0.75rem);
+        border-radius: var(--radius-fluent, 0.25rem);
+        font-size: 0.875rem;
+        font-weight: 600;
+        line-height: 1.25rem;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background-color 0.1s, border-color 0.1s;
+    }
+
+    .fluent-btn--icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: var(--height-touch, 2rem);
+        min-width: var(--height-touch, 2rem);
+        padding: 0;
+        border-radius: var(--radius-fluent, 0.25rem);
+    }
+
+    /* ── ПОЛЯ ВВОДА ───────────────────────────────────────── */
+
+    .fluent-input {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-f-xs, 0.25rem);
+    }
+
+    .fluent-input fluent-text-field,
+    .fluent-input fluent-text-area,
+    .fluent-input fluent-number-field,
+    .fluent-input fluent-select,
+    .fluent-input fluent-combobox {
+        width: 100%;
+    }
+
+    /* ── КАРТОЧКИ ─────────────────────────────────────────── */
+
+    .fluent-card {
+        background: var(--neutral-layer-2, #fafafa);
+        border: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+        border-radius: var(--radius-fluent-lg, 0.5rem);
+        padding: var(--spacing-f-l, 1rem);
+        box-shadow: var(--shadow-fluent-4, 0 2px 4px rgba(0,0,0,0.14));
+    }
+
+    /* ── ПАНЕЛИ (sidebar / drawer) ────────────────────────── */
+
+    .fluent-panel {
+        background: var(--neutral-layer-floating, #ffffff);
+        border-radius: var(--radius-fluent-lg, 0.5rem);
+        box-shadow: var(--shadow-fluent-8, 0 4px 8px rgba(0,0,0,0.14));
+    }
+
+    /* ── ТАБЛИЦЫ ─────────────────────────────────────────── */
+
+    .fluent-table {
+        width: 100%;
+        font-size: 0.875rem;
+    }
+
+    /* ── СТРАНИЦЫ ─────────────────────────────────────────── */
+
+    .fluent-page {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-f-xxl, 1.5rem);
+        padding: var(--spacing-f-xxl, 1.5rem);
+    }
+
+    .fluent-page-header {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-f-m, 0.75rem);
+        min-height: 2.5rem;
+    }
+
+    /* ── ФОРМЫ ───────────────────────────────────────────── */
+
+    .fluent-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-f-l, 1rem);
+    }
+
+    .fluent-form-row {
+        display: flex;
+        gap: var(--spacing-f-m, 0.75rem);
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+
+    /* ── СЕКЦИИ ──────────────────────────────────────────── */
+
+    .fluent-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-f-m, 0.75rem);
+    }
+
+    .fluent-section-header {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-f-m, 0.75rem);
+        padding-bottom: var(--spacing-f-s, 0.5rem);
+        border-bottom: 1px solid var(--neutral-stroke-subtle, #e0e0e0);
+    }
+
+    /* ── ПУСТОЕ СОСТОЯНИЕ ────────────────────────────────── */
+
+    .fluent-empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--spacing-f-m, 0.75rem);
+        padding: var(--spacing-f-4xl, 2.5rem) var(--spacing-f-xxl, 1.5rem);
+        text-align: center;
+        color: var(--neutral-foreground-hint, #616161);
+    }
+
+    /* ── ИНФОРМАЦИОННАЯ ПАНЕЛЬ (результаты, подсказки) ────── */
+
+    .fluent-info-box {
+        background: var(--neutral-layer-3, #f5f5f5);
+        border: 1px solid var(--neutral-stroke-subtle, #e0e0e0);
+        border-radius: var(--radius-fluent, 0.25rem);
+        padding: var(--spacing-f-m, 0.75rem) var(--spacing-f-l, 1rem);
+        font-size: 0.875rem;
+        color: var(--neutral-foreground-rest, #242424);
+    }
+
+    /* ── СТАТУСЫ ─────────────────────────────────────────── */
+
+    .fluent-status-dot {
+        width: 0.625rem;
+        height: 0.625rem;
+        border-radius: 9999px;
+        flex-shrink: 0;
+        margin: auto;
+    }
+
+    .fluent-status-dot--success { background-color: var(--colorStatusSuccessForeground1, #107C10); }
+    .fluent-status-dot--error   { background-color: var(--colorStatusDangerForeground1,  #D13438); }
+    .fluent-status-dot--warning { background-color: var(--colorStatusWarningForeground1, #F7630C); }
+    .fluent-status-dot--neutral { background-color: var(--neutral-foreground-hint,       #898989); }
+    .fluent-status-dot--info    { background-color: var(--accent-fill-rest,              #0F6CBD); }
+
+}
+
+/* ============================================================
+   Тёмная тема — смягчение рамки вокруг инпутов/селектов
+   FluentUI ставит data-theme="dark" на <body> при тёмной теме.
+   Переопределяем --neutral-stroke-rest чтобы рамка была менее
+   яркой/белой и выглядела так же деликатно, как в Windows 11.
+   ============================================================ */
+
+body[data-theme="dark"] fluent-select,
+body[data-theme="dark"] fluent-text-field,
+body[data-theme="dark"] fluent-number-field,
+body[data-theme="dark"] fluent-combobox,
+body[data-theme="dark"] fluent-text-area {
+    --neutral-stroke-rest:   rgba(255, 255, 255, 0.12);
+    --neutral-stroke-hover:  rgba(255, 255, 255, 0.18);
+    --neutral-stroke-active: rgba(255, 255, 255, 0.22);
+    --neutral-stroke-focus1: rgba(255, 255, 255, 0.30);
+    --neutral-stroke-focus2: rgba(255, 255, 255, 0.08);
+}

@@ -1,0 +1,391 @@
+@inject IRenameService RenameService
+@inject IToastService ToastService
+@inject FolderWatcherService WatcherService
+@implements IDisposable
+
+@{
+    var renameable  = _items?.Where(i => i.Status == PreviewStatus.WillRename).ToList();
+    var selected    = renameable?.Count(i => i.IsSelected) ?? 0;
+    var allSelected = renameable is { Count: > 0 } && renameable.All(i => i.IsSelected);
+    var someSelected = selected > 0 && !allSelected;
+}
+
+<div style="padding:12px 14px 14px 48px;background:var(--neutral-layer-3);border-top:1px solid var(--neutral-stroke-subtle);">
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <FluentButton Appearance="Appearance.Accent"
+                      IconStart="@(new Icons.Regular.Size20.Search())"
+                      OnClick="ScanAsync"
+                      Disabled="@_scanning">
+            @(_scanning ? L["folder_files.btn_scanning"] : L["folder_files.btn_scan"])
+        </FluentButton>
+        @if (_items is not null)
+        {
+            <div style="display:flex;align-items:center;gap:6px;flex:1;">
+                <FluentCheckbox Value="@allSelected"
+                                Indeterminate="@someSelected"
+                                ValueChanged="@((bool v) => SelectAll(v || someSelected))"
+                                Title="@(allSelected ? L["folder_files.btn_deselect_all"] : L["folder_files.btn_select_all"])"
+                                Disabled="@(renameable is null || renameable.Count == 0)" />
+                <FluentLabel Style="font-size:12px;">
+                    @L.Get("folder_files.stats", _items.Count, renameable?.Count ?? 0, selected)
+                </FluentLabel>
+            </div>
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@(new Icons.Regular.Size20.Checkmark())"
+                          OnClick="ApplyAsync"
+                          Disabled="@(selected == 0 || _applying)">
+                @(_applying ? L["folder_files.btn_applying"] : L.Get("folder_files.btn_apply", selected))
+            </FluentButton>
+        }
+    </FluentStack>
+
+    @if (_scanning)
+    {
+        <FluentProgress Width="100%" Style="margin-bottom:var(--spacingVerticalS);" />
+    }
+
+    @if (_items is { Count: > 0 })
+    {
+        var tree = BuildScanTree(_items);
+        <div style="border:1px solid var(--neutral-stroke-subtle);border-radius:4px;overflow:hidden;">
+            <div style="display:grid;grid-template-columns:44px 1fr 28px 1fr 140px 1fr 72px;background:var(--neutral-layer-2);border-bottom:1px solid var(--neutral-stroke-subtle);font-size:12px;font-weight:600;color:var(--neutral-foreground-rest);">
+                <div></div>
+                <div style="padding:5px 4px;">@L["folder_files.col_original"]</div>
+                <div></div>
+                <div style="padding:5px 4px;">@L["folder_files.col_new"]</div>
+                <div style="padding:5px 4px;">@L["folder_files.col_status"]</div>
+                <div style="padding:5px 4px;">@L["folder_files.col_reason"]</div>
+                <div></div>
+            </div>
+            @RenderScanNodes(tree.Children, 0)
+        </div>
+    }
+    else if (_items is not null && !_scanning)
+    {
+        <div style="font-size:13px;color:var(--neutral-foreground-hint);padding:6px 0;">
+            @L["folder_files.status_already_correct"]
+        </div>
+    }
+
+    @if (_autoEvents.Count > 0)
+    {
+        <FluentDivider Style="margin:12px 0 8px;" />
+        <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">
+            @L.Get("folder_files.auto_rename_section", _autoEvents.Count)
+        </FluentLabel>
+        @foreach (var ev in _autoEvents)
+        {
+            <div style="font-family:monospace;font-size:13px;margin:3px 0;">
+                <span style="color:var(--neutral-foreground-hint);">@ev.From</span>
+                &nbsp;→&nbsp;
+                <span style="color:var(--color-fluent-success);">@ev.To</span>
+            </div>
+        }
+    }
+</div>
+
+<!-- Rename file dialog -->
+<FluentDialog @bind-Hidden="_renameDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="420px">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["folder_files.rename_dialog_title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentTextField @bind-Value="_renameNewName"
+                         Label="@L["folder_files.rename_dialog_label"]"
+                         style="width:100%;" />
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmRenameAsync">@L["folder_files.rename_dialog_ok"]</FluentButton>
+        <FluentButton OnClick="@(() => _renameDialogHidden = true)">@L["folders.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+<!-- Delete file dialog -->
+<FluentDialog @bind-Hidden="_deleteDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="420px">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["folder_files.delete_dialog_title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentLabel>@L.Get("folder_files.delete_dialog_message", _deleteTarget?.OriginalName ?? "")</FluentLabel>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmDeleteAsync">@L["folder_files.delete_dialog_ok"]</FluentButton>
+        <FluentButton OnClick="@(() => _deleteDialogHidden = true)">@L["folders.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    [Parameter, EditorRequired] public FolderWatcher Folder { get; set; } = null!;
+
+    private bool _scanning;
+    private bool _applying;
+    private List<RenamePreviewItem>? _items;
+    private List<(string From, string To)> _autoEvents = [];
+    private Dictionary<string, bool> _expandedScanNodes = new();
+
+    // ── Rename dialog ──────────────────────────────────────────────
+    private bool _renameDialogHidden = true;
+    private RenamePreviewItem? _renameTarget;
+    private string _renameNewName = "";
+
+    // ── Delete dialog ──────────────────────────────────────────────
+    private bool _deleteDialogHidden = true;
+    private RenamePreviewItem? _deleteTarget;
+
+    protected override async Task OnInitializedAsync()
+    {
+        WatcherService.FileRenamed += OnFileRenamed;
+        await ScanAsync();
+    }
+
+    public void Dispose() => WatcherService.FileRenamed -= OnFileRenamed;
+
+    private async Task ScanAsync()
+    {
+        _scanning = true;
+        _items = null;
+        StateHasChanged();
+        try
+        {
+            _items = await RenameService.ScanFolderAsync(Folder.Id);
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_scan_error", ex.Message));
+        }
+        finally
+        {
+            _scanning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_items is null) return;
+        _applying = true;
+        StateHasChanged();
+        try
+        {
+            var approved = _items.Where(i => i.IsSelected && i.Status == PreviewStatus.WillRename).ToList();
+            await RenameService.ApplyRenamesAsync(Folder.Id, approved);
+            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_renamed", approved.Count));
+            _items = null;
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
+        finally
+        {
+            _applying = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SelectAll(bool selectAll)
+    {
+        if (_items is null) return;
+        _items.Where(i => i.Status == PreviewStatus.WillRename).ToList().ForEach(i => i.IsSelected = selectAll);
+        StateHasChanged();
+    }
+
+    private void OnFileRenamed(Guid folderId, string from, string to)
+    {
+        if (folderId != Folder.Id) return;
+        _autoEvents.Insert(0, (from, to));
+        if (_autoEvents.Count > 15) _autoEvents.RemoveAt(15);
+        InvokeAsync(StateHasChanged);
+    }
+
+    // ── Scan tree ──────────────────────────────────────────────────
+
+    private class ScanNode
+    {
+        public string Name { get; set; } = "";
+        public string RelPath { get; set; } = "";
+        public bool IsDir { get; set; }
+        public RenamePreviewItem? Item { get; set; }
+        public List<ScanNode> Children { get; } = [];
+        public int FileCount => IsDir ? Children.Sum(c => c.IsDir ? c.FileCount : 1) : 0;
+    }
+
+    private ScanNode BuildScanTree(List<RenamePreviewItem> items)
+    {
+        var baseDir = Folder.Path;
+        var root = new ScanNode { IsDir = true };
+
+        foreach (var item in items)
+        {
+            string relPath;
+            try { relPath = Path.GetRelativePath(baseDir, item.OriginalPath); }
+            catch { relPath = Path.GetFileName(item.OriginalPath); }
+
+            var parts = relPath.Split(
+                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+            InsertScanNode(root, parts, 0, item, "");
+        }
+
+        foreach (var child in root.Children.Where(c => c.IsDir))
+            _expandedScanNodes.TryAdd(child.RelPath, true);
+
+        return root;
+    }
+
+    private static void InsertScanNode(ScanNode parent, string[] parts, int idx, RenamePreviewItem item, string relBase)
+    {
+        if (idx >= parts.Length) return;
+        var name = parts[idx];
+        var rel = relBase.Length > 0 ? relBase + "/" + name : name;
+
+        if (idx == parts.Length - 1)
+        {
+            parent.Children.Add(new ScanNode { Name = name, RelPath = rel, IsDir = false, Item = item });
+            return;
+        }
+
+        var dir = parent.Children.FirstOrDefault(c => c.IsDir && c.Name == name);
+        if (dir == null)
+        {
+            dir = new ScanNode { Name = name, RelPath = rel, IsDir = true };
+            parent.Children.Add(dir);
+        }
+        InsertScanNode(dir, parts, idx + 1, item, rel);
+    }
+
+    private RenderFragment RenderScanNodes(List<ScanNode> nodes, int depth) => __builder =>
+    {
+        var sorted = nodes
+            .OrderByDescending(n => n.IsDir)
+            .ThenBy(n => n.Name, NaturalStringComparer.Ordinal);
+        foreach (var node in sorted)
+        {
+            if (node.IsDir)
+            {
+                var key = node.RelPath;
+                var exp = _expandedScanNodes.GetValueOrDefault(key, false);
+                var capturedKey = key;
+                var fc = node.FileCount;
+                <div style="display:flex;align-items:center;gap:6px;padding:5px 8px 5px @(depth * 16 + 8)px;background:var(--neutral-layer-2);cursor:pointer;border-bottom:1px solid var(--neutral-stroke-subtle);user-select:none;"
+                     @onclick="@(() => { _expandedScanNodes[capturedKey] = !_expandedScanNodes.GetValueOrDefault(capturedKey, false); })">
+                    <FluentIcon Value="@(exp ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;opacity:0.7;" />
+                    <FluentIcon Value="@(exp ? (Icon)(new Icons.Regular.Size16.FolderOpen()) : new Icons.Regular.Size16.Folder())" Style="flex-shrink:0;opacity:0.7;" />
+                    <span style="font-size:13px;font-weight:500;">@node.Name</span>
+                    <span style="font-size:12px;color:var(--neutral-foreground-hint);">(@fc)</span>
+                </div>
+                @if (exp)
+                {
+                    @RenderScanNodes(node.Children, depth + 1)
+                }
+            }
+            else if (node.Item is { } item)
+            {
+                <div style="display:grid;grid-template-columns:44px 1fr 28px 1fr 140px 1fr 72px;border-bottom:1px solid var(--neutral-stroke-subtle);align-items:center;">
+                    <div style="padding:4px 8px;display:flex;align-items:center;">
+                        <FluentCheckbox Value="@item.IsSelected"
+                                        ValueChanged="@((bool v) => item.IsSelected = v)"
+                                        Disabled="@(item.Status != PreviewStatus.WillRename)" />
+                    </div>
+                    <div style="padding:4px 4px 4px @(depth * 16 + 4)px;overflow:hidden;">
+                        <code style="font-size:13px;opacity:@(item.Status == PreviewStatus.WillRename ? 1.0 : 0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">@item.OriginalName</code>
+                    </div>
+                    <div style="padding:4px;text-align:center;">
+                        @if (item.Status == PreviewStatus.WillRename)
+                        {<span style="color:var(--neutral-foreground-hint);">→</span>}
+                    </div>
+                    <div style="padding:4px;overflow:hidden;">
+                        @if (item.NewName is not null)
+                        {<code style="font-size:13px;color:@GetNameColor(item.Status);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">@item.NewName</code>}
+                    </div>
+                    <div style="padding:4px;">
+                        <span class="@GetStatusClass(item.Status)">@GetStatusLabel(item.Status)</span>
+                    </div>
+                    <div style="padding:4px;overflow:hidden;">
+                        <span style="font-size:12px;color:var(--neutral-foreground-hint);">@item.Reason</span>
+                    </div>
+                    <div style="padding:4px;display:flex;gap:4px;justify-content:flex-end;">
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Rename())" Title="@L["folder_files.btn_rename"]" OnClick="@(() => OpenRename(item))" />
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())" Title="@L["folder_files.btn_delete"]" OnClick="@(() => OpenDelete(item))" />
+                    </div>
+                </div>
+            }
+        }
+    };
+
+    private string GetStatusLabel(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename     => L["folder_files.status_will_rename"],
+        PreviewStatus.WillSkip       => L["folder_files.status_will_skip"],
+        PreviewStatus.AlreadyCorrect => L["folder_files.status_already_correct"],
+        PreviewStatus.Error          => L["folder_files.status_error"],
+        _                            => "—"
+    };
+
+    private static string GetStatusClass(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename     => "status-badge status-pending",
+        PreviewStatus.WillSkip       => "status-badge status-skipped",
+        PreviewStatus.AlreadyCorrect => "status-badge status-renamed",
+        PreviewStatus.Error          => "status-badge status-error",
+        _                            => "status-badge"
+    };
+
+    private static string GetNameColor(PreviewStatus s) => s switch
+    {
+        PreviewStatus.WillRename => "var(--colorStatusSuccessForeground1)",
+        PreviewStatus.Error      => "var(--colorStatusDangerForeground1)",
+        _                        => "inherit"
+    };
+
+    private void OpenRename(RenamePreviewItem item)
+    {
+        _renameTarget = item;
+        _renameNewName = item.OriginalName;
+        _renameDialogHidden = false;
+    }
+
+    private async Task ConfirmRenameAsync()
+    {
+        if (_renameTarget is null || string.IsNullOrWhiteSpace(_renameNewName)) return;
+        _renameDialogHidden = true;
+        var dir = Path.GetDirectoryName(_renameTarget.OriginalPath);
+        if (dir is null) return;
+        var newPath = Path.Combine(dir, _renameNewName.Trim());
+        try
+        {
+            File.Move(_renameTarget.OriginalPath, newPath);
+            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_file_renamed", _renameTarget.OriginalName, _renameNewName.Trim()));
+            await ScanAsync();
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
+        _renameTarget = null;
+    }
+
+    private void OpenDelete(RenamePreviewItem item)
+    {
+        _deleteTarget = item;
+        _deleteDialogHidden = false;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is null) return;
+        _deleteDialogHidden = true;
+        var name = _deleteTarget.OriginalName;
+        try
+        {
+            File.Delete(_deleteTarget.OriginalPath);
+            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_file_deleted", name));
+            await ScanAsync();
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
+        _deleteTarget = null;
+    }
+}

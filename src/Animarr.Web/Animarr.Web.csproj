@@ -15,4 +15,10 @@
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
   </ItemGroup>
 
+  <!-- Tailwind CSS build -->
+  <Target Name="BuildTailwindCSS" BeforeTargets="Build">
+    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ContinueOnError="false" />
+  </Target>
+
 </Project>

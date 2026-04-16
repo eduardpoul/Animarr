@@ -2,6 +2,9 @@
 **/bin/
 **/obj/
 
+# Node modules (platform-specific native bindings must be installed fresh inside the container)
+**/node_modules/
+
 # IDE files
 .vs/
 *.user

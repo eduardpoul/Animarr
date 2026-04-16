@@ -9,7 +9,9 @@
 
 @if (_loading)
 {
-    <progress style="width:100%;height:4px;"></progress>
+    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
+        <FluentProgressRing />
+    </div>
 }
 else if (_section is null)
 {
@@ -23,13 +25,11 @@ else
             <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:12px;">@_section.Path</FluentLabel>
         </FluentStack>
         <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowSync())"
-                      OnClick="RefreshSection">
-            @L["section_folders.btn_refresh"]
-        </FluentButton>
+                      Title="@(L["section_folders.btn_refresh"])"
+                      OnClick="RefreshSection" />
         <FluentButton IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
-                      OnClick="@(() => Nav.NavigateTo("/folders"))">
-            @L["section_folders.btn_back"]
-        </FluentButton>
+                      Title="@(L["section_folders.btn_back"])"
+                      OnClick="@(() => Nav.NavigateTo("/folders"))" />
     </FluentStack>
 
     @if (_children.Count == 0)
@@ -51,19 +51,18 @@ else
                     : "—")
             </TemplateColumn>
             <TemplateColumn Title="@(L["section_folders.col_actions"])" Align="Align.End">
-                <FluentButton IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
-                              OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files?back={SectionId}"))">
-                    @L["section_folders.btn_files"]
-                </FluentButton>
-                <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                              OnClick="@(() => OpenEdit(context))">
-                    @L["section_folders.btn_edit"]
-                </FluentButton>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
+                              Title="@(L["section_folders.btn_files"])"
+                              OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files?back={SectionId}"))" />
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.Edit())"
+                              Title="@(L["section_folders.btn_edit"])"
+                              OnClick="@(() => OpenEdit(context))" />
                 <FluentButton Appearance="Appearance.Stealth"
                               IconStart="@(new Icons.Regular.Size20.Delete())"
-                              OnClick="@(() => AskDelete(context))">
-                    @L["section_folders.btn_delete"]
-                </FluentButton>
+                              Title="@(L["section_folders.btn_delete"])"
+                              OnClick="@(() => AskDelete(context))" />
             </TemplateColumn>
         </FluentDataGrid>
     }

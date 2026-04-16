@@ -32,6 +32,27 @@
                     <FluentOption TOption="string" Value="Dark">@L["settings.theme_dark"]</FluentOption>
                     <FluentOption TOption="string" Value="Light">@L["settings.theme_light"]</FluentOption>
                 </FluentSelect>
+
+                <div style="margin-top:16px;">
+                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);display:block;margin-bottom:8px;">
+                        @L["settings.accent_color_label"]
+                    </FluentLabel>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                        @foreach (var (color, hex) in _accentColors)
+                        {
+                            var isSelected = _accentColorValue == color;
+                            var isDefault = color == null;
+                            <FluentTooltip Anchor="@($"swatch-{(color == null ? "default" : color.ToString())}")" Position="TooltipPosition.Bottom">
+                                @(isDefault ? L["settings.accent_color_default"] : color!.ToString())
+                            </FluentTooltip>
+                            <button id="@($"swatch-{(color == null ? "default" : color.ToString())}")"
+                                    title="@(isDefault ? L["settings.accent_color_default"] : color!.ToString())"
+                                    @onclick="() => OnAccentColorChanged(color)"
+                                    style="@($"width:24px;height:24px;border-radius:50%;border:{(isSelected ? "3px solid var(--neutral-foreground-rest)" : "2px solid transparent")};padding:0;cursor:pointer;background:{(isDefault ? "conic-gradient(red,orange,yellow,green,cyan,blue,violet,red)" : hex)};outline:{(isSelected ? "2px solid var(--accent-fill-rest)" : "none")};outline-offset:2px;")">
+                            </button>
+                        }
+                    </div>
+                </div>
             </div>
 
             <FluentDivider />
@@ -78,14 +99,13 @@
                 <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["patterns.title"]</FluentLabel>
                 <FluentButton Appearance="Appearance.Accent"
                               IconStart="@(new Icons.Regular.Size20.Add())"
-                              OnClick="@(() => OpenPatternDialog(null))">
-                    @L["patterns.add_button"]
-                </FluentButton>
+                              Title="@(L["patterns.add_button"])"
+                              OnClick="@(() => OpenPatternDialog(null))" />
             </FluentStack>
 
             @if (_patternsLoading)
             {
-                <progress style="width:100%;height:4px;"></progress>
+                <FluentProgress Width="100%" />
             }
             else
             {
@@ -102,18 +122,23 @@
                             @(context.IsBuiltIn ? L["patterns.type_builtin"] : L["patterns.type_custom"])
                         </FluentBadge>
                     </TemplateColumn>
+                    <TemplateColumn Title="@(L["patterns.col_applicable"])" Width="240px">
+                        @(context.ApplicableTo switch {
+                            FolderType.Movie  => L["patterns.applicable_movie"],
+                            FolderType.Series => L["patterns.applicable_series"],
+                            _                 => L["patterns.applicable_all"]
+                        })
+                    </TemplateColumn>
                     <TemplateColumn Title="@(L["patterns.col_actions"])" Align="Align.End" Width="140px">
                         @if (!context.IsBuiltIn)
                         {
                             <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                                          OnClick="@(() => OpenPatternDialog(context))">
-                                @L["patterns.btn_edit"]
-                            </FluentButton>
+                                          Title="@(L["patterns.btn_edit"])"
+                                          OnClick="@(() => OpenPatternDialog(context))" />
                             <FluentButton Appearance="Appearance.Stealth"
                                           IconStart="@(new Icons.Regular.Size20.Delete())"
-                                          OnClick="@(() => DeletePattern(context))">
-                                @L["patterns.btn_delete"]
-                            </FluentButton>
+                                          Title="@(L["patterns.btn_delete"])"
+                                          OnClick="@(() => DeletePattern(context))" />
                         }
                     </TemplateColumn>
                 </FluentDataGrid>
@@ -124,7 +149,7 @@
                 <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:10px;">
                     @L["patterns.test_hint"]
                 </FluentLabel>
-                <FluentStack Orientation="Orientation.Horizontal" Style="gap:10px;" VerticalAlignment="VerticalAlignment.Bottom">
+                <FluentStack Orientation="Orientation.Horizontal" Style="gap:10px;max-width:800px;" VerticalAlignment="VerticalAlignment.Bottom">
                     <FluentTextField @bind-Value="_testInput"
                                      Label="@(L["patterns.test_field_label"])"
                                      Placeholder="@(L["patterns.test_placeholder"])"
@@ -137,17 +162,17 @@
                     <div style="margin-top:14px;padding:14px;background:var(--neutral-layer-2,#f3f2f1);border-radius:6px;">
                         @if (_testResult.IsMatched)
                         {
-                            <div style="color:#107c10;font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
+                            <div style="color:var(--color-fluent-success);font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
                             <div style="font-family:monospace;font-size:13px;line-height:1.8;">
                                 @L["patterns.test_season_label"] <b>@(_testResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b><br />
                                 @L["patterns.test_episode_label"] <b>@_testResult.Episode</b><br />
                                 @L["patterns.test_kind_label"] <b>@_testKind</b><br />
-                                @L["patterns.test_new_name_label"] <b style="color:#107c10;">@(_testNewName ?? "—")</b>
+                                @L["patterns.test_new_name_label"] <b style="color:var(--color-fluent-success);">@(_testNewName ?? "—")</b>
                             </div>
                         }
                         else
                         {
-                            <div style="color:#a80000;font-weight:600;">@L["patterns.test_not_matched"]</div>
+                            <div style="color:var(--color-fluent-error);font-weight:600;">@L["patterns.test_not_matched"]</div>
                         }
                     </div>
                 }
@@ -155,34 +180,6 @@
 
         </FluentStack>
     </FluentTab>
-
-    <!-- Add/Edit pattern dialog -->
-    <FluentDialog @bind-Hidden="_patternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
-        <FluentDialogHeader ShowDismiss="true">
-            <FluentLabel Typo="Typography.H4">
-                @(_patternEditTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
-            </FluentLabel>
-        </FluentDialogHeader>
-        <FluentDialogBody>
-            <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
-                <FluentTextField @bind-Value="_formName" Label="@(L["patterns.field_name_label"])" Placeholder="@(L["patterns.field_name_placeholder"])" style="width:100%;" />
-                <FluentTextField @bind-Value="_formPattern"
-                                 Label="@(L["patterns.field_regex_label"])"
-                                 Placeholder="@(L["patterns.field_regex_placeholder"])"
-                                 style="width:100%;font-family:monospace;" />
-                <FluentNumberField TValue="int" @bind-Value="_formPriority"
-                                   Label="@(L["patterns.field_priority_label"])"
-                                   Min="1" Max="999" style="width:160px;" />
-            </FluentStack>
-        </FluentDialogBody>
-        <FluentDialogFooter>
-            <FluentButton Appearance="Appearance.Accent" OnClick="SavePattern"
-                          Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern))">
-                @L["patterns.btn_save"]
-            </FluentButton>
-            <FluentButton OnClick="@(() => _patternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
-        </FluentDialogFooter>
-    </FluentDialog>
 
     <!-- ============================================================ -->
     <!-- TAB: Ignore Rules -->
@@ -192,7 +189,7 @@
 
             @if (_loading)
             {
-                <progress style="width:100%;height:4px;"></progress>
+                <FluentProgress Width="100%" />
             }
             else
             {
@@ -211,9 +208,8 @@
                         <FluentButton Appearance="Appearance.Accent"
                                       IconStart="@(new Icons.Regular.Size20.Add())"
                                       OnClick="AddRule"
-                                      Disabled="@string.IsNullOrWhiteSpace(_newMask)">
-                            @L["settings.btn_add_mask"]
-                        </FluentButton>
+                                      Title="@(L["settings.btn_add_mask"])"
+                                      Disabled="@string.IsNullOrWhiteSpace(_newMask)" />
                     </FluentStack>
 
                     <FluentDataGrid Items="@_rules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
@@ -221,9 +217,8 @@
                         <TemplateColumn Title="" Align="Align.End" Width="100px">
                             <FluentButton Appearance="Appearance.Stealth"
                                           IconStart="@(new Icons.Regular.Size20.Delete())"
-                                          OnClick="@(() => DeleteRule(context))">
-                                @L["settings.btn_delete_mask"]
-                            </FluentButton>
+                                          Title="@(L["settings.btn_delete_mask"])"
+                                          OnClick="@(() => DeleteRule(context))" />
                         </TemplateColumn>
                     </FluentDataGrid>
                 </div>
@@ -238,7 +233,7 @@
     <FluentTab Id="torrent" Label="@(L["settings.tab_torrent"])">
         @if (_torrentCfg is null)
         {
-            <progress style="width:100%;height:4px;margin-top:16px;"></progress>
+            <FluentProgress Width="100%" Style="margin-top:var(--spacingVerticalL);" />
         }
         else
         {
@@ -247,10 +242,10 @@
                 <div>
                     <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_speed_title"]</FluentLabel>
                     <div style="display:flex;flex-direction:column;gap:10px;">
-                        <FluentNumberField @bind-Value="_globalDlLimitKbps"
+                        <FluentNumberField @bind-Value="_globalDlLimitMbps"
                                            Label="@(L["settings.torrent_dl_limit_label"])"
                                            Min="0" style="width:260px;" />
-                        <FluentNumberField @bind-Value="_globalUlLimitKbps"
+                        <FluentNumberField @bind-Value="_globalUlLimitMbps"
                                            Label="@(L["settings.torrent_ul_limit_label"])"
                                            Min="0" style="width:260px;" />
                     </div>
@@ -321,6 +316,43 @@
 
 </FluentTabs>
 
+<!-- Add/Edit pattern dialog -->
+<FluentDialog @bind-Hidden="_patternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H4">
+            @(_patternEditTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
+        </FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
+            <FluentTextField @bind-Value="_formName" Label="@(L["patterns.field_name_label"])" Placeholder="@(L["patterns.field_name_placeholder"])" style="width:100%;" />
+            <FluentTextField @bind-Value="_formPattern"
+                             Label="@(L["patterns.field_regex_label"])"
+                             Placeholder="@(L["patterns.field_regex_placeholder"])"
+                             style="width:100%;font-family:monospace;" />
+            <FluentNumberField TValue="int" @bind-Value="_formPriority"
+                               Label="@(L["patterns.field_priority_label"])"
+                               Min="1" Max="999" style="width:160px;" />
+            <FluentSelect TOption="string"
+                          Label="@(L["patterns.field_applicable_label"])"
+                          Value="@(_formApplicableTo?.ToString() ?? "")"
+                          ValueChanged="@(v => _formApplicableTo = string.IsNullOrEmpty(v) ? null : Enum.Parse<FolderType>(v))"
+                          style="width:240px;">
+                <FluentOption TOption="string" Value="">@L["patterns.applicable_all"]</FluentOption>
+                <FluentOption TOption="string" Value="Series">@L["patterns.applicable_series"]</FluentOption>
+                <FluentOption TOption="string" Value="Movie">@L["patterns.applicable_movie"]</FluentOption>
+            </FluentSelect>
+        </FluentStack>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="SavePattern"
+                      Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern))">
+            @L["patterns.btn_save"]
+        </FluentButton>
+        <FluentButton OnClick="@(() => _patternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
 @code {
     // ── General / Rules / Torrent state ──────────────────────────
     private List<IgnoreRule> _rules = [];
@@ -328,10 +360,32 @@
     private string _newMask = "";
     private AppSettings _cfg = new();
     private string _themeStr = "System";
+    private OfficeColor? _accentColorValue;
     private string _activeTab = "general";
+
+    private static readonly (OfficeColor? Color, string Hex)[] _accentColors =
+    [
+        (null,                        "#808080"),
+        (OfficeColor.Outlook,         "#0f6cbd"),
+        (OfficeColor.Teams,           "#6264a7"),
+        (OfficeColor.Word,            "#2b579a"),
+        (OfficeColor.Excel,           "#217346"),
+        (OfficeColor.PowerPoint,      "#b7472a"),
+        (OfficeColor.OneNote,         "#7719aa"),
+        (OfficeColor.PowerApps,       "#742774"),
+        (OfficeColor.Stream,          "#bc1948"),
+        (OfficeColor.Sway,            "#008272"),
+        (OfficeColor.Publisher,       "#077568"),
+        (OfficeColor.Planner,         "#31752f"),
+        (OfficeColor.Visio,           "#3955a3"),
+        (OfficeColor.Yammer,          "#106ebe"),
+        (OfficeColor.PowerBI,         "#f2c811"),
+        (OfficeColor.Office,          "#d83b01"),
+        (OfficeColor.Access,          "#a4373a"),
+    ];
     private TorrentConfig? _torrentCfg;
-    private int _globalDlLimitKbps;
-    private int _globalUlLimitKbps;
+    private int _globalDlLimitMbps;
+    private int _globalUlLimitMbps;
 
     // ── Patterns state ───────────────────────────────────────────
     private List<RenamePattern> _patterns = [];
@@ -342,6 +396,7 @@
     private string _formName = "";
     private string _formPattern = "";
     private int _formPriority = 100;
+    private FolderType? _formApplicableTo;
 
     private string _testInput = "";
     private ParseResult? _testResult;
@@ -356,14 +411,15 @@
         if (qs["tab"] is { Length: > 0 } tab) _activeTab = tab;
 
         _themeStr = ThemeService.Mode.ToString();
+        _accentColorValue = ThemeService.AccentColor;
         _cfg = AppSettingsOptions.Value;
         await ReloadRulesAsync();
         _loading = false;
 
         await using var db = await DbFactory.CreateDbContextAsync();
         _torrentCfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1) ?? new TorrentConfig();
-        _globalDlLimitKbps = _torrentCfg.GlobalDownloadLimit / 125;
-        _globalUlLimitKbps = _torrentCfg.GlobalUploadLimit / 125;
+        _globalDlLimitMbps = _torrentCfg.GlobalDownloadLimit / 125000;
+        _globalUlLimitMbps = _torrentCfg.GlobalUploadLimit / 125000;
 
         await LoadPatternsAsync();
         _patternsLoading = false;
@@ -374,6 +430,12 @@
         _themeStr = value;
         if (Enum.TryParse<DesignThemeModes>(value, out var mode))
             ThemeService.Set(mode);
+    }
+
+    private void OnAccentColorChanged(OfficeColor? color)
+    {
+        _accentColorValue = color;
+        ThemeService.SetAccentColor(color);
     }
 
     private async Task OnLanguageChanged(string lang)
@@ -436,6 +498,7 @@
         _formName = pattern?.Name ?? "";
         _formPattern = pattern?.Pattern ?? "";
         _formPriority = pattern?.Priority ?? 100;
+        _formApplicableTo = pattern?.ApplicableTo;
         _patternDialogHidden = false;
     }
 
@@ -452,6 +515,7 @@
                 Name = _formName.Trim(),
                 Pattern = _formPattern.Trim(),
                 Priority = _formPriority,
+                ApplicableTo = _formApplicableTo,
                 Scope = PatternScope.Global,
                 IsBuiltIn = false,
             });
@@ -464,6 +528,7 @@
             entity.Name = _formName.Trim();
             entity.Pattern = _formPattern.Trim();
             entity.Priority = _formPriority;
+            entity.ApplicableTo = _formApplicableTo;
             ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
         }
 
@@ -496,8 +561,8 @@
     private async Task SaveTorrentSettingsAsync()
     {
         if (_torrentCfg is null) return;
-        _torrentCfg.GlobalDownloadLimit = _globalDlLimitKbps * 125;
-        _torrentCfg.GlobalUploadLimit   = _globalUlLimitKbps * 125;
+        _torrentCfg.GlobalDownloadLimit = _globalDlLimitMbps * 125000;
+        _torrentCfg.GlobalUploadLimit   = _globalUlLimitMbps * 125000;
         await using var db = await DbFactory.CreateDbContextAsync();
         var existing = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
         if (existing is null)

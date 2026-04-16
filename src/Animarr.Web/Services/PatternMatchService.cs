@@ -44,13 +44,16 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
         return false;
     }
 
-    // Simple glob: only * wildcard, anchored to full filename (not path).
+    // Glob matching for filename masks: * = any chars, ? = single char.
     private static bool MatchesGlob(string name, string mask)
     {
         if (mask == "*") return true;
 
-        // Convert glob to regex: escape everything, replace * with .*
-        var regexPattern = "^" + Regex.Escape(mask).Replace(@"\*", ".*") + "$";
+        // Convert glob to regex: escape special chars, then map wildcards.
+        var regexPattern = "^" + Regex.Escape(mask)
+            .Replace(@"\*", ".*")   // * → any sequence
+            .Replace(@"\?", ".")    // ? → any single char
+            + "$";
         return Regex.IsMatch(name, regexPattern, RegexOptions.IgnoreCase);
     }
 

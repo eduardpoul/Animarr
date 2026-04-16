@@ -15,7 +15,7 @@
     <FluentButton Appearance="Appearance.Accent"
                   IconStart="@(new Icons.Regular.Size20.Add())"
                   Title="@(L["torrents.add_button"])"
-                  OnClick="@(() => { _addPanelOpen = true; _detailsHash = null; })" />
+                  OnClick="@(() => { _addPanelOpen = true; _detailsPanelOpen = false; _detailsHash = null; })" />
     <FluentButton Appearance="Appearance.Stealth"
                   IconStart="@(new Icons.Regular.Size20.History())"
                   Title="@(L["torrents.history_button"])"
@@ -37,7 +37,7 @@ else
     <FluentDataGrid Items="@torrents.AsQueryable()" TGridItem="TorrentLiveStats"
                     ShowHover="true" ResizableColumns="true" Style="font-size:13px;">
         <TemplateColumn Title="" Width="18px">
-            <div style="width:10px;height:10px;border-radius:50%;background:@StatusColor(context);margin:auto;" title="@context.State.ToString()"></div>
+            <div class="fluent-status-dot fluent-status-dot--@StatusColorClass(context)" title="@context.State.ToString()"></div>
         </TemplateColumn>
 
         <TemplateColumn Title="@(L["torrents.col_name"])" Sortable="false">
@@ -59,17 +59,16 @@ else
         <TemplateColumn Title="@(L["torrents.col_progress"])" Width="220px">
             @if (context.State == TorrentState.Hashing)
             {
-                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-                    <progress style="flex:1;min-width:60px;height:6px;"></progress>
-                    <span style="font-size:12px;color:var(--neutral-foreground-hint);white-space:nowrap;">@L["torrents.state_hashing"]</span>
+                <div class="flex items-center gap-f-s min-w-0">
+                    <FluentProgress Width="100%" Style="flex:1;" />
+                    <span class="text-fluent-caption text-fluent-3 whitespace-nowrap">@L["torrents.state_hashing"]</span>
                 </div>
             }
             else
             {
-                <div style="display:flex;align-items:center;gap:6px;">
-                    <progress value="@((int)context.Progress)" max="100"
-                              style="flex:1;min-width:60px;height:6px;"></progress>
-                    <span style="font-size:12px;min-width:36px;">@context.Progress.ToString("F1")%</span>
+                <div class="flex items-center gap-f-xs">
+                    <FluentProgress Value="@((int)context.Progress)" Max="100" Width="100%" Style="flex:1;" />
+                    <span class="text-fluent-caption min-w-9">@context.Progress.ToString("F1")%</span>
                 </div>
             }
         </TemplateColumn>
@@ -110,7 +109,7 @@ else
                                   Title="@(L["torrents.btn_stop"])" OnClick="@(() => StopAsync(context.InfoHash))" />
                 }
                 <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())"
-                              style="color:var(--error,#c50f1f);"
+                              style="color:var(--color-fluent-error);"
                               Title="@(L["torrents.btn_delete"])" OnClick="@(() => AskDelete(context.InfoHash, context.Name))" />
             </div>
         </TemplateColumn>
@@ -120,12 +119,13 @@ else
 <!-- =================== ADD TORRENT PANEL =================== -->
 @if (_addPanelOpen)
 {
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="CloseAddPanel"></div>
-    <div style="position:fixed;top:0;right:0;width:640px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
-    <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
-        <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["add_torrent.title"]</FluentLabel>
-        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["add_torrent.btn_close"])" OnClick="CloseAddPanel" />
+<div class="fixed inset-0 z-40" @onclick="CloseAddPanel" style="background:rgba(0,0,0,.25);"></div>
+<div class="fixed top-0 right-0 bottom-0 z-50 flex flex-col overflow-hidden" style="width:640px;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-8px 0 24px rgba(0,0,0,.12);">
+    <div class="flex items-center shrink-0 px-f-xl" style="height:56px;border-bottom:1px solid var(--neutral-stroke-rest);">
+        <FluentLabel Typo="Typography.H5" Style="flex:1;margin:0;">@L["add_torrent.title"]</FluentLabel>
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" OnClick="CloseAddPanel" />
     </div>
+    <div class="flex-1 overflow-y-auto p-f-xl">
     <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
         <FluentTextField @bind-Value="_addMagnet"
                          Label="@(L["add_torrent.magnet_label"])"
@@ -261,7 +261,10 @@ else
 
         <FluentSwitch @bind-Value="_addStartPaused">@L["add_torrent.start_paused"]</FluentSwitch>
         <FluentSwitch @bind-Value="_addStopAfterDownload">@L["add_torrent.stop_after_download"]</FluentSwitch>
-        <FluentSwitch @bind-Value="_addFlattenSubfolders">@L["add_torrent.flatten_subfolders"]</FluentSwitch>
+        @if (_addFileEntries.Any(f => f.Path.Contains('/') || f.Path.Contains('\\')))
+        {
+            <FluentSwitch @bind-Value="_addSkipSubfolderStructure">@L["add_torrent.flatten_subfolders"]</FluentSwitch>
+        }
 
         @{
             // MonoTorrent always creates a root folder from torrent.Name for multi-file torrents.
@@ -308,7 +311,7 @@ else
             <FluentLabel Style="color:var(--error);font-size:13px;">@_addError</FluentLabel>
         }
 
-        <div style="display:flex;gap:8px;">
+        <div class="flex gap-f-s">
             <FluentButton Appearance="Appearance.Accent" OnClick="AddTorrentAsync"
                           Disabled="@(_addBusy || (string.IsNullOrWhiteSpace(_addMagnet) && _torrentFileBytes is null))">
                 @if (_addBusy) { <span>@L["add_torrent.btn_adding"]</span> } else { <span>@L["add_torrent.btn_add"]</span> }
@@ -317,21 +320,24 @@ else
         </div>
     </FluentStack>
     </div>
+</div>
 }
 
 <!-- =================== TORRENT DETAILS PANEL =================== -->
-@if (_detailsHash is not null)
+@{
+    var live = _detailsHash is not null ? TorrentEngine.Get(_detailsHash) : null;
+    var files = _detailsHash is not null ? TorrentEngine.GetFiles(_detailsHash) : null;
+}
+@if (_detailsPanelOpen)
 {
-    var live = TorrentEngine.Get(_detailsHash);
-    var files = TorrentEngine.GetFiles(_detailsHash);
-
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:999;" @onclick="@(() => _detailsHash = null)"></div>
-    <div style="position:fixed;top:0;right:0;width:720px;height:100vh;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-4px 0 16px rgba(0,0,0,.15);z-index:1000;overflow-y:auto;overflow-x:hidden;padding:20px;box-sizing:border-box;" @onclick:stopPropagation>
-    <div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
-        <h2 style="flex:1;margin:0;font-size:18px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(live?.Name ?? _detailsHash)</h2>
-        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())" Title="@(L["torrent_details.btn_edit"])" OnClick="@(() => Nav.NavigateTo($"/torrents/{_detailsHash}/edit"))" />
-        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["torrent_details.btn_close"])" OnClick="@(() => _detailsHash = null)" />
+<div class="fixed inset-0 z-40" @onclick="@(() => _detailsPanelOpen = false)" style="background:rgba(0,0,0,.25);"></div>
+<div class="fixed top-0 right-0 bottom-0 z-50 flex flex-col overflow-hidden" style="width:720px;background:var(--neutral-layer-floating);border-left:1px solid var(--neutral-stroke-rest);box-shadow:-8px 0 24px rgba(0,0,0,.12);">
+    <div class="flex items-center shrink-0 px-f-xl" style="height:56px;border-bottom:1px solid var(--neutral-stroke-rest);">
+        <FluentLabel Typo="Typography.H5" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(live?.Name ?? _detailsHash ?? "")</FluentLabel>
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())" Title="@(L["torrent_details.btn_edit"])" OnClick="@(() => Nav.NavigateTo("/torrents/" + _detailsHash + "/edit"))" />
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" OnClick="@(() => _detailsPanelOpen = false)" />
     </div>
+    <div class="flex-1 overflow-y-auto p-f-xl">
         @if (live is not null)
         {
             <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
@@ -375,7 +381,7 @@ else
                 @if (!live.MetadataReceived)
                 {
                     <div style="display:flex;align-items:center;gap:10px;color:var(--neutral-foreground-hint);font-size:13px;">
-                        <progress style="width:60px;height:4px;"></progress>
+                        <FluentProgress Width="64px" />
                         <span>@L["torrent_details.loading_metadata"]</span>
                     </div>
                 }
@@ -394,7 +400,7 @@ else
                                 var fp = item.FullPath!;
                                 var collapsed = _detailsCollapsedFolders.Contains(fp);
                                 <div style="background:var(--neutral-layer-2);padding:4px 6px;padding-left:@(item.Depth * 12 + 6)px;font-weight:600;border-bottom:1px solid var(--neutral-stroke-rest);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
-                                     @onclick="@(() => { if (_detailsCollapsedFolders.Contains(fp)) _detailsCollapsedFolders.Remove(fp); else _detailsCollapsedFolders.Add(fp); StateHasChanged(); })">
+                                     @onclick="@(() => ToggleDetailsFolder(fp))">
                                     <span style="font-size:11px;width:12px;text-align:center;">@(collapsed ? "▶" : "▼")</span>
                                     <span>📁 @item.Name</span>
                                 </div>
@@ -432,8 +438,8 @@ else
                     </div>
                     <div style="text-align:right;margin-top:4px;">
                         <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())"
-                                      OnClick="@(() => Nav.NavigateTo($"/torrents/{_detailsHash}/edit"))">@L["torrent_details.btn_full_editor"]
-                        </FluentButton>
+                                      Title="@(L["torrent_details.btn_full_editor"])"
+                                      OnClick="@(() => Nav.NavigateTo("/torrents/" + _detailsHash + "/edit"))" />
                     </div>
                 }
 
@@ -444,29 +450,35 @@ else
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     @if (live.State == TorrentState.Downloading || live.State == TorrentState.Metadata || live.State == TorrentState.Seeding)
                     {
-                        <FluentButton IconStart="@(new Icons.Regular.Size20.Pause())"
-                                      OnClick="@(() => PauseAsync(_detailsHash!))">@L["torrent_details.btn_pause"]</FluentButton>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size20.Pause())"
+                                      Title="@(L["torrent_details.btn_pause"])"
+                                      OnClick="@(() => PauseAsync(_detailsHash!))" />
                     }
                     @if (live.State == TorrentState.Paused || live.State == TorrentState.Stopped)
                     {
                         <FluentButton Appearance="Appearance.Accent"
                                       IconStart="@(new Icons.Regular.Size20.Play())"
-                                      OnClick="@(() => ResumeAsync(_detailsHash!))">@L["torrent_details.btn_resume"]</FluentButton>
+                                      Title="@(L["torrent_details.btn_resume"])"
+                                      OnClick="@(() => ResumeAsync(_detailsHash!))" />
                     }
                     @if (live.State != TorrentState.Stopped)
                     {
-                        <FluentButton IconStart="@(new Icons.Regular.Size20.Stop())"
-                                      OnClick="@(() => StopAsync(_detailsHash!))">@L["torrent_details.btn_stop"]</FluentButton>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size20.Stop())"
+                                      Title="@(L["torrent_details.btn_stop"])"
+                                      OnClick="@(() => StopAsync(_detailsHash!))" />
                     }
-                    <FluentButton IconStart="@(new Icons.Regular.Size20.Delete())"
-                                  style="color:var(--error,#c50f1f);"
-                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name))">@L["torrent_details.btn_delete"]</FluentButton>
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  style="color:var(--color-fluent-error);"
+                                  Title="@(L["torrent_details.btn_delete"])"
+                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name))" />
                     <FluentButton Appearance="Appearance.Outline"
-                                  style="color:var(--error,#c50f1f);border-color:var(--error,#c50f1f);"
+                                  style="color:var(--color-fluent-error);border-color:var(--color-fluent-error);"
                                   IconStart="@(new Icons.Regular.Size20.DeleteDismiss())"
-                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name, deleteFiles: true))">
-                        @L["torrent_details.btn_delete_with_files"]
-                    </FluentButton>
+                                  Title="@(L["torrent_details.btn_delete_with_files"])"
+                                  OnClick="@(() => AskDelete(_detailsHash!, live.Name, deleteFiles: true))" />
                 </div>
             </FluentStack>
         }
@@ -475,6 +487,7 @@ else
             <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["torrent_details.stopped_or_removed"]</FluentLabel>
         }
     </div>
+</div>
 }
 
 <!-- =================== DELETE CONFIRM DIALOG =================== -->
@@ -506,7 +519,7 @@ else
     private int _addUlLimit;
     private bool _addStartPaused;
     private bool _addStopAfterDownload;
-    private bool _addFlattenSubfolders;
+    private bool _addSkipSubfolderStructure;
     private bool _addSuppressRootFolder;
     private string _addCustomRootFolderName = "";
     private bool _addBusy;
@@ -527,6 +540,7 @@ else
     private HashSet<string> _collapsedFolders = new();
 
     // ---- Details panel state ----
+    private bool _detailsPanelOpen;
     private string? _detailsHash;
     private int _detailsDlLimit;
     private int _detailsUlLimit;
@@ -550,12 +564,19 @@ else
         var cfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
         if (cfg is not null)
         {
-            _defaultStopAfterDownload = cfg.StopSeedingAfterDone;
+            _defaultStopAfterDownload = cfg.DefaultStopAfterDownload;
             _addStopAfterDownload = _defaultStopAfterDownload;
         }
     }
 
     public void Dispose() => TorrentEngine.StateChanged -= OnTorrentStateChanged;
+
+    private void ToggleDetailsFolder(string fp)
+    {
+        if (_detailsCollapsedFolders.Contains(fp)) _detailsCollapsedFolders.Remove(fp);
+        else _detailsCollapsedFolders.Add(fp);
+        StateHasChanged();
+    }
 
     private void OnTorrentStateChanged()
     {
@@ -567,12 +588,13 @@ else
     private void OpenDetails(string infoHash)
     {
         _detailsHash = infoHash;
+        _detailsPanelOpen = true;
         _detailsCollapsedFolders = new();
         var live = TorrentEngine.Get(infoHash);
         if (live is not null)
         {
-            _detailsDlLimit = live.DownloadLimit / 125;   // convert B/s → Kbps for display
-            _detailsUlLimit = live.UploadLimit / 125;
+            _detailsDlLimit = live.DownloadLimit / 125000;
+            _detailsUlLimit = live.UploadLimit / 125000;
         }
         BuildDetailsFlatTree(infoHash);
         _addPanelOpen = false;
@@ -599,7 +621,7 @@ else
         _addUlLimit = 0;
         _addStartPaused = false;
         _addStopAfterDownload = _defaultStopAfterDownload;
-        _addFlattenSubfolders = false;
+        _addSkipSubfolderStructure = false;
         _addSuppressRootFolder = false;
         _addCustomRootFolderName = "";
         _createSubfolderMode = false;
@@ -677,16 +699,16 @@ else
             {
                 await TorrentEngine.AddTorrentFileAsync(
                     _torrentFileBytes, savePath, _addFolderWatcherId,
-                    _addDlLimit * 125, _addUlLimit * 125, autoRename, _addStartPaused, _addStopAfterDownload,
-                    _addFilePriorities.Count > 0 ? _addFilePriorities : null, _addFlattenSubfolders,
+                    _addDlLimit * 125000, _addUlLimit * 125000, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addFilePriorities.Count > 0 ? _addFilePriorities : null, _addSkipSubfolderStructure,
                     _addSuppressRootFolder, _addCustomRootFolderName);
             }
             else if (!string.IsNullOrWhiteSpace(_addMagnet))
             {
                 await TorrentEngine.AddMagnetAsync(
                     _addMagnet.Trim(), savePath, _addFolderWatcherId,
-                    _addDlLimit * 125, _addUlLimit * 125, autoRename, _addStartPaused, _addStopAfterDownload,
-                    _addFlattenSubfolders, _addSuppressRootFolder, _addCustomRootFolderName);
+                    _addDlLimit * 125000, _addUlLimit * 125000, autoRename, _addStartPaused, _addStopAfterDownload,
+                    _addSkipSubfolderStructure, _addSuppressRootFolder, _addCustomRootFolderName);
             }
             ToastService.ShowToast(ToastIntent.Success, "Торрент добавлен.");
             CloseAddPanel();
@@ -727,7 +749,7 @@ else
     private async Task ConfirmDeleteAsync()
     {
         if (_deleteHash is null) return;
-        if (_detailsHash == _deleteHash) _detailsHash = null;
+        if (_detailsHash == _deleteHash) { _detailsHash = null; _detailsPanelOpen = false; }
         await TorrentEngine.RemoveAsync(_deleteHash, _deleteFiles);
         ToastService.ShowToast(ToastIntent.Success, $"Торрент «{_deleteName}» удалён.");
         _deleteHidden = true;
@@ -738,7 +760,7 @@ else
     {
         if (_detailsHash is null) return;
         await TorrentEngine.SetSpeedLimitsAsync(_detailsHash,
-            _detailsDlLimit * 125, _detailsUlLimit * 125);
+            _detailsDlLimit * 125000, _detailsUlLimit * 125000);
         ToastService.ShowToast(ToastIntent.Success, "Лимиты обновлены.");
     }
 
@@ -749,16 +771,16 @@ else
 
     // ---- Formatting helpers ----
 
-    private static string StatusColor(TorrentLiveStats t) => t.State switch
+    private static string StatusColorClass(TorrentLiveStats t) => t.State switch
     {
-        TorrentState.Downloading => "#0078d4",
-        TorrentState.Metadata    => "#8764b8",
-        TorrentState.Seeding     => "#107c10",
-        TorrentState.Paused      => "#c8a600",
-        TorrentState.Stopped     => "#666",
-        TorrentState.Error       => "#c50f1f",
-        TorrentState.Hashing     => "#00b7c3",
-        _                        => "#999",
+        TorrentState.Downloading => "info",
+        TorrentState.Metadata    => "info",
+        TorrentState.Seeding     => "success",
+        TorrentState.Paused      => "warning",
+        TorrentState.Stopped     => "neutral",
+        TorrentState.Error       => "error",
+        TorrentState.Hashing     => "info",
+        _                        => "neutral",
     };
 
     private static string FormatEta(TorrentLiveStats s)

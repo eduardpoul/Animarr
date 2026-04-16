@@ -1,4 +1,5 @@
-﻿using Animarr.Web.Configuration;
+﻿using System.Collections.Concurrent;
+using Animarr.Web.Configuration;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
@@ -21,8 +22,10 @@ public class FolderWatcherService(
     private readonly int _delayMs = appOptions.Value.WatcherDelayMs;
 
     // folderId → watcher
-    private readonly Dictionary<Guid, FolderWatcherEntry> _watchers = [];
+    private readonly ConcurrentDictionary<Guid, FolderWatcherEntry> _watchers = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
+    /// <summary>Paths to skip in OnFileCreated — populated before intentional moves to avoid re-processing. Value = expiry TickCount64.</summary>
+    private readonly ConcurrentDictionary<string, long> _suppressedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Raised when a file is auto-renamed. Payload: (folderId, originalName, newName).</summary>
     public event Action<Guid, string, string>? FileRenamed;
@@ -83,10 +86,9 @@ public class FolderWatcherService(
         await _lock.WaitAsync();
         try
         {
-            if (_watchers.TryGetValue(folderId, out var entry))
+            if (_watchers.TryRemove(folderId, out var entry))
             {
                 entry.Dispose();
-                _watchers.Remove(folderId);
                 logger.LogInformation("Watcher stopped for folder {Id}", folderId);
             }
         }
@@ -96,10 +98,7 @@ public class FolderWatcherService(
         }
     }
 
-    public bool IsWatching(Guid folderId)
-    {
-        lock (_watchers) return _watchers.ContainsKey(folderId);
-    }
+    public bool IsWatching(Guid folderId) => _watchers.ContainsKey(folderId);
 
     // ─── Internal watcher creation ────────────────────────────────────────────
 
@@ -118,12 +117,8 @@ public class FolderWatcherService(
             EnableRaisingEvents = true,
         };
 
-        // Track in-flight files to debounce rapid events
-        var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var pendingLock = new object();
-
-        watcher.Created += (_, e) => OnFileCreated(e.FullPath, folderId, pending, pendingLock);
-        watcher.Renamed += (_, e) => OnFileCreated(e.FullPath, folderId, pending, pendingLock);
+        watcher.Created += (_, e) => OnFileCreated(e.FullPath, folderId);
+        watcher.Renamed += (_, e) => OnFileCreated(e.FullPath, folderId);
         watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
 
         FileSystemWatcher? dirWatcher = null;
@@ -191,65 +186,59 @@ public class FolderWatcherService(
         });
     }
 
-    private void OnFileCreated(string filePath, Guid folderId, HashSet<string> pending, object pendingLock)
+    private void OnFileCreated(string filePath, Guid folderId)
     {
-        lock (pendingLock)
-        {
-            if (!pending.Add(filePath)) return; // already processing
-        }
-
-        // Fire and forget with delay to let the file finish copying
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(_delayMs);
-
-                if (!File.Exists(filePath))
+                // Skip paths suppressed by intentional renames/flattens
+                if (_suppressedPaths.TryGetValue(filePath, out var expiry))
                 {
-                    logger.LogDebug("Watcher: file disappeared before processing: {Path}", filePath);
-                    return;
+                    if (Environment.TickCount64 < expiry)
+                    {
+                        _suppressedPaths.TryRemove(filePath, out _);
+                        return;
+                    }
+                    _suppressedPaths.TryRemove(filePath, out _);
                 }
 
-                var originalName = Path.GetFileName(filePath);
+                await using var db = await dbFactory.CreateDbContextAsync();
 
-                using var scope = scopeFactory.CreateScope();
-                var renameService = scope.ServiceProvider.GetRequiredService<IRenameService>();
-                await renameService.ProcessSingleFileAsync(filePath, folderId);
+                // Dedup: skip if this file is already queued or being processed
+                var alreadyQueued = await db.RenameQueues.AnyAsync(q =>
+                    q.FilePath == filePath &&
+                    q.FolderId == folderId &&
+                    q.Status < RenameQueueStatus.Done);
 
-                // Re-read what it was renamed to (if renamed, path changed)
-                var newName = GetLatestNameFromHistory(folderId, filePath);
-                FileRenamed?.Invoke(folderId, originalName, newName ?? originalName);
+                if (alreadyQueued) return;
+
+                db.RenameQueues.Add(new Data.Models.RenameQueue
+                {
+                    Id       = Guid.NewGuid(),
+                    FolderId = folderId,
+                    FilePath = filePath,
+                    Source   = Data.Models.RenameQueueSource.Watcher,
+                    QueuedAt = DateTime.UtcNow,
+                });
+                await db.SaveChangesAsync();
+                logger.LogDebug("Queued file for rename: {Path}", filePath);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error processing file {Path}", filePath);
-            }
-            finally
-            {
-                lock (pendingLock) pending.Remove(filePath);
+                logger.LogError(ex, "Failed to enqueue file {Path}", filePath);
             }
         });
     }
 
-    private string? GetLatestNameFromHistory(Guid folderId, string originalPath)
-    {
-        // Best effort — synchronous quick lookup
-        try
-        {
-            using var db = dbFactory.CreateDbContext();
-            var record = db.RenameHistories
-                .Where(h => h.FolderId == folderId && h.OriginalPath == originalPath)
-                .OrderByDescending(h => h.ProcessedAt)
-                .Select(h => h.NewPath)
-                .FirstOrDefault();
-            return record is not null ? Path.GetFileName(record) : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    /// <summary>Called by RenameQueueProcessorService after a file has been processed.</summary>
+    public void NotifyFileRenamed(Guid folderId, string originalName, string newName)
+        => FileRenamed?.Invoke(folderId, originalName, newName);
+
+    /// <summary>Suppresses the next watcher event for <paramref name="filePath"/> for up to 15 seconds.
+    /// Call this before intentionally moving a file so the resulting FSW event is ignored.</summary>
+    public void SuppressPath(string filePath)
+        => _suppressedPaths[filePath] = Environment.TickCount64 + 15_000;
 
     // ─── Dispose ──────────────────────────────────────────────────────────────
 
