@@ -1,194 +1,320 @@
 @page "/explorer"
 @rendermode InteractiveServer
+@inject NavigationManager Nav
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FolderWatcherService WatcherService
 @inject IToastService ToastService
 
+<style>
+    .exp-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+    }
+    .exp-card {
+        position: relative;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--neutral-stroke-rest);
+        background: var(--neutral-layer-2);
+        cursor: pointer;
+        transition: transform .15s ease, box-shadow .15s ease;
+        user-select: none;
+    }
+    .exp-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(0,0,0,.3);
+        border-color: var(--neutral-stroke-strong);
+    }
+    .exp-card-art {
+        aspect-ratio: 2/3;
+        overflow: hidden;
+        background: var(--neutral-layer-3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .exp-card-art img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    .exp-card-label {
+        padding: 6px 8px 7px;
+        font-size: 12px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        line-height: 1.3;
+    }
+    .exp-card-actions {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        display: none;
+        gap: 2px;
+        background: rgba(0,0,0,.60);
+        border-radius: 5px;
+        padding: 2px;
+    }
+    .exp-card:hover .exp-card-actions { display: flex; }
+    .exp-file-list {
+        border: 1px solid var(--neutral-stroke-rest);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-top: 16px;
+    }
+    .exp-file-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--neutral-stroke-subtle);
+        font-size: 13px;
+    }
+    .exp-file-row:last-child { border-bottom: none; }
+    .exp-file-row:hover { background: var(--neutral-layer-3); }
+    .exp-file-actions {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+        flex-shrink: 0;
+        opacity: 0.3;
+        transition: opacity 0.15s;
+    }
+    .exp-file-row:hover .exp-file-actions { opacity: 1; }
+    /* ── image preview ── */
+    .exp-img-preview-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        background: rgba(0,0,0,.88);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: zoom-out;
+    }
+    .exp-img-preview-img {
+        max-width: min(94vw, 1400px);
+        max-height: 94vh;
+        object-fit: contain;
+        border-radius: 6px;
+        box-shadow: 0 24px 80px rgba(0,0,0,.6);
+        cursor: default;
+    }
+    .exp-img-preview-close {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 9001;
+        opacity: 0.6;
+    }
+    .exp-img-preview-close:hover { opacity: 1; }
+</style>
+
 <PageTitle>Animarr</PageTitle>
 
-<FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:20px;gap:12px;">
-    <FluentLabel Typo="Typography.H4" Style="margin:0;flex:1;">@L["explorer.title"]</FluentLabel>
-    <FluentButton Appearance="Appearance.Accent"
-                  IconStart="@(new Icons.Regular.Size20.Add())"
-                  Title="@(L["explorer.add_section_button"])"
-                  OnClick="@(() => OpenSectionDialog(null))" />
-</FluentStack>
+<!-- ── TOP BAR ────────────────────────────────────────────────── -->
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;min-height:36px;">
+    @if (_navStack.Count == 0)
+    {
+        <span style="font-size:22px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@L["explorer.title"]</span>
+        <FluentButton Appearance="Appearance.Accent"
+                      IconStart="@(new Icons.Regular.Size20.Add())"
+                      OnClick="@(() => OpenSectionDialog(null))">
+            @L["explorer.add_section_button"]
+        </FluentButton>
+    }
+    else
+    {
+        <FluentButton Appearance="Appearance.Stealth"
+                      IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
+                      OnClick="NavigateBack"
+                      Style="flex-shrink:0;" />
+        <nav style="display:flex;align-items:center;flex-wrap:wrap;gap:0;flex:1;min-width:0;font-size:14px;">
+            <span style="color:var(--accent-foreground-rest);cursor:pointer;" @onclick="NavigateRoot">@L["explorer.title"]</span>
+            @for (int _bi = 0; _bi < _navStack.Count; _bi++)
+            {
+                var capturedI = _bi;
+                var entry     = _navStack[capturedI];
+                <FluentIcon Value="@(new Icons.Regular.Size16.ChevronRight())" Style="opacity:0.4;margin:0 3px;flex-shrink:0;" />
+                @if (capturedI == _navStack.Count - 1)
+                {
+                    <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@entry.Label</span>
+                }
+                else
+                {
+                    <span style="color:var(--accent-foreground-rest);cursor:pointer;" @onclick="@(() => NavigateToCrumb(capturedI))">@entry.Label</span>
+                }
+            }
+        </nav>
+    }
+</div>
 
+<!-- ── CONTENT ─────────────────────────────────────────────────── -->
 @if (_loading)
 {
     <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
         <FluentProgressRing />
     </div>
 }
-else if (_sections.Count == 0 && _standalone.Count == 0)
+else if (_navStack.Count == 0)
 {
-    <div style="text-align:center;padding:60px 20px;color:var(--neutral-foreground-hint);">
-        <FluentIcon Value="@(new Icons.Regular.Size24.Folder())" Style="opacity:0.3;" />
-        <div style="margin-top:16px;font-size:15px;">@L["explorer.empty"]</div>
-    </div>
+    <!-- ROOT: grid of section / standalone cards -->
+    @if (_allRootFolders.Count == 0)
+    {
+        <div style="text-align:center;padding:60px 20px;color:var(--neutral-foreground-hint);">
+            <FluentIcon Value="@(new Icons.Regular.Size48.Folder())" Style="opacity:0.3;" />
+            <div style="margin-top:16px;font-size:15px;">@L["explorer.empty"]</div>
+        </div>
+    }
+    else
+    {
+        <div class="exp-grid">
+            @foreach (var folder in _allRootFolders)
+            {
+                var f = folder;
+                <div class="exp-card" @onclick="@(() => NavigateInto(f.Path, f.Label))">
+                    <div class="exp-card-art">
+                        @if (_posterUrls.TryGetValue(f.Path, out var pUrl))
+                        {
+                            <img src="@pUrl" alt="@f.Label" loading="lazy" />
+                        }
+                        else
+                        {
+                            <FluentIcon Value="@(new Icons.Regular.Size48.Folder())" Style="opacity:0.4;" />
+                        }
+                    </div>
+                    <div class="exp-card-label" title="@f.Label">@f.Label</div>
+                    <div class="exp-card-actions" @onclick:stopPropagation>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size16.Edit())"
+                                      Style="min-width:26px;width:26px;height:26px;padding:0;color:white;"
+                                      OnClick="@(() => EditRootFolder(f))" />
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size16.Delete())"
+                                      Style="min-width:26px;width:26px;height:26px;padding:0;color:white;"
+                                      OnClick="@(() => AskDelete(f, f.IsSection))" />
+                    </div>
+                </div>
+            }
+        </div>
+    }
 }
 else
 {
-    @foreach (var sect in _sections)
-    {
-        var children = _children.GetValueOrDefault(sect.Id, []);
-        var expanded = _expanded.Contains(sect.Id);
-
-        <div style="border:1px solid var(--neutral-stroke-rest);border-radius:8px;margin-bottom:10px;overflow:hidden;">
-
-            <!-- Section header -->
-            <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--neutral-layer-2);cursor:pointer;user-select:none;"
-                 @onclick="@(() => ToggleExpand(sect.Id))">
-
-                @if (expanded)
-                {
-                    <FluentIcon Value="@(new Icons.Regular.Size16.ChevronDown())" Style="flex-shrink:0;" />
-                }
-                else
-                {
-                    <FluentIcon Value="@(new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;" />
-                }
-                <FluentIcon Value="@(new Icons.Regular.Size20.Folder())" Style="flex-shrink:0;" />
-
-                <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@sect.Label</span>
-
-                <span style="font-size:11px;color:var(--neutral-foreground-hint);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;">
-                    @sect.Path
-                </span>
-
-                <FluentBadge Appearance="Appearance.Accent" Style="flex-shrink:0;font-size:11px;">
-                    @(sect.FolderType switch {
-                        FolderType.Series => L["folders.type_series"],
-                        FolderType.Movie  => L["folders.type_movie"],
-                        _                 => L["folders.type_auto"],
-                    })
-                </FluentBadge>
-
-                <FluentBadge Appearance="Appearance.Neutral" Style="flex-shrink:0;font-size:11px;">
-                    @children.Count
-                </FluentBadge>
-
-                <div @onclick:stopPropagation style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-                    <FluentSwitch Value="@sect.WatchEnabled"
-                                  ValueChanged="@(async (bool v) => await ToggleWatcher(sect, v))"
-                                  Title="@L["explorer.tooltip_monitor"]"
-                                  Style="min-width:unset;" />
-
-                    <FluentButton Appearance="Appearance.Stealth"
-                                  IconStart="@(new Icons.Regular.Size20.ArrowSync())"
-                                  Title="@L["explorer.btn_refresh_tooltip"]"
-                                  OnClick="@(() => RefreshSection(sect))" />
-                    <FluentButton Appearance="Appearance.Stealth"
-                                  IconStart="@(new Icons.Regular.Size20.Edit())"
-                                  Title="@L["folders.btn_edit"]"
-                                  OnClick="@(() => OpenSectionDialog(sect))" />
-                    <FluentButton Appearance="Appearance.Stealth"
-                                  IconStart="@(new Icons.Regular.Size20.Delete())"
-                                  Title="@L["folders.btn_delete"]"
-                                  OnClick="@(() => AskDelete(sect, true))" />
-                </div>
-            </div>
-
-            <!-- Subfolder rows -->
-            @if (expanded)
+    <!-- INSIDE FOLDER: header (poster + actions) -->
+    <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;padding:14px 16px;background:var(--neutral-layer-2);border-radius:8px;border:1px solid var(--neutral-stroke-rest);">
+        <!-- Poster or folder icon -->
+        <div style="width:64px;height:96px;border-radius:6px;overflow:hidden;background:var(--neutral-layer-3);flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+            @if (_currentFolderPosterUrl != null)
             {
-                @if (children.Count == 0)
-                {
-                    <div style="padding:10px 14px 10px 52px;font-size:13px;color:var(--neutral-foreground-hint);">
-                        @L["explorer.subfolder_empty"]
-                    </div>
-                }
-                else
-                {
-                    @foreach (var child in children.OrderBy(c => c.Label))
-                    {
-                        var filesOpen = _openFiles.Contains(child.Id);
-                        <div>
-                            <div style="display:flex;align-items:center;gap:8px;padding:8px 14px 8px 48px;border-top:1px solid var(--neutral-stroke-subtle);cursor:pointer;user-select:none;"
-                                 @onclick="@(() => ToggleFilesOpen(child.Id))">
-                                <FluentIcon Value="@(filesOpen ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;opacity:0.7;" />
-                                <FluentIcon Value="@(filesOpen ? (Icon)(new Icons.Regular.Size20.FolderOpen()) : new Icons.Regular.Size20.Folder())" Style="flex-shrink:0;opacity:0.7;" />
-                                <div style="flex:1;min-width:0;">
-                                    <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@child.Label</div>
-                                    <div style="font-size:11px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@child.Path</div>
-                                </div>
-                                <FluentBadge Appearance="Appearance.Neutral" Style="flex-shrink:0;font-size:11px;">
-                                    @(child.FolderType switch {
-                                        FolderType.Series => L["folders.type_series"],
-                                        FolderType.Movie  => L["folders.type_movie"],
-                                        _                 => L["folders.type_auto"],
-                                    })
-                                </FluentBadge>
-                                <div @onclick:stopPropagation style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-                                    <FluentSwitch Value="@child.WatchEnabled"
-                                                  ValueChanged="@(async (bool v) => await ToggleWatcher(child, v))"
-                                                  Title="@L["explorer.tooltip_monitor"]"
-                                                  Style="min-width:unset;" />
-                                    <FluentButton Appearance="Appearance.Stealth"
-                                                  IconStart="@(new Icons.Regular.Size20.Edit())"
-                                                  Title="@L["folders.btn_edit"]"
-                                                  OnClick="@(() => OpenEditPanel(child))" />
-                                    <FluentButton Appearance="Appearance.Stealth"
-                                                  IconStart="@(new Icons.Regular.Size20.Delete())"
-                                                  Title="@L["folders.btn_delete"]"
-                                                  OnClick="@(() => AskDelete(child, false))" />
-                                </div>
-                            </div>
-                            @if (filesOpen)
-                            {
-                                <FolderScanPanel Folder="child" />
-                            }
-                        </div>
-                    }
-                }
+                <img src="@_currentFolderPosterUrl" alt="poster" style="width:100%;height:100%;object-fit:cover;display:block;" />
             }
+            else
+            {
+                <FluentIcon Value="@(new Icons.Regular.Size48.Folder())" Style="opacity:0.4;" />
+            }
+        </div>
+        <!-- Name + path + action buttons -->
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px;">
+                @_navStack[^1].Label
+            </div>
+            <div style="font-size:11px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:12px;">
+                @_navStack[^1].Path
+            </div>
+            @if (_currentFolderWatcher != null)
+            {
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <FluentButton Appearance="Appearance.Outline"
+                                  IconStart="@(new Icons.Regular.Size16.DocumentSearch())"
+                                  OnClick="IdentifyCurrentFolderAsync">
+                        @L["explorer.btn_identify"]
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size16.Edit())"
+                                  OnClick="@(() => OpenEditPanel(_currentFolderWatcher))">
+                        @L["folders.btn_edit"]
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size16.Delete())"
+                                  OnClick="AskDeleteCurrent">
+                        @L["folders.btn_delete"]
+                    </FluentButton>
+                </div>
+            }
+        </div>
+    </div>
 
+    <!-- INSIDE FOLDER: subdirectory cards + file list -->
+    @if (_subDirs.Count > 0)
+    {
+        <div class="exp-grid">
+            @foreach (var dir in _subDirs)
+            {
+                var d    = dir;
+                var name = Path.GetFileName(d) ?? d;
+                <div class="exp-card" @onclick="@(() => NavigateInto(d, name))">
+                    <div class="exp-card-art">
+                        @if (_posterUrls.TryGetValue(d, out var dUrl))
+                        {
+                            <img src="@dUrl" alt="@name" loading="lazy" />
+                        }
+                        else
+                        {
+                            <FluentIcon Value="@(new Icons.Regular.Size48.Folder())" Style="opacity:0.4;" />
+                        }
+                    </div>
+                    <div class="exp-card-label" title="@name">@name</div>
+                </div>
+            }
         </div>
     }
 
-    @if (_standalone.Count > 0)
+    @if (_subFiles.Count > 0)
     {
-        <FluentLabel Typo="Typography.H5" Style="margin:20px 0 10px;">@L["explorer.standalone_title"]</FluentLabel>
-        <div style="border:1px solid var(--neutral-stroke-rest);border-radius:8px;overflow:hidden;">
-            @foreach (var folder in _standalone)
+        <div class="exp-file-list">
+            @foreach (var file in _subFiles)
             {
-                var folderFilesOpen = _openFiles.Contains(folder.Id);
-                <div>
-                    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--neutral-stroke-subtle);cursor:pointer;user-select:none;"
-                         @onclick="@(() => ToggleFilesOpen(folder.Id))">
-                        <FluentIcon Value="@(folderFilesOpen ? (Icon)(new Icons.Regular.Size16.ChevronDown()) : new Icons.Regular.Size16.ChevronRight())" Style="flex-shrink:0;" />
-                        <FluentIcon Value="@(folderFilesOpen ? (Icon)(new Icons.Regular.Size20.FolderOpen()) : new Icons.Regular.Size20.Folder())" Style="flex-shrink:0;" />
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@folder.Label</div>
-                            <div style="font-size:11px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@folder.Path</div>
-                        </div>
-                        <FluentBadge Appearance="Appearance.Neutral" Style="flex-shrink:0;font-size:11px;">
-                            @(folder.FolderType switch {
-                                FolderType.Series => L["folders.type_series"],
-                                FolderType.Movie  => L["folders.type_movie"],
-                                _                 => L["folders.type_auto"],
-                            })
-                        </FluentBadge>
-                        <div @onclick:stopPropagation style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-                            <FluentSwitch Value="@folder.WatchEnabled"
-                                          ValueChanged="@(async (bool v) => await ToggleWatcher(folder, v))"
-                                          Title="@L["explorer.tooltip_monitor"]"
-                                          Style="min-width:unset;" />
-                            <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                                          Title="@L["folders.btn_edit"]"
-                                          OnClick="@(() => OpenEditPanel(folder))" />
-                            <FluentButton Appearance="Appearance.Stealth"
-                                          IconStart="@(new Icons.Regular.Size20.Delete())"
-                                          Title="@L["folders.btn_delete"]"
-                                          OnClick="@(() => AskDelete(folder, false))" />
-                        </div>
+                var f2 = file;
+                var isImg = IsImageFile(f2.Name);
+                <div class="exp-file-row" style="@(isImg ? "cursor:pointer;" : "")" @onclick="@(() => { if (isImg) OpenImagePreview(f2.Path); })">
+                    <FluentIcon Value="@GetFileIcon(f2.Name)" Style="flex-shrink:0;opacity:0.7;" />
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@f2.Name">@f2.Name</span>
+                    <span style="color:var(--neutral-foreground-hint);font-size:11px;flex-shrink:0;margin-right:4px;">@FormatFileSize(f2.Size)</span>
+                    <div class="exp-file-actions" @onclick:stopPropagation>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size16.Rename())"
+                                      Style="min-width:26px;width:26px;height:26px;padding:0;"
+                                      Title="Rename"
+                                      OnClick="@(() => StartRenameFile(f2))" />
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@(new Icons.Regular.Size16.Delete())"
+                                      Style="min-width:26px;width:26px;height:26px;padding:0;color:var(--color-fluent-error);"
+                                      Title="Delete"
+                                      OnClick="@(() => AskDeleteFile(f2))" />
                     </div>
-                    @if (folderFilesOpen)
-                    {
-                        <FolderScanPanel Folder="folder" />
-                    }
                 </div>
+                @if (_renameTarget?.Path == f2.Path)
+                {
+                    <div style="display:flex;align-items:center;gap:6px;padding:4px 12px 8px;background:var(--neutral-layer-3);">
+                        <FluentTextField @bind-Value="_renameValue" style="flex:1;" @onkeydown="OnRenameKeyDown" />
+                        <FluentButton Appearance="Appearance.Accent" IconStart="@(new Icons.Regular.Size16.Checkmark())" OnClick="ConfirmRenameFile" />
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Dismiss())" OnClick="@(() => _renameTarget = null)" />
+                    </div>
+                }
             }
+        </div>
+    }
+
+    @if (_subDirs.Count == 0 && _subFiles.Count == 0)
+    {
+        <div style="text-align:center;padding:60px 20px;color:var(--neutral-foreground-hint);">
+            <FluentIcon Value="@(new Icons.Regular.Size24.FolderOpen())" Style="opacity:0.3;font-size:48px;" />
+            <div style="margin-top:12px;font-size:14px;">@L["explorer.subfolder_empty"]</div>
         </div>
     }
 }
@@ -327,20 +453,79 @@ else
     </FluentDialogFooter>
 </FluentDialog>
 
+<!-- ================================================================ -->
+<!-- FILE DELETE CONFIRMATION -->
+<!-- ================================================================ -->
+<FluentDialog @bind-Hidden="_fileDeleteHidden" Modal="true" TrapFocus="true" PreventScroll="true">
+    <FluentDialogHeader ShowDismiss="true">
+        <FluentLabel Typo="Typography.H6">@L["explorer.file_delete_title"]</FluentLabel>
+    </FluentDialogHeader>
+    <FluentDialogBody>
+        <FluentLabel>@L.Get("explorer.file_delete_body", _fileDeleteTarget?.Name)</FluentLabel>
+    </FluentDialogBody>
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmDeleteFile">@L["folders.btn_delete_confirm"]</FluentButton>
+        <FluentButton OnClick="@(() => _fileDeleteHidden = true)">@L["folders.btn_cancel"]</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
 @if (_editTarget is not null)
 {
     <FolderEditPanel Folder="_editTarget" OnSaved="HandleEditSaved" OnClosed="CloseEditPanel" />
+}
+
+@if (_previewImageUrl is not null)
+{
+    <div class="exp-img-preview-backdrop" @onclick="CloseImagePreview">
+        <FluentButton class="exp-img-preview-close"
+                      Appearance="Appearance.Stealth"
+                      IconStart="@(new Icons.Regular.Size20.Dismiss())"
+                      Style="min-width:36px;width:36px;height:36px;padding:0;color:white;background:rgba(0,0,0,.5);border-radius:50%;"
+                      OnClick="CloseImagePreview" />
+        <img src="@_previewImageUrl" alt="preview" class="exp-img-preview-img" @onclick:stopPropagation />
+    </div>
 }
 
 
 
 
 @code {
+    // ── Section management (DB state) ──────────────────────────────
     private List<FolderWatcher> _sections = [];
     private Dictionary<Guid, List<FolderWatcher>> _children = [];
     private List<FolderWatcher> _standalone = [];
     private bool _loading = true;
-    private HashSet<Guid> _expanded = [];
+
+    // ── Navigation ─────────────────────────────────────────────────
+    private record NavEntry(string Path, string Label);
+    private List<NavEntry> _navStack = [];
+
+    // Root grid
+    private List<FolderWatcher> _allRootFolders = [];
+
+    // Current folder contents
+    private List<string>    _subDirs  = [];
+    private List<FileEntry> _subFiles = [];
+    private Dictionary<string, string> _posterUrls = [];
+    private record FileEntry(string Path, string Name, long Size, DateTime Modified);
+
+    private record SeasonInfo
+    {
+        public int     Number     { get; init; }
+        public string? PosterPath { get; init; }
+    }
+
+    // Current folder header
+    private FolderWatcher? _currentFolderWatcher;
+    private string?        _currentFolderPosterUrl;
+
+    // File rename inline
+    private FileEntry? _renameTarget;
+    private string     _renameValue = "";
+
+    // File delete dialog
+    private bool       _fileDeleteHidden = true;
+    private FileEntry? _fileDeleteTarget;
 
     // ── Section add/edit dialog ────────────────────────────────────
     private bool _sectionDialogHidden = true;
@@ -357,8 +542,6 @@ else
     private List<string> _pickerChildren = [];
     private bool _pickerMode = false;
 
-    private HashSet<Guid> _openFiles = [];
-
     // ── Edit folder panel ──────────────────────────────────────────
     private FolderWatcher? _editTarget;
 
@@ -366,14 +549,53 @@ else
     private bool _deleteHidden = true;
     private FolderWatcher? _deleteTarget;
     private bool _deleteIsSection;
+    private bool _deleteGoBack;
 
     // ── Init ───────────────────────────────────────────────────────
+
+    [SupplyParameterFromQuery(Name = "path")]
+    public string? InitPath { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
-        foreach (var s in _sections.Where(s => _children.ContainsKey(s.Id)))
-            _expanded.Add(s.Id);
+
+        // Deep-link: navigate directly into the given path
+        if (!string.IsNullOrWhiteSpace(InitPath))
+        {
+            // Build navStack from InitPath — walk up from root until we find
+            // the topmost registered FolderWatcher ancestor, then push remaining segments
+            var target = Path.GetFullPath(InitPath);
+            // Find the deepest registered root that is an ancestor of target
+            var allRoots = _allRootFolders.Select(f =>
+                Path.GetFullPath(f.Path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                .OrderByDescending(p => p.Length)
+                .ToList();
+            var root = allRoots.FirstOrDefault(r =>
+                target.StartsWith(r + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || target.Equals(r, StringComparison.OrdinalIgnoreCase));
+            if (root != null)
+            {
+                // Push ancestor crumbs
+                var rootFolder = _allRootFolders.First(f =>
+                    Path.GetFullPath(f.Path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Equals(root, StringComparison.OrdinalIgnoreCase));
+                _navStack.Add(new NavEntry(rootFolder.Path, rootFolder.Label));
+                // Push intermediate segments
+                var rel = target.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.IsNullOrEmpty(rel))
+                {
+                    var current = root;
+                    foreach (var seg in rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                    {
+                        current = Path.Combine(current, seg);
+                        _navStack.Add(new NavEntry(current, seg));
+                    }
+                }
+                await LoadCurrentDirAsync();
+            }
+        }
+
         _loading = false;
     }
 
@@ -381,25 +603,267 @@ else
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         var all = await db.FolderWatchers.OrderBy(f => f.Label).ToListAsync();
-        _sections  = all.Where(f => f.IsSection).ToList();
-        _children  = all
+        _sections   = all.Where(f => f.IsSection).ToList();
+        _children   = all
             .Where(f => !f.IsSection && f.ParentSectionId.HasValue)
             .GroupBy(f => f.ParentSectionId!.Value)
             .ToDictionary(g => g.Key, g => g.ToList());
         _standalone = all.Where(f => !f.IsSection && !f.ParentSectionId.HasValue).ToList();
+
+        _allRootFolders = _sections.Concat(_standalone).OrderBy(f => f.Label).ToList();
+
+        // Load posters for root folder cards
+        // For standalone folders: use their own poster.
+        // For section folders: pick a random poster from child MediaItems.
+        _posterUrls = [];
+
+        // Standalone posters
+        var standaloneIds = _standalone.Select(f => f.Id).ToList();
+        if (standaloneIds.Count > 0)
+        {
+            var standalonePosters = await db.MediaItems
+                .Where(m => standaloneIds.Contains(m.FolderId) && m.PosterPath != null)
+                .Select(m => new { m.FolderId, m.PosterPath, FolderPath = m.Folder!.Path, m.LastMetadataRefreshedAt })
+                .ToListAsync();
+            foreach (var p in standalonePosters)
+            {
+                var t = p.LastMetadataRefreshedAt?.Ticks ?? 0;
+                _posterUrls[p.FolderPath] = $"/api/image?path={Uri.EscapeDataString(Path.Combine(p.FolderPath, p.PosterPath!))}&t={t}";
+            }
+        }
+
+        // Section posters — pick random from children
+        foreach (var section in _sections)
+        {
+            var childIds = _children.TryGetValue(section.Id, out var ch) ? ch.Select(f => f.Id).ToList() : [];
+            if (childIds.Count == 0) continue;
+            var childPosters = await db.MediaItems
+                .Where(m => childIds.Contains(m.FolderId) && m.PosterPath != null)
+                .Select(m => new { m.FolderId, m.PosterPath, FolderPath = m.Folder!.Path, m.LastMetadataRefreshedAt })
+                .ToListAsync();
+            if (childPosters.Count == 0) continue;
+            var pick = childPosters[Random.Shared.Next(childPosters.Count)];
+            var pickT = pick.LastMetadataRefreshedAt?.Ticks ?? 0;
+            _posterUrls[section.Path] = $"/api/image?path={Uri.EscapeDataString(Path.Combine(pick.FolderPath, pick.PosterPath!))}&t={pickT}";
+        }
     }
 
-    private void ToggleExpand(Guid id)
+    // ── Navigation ─────────────────────────────────────────────────
+
+    private async Task NavigateInto(string path, string label)
     {
-        if (!_expanded.Remove(id)) _expanded.Add(id);
+        _loading = true;
+        StateHasChanged();
+        _navStack.Add(new NavEntry(path, label));
+        await LoadCurrentDirAsync();
     }
 
-    private void ToggleFilesOpen(Guid id)
+    private async Task NavigateBack()
     {
-        if (!_openFiles.Remove(id)) _openFiles.Add(id);
+        if (_navStack.Count == 0) return;
+        _loading = true;
+        StateHasChanged();
+        _navStack.RemoveAt(_navStack.Count - 1);
+        if (_navStack.Count == 0)
+        {
+            await LoadAsync();
+            _loading = false;
+        }
+        else
+        {
+            await LoadCurrentDirAsync();
+        }
+    }
+
+    private async Task NavigateRoot()
+    {
+        if (_navStack.Count == 0) return;
+        _navStack.Clear();
+        _loading = true;
+        StateHasChanged();
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task NavigateToCrumb(int idx)
+    {
+        _navStack = [.._navStack.Take(idx + 1)];
+        _loading = true;
+        StateHasChanged();
+        await LoadCurrentDirAsync();
+    }
+
+    private async Task LoadCurrentDirAsync()
+    {
+        var path = _navStack[^1].Path;
+        _subDirs  = [];
+        _subFiles = [];
+        _posterUrls = [];
+        _currentFolderWatcher   = null;
+        _currentFolderPosterUrl = null;
+
+        try
+        {
+            _subDirs = [..Directory.GetDirectories(path)
+                .Select(d => d.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)];
+
+            _subFiles = [..Directory.GetFiles(path)
+                .Select(f => { var fi = new FileInfo(f); return new FileEntry(fi.FullName, fi.Name, fi.Length, fi.LastWriteTime); })
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)];
+        }
+        catch { /* access denied or path not found */ }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Find FolderWatcher for current path
+        var normPath = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        _currentFolderWatcher = await db.FolderWatchers
+            .FirstOrDefaultAsync(f => f.Path == normPath);
+
+        if (_currentFolderWatcher != null)
+        {
+            var mi = await db.MediaItems
+                .Where(m => m.FolderId == _currentFolderWatcher.Id && m.PosterPath != null)
+                .Select(m => new { m.PosterPath, m.LastMetadataRefreshedAt })
+                .FirstOrDefaultAsync();
+            if (mi?.PosterPath != null)
+            {
+                var t = mi.LastMetadataRefreshedAt?.Ticks ?? 0;
+                _currentFolderPosterUrl = $"/api/image?path={Uri.EscapeDataString(Path.Combine(normPath, mi.PosterPath))}&t={t}";
+            }
+        }
+
+        if (_subDirs.Count > 0)
+        {
+            var posters = await db.MediaItems
+                .Include(m => m.Folder)
+                .Where(m => _subDirs.Contains(m.Folder!.Path) && m.PosterPath != null)
+                .Select(m => new { FolderPath = m.Folder!.Path, m.PosterPath, m.LastMetadataRefreshedAt })
+                .ToListAsync();
+            _posterUrls = posters.ToDictionary(
+                p => p.FolderPath,
+                p => $"/api/image?path={Uri.EscapeDataString(Path.Combine(p.FolderPath, p.PosterPath!))}&t={p.LastMetadataRefreshedAt?.Ticks ?? 0}");
+        }
+
+        // Season posters: if current folder's MediaItem has SeasonsJson, map subdir → season poster
+        if (_currentFolderWatcher != null)
+        {
+            var currentMi = await db.MediaItems
+                .Where(m => m.FolderId == _currentFolderWatcher.Id && m.SeasonsJson != null)
+                .Select(m => new { m.SeasonsJson })
+                .FirstOrDefaultAsync();
+            if (currentMi?.SeasonsJson != null)
+            {
+                try
+                {
+                    var seasons = System.Text.Json.JsonSerializer.Deserialize<List<SeasonInfo>>(currentMi.SeasonsJson,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (seasons != null)
+                    {
+                        foreach (var season in seasons.Where(s => s.PosterPath != null))
+                        {
+                            // Match subdirs by season number: Season 01, S01, season1, etc.
+                            var seasonDir = _subDirs.FirstOrDefault(d =>
+                            {
+                                var name = Path.GetFileName(d);
+                                return System.Text.RegularExpressions.Regex.IsMatch(name,
+                                    $@"(?i)^s(eason[\s._-]*)0*{season.Number}$");
+                            });
+                            if (seasonDir != null && !_posterUrls.ContainsKey(seasonDir))
+                                _posterUrls[seasonDir] = $"/api/image?path={Uri.EscapeDataString(Path.Combine(normPath, season.PosterPath!))}";
+                        }
+                    }
+                }
+                catch { /* malformed JSON */ }
+            }
+        }
+
+        _loading = false;
+    }
+
+    private void EditRootFolder(FolderWatcher folder)
+    {
+        if (folder.IsSection) OpenSectionDialog(folder);
+        else OpenEditPanel(folder);
+    }
+
+    private static string FormatFileSize(long bytes) => bytes switch    {
+        < 1024               => $"{bytes} B",
+        < 1024 * 1024        => $"{bytes / 1024.0:F1} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _                    => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+    };
+
+    // ── File rename ────────────────────────────────────────────────
+
+    private void StartRenameFile(FileEntry file)
+    {
+        _renameTarget = file;
+        _renameValue  = file.Name;
+    }
+
+    private async Task OnRenameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")  await ConfirmRenameFile();
+        if (e.Key == "Escape") _renameTarget = null;
+    }
+
+    private async Task ConfirmRenameFile()
+    {
+        if (_renameTarget is null) return;
+        var newName = _renameValue.Trim();
+        if (string.IsNullOrEmpty(newName) || newName == _renameTarget.Name)
+        {
+            _renameTarget = null;
+            return;
+        }
+        var dir     = Path.GetDirectoryName(_renameTarget.Path)!;
+        var newPath = Path.Combine(dir, newName);
+        try { File.Move(_renameTarget.Path, newPath); }
+        catch { /* TODO: surface error */ }
+        _renameTarget = null;
+        await LoadCurrentDirAsync();
+    }
+
+    // ── File delete ────────────────────────────────────────────────
+
+    private void AskDeleteFile(FileEntry file)
+    {
+        _fileDeleteTarget = file;
+        _fileDeleteHidden = false;
+    }
+
+    private async Task ConfirmDeleteFile()
+    {
+        _fileDeleteHidden = true;
+        if (_fileDeleteTarget is null) return;
+        try { File.Delete(_fileDeleteTarget.Path); }
+        catch { /* TODO: surface error */ }
+        _fileDeleteTarget = null;
+        await LoadCurrentDirAsync();
+    }
+
+    private static Icon GetFileIcon(string name)
+    {
+        return Path.GetExtension(name).ToLowerInvariant() switch
+        {
+            ".mkv" or ".mp4" or ".avi" or ".mov" or ".wmv" or ".flv" or ".webm" or ".m2ts" or ".ts" or ".m4v"
+                => new Icons.Regular.Size20.VideoClip(),
+            ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".bmp" or ".tiff"
+                => new Icons.Regular.Size20.Image(),
+            _ => new Icons.Regular.Size20.Document(),
+        };
     }
 
     // ── Edit panel ─────────────────────────────────────────────────
+
+    private string? _previewImageUrl;
+    private void OpenImagePreview(string path) => _previewImageUrl = $"/api/image?path={Uri.EscapeDataString(path)}";
+    private void CloseImagePreview()           => _previewImageUrl = null;
+
+    private static bool IsImageFile(string name) => Path.GetExtension(name).ToLowerInvariant() is
+        ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".bmp" or ".tiff";
 
     private void OpenEditPanel(FolderWatcher folder) => _editTarget = folder;
 
@@ -502,7 +966,6 @@ else
             await db.SaveChangesAsync();
             if (_formWatch) await WatcherService.StartWatcherAsync(section.Id);
             var count = await DiscoverChildrenAsync(db, section);
-            _expanded.Add(section.Id);
             ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_section_added", section.Label, count));
         }
         else
@@ -531,7 +994,87 @@ else
     {
         _deleteTarget    = f;
         _deleteIsSection = isSection;
+        _deleteGoBack    = false;
         _deleteHidden    = false;
+    }
+
+    private void AskDeleteCurrent()
+    {
+        if (_currentFolderWatcher is null) return;
+        _deleteTarget    = _currentFolderWatcher;
+        _deleteIsSection = _currentFolderWatcher.IsSection;
+        _deleteGoBack    = true;
+        _deleteHidden    = false;
+    }
+
+    private async Task IdentifyCurrentFolderAsync()
+    {
+        if (_currentFolderWatcher is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // If this is a section, queue all child folders instead of the section itself
+        if (_currentFolderWatcher.IsSection)
+        {
+            var children = await db.FolderWatchers
+                .Where(f => f.ParentSectionId == _currentFolderWatcher.Id)
+                .ToListAsync();
+
+            if (children.Count == 0)
+            {
+                ToastService.ShowToast(ToastIntent.Info, L["explorer.section_no_children"]);
+                return;
+            }
+
+            var childIds = children.Select(c => c.Id).ToList();
+
+            // Remove old done/failed/queued jobs for children
+            await db.IdentificationQueues
+                .Where(q => childIds.Contains(q.FolderId) &&
+                            (q.Status == IdentificationQueueStatus.Queued ||
+                             q.Status == IdentificationQueueStatus.Failed ||
+                             q.Status == IdentificationQueueStatus.Done))
+                .ExecuteDeleteAsync();
+
+            foreach (var child in children)
+            {
+                db.IdentificationQueues.Add(new IdentificationQueue
+                {
+                    Id           = Guid.NewGuid(),
+                    FolderId     = child.Id,
+                    ForceRefresh = true,
+                    QueuedAt     = DateTime.UtcNow,
+                });
+            }
+            await db.SaveChangesAsync();
+            ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.section_queued", children.Count));
+            return;
+        }
+
+        var processing = await db.IdentificationQueues
+            .AnyAsync(q => q.FolderId == _currentFolderWatcher.Id &&
+                           q.Status == IdentificationQueueStatus.Processing);
+        if (processing)
+        {
+            ToastService.ShowToast(ToastIntent.Info, L["folders.toast_already_queued"]);
+            return;
+        }
+
+        await db.IdentificationQueues
+            .Where(q => q.FolderId == _currentFolderWatcher.Id &&
+                        (q.Status == IdentificationQueueStatus.Queued ||
+                         q.Status == IdentificationQueueStatus.Failed ||
+                         q.Status == IdentificationQueueStatus.Done))
+            .ExecuteDeleteAsync();
+
+        db.IdentificationQueues.Add(new IdentificationQueue
+        {
+            Id           = Guid.NewGuid(),
+            FolderId     = _currentFolderWatcher.Id,
+            ForceRefresh = true,
+            QueuedAt     = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        ToastService.ShowToast(ToastIntent.Success, L["folders.toast_queued"]);
     }
 
     private async Task ConfirmDelete()
@@ -550,10 +1093,16 @@ else
         }
         var entity = await db.FolderWatchers.FindAsync(_deleteTarget.Id);
         if (entity is not null) { db.FolderWatchers.Remove(entity); await db.SaveChangesAsync(); }
-        ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_deleted", _deleteTarget.Label));
+        var label = _deleteTarget.Label;
+        var goBack = _deleteGoBack;
         _deleteHidden = true;
         _deleteTarget = null;
-        await LoadAsync();
+        _deleteGoBack  = false;
+        ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_deleted", label));
+        if (goBack)
+            await NavigateBack();
+        else
+            await LoadAsync();
     }
 
     // ── Watcher toggle ─────────────────────────────────────────────
@@ -576,7 +1125,6 @@ else
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         var count = await DiscoverChildrenAsync(db, section);
-        if (count > 0) _expanded.Add(section.Id);
         ToastService.ShowToast(count > 0 ? ToastIntent.Success : ToastIntent.Info,
             count > 0
                 ? L.Get("explorer.toast_found_subfolders", count)

@@ -12,6 +12,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="*" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="*" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="*" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="*" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="*" />
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
   </ItemGroup>
 

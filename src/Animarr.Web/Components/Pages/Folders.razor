@@ -1,5 +1,6 @@
 @page "/folders"
 @rendermode InteractiveServer
+@using Animarr.Web.Data.Models
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FolderWatcherService WatcherService
 @inject NavigationManager Nav
@@ -9,6 +10,12 @@
 
 <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:20px;gap:12px;">
     <FluentLabel Typo="Typography.H4" Style="margin:0;flex:1;">@L["folders.title"]</FluentLabel>
+    <FluentButton Appearance="Appearance.Neutral"
+                  IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
+                  Disabled="@_identifyingAll"
+                  OnClick="IdentifyAllAsync">
+        @(_identifyingAll ? L["folders.btn_identifying"] : L["folders.btn_identify_all"])
+    </FluentButton>
     <FluentButton Appearance="Appearance.Accent"
                   IconStart="@(new Icons.Regular.Size20.Add())"
                   Title="@(L["folders.add_button"])"
@@ -81,6 +88,13 @@ else
                               IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
                               Title="@(L["folders.btn_files"])"
                               OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files"))" />
+                @if (context.IdentifyEnabled)
+                {
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.ArrowSync())"
+                                  Title="@(L["folders.btn_identify"])"
+                                  OnClick="@(() => EnqueueFolderAsync(context.Id))" />
+                }
             }
             <FluentButton Appearance="Appearance.Stealth"
                           IconStart="@(new Icons.Regular.Size20.Edit())"
@@ -112,6 +126,7 @@ else
                              Placeholder="@(L["folders.field_name_placeholder"])"
                              style="width:100%;" />
             <FluentSwitch @bind-Value="_formWatch">@L["folders.switch_monitor"]</FluentSwitch>
+            <FluentSwitch @bind-Value="_formIdentifyEnabled">@L["folders.switch_identify"]</FluentSwitch>
             @if (_editTarget is null)
             {
                 <FluentSwitch @bind-Value="_formIsSection">
@@ -161,6 +176,7 @@ else
     private string _formPath = "";
     private string _formLabel = "";
     private bool _formWatch = true;
+    private bool _formIdentifyEnabled = true;
     private bool _formIsSection = false;
     private bool _formRenameEnabled = true;
     private FolderType _formFolderType = FolderType.Auto;
@@ -169,6 +185,8 @@ else
 
     private bool _deleteHidden = true;
     private FolderWatcher? _deleteTarget;
+
+    private bool _identifyingAll = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -192,6 +210,7 @@ else
         _formPath = folder?.Path ?? "";
         _formLabel = folder?.Label ?? "";
         _formWatch = folder?.WatchEnabled ?? true;
+        _formIdentifyEnabled = folder?.IdentifyEnabled ?? true;
         _formRenameEnabled = folder?.RenameEnabled ?? true;
         _formFolderType = folder?.FolderType ?? FolderType.Auto;
         _formFolderTypeStr = _formFolderType.ToString();
@@ -213,6 +232,7 @@ else
                 Path = _formPath.Trim(),
                 Label = _formLabel.Trim(),
                 WatchEnabled = _formWatch,
+                IdentifyEnabled = _formIdentifyEnabled,
                 RenameEnabled = _formRenameEnabled,
                 FolderType = _formRenameEnabled ? folderType : FolderType.Auto,
                 IsSection    = _formIsSection,
@@ -241,6 +261,7 @@ else
             entity.Path = _formPath.Trim();
             entity.Label = _formLabel.Trim();
             entity.WatchEnabled = _formWatch;
+            entity.IdentifyEnabled = _formIdentifyEnabled;
             entity.RenameEnabled = _formRenameEnabled;
             entity.FolderType = _formRenameEnabled ? folderType : FolderType.Auto;
             await db.SaveChangesAsync();
@@ -322,6 +343,7 @@ else
                 Path            = norm,
                 Label           = Path.GetFileName(norm),
                 WatchEnabled    = section.WatchEnabled,
+                IdentifyEnabled = section.IdentifyEnabled,
                 FolderType      = section.FolderType,
                 IsSection       = false,
                 ParentSectionId = section.Id,
@@ -349,5 +371,91 @@ else
                 ? $"Section updated: {count} new subfolders added."
                 : "No new subfolders found.");
         await LoadAsync();
+    }
+
+    // ─── Identification ───────────────────────────────────────────────────────
+
+    private async Task EnqueueFolderAsync(Guid folderId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        // Remove any pending/failed jobs so it re-runs fresh (keep Done/Processing untouched to avoid duplicates)
+        var existing = await db.IdentificationQueues
+            .Where(q => q.FolderId == folderId && q.Status == IdentificationQueueStatus.Processing)
+            .AnyAsync();
+        if (existing)
+        {
+            ToastService.ShowToast(ToastIntent.Info, L["folders.toast_already_queued"]);
+            return;
+        }
+        // Remove old queued/failed entries then add a fresh ForceRefresh job
+        await db.IdentificationQueues
+            .Where(q => q.FolderId == folderId &&
+                        (q.Status == IdentificationQueueStatus.Queued || q.Status == IdentificationQueueStatus.Failed || q.Status == IdentificationQueueStatus.Done))
+            .ExecuteDeleteAsync();
+        db.IdentificationQueues.Add(new IdentificationQueue
+        {
+            Id           = Guid.NewGuid(),
+            FolderId     = folderId,
+            ForceRefresh = true,
+            QueuedAt     = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        ToastService.ShowToast(ToastIntent.Success, L["folders.toast_queued"]);
+    }
+
+    private async Task IdentifyAllAsync()
+    {
+        _identifyingAll = true;
+        StateHasChanged();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var folderIds = await db.FolderWatchers
+                .Where(f => !f.IsSection && f.IdentifyEnabled)
+                .Select(f => f.Id)
+                .ToListAsync();
+
+            // Skip folders already processing
+            var processing = await db.IdentificationQueues
+                .Where(q => q.Status == IdentificationQueueStatus.Processing)
+                .Select(q => q.FolderId)
+                .ToHashSetAsync();
+
+            // Remove stale Queued/Done/Failed entries for all these folders, then re-add
+            await db.IdentificationQueues
+                .Where(q => folderIds.Contains(q.FolderId) &&
+                            (q.Status == IdentificationQueueStatus.Queued ||
+                             q.Status == IdentificationQueueStatus.Failed ||
+                             q.Status == IdentificationQueueStatus.Done))
+                .ExecuteDeleteAsync();
+
+            var toAdd = folderIds
+                .Where(id => !processing.Contains(id))
+                .Select(id => new IdentificationQueue
+                {
+                    Id           = Guid.NewGuid(),
+                    FolderId     = id,
+                    ForceRefresh = false,
+                    QueuedAt     = DateTime.UtcNow,
+                })
+                .ToList();
+
+            if (toAdd.Count > 0)
+            {
+                db.IdentificationQueues.AddRange(toAdd);
+                await db.SaveChangesAsync();
+                ToastService.ShowToast(ToastIntent.Success, L.Get("folders.toast_identify_all", toAdd.Count));
+            }
+            else
+            {
+                ToastService.ShowToast(ToastIntent.Info, L["folders.toast_all_processing"]);
+            }
+        }
+        finally
+        {
+            _identifyingAll = false;
+            StateHasChanged();
+        }
     }
 }

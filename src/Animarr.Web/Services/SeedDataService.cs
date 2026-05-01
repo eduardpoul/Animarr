@@ -184,22 +184,25 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
 
     private async Task SeedIgnoreRulesAsync(AppDbContext db)
     {
-        if (await db.IgnoreRules.AnyAsync(r => r.Scope == RuleScope.Global && r.FolderId == null))
+        var existingMasks = await db.IgnoreRules
+            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
+            .Select(r => r.Mask)
+            .ToHashSetAsync();
+
+        var toAdd = BuiltInIgnoreMasks
+            .Where(mask => !existingMasks.Contains(mask))
+            .Select(mask => new IgnoreRule { Id = Guid.NewGuid(), Mask = mask, Scope = RuleScope.Global })
+            .ToList();
+
+        if (toAdd.Count == 0)
         {
-            logger.LogDebug("Global ignore rules already seeded, skipping.");
+            logger.LogDebug("Built-in ignore rules already up to date, skipping.");
             return;
         }
 
-        var entities = BuiltInIgnoreMasks.Select(mask => new IgnoreRule
-        {
-            Id = Guid.NewGuid(),
-            Mask = mask,
-            Scope = RuleScope.Global,
-        });
-
-        db.IgnoreRules.AddRange(entities);
+        db.IgnoreRules.AddRange(toAdd);
         await db.SaveChangesAsync();
-        logger.LogInformation("Seeded {Count} global ignore rules.", BuiltInIgnoreMasks.Length);
+        logger.LogInformation("Seeded {Count} new built-in ignore rules.", toAdd.Count);
     }
 
     // ─── Private record ──────────────────────────────────────────────────────

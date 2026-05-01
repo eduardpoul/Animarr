@@ -1,61 +1,58 @@
 ﻿@inherits LayoutComponentBase
-@implements IDisposable
+@implements IAsyncDisposable
 @inject ThemeService ThemeService
 @inject IJSRuntime JS
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IAppConfigService AppConfig
 
 <FluentDesignTheme @bind-Mode="_themeMode" OfficeColor="@_accentColor" StorageName="animarr-theme" />
 
+<!-- Global backdrop: used by JS initBackdrop from any page -->
+<div id="backdrop-container" style="position:fixed;inset:0;z-index:0;pointer-events:none;">
+    <div id="backdrop-slide-a" class="backdrop-slide"></div>
+    <div id="backdrop-slide-b" class="backdrop-slide"></div>
+</div>
+
 <FluentLayout class="h-screen flex flex-col">
-    <FluentHeader Style="@HeaderStyle()">
-        <div class="flex items-center gap-f-s flex-1">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" class="shrink-0">
-                <rect width="32" height="32" rx="6" fill="white" fill-opacity="0.15"/>
-                <text x="16" y="24" font-family="Arial, sans-serif" font-size="26" font-weight="900"
-                      text-anchor="middle" fill="white" letter-spacing="-1">A</text>
-                <line x1="22" y1="9" x2="22" y2="16" stroke="white" stroke-width="2" stroke-linecap="round"/>
-                <polyline points="19.5,14 22,17.5 24.5,14" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <line x1="19.5" y1="19.5" x2="24.5" y2="19.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <FluentLabel Typo="Typography.H4" Style="margin:0;color:white;">Animarr</FluentLabel>
+    <div class="flex-1 min-h-0 flex flex-row overflow-hidden" style="position:relative;z-index:1;">
+        <!-- Sidebar: logo pinned above nav links (outside FluentNavMenu so it appears before the hamburger) -->
+        <div class="animarr-sidebar">
+            <!-- ── Logo / brand ────────────────────────────────── -->
+            <a href="/" style="padding:14px 14px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(128,128,128,0.18);margin-bottom:4px;flex-shrink:0;text-decoration:none;color:inherit;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="28" height="28" style="flex-shrink:0;">
+                    <rect width="32" height="32" rx="6" fill="currentColor" fill-opacity="0.15"/>
+                    <text x="16" y="24" font-family="Arial, sans-serif" font-size="26" font-weight="900"
+                          text-anchor="middle" fill="currentColor" letter-spacing="-1">A</text>
+                    <line x1="22" y1="9" x2="22" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <polyline points="19.5,14 22,17.5 24.5,14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                    <line x1="19.5" y1="19.5" x2="24.5" y2="19.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span style="font-weight:700;font-size:15px;letter-spacing:0.01em;">Animarr</span>
+            </a>
+            <!-- ── Nav links ──────────────────────────────────── -->
+            <FluentNavMenu Width="220">
+                <FluentNavLink Href="/" Icon="@(new Icons.Regular.Size20.VideoClip())" Match="NavLinkMatch.All">
+                    @L["nav.catalog"]
+                </FluentNavLink>
+                <FluentNavLink Href="/torrents" Icon="@(new Icons.Regular.Size20.ArrowDownload())" Match="NavLinkMatch.All">
+                    @L["nav.torrents"]
+                </FluentNavLink>
+                <FluentNavLink Href="/explorer" Icon="@(new Icons.Regular.Size20.FolderOpen())" Match="NavLinkMatch.Prefix">
+                    @L["nav.explorer"]
+                </FluentNavLink>
+                <FluentNavLink Href="/history" Icon="@(new Icons.Regular.Size20.History())" Match="NavLinkMatch.Prefix">
+                    @L["nav.rename_history"]
+                </FluentNavLink>
+                <FluentNavLink Href="/settings" Icon="@(new Icons.Regular.Size20.Settings())" Match="NavLinkMatch.Prefix">
+                    @L["nav.settings"]
+                </FluentNavLink>
+            </FluentNavMenu>
         </div>
-        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener noreferrer"
-           title="GitHub"
-           class="flex items-center mr-f-m text-white opacity-65 hover:opacity-100 transition-opacity duration-150">
-            <svg height="22" width="22" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="white">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-            </svg>
-        </a>
-    </FluentHeader>
 
-    <div class="flex-1 min-h-0 flex flex-row overflow-hidden">
-        <FluentNavMenu Width="220" Title="Navigation" Collapsible="true">
-            <FluentNavLink Href="/torrents" Icon="@(new Icons.Regular.Size20.ArrowDownload())" Match="NavLinkMatch.All">
-                @L["nav.torrents"]
-            </FluentNavLink>
-            <FluentNavLink Href="/torrents/history" Icon="@(new Icons.Regular.Size20.ClockArrowDownload())" Match="NavLinkMatch.Prefix">
-                @L["nav.torrent_history"]
-            </FluentNavLink>
-            <FluentNavLink Href="/explorer" Icon="@(new Icons.Regular.Size20.FolderOpen())" Match="NavLinkMatch.Prefix">
-                @L["nav.explorer"]
-            </FluentNavLink>
-            <FluentNavLink Href="/history" Icon="@(new Icons.Regular.Size20.History())" Match="NavLinkMatch.Prefix">
-                @L["nav.rename_history"]
-            </FluentNavLink>
-            <FluentNavLink Href="/settings" Icon="@(new Icons.Regular.Size20.Settings())" Match="NavLinkMatch.Prefix">
-                @L["nav.settings"]
-            </FluentNavLink>
-        </FluentNavMenu>
-
-        <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-f-xxl">
+        <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden main-content" style="padding:20px 24px 24px;">
             @Body
         </div>
     </div>
-
-    <FluentFooter>
-        <FluentLabel Typo="Typography.Body" class="px-f-l py-f-xs text-fluent-body">
-            @L["layout.footer_tagline"]
-        </FluentLabel>
-    </FluentFooter>
 </FluentLayout>
 
 <FluentToastProvider />
@@ -66,6 +63,7 @@
     private DesignThemeModes _themeMode = DesignThemeModes.System;
     private OfficeColor? _accentColor;
     private const string AccentStorageKey = "animarr-accent";
+    private bool _everywhereBackdropStarted;
 
     protected override void OnInitialized()
     {
@@ -85,6 +83,32 @@
                 ThemeService.SetAccentColor(color);
                 _accentColor = color;
                 StateHasChanged();
+            }
+
+            // Global backdrop: always on when enabled, manages all pages
+            var enabled = await AppConfig.GetAsync<bool>(AppConfigKeys.BackdropEnabled, true);
+            if (enabled)
+            {
+                var interval   = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropIntervalSec, 30);
+                var blur       = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBlurPx, 0);
+                if (blur > 20) { blur = 0; await AppConfig.SetAsync<int>(AppConfigKeys.BackdropBlurPx, 0); }
+                var brightness = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBrightness, 60);
+
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var fanarts = await db.MediaItems
+                    .Where(m => m.FanartPath != null && m.Folder != null)
+                    .Select(m => new { m.Folder!.Path, m.FanartPath })
+                    .ToListAsync();
+
+                var urls = fanarts
+                    .Select(m => $"/api/image?path={Uri.EscapeDataString(Path.Combine(m.Path, m.FanartPath!))}")
+                    .ToArray();
+
+                if (urls.Length > 0)
+                {
+                    _everywhereBackdropStarted = true;
+                    await JS.InvokeVoidAsync("initGlobalBackdrop", urls, interval, blur, brightness);
+                }
             }
         }
     }
@@ -107,10 +131,12 @@
 
     private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         ThemeService.OnChange -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;
+        if (_everywhereBackdropStarted)
+            try { await JS.InvokeVoidAsync("stopBackdrop"); } catch { }
     }
 
     private string HeaderStyle() =>

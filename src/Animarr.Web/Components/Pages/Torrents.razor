@@ -16,11 +16,10 @@
                   IconStart="@(new Icons.Regular.Size20.Add())"
                   Title="@(L["torrents.add_button"])"
                   OnClick="@(() => { _addPanelOpen = true; _detailsPanelOpen = false; _detailsHash = null; })" />
-    <FluentButton Appearance="Appearance.Stealth"
-                  IconStart="@(new Icons.Regular.Size20.History())"
-                  Title="@(L["torrents.history_button"])"
-                  OnClick="@(() => Nav.NavigateTo("/torrents/history"))" />
 </div>
+
+<FluentTabs @bind-ActiveTabId="_activeTabId" OnTabChange="OnTabChanged">
+    <FluentTab Id="active" Label="@L["torrents.tab_active"]">
 
 @{
     var torrents = TorrentEngine.GetAll();
@@ -28,7 +27,7 @@
 
 @if (torrents.Count == 0)
 {
-    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;">
+    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;padding-top:12px;">
         @L["torrents.empty"]
     </FluentLabel>
 }
@@ -90,31 +89,90 @@ else
         </TemplateColumn>
 
         <TemplateColumn Title="" Align="Align.End" Width="155px">
-            <div style="display:flex;gap:2px;">
-                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Edit())"
+            <div style="display:flex;gap:2px;align-items:center;">
+                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Edit())"
+                              Style="min-width:28px;width:28px;height:28px;padding:0;"
                               Title="@(L["torrents.btn_edit"])" OnClick="@(() => OpenDetails(context.InfoHash))" />
                 @if (context.State == TorrentState.Downloading || context.State == TorrentState.Metadata || context.State == TorrentState.Seeding)
                 {
-                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Pause())"
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Pause())"
+                                  Style="min-width:28px;width:28px;height:28px;padding:0;"
                                   Title="@(L["torrents.btn_pause"])" OnClick="@(() => PauseAsync(context.InfoHash))" />
                 }
                 else if (context.State == TorrentState.Paused || context.State == TorrentState.Stopped)
                 {
-                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Play())"
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Play())"
+                                  Style="min-width:28px;width:28px;height:28px;padding:0;"
                                   Title="@(L["torrents.btn_resume"])" OnClick="@(() => ResumeAsync(context.InfoHash))" />
                 }
                 @if (context.State != TorrentState.Stopped)
                 {
-                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Stop())"
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Stop())"
+                                  Style="min-width:28px;width:28px;height:28px;padding:0;"
                                   Title="@(L["torrents.btn_stop"])" OnClick="@(() => StopAsync(context.InfoHash))" />
                 }
-                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())"
-                              style="color:var(--color-fluent-error);"
+                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size16.Delete())"
+                              Style="min-width:28px;width:28px;height:28px;padding:0;color:var(--color-fluent-error);"
                               Title="@(L["torrents.btn_delete"])" OnClick="@(() => AskDelete(context.InfoHash, context.Name))" />
             </div>
         </TemplateColumn>
     </FluentDataGrid>
 }
+
+    </FluentTab>
+    <FluentTab Id="history" Label="@L["torrents.tab_history"]">
+
+@if (_historyLoading)
+{
+    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
+        <FluentProgressRing />
+    </div>
+}
+else if (_historyRecords.Count == 0)
+{
+    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;padding-top:12px;">
+        @L["torrent_history.empty"]
+    </FluentLabel>
+}
+else
+{
+    <FluentDataGrid Items="@_historyRecords.AsQueryable()" TGridItem="TorrentRecord"
+                    ShowHover="true" Style="font-size:13px;" Pagination="@_historyPagination">
+        <TemplateColumn Title="" Width="18px">
+            <div class="fluent-status-dot fluent-status-dot--@HistoryStateColorClass(context.State)"
+                 title="@context.State.ToString()"></div>
+        </TemplateColumn>
+        <PropertyColumn Property="@(r => r.Name)" Title="@(L["torrent_history.col_name"])" Sortable="true" />
+        <TemplateColumn Title="@(L["torrent_history.col_folder"])" Width="180px">
+            <span title="@context.SavePath" style="font-size:12px;color:var(--neutral-foreground-hint);">
+                @System.IO.Path.GetFileName(context.SavePath.TrimEnd('/', '\\'))
+            </span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["torrent_history.col_size"])" Width="90px">
+            <span style="font-size:12px;">@FormatBytes(context.TotalSize)</span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["torrent_history.col_speed"])" Width="120px">
+            <span style="font-size:12px;">@FormatBytes(context.Downloaded) / @FormatBytes(context.Uploaded)</span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["torrent_history.col_added"])" Width="140px">
+            <span style="font-size:12px;">@context.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["torrent_history.col_completed"])" Width="140px">
+            <span style="font-size:12px;">
+                @(context.CompletedAt.HasValue
+                    ? context.CompletedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    : "—")
+            </span>
+        </TemplateColumn>
+        <TemplateColumn Title="@(L["torrent_history.col_status"])" Width="110px">
+            <span style="font-size:12px;">@HistoryStateLabel(context.State)</span>
+        </TemplateColumn>
+    </FluentDataGrid>
+    <FluentPaginator State="@_historyPagination" />
+}
+
+    </FluentTab>
+</FluentTabs>
 
 <!-- =================== ADD TORRENT PANEL =================== -->
 @if (_addPanelOpen)
@@ -547,6 +605,13 @@ else
     private List<(bool IsFolder, string Name, string? FullPath, long Length, int Depth)> _detailsFlatTree = [];
     private HashSet<string> _detailsCollapsedFolders = new();
 
+    // ---- Tabs + History state ----
+    private string _activeTabId = "active";
+    private List<TorrentRecord> _historyRecords = [];
+    private bool _historyLoading;
+    private bool _historyLoaded;
+    private readonly PaginationState _historyPagination = new() { ItemsPerPage = 25 };
+
     // ---- Delete dialog state ----
     private bool _deleteHidden = true;
     private string? _deleteHash;
@@ -570,6 +635,55 @@ else
     }
 
     public void Dispose() => TorrentEngine.StateChanged -= OnTorrentStateChanged;
+
+    private async Task OnTabChanged(FluentTab tab)
+    {
+        if (tab.Id == "history" && !_historyLoaded)
+            await LoadHistoryAsync();
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        _historyLoading = true;
+        StateHasChanged();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _historyRecords = await db.TorrentRecords
+            .Where(r => r.State != TorrentRecordState.Downloading &&
+                        r.State != TorrentRecordState.Hashing)
+            .OrderByDescending(r => r.AddedAt)
+            .ToListAsync();
+        _historyLoading = false;
+        _historyLoaded = true;
+    }
+
+    private static string HistoryStateColorClass(TorrentRecordState state) => state switch
+    {
+        TorrentRecordState.Seeding     => "success",
+        TorrentRecordState.Stopped     => "neutral",
+        TorrentRecordState.Error       => "error",
+        TorrentRecordState.Hashing     => "warning",
+        TorrentRecordState.Downloading => "informative",
+        _                              => "neutral",
+    };
+
+    private string HistoryStateLabel(TorrentRecordState state) => state switch
+    {
+        TorrentRecordState.Seeding     => L["torrent_history.state_seeding"],
+        TorrentRecordState.Stopped     => L["torrent_history.state_stopped"],
+        TorrentRecordState.Error       => L["torrent_history.state_error"],
+        TorrentRecordState.Paused      => L["torrent_history.state_paused"],
+        TorrentRecordState.Hashing     => L["torrent_history.state_hashing"],
+        TorrentRecordState.Downloading => L["torrent_history.state_downloading"],
+        _                              => state.ToString(),
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
 
     private void ToggleDetailsFolder(string fp)
     {
@@ -798,14 +912,6 @@ else
         if (bytesPerSec >= 1_048_576) return $"{bytesPerSec / 1_048_576.0:F1} MB/s";
         if (bytesPerSec >= 1024)      return $"{bytesPerSec / 1024.0:F0} KB/s";
         return $"{bytesPerSec} B/s";
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
-        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
-        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
-        return $"{bytes} B";
     }
 
     // Shows "923 / 920 MB" — same unit, no duplication

@@ -161,6 +161,7 @@ public class FolderWatcherService(
                     Label           = Path.GetFileName(dirPath),
                     WatchEnabled    = section.WatchEnabled,
                     RenameEnabled   = section.RenameEnabled,
+                    IdentifyEnabled = section.IdentifyEnabled,
                     FolderType      = section.FolderType,
                     IsSection       = false,
                     ParentSectionId = sectionId,
@@ -176,6 +177,25 @@ public class FolderWatcherService(
 
                 // Try to auto-link a torrent whose SavePath matches this folder
                 await torrentEngine.TryLinkTorrentAsync(dirPath, newFolder.Id);
+
+                // Enqueue identification if AutoIdentify is enabled AND folder allows it
+                using (var scope = scopeFactory.CreateScope())
+                {
+                    var appCfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+                    var autoIdentify = await appCfg.GetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, true);
+                    if (autoIdentify && newFolder.IdentifyEnabled)
+                    {
+                        await using var idDb = await dbFactory.CreateDbContextAsync();
+                        idDb.IdentificationQueues.Add(new Data.Models.IdentificationQueue
+                        {
+                            Id       = Guid.NewGuid(),
+                            FolderId = newFolder.Id,
+                            QueuedAt = DateTime.UtcNow,
+                        });
+                        await idDb.SaveChangesAsync();
+                        logger.LogDebug("Queued identification for new folder {Path}", dirPath);
+                    }
+                }
 
                 SubfolderCreated?.Invoke(sectionId, newFolder.Id);
             }
