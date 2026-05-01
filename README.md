@@ -7,6 +7,8 @@ It watches your media folders, renames files according to configurable patterns,
 
 - **Folder monitoring** — watches one or more directories and auto-renames new files as they arrive
 - **Pattern engine** — regex-based naming rules with named capture groups (`season`, `episode`); global patterns plus per-folder overrides and exclusions
+- **Media catalog** — poster grid with fanart backdrop slideshow, detail page with episodes, tags, and ratings (TMDB & MAL)
+- **AI identification** — automatically identifies folders via any OpenAI-compatible LLM (Ollama, OpenAI, Groq, LM Studio, …); also suggests rename patterns
 - **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits (Kbps)
 - **Section folders** — point Animarr at a root directory and it auto-imports each subdirectory as a separate monitored folder
 - **Ignore rules** — glob masks (e.g. `*.nfo`, `fanart*`) that skip files from renaming; global or per-folder
@@ -119,6 +121,62 @@ Common examples: `*.nfo`, `*.txt`, `fanart*`, `poster*`, `thumb*`
 
 Rules can be **global** (apply everywhere) or scoped to a specific folder.  
 Managed in **Settings → Ignore Rules**.
+
+## Ignore rules
+
+Glob masks that tell Animarr to skip certain filenames during renaming. Supports `*` and `?` wildcards.
+
+Common examples: `*.nfo`, `*.txt`, `fanart*`, `poster*`, `thumb*`
+
+Rules can be **global** (apply everywhere) or scoped to a specific folder.  
+Managed in **Settings → Ignore Rules**.
+
+## AI / LLM integration
+
+Animarr can connect to **any OpenAI-compatible AI service** to automatically identify media folders, extract titles, and suggest rename patterns.  
+The provider and model are configured in **Settings → Metadata → AI / LLM** — no restart needed.
+
+Supported providers (anything with a `/v1/chat/completions` endpoint):
+
+| Provider | Notes |
+|---|---|
+| **Ollama** (local) | Free, runs on your hardware, no API key needed |
+| **OpenAI** | Requires API key from platform.openai.com |
+| **Groq** | Fast cloud inference, free tier available |
+| **LM Studio** | Local GUI app, OpenAI-compatible server |
+| **Together AI**, **Perplexity**, … | Any OpenAI-compatible endpoint |
+
+### Example: running Ollama locally (CPU-only, e.g. Ryzen 2400G)
+
+> This is just one example. You can use any compatible provider above.
+
+```bash
+# Start Ollama via the included docker-compose (deploy/ollama/)
+cd deploy/ollama
+docker compose up -d
+
+# Pull a lightweight model suitable for CPU-only inference
+docker exec -it ollama ollama pull qwen2.5:0.5b
+```
+
+Then in **Settings → Metadata → AI / LLM**:
+
+| Field | Value |
+|---|---|
+| Provider | OpenAI-compatible URL |
+| Base URL | `http://localhost:11434` (or your server IP) |
+| Model | `qwen2.5:0.5b` |
+| API Key | *(leave empty)* |
+
+**Model recommendations for CPU-only:**
+
+| Model | ~RAM | Speed on CPU |
+|---|---|---|
+| `qwen2.5:0.5b` | 400 MB | Fast (~8 tok/s on Ryzen 5) |
+| `qwen2.5:1.5b` | 1 GB | Moderate (~3 tok/s) — better quality |
+| `gemma3:4b` | 3 GB | Slow on CPU, good quality |
+
+`qwen2.5:0.5b` is the recommended starting point — it understands Japanese anime titles, returns clean JSON, and runs comfortably without a GPU.
 
 ## Building from source
 

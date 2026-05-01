@@ -39,7 +39,33 @@ else
     else
     {
         <FluentDataGrid Items="@_children.AsQueryable()" TGridItem="FolderWatcher" ShowHover="true" Style="width:100%;">
-            <PropertyColumn Property="@(f => f.Label)" Title="@(L["section_folders.col_name"])" Sortable="true" />
+            <TemplateColumn Title="@(L["section_folders.col_name"])" Sortable="true">
+                @{
+                    var hasMedia = _mediaItemMap.ContainsKey(context.Id);
+                }
+                <div style="display:flex;align-items:center;gap:10px;@(hasMedia ? "cursor:pointer;" : "")"
+                     @onclick="@(hasMedia ? () => Nav.NavigateTo($"/catalog/{_mediaItemMap[context.Id]}") : null)">
+                    @if (_posterMap.TryGetValue(context.Id, out var posterUrl))
+                    {
+                        <img src="@posterUrl" alt="@context.Label"
+                             loading="lazy"
+                             style="width:32px;height:48px;object-fit:cover;border-radius:3px;flex-shrink:0;" />
+                    }
+                    else
+                    {
+                        <div style="width:32px;height:48px;background:var(--neutral-layer-3);border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+                            <FluentIcon Value="@(new Icons.Regular.Size16.Folder())" Style="opacity:0.4;" />
+                        </div>
+                    }
+                    <div style="min-width:0;">
+                        <div style="font-weight:@(hasMedia ? "600" : "400");overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@context.Label</div>
+                        @if (hasMedia)
+                        {
+                            <div style="font-size:11px;color:var(--accent-foreground-rest);">@L["section_folders.identified"]</div>
+                        }
+                    </div>
+                </div>
+            </TemplateColumn>
             <PropertyColumn Property="@(f => f.Path)" Title="@(L["section_folders.col_path"])" />
             <TemplateColumn Title="@(L["section_folders.col_monitoring"])" Align="Align.Center">
                 <FluentSwitch Value="@context.WatchEnabled"
@@ -51,10 +77,17 @@ else
                     : "—")
             </TemplateColumn>
             <TemplateColumn Title="@(L["section_folders.col_actions"])" Align="Align.End">
+                @if (_mediaItemMap.TryGetValue(context.Id, out var catalogId))
+                {
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@(new Icons.Regular.Size20.VideoClip())"
+                                  Title="@(L["section_folders.btn_catalog"])"
+                                  OnClick="@(() => Nav.NavigateTo($"/catalog/{catalogId}"))" />
+                }
                 <FluentButton Appearance="Appearance.Stealth"
-                              IconStart="@(new Icons.Regular.Size20.DocumentSearch())"
+                              IconStart="@(new Icons.Regular.Size20.FolderOpen())"
                               Title="@(L["section_folders.btn_files"])"
-                              OnClick="@(() => Nav.NavigateTo($"/folders/{context.Id}/files?back={SectionId}"))" />
+                              OnClick="@(() => Nav.NavigateTo($"/explorer"))" />
                 <FluentButton Appearance="Appearance.Stealth"
                               IconStart="@(new Icons.Regular.Size20.Edit())"
                               Title="@(L["section_folders.btn_edit"])"
@@ -123,6 +156,8 @@ else
 
     private FolderWatcher? _section;
     private List<FolderWatcher> _children = [];
+    private Dictionary<Guid, string> _posterMap = [];
+    private Dictionary<Guid, Guid>   _mediaItemMap = [];   // FolderId → MediaItemId
     private bool _loading = true;
 
     private bool _deleteHidden = true;
@@ -146,6 +181,26 @@ else
             .Where(f => f.ParentSectionId == SectionId)
             .OrderBy(f => f.Label)
             .ToListAsync();
+
+        // Load poster thumbnails for identified media items
+        var folderIds = _children.Select(c => c.Id).ToList();
+        var posters = await db.MediaItems
+            .Where(m => folderIds.Contains(m.FolderId) && m.PosterPath != null)
+            .Include(m => m.Folder)
+            .Select(m => new { m.FolderId, m.PosterPath, FolderPath = m.Folder!.Path })
+            .ToListAsync();
+        _posterMap = posters
+            .Where(p => p.PosterPath != null)
+            .ToDictionary(
+                p => p.FolderId,
+                p => $"/api/image?path={Uri.EscapeDataString(Path.Combine(p.FolderPath, p.PosterPath!))}");
+
+        // Build mediaItem map for catalog navigation
+        var mediaItems = await db.MediaItems
+            .Where(m => folderIds.Contains(m.FolderId))
+            .Select(m => new { m.FolderId, m.Id })
+            .ToListAsync();
+        _mediaItemMap = mediaItems.ToDictionary(m => m.FolderId, m => m.Id);
     }
 
     private async Task RefreshSection()

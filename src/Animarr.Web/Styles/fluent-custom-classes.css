@@ -173,6 +173,68 @@
    яркой/белой и выглядела так же деликатно, как в Windows 11.
    ============================================================ */
 
+/* ============================================================
+   Frosted-glass nav sidebar — проявляется когда за ним есть
+   фоновое изображение (MediaDetail fanart background).
+   color-mix даёт полупрозрачность без потери темы.
+   ============================================================ */
+/* fluent-nav-menu itself is transparent — .animarr-sidebar wrapper handles glass */
+fluent-nav-menu {
+    background: transparent !important;
+    border-right: none !important;
+}
+
+/* Sidebar wrapper: logo + nav links with frosted glass */
+.animarr-sidebar {
+    position: relative;
+    z-index: 2;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    background-color: color-mix(in srgb, var(--neutral-layer-1, #1c1c1c) 70%, transparent) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* White nav text + icon tint when backdrop is active */
+body.has-backdrop .animarr-sidebar {
+    --neutral-foreground-rest:        rgba(255,255,255,0.92);
+    --neutral-foreground-hover:       #ffffff;
+    --neutral-foreground-active:      #ffffff;
+    --neutral-fill-stealth-rest:      rgba(255,255,255,0.04);
+    --neutral-fill-stealth-hover:     rgba(255,255,255,0.11);
+    --neutral-fill-stealth-active:    rgba(255,255,255,0.17);
+    --neutral-fill-rest:              rgba(255,255,255,0.09);
+    --neutral-fill-hover:             rgba(255,255,255,0.14);
+    --neutral-fill-active:            rgba(255,255,255,0.19);
+    --accent-fill-rest:               rgba(255,255,255,0.22);
+    --accent-fill-hover:              rgba(255,255,255,0.28);
+    --accent-foreground-rest:         #ffffff;
+    color:                            rgba(255,255,255,0.92);
+}
+
+/* White text in main content area when backdrop is active */
+body.has-backdrop .main-content {
+    --neutral-foreground-rest:        rgba(255,255,255,0.92);
+    --neutral-foreground-hover:       #ffffff;
+    --neutral-foreground-active:      #ffffff;
+    --neutral-foreground-hint:        rgba(255,255,255,0.55);
+    --neutral-fill-stealth-rest:      rgba(255,255,255,0.04);
+    --neutral-fill-stealth-hover:     rgba(255,255,255,0.10);
+    --neutral-fill-stealth-active:    rgba(255,255,255,0.15);
+    --neutral-fill-rest:              rgba(255,255,255,0.08);
+    --neutral-fill-hover:             rgba(255,255,255,0.13);
+    --neutral-fill-active:            rgba(255,255,255,0.18);
+    --neutral-layer-1:                rgba(0,0,0,0.35);
+    --neutral-layer-2:                rgba(0,0,0,0.25);
+    --neutral-layer-floating:         rgba(20,20,20,0.85);
+    --neutral-stroke-rest:            rgba(255,255,255,0.14);
+    --neutral-stroke-hover:           rgba(255,255,255,0.22);
+    --accent-foreground-rest:         #ffffff;
+    color:                            rgba(255,255,255,0.92);
+}
+
 body[data-theme="dark"] fluent-select,
 body[data-theme="dark"] fluent-text-field,
 body[data-theme="dark"] fluent-number-field,

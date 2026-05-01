@@ -1,4 +1,20 @@
-@inject IDbContextFactory<AppDbContext> DbFactory
+import re
+
+path = r'x:\Repos\Animarr\src\Animarr.Web\Components\Explorer\FolderEditPanel.razor'
+content = open(path, encoding='utf-8').read()
+
+# Fix doubled quotes: L[""key""] → L["key"]
+fixed = re.sub(r'L\[""\s*([^"]+?)\s*""\]', lambda m: f'L["{m.group(1)}"]', content)
+# Fix OnClick ApplyManualIdAsync(""tmdb_tv"") etc.
+fixed = re.sub(r'ApplyManualIdAsync\(""\s*([^"]+?)\s*""\)', lambda m: f'ApplyManualIdAsync("{m.group(1)}")', fixed)
+
+changed = sum(1 for a, b in zip(content.split('\n'), fixed.split('\n')) if a != b)
+print(f'Lines changed: {changed}')
+open(path, 'w', encoding='utf-8').write(fixed)
+print('done')
+
+if False:
+ content_unused = r"""@inject IDbContextFactory<AppDbContext> DbFactory
 @inject IToastService ToastService
 @inject FolderWatcherService WatcherService
 @inject IPatternMatchService Matcher
@@ -14,25 +30,25 @@
     <!-- Header -->
     <div style="display:flex;align-items:center;padding:16px 20px 12px;gap:8px;flex-shrink:0;border-bottom:1px solid var(--neutral-stroke-subtle);">
         <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@Folder.Label</FluentLabel>
-        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L["folders.btn_cancel"])" OnClick="@(() => OnClosed.InvokeAsync())" />
+        <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" Title="@(L[""folders.btn_cancel""])" OnClick="@(() => OnClosed.InvokeAsync())" />
     </div>
 
     <!-- Tabs -->
-    <FluentTabs @bind-ActiveTabId="_activeTab" OnTabChange="OnTabChanged" Style="--tabs-padding-left:20px;">
+    <FluentTabs @bind-ActiveTabId="_activeTab" Style="flex:1;overflow:hidden;display:flex;flex-direction:column;" OnTabChange="OnTabChanged">
 
         <!-- ═══ TAB 1: General ═══ -->
-        <FluentTab Id="general" Label="@(L["folder_detail.tab_general"])">
+        <FluentTab Id="general" Label="@(L[""folder_detail.tab_general""])">
             <div style="padding:20px;overflow-y:auto;height:calc(100vh - 120px);box-sizing:border-box;">
                 <div style="display:flex;flex-direction:column;gap:14px;max-width:480px;">
                     <FluentTextField @bind-Value="_editLabel"
-                                     Label="@(L["folders.field_name_label"])"
+                                     Label="@(L[""folders.field_name_label""])"
                                      style="width:100%;" />
                     <FluentSwitch @bind-Value="_editWatch">@L["folders.switch_monitor"]</FluentSwitch>
                     <FluentSwitch @bind-Value="_editRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
                     @if (_editRenameEnabled)
                     {
                         <FluentSelect TOption="string" @bind-Value="_editFolderTypeStr"
-                                      Label="@(L["folders.content_type_label"])" style="width:100%;">
+                                      Label="@(L[""folders.content_type_label""])" style="width:100%;">
                             <FluentOption TOption="string" Value="Auto">@L["folders.content_type_auto"]</FluentOption>
                             <FluentOption TOption="string" Value="Series">@L["folders.content_type_series"]</FluentOption>
                             <FluentOption TOption="string" Value="Movie">@L["folders.content_type_movie"]</FluentOption>
@@ -49,7 +65,7 @@
         </FluentTab>
 
         <!-- ═══ TAB 2: Metadata ═══ -->
-        <FluentTab Id="metadata" Label="@(L["folder_detail.tab_metadata"])">
+        <FluentTab Id="metadata" Label="@(L[""folder_detail.tab_metadata""])">
             <div style="padding:20px;overflow-y:auto;height:calc(100vh - 120px);box-sizing:border-box;">
                 @if (_metaLoading)
                 {
@@ -58,22 +74,13 @@
                 else if (_mediaItem is null)
                 {
                     <div style="text-align:center;padding:40px 0;color:var(--neutral-foreground-hint);">
-                        @if (_isQueued)
-                        {
-                            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowSync())" Style="opacity:0.3;" />
-                            <div style="margin-top:12px;font-size:14px;">@L["folder_detail.meta_identifying"]</div>
-                            <FluentProgress Width="180px" Style="margin:16px auto 0;" />
-                        }
-                        else
-                        {
-                            <FluentIcon Value="@(new Icons.Regular.Size32.DocumentSearch())" Style="opacity:0.3;" />
-                            <div style="margin-top:12px;font-size:14px;">@L["folder_detail.meta_not_identified"]</div>
-                            <FluentButton Appearance="Appearance.Accent" Style="margin-top:16px;"
-                                          IconStart="@(new Icons.Regular.Size16.DocumentSearch())"
-                                          OnClick="ReidentifyAsync">
-                                @L["folder_detail.meta_btn_identify"]
-                            </FluentButton>
-                        }
+                        <FluentIcon Value="@(new Icons.Regular.Size48.DocumentSearch())" Style="opacity:0.3;" />
+                        <div style="margin-top:12px;font-size:14px;">@L["folder_detail.meta_not_identified"]</div>
+                        <FluentButton Appearance="Appearance.Accent" Style="margin-top:16px;"
+                                      IconStart="@(new Icons.Regular.Size16.DocumentSearch())"
+                                      OnClick="ReidentifyAsync">
+                            @L["folder_detail.meta_btn_identify"]
+                        </FluentButton>
                     </div>
                 }
                 else
@@ -85,12 +92,7 @@
                             <FluentBadge Appearance="@StatusAppearance(_mediaItem.IdentificationStatus)" Style="font-size:12px;">
                                 @StatusLabel(_mediaItem.IdentificationStatus)
                             </FluentBadge>
-                            @if (_isQueued)
-                            {
-                                <FluentIcon Value="@(new Icons.Regular.Size16.ArrowSync())" Style="opacity:0.6;" />
-                                <span style="font-size:12px;color:var(--neutral-foreground-hint);">@L["folder_detail.meta_identifying"]</span>
-                            }
-                            else if (_mediaItem.LastMetadataRefreshedAt.HasValue)
+                            @if (_mediaItem.LastMetadataRefreshedAt.HasValue)
                             {
                                 <span style="font-size:12px;color:var(--neutral-foreground-hint);">
                                     @L["folder_detail.meta_last_updated"] @_mediaItem.LastMetadataRefreshedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
@@ -98,7 +100,7 @@
                             }
                             <FluentButton Appearance="Appearance.Stealth"
                                           IconStart="@(new Icons.Regular.Size16.ArrowSync())"
-                                          Disabled="@(_metaSaving || _isQueued)"
+                                          Disabled="@_metaSaving"
                                           OnClick="ReidentifyAsync">
                                 @L["folder_detail.meta_btn_reidentify"]
                             </FluentButton>
@@ -108,9 +110,7 @@
                         <div style="display:flex;gap:16px;flex-wrap:wrap;">
                             <div style="flex-shrink:0;">
                                 <div style="font-size:12px;font-weight:600;color:var(--neutral-foreground-hint);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">@L["folder_detail.meta_poster"]</div>
-                                <div style="width:110px;height:165px;background:var(--neutral-layer-2);border-radius:6px;overflow:hidden;border:1px solid var(--neutral-stroke-subtle);cursor:pointer;position:relative;group"
-                                     title="Нажмите для смены постера"
-                                     @onclick="@(() => OpenImagePickerAsync("poster"))">
+                                <div style="width:110px;height:165px;background:var(--neutral-layer-2);border-radius:6px;overflow:hidden;border:1px solid var(--neutral-stroke-subtle);">
                                     @if (_mediaItem.PosterPath is not null)
                                     {
                                         <img src="@GetImageUrl(_mediaItem, _mediaItem.PosterPath)" alt="poster" style="width:100%;height:100%;object-fit:cover;" />
@@ -121,17 +121,11 @@
                                             <FluentIcon Value="@(new Icons.Regular.Size24.Image())" />
                                         </div>
                                     }
-                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s;"
-                                         onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'">
-                                        <FluentIcon Value="@(new Icons.Regular.Size20.Edit())" Color="Color.Lightweight" />
-                                    </div>
                                 </div>
                             </div>
                             <div style="flex:1;min-width:160px;">
                                 <div style="font-size:12px;font-weight:600;color:var(--neutral-foreground-hint);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">@L["folder_detail.meta_fanart"]</div>
-                                <div style="width:100%;height:165px;background:var(--neutral-layer-2);border-radius:6px;overflow:hidden;border:1px solid var(--neutral-stroke-subtle);cursor:pointer;position:relative;"
-                                     title="Нажмите для смены фона"
-                                     @onclick="@(() => OpenImagePickerAsync("fanart"))">
+                                <div style="width:100%;height:165px;background:var(--neutral-layer-2);border-radius:6px;overflow:hidden;border:1px solid var(--neutral-stroke-subtle);">
                                     @if (_mediaItem.FanartPath is not null)
                                     {
                                         <img src="@GetImageUrl(_mediaItem, _mediaItem.FanartPath)" alt="fanart" style="width:100%;height:100%;object-fit:cover;" />
@@ -142,10 +136,6 @@
                                             <FluentIcon Value="@(new Icons.Regular.Size24.Image())" />
                                         </div>
                                     }
-                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s;"
-                                         onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'">
-                                        <FluentIcon Value="@(new Icons.Regular.Size20.Edit())" Color="Color.Lightweight" />
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -170,110 +160,64 @@
                         </div>
 
                         <FluentDivider />
-                    </div>
-                }
 
-                @if (!_metaLoading)
-                {
-                    <!-- External ID — source select + single ID field -->
-                    <div style="display:flex;flex-direction:column;gap:14px;margin-top:@(_mediaItem is not null ? "0" : "20px")">
+                        <!-- External IDs -->
+                        <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@L["folder_detail.meta_external_ids"]</FluentLabel>
+                        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:8px;">@L["folder_detail.meta_external_ids_hint"]</FluentLabel>
 
-                        <FluentLabel Typo="Typography.H3" Style="margin-bottom:2px;">@L["folder_detail.meta_external_ids"]</FluentLabel>
-                        <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.meta_external_ids_hint"]</FluentLabel>
-
-                        <!-- Current IDs summary -->
-                        @if (_mediaItem is not null)
-                        {
-                            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px;">
+                        <div style="display:flex;flex-direction:column;gap:14px;max-width:440px;">
+                            <!-- TMDB -->
+                            <div>
+                                <div style="font-size:13px;font-weight:600;margin-bottom:4px;">TMDB ID</div>
+                                <div style="display:flex;gap:8px;align-items:flex-end;">
+                                    <FluentNumberField TValue="int?" @bind-Value="_editTmdbId"
+                                                       Placeholder="e.g. 1399" style="width:150px;" />
+                                    <FluentButton Appearance="Appearance.Accent"
+                                                  Disabled="@(!_editTmdbId.HasValue || _metaSaving)"
+                                                  OnClick="@(() => ApplyManualIdAsync(""tmdb_tv""))">
+                                        @L["folder_detail.meta_btn_apply_tmdb_tv"]
+                                    </FluentButton>
+                                    <FluentButton Appearance="Appearance.Neutral"
+                                                  Disabled="@(!_editTmdbId.HasValue || _metaSaving)"
+                                                  OnClick="@(() => ApplyManualIdAsync(""tmdb_movie""))">
+                                        @L["folder_detail.meta_btn_apply_tmdb_movie"]
+                                    </FluentButton>
+                                </div>
                                 @if (_mediaItem.TmdbId.HasValue)
                                 {
-                                    <a href="https://www.themoviedb.org/tv/@_mediaItem.TmdbId" target="_blank"
-                                       style="padding:2px 8px;background:var(--neutral-layer-3);border-radius:10px;color:var(--accent-fill-rest);text-decoration:none;">
-                                        TMDB @_mediaItem.TmdbId ↗
-                                    </a>
-                                }
-                                @if (_mediaItem.ImdbId is not null)
-                                {
-                                    <a href="https://www.imdb.com/title/@_mediaItem.ImdbId" target="_blank"
-                                       style="padding:2px 8px;background:var(--neutral-layer-3);border-radius:10px;color:var(--accent-fill-rest);text-decoration:none;">
-                                        IMDb @_mediaItem.ImdbId ↗
-                                    </a>
-                                }
-                                @if (_mediaItem.TvdbId.HasValue)
-                                {
-                                    <a href="https://thetvdb.com/?tab=series&id=@_mediaItem.TvdbId" target="_blank"
-                                       style="padding:2px 8px;background:var(--neutral-layer-3);border-radius:10px;color:var(--accent-fill-rest);text-decoration:none;">
-                                        TVDB @_mediaItem.TvdbId ↗
-                                    </a>
-                                }
-                                @if (_mediaItem.MalId.HasValue)
-                                {
-                                    <a href="https://myanimelist.net/anime/@_mediaItem.MalId" target="_blank"
-                                       style="padding:2px 8px;background:var(--neutral-layer-3);border-radius:10px;color:var(--accent-fill-rest);text-decoration:none;">
-                                        MAL @_mediaItem.MalId ↗
-                                    </a>
+                                    <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:3px;">
+                                        @L["folder_detail.meta_current_id"]: <b>@_mediaItem.TmdbId</b>
+                                        &nbsp;&middot;&nbsp;
+                                        <a href="https://www.themoviedb.org/tv/@_mediaItem.TmdbId" target="_blank" style="color:var(--accent-fill-rest);">TMDB &#8599;</a>
+                                    </div>
                                 }
                             </div>
-                        }
-
-                        <!-- Source selector -->
-                        <FluentSelect TOption="string"
-                                      @bind-Value="ManualIdSource"
-                                      Label="@(L["folder_detail.meta_id_source"])" style="width:100%;">
-                            <FluentOption TOption="string" Value="tmdb_tv">TMDB — TV / Сериал</FluentOption>
-                            <FluentOption TOption="string" Value="tmdb_movie">TMDB — Фильм</FluentOption>
-                            <FluentOption TOption="string" Value="imdb">IMDb (tt…)</FluentOption>
-                            <FluentOption TOption="string" Value="tvdb_tv">TheTVDB</FluentOption>
-                            <FluentOption TOption="string" Value="mal">MyAnimeList</FluentOption>
-                        </FluentSelect>
-
-                        <!-- ID field + Apply button -->
-                        <div style="display:flex;gap:8px;align-items:flex-end;">
-                            @if (_manualIdSource == "imdb")
-                            {
-                                <FluentTextField @bind-Value="_manualIdStr"
-                                                 Label="ID"
-                                                 Placeholder="tt0944947"
-                                                 style="flex:1;" />
-                            }
-                            else
-                            {
-                                <FluentNumberField TValue="int?"
-                                                   @bind-Value="_manualIdNum"
-                                                   Label="ID"
-                                                   Placeholder="@IdPlaceholder(_manualIdSource)"
-                                                   style="flex:1;" />
-                            }
-                            <FluentButton Appearance="Appearance.Accent"
-                                          Disabled="@_metaSaving"
-                                          OnClick="ApplyManualIdUnifiedAsync">
-                                @L["folder_detail.meta_btn_apply"]
-                            </FluentButton>
-                        </div>
-
-                        <!-- Source hint link -->
-                        <div style="font-size:11px;color:var(--neutral-foreground-hint);">
-                            @switch (_manualIdSource)
-                            {
-                                case "tmdb_tv":
-                                case "tmdb_movie":
-                                    <a href="https://www.themoviedb.org/search" target="_blank" style="color:var(--accent-fill-rest);">themoviedb.org ↗</a>
-                                    break;
-                                case "imdb":
-                                    <a href="https://www.imdb.com/search/title/" target="_blank" style="color:var(--accent-fill-rest);">imdb.com ↗</a>
-                                    break;
-                                case "tvdb_tv":
-                                    <a href="https://thetvdb.com/search" target="_blank" style="color:var(--accent-fill-rest);">thetvdb.com ↗</a>
-                                    break;
-                                case "mal":
-                                    <a href="https://myanimelist.net/anime.php" target="_blank" style="color:var(--accent-fill-rest);">myanimelist.net ↗</a>
-                                    break;
-                            }
+                            <!-- MAL -->
+                            <div>
+                                <div style="font-size:13px;font-weight:600;margin-bottom:4px;">MyAnimeList ID</div>
+                                <div style="display:flex;gap:8px;align-items:flex-end;">
+                                    <FluentNumberField TValue="int?" @bind-Value="_editMalId"
+                                                       Placeholder="e.g. 5114" style="width:150px;" />
+                                    <FluentButton Appearance="Appearance.Accent"
+                                                  Disabled="@(!_editMalId.HasValue || _metaSaving)"
+                                                  OnClick="@(() => ApplyManualIdAsync(""mal""))">
+                                        @L["folder_detail.meta_btn_apply_mal"]
+                                    </FluentButton>
+                                </div>
+                                @if (_mediaItem.MalId.HasValue)
+                                {
+                                    <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:3px;">
+                                        @L["folder_detail.meta_current_id"]: <b>@_mediaItem.MalId</b>
+                                        &nbsp;&middot;&nbsp;
+                                        <a href="https://myanimelist.net/anime/@_mediaItem.MalId" target="_blank" style="color:var(--accent-fill-rest);">MAL &#8599;</a>
+                                    </div>
+                                }
+                            </div>
                         </div>
 
                         @if (_metaSaving)
                         {
-                            <FluentProgress Width="100%" />
+                            <FluentProgress Width="100%" Style="margin-top:8px;" />
                         }
                     </div>
                 }
@@ -281,7 +225,7 @@
         </FluentTab>
 
         <!-- ═══ TAB 3: Patterns ═══ -->
-        <FluentTab Id="patterns" Label="@(L["folder_detail.tab_patterns"])">
+        <FluentTab Id="patterns" Label="@(L[""folder_detail.tab_patterns""])">
             <div style="padding:20px;overflow-y:auto;height:calc(100vh - 120px);box-sizing:border-box;">
                 <div style="display:flex;flex-direction:column;gap:16px;">
 
@@ -295,17 +239,17 @@
                     else
                     {
                         <FluentDataGrid Items="@_inheritedPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
-                            <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
+                            <TemplateColumn Title="@(L[""patterns.col_priority""])" Width="60px" Align="Align.Center">
                                 <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Priority</span>
                             </TemplateColumn>
-                            <TemplateColumn Title="@(L["patterns.col_name"])">
+                            <TemplateColumn Title="@(L[""patterns.col_name""])">
                                 <span style="opacity:@(_disabledInheritedPatternIds.Contains(context.Id) ? 0.4 : 1.0);">@context.Name</span>
                             </TemplateColumn>
                             <TemplateColumn Title="" Align="Align.End" Width="120px">
                                 @{var isDisabled = _disabledInheritedPatternIds.Contains(context.Id);}
                                 <FluentSwitch Value="@(!isDisabled)"
                                               ValueChanged="@(async (bool v) => await ToggleInheritedPatternAsync(context, !v))"
-                                              Title="@(isDisabled ? L["folder_detail.inherited_pattern_disabled"] : L["folder_detail.inherited_pattern_active"])" />
+                                              Title="@(isDisabled ? L[""folder_detail.inherited_pattern_disabled""] : L[""folder_detail.inherited_pattern_active""])" />
                             </TemplateColumn>
                         </FluentDataGrid>
                     }
@@ -316,7 +260,7 @@
                         <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["folder_detail.override_patterns_title"]</FluentLabel>
                         <FluentButton Appearance="Appearance.Accent"
                                       IconStart="@(new Icons.Regular.Size20.Add())"
-                                      Title="@(L["patterns.add_button"])"
+                                      Title="@(L[""patterns.add_button""])"
                                       OnClick="@(() => OpenEditPatternDialog(null))" />
                     </div>
                     <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.patterns_hint"]</FluentLabel>
@@ -328,20 +272,20 @@
                     else
                     {
                         <FluentDataGrid Items="@_editPatterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
-                            <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
+                            <TemplateColumn Title="@(L[""patterns.col_priority""])" Width="60px" Align="Align.Center">
                                 @context.Priority
                             </TemplateColumn>
-                            <PropertyColumn Property="@(p => p.Name)" Title="@(L["patterns.col_name"])" />
-                            <TemplateColumn Title="@(L["patterns.col_regex"])">
+                            <PropertyColumn Property="@(p => p.Name)" Title="@(L[""patterns.col_name""])" />
+                            <TemplateColumn Title="@(L[""patterns.col_regex""])">
                                 <code style="font-size:11px;word-break:break-all;">@context.Pattern</code>
                             </TemplateColumn>
                             <TemplateColumn Title="" Align="Align.End" Width="110px">
                                 <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                                              Title="@(L["patterns.btn_edit"])"
+                                              Title="@(L[""patterns.btn_edit""])"
                                               OnClick="@(() => OpenEditPatternDialog(context))" />
                                 <FluentButton Appearance="Appearance.Stealth"
                                               IconStart="@(new Icons.Regular.Size20.Delete())"
-                                              Title="@(L["patterns.btn_delete"])"
+                                              Title="@(L[""patterns.btn_delete""])"
                                               OnClick="@(() => DeleteEditPatternAsync(context))" />
                             </TemplateColumn>
                         </FluentDataGrid>
@@ -352,8 +296,8 @@
                     <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.test_hint"]</FluentLabel>
                     <div style="display:flex;align-items:flex-end;gap:10px;">
                         <FluentTextField @bind-Value="_editTestInput"
-                                         Label="@(L["patterns.test_field_label"])"
-                                         Placeholder="@(L["patterns.test_placeholder"])"
+                                         Label="@(L[""patterns.test_field_label""])"
+                                         Placeholder="@(L[""patterns.test_placeholder""])"
                                          style="flex:1;" />
                         <FluentButton Appearance="Appearance.Accent" OnClick="TestEditPattern">@L["patterns.test_button"]</FluentButton>
                     </div>
@@ -382,13 +326,13 @@
                     <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);">@L["folder_detail.rules_hint"]</FluentLabel>
                     <div style="display:flex;align-items:flex-end;gap:8px;">
                         <FluentTextField @bind-Value="_editNewMask"
-                                         Placeholder="@(L["settings.new_mask_placeholder"])"
-                                         Label="@(L["settings.new_mask_label"])"
+                                         Placeholder="@(L[""settings.new_mask_placeholder""])"
+                                         Label="@(L[""settings.new_mask_label""])"
                                          style="flex:1;" />
                         <FluentButton Appearance="Appearance.Accent"
                                       IconStart="@(new Icons.Regular.Size20.Add())"
                                       OnClick="AddEditRuleAsync"
-                                      Title="@(L["settings.btn_add_mask"])"
+                                      Title="@(L[""settings.btn_add_mask""])"
                                       Disabled="@string.IsNullOrWhiteSpace(_editNewMask)" />
                     </div>
                     @if (_editRules.Count == 0)
@@ -398,11 +342,11 @@
                     else
                     {
                         <FluentDataGrid Items="@_editRules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
-                            <PropertyColumn Property="@(r => r.Mask)" Title="@(L["settings.col_mask"])" />
+                            <PropertyColumn Property="@(r => r.Mask)" Title="@(L[""settings.col_mask""])" />
                             <TemplateColumn Title="" Align="Align.End" Width="100px">
                                 <FluentButton Appearance="Appearance.Stealth"
                                               IconStart="@(new Icons.Regular.Size20.Delete())"
-                                              Title="@(L["settings.btn_delete_mask"])"
+                                              Title="@(L[""settings.btn_delete_mask""])"
                                               OnClick="@(() => DeleteEditRuleAsync(context))" />
                             </TemplateColumn>
                         </FluentDataGrid>
@@ -424,15 +368,15 @@
     <FluentDialogBody>
         <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
             <FluentTextField @bind-Value="_editPatternName"
-                             Label="@(L["patterns.field_name_label"])"
-                             Placeholder="@(L["patterns.field_name_placeholder"])"
+                             Label="@(L[""patterns.field_name_label""])"
+                             Placeholder="@(L[""patterns.field_name_placeholder""])"
                              style="width:100%;" />
             <FluentTextField @bind-Value="_editPatternRegex"
-                             Label="@(L["patterns.field_regex_label"])"
-                             Placeholder="@(L["patterns.field_regex_placeholder"])"
+                             Label="@(L[""patterns.field_regex_label""])"
+                             Placeholder="@(L[""patterns.field_regex_placeholder""])"
                              style="width:100%;font-family:monospace;" />
             <FluentNumberField TValue="int" @bind-Value="_editPatternPriority"
-                               Label="@(L["patterns.field_priority_label"])"
+                               Label="@(L[""patterns.field_priority_label""])"
                                Min="1" Max="999" style="width:160px;" />
         </FluentStack>
     </FluentDialogBody>
@@ -444,60 +388,6 @@
         <FluentButton OnClick="@(() => _editPatternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
     </FluentDialogFooter>
 </FluentDialog>
-
-<!-- Image picker dialog -->
-@if (!_imagePickerHidden)
-{
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;display:flex;align-items:center;justify-content:center;"
-         @onclick="@(() => _imagePickerHidden = true)">
-        <div style="background:var(--neutral-layer-floating);border-radius:12px;width:min(900px,95vw);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5);"
-             @onclick:stopPropagation>
-            <!-- Header -->
-            <div style="display:flex;align-items:center;padding:16px 20px;gap:8px;border-bottom:1px solid var(--neutral-stroke-subtle);flex-shrink:0;">
-                <span style="font-size:15px;font-weight:600;flex:1;">
-                    @(_imagePickerType == "poster" ? "Выбрать постер" : _imagePickerType == "fanart" ? "Выбрать фон (Backdrop)" : "Выбрать логотип")
-                </span>
-                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Dismiss())" OnClick="@(() => _imagePickerHidden = true)" />
-            </div>
-            <!-- Body -->
-            <div style="overflow-y:auto;padding:16px;flex:1;">
-                @if (_imagePickerLoading)
-                {
-                    <div style="display:flex;justify-content:center;padding:40px;">
-                        <FluentProgressRing />
-                    </div>
-                }
-                else if (_imagePickerList.Count == 0)
-                {
-                    <div style="text-align:center;color:var(--neutral-foreground-hint);padding:40px;">
-                        Нет доступных изображений (TMDB не нашёл совпадений по этому ID)
-                    </div>
-                }
-                else
-                {
-                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(@(_imagePickerType=="poster" ? "140px" : "220px"),1fr));gap:10px;">
-                        @foreach (var url in _imagePickerList)
-                        {
-                            var u = url;
-                            <div style="position:relative;cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color .15s;"
-                                 @onclick="@(() => PickImageAsync(u))"
-                                 @onmouseover="@(e => { })"
-                                 title="Выбрать">
-                                <img src="@u" loading="lazy"
-                                     style="width:100%;display:block;@(_imagePickerType=="poster" ? "aspect-ratio:2/3;" : "aspect-ratio:16/9;")object-fit:cover;" />
-                                <div style="position:absolute;inset:0;background:rgba(0,0,0,0);transition:background .15s;display:flex;align-items:center;justify-content:center;"
-                                     class="img-hover-overlay">
-                                    <FluentIcon Value="@(new Icons.Regular.Size28.Checkmark())" Color="Color.Lightweight"
-                                                Style="opacity:0;transition:opacity .15s;filter:drop-shadow(0 0 4px rgba(0,0,0,.8));" />
-                                </div>
-                            </div>
-                        }
-                    </div>
-                }
-            </div>
-        </div>
-    </div>
-}
 
 @code {
     [Parameter, EditorRequired] public FolderWatcher Folder { get; set; } = null!;
@@ -517,29 +407,8 @@
     private MediaItem? _mediaItem;
     private bool _metaLoading = false;
     private bool _metaSaving  = false;
-    private bool _isQueued    = false;
-    // Unified manual ID entry
-    private string _manualIdSource = "tmdb_tv";
-    private int?    _manualIdNum;
-    private string? _manualIdStr;
-
-    // Image picker
-    private bool         _imagePickerHidden = true;
-    private string       _imagePickerType   = "poster"; // "poster" | "fanart" | "logo"
-    private bool         _imagePickerLoading = false;
-    private List<string> _imagePickerList    = [];
-
-    private string ManualIdSource
-    {
-        get => _manualIdSource;
-        set
-        {
-            if (_manualIdSource == value) return;
-            _manualIdSource = value;
-            _manualIdNum    = null;
-            _manualIdStr    = null;
-        }
-    }
+    private int? _editTmdbId;
+    private int? _editMalId;
 
     // ── Tab 3: Patterns ───────────────────────────────────────────
     private List<RenamePattern> _editPatterns = [];
@@ -564,9 +433,8 @@
         _loadedFolderId = Folder.Id;
         _activeTab      = "general";
         _mediaItem      = null;
-        _manualIdSource = "tmdb_tv";
-        _manualIdNum    = null;
-        _manualIdStr    = null;
+        _editTmdbId     = null;
+        _editMalId      = null;
 
         _editLabel         = Folder.Label;
         _editWatch         = Folder.WatchEnabled;
@@ -598,46 +466,24 @@
 
     private async Task OnTabChanged(FluentTab tab)
     {
-        if (tab.Id == "metadata" && !_metaLoading)
+        if (tab.Id == "metadata" && _mediaItem is null && !_metaLoading)
             await LoadMediaItemAsync();
     }
 
-    private async Task LoadMediaItemAsync(bool showLoading = true)
+    private async Task LoadMediaItemAsync()
     {
-        if (showLoading) { _metaLoading = true; StateHasChanged(); }
+        _metaLoading = true;
+        StateHasChanged();
         await using var db = await DbFactory.CreateDbContextAsync();
         _mediaItem = await db.MediaItems
             .Include(m => m.Folder)
             .FirstOrDefaultAsync(m => m.FolderId == Folder.Id);
-        _isQueued = await db.IdentificationQueues
-            .AnyAsync(q => q.FolderId == Folder.Id &&
-                           (q.Status == IdentificationQueueStatus.Queued ||
-                            q.Status == IdentificationQueueStatus.Processing));
-        // Pre-fill the ID field with whatever is currently stored, picking the best source
         if (_mediaItem is not null)
         {
-            if (_mediaItem.TmdbId.HasValue)
-            {
-                _manualIdSource = _mediaItem.MediaType == MediaItemType.Movie ? "tmdb_movie" : "tmdb_tv";
-                _manualIdNum    = _mediaItem.TmdbId;
-            }
-            else if (_mediaItem.ImdbId is not null)
-            {
-                _manualIdSource = "imdb";
-                _manualIdStr    = _mediaItem.ImdbId;
-            }
-            else if (_mediaItem.MalId.HasValue)
-            {
-                _manualIdSource = "mal";
-                _manualIdNum    = _mediaItem.MalId;
-            }
-            else if (_mediaItem.TvdbId.HasValue)
-            {
-                _manualIdSource = "tvdb_tv";
-                _manualIdNum    = _mediaItem.TvdbId;
-            }
+            _editTmdbId = _mediaItem.TmdbId;
+            _editMalId  = _mediaItem.MalId;
         }
-        if (showLoading) _metaLoading = false;
+        _metaLoading = false;
     }
 
     // ── Tab 1: General ────────────────────────────────────────────
@@ -671,63 +517,7 @@
     {
         if (item.Folder is null) return "";
         var full = Path.Combine(item.Folder.Path, relativePath);
-        var v = item.LastMetadataRefreshedAt?.Ticks ?? 0;
-        return $"/api/image?path={Uri.EscapeDataString(full)}&t={v}";
-    }
-
-    // ── Image picker ──────────────────────────────────────────────
-
-    private async Task OpenImagePickerAsync(string imageType)
-    {
-        if (_mediaItem is null) return;
-        _imagePickerType    = imageType;
-        _imagePickerHidden  = false;
-        _imagePickerLoading = true;
-        _imagePickerList    = [];
-        StateHasChanged();
-
-        try
-        {
-            var (posters, backdrops, logos) = await MetadataService.GetAvailableImagesAsync(Folder.Id);
-            _imagePickerList = imageType switch
-            {
-                "poster" => posters,
-                "fanart" => backdrops,
-                "logo"   => logos,
-                _        => []
-            };
-        }
-        catch (Exception ex)
-        {
-            ToastService.ShowToast(ToastIntent.Error, ex.Message);
-            _imagePickerHidden = true;
-        }
-        finally
-        {
-            _imagePickerLoading = false;
-        }
-    }
-
-    private async Task PickImageAsync(string imageUrl)
-    {
-        _imagePickerHidden = true;
-        _metaSaving = true;
-        StateHasChanged();
-        try
-        {
-            await MetadataService.ApplySelectedImageAsync(Folder.Id, _imagePickerType, imageUrl);
-            await LoadMediaItemAsync(showLoading: false);
-            await OnSaved.InvokeAsync();
-            ToastService.ShowToast(ToastIntent.Success, "Изображение применено");
-        }
-        catch (Exception ex)
-        {
-            ToastService.ShowToast(ToastIntent.Error, ex.Message);
-        }
-        finally
-        {
-            _metaSaving = false;
-        }
+        return $"/api/image?path={Uri.EscapeDataString(full)}";
     }
 
     private static Appearance StatusAppearance(IdentificationStatus s) => s switch
@@ -768,45 +558,18 @@
         ToastService.ShowToast(ToastIntent.Success, L["folders.toast_queued"]);
     }
 
-    private bool CanApplyManualId() => _manualIdSource == "imdb"
-        ? !string.IsNullOrWhiteSpace(_manualIdStr)
-        : _manualIdNum.HasValue;
-
-    private static string IdPlaceholder(string source) => source switch
+    private async Task ApplyManualIdAsync(string source)
     {
-        "tmdb_tv"    => "e.g. 1399",
-        "tmdb_movie" => "e.g. 11",
-        "tvdb_tv"    => "e.g. 83268",
-        "mal"        => "e.g. 5114",
-        _            => "ID",
-    };
-
-    private async Task ApplyManualIdUnifiedAsync()
-    {
-        if (!CanApplyManualId())
-        {
-            ToastService.ShowToast(ToastIntent.Warning, "Enter an ID first.");
-            return;
-        }
+        int? id = source == "mal" ? _editMalId : _editTmdbId;
+        if (id is null) return;
         _metaSaving = true;
         StateHasChanged();
         try
         {
-            if (_manualIdSource == "imdb")
-            {
-                await MetadataService.ApplyManualAsync(Folder.Id, "imdb_tv", _manualIdStr!.Trim());
-            }
-            else if (_manualIdSource is "tmdb_tv" or "tmdb_movie" or "mal")
-            {
-                await MetadataService.ApplyManualAsync(Folder.Id, _manualIdSource, _manualIdNum!.Value);
-            }
-            else if (_manualIdSource == "tvdb_tv")
-            {
-                await MetadataService.ApplyManualAsync(Folder.Id, "tvdb_tv", _manualIdNum!.Value.ToString());
-            }
+            await MetadataService.ApplyManualAsync(Folder.Id, source, id.Value);
             ToastService.ShowToast(ToastIntent.Success, L["folder_detail.meta_toast_applied"]);
-            await LoadMediaItemAsync(showLoading: false);
-            await OnSaved.InvokeAsync();
+            _mediaItem = null;
+            await LoadMediaItemAsync();
         }
         catch (Exception ex)
         {
@@ -962,3 +725,8 @@
             .ToListAsync();
     }
 }
+"""
+
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(content)
+print('done')
