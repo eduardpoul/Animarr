@@ -61,8 +61,17 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
         {
             using var http = httpFactory.CreateClient("tmdb");
             var url = $"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids&language=en-US&include_image_language=en,null";
-            return await http.GetFromJsonAsync<TmdbTvDetail>(url, _json, ct);
+            using var resp = await http.GetAsync(url, ct);
+            if (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"TMDB API key is invalid or not configured (HTTP {(int)resp.StatusCode}).");
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("TMDB GetTvDetail({Id}) returned HTTP {Status}", tmdbId, (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadFromJsonAsync<TmdbTvDetail>(_json, ct);
         }
+        catch (UnauthorizedAccessException) { throw; }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "TMDB GetTvDetail failed for id={Id}", tmdbId);
@@ -93,8 +102,17 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
         {
             using var http = httpFactory.CreateClient("tmdb");
             var url = $"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids&language=en-US&include_image_language=en,null";
-            return await http.GetFromJsonAsync<TmdbMovieDetail>(url, _json, ct);
+            using var resp = await http.GetAsync(url, ct);
+            if (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"TMDB API key is invalid or not configured (HTTP {(int)resp.StatusCode}).");
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("TMDB GetMovieDetail({Id}) returned HTTP {Status}", tmdbId, (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadFromJsonAsync<TmdbMovieDetail>(_json, ct);
         }
+        catch (UnauthorizedAccessException) { throw; }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "TMDB GetMovieDetail failed for id={Id}", tmdbId);

@@ -133,6 +133,10 @@ else
                     @L["folders.switch_section"]
                 </FluentSwitch>
             }
+            @if (_formIsSection || (_editTarget?.IsSection == true))
+            {
+                <FluentSwitch @bind-Value="_formFlatSection">@L["folders.switch_flat_section"]</FluentSwitch>
+            }
             <FluentSwitch @bind-Value="_formRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
             @if (_formRenameEnabled)
             {
@@ -178,6 +182,7 @@ else
     private bool _formWatch = true;
     private bool _formIdentifyEnabled = true;
     private bool _formIsSection = false;
+    private bool _formFlatSection = false;
     private bool _formRenameEnabled = true;
     private FolderType _formFolderType = FolderType.Auto;
     private string _formFolderTypeStr = "Auto";
@@ -211,6 +216,8 @@ else
         _formLabel = folder?.Label ?? "";
         _formWatch = folder?.WatchEnabled ?? true;
         _formIdentifyEnabled = folder?.IdentifyEnabled ?? true;
+        _formIsSection = folder?.IsSection ?? false;
+        _formFlatSection = folder?.FlatSection ?? false;
         _formRenameEnabled = folder?.RenameEnabled ?? true;
         _formFolderType = folder?.FolderType ?? FolderType.Auto;
         _formFolderTypeStr = _formFolderType.ToString();
@@ -236,6 +243,7 @@ else
                 RenameEnabled = _formRenameEnabled,
                 FolderType = _formRenameEnabled ? folderType : FolderType.Auto,
                 IsSection    = _formIsSection,
+                FlatSection  = _formIsSection && _formFlatSection,
                 CreatedAt    = DateTime.UtcNow,
             };
             db.FolderWatchers.Add(folder);
@@ -246,7 +254,9 @@ else
             {
                 var count = await DiscoverSectionChildrenAsync(db, folder);
                 ToastService.ShowToast(ToastIntent.Success,
-                    $"Section «{folder.Label}» added, {count} subfolders found.");
+                    folder.FlatSection
+                        ? $"Section «{folder.Label}» added, {count} flat files found."
+                        : $"Section «{folder.Label}» added, {count} subfolders found.");
             }
             else
             {
@@ -264,6 +274,7 @@ else
             entity.IdentifyEnabled = _formIdentifyEnabled;
             entity.RenameEnabled = _formRenameEnabled;
             entity.FolderType = _formRenameEnabled ? folderType : FolderType.Auto;
+            entity.FlatSection = entity.IsSection && _formFlatSection;
             await db.SaveChangesAsync();
             if (!wasEnabled && _formWatch) await WatcherService.StartWatcherAsync(entity.Id);
             else if (wasEnabled && !_formWatch) await WatcherService.StopWatcherAsync(entity.Id);
@@ -315,14 +326,75 @@ else
 
     // ─── Раздел — авто-поиск подпапок ───────────────────────────────────
 
+    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".m2ts", ".webm", ".flv", ".ogv" };
+
     private async Task<int> DiscoverSectionChildrenAsync(AppDbContext db, FolderWatcher section)
     {
         if (!Directory.Exists(section.Path)) return 0;
 
+        var added = 0;
+
+        // ── Always scan flat video files in root ──────────────────────────────
+        var existingFilePaths = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id && f.SingleFilePath != null)
+            .Select(f => f.SingleFilePath!)
+            .ToListAsync();
+        var existingFileSet = new HashSet<string>(existingFilePaths, StringComparer.OrdinalIgnoreCase);
+
+        var flatVideoFiles = Directory.GetFiles(section.Path)
+            .Where(f => _videoExtensions.Contains(Path.GetExtension(f)) && !existingFileSet.Contains(f))
+            .ToList();
+
+        if (flatVideoFiles.Count > 0)
+        {
+            // Auto-set FlatSection = true on the section record if not already
+            if (!section.FlatSection)
+            {
+                var entity = await db.FolderWatchers.FindAsync(section.Id);
+                if (entity != null) { entity.FlatSection = true; }
+                section.FlatSection = true;
+            }
+
+            var flatEntries = flatVideoFiles.Select(f => new FolderWatcher
+            {
+                Id              = Guid.NewGuid(),
+                Path            = section.Path,
+                SingleFilePath  = f,
+                Label           = Path.GetFileNameWithoutExtension(f),
+                WatchEnabled    = false,
+                RenameEnabled   = section.RenameEnabled,
+                IdentifyEnabled = section.IdentifyEnabled,
+                FolderType      = FolderType.Movie,
+                IsSection       = false,
+                FlatSection     = false,
+                ParentSectionId = section.Id,
+                CreatedAt       = DateTime.UtcNow,
+            }).ToList();
+
+            db.FolderWatchers.AddRange(flatEntries);
+            await db.SaveChangesAsync();
+            added += flatEntries.Count;
+
+            foreach (var ff in flatEntries.Where(f => f.IdentifyEnabled))
+            {
+                db.IdentificationQueues.Add(new IdentificationQueue
+                {
+                    Id           = Guid.NewGuid(),
+                    FolderId     = ff.Id,
+                    ForceRefresh = false,
+                    QueuedAt     = DateTime.UtcNow,
+                });
+            }
+            if (flatEntries.Any(f => f.IdentifyEnabled))
+                await db.SaveChangesAsync();
+        }
+
+        // ── Always scan subdirectories ────────────────────────────────────────
         var existingPaths = await db.FolderWatchers
-            .Where(f => f.ParentSectionId == section.Id)
+            .Where(f => f.ParentSectionId == section.Id && f.SingleFilePath == null)
             .Select(f => f.Path)
-            .ToHashSetAsync();
+            .ToHashSetAsync(StringComparer.OrdinalIgnoreCase);
 
         var subDirs = Directory.GetDirectories(section.Path);
         var toAdd = new List<FolderWatcher>();
@@ -330,11 +402,7 @@ else
         foreach (var subDir in subDirs)
         {
             var norm = subDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (existingPaths.Any(p =>
-                string.Equals(
-                    p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    norm,
-                    StringComparison.OrdinalIgnoreCase)))
+            if (existingPaths.Contains(norm))
                 continue;
 
             toAdd.Add(new FolderWatcher
@@ -357,19 +425,63 @@ else
             await db.SaveChangesAsync();
             foreach (var child in toAdd.Where(c => c.WatchEnabled))
                 await WatcherService.StartWatcherAsync(child.Id);
+            added += toAdd.Count;
         }
 
-        return toAdd.Count;
+        return added;
     }
 
     private async Task RefreshSection(FolderWatcher section)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        var count = await DiscoverSectionChildrenAsync(db, section);
-        ToastService.ShowToast(ToastIntent.Success,
-            count > 0
-                ? $"Section updated: {count} new subfolders added."
-                : "No new subfolders found.");
+
+        var newCount = await DiscoverSectionChildrenAsync(db, section);
+
+        // Also enqueue ALL unidentified children (not just newly discovered ones)
+        var unidentifiedIds = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id && f.IdentifyEnabled)
+            .Select(f => f.Id)
+            .ToListAsync();
+
+        var alreadyQueued = await db.IdentificationQueues
+            .Where(q => unidentifiedIds.Contains(q.FolderId) &&
+                        (q.Status == IdentificationQueueStatus.Queued ||
+                         q.Status == IdentificationQueueStatus.Processing))
+            .Select(q => q.FolderId)
+            .ToHashSetAsync();
+
+        var alreadyIdentified = await db.MediaItems
+            .Where(m => unidentifiedIds.Contains(m.FolderId) &&
+                        m.IdentificationStatus == IdentificationStatus.Identified)
+            .Select(m => m.FolderId)
+            .ToHashSetAsync();
+
+        var toEnqueue = unidentifiedIds
+            .Where(id => !alreadyQueued.Contains(id) && !alreadyIdentified.Contains(id))
+            .ToList();
+
+        foreach (var id in toEnqueue)
+        {
+            db.IdentificationQueues.Add(new IdentificationQueue
+            {
+                Id           = Guid.NewGuid(),
+                FolderId     = id,
+                ForceRefresh = false,
+                QueuedAt     = DateTime.UtcNow,
+            });
+        }
+        if (toEnqueue.Count > 0)
+            await db.SaveChangesAsync();
+
+        var msg = new System.Text.StringBuilder();
+        if (newCount > 0)
+            msg.Append($"{newCount} new items discovered. ");
+        if (toEnqueue.Count > 0)
+            msg.Append($"{toEnqueue.Count} items queued for identification.");
+        if (msg.Length == 0)
+            msg.Append("Nothing new — all items already identified or queued.");
+
+        ToastService.ShowToast(ToastIntent.Success, msg.ToString());
         await LoadAsync();
     }
 

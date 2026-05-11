@@ -153,6 +153,7 @@
   "folders.switch_monitor": "Auto-monitoring",
   "folders.switch_identify": "Identify from sources (TMDB / MAL)",
   "folders.switch_section": "Section (auto-discover all subfolders on add)",
+  "folders.switch_flat_section": "Flat files (each movie is a single file, no subfolders)",
   "folders.switch_rename": "Auto-rename",
   "folders.content_type_label": "Content Type",
   "folders.content_type_auto": "Auto",
