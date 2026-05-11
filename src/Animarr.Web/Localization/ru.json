@@ -155,6 +155,7 @@
   "folders.switch_monitor": "Авто-мониторинг",
   "folders.switch_identify": "Распознавание из источников (TMDB / MAL)",
   "folders.switch_section": "Раздел (автоматически сканировать подпапки при добавлении)",
+  "folders.switch_flat_section": "Плоские файлы (каждый фильм — один файл, без подпапок)",
   "folders.switch_rename": "Авто-переименование",
   "folders.content_type_label": "Тип содержимого",
   "folders.content_type_auto": "Авто",

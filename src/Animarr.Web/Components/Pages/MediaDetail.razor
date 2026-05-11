@@ -419,42 +419,6 @@ else
         </FluentTabs>
     }
 
-    <!-- ══ Subfolders ══════════════════════════════════════════════════════ -->
-    @if (_subDirs.Count > 0)
-    {
-        <FluentDivider Style="margin:28px 0 20px;" />
-        <FluentLabel Typo="Typography.H3" Style="margin-bottom:16px;">@L["media_detail.subfolders"]</FluentLabel>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;">
-            @foreach (var dir in _subDirs)
-            {
-                var hasCatalog = _subDirMediaIds.ContainsKey(dir.Path);
-                <div style="border-radius:8px;overflow:hidden;background:var(--neutral-layer-2);cursor:pointer;"
-                     @onclick="@(() => NavigateToSubfolder(dir.Path))">
-                    @if (dir.PosterUrl != null)
-                    {
-                        <img loading="lazy" src="@dir.PosterUrl" alt="@dir.Name"
-                             style="width:100%;aspect-ratio:2/3;object-fit:cover;display:block;" />
-                    }
-                    else
-                    {
-                        <div style="width:100%;aspect-ratio:2/3;background:var(--neutral-layer-3);display:flex;align-items:center;justify-content:center;">
-                            @if (hasCatalog)
-                            {
-                                <FluentIcon Value="@(new Icons.Regular.Size32.VideoClip())" Style="opacity:0.35;" />
-                            }
-                            else
-                            {
-                                <FluentIcon Value="@(new Icons.Regular.Size32.Folder())" Style="opacity:0.35;" />
-                            }
-                        </div>
-                    }
-                    <div style="padding:6px 8px;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
-                         title="@dir.Name">@dir.Name</div>
-                </div>
-            }
-        </div>
-    }
-
     <!-- ══ Files ═══════════════════════════════════════════════════════════ -->
     @if (_subFiles.Count > 0 && _seasons.Count == 0)
     {

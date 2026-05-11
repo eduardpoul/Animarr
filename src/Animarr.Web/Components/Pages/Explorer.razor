@@ -1,9 +1,12 @@
 @page "/explorer"
 @rendermode InteractiveServer
+@implements IAsyncDisposable
 @inject NavigationManager Nav
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FolderWatcherService WatcherService
 @inject IToastService ToastService
+@inject IJSRuntime JS
+@inject IAppConfigService AppConfig
 
 <style>
     .exp-grid {
@@ -85,6 +88,40 @@
         transition: opacity 0.15s;
     }
     .exp-file-row:hover .exp-file-actions { opacity: 1; }
+    /* ── video player ── */
+    .exp-vp-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9100;
+        background: rgba(0,0,0,.92);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .exp-vp-shell {
+        display: flex;
+        flex-direction: column;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0,0,0,.8);
+        max-width: min(96vw, 1200px);
+    }
+    .exp-vp-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: #111;
+    }
+    .exp-vp-title {
+        flex: 1;
+        font-size: 13px;
+        color: rgba(255,255,255,.7);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     /* ── image preview ── */
     .exp-img-preview-backdrop {
         position: fixed;
@@ -281,7 +318,8 @@ else
             {
                 var f2 = file;
                 var isImg = IsImageFile(f2.Name);
-                <div class="exp-file-row" style="@(isImg ? "cursor:pointer;" : "")" @onclick="@(() => { if (isImg) OpenImagePreview(f2.Path); })">
+                var isVid = IsVideoFile(f2.Name);
+                <div class="exp-file-row" style="@(isImg || isVid ? "cursor:pointer;" : "")" @onclick="@(() => { if (isImg) OpenImagePreview(f2.Path); else if (isVid) OpenVideoPlayer(f2.Path); })">
                     <FluentIcon Value="@GetFileIcon(f2.Name)" Style="flex-shrink:0;opacity:0.7;" />
                     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@f2.Name">@f2.Name</span>
                     <span style="color:var(--neutral-foreground-hint);font-size:11px;flex-shrink:0;margin-right:4px;">@FormatFileSize(f2.Size)</span>
@@ -474,6 +512,24 @@ else
     <FolderEditPanel Folder="_editTarget" OnSaved="HandleEditSaved" OnClosed="CloseEditPanel" />
 }
 
+@if (_playerPath is not null)
+{
+    <div class="exp-vp-backdrop" @onclick="CloseVideoPlayer">
+        <div class="exp-vp-shell" @onclick:stopPropagation>
+            <div class="exp-vp-header">
+                <span class="exp-vp-title" title="@_playerPath">@Path.GetFileName(_playerPath)</span>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.Dismiss())"
+                              Style="min-width:32px;width:32px;height:32px;padding:0;color:white;"
+                              OnClick="CloseVideoPlayer" />
+            </div>
+            <video controls autoplay style="display:block;width:min(92vw,1100px);max-height:calc(90vh - 48px);background:#000;"
+                   src="@($"/api/video?path={Uri.EscapeDataString(_playerPath)}")">
+            </video>
+        </div>
+    </div>
+}
+
 @if (_previewImageUrl is not null)
 {
     <div class="exp-img-preview-backdrop" @onclick="CloseImagePreview">
@@ -518,6 +574,8 @@ else
     // Current folder header
     private FolderWatcher? _currentFolderWatcher;
     private string?        _currentFolderPosterUrl;
+    private bool           _backdropOwned;
+    private bool           _pendingBackdropUpdate;
 
     // File rename inline
     private FileEntry? _renameTarget;
@@ -644,8 +702,10 @@ else
             if (childPosters.Count == 0) continue;
             var pick = childPosters[Random.Shared.Next(childPosters.Count)];
             var pickT = pick.LastMetadataRefreshedAt?.Ticks ?? 0;
-            _posterUrls[section.Path] = $"/api/image?path={Uri.EscapeDataString(Path.Combine(pick.FolderPath, pick.PosterPath!))}&t={pickT}";
+            _posterUrls[section.Path] = $"/api/image?path={Uri.EscapeDataString(Path.Combine(pick.FolderPath, pick.PosterPath!))}&t={pickT}&r={Random.Shared.Next()}";
         }
+
+        _pendingBackdropUpdate = true;
     }
 
     // ── Navigation ─────────────────────────────────────────────────
@@ -716,21 +776,54 @@ else
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
-        // Find FolderWatcher for current path
+        // Find FolderWatcher for current path (case-insensitive for cross-platform compat)
         var normPath = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        _currentFolderWatcher = await db.FolderWatchers
-            .FirstOrDefaultAsync(f => f.Path == normPath);
+        var allWatchers = await db.FolderWatchers
+            .Where(f => f.SingleFilePath == null)
+            .Select(f => new { f.Id, f.Path, f.IsSection, f.ParentSectionId, f.FolderType,
+                               f.WatchEnabled, f.RenameEnabled, f.IdentifyEnabled, f.Label,
+                               f.FlatSection, f.CreatedAt })
+            .ToListAsync();
+        var matchedRow = allWatchers.FirstOrDefault(f =>
+            string.Equals(f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                          normPath, StringComparison.OrdinalIgnoreCase));
+        if (matchedRow != null)
+            _currentFolderWatcher = await db.FolderWatchers.FindAsync(matchedRow.Id);
 
         if (_currentFolderWatcher != null)
         {
-            var mi = await db.MediaItems
-                .Where(m => m.FolderId == _currentFolderWatcher.Id && m.PosterPath != null)
-                .Select(m => new { m.PosterPath, m.LastMetadataRefreshedAt })
-                .FirstOrDefaultAsync();
-            if (mi?.PosterPath != null)
+            if (_currentFolderWatcher.IsSection)
             {
-                var t = mi.LastMetadataRefreshedAt?.Ticks ?? 0;
-                _currentFolderPosterUrl = $"/api/image?path={Uri.EscapeDataString(Path.Combine(normPath, mi.PosterPath))}&t={t}";
+                // Section has no own MediaItem — pick a random poster from child folders
+                var childIds = await db.FolderWatchers
+                    .Where(f => f.ParentSectionId == _currentFolderWatcher.Id)
+                    .Select(f => f.Id)
+                    .ToListAsync();
+                if (childIds.Count > 0)
+                {
+                    var childPosters = await db.MediaItems
+                        .Where(m => childIds.Contains(m.FolderId) && m.PosterPath != null)
+                        .Select(m => new { m.PosterPath, FolderPath = m.Folder!.Path, m.LastMetadataRefreshedAt })
+                        .ToListAsync();
+                    if (childPosters.Count > 0)
+                    {
+                        var pick = childPosters[Random.Shared.Next(childPosters.Count)];
+                        var pickT = pick.LastMetadataRefreshedAt?.Ticks ?? 0;
+                        _currentFolderPosterUrl = $"/api/image?path={Uri.EscapeDataString(Path.Combine(pick.FolderPath, pick.PosterPath!))}&t={pickT}&r={Random.Shared.Next()}";
+                    }
+                }
+            }
+            else
+            {
+                var mi = await db.MediaItems
+                    .Where(m => m.FolderId == _currentFolderWatcher.Id && m.PosterPath != null)
+                    .Select(m => new { m.PosterPath, m.LastMetadataRefreshedAt })
+                    .FirstOrDefaultAsync();
+                if (mi?.PosterPath != null)
+                {
+                    var t = mi.LastMetadataRefreshedAt?.Ticks ?? 0;
+                    _currentFolderPosterUrl = $"/api/image?path={Uri.EscapeDataString(Path.Combine(normPath, mi.PosterPath))}&t={t}";
+                }
             }
         }
 
@@ -777,9 +870,37 @@ else
                 }
                 catch { /* malformed JSON */ }
             }
+
+            // Hide season subfolders — seasons are navigated via MediaDetail/Browse
+            if (!_currentFolderWatcher.IsSection)
+                _subDirs = [];
+        }
+        else if (_navStack.Count >= 2)
+        {
+            // Fallback: if parent path in the nav stack is a registered section,
+            // we're in a show folder — hide season subfolders even if this folder isn't in the DB
+            var parentPath = _navStack[^2].Path
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var parentIsSection = allWatchers.Any(f =>
+                f.IsSection &&
+                string.Equals(
+                    f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    parentPath, StringComparison.OrdinalIgnoreCase));
+            if (parentIsSection)
+                _subDirs = [];
         }
 
         _loading = false;
+        _pendingBackdropUpdate = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || _pendingBackdropUpdate)
+        {
+            _pendingBackdropUpdate = false;
+            await UpdateBackdropAsync();
+        }
     }
 
     private void EditRootFolder(FolderWatcher folder)
@@ -862,8 +983,15 @@ else
     private void OpenImagePreview(string path) => _previewImageUrl = $"/api/image?path={Uri.EscapeDataString(path)}";
     private void CloseImagePreview()           => _previewImageUrl = null;
 
+    private string? _playerPath;
+    private void OpenVideoPlayer(string path)  => _playerPath = path;
+    private void CloseVideoPlayer()            => _playerPath = null;
+
     private static bool IsImageFile(string name) => Path.GetExtension(name).ToLowerInvariant() is
         ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".bmp" or ".tiff";
+
+    private static bool IsVideoFile(string name) => Path.GetExtension(name).ToLowerInvariant() is
+        ".mp4" or ".webm" or ".mkv" or ".avi" or ".mov" or ".m4v" or ".wmv" or ".ts" or ".m2ts";
 
     private void OpenEditPanel(FolderWatcher folder) => _editTarget = folder;
 
@@ -1174,5 +1302,83 @@ else
         }
 
         return toAdd.Count;
+    }
+
+    // ── Backdrop ──────────────────────────────────────────────────
+
+    private async Task UpdateBackdropAsync()
+    {
+        var enabled = await AppConfig.GetAsync<bool>(AppConfigKeys.BackdropEnabled, true);
+        if (!enabled) return;
+
+        var blur       = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBlurPx, 0);
+        if (blur > 20) blur = 0;
+        var brightness = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBrightness, 60);
+
+        if (_navStack.Count == 0)
+        {
+            // Root level — restore global (all fanarts)
+            if (_backdropOwned) { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); _backdropOwned = false; }
+            return;
+        }
+
+        if (_currentFolderWatcher is null)
+        {
+            if (_backdropOwned) { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); _backdropOwned = false; }
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        string[]? urls = null;
+        if (_currentFolderWatcher.IsSection)
+        {
+            // Section: random fanarts from children
+            var childIds = await db.FolderWatchers
+                .Where(f => f.ParentSectionId == _currentFolderWatcher.Id)
+                .Select(f => f.Id)
+                .ToListAsync();
+            if (childIds.Count > 0)
+            {
+                var fanarts = await db.MediaItems
+                    .Where(m => childIds.Contains(m.FolderId) && m.FanartPath != null)
+                    .Select(m => new { m.FanartPath, FolderPath = m.Folder!.Path })
+                    .ToListAsync();
+                if (fanarts.Count > 0)
+                    urls = fanarts
+                        .Select(f => $"/api/image?path={Uri.EscapeDataString(Path.Combine(f.FolderPath, f.FanartPath!))}")
+                        .ToArray();
+            }
+        }
+        else
+        {
+            // Specific media folder: use only this item's fanart
+            var mi = await db.MediaItems
+                .Where(m => m.FolderId == _currentFolderWatcher.Id && m.FanartPath != null)
+                .Select(m => new { m.FanartPath, FolderPath = m.Folder!.Path })
+                .FirstOrDefaultAsync();
+            if (mi?.FanartPath != null)
+                urls = [$"/api/image?path={Uri.EscapeDataString(Path.Combine(mi.FolderPath, mi.FanartPath))}"];
+        }
+
+        if (urls is { Length: > 0 })
+        {
+            var interval = _currentFolderWatcher.IsSection
+                ? await AppConfig.GetAsync<int>(AppConfigKeys.BackdropIntervalSec, 30)
+                : 999;
+            _backdropOwned = true;
+            await JS.InvokeVoidAsync("initBackdrop", urls, interval, blur, brightness);
+        }
+        else if (_backdropOwned)
+        {
+            await JS.InvokeVoidAsync("restoreGlobalBackdrop");
+            _backdropOwned = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_backdropOwned)
+            try { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); } catch { }
     }
 }

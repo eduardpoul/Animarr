@@ -1,9 +1,12 @@
 @page "/browse"
 @rendermode InteractiveServer
+@implements IAsyncDisposable
 @using System.Text.Json
 @using System.Text.RegularExpressions
 @inject NavigationManager Nav
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject IJSRuntime JS
+@inject IAppConfigService AppConfig
 
 <PageTitle>@(_navStack.Count > 0 ? _navStack[^1].Label : "Browse") — Animarr</PageTitle>
 
@@ -265,8 +268,8 @@ else
         </div>
     }
 
-    <!-- ── Subfolders ──────────────────────────────────────────── -->
-    @if (_dirs.Count > 0)
+    <!-- ── Subfolders — hidden when parent already has a seasons interface ── -->
+    @if (_dirs.Count > 0 && (_parentInfo == null || _parentInfo.Seasons.Count == 0))
     {
         @if (_files.Count > 0)
         {
@@ -630,5 +633,29 @@ else
         var full = System.IO.Path.Combine(_parentInfo.FolderPath, rel);
         var v = _parentInfo.ImageVersion;
         return File.Exists(full) ? $"/api/image?path={Uri.EscapeDataString(full)}&t={v}" : null;
+    }
+
+    // ── Backdrop ──────────────────────────────────────────────────
+
+    private bool _backdropOwned;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var fanartUrl = GetInfoFanartUrl();
+        if (fanartUrl is null) return;
+        var enabled = await AppConfig.GetAsync<bool>(AppConfigKeys.BackdropEnabled, true);
+        if (!enabled) return;
+        var blur       = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBlurPx, 0);
+        if (blur > 20) blur = 0;
+        var brightness = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBrightness, 60);
+        _backdropOwned = true;
+        await JS.InvokeVoidAsync("initBackdrop", new[] { fanartUrl }, 999, blur, brightness);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_backdropOwned)
+            try { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); } catch { }
     }
 }
