@@ -291,12 +291,17 @@ else
                     <option value="">@L["add_torrent.folder_placeholder"]</option>
                     @foreach (var grp in _foldersBySection)
                     {
+                        @* Section header keeps the disk label (sections aren't
+                           identified — they're library roots). Children use the
+                           identified Title from MediaItems when available so the
+                           picker reads naturally ("Bleach", "Cowboy Bebop") even
+                           if the on-disk folder name is the raw download dir. *@
                         @if (grp.Section is not null)
                         {
                             <optgroup label="@grp.Section.Label">
                                 @foreach (var f in grp.Children)
                                 {
-                                    <option value="@f.Id">@f.Label</option>
+                                    <option value="@f.Id">@(_folderDisplayName.TryGetValue(f.Id, out var n) ? n : f.Label)</option>
                                 }
                             </optgroup>
                         }
@@ -304,7 +309,7 @@ else
                         {
                             @foreach (var f in grp.Children)
                             {
-                                <option value="@f.Id">@f.Label</option>
+                                <option value="@f.Id">@(_folderDisplayName.TryGetValue(f.Id, out var n) ? n : f.Label)</option>
                             }
                         }
                     }
@@ -632,6 +637,11 @@ else
     // Phase 3.1 MVP: same list grouped by parent section for the optgroup-style picker.
     private record FolderGroup(FolderWatcher? Section, List<FolderWatcher> Children);
     private List<FolderGroup> _foldersBySection = [];
+    // FolderWatcher.Id → identified title from MediaItems (when status is Identified
+    // or Manual). Used as the display name in the picker so the user sees the
+    // canonical "Bleach" instead of the on-disk folder name (which can still be a
+    // ".Bleach.S01.1080p.…"-style raw download dir, or any user-chosen name).
+    private Dictionary<Guid, string> _folderDisplayName = new();
     private bool _defaultStopAfterDownload;
 
     // ---- Add panel file list state ----
@@ -684,16 +694,32 @@ else
             .ToListAsync();
         var sectionMap = sections.ToDictionary(s => s.Id);
 
+        // Load identified titles so the picker shows "Bleach" instead of the raw
+        // disk name. Only Identified/Manual entries — for NeedsReview / Failed
+        // the title might be a wrong match, so we fall back to the disk label.
+        var folderIds = _folders.Select(f => f.Id).ToList();
+        _folderDisplayName = await db.MediaItems
+            .Where(m => folderIds.Contains(m.FolderId)
+                        && !string.IsNullOrEmpty(m.Title)
+                        && (m.IdentificationStatus == IdentificationStatus.Identified
+                            || m.IdentificationStatus == IdentificationStatus.Manual))
+            .ToDictionaryAsync(m => m.FolderId, m => m.Title!);
+
+        // Helper: what the user sees for a given folder. Defined here once so
+        // ordering and rendering use the same name.
+        string Display(FolderWatcher f) =>
+            _folderDisplayName.TryGetValue(f.Id, out var t) ? t : f.Label;
+
         _foldersBySection = sections
             .Select(s => new FolderGroup(s,
-                _folders.Where(f => f.ParentSectionId == s.Id).OrderBy(f => f.Label).ToList()))
+                _folders.Where(f => f.ParentSectionId == s.Id).OrderBy(Display).ToList()))
             .Where(g => g.Children.Count > 0)
             .Concat(new[]
             {
                 new FolderGroup(null,
                     _folders.Where(f => !f.ParentSectionId.HasValue ||
                                         !sectionMap.ContainsKey(f.ParentSectionId.Value))
-                            .OrderBy(f => f.Label).ToList())
+                            .OrderBy(Display).ToList())
             })
             .Where(g => g.Children.Count > 0)
             .ToList();
