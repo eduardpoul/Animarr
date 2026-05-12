@@ -293,6 +293,11 @@ public class MetadataService(
         // Never auto-rename a section root — too disruptive (children point at the old name).
         if (folder.IsSection) return;
 
+        // Never auto-rename for flat single-file entries: their .Path points at the
+        // section root, and renaming it would clobber every other movie in the section.
+        // The file itself is already renamed by the regular RenameService pipeline.
+        if (folder.SingleFilePath != null) return;
+
         var currentDir = folder.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var parentDir  = Path.GetDirectoryName(currentDir);
         if (string.IsNullOrEmpty(parentDir) || !Directory.Exists(currentDir)) return;
