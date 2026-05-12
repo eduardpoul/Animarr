@@ -5,6 +5,12 @@ public class LlmIdentifyResult
 {
     public string Title { get; set; } = "";
     public string? OriginalTitle { get; set; }
+    /// <summary>
+    /// Canonical English title when the source name is in pinyin/romaji/Cyrillic
+    /// transliteration. Used as an extra TMDB search query when the primary
+    /// title returns nothing.
+    /// </summary>
+    public string? EnglishTitle { get; set; }
     public int? Year { get; set; }
     /// <summary>anime | series | movie | unknown</summary>
     public string Type { get; set; } = "unknown";
@@ -35,7 +41,10 @@ public class LlmCandidateItem
 public interface ILlmService
 {
     /// <summary>Ask the LLM to identify a media folder from its path/name.</summary>
-    Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, CancellationToken ct = default);
+    /// <param name="folderPath">Path to the folder or single file to identify.</param>
+    /// <param name="sectionLabel">User-defined label of the parent section
+    /// (e.g. "Anime", "Movies"); a category hint that biases classification.</param>
+    Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, string? sectionLabel = null, CancellationToken ct = default);
 
     /// <summary>Ask the LLM to suggest a rename regex for an unmatched filename.</summary>
     Task<LlmRegexResult?> SuggestRegexAsync(string fileName, CancellationToken ct = default);
