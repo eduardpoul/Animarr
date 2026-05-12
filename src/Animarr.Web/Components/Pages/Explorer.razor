@@ -1235,6 +1235,11 @@ else
         // If this is a section, queue all child folders instead of the section itself
         if (_currentFolderWatcher.IsSection)
         {
+            // Drop orphan children (disk path missing) before queueing so we
+            // don't waste cycles identifying ghosts that'd just resurrect as
+            // Failed cards.
+            await WatcherService.CleanupOrphanedChildrenAsync(_currentFolderWatcher.Id);
+
             var children = await db.FolderWatchers
                 .Where(f => f.ParentSectionId == _currentFolderWatcher.Id)
                 .ToListAsync();
@@ -1411,6 +1416,9 @@ else
     private async Task RestoreDismissedAsync(FolderWatcher section)
     {
         await WatcherService.ClearDismissedAsync(section.Id);
+        // Drop FolderWatchers whose disk path is gone BEFORE rediscovering —
+        // otherwise they linger as ghost cards.
+        await WatcherService.CleanupOrphanedChildrenAsync(section.Id);
         await using var db = await DbFactory.CreateDbContextAsync();
         var discovered = await DiscoverChildrenAsync(db, section);
 
@@ -1485,6 +1493,11 @@ else
         StateHasChanged();
         try
         {
+            // Drop FolderWatchers whose disk path is gone before doing anything
+            // else — otherwise we'd queue identification for them and they'd
+            // resurrect as Failed cards in /catalog.
+            await WatcherService.CleanupOrphanedChildrenAllAsync();
+
             await using var db = await DbFactory.CreateDbContextAsync();
             var sections = await db.FolderWatchers
                 .Where(f => f.IsSection)

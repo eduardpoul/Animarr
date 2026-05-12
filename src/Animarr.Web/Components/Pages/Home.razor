@@ -8,6 +8,7 @@
 @inject MalClient MalClient
 @inject IJSRuntime JS
 @inject IAppConfigService AppConfig
+@inject FolderWatcherService WatcherService
 @implements IAsyncDisposable
 
 <PageTitle>Animarr — @L["catalog.title"]</PageTitle>
@@ -327,11 +328,21 @@
             .OrderBy(f => f.Label)
             .ToListAsync();
         // H-7: skip the eager Tags join — they're not rendered in the catalog grid (M-13).
-        _allItems = await db.MediaItems
+        var raw = await db.MediaItems
             .Include(m => m.Folder)
             .Where(m => m.Folder != null && !m.Folder.IsSection)
             .OrderBy(m => m.Title)
             .ToListAsync();
+        // Hide ghost entries — MediaItems whose folder (or single-file path) is
+        // no longer on disk. They previously survived "delete from catalog" and
+        // reappeared on the next Identify, which was the source of the ghost
+        // "The Portal"-style cards. We don't auto-delete here (the Folder might
+        // be on a temporarily-unreachable mount); just hide them in the grid.
+        _allItems = raw.Where(m =>
+            m.Folder!.SingleFilePath is { Length: > 0 } sfp
+                ? File.Exists(sfp)
+                : Directory.Exists(m.Folder.Path)
+        ).ToList();
         _loading = false;
         ApplyFilter();
 
@@ -416,8 +427,35 @@
         var entity = await db.MediaItems.FindAsync(_deleteTarget.Id);
         if (entity != null)
         {
+            // Removing only the MediaItem here used to mean the next Identify
+            // run would happily re-create it from the still-present FolderWatcher
+            // — the card would "resurrect" and confuse the user. Remove the
+            // watcher too, and dismiss the path so neither the FSW auto-register
+            // nor a manual Rescan brings the entry back. The on-disk folder is
+            // not touched (the dialog explicitly promises this).
+            var folderId   = entity.FolderId;
+            var folder     = await db.FolderWatchers.FindAsync(folderId);
             db.MediaItems.Remove(entity);
-            await db.SaveChangesAsync();
+            if (folder is not null && !folder.IsSection)
+            {
+                // Drop any queue rows so we don't process a folder we're about
+                // to forget about.
+                await db.IdentificationQueues
+                    .Where(q => q.FolderId == folderId && q.Status != IdentificationQueueStatus.Processing)
+                    .ExecuteDeleteAsync();
+
+                try { await WatcherService.StopWatcherAsync(folderId); } catch { /* best-effort */ }
+                var parentSectionId = folder.ParentSectionId;
+                var pathToDismiss   = folder.Path;
+                db.FolderWatchers.Remove(folder);
+                await db.SaveChangesAsync();
+                if (parentSectionId.HasValue)
+                    await WatcherService.DismissChildPathAsync(parentSectionId.Value, pathToDismiss);
+            }
+            else
+            {
+                await db.SaveChangesAsync();
+            }
         }
         _allItems.RemoveAll(m => m.Id == _deleteTarget.Id);
         ApplyFilter();

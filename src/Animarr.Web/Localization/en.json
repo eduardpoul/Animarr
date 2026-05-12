@@ -575,8 +575,8 @@
   "catalog.tag_btn_delete": "Delete",
   "catalog.btn_delete_item": "Remove from library",
   "catalog.delete_dialog_title": "Remove from library",
-  "catalog.delete_dialog_body": "Remove \"{0}\" from the media library? The folder and files will not be deleted.",
-  "catalog.delete_dialog_hint": "Only the metadata entry will be removed. The folder can be re-identified later.",
+  "catalog.delete_dialog_body": "Remove \"{0}\" from the media library? The folder and files on disk will not be deleted.",
+  "catalog.delete_dialog_hint": "The catalog entry will be removed for good — Identify/Rescan won't bring it back. The folder stays on disk and can be re-added manually later.",
   "catalog.delete_dialog_confirm": "Remove",
   "catalog.delete_toast": "\"{0}\" removed from library.",
 
