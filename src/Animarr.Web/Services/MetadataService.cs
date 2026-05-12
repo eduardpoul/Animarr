@@ -81,7 +81,16 @@ public class MetadataService(
         var titleSource = folder.SingleFilePath != null
             ? Path.GetFileNameWithoutExtension(folder.SingleFilePath)
             : folder.Path;
-        var searchTitle = llmResult?.Title ?? ParseTitleFromPath(titleSource);
+
+        // Search-title priority: when the LLM gives an English/romanised title (english_title)
+        // AND its primary title is non-ASCII (e.g. Chinese 凡人修仙传, Japanese 仙逆), search by
+        // the English form first — TMDB/IMDb don't index CJK well, and MAL's hits for CJK are
+        // noisy (a Chinese title bag-of-chars matches dozens of unrelated anime).
+        string searchTitle;
+        if (llmResult is { EnglishTitle: { Length: > 0 } eng } && !IsMostlyAscii(llmResult.Title ?? "") && IsMostlyAscii(eng))
+            searchTitle = eng;
+        else
+            searchTitle = llmResult?.Title ?? ParseTitleFromPath(titleSource);
         var folderYear  = llmResult?.Year ?? ExtractYearFromPath(titleSource);
 
         // Phase 1.5: prefer LLM type hint over manual FolderType when confidence is decent.
@@ -110,6 +119,12 @@ public class MetadataService(
         log?.Invoke(llmResult != null
             ? $"[LLM] Title: \"{llmResult.Title}\" type={typeHint} year={folderYear} (confidence {llmResult.Confidence:F2})"
             : $"[Parse] Path title: \"{searchTitle}\" year={folderYear}");
+        // When we prefer english_title for searching, surface that — otherwise the
+        // [TMDB]/[IMDb] log lines look mysterious (searching for a title the LLM
+        // didn't claim to identify).
+        if (llmResult?.Title is { } llmTitle &&
+            !string.Equals(llmTitle, searchTitle, StringComparison.Ordinal))
+            log?.Invoke($"[Search] Preferring English/romanised title for search: \"{searchTitle}\"");
         logger.LogInformation("Identifying folder '{Path}' with title '{Title}' type={Type}", folder.Path, searchTitle, typeHint);
 
         var tmdbKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
@@ -755,6 +770,21 @@ public class MetadataService(
         return sb.ToString();
     }
 
+    /// <summary>True when ≥70% of the letter characters are basic ASCII — used to decide
+    /// whether to switch to the LLM's english_title for searching.</summary>
+    private static bool IsMostlyAscii(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return true;
+        int letters = 0, ascii = 0;
+        foreach (var c in s)
+        {
+            if (!char.IsLetter(c)) continue;
+            letters++;
+            if (c < 128) ascii++;
+        }
+        return letters == 0 || ascii * 10 >= letters * 7;
+    }
+
     private static List<(string Id, bool Enabled)> ParseSourceOrder(string? json)
     {
         var defaults = new List<(string, bool)> { ("tmdb_tv", true), ("tmdb_movie", true), ("mal", false), ("imdb_search", true) };
@@ -830,7 +860,7 @@ public class MetadataService(
     {
         var results = await imdbSearch.SearchTitlesAsync(searchTitle, 5, ct);
         if (results.Count == 0)
-            log?.Invoke($"[IMDb] No results for \"{{searchTitle}}\" — ensure the title is in English.");
+            log?.Invoke($"[IMDb] No results for \"{searchTitle}\" — ensure the title is in English.");
         // Note: IMDb's PrimaryImage is only on the detail endpoint, not the
         // search response — we leave PosterUrl null and rely on the external
         // link button in the NeedsReview UI to let the user preview manually.
@@ -888,8 +918,10 @@ public class MetadataService(
 
         var sorted = typed.OrderByDescending(c => c.Score).ToList();
 
-        // Log top-3 for the scan log
-        for (int i = 0; i < Math.Min(sorted.Count, 3); i++)
+        // Log top-5 — that's the slice the LLM actually sees in SelectCandidate.
+        // (Previously only top-3 were logged, which made it confusing when the LLM
+        //  picked index 4 and the log didn't show what was there.)
+        for (int i = 0; i < Math.Min(sorted.Count, 5); i++)
             log?.Invoke($"  [{i}] \"{sorted[i].Title}\" ({sorted[i].Year}) [{sorted[i].Source}] score={sorted[i].Score:F2}");
 
         if (sorted.Count == 1)
@@ -966,13 +998,26 @@ public class MetadataService(
                 // 0.9 (clear of the auto-apply threshold) only if either:
                 //   • title-similarity is reasonable (base score ≥ 0.7), OR
                 //   • the year matches our expectation (+0.4 from year alone).
-                // For weak matches (Kaiju Jiu → Kaiju Girls, score 0.42) we keep the
-                // raw score so the result lands in NeedsReview with a top-3 banner.
+                // For weak matches (Kaiju Jiu → Kaiju Girls, score 0.42) we keep
+                // the LLM choice but FLOOR the score at the NeedsReview threshold
+                // so the result lands in NeedsReview with a top-3 banner — never
+                // Failed (which hides the banner and strands the user).
                 bool trustLlm = picked.Score >= 0.7
                     || (expectedYear.HasValue && picked.Year.HasValue
                         && Math.Abs(picked.Year.Value - expectedYear.Value) <= 1);
                 if (trustLlm)
                     return picked.Score >= 0.9 ? picked : picked with { Score = 0.9 };
+
+                // The NeedsReview floor is the same value the caller compares against
+                // in IdentifyFolderAsync (default 0.50). Use 0.50 as the floor here —
+                // even if the user has lowered NeedsReviewConfidence further, 0.50
+                // is still above any reasonable failure cutoff and ensures the banner.
+                const double NeedsReviewFloor = 0.50;
+                if (picked.Score < NeedsReviewFloor)
+                {
+                    log?.Invoke($"[LLM] Weak base score ({picked.Score:F2}) — floored to {NeedsReviewFloor:F2} so user can review.");
+                    return picked with { Score = NeedsReviewFloor };
+                }
                 log?.Invoke($"[LLM] Selected pick has weak base score ({picked.Score:F2}) — keeping for NeedsReview.");
                 return picked;
             }
