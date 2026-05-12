@@ -921,6 +921,22 @@ public class MetadataService(
             {
                 var picked = topN[llmIndex.Value];
                 log?.Invoke($"[LLM] Selected [{llmIndex.Value}]: \"{picked.Title}\" [{picked.Source}]");
+
+                // TMDB preference: when LLM picks a non-TMDB source but the top
+                // scorer is TMDB and the score difference is small (≤ 0.3), keep
+                // the TMDB pick. TMDB has richer data (seasons, episode lists,
+                // episode names + stills) — MAL-only matches give the user an
+                // empty season tab in MediaDetail, while TMDB-matches render the
+                // full episode list with ✓/download badges.
+                var top = sorted[0];
+                bool topIsTmdb = top.Source == "tmdb_tv" || top.Source == "tmdb_movie";
+                bool pickedIsTmdb = picked.Source == "tmdb_tv" || picked.Source == "tmdb_movie";
+                if (topIsTmdb && !pickedIsTmdb && top.Score - picked.Score <= 0.3)
+                {
+                    log?.Invoke($"[Score] Overriding LLM pick — top scorer {top.Source} is TMDB (ΔScore={top.Score - picked.Score:F2}).");
+                    picked = top;
+                }
+
                 // Trust LLM's pick when the underlying signal is decent. We boost to
                 // 0.9 (clear of the auto-apply threshold) only if either:
                 //   • title-similarity is reasonable (base score ≥ 0.7), OR
@@ -1065,6 +1081,26 @@ public class MetadataService(
 
         item.MediaType            = MediaItemType.Anime;
         item.IdentificationStatus = IdentificationStatus.Identified;
+
+        // MAL has no concept of seasons — the show is a single contiguous run.
+        // Synthesise a Season 1 entry with NumEpisodes so MediaDetail renders
+        // an episode list (each card marked ✓ or download based on file presence)
+        // instead of an empty page.
+        if (string.IsNullOrEmpty(item.SeasonsJson) && (detail.NumEpisodes ?? 0) > 0)
+        {
+            item.SeasonsJson = JsonSerializer.Serialize(new[]
+            {
+                new
+                {
+                    Number       = 1,
+                    EpisodeCount = detail.NumEpisodes!.Value,
+                    Name         = "Season 1",
+                    PosterPath   = (string?)null,
+                    Overview     = (string?)null,
+                    AirDate      = (string?)null,
+                }
+            }, _json);
+        }
 
         if (item.PosterPath is null && detail.PosterUrl is not null)
         {
