@@ -948,7 +948,7 @@
         _malClientId         = await AppConfig.GetAsync(AppConfigKeys.MalClientId) ?? "";
         _autoIdentifyEnabled = await AppConfig.GetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, true);
         _downloadEpThumbs    = await AppConfig.GetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, false);
-        _autoRenameFolder    = await AppConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, true);
+        _autoRenameFolder    = await AppConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, false);
         _includeEpisodeName  = await AppConfig.GetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, true);
 
         var sourceOrderJson = await AppConfig.GetAsync(AppConfigKeys.SearchSourceOrder);

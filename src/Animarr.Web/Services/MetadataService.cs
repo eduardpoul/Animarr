@@ -349,11 +349,30 @@ public class MetadataService(
 
         // Phase 1.2 + 2.3: only auto-rename the containing folder when the final
         // status is Identified (i.e. confidence cleared the auto-apply threshold).
+        //
+        // Safety net (added after two catastrophic data-corruption incidents — the
+        // Movies-folder rename and the Bleach → "The Portal" rename):
+        //
+        //   1. The setting now DEFAULTS TO OFF. Single-user self-hosted users
+        //      rarely want files moved around without explicit confirmation;
+        //      having auto-rename on by default has cost real data.
+        //
+        //   2. Even when enabled, only auto-rename for the FIRST successful
+        //      identification of a folder (i.e. the MediaItem was just created
+        //      in this run). If the user has ever lived with this folder before
+        //      — even with a previous wrong identification — never blindly
+        //      rename it; the user can re-identify and click "Use this" manually.
+        //
+        //   3. Require a high-confidence score (≥ 0.95). The auto-apply
+        //      threshold (0.85) is fine for marking the result Identified, but
+        //      not strong enough to justify a destructive disk-side rename.
         if (identified && item.IdentificationStatus == IdentificationStatus.Identified)
         {
-            var auto = await appConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, true, ct);
-            if (auto)
+            var auto = await appConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, false, ct);
+            if (auto && isNew && winner.Score >= 0.95)
                 await TryRenameContainerFolderAsync(folderId, item.Title, item.Year, log, ct);
+            else if (auto)
+                log?.Invoke($"[FolderRename] Skip — not a first-ever identification (isNew={isNew}) or score below 0.95 ({winner.Score:F2}).");
         }
     }
 
