@@ -584,6 +584,7 @@
   "media_detail.review_title": "Confirm match",
   "media_detail.review_hint": "AI is not fully confident this is the right title. Pick the correct one below or search manually.",
   "media_detail.review_apply": "Use this",
+  "media_detail.review_open_source": "Open source",
   "media_detail.review_applied": "Match applied.",
   "media_detail.ep_prefix": "Ep",
   "media_detail.btn_load_episodes": "Load episodes",

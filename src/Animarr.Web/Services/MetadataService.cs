@@ -34,7 +34,8 @@ public class MetadataService(
         string? Overview,
         bool    IsTv,
         double  Score,
-        string? StringId = null);  // non-integer IDs (e.g. IMDb "tt...")
+        string? StringId   = null,   // non-integer IDs (e.g. IMDb "tt...")
+        string? PosterUrl  = null);  // small thumb URL for the NeedsReview UI
 
     // ── Public: automatic identification ─────────────────────────────────────
 
@@ -203,11 +204,13 @@ public class MetadataService(
         item.CandidatesJson = JsonSerializer.Serialize(
             candidates.OrderByDescending(c => c.Score).Take(3).Select(c => new
             {
-                Id       = c.Id,
-                Title    = c.Title,
-                Year     = c.Year,
-                Type     = c.Source,
-                Overview = c.Overview,
+                Id        = c.Id,
+                StringId  = c.StringId,    // IMDb "tt..." ids — needed for external link
+                Title     = c.Title,
+                Year      = c.Year,
+                Type      = c.Source,
+                Overview  = c.Overview,
+                PosterUrl = c.PosterUrl,
             }).ToList(), _json);
 
         // ── Phase 2: Pick winner (LLM or top-scorer) ─────────────────────────
@@ -767,6 +770,9 @@ public class MetadataService(
 
     private sealed record SearchSourceEntry(string Id, bool Enabled);
 
+    // TMDB poster thumb size for the NeedsReview UI (≈ 60×90 rendered).
+    private const string TmdbThumbBase = "https://image.tmdb.org/t/p/w154";
+
     private async Task<List<MetadataCandidate>> SearchTmdbTvCandidatesAsync(
         string searchTitle, int? folderYear, CancellationToken ct)
     {
@@ -779,7 +785,8 @@ public class MetadataService(
             Year:          r.Year,
             Overview:      r.Overview,
             IsTv:          true,
-            Score:         ScoreResult(r.DisplayTitle, r.OriginalName, r.Year, searchTitle, folderYear)
+            Score:         ScoreResult(r.DisplayTitle, r.OriginalName, r.Year, searchTitle, folderYear),
+            PosterUrl:     !string.IsNullOrEmpty(r.PosterPath) ? TmdbThumbBase + r.PosterPath : null
         )).ToList();
     }
 
@@ -795,7 +802,8 @@ public class MetadataService(
             Year:          r.Year,
             Overview:      r.Overview,
             IsTv:          false,
-            Score:         ScoreResult(r.DisplayTitle, r.OriginalTitle, r.Year, searchTitle, folderYear)
+            Score:         ScoreResult(r.DisplayTitle, r.OriginalTitle, r.Year, searchTitle, folderYear),
+            PosterUrl:     !string.IsNullOrEmpty(r.PosterPath) ? TmdbThumbBase + r.PosterPath : null
         )).ToList();
     }
 
@@ -811,7 +819,8 @@ public class MetadataService(
             Year:          r.Year,
             Overview:      r.Synopsis,
             IsTv:          true,
-            Score:         ScoreResult(r.EnglishTitle, r.AlternativeTitles?.Ja ?? r.Title, r.Year, searchTitle, folderYear)
+            Score:         ScoreResult(r.EnglishTitle, r.AlternativeTitles?.Ja ?? r.Title, r.Year, searchTitle, folderYear),
+            PosterUrl:     r.PosterUrl
         )).ToList();
     }
 
@@ -821,6 +830,9 @@ public class MetadataService(
         var results = await imdbSearch.SearchTitlesAsync(searchTitle, 5, ct);
         if (results.Count == 0)
             log?.Invoke($"[IMDb] No results for \"{{searchTitle}}\" — ensure the title is in English.");
+        // Note: IMDb's PrimaryImage is only on the detail endpoint, not the
+        // search response — we leave PosterUrl null and rely on the external
+        // link button in the NeedsReview UI to let the user preview manually.
         return results.Select(r =>
         {
             bool isTv = r.Type is "tvSeries" or "tvMiniSeries" or "tvSpecial" or "tvMovie";

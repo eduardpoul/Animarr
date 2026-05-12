@@ -587,6 +587,7 @@
   "media_detail.review_title": "Подтвердите соответствие",
   "media_detail.review_hint": "AI не уверена в результате. Выберите правильный вариант или найдите вручную.",
   "media_detail.review_apply": "Это оно",
+  "media_detail.review_open_source": "Открыть источник",
   "media_detail.review_applied": "Применено.",
   "media_detail.ep_prefix": "Эп.",
   "media_detail.btn_load_episodes": "Загрузить эпизоды",
