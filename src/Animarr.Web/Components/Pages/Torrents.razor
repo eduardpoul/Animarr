@@ -22,7 +22,8 @@
     <FluentTab Id="active" Label="@L["torrents.tab_active"]">
 
 @{
-    var torrents = TorrentEngine.GetAll();
+    // M-14: snapshot taken once per render — avoids a fresh GetAll() materialization on every grid cell.
+    var torrents = _torrentSnapshot;
 }
 
 @if (torrents.Count == 0)
@@ -58,16 +59,21 @@ else
         <TemplateColumn Title="@(L["torrents.col_progress"])" Width="220px">
             @if (context.State == TorrentState.Hashing)
             {
-                <div class="flex items-center gap-f-s min-w-0">
-                    <FluentProgress Width="100%" Style="flex:1;" />
-                    <span class="text-fluent-caption text-fluent-3 whitespace-nowrap">@L["torrents.state_hashing"]</span>
+                <div class="animarr-progress">
+                    <div class="animarr-progress__track">
+                        <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+                    </div>
+                    <span class="animarr-progress__label">@L["torrents.state_hashing"]</span>
                 </div>
             }
             else
             {
-                <div class="flex items-center gap-f-xs">
-                    <FluentProgress Value="@((int)context.Progress)" Max="100" Width="100%" Style="flex:1;" />
-                    <span class="text-fluent-caption min-w-9">@context.Progress.ToString("F1")%</span>
+                <div class="animarr-progress">
+                    <div class="animarr-progress__track">
+                        <div class="animarr-progress__fill"
+                             style="width:@(context.Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
+                    </div>
+                    <span class="animarr-progress__label">@context.Progress.ToString("F1")%</span>
                 </div>
             }
         </TemplateColumn>
@@ -185,10 +191,24 @@ else
     </div>
     <div class="flex-1 overflow-y-auto p-f-xl">
     <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
-        <FluentTextField @bind-Value="_addMagnet"
+        <FluentTextField Value="_addMagnet"
+                         ValueChanged="@(async (string v) => { _addMagnet = v; await OnMagnetChangedAsync(); })"
                          Label="@(L["add_torrent.magnet_label"])"
                          Placeholder="@(L["add_torrent.magnet_placeholder"])"
+                         Immediate="true"
                          style="width:100%;" />
+
+        @if (!string.IsNullOrEmpty(_suggestedMatch))
+        {
+            <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--neutral-layer-3);border-radius:6px;font-size:12px;">
+                <FluentIcon Value="@(new Icons.Regular.Size16.Sparkle())" Style="color:var(--accent-fill-rest);" />
+                <span>@L.Get("add_torrent.suggested_match", _suggestedMatch)</span>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size16.Dismiss())"
+                              Style="min-width:22px;width:22px;height:22px;padding:0;margin-left:auto;"
+                              OnClick="@(() => { _suggestedMatch = null; _addFolderWatcherId = null; _addFolderStr = ""; })" />
+            </div>
+        }
 
         <div>
             <FluentLabel Style="font-size:13px;font-weight:600;margin-bottom:6px;">@L["add_torrent.torrent_file_label"]</FluentLabel>
@@ -212,7 +232,7 @@ else
                     <input type="checkbox"
                            checked="@(_addFilePriorities.Count > 0 && _addFilePriorities.Values.All(v => v > 0))"
                            @onchange="@(e => { bool chk = (bool)e.Value!; foreach (var k in _addFilePriorities.Keys.ToList()) _addFilePriorities[k] = chk ? 4 : 0; StateHasChanged(); })" />
-                    <FluentLabel Style="font-size:13px;font-weight:600;">Files (@_addFileEntries.Count)</FluentLabel>
+                    <FluentLabel Style="font-size:13px;font-weight:600;">@L.Get("add_torrent.files_label", _addFileEntries.Count)</FluentLabel>
                 </div>
                 <div style="max-height:calc(100vh - 400px);min-height:200px;overflow-y:auto;border:1px solid var(--neutral-stroke-rest);border-radius:4px;font-size:12px;">
                     @foreach (var item in _addFlatTree)
@@ -261,14 +281,34 @@ else
         <div>
             <FluentLabel style="display:block;margin-bottom:4px;">@L["add_torrent.folder_label"]</FluentLabel>
             <div style="display:flex;align-items:center;gap:6px;">
-                <FluentCombobox TOption="FolderWatcher"
-                                Items="@_folders"
-                                OptionText="@(f => f.Label)"
-                                Autocomplete="ComboboxAutocomplete.Both"
-                                SelectedOption="@(_folders.FirstOrDefault(f => f.Id.ToString() == _addFolderStr))"
-                                SelectedOptionChanged="@((FolderWatcher? f) => { _addFolderStr = f?.Id.ToString() ?? ""; _addFolderWatcherId = f?.Id; _addCustomPath = string.Empty; _createSubfolderMode = false; })"
-                                Placeholder="@L["add_torrent.folder_placeholder"]"
-                                class="folder-combobox" />
+                @* Phase 3.1 MVP: native <select> grouped by section so the user
+                   sees library structure (Anime → Cowboy Bebop, etc.) instead of
+                   a flat alphabetical dropdown. Keeps autocomplete via browser. *@
+                <select class="folder-combobox"
+                        style="flex:1;font-size:13px;padding:6px 8px;border:1px solid var(--neutral-stroke-rest);border-radius:4px;background:var(--neutral-layer-floating);color:var(--neutral-foreground-rest);min-width:0;"
+                        value="@_addFolderStr"
+                        @onchange="@(e => OnFolderPicked(e.Value?.ToString() ?? ""))">
+                    <option value="">@L["add_torrent.folder_placeholder"]</option>
+                    @foreach (var grp in _foldersBySection)
+                    {
+                        @if (grp.Section is not null)
+                        {
+                            <optgroup label="@grp.Section.Label">
+                                @foreach (var f in grp.Children)
+                                {
+                                    <option value="@f.Id">@f.Label</option>
+                                }
+                            </optgroup>
+                        }
+                        else
+                        {
+                            @foreach (var f in grp.Children)
+                            {
+                                <option value="@f.Id">@f.Label</option>
+                            }
+                        }
+                    }
+                </select>
                 <FluentButton Appearance="Appearance.Outline"
                               Title="@(L["add_torrent.create_subfolder_title"])"
                               OnClick="@(() => { _createSubfolderMode = !_createSubfolderMode; _newSubfolderName = string.Empty; })">+</FluentButton>
@@ -418,8 +458,8 @@ else
                     <div style="display:flex;gap:20px;font-size:12px;margin-top:6px;color:var(--neutral-foreground-hint);">
                         <span>↓ @FormatSpeed(live.DownloadRate)</span>
                         <span>↑ @FormatSpeed(live.UploadRate)</span>
-                        <span>Seeds: @live.Seeds</span>
-                        <span>Peers: @live.Peers</span>
+                        <span>@L["torrent_details.seeds_label"] @live.Seeds</span>
+                        <span>@L["torrent_details.peers_label"] @live.Peers</span>
                     </div>
                 </div>
 
@@ -589,6 +629,9 @@ else
 
     // ---- Folder list for combobox ----
     private List<FolderWatcher> _folders = [];
+    // Phase 3.1 MVP: same list grouped by parent section for the optgroup-style picker.
+    private record FolderGroup(FolderWatcher? Section, List<FolderWatcher> Children);
+    private List<FolderGroup> _foldersBySection = [];
     private bool _defaultStopAfterDownload;
 
     // ---- Add panel file list state ----
@@ -604,6 +647,12 @@ else
     private int _detailsUlLimit;
     private List<(bool IsFolder, string Name, string? FullPath, long Length, int Depth)> _detailsFlatTree = [];
     private HashSet<string> _detailsCollapsedFolders = new();
+
+    // M-14: snapshot of live torrents, refreshed from OnTorrentStateChanged.
+    private IReadOnlyList<TorrentLiveStats> _torrentSnapshot = [];
+
+    // Phase 3.2: title of the MediaItem we auto-matched the new torrent to.
+    private string? _suggestedMatch;
 
     // ---- Tabs + History state ----
     private string _activeTabId = "active";
@@ -621,11 +670,33 @@ else
     protected override async Task OnInitializedAsync()
     {
         TorrentEngine.StateChanged += OnTorrentStateChanged;
+        _torrentSnapshot = TorrentEngine.GetAll();
         await using var db = await DbFactory.CreateDbContextAsync();
         _folders = await db.FolderWatchers
             .Where(f => !f.IsSection)
             .OrderBy(f => f.Label)
             .ToListAsync();
+
+        // Phase 3.1 MVP: build section-grouped folder list for the picker.
+        var sections = await db.FolderWatchers
+            .Where(f => f.IsSection)
+            .OrderBy(f => f.Label)
+            .ToListAsync();
+        var sectionMap = sections.ToDictionary(s => s.Id);
+
+        _foldersBySection = sections
+            .Select(s => new FolderGroup(s,
+                _folders.Where(f => f.ParentSectionId == s.Id).OrderBy(f => f.Label).ToList()))
+            .Where(g => g.Children.Count > 0)
+            .Concat(new[]
+            {
+                new FolderGroup(null,
+                    _folders.Where(f => !f.ParentSectionId.HasValue ||
+                                        !sectionMap.ContainsKey(f.ParentSectionId.Value))
+                            .OrderBy(f => f.Label).ToList())
+            })
+            .Where(g => g.Children.Count > 0)
+            .ToList();
         var cfg = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
         if (cfg is not null)
         {
@@ -694,9 +765,14 @@ else
 
     private void OnTorrentStateChanged()
     {
-        if (_detailsHash is not null && _detailsFlatTree.Count == 0)
-            BuildDetailsFlatTree(_detailsHash);
-        InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            // M-14: refresh snapshot once per state-change instead of in markup.
+            _torrentSnapshot = TorrentEngine.GetAll();
+            if (_detailsHash is not null && _detailsFlatTree.Count == 0)
+                BuildDetailsFlatTree(_detailsHash);
+            StateHasChanged();
+        });
     }
 
     private void OpenDetails(string infoHash)
@@ -745,6 +821,34 @@ else
         _addFlatTree = [];
         _collapsedFolders = new();
         _addError = null;
+        _suggestedMatch = null;
+    }
+
+    private void OnFolderPicked(string id)
+    {
+        _addFolderStr = id;
+        if (Guid.TryParse(id, out var guid))
+        {
+            _addFolderWatcherId = guid;
+            _addCustomPath = string.Empty;
+        }
+        else
+        {
+            _addFolderWatcherId = null;
+        }
+        _createSubfolderMode = false;
+        _suggestedMatch = null; // manual pick → no longer an auto-suggest
+    }
+
+    private async Task OnMagnetChangedAsync()
+    {
+        // Try to extract "dn=" from the magnet — it's the display name and is
+        // the cleanest signal for matching against the library.
+        if (string.IsNullOrWhiteSpace(_addMagnet)) return;
+        var dn = System.Text.RegularExpressions.Regex.Match(_addMagnet, @"[?&]dn=([^&]+)");
+        if (!dn.Success) return;
+        var name = Uri.UnescapeDataString(dn.Groups[1].Value).Replace('+', ' ');
+        await SuggestDestinationFromNameAsync(name);
     }
 
     private async Task OnTorrentFileSelected(InputFileChangeEventArgs e)
@@ -762,6 +866,72 @@ else
         _addFilePriorities = _addFileEntries.ToDictionary(f => f.Path.Replace('\\', '/'), _ => 4); // default Normal, normalized path
         _addFlatTree = TorrentFileTree.Flatten(TorrentFileTree.BuildTree(_addFileEntries));
         _collapsedFolders = new();
+
+        // Phase 3.1/3.2: auto-suggest destination based on torrent name.
+        await SuggestDestinationFromNameAsync(Path.GetFileNameWithoutExtension(file.Name));
+    }
+
+    /// <summary>
+    /// Phase 3.2: when the user picks a magnet or .torrent, fuzzy-match the
+    /// release name against existing MediaItems and pre-select the matching
+    /// folder so they don't have to dig through the dropdown.
+    /// </summary>
+    private async Task SuggestDestinationFromNameAsync(string sourceName)
+    {
+        // Don't override a manual pick.
+        if (_addFolderWatcherId.HasValue || !string.IsNullOrWhiteSpace(_addCustomPath))
+            return;
+        if (string.IsNullOrWhiteSpace(sourceName)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var items = await db.MediaItems
+            .Include(m => m.Folder)
+            .Where(m => m.Folder != null && !m.Folder.IsSection)
+            .Select(m => new { m.Title, m.OriginalTitle, m.FolderId, FolderPath = m.Folder!.Path })
+            .ToListAsync();
+        if (items.Count == 0) return;
+
+        var needle = NormaliseForMatch(sourceName);
+        var best   = items
+            .Select(m => new
+            {
+                m.FolderId,
+                m.FolderPath,
+                m.Title,
+                Score = Math.Max(
+                    SubstringScore(needle, NormaliseForMatch(m.Title)),
+                    SubstringScore(needle, NormaliseForMatch(m.OriginalTitle ?? "")))
+            })
+            .Where(x => x.Score >= 0.6)
+            .OrderByDescending(x => x.Score)
+            .FirstOrDefault();
+
+        if (best is null) return;
+
+        _addFolderWatcherId = best.FolderId;
+        _addFolderStr       = best.FolderId.ToString();
+        _suggestedMatch     = best.Title;
+        StateHasChanged();
+    }
+
+    private static string NormaliseForMatch(string s)
+    {
+        var lower = s.ToLowerInvariant();
+        var chars = lower.Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
+        return System.Text.RegularExpressions.Regex
+            .Replace(new string(chars), @"\s+", " ").Trim();
+    }
+
+    /// <summary>Returns 1.0 if all words of <paramref name="title"/> appear in
+    /// <paramref name="sourceName"/> in order, scaled by ratio of matched words.</summary>
+    private static double SubstringScore(string sourceName, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(sourceName)) return 0;
+        if (sourceName.Contains(title)) return 1.0;
+        var titleWords = title.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (titleWords.Length == 0) return 0;
+        int hit = titleWords.Count(w => w.Length >= 2 && sourceName.Contains(w));
+        return (double)hit / titleWords.Length;
     }
 
     private bool IsItemVisible((bool IsFolder, string Name, string? FullPath, long Length, int Depth) item)
@@ -824,7 +994,7 @@ else
                     _addDlLimit * 125000, _addUlLimit * 125000, autoRename, _addStartPaused, _addStopAfterDownload,
                     _addSkipSubfolderStructure, _addSuppressRootFolder, _addCustomRootFolderName);
             }
-            ToastService.ShowToast(ToastIntent.Success, "Торрент добавлен.");
+            ToastService.ShowToast(ToastIntent.Success, L["add_torrent.toast_added"]);
             CloseAddPanel();
         }
         catch (Exception ex)
@@ -865,7 +1035,7 @@ else
         if (_deleteHash is null) return;
         if (_detailsHash == _deleteHash) { _detailsHash = null; _detailsPanelOpen = false; }
         await TorrentEngine.RemoveAsync(_deleteHash, _deleteFiles);
-        ToastService.ShowToast(ToastIntent.Success, $"Торрент «{_deleteName}» удалён.");
+        ToastService.ShowToast(ToastIntent.Success, L.Get("add_torrent.toast_removed", _deleteName));
         _deleteHidden = true;
         _deleteHash = null;
     }
@@ -875,7 +1045,7 @@ else
         if (_detailsHash is null) return;
         await TorrentEngine.SetSpeedLimitsAsync(_detailsHash,
             _detailsDlLimit * 125000, _detailsUlLimit * 125000);
-        ToastService.ShowToast(ToastIntent.Success, "Лимиты обновлены.");
+        ToastService.ShowToast(ToastIntent.Success, L["torrent_details.toast_limits_updated"]);
     }
 
     private async Task SetFilePriorityAsync(string infoHash, string filePath, int priority)

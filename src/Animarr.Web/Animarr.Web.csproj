@@ -7,13 +7,15 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <!-- L-12: pinned versions (resolved via `dotnet list package` 2026-05-12).
+       Bump deliberately rather than letting `*` drift. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="*" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="*" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="*" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="*" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.7" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.1" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.1" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.5.2" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.2" />
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
   </ItemGroup>
 

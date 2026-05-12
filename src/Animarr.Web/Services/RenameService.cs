@@ -1,4 +1,5 @@
-﻿using Animarr.Web.Data;
+using System.Text.Json;
+using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,75 +9,129 @@ public class RenameService(
     IDbContextFactory<AppDbContext> dbFactory,
     IPatternMatchService matcher,
     TorrentEngineService torrentEngine,
+    IAppConfigService appConfig,
     ILogger<RenameService> logger) : IRenameService
 {
+    // ─── B-1: shared effective-pattern/ignore-rule resolution ─────────────────
+
+    private sealed record EffectiveRules(
+        FolderWatcher Folder,
+        List<RenamePattern> Patterns,
+        List<IgnoreRule> IgnoreRules,
+        IReadOnlyDictionary<(int s, int ep), string>? EpisodeNames);
+
+    private sealed record SeasonMetaDto(int Number, string? Name, List<EpisodeMetaDto>? Episodes);
+    private sealed record EpisodeMetaDto(int Number, string? Name);
+
+    private async Task<EffectiveRules?> LoadEffectiveRulesAsync(AppDbContext db, Guid folderId, CancellationToken ct)
+    {
+        var folder = await db.FolderWatchers
+            .Include(f => f.Patterns)
+            .Include(f => f.IgnoreRules)
+            .FirstOrDefaultAsync(f => f.Id == folderId, ct);
+
+        if (folder is null) return null;
+
+        var globalPatterns = await db.RenamePatterns
+            .Where(p => p.Scope == PatternScope.Global)
+            .ToListAsync(ct);
+
+        var excludedGlobalIds = folder.Patterns
+            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
+            .Select(p => p.GlobalPatternId!.Value)
+            .ToHashSet();
+
+        var isMovieFolder = folder.FolderType == FolderType.Movie;
+
+        var effectivePatterns = globalPatterns
+            .Where(p => !excludedGlobalIds.Contains(p.Id))
+            .Concat(folder.Patterns.Where(p => !p.IsExcluded))
+            .Where(p => isMovieFolder
+                ? p.ApplicableTo == FolderType.Movie
+                : p.ApplicableTo != FolderType.Movie)
+            .OrderBy(p => p.Priority)
+            .ToList();
+
+        var globalIgnoreRules = await db.IgnoreRules
+            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
+            .ToListAsync(ct);
+
+        var effectiveIgnoreRules = globalIgnoreRules.Concat(folder.IgnoreRules).ToList();
+
+        // Phase 1.3: episode-name map from MediaItem.SeasonsJson, if enabled and identified.
+        IReadOnlyDictionary<(int, int), string>? episodeNames = null;
+        var includeEpName = await appConfig.GetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, true, ct);
+        if (includeEpName)
+        {
+            var media = await db.MediaItems
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.FolderId == folder.Id, ct);
+            if (media is not null && !string.IsNullOrWhiteSpace(media.SeasonsJson))
+                episodeNames = BuildEpisodeNameMap(media.SeasonsJson);
+        }
+
+        return new EffectiveRules(folder, effectivePatterns, effectiveIgnoreRules, episodeNames);
+    }
+
+    private static Dictionary<(int, int), string>? BuildEpisodeNameMap(string seasonsJson)
+    {
+        try
+        {
+            var seasons = JsonSerializer.Deserialize<List<SeasonMetaDto>>(seasonsJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (seasons is null) return null;
+
+            var map = new Dictionary<(int, int), string>();
+            foreach (var s in seasons)
+            {
+                if (s.Episodes is null) continue;
+                foreach (var ep in s.Episodes)
+                {
+                    if (!string.IsNullOrWhiteSpace(ep.Name))
+                        map[(s.Number, ep.Number)] = ep.Name!;
+                }
+            }
+            return map.Count > 0 ? map : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     // ─── Scan (dry-run) ───────────────────────────────────────────────────────
 
     public async Task<List<RenamePreviewItem>> ScanFolderAsync(Guid folderId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        var folder = await db.FolderWatchers
-            .Include(f => f.Patterns)
-            .Include(f => f.IgnoreRules)
-            .FirstOrDefaultAsync(f => f.Id == folderId, ct)
-            ?? throw new InvalidOperationException($"Folder {folderId} not found.");
+        var rules = await LoadEffectiveRulesAsync(db, folderId, ct)
+                    ?? throw new InvalidOperationException($"Folder {folderId} not found.");
 
-        if (!Directory.Exists(folder.Path))
-            throw new DirectoryNotFoundException($"Directory not found: {folder.Path}");
+        if (!Directory.Exists(rules.Folder.Path))
+            throw new DirectoryNotFoundException($"Directory not found: {rules.Folder.Path}");
 
-        // Merge global + folder-specific patterns (folder exclusions override globals)
-        var globalPatterns = await db.RenamePatterns
-            .Where(p => p.Scope == PatternScope.Global)
-            .ToListAsync(ct);
-
-        var folderPatterns = folder.Patterns;
-        var excludedGlobalPatternIds = folderPatterns
-            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
-            .Select(p => p.GlobalPatternId!.Value)
-            .ToHashSet();
-
-        var effectivePatterns = globalPatterns
-            .Where(p => !excludedGlobalPatternIds.Contains(p.Id))
-            .Concat(folderPatterns.Where(p => !p.IsExcluded))
-            .OrderBy(p => p.Priority)
-            .ToList();
-
-        // Filter patterns by folder type:
-        // - Movie patterns (ApplicableTo == Movie) only run in Movie folders
-        // - All other patterns (ApplicableTo == null/Series) don't run in Movie folders
-        var isMovieFolder = folder.FolderType == FolderType.Movie;
-        effectivePatterns = effectivePatterns
-            .Where(p => isMovieFolder
-                ? p.ApplicableTo == FolderType.Movie
-                : p.ApplicableTo != FolderType.Movie)
-            .ToList();
-
-        // Global + folder-specific ignore rules
-        var globalIgnoreRules = await db.IgnoreRules
-            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
-            .ToListAsync(ct);
-
-        var effectiveIgnoreRules = globalIgnoreRules
-            .Concat(folder.IgnoreRules)
-            .ToList();
-
-        // Enumerate all files recursively
+        // Enumerate all files recursively (M-11: yields control to keep UI responsive)
         var activeDownloads = torrentEngine.GetActiveDownloadFilePaths();
         var incompleteFiles  = torrentEngine.GetIncompleteFilePaths();
         var files = Directory
-            .EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories)
+            .EnumerateFiles(rules.Folder.Path, "*", SearchOption.AllDirectories)
             .Where(f => !activeDownloads.Contains(f) && !activeDownloads.Contains(f.TrimEnd('/'))
                      && !incompleteFiles.Contains(f)  && !incompleteFiles.Contains(f.TrimEnd('/')))
             .OrderBy(f => f, NaturalStringComparer.Ordinal);
 
         var results = new List<RenamePreviewItem>();
+        int counter = 0;
         foreach (var filePath in files)
         {
             ct.ThrowIfCancellationRequested();
-        var item = matcher.EvaluateFile(filePath, effectivePatterns, effectiveIgnoreRules,
-            folder.FolderType, folder.IsSection, folder.Path);
+            var item = matcher.EvaluateFile(filePath, rules.Patterns, rules.IgnoreRules,
+                rules.Folder.FolderType, rules.Folder.IsSection, rules.Folder.Path,
+                rules.EpisodeNames);
             results.Add(item);
+
+            // M-11: yield every 200 items so a huge tree doesn't peg the request thread
+            if ((++counter & 0xFF) == 0) await Task.Yield();
         }
 
         // Update LastScannedAt
@@ -98,23 +153,27 @@ public class RenameService(
         CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var toProcess = approved.Where(i => i.Status == PreviewStatus.WillRename && i.IsSelected).ToList();
+
+        // H-5: pair item + history explicitly so future filtering can't desync indices.
+        var pairs = approved
+            .Where(i => i.Status == PreviewStatus.WillRename && i.IsSelected)
+            .Select(item => (item, history: new RenameHistory
+            {
+                Id           = Guid.NewGuid(),
+                FolderId     = folderId,
+                OriginalPath = item.OriginalPath,
+                NewPath      = item.NewPath!,
+                Status       = RenameStatus.Pending,
+                ProcessedAt  = DateTime.UtcNow,
+            }))
+            .ToList();
 
         // Write all intentions as Pending before touching any file.
         // If the process crashes mid-run, SeedDataService.RecoverPendingHistoryAsync will resolve them on restart.
-        var histories = toProcess.Select(item => new RenameHistory
-        {
-            Id           = Guid.NewGuid(),
-            FolderId     = folderId,
-            OriginalPath = item.OriginalPath,
-            NewPath      = item.NewPath!,
-            Status       = RenameStatus.Pending,
-            ProcessedAt  = DateTime.UtcNow,
-        }).ToList();
-        db.RenameHistories.AddRange(histories);
+        db.RenameHistories.AddRange(pairs.Select(p => p.history));
         await db.SaveChangesAsync(ct);
 
-        foreach (var (item, history) in toProcess.Zip(histories))
+        foreach (var (item, history) in pairs)
         {
             ct.ThrowIfCancellationRequested();
             try
@@ -135,6 +194,10 @@ public class RenameService(
                     if (!moved) File.Move(item.OriginalPath, item.NewPath!);
                     history.Status = RenameStatus.Renamed;
                     logger.LogInformation("Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+
+                    // Phase 3.5: rename paired subtitles / sidecar files that
+                    // share the original baseName (e.g. video.eng.srt → newname.eng.srt).
+                    RenamePairedSidecars(item.OriginalPath, item.NewPath!);
                 }
             }
             catch (Exception ex)
@@ -147,47 +210,93 @@ public class RenameService(
         }
     }
 
+    /// <summary>
+    /// Phase 3.5: when a video file is renamed, also rename any sidecar files
+    /// (subtitles, NFO, JPG thumbs) in the same directory that share the
+    /// same baseName — preserving language/track suffixes like ".eng.srt".
+    /// </summary>
+    private void RenamePairedSidecars(string originalPath, string newPath)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(originalPath);
+            var newDir = Path.GetDirectoryName(newPath);
+            if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(newDir)) return;
+            if (!Directory.Exists(dir)) return;
+
+            // Use newDir if it differs (RenameService may not move across dirs, but stay safe).
+            var oldBase = Path.GetFileNameWithoutExtension(originalPath);
+            var newBase = Path.GetFileNameWithoutExtension(newPath);
+            if (string.IsNullOrEmpty(oldBase) || string.IsNullOrEmpty(newBase) || oldBase == newBase)
+                return;
+
+            // We only touch sidecar extensions — never re-rename video files (they go through
+            // the rename pipeline themselves).
+            var sidecarExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { ".srt", ".ass", ".ssa", ".sub", ".vtt", ".idx", ".nfo", ".sup" };
+
+            foreach (var sibling in Directory.EnumerateFiles(dir))
+            {
+                if (string.Equals(sibling, originalPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var ext = Path.GetExtension(sibling);
+                if (!sidecarExts.Contains(ext)) continue;
+
+                var siblingBase = Path.GetFileNameWithoutExtension(sibling);
+                if (string.IsNullOrEmpty(siblingBase)) continue;
+
+                // Match: same baseName (video.srt) OR same baseName with a track suffix (video.eng.srt).
+                string? suffix = null;
+                if (string.Equals(siblingBase, oldBase, StringComparison.OrdinalIgnoreCase))
+                {
+                    suffix = "";
+                }
+                else if (siblingBase.StartsWith(oldBase + ".", StringComparison.OrdinalIgnoreCase))
+                {
+                    suffix = siblingBase[(oldBase.Length)..]; // includes leading dot
+                }
+
+                if (suffix is null) continue;
+
+                var targetPath = Path.Combine(newDir, newBase + suffix + ext);
+                if (string.Equals(sibling, targetPath, StringComparison.OrdinalIgnoreCase)) continue;
+                if (File.Exists(targetPath))
+                {
+                    logger.LogDebug("Sidecar target exists, skipping: {Path}", targetPath);
+                    continue;
+                }
+
+                try
+                {
+                    File.Move(sibling, targetPath);
+                    logger.LogInformation("Sidecar renamed: {Old} → {New}",
+                        Path.GetFileName(sibling), Path.GetFileName(targetPath));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to rename sidecar {Path}", sibling);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Sidecar renaming is best-effort — never fail the main rename because of it.
+            logger.LogWarning(ex, "Sidecar pairing failed for {Path}", originalPath);
+        }
+    }
+
     // ─── Process single file (Watcher) ────────────────────────────────────────
 
     public async Task ProcessSingleFileAsync(string filePath, Guid folderId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        var folder = await db.FolderWatchers
-            .Include(f => f.Patterns)
-            .Include(f => f.IgnoreRules)
-            .FirstOrDefaultAsync(f => f.Id == folderId, ct);
+        var rules = await LoadEffectiveRulesAsync(db, folderId, ct);
+        if (rules is null) return;
 
-        if (folder is null) return;
-
-        var globalPatterns = await db.RenamePatterns
-            .Where(p => p.Scope == PatternScope.Global)
-            .ToListAsync(ct);
-
-        var excludedGlobalIds = folder.Patterns
-            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
-            .Select(p => p.GlobalPatternId!.Value)
-            .ToHashSet();
-
-        var isMovieFolder = folder.FolderType == FolderType.Movie;
-
-        var effectivePatterns = globalPatterns
-            .Where(p => !excludedGlobalIds.Contains(p.Id))
-            .Concat(folder.Patterns.Where(p => !p.IsExcluded))
-            .OrderBy(p => p.Priority)
-            .Where(p => isMovieFolder
-                ? p.ApplicableTo == FolderType.Movie
-                : p.ApplicableTo != FolderType.Movie)
-            .ToList();
-
-        var globalIgnoreRules = await db.IgnoreRules
-            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
-            .ToListAsync(ct);
-
-        var effectiveIgnoreRules = globalIgnoreRules.Concat(folder.IgnoreRules).ToList();
-
-        var item = matcher.EvaluateFile(filePath, effectivePatterns, effectiveIgnoreRules,
-            folder.FolderType, folder.IsSection, folder.Path);
+        var item = matcher.EvaluateFile(filePath, rules.Patterns, rules.IgnoreRules,
+            rules.Folder.FolderType, rules.Folder.IsSection, rules.Folder.Path,
+            rules.EpisodeNames);
 
         // Skip if the file is still being downloaded (not yet 100%)
         var incompleteFiles = torrentEngine.GetIncompleteFilePaths();
@@ -229,6 +338,9 @@ public class RenameService(
                 if (!moved) File.Move(item.OriginalPath, item.NewPath!);
                 history.Status = RenameStatus.Renamed;
                 logger.LogInformation("[Watcher] Renamed: {Old} → {New}", item.OriginalName, item.NewName);
+
+                // Phase 3.5: rename paired subtitles / sidecars alongside.
+                RenamePairedSidecars(item.OriginalPath, item.NewPath!);
             }
         }
         catch (Exception ex)

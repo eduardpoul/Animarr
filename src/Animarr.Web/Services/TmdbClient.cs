@@ -1,8 +1,12 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Animarr.Web.Services;
+
+/// <summary>Thrown when TMDB rejects a request as unauthorized — usually a missing/invalid API key.</summary>
+public class TmdbAuthException(string message) : Exception(message);
 
 /// <summary>
 /// Lightweight TMDB API v3 client.
@@ -12,12 +16,62 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
 {
     private const string BaseUrl   = "https://api.themoviedb.org/3";
     private const string ImageBase = "https://image.tmdb.org/t/p/";
+    private const int MaxRetriesOn429 = 3;
 
     private static readonly JsonSerializerOptions _json = new()
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+
+    /// <summary>H-9: GET with branching on HTTP status codes (401/403/429/5xx).
+    /// 429 → respect Retry-After and back off up to 3 times.
+    /// 401/403 → throw TmdbAuthException so callers can surface "bad API key" to UI.
+    /// All other failures → log + return default.</summary>
+    private async Task<T?> GetJsonAsync<T>(string url, CancellationToken ct) where T : class
+    {
+        using var http = httpFactory.CreateClient("tmdb");
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var resp = await http.GetAsync(url, ct);
+                if (resp.IsSuccessStatusCode)
+                    return await resp.Content.ReadFromJsonAsync<T>(_json, ct);
+
+                switch (resp.StatusCode)
+                {
+                    case HttpStatusCode.Unauthorized:
+                    case HttpStatusCode.Forbidden:
+                        logger.LogWarning("TMDB {Status} on {Url} — check API key", resp.StatusCode, url);
+                        throw new TmdbAuthException($"TMDB rejected the request ({(int)resp.StatusCode}). Check that the API key is set and valid.");
+                    case HttpStatusCode.TooManyRequests:
+                        if (attempt >= MaxRetriesOn429)
+                        {
+                            logger.LogWarning("TMDB 429 — exhausted retries on {Url}", url);
+                            return null;
+                        }
+                        var delay = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                        if (delay > TimeSpan.FromSeconds(30)) delay = TimeSpan.FromSeconds(30);
+                        logger.LogInformation("TMDB 429 — backing off {Delay}s (attempt {Attempt})", delay.TotalSeconds, attempt + 1);
+                        await Task.Delay(delay, ct);
+                        continue;
+                    case HttpStatusCode.NotFound:
+                        return null;
+                    default:
+                        logger.LogWarning("TMDB {Status} on {Url}", resp.StatusCode, url);
+                        return null;
+                }
+            }
+            catch (TmdbAuthException) { throw; }
+            catch (TaskCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "TMDB request failed: {Url}", url);
+                return null;
+            }
+        }
+    }
 
     // ── Image helpers ────────────────────────────────────────────────────────
 
@@ -39,122 +93,41 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
 
     private async Task<List<TmdbSearchResult>> SearchAsync(string endpoint, string query, CancellationToken ct)
     {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/{endpoint}?query={Uri.EscapeDataString(query)}&include_adult=false&language=en-US";
-            var resp = await http.GetFromJsonAsync<TmdbPagedResponse<TmdbSearchResult>>(url, _json, ct);
-            return resp?.Results ?? [];
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB search failed for '{Query}' on {Endpoint}", query, endpoint);
-            return [];
-        }
+        var url = $"{BaseUrl}/{endpoint}?query={Uri.EscapeDataString(query)}&include_adult=false&language=en-US";
+        var resp = await GetJsonAsync<TmdbPagedResponse<TmdbSearchResult>>(url, ct);
+        return resp?.Results ?? [];
     }
 
     // ── TV series detail ─────────────────────────────────────────────────────
 
-    public async Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids&language=en-US&include_image_language=en,null";
-            return await http.GetFromJsonAsync<TmdbTvDetail>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB GetTvDetail failed for id={Id}", tmdbId);
-            return null;
-        }
-    }
+    public Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, CancellationToken ct = default)
+        => GetJsonAsync<TmdbTvDetail>($"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids&language=en-US&include_image_language=en,null", ct);
 
-    public async Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language=en-US&include_image_language=en,null";
-            return await http.GetFromJsonAsync<TmdbSeasonDetail>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB GetSeason failed for id={Id} s{Season}", tmdbId, seasonNumber);
-            return null;
-        }
-    }
+    public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, CancellationToken ct = default)
+        => GetJsonAsync<TmdbSeasonDetail>($"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language=en-US&include_image_language=en,null", ct);
 
     // ── Movie detail ─────────────────────────────────────────────────────────
 
-    public async Task<TmdbMovieDetail?> GetMovieDetailAsync(int tmdbId, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids&language=en-US&include_image_language=en,null";
-            return await http.GetFromJsonAsync<TmdbMovieDetail>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB GetMovieDetail failed for id={Id}", tmdbId);
-            return null;
-        }
-    }
+    public Task<TmdbMovieDetail?> GetMovieDetailAsync(int tmdbId, CancellationToken ct = default)
+        => GetJsonAsync<TmdbMovieDetail>($"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids&language=en-US&include_image_language=en,null", ct);
 
     // ── Find by external ID ──────────────────────────────────────────────────
 
     /// <summary>Find TMDB entries by external ID (IMDb or TVDB).</summary>
     /// <param name="externalId">e.g. "tt1234567" for IMDb, "83268" for TVDB</param>
     /// <param name="source">"imdb_id" or "tvdb_id"</param>
-    public async Task<TmdbFindResponse?> FindByExternalIdAsync(string externalId, string source, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/find/{Uri.EscapeDataString(externalId)}?external_source={source}&language=en-US";
-            return await http.GetFromJsonAsync<TmdbFindResponse>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB FindByExternalId failed: id={Id} source={Source}", externalId, source);
-            return null;
-        }
-    }
+    public Task<TmdbFindResponse?> FindByExternalIdAsync(string externalId, string source, CancellationToken ct = default)
+        => GetJsonAsync<TmdbFindResponse>($"{BaseUrl}/find/{Uri.EscapeDataString(externalId)}?external_source={source}&language=en-US", ct);
 
     // ── All images for a given TMDB entity ───────────────────────────────────
 
     /// <summary>Returns all posters, backdrops and logos for a TV series.</summary>
-    public async Task<TmdbImages?> GetTvImagesAsync(int tmdbId, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/tv/{tmdbId}/images?include_image_language=en,ja,ru,null";
-            return await http.GetFromJsonAsync<TmdbImages>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB GetTvImages failed for id={Id}", tmdbId);
-            return null;
-        }
-    }
+    public Task<TmdbImages?> GetTvImagesAsync(int tmdbId, CancellationToken ct = default)
+        => GetJsonAsync<TmdbImages>($"{BaseUrl}/tv/{tmdbId}/images?include_image_language=en,ja,ru,null", ct);
 
     /// <summary>Returns all posters, backdrops and logos for a movie.</summary>
-    public async Task<TmdbImages?> GetMovieImagesAsync(int tmdbId, CancellationToken ct = default)
-    {
-        try
-        {
-            using var http = httpFactory.CreateClient("tmdb");
-            var url = $"{BaseUrl}/movie/{tmdbId}/images?include_image_language=en,ja,ru,null";
-            return await http.GetFromJsonAsync<TmdbImages>(url, _json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "TMDB GetMovieImages failed for id={Id}", tmdbId);
-            return null;
-        }
-    }
+    public Task<TmdbImages?> GetMovieImagesAsync(int tmdbId, CancellationToken ct = default)
+        => GetJsonAsync<TmdbImages>($"{BaseUrl}/movie/{tmdbId}/images?include_image_language=en,ja,ru,null", ct);
 
     // ── Image download helper ────────────────────────────────────────────────
 

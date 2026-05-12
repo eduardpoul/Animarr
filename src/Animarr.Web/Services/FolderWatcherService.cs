@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Text.Json;
 using Animarr.Web.Configuration;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
@@ -26,6 +27,8 @@ public class FolderWatcherService(
     private readonly SemaphoreSlim _lock = new(1, 1);
     /// <summary>Paths to skip in OnFileCreated — populated before intentional moves to avoid re-processing. Value = expiry TickCount64.</summary>
     private readonly ConcurrentDictionary<string, long> _suppressedPaths = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>H-2: periodic GC of expired _suppressedPaths entries that never got matched by a watcher event.</summary>
+    private Timer? _suppressedGcTimer;
 
     /// <summary>Raised when a file is auto-renamed. Payload: (folderId, originalName, newName).</summary>
     public event Action<Guid, string, string>? FileRenamed;
@@ -50,6 +53,15 @@ public class FolderWatcherService(
         }
 
         logger.LogInformation("Started {Count} folder watchers.", _watchers.Count);
+
+        // H-2: prune expired _suppressedPaths every 60s
+        _suppressedGcTimer = new Timer(_ =>
+        {
+            var now = Environment.TickCount64;
+            foreach (var kv in _suppressedPaths)
+                if (kv.Value < now)
+                    _suppressedPaths.TryRemove(kv.Key, out _);
+        }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -143,13 +155,32 @@ public class FolderWatcherService(
         {
             try
             {
-                await Task.Delay(500); // let the OS fully flush the directory creation
+                // Wait long enough for whatever created the dir to populate it
+                // (torrent download, file manager) before we decide whether to register.
+                await Task.Delay(2000);
+
+                // BUG-FIX "New Folder reappears": skip junk-named or empty
+                // directories. They cannot be identified and re-appear forever
+                // if the user removes them from the catalog while the physical
+                // folder stays on disk.
+                if (!MediaFolderHeuristics.LooksLikeMediaFolder(dirPath))
+                {
+                    logger.LogDebug("Skipping auto-register — empty or junk subfolder: {Path}", dirPath);
+                    return;
+                }
 
                 await using var db = await dbFactory.CreateDbContextAsync();
 
                 // Skip if this path is already registered
                 if (await db.FolderWatchers.AnyAsync(f => f.Path == dirPath))
                     return;
+
+                // Bug-fix: also skip paths the user has explicitly dismissed in the past.
+                if (await IsDismissedAsync(db, sectionId, dirPath))
+                {
+                    logger.LogDebug("Skipping auto-register — path was dismissed by user: {Path}", dirPath);
+                    return;
+                }
 
                 var section = await db.FolderWatchers.FindAsync(sectionId);
                 if (section is null) return;
@@ -260,10 +291,63 @@ public class FolderWatcherService(
     public void SuppressPath(string filePath)
         => _suppressedPaths[filePath] = Environment.TickCount64 + 15_000;
 
+    /// <summary>
+    /// Bug-fix "New Folder reappears": persistent per-section list of dismissed
+    /// child paths. When the user removes a child from the catalog, the physical
+    /// folder on disk usually remains — we remember the path here so the auto-
+    /// discovery loop doesn't keep re-registering it.
+    /// </summary>
+    public async Task DismissChildPathAsync(Guid sectionId, string childPath)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var key = DismissedKey(sectionId);
+        var raw = await db.AppConfigs.FindAsync(key);
+        var list = ParseDismissed(raw?.Value);
+        if (list.Add(NormalisePath(childPath)))
+        {
+            var json = JsonSerializer.Serialize(list.ToList());
+            if (raw is null)
+                db.AppConfigs.Add(new AppConfig { Key = key, Value = json });
+            else
+                raw.Value = json;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>Returns true if <paramref name="childPath"/> was previously dismissed for this section.</summary>
+    private static async Task<bool> IsDismissedAsync(AppDbContext db, Guid sectionId, string childPath)
+    {
+        var key = DismissedKey(sectionId);
+        var raw = await db.AppConfigs.FindAsync(key);
+        if (raw?.Value is null) return false;
+        var list = ParseDismissed(raw.Value);
+        return list.Contains(NormalisePath(childPath));
+    }
+
+    private static string DismissedKey(Guid sectionId) => $"dismissed.section.{sectionId}";
+
+    private static HashSet<string> ParseDismissed(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var arr = JsonSerializer.Deserialize<List<string>>(json);
+            return arr is null
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+    }
+
+    private static string NormalisePath(string p)
+        => p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
     // ─── Dispose ──────────────────────────────────────────────────────────────
 
     public void Dispose()
     {
+        _suppressedGcTimer?.Dispose();
+        _suppressedGcTimer = null;
         foreach (var entry in _watchers.Values)
             entry.Dispose();
         _watchers.Clear();

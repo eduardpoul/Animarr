@@ -18,6 +18,8 @@ public class MetadataService(
     ImdbSearchClient imdbSearch,
     IAppConfigService appConfig,
     ILlmService llm,
+    FolderWatcherService watcher,
+    TorrentEngineService torrentEngine,
     ILogger<MetadataService> logger)
 {
     private static readonly JsonSerializerOptions _json = new() { WriteIndented = false };
@@ -38,8 +40,7 @@ public class MetadataService(
 
     public async Task IdentifyFolderAsync(
         Guid folderId,
-        string? llmTitle,
-        double? llmConfidence,
+        LlmIdentifyResult? llmResult,
         bool forceRefresh,
         Action<string>? log = null,
         CancellationToken ct = default)
@@ -61,15 +62,31 @@ public class MetadataService(
             return;
         }
 
-        item.LlmIdentifiedTitle = llmTitle;
-        item.LlmConfidence      = llmConfidence;
+        item.LlmIdentifiedTitle = llmResult?.Title;
+        item.LlmConfidence      = llmResult?.Confidence;
 
-        var searchTitle = llmTitle ?? ParseTitleFromPath(folder.Path);
-        var folderYear  = ExtractYearFromPath(folder.Path);
-        log?.Invoke(llmTitle != null
-            ? $"[LLM] Title: \"{llmTitle}\" (confidence {llmConfidence:F2})"
-            : $"[Parse] Path title: \"{searchTitle}\"");
-        logger.LogInformation("Identifying folder '{Path}' with title '{Title}'", folder.Path, searchTitle);
+        var searchTitle = llmResult?.Title ?? ParseTitleFromPath(folder.Path);
+        var folderYear  = llmResult?.Year ?? ExtractYearFromPath(folder.Path);
+
+        // Phase 1.5: prefer LLM type hint over manual FolderType when confidence is decent.
+        // This biases TMDB endpoint selection (TV vs Movie) without forcing the user to
+        // configure FolderType manually.
+        var typeHint = folder.FolderType;
+        if (llmResult is { Confidence: >= 0.7 })
+        {
+            typeHint = llmResult.Type switch
+            {
+                "movie"  => FolderType.Movie,
+                "series" => FolderType.Series,
+                "anime"  => FolderType.Series,  // anime → TV endpoint of TMDB + MAL
+                _        => typeHint,
+            };
+        }
+
+        log?.Invoke(llmResult != null
+            ? $"[LLM] Title: \"{llmResult.Title}\" type={typeHint} year={folderYear} (confidence {llmResult.Confidence:F2})"
+            : $"[Parse] Path title: \"{searchTitle}\" year={folderYear}");
+        logger.LogInformation("Identifying folder '{Path}' with title '{Title}' type={Type}", folder.Path, searchTitle, typeHint);
 
         var tmdbKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
         var malKey  = await appConfig.GetAsync(AppConfigKeys.MalClientId, ct);
@@ -94,7 +111,7 @@ public class MetadataService(
 
         // ── Phase 1: Gather all candidates in parallel ────────────────────────
         var candidates = await GatherCandidatesAsync(
-            searchTitle, folder.FolderType, tmdbKey, malKey, folderYear, log, ct);
+            searchTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
 
         if (candidates.Count == 0)
         {
@@ -139,11 +156,143 @@ public class MetadataService(
         else
         {
             await FillMissingImagesAsync(item, folder, forceRefresh, log, ct);
+
+            // Phase 2.3: gate the final status on confidence.
+            //   ≥ autoApply           → Identified (use as-is, auto-rename)
+            //   ≥ needsReview         → NeedsReview (poster shown, badge "needs review", top-3 in CandidatesJson)
+            //   < needsReview         → Failed
+            var autoThreshold   = await appConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence, 0.85, ct);
+            var reviewThreshold = await appConfig.GetAsync<double>(AppConfigKeys.NeedsReviewConfidence, 0.50, ct);
+
+            if (winner.Score >= autoThreshold)
+            {
+                // Keep whatever Populate*Async set (typically Identified).
+                if (item.IdentificationStatus is not IdentificationStatus.Manual
+                                              and not IdentificationStatus.Identified)
+                    item.IdentificationStatus = IdentificationStatus.Identified;
+            }
+            else if (winner.Score >= reviewThreshold)
+            {
+                item.IdentificationStatus = IdentificationStatus.NeedsReview;
+                log?.Invoke($"[Winner] Confidence {winner.Score:F2} below auto-apply threshold {autoThreshold:F2} — marking NeedsReview.");
+            }
+            else
+            {
+                item.IdentificationStatus = IdentificationStatus.Failed;
+                log?.Invoke($"[Winner] Confidence {winner.Score:F2} below review threshold {reviewThreshold:F2} — marking Failed.");
+            }
+
+            // Auto-pilot completeness: sync FolderWatcher.FolderType with the
+            // detected MediaItem.MediaType. Without this the rename pipeline
+            // keeps using FolderType=Auto and never produces "Title (Year).mkv"
+            // for movie folders, even though we know they're movies.
+            if (item.IdentificationStatus == IdentificationStatus.Identified &&
+                folder.FolderType == FolderType.Auto)
+            {
+                var derived = item.MediaType switch
+                {
+                    MediaItemType.Movie   => FolderType.Movie,
+                    MediaItemType.Series  => FolderType.Series,
+                    MediaItemType.Anime   => FolderType.Series,
+                    _                     => FolderType.Auto,
+                };
+                if (derived != FolderType.Auto)
+                {
+                    folder.FolderType = derived;
+                    log?.Invoke($"[Auto] FolderType: Auto → {derived} (from MediaType {item.MediaType})");
+                }
+            }
         }
 
         item.LastMetadataRefreshedAt = DateTime.UtcNow;
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
+
+        // Phase 1.2 + 2.3: only auto-rename the containing folder when the final
+        // status is Identified (i.e. confidence cleared the auto-apply threshold).
+        if (identified && item.IdentificationStatus == IdentificationStatus.Identified)
+        {
+            var auto = await appConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, true, ct);
+            if (auto)
+                await TryRenameContainerFolderAsync(folderId, item.Title, item.Year, log, ct);
+        }
+    }
+
+    /// <summary>
+    /// Phase 1.2/2.5: rename the watched folder on disk to "Title (Year)" so the
+    /// library stays clean after a torrent dump. Stops the FileSystemWatcher,
+    /// moves the directory, updates FolderWatcher.Path / .Label, then restarts
+    /// the watcher pointing at the new path. Skipped if any active torrent is
+    /// currently writing into this folder.
+    /// </summary>
+    private async Task TryRenameContainerFolderAsync(
+        Guid folderId, string? title, int? year, Action<string>? log, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return;
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var folder = await db.FolderWatchers.FindAsync([folderId], ct);
+        if (folder is null) return;
+
+        // Never auto-rename a section root — too disruptive (children point at the old name).
+        if (folder.IsSection) return;
+
+        var currentDir = folder.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parentDir  = Path.GetDirectoryName(currentDir);
+        if (string.IsNullOrEmpty(parentDir) || !Directory.Exists(currentDir)) return;
+
+        var safeTitle = SanitizeForPath(title);
+        var targetName = year.HasValue ? $"{safeTitle} ({year})" : safeTitle;
+        var targetPath = Path.Combine(parentDir, targetName);
+
+        if (string.Equals(currentDir, targetPath, StringComparison.OrdinalIgnoreCase))
+            return; // already correct
+
+        if (Directory.Exists(targetPath))
+        {
+            log?.Invoke($"[FolderRename] Skip — target already exists: {targetPath}");
+            return;
+        }
+
+        // Don't move the folder out from under an active torrent — MonoTorrent's
+        // SavePath would point at the wrong place.
+        if (torrentEngine.IsSavePathActive(currentDir))
+        {
+            log?.Invoke($"[FolderRename] Skip — active torrent is writing here.");
+            return;
+        }
+
+        // 2.5: stop FSW BEFORE Directory.Move so file events from the moved tree
+        // don't fire on a stale handle. Restart afterwards with the new path.
+        bool wasWatching = watcher.IsWatching(folderId);
+        if (wasWatching) await watcher.StopWatcherAsync(folderId);
+
+        try
+        {
+            Directory.Move(currentDir, targetPath);
+            folder.Path  = targetPath;
+            folder.Label = targetName;
+            await db.SaveChangesAsync(ct);
+            log?.Invoke($"[FolderRename] {Path.GetFileName(currentDir)} → {targetName}");
+            logger.LogInformation("Renamed folder {Old} → {New}", currentDir, targetPath);
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"[FolderRename] Failed: {ex.Message}");
+            logger.LogWarning(ex, "Failed to rename folder {Old} → {New}", currentDir, targetPath);
+            // Keep folder.Path pointing at currentDir (no save). Fall through to restart watcher.
+        }
+
+        // Restart the watcher whether the move succeeded or not — if it failed,
+        // the old path still exists and we want to keep watching it.
+        if (wasWatching) await watcher.StartWatcherAsync(folderId);
+    }
+
+    private static string SanitizeForPath(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = name.Select(c => invalid.Contains(c) ? ' ' : c).ToArray();
+        return new string(chars).Trim().Trim('.');
     }
 
     // ── Public: manual identification by numeric ID ───────────────────────────

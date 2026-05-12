@@ -223,6 +223,65 @@ html, body {
     width: 100%;
 }
 
+/* ── FluentDataGrid: row height fix ────────────────────────
+   Дефолтная высота ряда слишком маленькая — 28px кнопки в action-колонке
+   не помещаются по вертикали. Принудительно выставляем min-height. */
+fluent-data-grid-row,
+.fluent-data-grid-row {
+    min-height: 44px;
+}
+fluent-data-grid-row > fluent-data-grid-cell,
+.fluent-data-grid-row > .fluent-data-grid-cell {
+    align-items: center;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+/* ── Smooth progress bar (без мерцания) ────────────────────
+   FluentProgress в строке грида перерисовывается каждые 500 мс из StateChanged
+   и сбрасывается в 0 при ремаунте. Заменяем на чистый CSS-progress с transition. */
+.animarr-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+}
+.animarr-progress__track {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--neutral-stroke-rest, #d1d1d1);
+    overflow: hidden;
+    min-width: 0;
+}
+.animarr-progress__fill {
+    height: 100%;
+    background: var(--accent-fill-rest, #0f6cbd);
+    border-radius: 3px;
+    transition: width .25s ease-out;
+    will-change: width;
+}
+.animarr-progress__fill--indeterminate {
+    width: 30%;
+    background: linear-gradient(90deg,
+        var(--neutral-stroke-rest) 0%,
+        var(--accent-fill-rest) 50%,
+        var(--neutral-stroke-rest) 100%);
+    animation: animarr-progress-indeterminate 1.4s ease-in-out infinite;
+}
+.animarr-progress__label {
+    font-size: 12px;
+    color: var(--neutral-foreground-hint);
+    white-space: nowrap;
+    min-width: 36px;
+    text-align: right;
+}
+@keyframes animarr-progress-indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+}
+
 a, .btn-link {
     color: var(--accent-foreground-rest, #0F6CBD);
 }

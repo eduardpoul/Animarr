@@ -9,7 +9,7 @@ It watches your media folders, renames files according to configurable patterns,
 - **Pattern engine** — regex-based naming rules with named capture groups (`season`, `episode`); global patterns plus per-folder overrides and exclusions
 - **Media catalog** — poster grid with fanart backdrop slideshow, detail page with episodes, tags, and ratings (TMDB & MAL)
 - **AI identification** — automatically identifies folders via any OpenAI-compatible LLM (Ollama, OpenAI, Groq, LM Studio, …); also suggests rename patterns
-- **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits (Kbps)
+- **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits (Mbps)
 - **Section folders** — point Animarr at a root directory and it auto-imports each subdirectory as a separate monitored folder
 - **Ignore rules** — glob masks (e.g. `*.nfo`, `fanart*`) that skip files from renaming; global or per-folder
 - **Rename history** — full log with one-click revert per file
@@ -110,17 +110,8 @@ The **Explorer** page provides a folder-by-folder view of your media library.
 - **Create subfolder** (`+` button) — instantly create a new subdirectory inside a destination folder without leaving the add panel
 - **Flatten subfolders** — after download completes, all files from nested subdirectories are moved to the destination root (useful when a torrent wraps everything in an extra folder)
 - **Rename / strip root folder** — when a torrent contains a top-level folder, you can rename it or strip it entirely before files land in the destination
-- Speed limits are set in **Kbps** (kilobits per second), globally in Settings and per-torrent in the details panel
+- Speed limits are set in **Mbps** (megabits per second), globally in Settings and per-torrent in the details panel
 - Auto-rename on completion — when a torrent finishes, the destination folder is scanned and renamed according to the folder's pattern
-
-## Ignore rules
-
-Glob masks that tell Animarr to skip certain filenames during renaming. Supports `*` and `?` wildcards.
-
-Common examples: `*.nfo`, `*.txt`, `fanart*`, `poster*`, `thumb*`
-
-Rules can be **global** (apply everywhere) or scoped to a specific folder.  
-Managed in **Settings → Ignore Rules**.
 
 ## Ignore rules
 

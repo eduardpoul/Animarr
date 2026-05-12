@@ -26,7 +26,17 @@ public class TorrentEngineService : BackgroundService
     /// <summary>Per-torrent lock that serializes MetadataReceived and StateChanged handlers (avoids concurrent SaveChanges on the same record).</summary>
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _torrentLocks = new();
 
-    /// <summary>Fires every 500 ms and on any torrent state change.</summary>
+    /// <summary>Cached snapshot of TorrentConfig; reloaded on UpdateGlobalSettingsAsync (M-12).</summary>
+    private TorrentConfig _cachedConfig = new();
+
+    /// <summary>Pending IsDownloaded flags batched between timer ticks (H-4).</summary>
+    private readonly ConcurrentDictionary<string, byte> _pendingDownloadedWrites = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Hash of last-broadcast stats to suppress duplicate StateChanged invocations (H-8).</summary>
+    private long _lastStatsHash;
+    private DateTime _lastStatsPersistAt = DateTime.MinValue;
+
+    /// <summary>Fires every 500 ms (only if values changed) and on any torrent state change.</summary>
     public event Action? StateChanged;
 
     public TorrentEngineService(
@@ -46,6 +56,7 @@ public class TorrentEngineService : BackgroundService
         try
         {
             var cfg = await LoadConfigAsync();
+            _cachedConfig = cfg;
             await StartEngineAsync(cfg);
             await RestoreActiveTorrentsAsync(cfg);
 
@@ -53,7 +64,26 @@ public class TorrentEngineService : BackgroundService
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 UpdateLiveStats();
-                StateChanged?.Invoke();
+                FlushPendingDownloadedWrites();
+
+                // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
+                if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
+                {
+                    _lastStatsPersistAt = DateTime.UtcNow;
+                    _ = Task.Run(async () =>
+                    {
+                        try { await PersistStatsAsync(); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Periodic PersistStats failed"); }
+                    }, stoppingToken);
+                }
+
+                // H-8: only invoke StateChanged if values actually changed
+                var newHash = ComputeStatsHash();
+                if (newHash != _lastStatsHash)
+                {
+                    _lastStatsHash = newHash;
+                    StateChanged?.Invoke();
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -65,6 +95,81 @@ public class TorrentEngineService : BackgroundService
         {
             await ShutdownAsync();
         }
+    }
+
+    /// <summary>Computes a fast hash over fields that affect the UI, so we skip
+    /// StateChanged when nothing visible has changed (H-8).</summary>
+    private long ComputeStatsHash()
+    {
+        unchecked
+        {
+            long h = 17;
+            foreach (var s in _liveStats.Values)
+            {
+                h = h * 31 + s.InfoHash.GetHashCode();
+                h = h * 31 + (long)s.State;
+                h = h * 31 + (long)(s.Progress * 10);        // 0.1% resolution
+                h = h * 31 + s.DownloadRate;
+                h = h * 31 + s.UploadRate;
+                h = h * 31 + s.Downloaded;
+                h = h * 31 + s.Seeds;
+                h = h * 31 + s.Peers;
+            }
+            return h;
+        }
+    }
+
+    /// <summary>Batches IsDownloaded writes — H-4. Called once per timer tick.</summary>
+    private void FlushPendingDownloadedWrites()
+    {
+        if (_pendingDownloadedWrites.IsEmpty) return;
+        var keys = _pendingDownloadedWrites.Keys.ToList();
+        foreach (var k in keys) _pendingDownloadedWrites.TryRemove(k, out _);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+                await using var ctx = await db.CreateDbContextAsync();
+
+                // Group by torrent hash so we hit each record once.
+                var byHash = keys
+                    .Select(k => { var i = k.IndexOf(':'); return (Hash: k[..i], Path: k[(i + 1)..]); })
+                    .GroupBy(p => p.Hash);
+
+                foreach (var grp in byHash)
+                {
+                    var record = await ctx.TorrentRecords
+                        .Include(r => r.FileSelections)
+                        .FirstOrDefaultAsync(r => r.InfoHash == grp.Key);
+                    if (record is null) continue;
+
+                    foreach (var (_, path) in grp)
+                    {
+                        var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == path);
+                        if (sel is null)
+                        {
+                            ctx.TorrentFileSelections.Add(new TorrentFileSelection
+                            {
+                                Id = Guid.NewGuid(), TorrentId = record.Id,
+                                FilePath = path, Priority = 1, IsDownloaded = true,
+                            });
+                        }
+                        else if (!sel.IsDownloaded)
+                        {
+                            sel.IsDownloaded = true;
+                        }
+                    }
+                }
+                await ctx.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "FlushPendingDownloadedWrites failed");
+            }
+        });
     }
 
     private async Task<TorrentConfig> LoadConfigAsync()
@@ -205,8 +310,8 @@ public class TorrentEngineService : BackgroundService
 
     private async Task OnStateChangedAsync(TorrentManager mgr, string infoHash)
     {
-        // Always load fresh config so changes made after startup are respected (H-4 fix).
-        var cfg = await LoadConfigAsync();
+        // M-12: use cached config (refreshed by UpdateGlobalSettingsAsync) instead of a DB query per state change.
+        var cfg = _cachedConfig;
         UpdateLiveStats();
         StateChanged?.Invoke();
 
@@ -327,7 +432,7 @@ public class TorrentEngineService : BackgroundService
 
                     var key = $"{hash}:{file.Path}";
                     if (_markedDownloaded.TryAdd(key, 0))
-                        _ = Task.Run(async () => await MarkFileDownloadedAsync(hash, file.Path));
+                        _pendingDownloadedWrites.TryAdd(key, 0);
                 }
             }
 
@@ -354,36 +459,6 @@ public class TorrentEngineService : BackgroundService
 
         foreach (var hash in _liveStats.Keys.Except(_managers.Keys).ToList())
             _liveStats.TryRemove(hash, out _);
-    }
-
-    private async Task MarkFileDownloadedAsync(string torrentHash, string relativePath)
-    {
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-            await using var ctx = await db.CreateDbContextAsync();
-            var record = await ctx.TorrentRecords
-                .Include(r => r.FileSelections)
-                .FirstOrDefaultAsync(r => r.InfoHash == torrentHash);
-            if (record is null) return;
-            var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == relativePath);
-            if (sel is null)
-            {
-                ctx.TorrentFileSelections.Add(new TorrentFileSelection
-                    { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = relativePath, Priority = 1, IsDownloaded = true });
-            }
-            else if (!sel.IsDownloaded)
-            {
-                sel.IsDownloaded = true;
-            }
-            else return;
-            await ctx.SaveChangesAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to mark file downloaded: {Hash}:{Path}", torrentHash, relativePath);
-        }
     }
 
     private async Task PersistStatsAsync()
@@ -436,6 +511,28 @@ public class TorrentEngineService : BackgroundService
                 result.Add(mgr.SavePath);
         }
         return result;
+    }
+
+    /// <summary>
+    /// 2.5: returns true if any non-stopped torrent has its SavePath inside (or equal to)
+    /// <paramref name="folderPath"/>. Used to skip auto-folder-rename while torrents are
+    /// writing into the folder.
+    /// </summary>
+    public bool IsSavePathActive(string folderPath)
+    {
+        var norm = folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                   + Path.DirectorySeparatorChar;
+        foreach (var (_, mgr) in _managers)
+        {
+            if (mgr.State == TorrentState.Stopped || mgr.State == TorrentState.Error)
+                continue;
+            var save = mgr.SavePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
+            if (save.StartsWith(norm, StringComparison.OrdinalIgnoreCase) ||
+                norm.StartsWith(save, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public TorrentLiveStats? Get(string infoHash) => _liveStats.GetValueOrDefault(infoHash);
@@ -814,6 +911,15 @@ public class TorrentEngineService : BackgroundService
         _folderWatchers.TryRemove(infoHash, out _);
         _autoRename.TryRemove(infoHash, out _);
 
+        // C-1: dispose per-torrent semaphore so it doesn't leak across add/remove cycles.
+        if (_torrentLocks.TryRemove(infoHash, out var sem))
+            sem.Dispose();
+
+        // M-1: purge _markedDownloaded entries for this torrent.
+        var prefix = infoHash + ":";
+        foreach (var k in _markedDownloaded.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+            _markedDownloaded.TryRemove(k, out _);
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
@@ -894,6 +1000,9 @@ public class TorrentEngineService : BackgroundService
             AllowLocalPeerDiscovery = cfg.EnableLSD,
         };
         await _engine.UpdateSettingsAsync(builder.ToSettings());
+
+        // M-12: keep cached snapshot in sync.
+        _cachedConfig = cfg;
     }
 
     // -------------------------------------------------------------------------

@@ -134,7 +134,12 @@ else
                         <span style="color:var(--neutral-foreground-hint);">@L["torrent_edit.stat_progress"]</span>
                         <b>@_live.Progress.ToString("F1")%</b>
                     </div>
-                    <FluentProgress Value="@((int)_live.Progress)" Max="100" Width="100%" />
+                    <div class="animarr-progress" style="margin-top:2px;">
+                        <div class="animarr-progress__track">
+                            <div class="animarr-progress__fill"
+                                 style="width:@(_live.Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
+                        </div>
+                    </div>
                     <div style="display:flex;justify-content:space-between;margin-top:4px;">
                         <span style="color:var(--neutral-foreground-hint);">@L["torrent_edit.stat_downloaded"]</span>
                         <span>@FormatBytes(_live.Downloaded) / @FormatBytes(_live.TotalSize)</span>
@@ -149,7 +154,7 @@ else
                     </div>
                     <div style="display:flex;justify-content:space-between;">
                         <span style="color:var(--neutral-foreground-hint);">@L["torrent_edit.stat_peers"]</span>
-                        <span>Seeds: @_live.Seeds &nbsp; Peers: @_live.Peers</span>
+                        <span>@L["torrent_details.seeds_label"] @_live.Seeds &nbsp; @L["torrent_details.peers_label"] @_live.Peers</span>
                     </div>
                     <FluentDivider Style="margin:6px 0;" />
                     <div style="font-size:11px;color:var(--neutral-foreground-hint);word-break:break-all;">

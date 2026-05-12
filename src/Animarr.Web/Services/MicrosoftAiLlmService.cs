@@ -27,10 +27,22 @@ public class MicrosoftAiLlmService(
     public async Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, CancellationToken ct = default)
     {
         var folderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
+        var parentName = Path.GetFileName(
+            Path.GetDirectoryName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/')) ?? "");
+
+        // Phase 1.5: feed the LLM a sample of file names inside the folder so it
+        // can use file count and naming patterns as evidence (movie vs series,
+        // episode count hints, season number).
+        var fileSamples = SampleFileNames(folderPath, maxFiles: 8);
+        var fileBlock = fileSamples.Count > 0
+            ? "Files inside (sample):\n" + string.Join("\n", fileSamples.Select(f => "  - " + f)) + "\n\n"
+            : "";
 
         var prompt =
-            "You are a media library assistant. Identify the following media folder name and extract structured information.\n\n" +
+            "You are a media library assistant. Identify the following media folder and extract structured information.\n\n" +
+            (string.IsNullOrEmpty(parentName) ? "" : "Parent folder: \"" + parentName + "\"\n") +
             "Folder name: \"" + folderName + "\"\n\n" +
+            fileBlock +
             "Respond ONLY with valid JSON matching this exact schema:\n" +
             "{\n" +
             "  \"title\": \"English title of the media\",\n" +
@@ -43,7 +55,10 @@ public class MicrosoftAiLlmService(
             "}\n\n" +
             "Rules:\n" +
             "- \"type\" is \"anime\" for Japanese animation, \"series\" for live-action TV, \"movie\" for films\n" +
+            "- A folder with ONE video file and a year is almost always a \"movie\"\n" +
+            "- A folder with multiple sequentially-numbered video files is a \"series\" or \"anime\"\n" +
             "- \"confidence\" reflects how sure you are about the identification (1.0 = certain)\n" +
+            "- Use parent folder name and file samples as additional evidence\n" +
             "- For \"suggested_regex\", include named groups: (?<episode>...) and optionally (?<season>...)\n" +
             "- Return ONLY the JSON object, no extra text";
 
@@ -137,6 +152,56 @@ public class MicrosoftAiLlmService(
         return null;
     }
 
+    public async Task<List<(int FileIndex, int EpisodeNumber)>?> MapFilesToEpisodesAsync(
+        IReadOnlyList<string> fileNames,
+        IReadOnlyList<(int Number, string Name)> episodes,
+        CancellationToken ct = default)
+    {
+        if (fileNames.Count == 0 || episodes.Count == 0) return null;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("You are a media library assistant. Map each video file name to the most likely episode number.");
+        sb.AppendLine();
+        sb.AppendLine("Files (by index):");
+        for (int i = 0; i < fileNames.Count; i++)
+            sb.AppendLine($"  [{i}] {fileNames[i]}");
+        sb.AppendLine();
+        sb.AppendLine("Episodes available:");
+        foreach (var (num, name) in episodes)
+            sb.AppendLine($"  E{num:D2} — {name}");
+        sb.AppendLine();
+        sb.AppendLine("Respond ONLY with valid JSON: {\"pairs\": [{\"file\": <index>, \"episode\": <number>}, ...]}");
+        sb.AppendLine("Rules:");
+        sb.AppendLine("- Match using episode names or numbering patterns in the file name.");
+        sb.AppendLine("- Skip a file if there's no confident match (omit it from pairs).");
+        sb.AppendLine("- Do not invent episodes that aren't in the list.");
+        sb.AppendLine("- Return ONLY the JSON object, no extra text.");
+
+        var raw = await CallAsync(sb.ToString(), ct);
+        if (raw is null) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("pairs", out var arr)) return null;
+            var result = new List<(int, int)>();
+            foreach (var el in arr.EnumerateArray())
+            {
+                if (!el.TryGetProperty("file", out var pf) || !pf.TryGetInt32(out var idx)) continue;
+                if (!el.TryGetProperty("episode", out var pe) || !pe.TryGetInt32(out var ep)) continue;
+                if (idx < 0 || idx >= fileNames.Count) continue;
+                if (!episodes.Any(e => e.Number == ep)) continue;
+                result.Add((idx, ep));
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to parse LLM file→episode mapping: {Raw}", raw);
+            return null;
+        }
+    }
+
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         try
@@ -159,6 +224,37 @@ public class MicrosoftAiLlmService(
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
+
+    /// <summary>Pick up to N representative file names from <paramref name="folderPath"/> for the LLM prompt.</summary>
+    private static List<string> SampleFileNames(string folderPath, int maxFiles)
+    {
+        try
+        {
+            if (!Directory.Exists(folderPath)) return [];
+            var videoExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".m2ts" };
+            var all = Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
+                .Where(f => videoExt.Contains(Path.GetExtension(f)))
+                .OrderBy(f => f, NaturalStringComparer.Ordinal)
+                .ToList();
+
+            if (all.Count == 0) return [];
+            if (all.Count <= maxFiles)
+                return all.Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToList();
+
+            // Sample: first 3 + middle + last 3 → covers patterns without dumping 1000 names.
+            var picks = new List<string>();
+            picks.AddRange(all.Take(3).Select(Path.GetFileName).Where(n => n != null).Cast<string>());
+            var mid = Path.GetFileName(all[all.Count / 2]);
+            if (mid != null) picks.Add(mid);
+            picks.AddRange(all.TakeLast(3).Select(Path.GetFileName).Where(n => n != null).Cast<string>());
+            return picks.Distinct().Take(maxFiles).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     private async Task<string?> CallAsync(string userPrompt, CancellationToken ct)
     {
