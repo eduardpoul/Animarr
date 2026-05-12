@@ -35,6 +35,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dpKeysDir, "dp-keys")))
     .SetApplicationName("Animarr");
 builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<MediaCachePaths>();
 
 // App services
 builder.Services.AddScoped<SeedDataService>();
@@ -128,8 +129,10 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 // ─── /api/image — serve media images from arbitrary disk paths ────────────
-// Security: path must resolve inside one of the registered FolderWatcher paths.
-app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbContext> dbFactory, HttpContext ctx) =>
+// Security: path must resolve inside one of the registered FolderWatcher paths,
+// OR inside the dedicated image cache (which lives next to the database, away
+// from the user's media tree).
+app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbContext> dbFactory, MediaCachePaths cachePaths, HttpContext ctx) =>
 {
     if (string.IsNullOrWhiteSpace(path))
         return Results.BadRequest();
@@ -157,10 +160,13 @@ app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbCon
     catch { /* fall through to existence check below */ }
 
     // Validate: the file must reside inside a registered FolderWatcher path
+    // OR inside Animarr's dedicated image cache (which lives outside the user's
+    // media tree, in /app/data/image-cache by default).
     await using var db = await dbFactory.CreateDbContextAsync();
     var allowedRoots = await db.FolderWatchers
         .Select(f => f.Path)
         .ToListAsync();
+    allowedRoots.Add(cachePaths.CacheRoot);
 
     bool allowed = allowedRoots.Any(root =>
     {
