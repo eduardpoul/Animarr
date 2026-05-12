@@ -1403,10 +1403,10 @@ else
     }
 
     /// <summary>
-    /// Wipes the section's dismissed-paths list, re-discovers children, AND
-    /// queues identification for every section child that isn't already
-    /// confidently identified. Folders that were previously removed from the
-    /// catalog come back AND start identifying without a second click.
+    /// Wipes the section's dismissed-paths list, re-discovers children, makes
+    /// sure they all have IdentifyEnabled=true, drops any leftover queue rows,
+    /// and (re-)queues identification for every child whose poster isn't on
+    /// disk. One click brings folders back AND kicks off the work.
     /// </summary>
     private async Task RestoreDismissedAsync(FolderWatcher section)
     {
@@ -1414,40 +1414,61 @@ else
         await using var db = await DbFactory.CreateDbContextAsync();
         var discovered = await DiscoverChildrenAsync(db, section);
 
-        // Queue identification for any child that doesn't already have an
-        // Identified or Manual MediaItem. Without this the user gets folders
-        // back but every card is a black rectangle — needing an extra Rescan
-        // click — which feels broken.
-        var pendingFolderIds = await db.FolderWatchers
-            .Where(f => f.ParentSectionId == section.Id
-                        && !f.IsSection
-                        && f.IdentifyEnabled)
-            .Where(f => !db.MediaItems.Any(m =>
-                m.FolderId == f.Id &&
-                (m.IdentificationStatus == IdentificationStatus.Identified ||
-                 m.IdentificationStatus == IdentificationStatus.Manual)))
-            .Select(f => f.Id)
+        // Make sure every child of this section is identify-enabled. The user
+        // explicitly asked to restore the catalog — if a folder was somehow
+        // toggled off, this is the moment to re-arm it.
+        await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id && !f.IsSection && !f.IdentifyEnabled)
+            .ExecuteUpdateAsync(s => s.SetProperty(f => f.IdentifyEnabled, true));
+
+        // Gather all section children that need (re-)identification:
+        //   - no MediaItem at all, OR
+        //   - MediaItem isn't Identified/Manual (failed, needs-review, etc.), OR
+        //   - PosterPath points at a missing file (leftover from the old
+        //     ".animarr/" cache that the user nuked from disk).
+        var childMedia = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id && !f.IsSection)
+            .GroupJoin(db.MediaItems,
+                f => f.Id,
+                m => m.FolderId,
+                (f, mGroup) => new
+                {
+                    FolderId   = f.Id,
+                    FolderPath = f.Path,
+                    Item       = mGroup.FirstOrDefault(),
+                })
             .ToListAsync();
-        int queued = 0;
-        foreach (var id in pendingFolderIds)
+
+        var needsIdentify = childMedia
+            .Where(x => x.Item is null
+                        || (x.Item.IdentificationStatus != IdentificationStatus.Identified
+                            && x.Item.IdentificationStatus != IdentificationStatus.Manual)
+                        || (x.Item.PosterPath is not null
+                            && !File.Exists(Path.Combine(x.FolderPath, x.Item.PosterPath))))
+            .Select(x => x.FolderId)
+            .ToList();
+
+        // Drop any leftover queue rows for these folders so we start clean,
+        // then queue every one with ForceRefresh=true (handles the case where
+        // the item is already Identified but the cached image was deleted).
+        await db.IdentificationQueues
+            .Where(q => needsIdentify.Contains(q.FolderId)
+                        && q.Status != IdentificationQueueStatus.Processing)
+            .ExecuteDeleteAsync();
+        foreach (var id in needsIdentify)
         {
-            var already = await db.IdentificationQueues.AnyAsync(q =>
-                q.FolderId == id &&
-                (q.Status == IdentificationQueueStatus.Queued ||
-                 q.Status == IdentificationQueueStatus.Processing));
-            if (already) continue;
             db.IdentificationQueues.Add(new IdentificationQueue
             {
-                Id       = Guid.NewGuid(),
-                FolderId = id,
-                QueuedAt = DateTime.UtcNow,
+                Id           = Guid.NewGuid(),
+                FolderId     = id,
+                ForceRefresh = true,
+                QueuedAt     = DateTime.UtcNow,
             });
-            queued++;
         }
-        if (queued > 0) await db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
         ToastService.ShowToast(ToastIntent.Success,
-            L.Get("explorer.toast_restored_dismissed_with_queue", discovered, queued));
+            L.Get("explorer.toast_restored_dismissed_with_queue", discovered, needsIdentify.Count));
         await LoadAsync();
     }
 
