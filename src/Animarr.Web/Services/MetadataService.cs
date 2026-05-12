@@ -87,6 +87,14 @@ public class MetadataService(
             };
         }
 
+        // SingleFilePath entries are individual files in a flat section — by definition
+        // they are MOVIES, not series. Override any "anime"/"series" hint to force the
+        // Movie endpoint, otherwise franchise movies (Gundam SEED Freedom, Gundam 00
+        // A Wakening, Renegade Immortal: Battle of Gods, Douluo Dalu: Sword Master)
+        // get matched to the parent SERIES on TMDB and produce duplicate MediaItems.
+        if (folder.SingleFilePath != null)
+            typeHint = FolderType.Movie;
+
         log?.Invoke(llmResult != null
             ? $"[LLM] Title: \"{llmResult.Title}\" type={typeHint} year={folderYear} (confidence {llmResult.Confidence:F2})"
             : $"[Parse] Path title: \"{searchTitle}\" year={folderYear}");
@@ -194,6 +202,33 @@ public class MetadataService(
         // ── Phase 2: Pick winner (LLM or top-scorer) ─────────────────────────
         var winner = await SelectWinnerAsync(candidates, folder.Path, log, ct);
         log?.Invoke($"[Winner] \"{winner.Title}\" ({winner.Year}) [{winner.Source}] id={winner.Id}  score={winner.Score:F2}");
+
+        // Anti-duplicate: if another MediaItem already points at this exact
+        // TMDB/MAL entry, this is almost certainly a misidentification
+        // (e.g. a franchise movie matched against the parent series). Try the
+        // NEXT candidate; if none, fall through to NeedsReview.
+        var winnerExternalId = winner.Source == "imdb_search" ? null : (int?)winner.Id;
+        if (winnerExternalId.HasValue)
+        {
+            var dup = await db.MediaItems.AnyAsync(m =>
+                m.Id != item.Id &&
+                ((winner.Source == "tmdb_tv" || winner.Source == "tmdb_movie") && m.TmdbId == winnerExternalId
+                 || winner.Source == "mal" && m.MalId == winnerExternalId), ct);
+            if (dup)
+            {
+                log?.Invoke($"[Winner] {winner.Source}#{winner.Id} is already used by another MediaItem — trying next candidate.");
+                var alt = candidates
+                    .Where(c => c != winner)
+                    .OrderByDescending(c => c.Score)
+                    .FirstOrDefault(c =>
+                        winner.Source == "imdb_search" || c.Source != winner.Source || c.Id != winner.Id);
+                if (alt is not null)
+                {
+                    winner = alt;
+                    log?.Invoke($"[Winner-alt] \"{winner.Title}\" ({winner.Year}) [{winner.Source}] id={winner.Id}  score={winner.Score:F2}");
+                }
+            }
+        }
 
         // ── Phase 3: Apply winner ─────────────────────────────────────────────
         bool identified = winner.Source switch
