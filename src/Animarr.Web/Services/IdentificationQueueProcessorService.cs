@@ -103,8 +103,13 @@ public class IdentificationQueueProcessorService(
                 var folder = await dbFolder.FolderWatchers.FindAsync([job.FolderId], ct);
                 if (folder is not null)
                 {
-                    Log($"[LLM] Calling LLM for: {folder.Path}");
-                    llmResult = await llm.IdentifyFolderAsync(folder.Path, ct);
+                    // For flat single-file entries, identify against the file path itself —
+                    // the section's directory name (e.g. "Movies") is generic and only
+                    // confuses the LLM (e.g. "Movies" + "Home Video" inside a filename →
+                    // misidentified as "Home Movies").
+                    var pathForLlm = folder.SingleFilePath ?? folder.Path;
+                    Log($"[LLM] Calling LLM for: {pathForLlm}");
+                    llmResult = await llm.IdentifyFolderAsync(pathForLlm, ct);
                     if (llmResult != null && llmResult.Confidence >= 0.5)
                     {
                         Log($"[LLM] Result: \"{llmResult.Title}\" type={llmResult.Type} year={llmResult.Year} confidence={llmResult.Confidence:F2}");
