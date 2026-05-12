@@ -28,9 +28,11 @@
 
   "add_torrent.title": "Add Torrent",
   "add_torrent.btn_close": "Close",
+  "add_torrent.source_file": "File",
+  "add_torrent.source_magnet": "Magnet",
   "add_torrent.magnet_label": "Magnet link",
   "add_torrent.magnet_placeholder": "magnet:?xt=urn:btih:...",
-  "add_torrent.torrent_file_label": "Or .torrent file",
+  "add_torrent.torrent_file_label": ".torrent file",
   "add_torrent.select_file_button": "Choose .torrent",
   "add_torrent.folder_label": "Destination Folder",
   "add_torrent.folder_placeholder": "— Select folder —",

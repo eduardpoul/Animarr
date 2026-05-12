@@ -30,9 +30,11 @@
 
   "add_torrent.title": "Добавить торрент",
   "add_torrent.btn_close": "Закрыть",
+  "add_torrent.source_file": "Файл",
+  "add_torrent.source_magnet": "Magnet",
   "add_torrent.magnet_label": "Magnet-ссылка",
   "add_torrent.magnet_placeholder": "magnet:?xt=urn:btih:...",
-  "add_torrent.torrent_file_label": "Или .torrent файл",
+  "add_torrent.torrent_file_label": ".torrent файл",
   "add_torrent.select_file_button": "Выбрать .torrent",
   "add_torrent.folder_label": "Папка назначения",
   "add_torrent.folder_placeholder": "— Выбрать папку —",

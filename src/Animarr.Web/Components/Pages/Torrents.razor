@@ -191,12 +191,45 @@ else
     </div>
     <div class="flex-1 overflow-y-auto p-f-xl">
     <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;padding:4px 0;">
-        <FluentTextField Value="_addMagnet"
-                         ValueChanged="@(async (string v) => { _addMagnet = v; await OnMagnetChangedAsync(); })"
-                         Label="@(L["add_torrent.magnet_label"])"
-                         Placeholder="@(L["add_torrent.magnet_placeholder"])"
-                         Immediate="true"
-                         style="width:100%;" />
+
+        @* Source-type toggle: File vs Magnet. Default is File — most users
+           drop a .torrent from their browser's Downloads folder; the magnet
+           tab is the secondary path. Switching wipes the other input so we
+           don't accidentally have both filled at the same time. *@
+        <FluentRadioGroup Value="@_addSourceType"
+                          ValueChanged="@((string v) => SwitchAddSource(v))"
+                          Orientation="Orientation.Horizontal"
+                          Style="margin-bottom:4px;">
+            <FluentRadio Value="@("file")">@L["add_torrent.source_file"]</FluentRadio>
+            <FluentRadio Value="@("magnet")">@L["add_torrent.source_magnet"]</FluentRadio>
+        </FluentRadioGroup>
+
+        @if (_addSourceType == "magnet")
+        {
+            <FluentTextField Value="@_addMagnet"
+                             ValueChanged="@(async (string v) => { _addMagnet = v; await OnMagnetChangedAsync(); })"
+                             Label="@(L["add_torrent.magnet_label"])"
+                             Placeholder="@(L["add_torrent.magnet_placeholder"])"
+                             Immediate="true"
+                             style="width:100%;" />
+        }
+        else
+        {
+            <div>
+                <FluentLabel Style="font-size:13px;font-weight:600;margin-bottom:6px;">@L["add_torrent.torrent_file_label"]</FluentLabel>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <InputFile id="torrentFileInput" OnChange="OnTorrentFileSelected" accept=".torrent" style="display:none;" />
+                    <label for="torrentFileInput" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;height:32px;padding:0 14px;border-radius:4px;background:var(--accent-fill-rest);color:var(--foreground-on-accent-rest);font-size:13px;font-weight:500;user-select:none;white-space:nowrap;transition:background .1s;">
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M11.586 2H5.5A2.5 2.5 0 0 0 3 4.5v11A2.5 2.5 0 0 0 5.5 18h9a2.5 2.5 0 0 0 2.5-2.5V8.414L11.586 2zM11 3.5 15.5 8H12a1 1 0 0 1-1-1V3.5zM10 12v2.5a.5.5 0 0 1-1 0V12H6.5a.5.5 0 0 1 0-1H9V8.5a.5.5 0 0 1 1 0V11h2.5a.5.5 0 0 1 0 1H10z"/></svg>
+                        @L["add_torrent.select_file_button"]
+                    </label>
+                    @if (_torrentFileName is not null)
+                    {
+                        <span style="flex:1;min-width:0;font-size:12px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@_torrentFileName">✓ @_torrentFileName</span>
+                    }
+                </div>
+            </div>
+        }
 
         @if (!string.IsNullOrEmpty(_suggestedMatch))
         {
@@ -209,21 +242,6 @@ else
                               OnClick="@(() => { _suggestedMatch = null; _addFolderWatcherId = null; _addFolderStr = ""; })" />
             </div>
         }
-
-        <div>
-            <FluentLabel Style="font-size:13px;font-weight:600;margin-bottom:6px;">@L["add_torrent.torrent_file_label"]</FluentLabel>
-            <div style="display:flex;align-items:center;gap:10px;">
-                <InputFile id="torrentFileInput" OnChange="OnTorrentFileSelected" accept=".torrent" style="display:none;" />
-                <label for="torrentFileInput" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;height:32px;padding:0 14px;border-radius:4px;background:var(--accent-fill-rest);color:var(--foreground-on-accent-rest);font-size:13px;font-weight:500;user-select:none;white-space:nowrap;transition:background .1s;">
-                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M11.586 2H5.5A2.5 2.5 0 0 0 3 4.5v11A2.5 2.5 0 0 0 5.5 18h9a2.5 2.5 0 0 0 2.5-2.5V8.414L11.586 2zM11 3.5 15.5 8H12a1 1 0 0 1-1-1V3.5zM10 12v2.5a.5.5 0 0 1-1 0V12H6.5a.5.5 0 0 1 0-1H9V8.5a.5.5 0 0 1 1 0V11h2.5a.5.5 0 0 1 0 1H10z"/></svg>
-                    @L["add_torrent.select_file_button"]
-                </label>
-                @if (_torrentFileName is not null)
-                {
-                    <span style="flex:1;min-width:0;font-size:12px;color:var(--neutral-foreground-hint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@_torrentFileName">✓ @_torrentFileName</span>
-                }
-            </div>
-        </div>
 
         @if (_addFileEntries.Count > 0)
         {
@@ -612,6 +630,9 @@ else
 @code {
     // ---- Add panel state ----
     private bool _addPanelOpen;
+    // "file" (default) | "magnet" — which source the add-torrent panel is
+    // currently set to. Switching wipes the other input.
+    private string _addSourceType = "file";
     private string _addMagnet = "";
     private byte[]? _torrentFileBytes;
     private string? _torrentFileName;
@@ -699,8 +720,12 @@ else
         TorrentEngine.StateChanged += OnTorrentStateChanged;
         _torrentSnapshot = TorrentEngine.GetAll();
         await using var db = await DbFactory.CreateDbContextAsync();
+        // Exclude SingleFilePath entries — those are individual movie FILES inside
+        // a flat section (e.g. "Movies/Inception (2010).mkv"). The picker is a
+        // destination-FOLDER selector — saving a torrent into a single video file
+        // doesn't make sense and would clobber the existing movie.
         _folders = await db.FolderWatchers
-            .Where(f => !f.IsSection)
+            .Where(f => !f.IsSection && f.SingleFilePath == null)
             .OrderBy(f => f.Label)
             .ToListAsync();
 
@@ -843,9 +868,34 @@ else
         _detailsFlatTree = TorrentFileTree.Flatten(TorrentFileTree.BuildTree(entries));
     }
 
+    /// <summary>
+    /// Switch between the "file" and "magnet" source inputs. Wipes the input
+    /// that's about to be hidden so saving doesn't accidentally pull from both
+    /// (the Add button looks at whichever side has data).
+    /// </summary>
+    private void SwitchAddSource(string source)
+    {
+        if (_addSourceType == source) return;
+        _addSourceType = source;
+        if (source == "file")
+        {
+            _addMagnet = "";
+        }
+        else
+        {
+            _torrentFileBytes = null;
+            _torrentFileName  = null;
+            _addFileEntries   = [];
+            _addFilePriorities = new();
+            _addFlatTree      = [];
+            _collapsedFolders = new();
+        }
+    }
+
     private void CloseAddPanel()
     {
         _addPanelOpen = false;
+        _addSourceType = "file";
         _addMagnet = "";
         _torrentFileBytes = null;
         _torrentFileName = null;
