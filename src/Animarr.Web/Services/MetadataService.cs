@@ -117,6 +117,32 @@ public class MetadataService(
         var candidates = await GatherCandidatesAsync(
             searchTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
 
+        // Fallback A: if the LLM-normalised title returned nothing, try the raw
+        // folder name. The LLM often emits a faithful pinyin/romaji that TMDB
+        // doesn't index, while the folder itself sometimes has the English title
+        // mixed in (e.g. "Code Geass Dakkan no Rose" — the folder has the
+        // canonical "Code Geass" prefix which TMDB knows).
+        var rawFolderName = Path.GetFileName(folder.Path.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (candidates.Count == 0 &&
+            !string.IsNullOrWhiteSpace(rawFolderName) &&
+            !string.Equals(rawFolderName, searchTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            log?.Invoke($"[Search] Empty — retrying with raw folder name: \"{rawFolderName}\"");
+            candidates = await GatherCandidatesAsync(
+                rawFolderName, typeHint, tmdbKey, malKey, folderYear, log, ct);
+        }
+
+        // Fallback B: try the LLM's original_title hint if it was provided.
+        if (candidates.Count == 0 &&
+            !string.IsNullOrWhiteSpace(llmResult?.OriginalTitle) &&
+            !string.Equals(llmResult.OriginalTitle, searchTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            log?.Invoke($"[Search] Empty — retrying with LLM original_title: \"{llmResult.OriginalTitle}\"");
+            candidates = await GatherCandidatesAsync(
+                llmResult.OriginalTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
+        }
+
         if (candidates.Count == 0)
         {
             log?.Invoke("[Search] No candidates found from any source.");
@@ -154,8 +180,19 @@ public class MetadataService(
 
         if (!identified)
         {
-            log?.Invoke($"[Winner] Populate returned false for source '{winner.Source}' — marking as Failed.");
-            item.IdentificationStatus = IdentificationStatus.Failed;
+            // If we have other candidates the user can pick from, demote to
+            // NeedsReview (banner with top-3) instead of Failed — Populate often
+            // returns false for transient TMDB hiccups even when search worked.
+            if (candidates.Count > 1)
+            {
+                log?.Invoke($"[Winner] Populate returned false for source '{winner.Source}' — {candidates.Count - 1} other candidate(s) available, marking NeedsReview.");
+                item.IdentificationStatus = IdentificationStatus.NeedsReview;
+            }
+            else
+            {
+                log?.Invoke($"[Winner] Populate returned false for source '{winner.Source}' — marking as Failed.");
+                item.IdentificationStatus = IdentificationStatus.Failed;
+            }
         }
         else
         {
@@ -737,8 +774,14 @@ public class MetadataService(
 
             if (llmIndex.HasValue && llmIndex.Value >= 0 && llmIndex.Value < topN.Count)
             {
-                log?.Invoke($"[LLM] Selected [{llmIndex.Value}]: \"{topN[llmIndex.Value].Title}\" [{topN[llmIndex.Value].Source}]");
-                return topN[llmIndex.Value];
+                var picked = topN[llmIndex.Value];
+                log?.Invoke($"[LLM] Selected [{llmIndex.Value}]: \"{picked.Title}\" [{picked.Source}]");
+                // Trust LLM's pick: when the romanised LLM title doesn't match the English
+                // TMDB title, the string-similarity score is 0.00 — but the LLM has
+                // already confirmed this is the right entry. Boost the score so the
+                // confidence-gated UX (≥0.85 auto-apply, ≥0.50 NeedsReview) doesn't
+                // flag the result as Failed purely because of the language gap.
+                return picked.Score >= 0.9 ? picked : picked with { Score = 0.9 };
             }
         }
         catch (Exception ex)
