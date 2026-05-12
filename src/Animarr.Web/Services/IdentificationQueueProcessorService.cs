@@ -124,7 +124,11 @@ public class IdentificationQueueProcessorService(
                     llmResult = await llm.IdentifyFolderAsync(pathForLlm, sectionLabel, ct);
                     if (llmResult != null && llmResult.Confidence >= 0.5)
                     {
-                        Log($"[LLM] Result: \"{llmResult.Title}\" type={llmResult.Type} year={llmResult.Year} confidence={llmResult.Confidence:F2}");
+                        var engPart = !string.IsNullOrWhiteSpace(llmResult.EnglishTitle) &&
+                                      !string.Equals(llmResult.EnglishTitle, llmResult.Title, StringComparison.OrdinalIgnoreCase)
+                            ? $" english_title=\"{llmResult.EnglishTitle}\""
+                            : "";
+                        Log($"[LLM] Result: \"{llmResult.Title}\"{engPart} type={llmResult.Type} year={llmResult.Year} confidence={llmResult.Confidence:F2}");
                         logger.LogInformation(
                             "LLM identified '{Path}' as '{Title}' [{Type}] (confidence={Conf:F2})",
                             folder.Path, llmResult.Title, llmResult.Type, llmResult.Confidence);
