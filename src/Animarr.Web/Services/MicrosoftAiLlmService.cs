@@ -26,14 +26,25 @@ public class MicrosoftAiLlmService(
 
     public async Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, CancellationToken ct = default)
     {
-        var folderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
-        var parentName = Path.GetFileName(
-            Path.GetDirectoryName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/')) ?? "");
+        // For flat single-file entries the caller may pass a file path here; we
+        // want to identify the file by its OWN name, not by the generic section
+        // dir it lives in (e.g. "Movies" + filename → "Home Movies" mishaps).
+        var isFile = File.Exists(folderPath) && !Directory.Exists(folderPath);
+        var folderName = isFile
+            ? Path.GetFileName(folderPath)               // includes extension; LLM tolerates it
+            : Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
+        // Skip parent context for single files — section names like "Movies"
+        // are noise. Keep parent for actual folders (helps with Season subdirs).
+        var parentName = isFile
+            ? ""
+            : Path.GetFileName(
+                Path.GetDirectoryName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/')) ?? "");
 
         // Phase 1.5: feed the LLM a sample of file names inside the folder so it
         // can use file count and naming patterns as evidence (movie vs series,
-        // episode count hints, season number).
-        var fileSamples = SampleFileNames(folderPath, maxFiles: 8);
+        // episode count hints, season number). For a single file there is no
+        // 'inside' — fileBlock stays empty and folderName carries all the signal.
+        var fileSamples = isFile ? new List<string>() : SampleFileNames(folderPath, maxFiles: 8);
         var fileBlock = fileSamples.Count > 0
             ? "Files inside (sample):\n" + string.Join("\n", fileSamples.Select(f => "  - " + f)) + "\n\n"
             : "";

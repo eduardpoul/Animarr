@@ -118,12 +118,12 @@ public class MetadataService(
             searchTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
 
         // Fallback A: if the LLM-normalised title returned nothing, try the raw
-        // folder name. The LLM often emits a faithful pinyin/romaji that TMDB
-        // doesn't index, while the folder itself sometimes has the English title
-        // mixed in (e.g. "Code Geass Dakkan no Rose" — the folder has the
-        // canonical "Code Geass" prefix which TMDB knows).
-        var rawFolderName = Path.GetFileName(folder.Path.TrimEnd(
-            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        // folder or file name. For SingleFilePath entries this is the filename
+        // (without extension) — never the generic section dir like "Movies".
+        var rawFolderName = folder.SingleFilePath != null
+            ? Path.GetFileNameWithoutExtension(folder.SingleFilePath)
+            : Path.GetFileName(folder.Path.TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (candidates.Count == 0 &&
             !string.IsNullOrWhiteSpace(rawFolderName) &&
             !string.Equals(rawFolderName, searchTitle, StringComparison.OrdinalIgnoreCase))
