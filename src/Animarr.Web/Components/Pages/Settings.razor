@@ -483,11 +483,10 @@
                             <FluentSwitch @bind-Value="_downloadEpThumbs">@L["settings.download_ep_thumbs_switch"]</FluentSwitch>
                             <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;padding-left:4px;">@L["settings.download_ep_thumbs_hint"]</div>
                         </div>
-                        @* Phase 1 toggles exposed here *@
-                        <div>
-                            <FluentSwitch @bind-Value="_autoRenameFolder">@L["settings.auto_rename_folder_switch"]</FluentSwitch>
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;padding-left:4px;">@L["settings.auto_rename_folder_hint"]</div>
-                        </div>
+                        @* Auto-rename of container folders was removed after two
+                           catastrophic data-corruption incidents. Identification
+                           only updates DB associations now; on-disk paths are
+                           never modified. *@
                         <div>
                             <FluentSwitch @bind-Value="_includeEpisodeName">@L["settings.include_episode_name_switch"]</FluentSwitch>
                             <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;padding-left:4px;">@L["settings.include_episode_name_hint"]</div>
@@ -683,7 +682,6 @@
     private string _malClientId = "";
     private bool _autoIdentifyEnabled = true;
     private bool _downloadEpThumbs = false;
-    private bool _autoRenameFolder = true;
     private bool _includeEpisodeName = true;
     // Source order
     private List<SearchSourceItem> _searchSources = [
@@ -948,7 +946,6 @@
         _malClientId         = await AppConfig.GetAsync(AppConfigKeys.MalClientId) ?? "";
         _autoIdentifyEnabled = await AppConfig.GetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, true);
         _downloadEpThumbs    = await AppConfig.GetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, false);
-        _autoRenameFolder    = await AppConfig.GetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, false);
         _includeEpisodeName  = await AppConfig.GetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, true);
 
         var sourceOrderJson = await AppConfig.GetAsync(AppConfigKeys.SearchSourceOrder);
@@ -999,7 +996,6 @@
         await AppConfig.SetAsync(AppConfigKeys.MalClientId, _malClientId);
         await AppConfig.SetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, _autoIdentifyEnabled);
         await AppConfig.SetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, _downloadEpThumbs);
-        await AppConfig.SetAsync<bool>(AppConfigKeys.AutoRenameContainerFolder, _autoRenameFolder);
         await AppConfig.SetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, _includeEpisodeName);
         var sourceOrderJson = System.Text.Json.JsonSerializer.Serialize(
             _searchSources.Select(s => new { s.Id, s.Enabled }));

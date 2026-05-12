@@ -507,8 +507,6 @@
 
   "settings.meta_auto_title": "Автоматизация",
   "settings.auto_identify_switch": "Автоматически определять папку при добавлении",
-  "settings.auto_rename_folder_switch": "Автопереименование папок в «Название (Год)»",
-  "settings.auto_rename_folder_hint": "После уверенного опознания папка на диске будет переименована в каноничное название.",
   "settings.include_episode_name_switch": "Добавлять название эпизода в имя файла",
   "settings.include_episode_name_hint": "S01E03.mkv → S01E03 - Honky Tonk Women.mkv. Если название неизвестно — используется короткий формат.",
   "settings.download_ep_thumbs_switch": "Скачивать превью эпизодов (still images)",
