@@ -1,3 +1,4 @@
+using Animarr.Web.Data.Models;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace Animarr.Web.Services;

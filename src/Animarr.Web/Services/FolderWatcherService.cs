@@ -60,7 +60,7 @@ public class FolderWatcherService(
             var now = Environment.TickCount64;
             foreach (var kv in _suppressedPaths)
                 if (kv.Value < now)
-                    _suppressedPaths.TryRemove(kv.Key, out _);
+                    _suppressedPaths.TryRemove(kv.Key, out long _);
         }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
     }
 
