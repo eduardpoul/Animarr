@@ -292,16 +292,16 @@ else
                     @foreach (var grp in _foldersBySection)
                     {
                         @* Section header keeps the disk label (sections aren't
-                           identified — they're library roots). Children use the
-                           identified Title from MediaItems when available so the
-                           picker reads naturally ("Bleach", "Cowboy Bebop") even
-                           if the on-disk folder name is the raw download dir. *@
+                           identified — they're library roots). Children render
+                           via DisplayFor: user-customised Label wins over the
+                           auto-identified MediaItem.Title, so a manually-fixed
+                           name isn't overwritten by a stale wrong identification. *@
                         @if (grp.Section is not null)
                         {
                             <optgroup label="@grp.Section.Label">
                                 @foreach (var f in grp.Children)
                                 {
-                                    <option value="@f.Id">@(_folderDisplayName.TryGetValue(f.Id, out var n) ? n : f.Label)</option>
+                                    <option value="@f.Id">@DisplayFor(f)</option>
                                 }
                             </optgroup>
                         }
@@ -309,7 +309,7 @@ else
                         {
                             @foreach (var f in grp.Children)
                             {
-                                <option value="@f.Id">@(_folderDisplayName.TryGetValue(f.Id, out var n) ? n : f.Label)</option>
+                                <option value="@f.Id">@DisplayFor(f)</option>
                             }
                         }
                     }
@@ -642,6 +642,23 @@ else
     // canonical "Bleach" instead of the on-disk folder name (which can still be a
     // ".Bleach.S01.1080p.…"-style raw download dir, or any user-chosen name).
     private Dictionary<Guid, string> _folderDisplayName = new();
+
+    /// <summary>
+    /// Display name for a folder in the picker. Priority:
+    ///   1. User-customised Label (differs from on-disk basename) — explicit
+    ///      "this is what I want to see" signal, e.g. after fixing a bad rename.
+    ///   2. MediaItem.Title from a confident identification.
+    ///   3. Label as-is (= on-disk basename for never-customised entries).
+    /// </summary>
+    private string DisplayFor(FolderWatcher f)
+    {
+        var basename = Path.GetFileName(f.Path.TrimEnd('/', '\\'));
+        if (!string.Equals(f.Label, basename, StringComparison.Ordinal))
+            return f.Label;
+        if (_folderDisplayName.TryGetValue(f.Id, out var t))
+            return t;
+        return f.Label;
+    }
     private bool _defaultStopAfterDownload;
 
     // ---- Add panel file list state ----
@@ -694,6 +711,13 @@ else
             .ToListAsync();
         var sectionMap = sections.ToDictionary(s => s.Id);
 
+        // Hide ghost entries whose on-disk path no longer exists. After the
+        // historic auto-rename catastrophe the DB still references the renamed
+        // paths (e.g. "/Anime/The Portal"); those folders can't actually receive
+        // a torrent and just confuse the picker. Sections aren't filtered —
+        // missing section roots are a separate "fix your config" problem.
+        _folders = _folders.Where(f => Directory.Exists(f.Path)).ToList();
+
         // Load identified titles so the picker shows "Bleach" instead of the raw
         // disk name. Only Identified/Manual entries — for NeedsReview / Failed
         // the title might be a wrong match, so we fall back to the disk label.
@@ -705,21 +729,16 @@ else
                             || m.IdentificationStatus == IdentificationStatus.Manual))
             .ToDictionaryAsync(m => m.FolderId, m => m.Title!);
 
-        // Helper: what the user sees for a given folder. Defined here once so
-        // ordering and rendering use the same name.
-        string Display(FolderWatcher f) =>
-            _folderDisplayName.TryGetValue(f.Id, out var t) ? t : f.Label;
-
         _foldersBySection = sections
             .Select(s => new FolderGroup(s,
-                _folders.Where(f => f.ParentSectionId == s.Id).OrderBy(Display).ToList()))
+                _folders.Where(f => f.ParentSectionId == s.Id).OrderBy(DisplayFor).ToList()))
             .Where(g => g.Children.Count > 0)
             .Concat(new[]
             {
                 new FolderGroup(null,
                     _folders.Where(f => !f.ParentSectionId.HasValue ||
                                         !sectionMap.ContainsKey(f.ParentSectionId.Value))
-                            .OrderBy(Display).ToList())
+                            .OrderBy(DisplayFor).ToList())
             })
             .Where(g => g.Children.Count > 0)
             .ToList();
