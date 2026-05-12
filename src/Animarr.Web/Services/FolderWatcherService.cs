@@ -408,6 +408,38 @@ public class FolderWatcherService(
         }
     }
 
+    /// <summary>
+    /// Removes <paramref name="childPath"/> from the section's dismissed list so
+    /// the next DiscoverChildrenAsync (or FSW Created event) re-registers it.
+    /// Used when the user explicitly wants to bring back an accidentally-deleted
+    /// folder (e.g. one that was lost to an auto-rename catastrophe).
+    /// </summary>
+    public async Task UndismissChildPathAsync(Guid sectionId, string childPath)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var key = DismissedKey(sectionId);
+        var raw = await db.AppConfigs.FindAsync(key);
+        if (raw?.Value is null) return;
+        var list = ParseDismissed(raw.Value);
+        if (list.Remove(NormalisePath(childPath)))
+        {
+            raw.Value = JsonSerializer.Serialize(list.ToList());
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>Wipes ALL dismissed paths for a section — used by the "forget
+    /// dismissed folders" recovery action.</summary>
+    public async Task ClearDismissedAsync(Guid sectionId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var key = DismissedKey(sectionId);
+        var raw = await db.AppConfigs.FindAsync(key);
+        if (raw is null) return;
+        db.AppConfigs.Remove(raw);
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Returns true if <paramref name="childPath"/> was previously dismissed for this section.</summary>
     private static async Task<bool> IsDismissedAsync(AppDbContext db, Guid sectionId, string childPath)
     {
