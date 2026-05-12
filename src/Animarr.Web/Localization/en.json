@@ -199,6 +199,7 @@
   "explorer.btn_restore_dismissed": "Restore deleted",
   "explorer.btn_restore_dismissed_title": "Clear this section's dismissed-paths list — any folders that still exist on disk will be re-added to the catalog",
   "explorer.toast_restored_dismissed": "Dismissed list cleared. {0} subfolder(s) re-added.",
+  "explorer.toast_restored_dismissed_with_queue": "Dismissed list cleared. {0} subfolder(s) re-added, {1} queued for identification.",
   "explorer.btn_rescan_all": "Rescan library",
   "explorer.toast_rescan_done": "Rescan done — {0} new subfolders, {1} queued for identification.",
   "explorer.btn_scan": "Scan files",

@@ -201,6 +201,7 @@
   "explorer.btn_restore_dismissed": "Восстановить удалённые",
   "explorer.btn_restore_dismissed_title": "Очистить список ранее удалённых подпапок этого раздела — папки, физически существующие на диске, появятся в каталоге снова",
   "explorer.toast_restored_dismissed": "Список восстановлен. Найдено и добавлено {0} подпапок.",
+  "explorer.toast_restored_dismissed_with_queue": "Список восстановлен. Добавлено {0} подпапок, в очередь на идентификацию поставлено {1}.",
   "explorer.btn_rescan_all": "Пересканировать библиотеку",
   "explorer.toast_rescan_done": "Готово — {0} новых подпапок, {1} в очереди на опознание.",
   "explorer.btn_scan": "Сканировать файлы",
