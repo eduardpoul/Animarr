@@ -268,6 +268,7 @@
   "folder_detail.meta_btn_clear": "Очистить",
   "folder_detail.meta_toast_cleared": "ID удалён.",
   "folder_detail.meta_toast_applied": "Метаданные обновлены по внешнему ID.",
+  "folder_detail.meta_tvdb_slug_unsupported": "TheTVDB-слаг (типа «bleach») не поддерживается — нужен числовой ID. Открой страницу сериала на thetvdb.com и скопируй число из поля «TheTVDB ID» или из URL вида …?id=NNN.",
   "folder_detail.meta_status_identified": "Определено",
   "folder_detail.meta_status_manual": "Вручную",
   "folder_detail.meta_status_needs_review": "Требует проверки",

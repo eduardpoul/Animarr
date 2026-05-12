@@ -236,11 +236,16 @@
 
                         <!-- ID field + Apply button -->
                         <div style="display:flex;gap:8px;align-items:flex-end;">
-                            @if (_manualIdSource == "imdb")
+                            @* IMDb and TVDB accept text input — IMDb because the
+                               canonical form is "tt…", TVDB because the site has
+                               slug-style identifiers ("bleach") and people often
+                               paste a URL. The apply handler tolerates a numeric
+                               id, a slug, or a full URL. *@
+                            @if (_manualIdSource is "imdb" or "tvdb_tv")
                             {
                                 <FluentTextField @bind-Value="_manualIdStr"
                                                  Label="ID"
-                                                 Placeholder="tt0944947"
+                                                 Placeholder="@IdPlaceholder(_manualIdSource)"
                                                  style="flex:1;" />
                             }
                             else
@@ -641,7 +646,7 @@
             else if (_mediaItem.TvdbId.HasValue)
             {
                 _manualIdSource = "tvdb_tv";
-                _manualIdNum    = _mediaItem.TvdbId;
+                _manualIdStr    = _mediaItem.TvdbId.ToString();
             }
         }
         if (showLoading) _metaLoading = false;
@@ -775,7 +780,7 @@
         ToastService.ShowToast(ToastIntent.Success, L["folders.toast_queued"]);
     }
 
-    private bool CanApplyManualId() => _manualIdSource == "imdb"
+    private bool CanApplyManualId() => _manualIdSource is "imdb" or "tvdb_tv"
         ? !string.IsNullOrWhiteSpace(_manualIdStr)
         : _manualIdNum.HasValue;
 
@@ -783,10 +788,35 @@
     {
         "tmdb_tv"    => "e.g. 1399",
         "tmdb_movie" => "e.g. 11",
-        "tvdb_tv"    => "e.g. 83268",
+        "imdb"       => "tt0944947",
+        "tvdb_tv"    => "e.g. 83268, https://thetvdb.com/series/bleach",
         "mal"        => "e.g. 5114",
         _            => "ID",
     };
+
+    /// <summary>
+    /// Pulls a numeric TVDB id out of whatever the user pasted. Accepts:
+    ///   - raw number ("74796")
+    ///   - URL with ?id=N  ("https://thetvdb.com/?tab=series&id=74796")
+    ///   - URL with /dereferrer/series/N
+    /// Returns null when the input is a pure slug (e.g. "bleach"), since
+    /// TMDB's FindByExternalId needs the numeric form and we don't have a
+    /// TVDB API key to resolve slugs.
+    /// </summary>
+    private static string? ExtractTvdbNumericId(string input)
+    {
+        var s = input.Trim();
+        if (s.Length == 0) return null;
+        if (s.All(char.IsDigit)) return s;
+
+        var idMatch = System.Text.RegularExpressions.Regex.Match(s, @"[?&]id=(\d+)");
+        if (idMatch.Success) return idMatch.Groups[1].Value;
+
+        var pathMatch = System.Text.RegularExpressions.Regex.Match(s, @"/series/(\d+)");
+        if (pathMatch.Success) return pathMatch.Groups[1].Value;
+
+        return null;
+    }
 
     private async Task ApplyManualIdUnifiedAsync()
     {
@@ -809,7 +839,14 @@
             }
             else if (_manualIdSource == "tvdb_tv")
             {
-                await MetadataService.ApplyManualAsync(Folder.Id, "tvdb_tv", _manualIdNum!.Value.ToString());
+                var numeric = ExtractTvdbNumericId(_manualIdStr ?? "");
+                if (numeric is null)
+                {
+                    ToastService.ShowToast(ToastIntent.Error,
+                        L["folder_detail.meta_tvdb_slug_unsupported"]);
+                    return;
+                }
+                await MetadataService.ApplyManualAsync(Folder.Id, "tvdb_tv", numeric);
             }
             ToastService.ShowToast(ToastIntent.Success, L["folder_detail.meta_toast_applied"]);
             await LoadMediaItemAsync(showLoading: false);
