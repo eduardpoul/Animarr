@@ -264,6 +264,7 @@
   "folder_detail.meta_btn_apply_mal": "Apply",
   "folder_detail.meta_btn_clear": "Clear",
   "folder_detail.meta_toast_applied": "Metadata updated from external ID.",
+  "folder_detail.meta_tvdb_slug_unsupported": "TheTVDB slug (like \"bleach\") is not supported — needs the numeric ID. Open the series page on thetvdb.com and copy the number from the \"TheTVDB ID\" field, or paste a URL containing ?id=NNN.",
   "folder_detail.meta_toast_cleared": "ID cleared.",
   "folder_detail.meta_status_identified": "Identified",
   "folder_detail.meta_status_manual": "Manual",
