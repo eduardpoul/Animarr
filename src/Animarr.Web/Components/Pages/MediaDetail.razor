@@ -731,10 +731,21 @@ else
                 if (!videoExts.Contains(Path.GetExtension(filePath))) continue;
                 var fileName = Path.GetFileName(filePath);
                 var parse    = PatternMatch.ParseFileName(fileName, effectivePatterns);
+                var fileDir  = Path.GetDirectoryName(filePath) ?? folderPath;
 
-                int seasonNum = parse.Season
-                    ?? PatternMatch.DetectSeasonFromPath(Path.GetDirectoryName(filePath) ?? folderPath, folderPath)
-                    ?? 1;
+                // Resolution order for the season number:
+                //   1. Explicit in filename (S02E03 → 2)
+                //   2. "Season N" / "Сезон N" on any parent dir
+                //   3. Fuzzy match of any parent dir name against TMDB season Names
+                //      (so a folder named "Thousand Year War" maps to Bleach's
+                //      Season 17 "The Thousand-Year Blood War")
+                //   4. Single-TMDB-season fallback
+                //   5. Default 1
+                int? seasonGuess = parse.Season
+                    ?? PatternMatch.DetectSeasonFromPath(fileDir, folderPath)
+                    ?? FuzzyMatchSeasonFromDirNames(fileDir, folderPath);
+
+                int seasonNum = seasonGuess ?? 1;
 
                 if (parse.IsMatched)
                 {
@@ -834,6 +845,68 @@ else
             Logger.LogWarning(ex, "BuildEpisodeFileMap failed");
             _episodeFileMap = [];
         }
+    }
+
+    /// <summary>
+    /// Walk up the path from <paramref name="fileDir"/> to <paramref name="folderRoot"/>
+    /// (capped at 5 levels) and fuzzy-match each ancestor's name against the TMDB
+    /// season Names. Returns the best-matching season Number when similarity is
+    /// high enough, otherwise null. Lets a local folder "Thousand Year War" map
+    /// to Bleach Season 17 "The Thousand-Year Blood War" without exact naming.
+    /// </summary>
+    private int? FuzzyMatchSeasonFromDirNames(string fileDir, string folderRoot)
+    {
+        if (_seasons.Count < 2) return null;  // ambiguity needs at least 2 seasons
+
+        var namedSeasons = _seasons
+            .Where(s => !string.IsNullOrWhiteSpace(s.Name))
+            .Select(s => (s.Number, NormalisedName: NormaliseForSeasonMatch(s.Name!)))
+            .Where(t => t.NormalisedName.Length > 2)
+            .ToList();
+        if (namedSeasons.Count == 0) return null;
+
+        var rootNorm = folderRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var dir = new DirectoryInfo(fileDir);
+        for (int i = 0; i < 5 && dir != null; i++, dir = dir.Parent!)
+        {
+            var candidateName = NormaliseForSeasonMatch(dir.Name);
+            if (candidateName.Length > 2)
+            {
+                var best = namedSeasons
+                    .Select(t => (t.Number, Score: TitleWordOverlap(candidateName, t.NormalisedName)))
+                    .OrderByDescending(t => t.Score)
+                    .First();
+                if (best.Score >= 0.5)
+                    return best.Number;
+            }
+            if (string.Equals(dir.FullName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                              rootNorm, StringComparison.OrdinalIgnoreCase))
+                break;
+        }
+        return null;
+    }
+
+    private static string NormaliseForSeasonMatch(string s)
+    {
+        // Lowercase, strip non-alphanumeric, collapse common stopwords.
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var c in s)
+            sb.Append(char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ');
+        var words = sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var stopwords = new HashSet<string>(StringComparer.Ordinal)
+            { "the", "of", "a", "an", "and", "season", "part", "arc", "saga" };
+        return string.Join(' ', words.Where(w => !stopwords.Contains(w)));
+    }
+
+    private static double TitleWordOverlap(string a, string b)
+    {
+        var aw = a.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        var bw = b.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        if (aw.Count == 0 || bw.Count == 0) return 0;
+        // Jaccard on word sets.
+        var inter = aw.Intersect(bw).Count();
+        var union = aw.Union(bw).Count();
+        return (double)inter / union;
     }
 
     private async Task<bool> IsLlmMappingEnabledAsync()
