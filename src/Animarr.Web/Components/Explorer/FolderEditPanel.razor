@@ -51,7 +51,14 @@
         <!-- ═══ TAB 2: Metadata ═══ -->
         <FluentTab Id="metadata" Label="@(L["folder_detail.tab_metadata"])">
             <div style="padding:20px;overflow-y:auto;height:calc(100vh - 120px);box-sizing:border-box;">
-                @if (_metaLoading)
+                @if (Folder.IsSection)
+                {
+                    <div style="text-align:center;padding:40px 0;color:var(--neutral-foreground-hint);">
+                        <FluentIcon Value="@(new Icons.Regular.Size32.Folder())" Style="opacity:0.3;" />
+                        <div style="margin-top:12px;font-size:14px;">Секции не имеют собственных метаданных. Метаданные подтягиваются динамически из вложенных папок.</div>
+                    </div>
+                }
+                else if (_metaLoading)
                 {
                     <FluentProgress Width="100%" />
                 }
@@ -173,7 +180,7 @@
                     </div>
                 }
 
-                @if (!_metaLoading)
+                @if (!_metaLoading && !Folder.IsSection)
                 {
                     <!-- External ID — source select + single ID field -->
                     <div style="display:flex;flex-direction:column;gap:14px;margin-top:@(_mediaItem is not null ? "0" : "20px")">
