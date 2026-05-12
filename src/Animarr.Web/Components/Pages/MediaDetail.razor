@@ -758,31 +758,65 @@ else
             foreach (var (season, files) in unmatchedBySeason)
             {
                 if (files.Count == 0) continue;
-                if (_seasons.FirstOrDefault(s => s.Number == season) is not { } seasonMeta) continue;
+
+                // Find the TMDB season this user-bucket maps to. If the detected
+                // season number doesn't exist in TMDB's metadata (common for Chinese
+                // donghua where TMDB lumps everything as Season 1 but the user names
+                // local folders Season 2 / Season 3 by airing-block convention),
+                // fall back to the show's only TMDB season.
+                var seasonMeta = _seasons.FirstOrDefault(s => s.Number == season);
+                int effectiveSeason = season;
+                if (seasonMeta is null)
+                {
+                    if (_seasons.Count == 1)
+                    {
+                        seasonMeta = _seasons[0];
+                        effectiveSeason = seasonMeta.Number;
+                        Logger.LogInformation(
+                            "Folder Season {Folder} not in TMDB metadata; mapping into the show's only TMDB season {Tmdb}.",
+                            season, effectiveSeason);
+                    }
+                    else continue;
+                }
                 if (seasonMeta.EpisodeCount <= 0) continue;
-                // Only run fuzzy when pattern matched none of the season's episodes —
+                // Only run fuzzy when pattern matched none of the effective season's episodes —
                 // otherwise we'd mis-align with partial pattern matches.
-                bool anyPatternHit = _episodeFileMap.Keys.Any(k => k.s == season);
+                bool anyPatternHit = _episodeFileMap.Keys.Any(k => k.s == effectiveSeason);
                 if (anyPatternHit) continue;
 
-                if (files.Count == seasonMeta.EpisodeCount)
+                var ordered = files.OrderBy(p => p, NaturalStringComparer.Ordinal).ToList();
+                if (ordered.Count == seasonMeta.EpisodeCount)
                 {
-                    var ordered = files.OrderBy(p => p, NaturalStringComparer.Ordinal).ToList();
                     for (int i = 0; i < ordered.Count; i++)
                     {
-                        var key = (season, i + 1);
+                        var key = (effectiveSeason, i + 1);
                         _episodeFileMap.TryAdd(key, ordered[i]);
                     }
                     Logger.LogInformation(
                         "Fuzzy episode mapping: season {S} matched {N} files by order in {Folder}",
-                        season, ordered.Count, folderPath);
+                        effectiveSeason, ordered.Count, folderPath);
                 }
-                else if (await IsLlmMappingEnabledAsync())
+                else
                 {
-                    // Phase 3.3: third pass — ask the LLM to map files to episodes
-                    // when neither pattern nor fuzzy ordering worked (e.g. odd
-                    // file count, mixed numbering schemes, episode-name-only).
-                    await TryLlmMapFilesToEpisodesAsync(season, files, seasonMeta);
+                    // Counts don't match (e.g. user has 59 files but TMDB lists 200).
+                    // Still show them — map by episode number parsed from filename
+                    // (or natural order index) into the effective season's slots.
+                    for (int i = 0; i < ordered.Count; i++)
+                    {
+                        var fileName = Path.GetFileName(ordered[i]);
+                        var parse = PatternMatch.ParseFileName(fileName, effectivePatterns);
+                        var ep = parse.IsMatched && parse.Episode > 0 ? parse.Episode : i + 1;
+                        var key = (effectiveSeason, ep);
+                        _episodeFileMap.TryAdd(key, ordered[i]);
+                    }
+                    Logger.LogInformation(
+                        "Number-anchored mapping: season {S} mapped {N} files into TMDB slots (out of {Total}) in {Folder}",
+                        effectiveSeason, ordered.Count, seasonMeta.EpisodeCount, folderPath);
+                    if (await IsLlmMappingEnabledAsync())
+                    {
+                        // Phase 3.3: AI fallback when episode names matter (opt-in).
+                        await TryLlmMapFilesToEpisodesAsync(effectiveSeason, files, seasonMeta);
+                    }
                 }
             }
         }
