@@ -519,6 +519,19 @@ else
         else
         {
             <FluentLabel>@L.Get("folders.delete_body", _deleteTarget?.Label)</FluentLabel>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:8px;">
+                <FluentCheckbox Value="@_deleteFromDisk"
+                                ValueChanged="@((bool v) => _deleteFromDisk = v)" />
+                <FluentLabel Style="font-size:13px;color:var(--accent-fill-rest);">
+                    @L["explorer.delete_from_disk_label"]
+                </FluentLabel>
+            </div>
+            @if (_deleteFromDisk)
+            {
+                <FluentLabel Style="margin-top:6px;font-size:12px;color:var(--error);">
+                    @L["explorer.delete_from_disk_warning"]
+                </FluentLabel>
+            }
         }
     </FluentDialogBody>
     <FluentDialogFooter>
@@ -647,6 +660,7 @@ else
     private FolderWatcher? _deleteTarget;
     private bool _deleteIsSection;
     private bool _deleteGoBack;
+    private bool _deleteFromDisk;
 
     // ── Init ───────────────────────────────────────────────────────
 
@@ -1184,6 +1198,7 @@ else
         _deleteTarget    = f;
         _deleteIsSection = isSection;
         _deleteGoBack    = false;
+        _deleteFromDisk  = false;
         _deleteHidden    = false;
     }
 
@@ -1193,6 +1208,7 @@ else
         _deleteTarget    = _currentFolderWatcher;
         _deleteIsSection = _currentFolderWatcher.IsSection;
         _deleteGoBack    = true;
+        _deleteFromDisk  = false;
         _deleteHidden    = false;
     }
 
@@ -1284,16 +1300,60 @@ else
         // its path so DiscoverChildrenAsync and FSW auto-register won't bring it back.
         var dismissTargetSection = _deleteTarget.ParentSectionId;
         var dismissTargetPath    = _deleteTarget.Path;
+        var singleFilePath       = _deleteTarget.SingleFilePath;
         var entity = await db.FolderWatchers.FindAsync(_deleteTarget.Id);
         if (entity is not null) { db.FolderWatchers.Remove(entity); await db.SaveChangesAsync(); }
         if (dismissTargetSection.HasValue)
             await WatcherService.DismissChildPathAsync(dismissTargetSection.Value, dismissTargetPath);
+
+        // ── Disk deletion (only when explicitly requested and target is not a section) ──
+        // Sections represent root library folders configured by the user — disk-deleting
+        // those would wipe entire libraries, so the checkbox is hidden in that case.
+        var diskDeleted = false;
+        string? diskError = null;
+        if (_deleteFromDisk && !_deleteIsSection)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(singleFilePath))
+                {
+                    // Flat-section single-file entry: delete just that one file.
+                    if (File.Exists(singleFilePath))
+                    {
+                        File.Delete(singleFilePath);
+                        diskDeleted = true;
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(dismissTargetPath))
+                {
+                    // Regular folder entry: recursively delete the directory.
+                    if (Directory.Exists(dismissTargetPath))
+                    {
+                        Directory.Delete(dismissTargetPath, recursive: true);
+                        diskDeleted = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                diskError = ex.Message;
+            }
+        }
+
         var label = _deleteTarget.Label;
         var goBack = _deleteGoBack;
-        _deleteHidden = true;
-        _deleteTarget = null;
-        _deleteGoBack  = false;
-        ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_deleted", label));
+        _deleteHidden   = true;
+        _deleteTarget   = null;
+        _deleteGoBack   = false;
+        _deleteFromDisk = false;
+        if (diskError != null)
+            ToastService.ShowToast(ToastIntent.Error,
+                L.Get("explorer.toast_disk_delete_failed", label, diskError));
+        else if (diskDeleted)
+            ToastService.ShowToast(ToastIntent.Success,
+                L.Get("explorer.toast_deleted_with_disk", label));
+        else
+            ToastService.ShowToast(ToastIntent.Success, L.Get("explorer.toast_deleted", label));
         if (goBack)
             await NavigateBack();
         else

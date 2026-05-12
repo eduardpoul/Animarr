@@ -221,6 +221,10 @@
   "explorer.toast_found_subfolders": "Добавлено {0} новых подпапок.",
   "explorer.toast_no_subfolders": "Новых подпапок не найдено.",
   "explorer.toast_deleted": "«{0}» удалено.",
+  "explorer.toast_deleted_with_disk": "«{0}» удалено вместе с файлами на диске.",
+  "explorer.toast_disk_delete_failed": "Запись «{0}» удалена, но файлы на диске удалить не удалось: {1}",
+  "explorer.delete_from_disk_label": "Также удалить файлы с диска",
+  "explorer.delete_from_disk_warning": "Внимание: файлы будут безвозвратно удалены с диска.",
   "explorer.file_delete_title": "Удалить файл",
   "explorer.file_delete_body": "Удалить «{0}»? Это действие нельзя отменить.",
 

@@ -219,6 +219,10 @@
   "explorer.toast_found_subfolders": "{0} new subfolders added.",
   "explorer.toast_no_subfolders": "No new subfolders found.",
   "explorer.toast_deleted": "\u00ab{0}\u00bb deleted.",
+  "explorer.toast_deleted_with_disk": "\u00ab{0}\u00bb deleted along with files on disk.",
+  "explorer.toast_disk_delete_failed": "\u00ab{0}\u00bb record removed, but disk deletion failed: {1}",
+  "explorer.delete_from_disk_label": "Also delete files from disk",
+  "explorer.delete_from_disk_warning": "Warning: files will be permanently deleted from disk.",
   "explorer.file_delete_title": "Delete file",
   "explorer.file_delete_body": "Delete \u00ab{0}\u00bb? This cannot be undone.",
 
