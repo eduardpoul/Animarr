@@ -143,6 +143,21 @@ public class MetadataService(
                 llmResult.OriginalTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
         }
 
+        // Fallback C: progressively shorter prefixes — for "Code Geass Dakkan no Rose"
+        // try "Code Geass Dakkan no", "Code Geass Dakkan", then "Code Geass" — the
+        // first 2-3 words are usually the franchise/series name that TMDB does know.
+        if (candidates.Count == 0)
+        {
+            var words = searchTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            for (int take = words.Length - 1; take >= 2 && candidates.Count == 0; take--)
+            {
+                var prefix = string.Join(' ', words.Take(take));
+                log?.Invoke($"[Search] Empty — retrying with prefix: \"{prefix}\"");
+                candidates = await GatherCandidatesAsync(
+                    prefix, typeHint, tmdbKey, malKey, folderYear, log, ct);
+            }
+        }
+
         if (candidates.Count == 0)
         {
             log?.Invoke("[Search] No candidates found from any source.");
@@ -749,7 +764,16 @@ public class MetadataService(
         for (int i = 0; i < Math.Min(sorted.Count, 3); i++)
             log?.Invoke($"  [{i}] \"{sorted[i].Title}\" ({sorted[i].Year}) [{sorted[i].Source}] score={sorted[i].Score:F2}");
 
-        if (sorted.Count == 1) return sorted[0];
+        if (sorted.Count == 1)
+        {
+            // Single candidate: trust TMDB's unique match even when string-similarity
+            // is zero (typical for pinyin/romaji folder names vs English TMDB titles).
+            // Boost to the auto-apply threshold so the result isn't flagged as Failed
+            // purely because of language mismatch.
+            var solo = sorted[0];
+            log?.Invoke($"[Score] Single candidate — trusting it: \"{solo.Title}\"");
+            return solo.Score >= 0.85 ? solo : solo with { Score = 0.85 };
+        }
 
         var llmEnabled = await appConfig.GetAsync<bool>(AppConfigKeys.LlmEnabled, false, ct);
         if (!llmEnabled) return sorted[0];
