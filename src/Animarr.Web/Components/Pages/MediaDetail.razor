@@ -11,6 +11,7 @@
 @inject IJSRuntime JS
 @inject ILogger<MediaDetail> Logger
 @inject ILlmService Llm
+@inject MediaCachePaths CachePaths
 
 <PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
 
@@ -1161,11 +1162,15 @@ else
             string? stillUrl = null;
             if (_downloadThumbs && ep.StillPath != null && _item.Folder != null)
             {
-                var fileName = $"s{seasonNumber:D2}e{ep.EpisodeNumber:D2}_still.jpg";
-                var localPath = Path.Combine(_item.Folder.Path, ".animarr", fileName);
+                // Episode stills live in the central image cache, not the media
+                // tree — keeps Animarr from creating folders inside the user's
+                // show directories.
+                var fileName  = $"s{seasonNumber:D2}e{ep.EpisodeNumber:D2}_still.jpg";
+                var cacheDir  = CachePaths.ForFolder(_item.Folder.Id);
+                var localPath = Path.Combine(cacheDir, fileName);
                 if (!File.Exists(localPath))
                     await TmdbClient.DownloadImageAsync(TmdbClient.StillUrl(ep.StillPath), localPath);
-                stillUrl = BuildUrl(_item.Folder.Path, Path.Combine(".animarr", fileName));
+                stillUrl = BuildUrl(_item.Folder.Path, localPath);
             }
             else if (ep.StillPath != null)
             {

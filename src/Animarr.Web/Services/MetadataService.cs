@@ -18,6 +18,7 @@ public class MetadataService(
     ImdbSearchClient imdbSearch,
     IAppConfigService appConfig,
     ILlmService llm,
+    MediaCachePaths cachePaths,
     ILogger<MetadataService> logger)
 {
     private static readonly JsonSerializerOptions _json = new() { WriteIndented = false };
@@ -559,15 +560,18 @@ public class MetadataService(
 
         var metaDir  = MetaDir(folder);
         var destPath = Path.Combine(metaDir, fileName);
-        var relPath  = Path.GetRelativePath(folder.Path, destPath);
         if (!await tmdb.DownloadImageAsync(fullUrl, destPath, ct))
             throw new InvalidOperationException($"Failed to download image from {fullUrl}");
 
+        // Store the absolute cache path — readers use Path.Combine(folder.Path, …)
+        // which keeps the absolute path verbatim (Path.Combine drops the left side
+        // when the right side is rooted). Backward-compatible with the old
+        // ".animarr/poster.jpg"-style relative paths still sitting in the db.
         switch (imageType)
         {
-            case "poster": item.PosterPath = relPath; break;
-            case "fanart": item.FanartPath = relPath; break;
-            case "logo":   item.LogoPath   = relPath; break;
+            case "poster": item.PosterPath = destPath; break;
+            case "fanart": item.FanartPath = destPath; break;
+            case "logo":   item.LogoPath   = destPath; break;
         }
         item.LastMetadataRefreshedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -982,7 +986,7 @@ public class MetadataService(
                 EpisodeCount = s.EpisodeCount,
                 Name         = s.Name,
                 PosterPath   = s.PosterPath != null
-                    ? Path.Combine(".animarr", $"season{s.SeasonNumber}-poster.jpg")
+                    ? Path.Combine(MetaDir(folder), $"season{s.SeasonNumber}-poster.jpg")
                     : null,
             }).ToList();
         item.SeasonsJson = JsonSerializer.Serialize(seasons, _json);
@@ -996,10 +1000,10 @@ public class MetadataService(
             logo:         detail.BestLogoPath   != null ? TmdbClient.LogoUrl(detail.BestLogoPath)         : null,
             forceRefresh: forceRefresh, log: log, ct: ct);
 
-        // Season posters → .animarr/seasonN-poster.jpg
+        // Season posters → <cache>/<folder-id>/seasonN-poster.jpg
         foreach (var s in detail.Seasons.Where(s => s.SeasonNumber > 0 && s.PosterPath != null))
         {
-            var dest = Path.Combine(folder.Path, ".animarr", $"season{s.SeasonNumber}-poster.jpg");
+            var dest = Path.Combine(MetaDir(folder), $"season{s.SeasonNumber}-poster.jpg");
             if (!forceRefresh && File.Exists(dest)) continue;
             log?.Invoke($"[Images] Season {s.SeasonNumber} poster");
             await tmdb.DownloadImageAsync(TmdbClient.PosterUrl(s.PosterPath!), dest, ct);
@@ -1091,18 +1095,17 @@ public class MetadataService(
         {
             var metaDir  = MetaDir(folder);
             var destPath = Path.Combine(metaDir, "poster.jpg");
-            var rel      = Path.Combine(".animarr", "poster.jpg");
             if (!File.Exists(destPath))
             {
-                log?.Invoke($"[Images] Downloading MAL poster → {rel}");
+                log?.Invoke($"[Images] Downloading MAL poster → {destPath}");
                 if (await tmdb.DownloadImageAsync(detail.PosterUrl, destPath, ct))
-                { item.PosterPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
                 else
-                { log?.Invoke($"[Images] {rel} ✗ (download failed)"); }
+                { log?.Invoke($"[Images] {destPath} ✗ (download failed)"); }
             }
             else
             {
-                item.PosterPath = rel;
+                item.PosterPath = destPath;
             }
         }
 
@@ -1175,18 +1178,17 @@ public class MetadataService(
         {
             var metaDir  = MetaDir(folder);
             var destPath = Path.Combine(metaDir, "poster.jpg");
-            var rel      = Path.Combine(".animarr", "poster.jpg");
             if (forceRefresh || item.PosterPath is null || !File.Exists(destPath))
             {
-                log?.Invoke($"[Images] Downloading IMDb poster → {rel}");
+                log?.Invoke($"[Images] Downloading IMDb poster → {destPath}");
                 if (await tmdb.DownloadImageAsync(posterUrl, destPath, ct))
-                { item.PosterPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
                 else
-                { log?.Invoke($"[Images] {rel} ✗ (download failed)"); }
+                { log?.Invoke($"[Images] {destPath} ✗ (download failed)"); }
             }
             else if (File.Exists(destPath))
             {
-                item.PosterPath = rel;
+                item.PosterPath = destPath;
             }
         }
 
@@ -1220,30 +1222,29 @@ public class MetadataService(
         {
             var metaDir  = MetaDir(folder);
             var destPath = Path.Combine(metaDir, "poster.jpg");
-            var rel      = Path.Combine(".animarr", "poster.jpg");
             if (forceRefresh || !File.Exists(destPath))
             {
-                log?.Invoke($"[Images] Downloading MAL poster → {rel}");
+                log?.Invoke($"[Images] Downloading MAL poster → {destPath}");
                 if (await tmdb.DownloadImageAsync(detail.PosterUrl, destPath, ct))
-                { item.PosterPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
             }
             else
             {
-                item.PosterPath = rel;
+                item.PosterPath = destPath;
             }
         }
     }
 
     // ── Image download ────────────────────────────────────────────────────────
 
-    private static string MetaDir(FolderWatcher folder)
-    {
-        var dir = folder.SingleFilePath != null
-            ? Path.Combine(folder.Path, ".animarr", folder.Id.ToString("N"))
-            : Path.Combine(folder.Path, ".animarr");
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
+    /// <summary>
+    /// Returns the cache directory for this folder's posters, fanart, logos.
+    /// Always lives inside <see cref="MediaCachePaths.CacheRoot"/> — never
+    /// inside the user's media tree. SingleFilePath vs directory entries no
+    /// longer need different layouts because each FolderWatcher has its own
+    /// unique cache subdir keyed by Id.
+    /// </summary>
+    private string MetaDir(FolderWatcher folder) => cachePaths.ForFolder(folder.Id);
 
     private async Task DownloadImagesAsync(
         MediaItem item,
@@ -1262,19 +1263,18 @@ public class MetadataService(
             var ext  = Path.GetExtension(poster.Split('?')[0]);
             var name = "poster" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
             var dest = Path.Combine(metaDir, name);
-            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
-                log?.Invoke($"[Images] Downloading poster → {rel}");
+                log?.Invoke($"[Images] Downloading poster → {dest}");
                 if (await tmdb.DownloadImageAsync(poster, dest, ct))
-                { item.PosterPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.PosterPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
                 else
-                { log?.Invoke($"[Images] {rel} ✗ (download failed)"); }
+                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
             }
             else
             {
-                item.PosterPath = rel;
-                log?.Invoke($"[Images] {rel} already exists, skipping");
+                item.PosterPath = dest;
+                log?.Invoke($"[Images] {dest} already exists, skipping");
             }
         }
         else
@@ -1287,19 +1287,18 @@ public class MetadataService(
             var ext  = Path.GetExtension(fanart.Split('?')[0]);
             var name = "fanart" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
             var dest = Path.Combine(metaDir, name);
-            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
-                log?.Invoke($"[Images] Downloading fanart → {rel}");
+                log?.Invoke($"[Images] Downloading fanart → {dest}");
                 if (await tmdb.DownloadImageAsync(fanart, dest, ct))
-                { item.FanartPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.FanartPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
                 else
-                { log?.Invoke($"[Images] {rel} ✗ (download failed)"); }
+                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
             }
             else
             {
-                item.FanartPath = rel;
-                log?.Invoke($"[Images] {rel} already exists, skipping");
+                item.FanartPath = dest;
+                log?.Invoke($"[Images] {dest} already exists, skipping");
             }
         }
 
@@ -1308,19 +1307,18 @@ public class MetadataService(
             var ext  = Path.GetExtension(logo.Split('?')[0]);
             var name = "logo" + (string.IsNullOrEmpty(ext) ? ".png" : ext);
             var dest = Path.Combine(metaDir, name);
-            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
-                log?.Invoke($"[Images] Downloading logo → {rel}");
+                log?.Invoke($"[Images] Downloading logo → {dest}");
                 if (await tmdb.DownloadImageAsync(logo, dest, ct))
-                { item.LogoPath = rel; log?.Invoke($"[Images] {rel} ✓"); }
+                { item.LogoPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
                 else
-                { log?.Invoke($"[Images] {rel} ✗ (download failed)"); }
+                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
             }
             else
             {
-                item.LogoPath = rel;
-                log?.Invoke($"[Images] {rel} already exists, skipping");
+                item.LogoPath = dest;
+                log?.Invoke($"[Images] {dest} already exists, skipping");
             }
         }
     }
@@ -1417,17 +1415,16 @@ public class MetadataService(
             {
                 var metaDir  = MetaDir(folder);
                 var destPath = Path.Combine(metaDir, "poster.jpg");
-                var rel      = Path.Combine(".animarr", "poster.jpg");
                 if (forceRefresh || !File.Exists(destPath))
                 {
                     if (await tmdb.DownloadImageAsync(posterUrl, destPath, ct))
-                    { item.PosterPath = rel; log?.Invoke($"[Images/Fallback] {rel} from MAL ✓"); }
+                    { item.PosterPath = destPath; log?.Invoke($"[Images/Fallback] {destPath} from MAL ✓"); }
                     else
-                    { log?.Invoke($"[Images/Fallback] {rel} from MAL ✗"); }
+                    { log?.Invoke($"[Images/Fallback] {destPath} from MAL ✗"); }
                 }
                 else
                 {
-                    item.PosterPath = rel;
+                    item.PosterPath = destPath;
                 }
             }
         }
