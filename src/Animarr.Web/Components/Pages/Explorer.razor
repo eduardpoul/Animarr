@@ -896,9 +896,15 @@ else
                 .Where(m => _subDirs.Contains(m.Folder!.Path) && m.PosterPath != null)
                 .Select(m => new { FolderPath = m.Folder!.Path, m.PosterPath, m.LastMetadataRefreshedAt })
                 .ToListAsync();
-            _posterUrls = posters.ToDictionary(
-                p => p.FolderPath,
-                p => $"/api/image?path={Uri.EscapeDataString(Path.Combine(p.FolderPath, p.PosterPath!))}&t={p.LastMetadataRefreshedAt?.Ticks ?? 0}");
+            // Skip entries whose poster file actually doesn't exist — happens
+            // after the image-cache relocation when old PosterPath values still
+            // point at the deleted ".animarr/" cache. The folder icon shows up
+            // for those cards instead of a broken-image black rectangle.
+            _posterUrls = posters
+                .Where(p => File.Exists(Path.Combine(p.FolderPath, p.PosterPath!)))
+                .ToDictionary(
+                    p => p.FolderPath,
+                    p => $"/api/image?path={Uri.EscapeDataString(Path.Combine(p.FolderPath, p.PosterPath!))}&t={p.LastMetadataRefreshedAt?.Ticks ?? 0}");
         }
 
         // Season posters: if current folder's MediaItem has SeasonsJson, map subdir → season poster
@@ -1397,18 +1403,51 @@ else
     }
 
     /// <summary>
-    /// Wipes the section's dismissed-paths list and immediately re-discovers
-    /// children. Folders that were previously removed from the catalog (manually
-    /// or via the auto-rename accident) come back into the catalog if they still
-    /// exist on disk.
+    /// Wipes the section's dismissed-paths list, re-discovers children, AND
+    /// queues identification for every section child that isn't already
+    /// confidently identified. Folders that were previously removed from the
+    /// catalog come back AND start identifying without a second click.
     /// </summary>
     private async Task RestoreDismissedAsync(FolderWatcher section)
     {
         await WatcherService.ClearDismissedAsync(section.Id);
         await using var db = await DbFactory.CreateDbContextAsync();
-        var count = await DiscoverChildrenAsync(db, section);
+        var discovered = await DiscoverChildrenAsync(db, section);
+
+        // Queue identification for any child that doesn't already have an
+        // Identified or Manual MediaItem. Without this the user gets folders
+        // back but every card is a black rectangle — needing an extra Rescan
+        // click — which feels broken.
+        var pendingFolderIds = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id
+                        && !f.IsSection
+                        && f.IdentifyEnabled)
+            .Where(f => !db.MediaItems.Any(m =>
+                m.FolderId == f.Id &&
+                (m.IdentificationStatus == IdentificationStatus.Identified ||
+                 m.IdentificationStatus == IdentificationStatus.Manual)))
+            .Select(f => f.Id)
+            .ToListAsync();
+        int queued = 0;
+        foreach (var id in pendingFolderIds)
+        {
+            var already = await db.IdentificationQueues.AnyAsync(q =>
+                q.FolderId == id &&
+                (q.Status == IdentificationQueueStatus.Queued ||
+                 q.Status == IdentificationQueueStatus.Processing));
+            if (already) continue;
+            db.IdentificationQueues.Add(new IdentificationQueue
+            {
+                Id       = Guid.NewGuid(),
+                FolderId = id,
+                QueuedAt = DateTime.UtcNow,
+            });
+            queued++;
+        }
+        if (queued > 0) await db.SaveChangesAsync();
+
         ToastService.ShowToast(ToastIntent.Success,
-            L.Get("explorer.toast_restored_dismissed", count));
+            L.Get("explorer.toast_restored_dismissed_with_queue", discovered, queued));
         await LoadAsync();
     }
 
@@ -1444,6 +1483,23 @@ else
                 .Select(f => f.Id)
                 .ToListAsync();
 
+            // Also re-queue Identified/Manual items whose poster file is gone
+            // — happens after the image-cache relocation when old paths point at
+            // the deleted ".animarr/" cache. Re-identification will write fresh
+            // posters to the new central cache.
+            var possiblyBroken = await db.MediaItems
+                .Where(m => m.PosterPath != null
+                            && (m.IdentificationStatus == IdentificationStatus.Identified
+                                || m.IdentificationStatus == IdentificationStatus.Manual))
+                .Select(m => new { m.FolderId, m.PosterPath, FolderPath = m.Folder!.Path })
+                .ToListAsync();
+            var brokenIds = possiblyBroken
+                .Where(p => !File.Exists(Path.Combine(p.FolderPath, p.PosterPath!)))
+                .Select(p => p.FolderId)
+                .ToList();
+            var brokenSet = brokenIds.ToHashSet();
+            pendingFolderIds = pendingFolderIds.Concat(brokenIds).Distinct().ToList();
+
             int queued = 0;
             foreach (var id in pendingFolderIds)
             {
@@ -1454,9 +1510,13 @@ else
                 if (already) continue;
                 db.IdentificationQueues.Add(new IdentificationQueue
                 {
-                    Id       = Guid.NewGuid(),
-                    FolderId = id,
-                    QueuedAt = DateTime.UtcNow,
+                    Id           = Guid.NewGuid(),
+                    FolderId     = id,
+                    // Broken-poster items are already Identified → without
+                    // ForceRefresh the processor would skip them. Force a refresh
+                    // so they re-download images to the new cache location.
+                    ForceRefresh = brokenSet.Contains(id),
+                    QueuedAt     = DateTime.UtcNow,
                 });
                 queued++;
             }
