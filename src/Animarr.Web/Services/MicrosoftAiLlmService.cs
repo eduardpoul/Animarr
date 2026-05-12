@@ -54,13 +54,20 @@ public class MicrosoftAiLlmService(
             "  \"suggested_regex\": \"A .NET regex pattern to match episode files in this folder, or null\"\n" +
             "}\n\n" +
             "Rules:\n" +
-            "- \"type\" is \"anime\" for Japanese animation, \"series\" for live-action TV, \"movie\" for films\n" +
-            "- A folder with ONE video file and a year is almost always a \"movie\"\n" +
-            "- A folder with multiple sequentially-numbered video files is a \"series\" or \"anime\"\n" +
-            "- \"confidence\" reflects how sure you are about the identification (1.0 = certain)\n" +
-            "- Use parent folder name and file samples as additional evidence\n" +
-            "- For \"suggested_regex\", include named groups: (?<episode>...) and optionally (?<season>...)\n" +
-            "- Return ONLY the JSON object, no extra text";
+            "- The TITLE is the LEADING portion of the file/folder name, BEFORE any year, resolution, codec, release group, language, or technical tag.\n" +
+            "- Stop reading the title at the first occurrence of: a 4-digit year (1900-2099), resolution (1080p/2160p/720p), source tags (BluRay/BDRemux/WEB-DL/WEBRip/UHD/HDR), codecs (x264/x265/HEVC/AVC), or technical phrases like 'Reliance Home Video'.\n" +
+            "- Examples:\n" +
+            "  'Baahubali.2_The.Conclusion.2017.Reliance.Home.Video.&.Games.BDRemux.1080p.mkv' → title = 'Baahubali 2: The Conclusion', year = 2017. NOT 'Home Movies'.\n" +
+            "  'The.Gorge.2025.mkv' → title = 'The Gorge', year = 2025.\n" +
+            "  'Inception.2010.1080p.BluRay.x265.mkv' → title = 'Inception', year = 2010.\n" +
+            "- Replace dots and underscores in the title with spaces. Preserve diacritics and punctuation.\n" +
+            "- \"type\" is \"anime\" for Japanese animation, \"series\" for live-action TV, \"movie\" for films.\n" +
+            "- A folder with ONE video file and a year is almost always a \"movie\".\n" +
+            "- A folder with multiple sequentially-numbered video files is a \"series\" or \"anime\".\n" +
+            "- \"confidence\" reflects how sure you are about the identification (1.0 = certain).\n" +
+            "- Use parent folder name and file samples as additional evidence.\n" +
+            "- For \"suggested_regex\", include named groups: (?<episode>...) and optionally (?<season>...).\n" +
+            "- Return ONLY the JSON object, no extra text.";
 
         var raw = await CallAsync(prompt, ct);
         if (raw is null) return null;
