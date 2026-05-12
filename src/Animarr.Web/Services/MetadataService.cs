@@ -211,7 +211,7 @@ public class MetadataService(
             }).ToList(), _json);
 
         // ── Phase 2: Pick winner (LLM or top-scorer) ─────────────────────────
-        var winner = await SelectWinnerAsync(candidates, folder.Path, folderYear, log, ct);
+        var winner = await SelectWinnerAsync(candidates, folder.Path, folderYear, typeHint, log, ct);
         log?.Invoke($"[Winner] \"{winner.Title}\" ({winner.Year}) [{winner.Source}] id={winner.Id}  score={winner.Score:F2}");
 
         // Anti-duplicate: if another MediaItem already points at this exact
@@ -858,10 +858,22 @@ public class MetadataService(
         List<MetadataCandidate> candidates,
         string folderPath,
         int? expectedYear,
+        FolderType typeHint,
         Action<string>? log,
         CancellationToken ct)
     {
-        var sorted = candidates.OrderByDescending(c => c.Score).ToList();
+        // Type filter: when caller asks for Series (e.g. LLM said anime), drop
+        // IMDb-source movie candidates so the LLM can't pick them. tmdb_movie
+        // is already excluded upstream in GatherCandidatesAsync, but IMDb's
+        // mixed type-set still leaks movies into the candidate pool.
+        var typed = candidates;
+        if (typeHint == FolderType.Series)
+            typed = candidates.Where(c => c.IsTv || c.Source != "imdb_search").ToList();
+        else if (typeHint == FolderType.Movie)
+            typed = candidates.Where(c => !c.IsTv || c.Source != "imdb_search").ToList();
+        if (typed.Count == 0) typed = candidates;          // never strand the show
+
+        var sorted = typed.OrderByDescending(c => c.Score).ToList();
 
         // Log top-3 for the scan log
         for (int i = 0; i < Math.Min(sorted.Count, 3); i++)
