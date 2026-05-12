@@ -910,23 +910,24 @@ else
                 catch { /* malformed JSON */ }
             }
 
-            // Hide season subfolders — seasons are navigated via MediaDetail/Browse
-            if (!_currentFolderWatcher.IsSection)
-                _subDirs = [];
+            // Hide our own metadata cache dirs (".animarr" / ".metadata"), but DO show
+            // real subfolders like "Season 1" / "Season 3" so the user can navigate
+            // into them from Explorer (was previously hidden, leaving seasonal layouts
+            // looking empty in Explorer even though MediaDetail had the episodes list).
+            _subDirs = _subDirs
+                .Where(d => Path.GetFileName(d) is { Length: > 0 } n
+                            && !n.StartsWith('.')
+                            && !string.Equals(n, ".animarr", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(n, ".metadata", StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
         else if (_navStack.Count >= 2)
         {
-            // Fallback: if parent path in the nav stack is a registered section,
-            // we're in a show folder — hide season subfolders even if this folder isn't in the DB
-            var parentPath = _navStack[^2].Path
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parentIsSection = allWatchers.Any(f =>
-                f.IsSection &&
-                string.Equals(
-                    f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    parentPath, StringComparison.OrdinalIgnoreCase));
-            if (parentIsSection)
-                _subDirs = [];
+            // Same dot-prefixed filtering when the parent is a registered section but
+            // this folder isn't itself tracked.
+            _subDirs = _subDirs
+                .Where(d => Path.GetFileName(d) is { Length: > 0 } n && !n.StartsWith('.'))
+                .ToList();
         }
 
         _loading = false;
