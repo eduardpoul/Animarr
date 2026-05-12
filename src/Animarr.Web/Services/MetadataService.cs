@@ -133,7 +133,19 @@ public class MetadataService(
                 rawFolderName, typeHint, tmdbKey, malKey, folderYear, log, ct);
         }
 
-        // Fallback B: try the LLM's original_title hint if it was provided.
+        // Fallback B: try the LLM's english_title hint — the canonical English
+        // translation it provides when the source name is pinyin/romaji/Cyrillic.
+        // This is the highest-yield fallback for Chinese donghua and similar.
+        if (candidates.Count == 0 &&
+            !string.IsNullOrWhiteSpace(llmResult?.EnglishTitle) &&
+            !string.Equals(llmResult.EnglishTitle, searchTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            log?.Invoke($"[Search] Empty — retrying with LLM english_title: \"{llmResult.EnglishTitle}\"");
+            candidates = await GatherCandidatesAsync(
+                llmResult.EnglishTitle, typeHint, tmdbKey, malKey, folderYear, log, ct);
+        }
+
+        // Fallback B2: try the LLM's original_title hint if it was provided.
         if (candidates.Count == 0 &&
             !string.IsNullOrWhiteSpace(llmResult?.OriginalTitle) &&
             !string.Equals(llmResult.OriginalTitle, searchTitle, StringComparison.OrdinalIgnoreCase))

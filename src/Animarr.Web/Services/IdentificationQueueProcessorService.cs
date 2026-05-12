@@ -108,8 +108,20 @@ public class IdentificationQueueProcessorService(
                     // confuses the LLM (e.g. "Movies" + "Home Video" inside a filename →
                     // misidentified as "Home Movies").
                     var pathForLlm = folder.SingleFilePath ?? folder.Path;
-                    Log($"[LLM] Calling LLM for: {pathForLlm}");
-                    llmResult = await llm.IdentifyFolderAsync(pathForLlm, ct);
+
+                    // Pass the parent section's user-facing label as a category hint
+                    // (e.g. "Anime" → expect pinyin/romaji titles, ask for canonical
+                    // English translation).
+                    string? sectionLabel = null;
+                    if (folder.ParentSectionId.HasValue)
+                    {
+                        var parent = await dbFolder.FolderWatchers.FindAsync(
+                            new object[] { folder.ParentSectionId.Value }, ct);
+                        sectionLabel = parent?.Label;
+                    }
+
+                    Log($"[LLM] Calling LLM for: {pathForLlm} (section: {sectionLabel ?? "<none>"})");
+                    llmResult = await llm.IdentifyFolderAsync(pathForLlm, sectionLabel, ct);
                     if (llmResult != null && llmResult.Confidence >= 0.5)
                     {
                         Log($"[LLM] Result: \"{llmResult.Title}\" type={llmResult.Type} year={llmResult.Year} confidence={llmResult.Confidence:F2}");

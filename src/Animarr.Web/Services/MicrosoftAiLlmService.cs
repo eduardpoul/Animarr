@@ -24,7 +24,7 @@ public class MicrosoftAiLlmService(
 
     // ── ILlmService ───────────────────────────────────────────────────────────
 
-    public async Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, CancellationToken ct = default)
+    public async Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, string? sectionLabel = null, CancellationToken ct = default)
     {
         // For flat single-file entries the caller may pass a file path here; we
         // want to identify the file by its OWN name, not by the generic section
@@ -49,15 +49,26 @@ public class MicrosoftAiLlmService(
             ? "Files inside (sample):\n" + string.Join("\n", fileSamples.Select(f => "  - " + f)) + "\n\n"
             : "";
 
+        // User-defined section label ("Anime", "Movies", "Multserials", "Serials") tells the
+        // LLM what KIND of content to expect. Anime sections are likely to contain Chinese
+        // donghua / Japanese anime with pinyin or romaji folder names — the LLM should map
+        // those to canonical English titles internationally known.
+        var sectionHint = string.IsNullOrWhiteSpace(sectionLabel)
+            ? ""
+            : "Library section: \"" + sectionLabel + "\" — content in this section is expected to be: " +
+              SectionGuidance(sectionLabel) + "\n";
+
         var prompt =
             "You are a media library assistant. Identify the following media folder and extract structured information.\n\n" +
+            sectionHint +
             (string.IsNullOrEmpty(parentName) ? "" : "Parent folder: \"" + parentName + "\"\n") +
             "Folder name: \"" + folderName + "\"\n\n" +
             fileBlock +
             "Respond ONLY with valid JSON matching this exact schema:\n" +
             "{\n" +
-            "  \"title\": \"English title of the media\",\n" +
-            "  \"original_title\": \"Original title if different from English, or null\",\n" +
+            "  \"title\": \"Best-known title (English or original)\",\n" +
+            "  \"original_title\": \"Original-language title (e.g. 斗破苍穹), or null\",\n" +
+            "  \"english_title\": \"Canonical English title used internationally — ONLY when the folder name is pinyin/romaji/Cyrillic transliteration. Null otherwise.\",\n" +
             "  \"year\": integer release year or null,\n" +
             "  \"type\": \"anime\" | \"series\" | \"movie\" | \"unknown\",\n" +
             "  \"season\": integer season number if detectable or null,\n" +
@@ -67,16 +78,23 @@ public class MicrosoftAiLlmService(
             "Rules:\n" +
             "- The TITLE is the LEADING portion of the file/folder name, BEFORE any year, resolution, codec, release group, language, or technical tag.\n" +
             "- Stop reading the title at the first occurrence of: a 4-digit year (1900-2099), resolution (1080p/2160p/720p), source tags (BluRay/BDRemux/WEB-DL/WEBRip/UHD/HDR), codecs (x264/x265/HEVC/AVC), or technical phrases like 'Reliance Home Video'.\n" +
-            "- Examples:\n" +
-            "  'Baahubali.2_The.Conclusion.2017.Reliance.Home.Video.&.Games.BDRemux.1080p.mkv' → title = 'Baahubali 2: The Conclusion', year = 2017. NOT 'Home Movies'.\n" +
-            "  'The.Gorge.2025.mkv' → title = 'The Gorge', year = 2025.\n" +
-            "  'Inception.2010.1080p.BluRay.x265.mkv' → title = 'Inception', year = 2010.\n" +
+            "- TRANSLITERATION-aware: when the folder is in pinyin (Chinese), romaji (Japanese), or Cyrillic transliteration, ALSO provide the canonical English title in 'english_title'. Examples:\n" +
+            "  'Doupo Gangqiong' → title='Doupo Cangqiong', english_title='Battle Through the Heavens', type='anime'.\n" +
+            "  'Quanzhi Fashi' → title='Quanzhi Fashi', english_title='Full-Time Magister', type='anime'.\n" +
+            "  'Fan Ren Xiu Xian Zhuan' → title='Fanren Xiuxian Zhuan', english_title='A Mortal\\'s Journey to Immortality', type='anime'.\n" +
+            "  'Douluo Dalu' → title='Douluo Dalu', english_title='Soul Land', type='anime'.\n" +
+            "  'Xian Ni' → title='Xian Ni', english_title='Renegade Immortal', type='anime'.\n" +
+            "  'Миссия невыполнима' → title='Mission: Impossible', english_title='Mission: Impossible', type='movie'.\n" +
+            "- Other formatting examples:\n" +
+            "  'Baahubali.2_The.Conclusion.2017.Reliance.Home.Video.&.Games.BDRemux.1080p.mkv' → title='Baahubali 2: The Conclusion', year=2017. NOT 'Home Movies'.\n" +
+            "  'The.Gorge.2025.mkv' → title='The Gorge', year=2025.\n" +
+            "  'Inception.2010.1080p.BluRay.x265.mkv' → title='Inception', year=2010.\n" +
             "- Replace dots and underscores in the title with spaces. Preserve diacritics and punctuation.\n" +
-            "- \"type\" is \"anime\" for Japanese animation, \"series\" for live-action TV, \"movie\" for films.\n" +
+            "- \"type\" is \"anime\" for Japanese/Chinese animation, \"series\" for live-action TV, \"movie\" for films.\n" +
             "- A folder with ONE video file and a year is almost always a \"movie\".\n" +
             "- A folder with multiple sequentially-numbered video files is a \"series\" or \"anime\".\n" +
+            "- Use the Library section hint to bias type selection.\n" +
             "- \"confidence\" reflects how sure you are about the identification (1.0 = certain).\n" +
-            "- Use parent folder name and file samples as additional evidence.\n" +
             "- For \"suggested_regex\", include named groups: (?<episode>...) and optionally (?<season>...).\n" +
             "- Return ONLY the JSON object, no extra text.";
 
@@ -91,6 +109,7 @@ public class MicrosoftAiLlmService(
             {
                 Title          = result.Title,
                 OriginalTitle  = result.OriginalTitle,
+                EnglishTitle   = result.EnglishTitle,
                 Year           = result.Year,
                 Type           = result.Type ?? "unknown",
                 Season         = result.Season,
@@ -363,10 +382,30 @@ public class MicrosoftAiLlmService(
     {
         public string Title { get; set; } = "";
         [JsonPropertyName("original_title")] public string? OriginalTitle { get; set; }
+        [JsonPropertyName("english_title")]  public string? EnglishTitle { get; set; }
         public int? Year { get; set; }
         public string? Type { get; set; }
         public int? Season { get; set; }
         public double Confidence { get; set; }
         [JsonPropertyName("suggested_regex")] public string? SuggestedRegex { get; set; }
+    }
+
+    private static string SectionGuidance(string label)
+    {
+        var lower = label.ToLowerInvariant();
+        return lower switch
+        {
+            var s when s.Contains("anime") || s.Contains("аниме")
+                => "Japanese anime or Chinese donghua (animated series and films). Folder names are often in pinyin or romaji; provide the canonical English title in 'english_title'.",
+            var s when s.Contains("mult") || s.Contains("cartoon") || s.Contains("мульт")
+                => "Animated cartoons (Western or Asian). May include kid shows, action cartoons, donghua.",
+            var s when s.Contains("movie") || s.Contains("film") || s.Contains("фильм") || s.Contains("кино")
+                => "Theatrical films / movies.",
+            var s when s.Contains("serial") || s.Contains("show") || s.Contains("tv") || s.Contains("сериал")
+                => "Live-action TV series.",
+            var s when s.Contains("doram") || s.Contains("дорам")
+                => "Korean / Japanese / Chinese live-action TV dramas.",
+            _ => "Generic media — could be a movie, TV series, or animation."
+        };
     }
 }
