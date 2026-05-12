@@ -284,6 +284,15 @@ else
                                       OnClick="@(() => RefreshSection(_currentFolderWatcher))">
                             @L["explorer.btn_refresh_tooltip"]
                         </FluentButton>
+                        @* "Restore dismissed folders" — recovers child paths that
+                           were previously removed from the catalog (via delete or
+                           auto-rename accident) but still exist on disk. *@
+                        <FluentButton Appearance="Appearance.Outline"
+                                      IconStart="@(new Icons.Regular.Size16.ArrowUndo())"
+                                      Title="@L["explorer.btn_restore_dismissed_title"]"
+                                      OnClick="@(() => RestoreDismissedAsync(_currentFolderWatcher))">
+                            @L["explorer.btn_restore_dismissed"]
+                        </FluentButton>
                     }
                     <FluentButton Appearance="Appearance.Outline"
                                   IconStart="@(new Icons.Regular.Size16.DocumentSearch())"
@@ -1384,6 +1393,22 @@ else
             count > 0
                 ? L.Get("explorer.toast_found_subfolders", count)
                 : L["explorer.toast_no_subfolders"]);
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Wipes the section's dismissed-paths list and immediately re-discovers
+    /// children. Folders that were previously removed from the catalog (manually
+    /// or via the auto-rename accident) come back into the catalog if they still
+    /// exist on disk.
+    /// </summary>
+    private async Task RestoreDismissedAsync(FolderWatcher section)
+    {
+        await WatcherService.ClearDismissedAsync(section.Id);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var count = await DiscoverChildrenAsync(db, section);
+        ToastService.ShowToast(ToastIntent.Success,
+            L.Get("explorer.toast_restored_dismissed", count));
         await LoadAsync();
     }
 
