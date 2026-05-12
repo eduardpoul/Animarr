@@ -211,7 +211,7 @@ public class MetadataService(
             }).ToList(), _json);
 
         // ── Phase 2: Pick winner (LLM or top-scorer) ─────────────────────────
-        var winner = await SelectWinnerAsync(candidates, folder.Path, log, ct);
+        var winner = await SelectWinnerAsync(candidates, folder.Path, folderYear, log, ct);
         log?.Invoke($"[Winner] \"{winner.Title}\" ({winner.Year}) [{winner.Source}] id={winner.Id}  score={winner.Score:F2}");
 
         // Anti-duplicate: if another MediaItem already points at this exact
@@ -851,6 +851,7 @@ public class MetadataService(
     private async Task<MetadataCandidate> SelectWinnerAsync(
         List<MetadataCandidate> candidates,
         string folderPath,
+        int? expectedYear,
         Action<string>? log,
         CancellationToken ct)
     {
@@ -869,6 +870,24 @@ public class MetadataService(
             var solo = sorted[0];
             log?.Invoke($"[Score] Single candidate — trusting it: \"{solo.Title}\"");
             return solo.Score >= 0.85 ? solo : solo with { Score = 0.85 };
+        }
+
+        // Year-anchored shortcut: if we know the expected year and at least one
+        // candidate matches it ±1 year, hide all other-year candidates from the
+        // LLM. Prevents the LLM (qwen2.5:1.5b) from picking a 1968 film when the
+        // file name clearly says 2025.
+        var yearMatching = expectedYear.HasValue
+            ? sorted.Where(c => c.Year.HasValue && Math.Abs(c.Year.Value - expectedYear.Value) <= 1).ToList()
+            : new List<MetadataCandidate>();
+        if (yearMatching.Count > 0 && expectedYear.HasValue)
+        {
+            log?.Invoke($"[Score] Filtering candidates by year ±1 of {expectedYear.Value}: {yearMatching.Count} match(es) remain.");
+            sorted = yearMatching;
+            if (sorted.Count == 1)
+            {
+                var solo = sorted[0];
+                return solo.Score >= 0.85 ? solo : solo with { Score = 0.85 };
+            }
         }
 
         var llmEnabled = await appConfig.GetAsync<bool>(AppConfigKeys.LlmEnabled, false, ct);
@@ -896,12 +915,19 @@ public class MetadataService(
             {
                 var picked = topN[llmIndex.Value];
                 log?.Invoke($"[LLM] Selected [{llmIndex.Value}]: \"{picked.Title}\" [{picked.Source}]");
-                // Trust LLM's pick: when the romanised LLM title doesn't match the English
-                // TMDB title, the string-similarity score is 0.00 — but the LLM has
-                // already confirmed this is the right entry. Boost the score so the
-                // confidence-gated UX (≥0.85 auto-apply, ≥0.50 NeedsReview) doesn't
-                // flag the result as Failed purely because of the language gap.
-                return picked.Score >= 0.9 ? picked : picked with { Score = 0.9 };
+                // Trust LLM's pick when the underlying signal is decent. We boost to
+                // 0.9 (clear of the auto-apply threshold) only if either:
+                //   • title-similarity is reasonable (base score ≥ 0.7), OR
+                //   • the year matches our expectation (+0.4 from year alone).
+                // For weak matches (Kaiju Jiu → Kaiju Girls, score 0.42) we keep the
+                // raw score so the result lands in NeedsReview with a top-3 banner.
+                bool trustLlm = picked.Score >= 0.7
+                    || (expectedYear.HasValue && picked.Year.HasValue
+                        && Math.Abs(picked.Year.Value - expectedYear.Value) <= 1);
+                if (trustLlm)
+                    return picked.Score >= 0.9 ? picked : picked with { Score = 0.9 };
+                log?.Invoke($"[LLM] Selected pick has weak base score ({picked.Score:F2}) — keeping for NeedsReview.");
+                return picked;
             }
         }
         catch (Exception ex)
