@@ -3,6 +3,7 @@ using Animarr.Web.Configuration;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.FluentUI.AspNetCore.Components;
 

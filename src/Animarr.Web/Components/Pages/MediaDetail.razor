@@ -643,9 +643,9 @@ else
             {
                 int id     = el.TryGetProperty("Id",       out var pId)    ? pId.GetInt32()      : 0;
                 var title  = el.TryGetProperty("Title",    out var pTit)   ? pTit.GetString() ?? "" : "";
-                int? year  = el.TryGetProperty("Year",     out var pYr) && pYr.ValueKind == JsonValueKind.Number ? pYr.GetInt32() : null;
+                int? year  = el.TryGetProperty("Year",     out var pYr) && pYr.ValueKind == System.Text.Json.JsonValueKind.Number ? pYr.GetInt32() : null;
                 var type   = el.TryGetProperty("Type",     out var pTy)    ? pTy.GetString() ?? "" : "";
-                var ov     = el.TryGetProperty("Overview", out var pOv) && pOv.ValueKind == JsonValueKind.String ? pOv.GetString() : null;
+                var ov     = el.TryGetProperty("Overview", out var pOv) && pOv.ValueKind == System.Text.Json.JsonValueKind.String ? pOv.GetString() : null;
                 list.Add(new CandidateRow(id, title, year, type, ov));
             }
             return list;
