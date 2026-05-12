@@ -504,8 +504,6 @@
 
   "settings.meta_auto_title": "Automation",
   "settings.auto_identify_switch": "Auto-identify folder when added",
-  "settings.auto_rename_folder_switch": "Auto-rename folders to \"Title (Year)\"",
-  "settings.auto_rename_folder_hint": "After a folder is identified with high confidence, rename it on disk to the canonical title.",
   "settings.include_episode_name_switch": "Append episode name to filenames",
   "settings.include_episode_name_hint": "S01E03.mkv → S01E03 - Honky Tonk Women.mkv. Falls back to the short form when the name is unknown.",
   "settings.download_ep_thumbs_switch": "Download episode thumbnails (still images)",

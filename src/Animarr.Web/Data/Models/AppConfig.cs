@@ -25,7 +25,10 @@ public static class AppConfigKeys
     public const string AutoIdentifyEnabled     = "metadata.auto_identify_enabled";
     public const string DownloadEpisodeThumbs   = "metadata.download_episode_thumbs";
 
-    // Phase 1.2/2.3: rename the watched folder to "Title (Year)" after successful identification.
+    // Deprecated: container-folder auto-rename was removed after two catastrophic
+    // data-corruption incidents. The constant is kept so any value still sitting
+    // in the AppConfig table can be located/cleaned up; nothing reads or writes it.
+    [System.Obsolete("Container-folder auto-rename is no longer supported.")]
     public const string AutoRenameContainerFolder = "metadata.auto_rename_container_folder";
     // Phase 1.3: append episode name to renamed files — "S01E03 - Honky Tonk Women.mkv".
     public const string IncludeEpisodeNameInFile  = "rename.include_episode_name";
