@@ -440,6 +440,68 @@ public class FolderWatcherService(
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Removes FolderWatcher rows whose on-disk path (or SingleFilePath for
+    /// flat-section entries) no longer exists. The MediaItem cascades, so the
+    /// /catalog stops showing ghost cards that don't correspond to any disk
+    /// content.
+    ///
+    /// SAFETY: a section root that is currently unreachable (e.g. network mount
+    /// down) would naively cause us to wipe every child — we'd be deleting the
+    /// user's entire library on a temporary unmount. To avoid that, we
+    /// short-circuit any section whose own path is missing: leave it and its
+    /// children alone until the mount comes back.
+    /// </summary>
+    public async Task<int> CleanupOrphanedChildrenAsync(Guid sectionId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var section = await db.FolderWatchers.FindAsync(sectionId);
+        if (section is null) return 0;
+        // Refuse to touch anything if the section's own root isn't reachable —
+        // the disk might be temporarily unmounted.
+        if (!Directory.Exists(section.Path)) return 0;
+
+        var children = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == sectionId && !f.IsSection)
+            .ToListAsync();
+
+        var orphans = children.Where(c =>
+            c.SingleFilePath is { Length: > 0 }
+                ? !File.Exists(c.SingleFilePath)
+                : !Directory.Exists(c.Path)
+        ).ToList();
+
+        if (orphans.Count == 0) return 0;
+
+        foreach (var orphan in orphans)
+        {
+            try { await StopWatcherAsync(orphan.Id); } catch { /* best effort */ }
+        }
+        db.FolderWatchers.RemoveRange(orphans);
+        await db.SaveChangesAsync();
+        logger.LogInformation("Cleaned up {Count} orphaned FolderWatcher rows under section {SectionId}",
+            orphans.Count, sectionId);
+        return orphans.Count;
+    }
+
+    /// <summary>
+    /// Whole-library variant. Walks every section and removes orphan children.
+    /// Sections themselves are never auto-deleted (an unreachable section is
+    /// almost always a temporary mount problem, not a "delete my config" intent).
+    /// </summary>
+    public async Task<int> CleanupOrphanedChildrenAllAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var sectionIds = await db.FolderWatchers
+            .Where(f => f.IsSection)
+            .Select(f => f.Id)
+            .ToListAsync();
+        int total = 0;
+        foreach (var id in sectionIds)
+            total += await CleanupOrphanedChildrenAsync(id);
+        return total;
+    }
+
     /// <summary>Returns true if <paramref name="childPath"/> was previously dismissed for this section.</summary>
     private static async Task<bool> IsDismissedAsync(AppDbContext db, Guid sectionId, string childPath)
     {

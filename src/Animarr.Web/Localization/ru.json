@@ -578,8 +578,8 @@
   "catalog.tag_btn_delete": "Удалить",
   "catalog.btn_delete_item": "Убрать из медиатеки",
   "catalog.delete_dialog_title": "Убрать из медиатеки",
-  "catalog.delete_dialog_body": "Убрать \"{0}\" из медиатеки? Папка и файлы удалены не будут.",
-  "catalog.delete_dialog_hint": "Будет удалена только запись с метаданными. Папку можно переопределить позже.",
+  "catalog.delete_dialog_body": "Убрать \"{0}\" из медиатеки? Папка и файлы на диске удалены не будут.",
+  "catalog.delete_dialog_hint": "Запись в каталоге пропадёт окончательно — Identify/Rescan не вернут её. Папка останется на диске, её можно потом вручную добавить заново.",
   "catalog.delete_dialog_confirm": "Убрать",
   "catalog.delete_toast": "\"{0}\" убрано из медиатеки.",
 
