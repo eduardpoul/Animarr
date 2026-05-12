@@ -738,7 +738,15 @@ else
 
                 if (parse.IsMatched)
                 {
-                    var key = (seasonNum, parse.Episode);
+                    // If the detected season has no TMDB counterpart but the show has
+                    // exactly one TMDB season (e.g. Chinese donghua named "Season 3"
+                    // locally while TMDB lumps everything as Season 1), remap into
+                    // that single TMDB season so files line up with episode tabs.
+                    var effective = seasonNum;
+                    if (_seasons.All(s => s.Number != seasonNum) && _seasons.Count == 1)
+                        effective = _seasons[0].Number;
+
+                    var key = (effective, parse.Episode);
                     if (!_episodeFileMap.ContainsKey(key))
                         _episodeFileMap[key] = filePath;
                 }
@@ -1022,12 +1030,8 @@ else
         var vms = new List<EpisodeVm>();
         foreach (var ep in detail.Episodes)
         {
-            // Only include episodes that have a physical file on disk
-            // (skip the filter if the map is empty — e.g. no patterns configured)
-            if (_episodeFileMap.Count > 0 &&
-                !_episodeFileMap.ContainsKey((seasonNumber, ep.EpisodeNumber)))
-                continue;
-
+            // Show ALL episodes from TMDB. Whether the file is physically on
+            // disk is communicated via a ✓ / download icon on the episode card.
             string? stillUrl = null;
             if (_downloadThumbs && ep.StillPath != null && _item.Folder != null)
             {
