@@ -65,6 +65,17 @@ public class MetadataService(
         item.LlmIdentifiedTitle = llmResult?.Title;
         item.LlmConfidence      = llmResult?.Confidence;
 
+        // Seed Title with a folder/file-name fallback so failed-to-identify items
+        // still show something readable in the catalog and detail view. Populate*Async
+        // overwrites this with the canonical title when identification succeeds.
+        if (string.IsNullOrWhiteSpace(item.Title))
+        {
+            item.Title = folder.SingleFilePath != null
+                ? Path.GetFileNameWithoutExtension(folder.SingleFilePath)
+                : Path.GetFileName(folder.Path.TrimEnd(
+                    Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+
         // Title/year source — flat files use the filename without extension; otherwise the folder path.
         var titleSource = folder.SingleFilePath != null
             ? Path.GetFileNameWithoutExtension(folder.SingleFilePath)
@@ -697,8 +708,41 @@ public class MetadataService(
             }).ToList();
         }
 
+        // Cross-validation: when two different sources independently return the same
+        // work (matched on normalised title + year), boost every candidate in that
+        // group by +0.25 — agreement between independent indexes is a strong signal.
+        if (all.Count > 1)
+        {
+            var groups = all
+                .GroupBy(c => (Key: NormaliseTitleForMatch(c.Title), c.Year))
+                .Where(g => g.Select(c => c.Source).Distinct().Count() >= 2)
+                .ToList();
+
+            if (groups.Count > 0)
+            {
+                var boosted = new HashSet<MetadataCandidate>(ReferenceEqualityComparer.Instance);
+                foreach (var g in groups)
+                    foreach (var c in g)
+                        boosted.Add(c);
+                all = all.Select(c => boosted.Contains(c)
+                    ? c with { Score = c.Score + 0.25 }
+                    : c).ToList();
+                log?.Invoke($"[Cross-validation] {groups.Count} cross-source match group(s) boosted (+0.25)");
+            }
+        }
+
         log?.Invoke($"[Search] {all.Count} total candidates");
         return all;
+    }
+
+    /// <summary>Strips non-alphanumeric characters and lower-cases — for cross-source matching.</summary>
+    private static string NormaliseTitleForMatch(string title)
+    {
+        if (string.IsNullOrEmpty(title)) return "";
+        var sb = new System.Text.StringBuilder(title.Length);
+        foreach (var c in title)
+            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        return sb.ToString();
     }
 
     private static List<(string Id, bool Enabled)> ParseSourceOrder(string? json)
