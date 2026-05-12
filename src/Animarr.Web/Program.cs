@@ -26,6 +26,15 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite(connectionString)
            .AddInterceptors(new SqliteWalInterceptor()));
 
+// H-10: DataProtection so we can encrypt API keys in AppConfig.
+// Keys are persisted under /app/data so they survive container restarts.
+var dpKeysDir = string.IsNullOrEmpty(dbDir) ? "." : dbDir;
+Directory.CreateDirectory(Path.Combine(dpKeysDir, "dp-keys"));
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dpKeysDir, "dp-keys")))
+    .SetApplicationName("Animarr");
+builder.Services.AddSingleton<SecretProtector>();
+
 // App services
 builder.Services.AddScoped<SeedDataService>();
 builder.Services.AddSingleton<IPatternMatchService, PatternMatchService>();
@@ -132,6 +141,19 @@ app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbCon
     // Reject directory traversal — path must point to a file, not a directory
     if (Directory.Exists(fullPath))
         return Results.BadRequest();
+
+    // C-6: reject symlinks (reparse points) so a symlink inside an allowed
+    // folder cannot leak files from outside the library (e.g. /etc/shadow).
+    try
+    {
+        if (File.Exists(fullPath))
+        {
+            var attrs = File.GetAttributes(fullPath);
+            if ((attrs & FileAttributes.ReparsePoint) != 0)
+                return Results.Forbid();
+        }
+    }
+    catch { /* fall through to existence check below */ }
 
     // Validate: the file must reside inside a registered FolderWatcher path
     await using var db = await dbFactory.CreateDbContextAsync();

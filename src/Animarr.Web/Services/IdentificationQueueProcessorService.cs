@@ -94,8 +94,7 @@ public class IdentificationQueueProcessorService(
             }
 
             // Step 1: LLM identification (optional, if enabled)
-            string? llmTitle     = null;
-            double? llmConfidence = null;
+            LlmIdentifyResult? llmResult = null;
 
             var ollamaEnabled = await appCfg.GetAsync<bool>(AppConfigKeys.LlmEnabled, false, ct);
             if (ollamaEnabled)
@@ -105,19 +104,18 @@ public class IdentificationQueueProcessorService(
                 if (folder is not null)
                 {
                     Log($"[LLM] Calling LLM for: {folder.Path}");
-                    var llmResult = await llm.IdentifyFolderAsync(folder.Path, ct);
+                    llmResult = await llm.IdentifyFolderAsync(folder.Path, ct);
                     if (llmResult != null && llmResult.Confidence >= 0.5)
                     {
-                        llmTitle      = llmResult.Title;
-                        llmConfidence = llmResult.Confidence;
-                        Log($"[LLM] Result: \"{llmTitle}\" confidence={llmConfidence:F2}");
+                        Log($"[LLM] Result: \"{llmResult.Title}\" type={llmResult.Type} year={llmResult.Year} confidence={llmResult.Confidence:F2}");
                         logger.LogInformation(
-                            "LLM identified '{Path}' as '{Title}' (confidence={Conf:F2})",
-                            folder.Path, llmTitle, llmConfidence);
+                            "LLM identified '{Path}' as '{Title}' [{Type}] (confidence={Conf:F2})",
+                            folder.Path, llmResult.Title, llmResult.Type, llmResult.Confidence);
                     }
                     else if (llmResult != null)
                     {
                         Log($"[LLM] Low confidence ({llmResult.Confidence:F2}) for \"{llmResult.Title}\" — ignored.");
+                        llmResult = null;
                     }
                     else
                     {
@@ -130,11 +128,10 @@ public class IdentificationQueueProcessorService(
                 Log("[LLM] Disabled in settings.");
             }
 
-            // Step 2: TMDB / MAL identification + image download
+            // Step 2: TMDB / MAL identification + image download (uses LLM type/year hints)
             await metadata.IdentifyFolderAsync(
                 job.FolderId,
-                llmTitle,
-                llmConfidence,
+                llmResult,
                 job.ForceRefresh,
                 Log,
                 ct);
@@ -145,6 +142,14 @@ public class IdentificationQueueProcessorService(
             job.LogDetails   = logSb.ToString();
 
             logger.LogInformation("Identification done for folder {FolderId}", job.FolderId);
+        }
+        catch (TmdbAuthException ex)
+        {
+            // H-9: auth errors are not retryable — fail immediately so the user sees the cause.
+            job.ErrorMessage = ex.Message;
+            job.Status       = IdentificationQueueStatus.Failed;
+            job.ProcessedAt  = DateTime.UtcNow;
+            logger.LogError(ex, "Identification failed (auth) for folder {FolderId}", job.FolderId);
         }
         catch (Exception ex)
         {

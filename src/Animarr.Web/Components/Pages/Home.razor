@@ -58,7 +58,9 @@
     else
     {
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;">
-            @foreach (var item in _filtered)
+            @* H-7: cap rendered items to 240. Catalog stays snappy even at 1000+ entries;
+               full list is still searchable via the filter input. *@
+            @foreach (var item in _filtered.Take(240))
             {
                 <a href="/catalog/@item.Id" class="catalog-card"
                    style="display:block;text-decoration:none;color:inherit;cursor:pointer;border-radius:8px;overflow:hidden;background:var(--neutral-layer-2);box-shadow:0 2px 8px rgba(0,0,0,.15);transition:transform .15s,box-shadow .15s;"
@@ -133,6 +135,12 @@
                 </a>
             }
         </div>
+        @if (_filtered.Count > 240)
+        {
+            <div style="text-align:center;padding:24px 0;color:var(--neutral-foreground-hint);font-size:13px;">
+                @L.Get("catalog.shown_of_total", 240, _filtered.Count)
+            </div>
+        }
     }
 
 </div>
@@ -318,9 +326,9 @@
             .Where(f => f.IsSection)
             .OrderBy(f => f.Label)
             .ToListAsync();
+        // H-7: skip the eager Tags join — they're not rendered in the catalog grid (M-13).
         _allItems = await db.MediaItems
             .Include(m => m.Folder)
-            .Include(m => m.Tags).ThenInclude(mt => mt.MediaTag)
             .Where(m => m.Folder != null && !m.Folder.IsSection)
             .OrderBy(m => m.Title)
             .ToListAsync();
@@ -583,9 +591,9 @@
                 if (justCompleted.Count > 0)
                 {
                     await using var db = await DbFactory.CreateDbContextAsync();
+                    // M-13: drop the Tags include — refresh only the catalog-visible fields.
                     var updatedItems = await db.MediaItems
                         .Include(m => m.Folder)
-                        .Include(m => m.Tags).ThenInclude(mt => mt.MediaTag)
                         .Where(m => justCompleted.Contains(m.FolderId) && m.Folder != null && !m.Folder.IsSection)
                         .ToListAsync();
 
@@ -596,6 +604,11 @@
                         else _allItems.Add(updated);
                     }
                     ApplyFilter();
+                }
+                else
+                {
+                    // L-3: no completion → don't trigger a full re-render
+                    continue;
                 }
 
                 await InvokeAsync(StateHasChanged);

@@ -289,12 +289,12 @@ else
                         <FluentButton Appearance="Appearance.Stealth"
                                       IconStart="@(new Icons.Regular.Size16.Rename())"
                                       Style="min-width:26px;width:26px;height:26px;padding:0;"
-                                      Title="Rename"
+                                      Title="@(L["folder_files.btn_rename"])"
                                       OnClick="@(() => StartRenameFile(f2))" />
                         <FluentButton Appearance="Appearance.Stealth"
                                       IconStart="@(new Icons.Regular.Size16.Delete())"
                                       Style="min-width:26px;width:26px;height:26px;padding:0;color:var(--color-fluent-error);"
-                                      Title="Delete"
+                                      Title="@(L["folder_files.btn_delete"])"
                                       OnClick="@(() => AskDeleteFile(f2))" />
                     </div>
                 </div>
@@ -408,17 +408,32 @@ else
                              Label="@(L["folders.field_name_label"])"
                              Placeholder="@(L["folders.field_name_placeholder"])"
                              style="width:100%;" />
-            <FluentSwitch @bind-Value="_formWatch">@L["folders.switch_monitor"]</FluentSwitch>
-            <FluentSwitch @bind-Value="_formRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
-            @if (_formRenameEnabled)
-            {
-                <FluentSelect TOption="string" @bind-Value="_formFolderTypeStr"
-                              Label="@(L["folders.content_type_label"])" style="width:100%;">
-                    <FluentOption TOption="string" Value="Auto">@L["folders.content_type_auto"]</FluentOption>
-                    <FluentOption TOption="string" Value="Series">@L["folders.content_type_series"]</FluentOption>
-                    <FluentOption TOption="string" Value="Movie">@L["folders.content_type_movie"]</FluentOption>
-                </FluentSelect>
-            }
+            @* Phase 1.4: one master "Active" toggle. *@
+            <FluentSwitch Value="_formActive"
+                          ValueChanged="@((bool v) => { _formWatch = v; _formRenameEnabled = v; })">
+                @L["folders.switch_active"]
+            </FluentSwitch>
+
+            @* Phase 3.4: FolderType + low-level switches hidden behind Advanced.
+               System auto-detects type via LLM/TMDB; users only override when needed. *@
+            <details>
+                <summary style="cursor:pointer;font-size:13px;color:var(--neutral-foreground-hint);user-select:none;">
+                    @L["folders.advanced_section"]
+                </summary>
+                <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0 0 8px;border-left:2px solid var(--neutral-stroke-rest);margin-top:8px;">
+                    <FluentSwitch @bind-Value="_formWatch">@L["folders.switch_monitor"]</FluentSwitch>
+                    <FluentSwitch @bind-Value="_formRenameEnabled">@L["folders.switch_rename"]</FluentSwitch>
+                    @if (_formRenameEnabled)
+                    {
+                        <FluentSelect TOption="string" @bind-Value="_formFolderTypeStr"
+                                      Label="@(L["folders.content_type_label"])" style="width:100%;">
+                            <FluentOption TOption="string" Value="Auto">@L["folders.content_type_auto"]</FluentOption>
+                            <FluentOption TOption="string" Value="Series">@L["folders.content_type_series"]</FluentOption>
+                            <FluentOption TOption="string" Value="Movie">@L["folders.content_type_movie"]</FluentOption>
+                        </FluentSelect>
+                    }
+                </div>
+            </details>
         </FluentStack>
     </FluentDialogBody>
     <FluentDialogFooter>
@@ -535,6 +550,8 @@ else
     private bool _formWatch = true;
     private bool _formRenameEnabled = true;
     private string _formFolderTypeStr = "Auto";
+    // Phase 1.4: derived master toggle.
+    private bool _formActive => _formWatch && _formRenameEnabled;
 
     // Folder picker (embedded in add dialog)
     private List<DriveInfo> _drives = [];
@@ -820,8 +837,16 @@ else
         }
         var dir     = Path.GetDirectoryName(_renameTarget.Path)!;
         var newPath = Path.Combine(dir, newName);
-        try { File.Move(_renameTarget.Path, newPath); }
-        catch { /* TODO: surface error */ }
+        try
+        {
+            File.Move(_renameTarget.Path, newPath);
+            ToastService.ShowToast(ToastIntent.Success,
+                L.Get("folder_files.toast_file_renamed", _renameTarget.Name, newName));
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
         _renameTarget = null;
         await LoadCurrentDirAsync();
     }
@@ -838,8 +863,16 @@ else
     {
         _fileDeleteHidden = true;
         if (_fileDeleteTarget is null) return;
-        try { File.Delete(_fileDeleteTarget.Path); }
-        catch { /* TODO: surface error */ }
+        var name = _fileDeleteTarget.Name;
+        try
+        {
+            File.Delete(_fileDeleteTarget.Path);
+            ToastService.ShowToast(ToastIntent.Success, L.Get("folder_files.toast_file_deleted", name));
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowToast(ToastIntent.Error, L.Get("folder_files.toast_error", ex.Message));
+        }
         _fileDeleteTarget = null;
         await LoadCurrentDirAsync();
     }
@@ -1091,8 +1124,14 @@ else
                 await WatcherService.StopWatcherAsync(child.Id);
             db.FolderWatchers.RemoveRange(childList);
         }
+        // Bug-fix "New Folder reappears": when deleting a child of a section, remember
+        // its path so DiscoverChildrenAsync and FSW auto-register won't bring it back.
+        var dismissTargetSection = _deleteTarget.ParentSectionId;
+        var dismissTargetPath    = _deleteTarget.Path;
         var entity = await db.FolderWatchers.FindAsync(_deleteTarget.Id);
         if (entity is not null) { db.FolderWatchers.Remove(entity); await db.SaveChangesAsync(); }
+        if (dismissTargetSection.HasValue)
+            await WatcherService.DismissChildPathAsync(dismissTargetSection.Value, dismissTargetPath);
         var label = _deleteTarget.Label;
         var goBack = _deleteGoBack;
         _deleteHidden = true;
@@ -1141,6 +1180,11 @@ else
             .Select(f => f.Path)
             .ToHashSetAsync();
 
+        // Bug-fix "New Folder reappears": load dismissed-paths set for this section.
+        var dismissedKey = $"dismissed.section.{section.Id}";
+        var dismissedRaw = await db.AppConfigs.FindAsync(dismissedKey);
+        var dismissed = ParseDismissedPaths(dismissedRaw?.Value);
+
         var toAdd = new List<FolderWatcher>();
         foreach (var subDir in Directory.GetDirectories(section.Path))
         {
@@ -1150,6 +1194,14 @@ else
                         p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                         norm, StringComparison.OrdinalIgnoreCase)))
                 continue;
+
+            // Bug-fix: skip empty / junk-named subfolders that can never be identified.
+            // This prevents "New Folder" (and similar accidents) from reappearing
+            // every time the user deletes them from the catalog.
+            if (!MediaFolderHeuristics.LooksLikeMediaFolder(norm)) continue;
+
+            // Bug-fix: skip paths the user dismissed earlier.
+            if (dismissed.Contains(norm)) continue;
 
             toAdd.Add(new FolderWatcher
             {
@@ -1171,8 +1223,39 @@ else
             await db.SaveChangesAsync();
             foreach (var child in toAdd.Where(c => c.WatchEnabled))
                 await WatcherService.StartWatcherAsync(child.Id);
+
+            // Phase 1.1: auto-queue identification — no "Identify" button needed.
+            foreach (var child in toAdd.Where(c => c.IdentifyEnabled))
+            {
+                var already = await db.IdentificationQueues
+                    .AnyAsync(q => q.FolderId == child.Id &&
+                                   (q.Status == IdentificationQueueStatus.Queued ||
+                                    q.Status == IdentificationQueueStatus.Processing));
+                if (already) continue;
+                db.IdentificationQueues.Add(new IdentificationQueue
+                {
+                    Id       = Guid.NewGuid(),
+                    FolderId = child.Id,
+                    QueuedAt = DateTime.UtcNow,
+                });
+            }
+            await db.SaveChangesAsync();
         }
 
         return toAdd.Count;
+    }
+
+    /// <summary>Parses the JSON stored in <c>AppConfig["dismissed.section.{id}"]</c>.</summary>
+    private static HashSet<string> ParseDismissedPaths(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var arr = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+            return arr is null
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
     }
 }

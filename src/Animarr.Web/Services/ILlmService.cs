@@ -48,4 +48,15 @@ public interface ILlmService
 
     /// <summary>Returns true if the configured LLM server is reachable.</summary>
     Task<bool> IsAvailableAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Phase 3.3: given a list of un-matched video files and a list of episode
+    /// titles for a season, ask the LLM to suggest a file → episode mapping.
+    /// Used only when pattern matching and fuzzy ordering both failed.
+    /// Returns null on failure; otherwise a list of pairs (fileIndex, episodeNumber).
+    /// </summary>
+    Task<List<(int FileIndex, int EpisodeNumber)>?> MapFilesToEpisodesAsync(
+        IReadOnlyList<string> fileNames,
+        IReadOnlyList<(int Number, string Name)> episodes,
+        CancellationToken ct = default);
 }

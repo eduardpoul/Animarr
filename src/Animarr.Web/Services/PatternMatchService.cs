@@ -1,11 +1,14 @@
 ﻿using System.Text.RegularExpressions;
 using Animarr.Web.Configuration;
 using Animarr.Web.Data.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Animarr.Web.Services;
 
-public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPatternMatchService
+public partial class PatternMatchService(
+    IOptions<AppSettings> appOptions,
+    ILogger<PatternMatchService> logger) : IPatternMatchService
 {
     private readonly AppSettings _settings = appOptions.Value;
 
@@ -68,7 +71,13 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
 
             Regex rx;
             try { rx = new Regex(p.Pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(500)); }
-            catch { continue; } // Bad regex in DB — skip
+            catch (Exception ex)
+            {
+                // L-7: surface invalid patterns instead of silently swallowing.
+                logger.LogWarning(ex, "Skipping pattern «{Name}» (id={Id}): invalid regex `{Pattern}`",
+                    p.Name, p.Id, p.Pattern);
+                continue;
+            }
 
             var m = rx.Match(fileName);
             if (!m.Success) continue;
@@ -104,12 +113,26 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
 
     // ─── Detect season from folder path ──────────────────────────────────────
 
-    public int? DetectSeasonFromPath(string folderPath)
+    /// <summary>
+    /// M-10: walks up the directory tree from <paramref name="folderPath"/> looking
+    /// for a season marker. Stops at <paramref name="rootPath"/> (the FolderWatcher
+    /// root) if provided, or after <c>maxDepth</c> levels otherwise.
+    /// </summary>
+    public int? DetectSeasonFromPath(string folderPath, string? rootPath = null, int maxDepth = 5)
     {
-        // Walk up max 2 levels: immediate folder, then its parent
         var dir = new DirectoryInfo(folderPath);
+        string? normalRoot = null;
+        if (!string.IsNullOrEmpty(rootPath))
+        {
+            try
+            {
+                normalRoot = Path.GetFullPath(rootPath)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch { /* invalid root — fall back to depth-only */ }
+        }
 
-        for (int i = 0; i < 2 && dir != null; i++, dir = dir.Parent!)
+        for (int i = 0; i < maxDepth && dir != null; i++, dir = dir.Parent!)
         {
             var name = dir.Name;
 
@@ -121,6 +144,14 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
 
             m = PartRegex().Match(name);
             if (m.Success && int.TryParse(m.Groups["s"].Value, out var sp)) return sp;
+
+            // Stop once we reach the FolderWatcher root — don't leak into parents above it.
+            if (normalRoot != null)
+            {
+                var dirFull = dir.FullName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (string.Equals(dirFull, normalRoot, StringComparison.OrdinalIgnoreCase))
+                    break;
+            }
         }
 
         return null;
@@ -128,7 +159,8 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
 
     // ─── Build target name ────────────────────────────────────────────────────
 
-    public string? BuildTargetName(ParseResult parse, int? seasonFromPath, FileKind kind, string extension)
+    public string? BuildTargetName(ParseResult parse, int? seasonFromPath, FileKind kind, string extension,
+        string? episodeName = null)
     {
         var ext = extension.ToLowerInvariant();
 
@@ -152,12 +184,30 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
             var effectiveSeason = parse.Season ?? seasonFromPath;
             var ep = parse.Episode.ToString("D2");
 
+            // Phase 1.3: optionally append episode name from TMDB metadata.
+            var suffix = "";
+            if (!string.IsNullOrWhiteSpace(episodeName))
+            {
+                var safe = SanitizeForFileName(episodeName);
+                if (!string.IsNullOrWhiteSpace(safe))
+                    suffix = $" - {safe}";
+            }
+
             return effectiveSeason.HasValue
-                ? $"S{effectiveSeason.Value:D2}E{ep}{ext}"
-                : $"{ep}{ext}";
+                ? $"S{effectiveSeason.Value:D2}E{ep}{suffix}{ext}"
+                : $"{ep}{suffix}{ext}";
         }
 
         return null;
+    }
+
+    private static string SanitizeForFileName(string s)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = s.Select(c => invalid.Contains(c) ? ' ' : c).ToArray();
+        var cleaned = new string(chars).Trim().Trim('.');
+        // Collapse multiple spaces.
+        return System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ");
     }
 
     // ─── Evaluate single file (for preview) ───────────────────────────────────
@@ -168,7 +218,8 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
         IEnumerable<IgnoreRule> ignoreRules,
         FolderType folderType = FolderType.Auto,
         bool isSection = false,
-        string? folderRoot = null)
+        string? folderRoot = null,
+        IReadOnlyDictionary<(int s, int ep), string>? episodeNames = null)
     {
         var item = new RenamePreviewItem { OriginalPath = filePath };
 
@@ -218,17 +269,19 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
                 bool appendYear = false;
                 int year = 0;
 
-                // Always derive title from the filename — most reliable for torrent releases
-                // (folder names can be quality tags like "1080" or buried sub-paths).
-                // Fall back to the parent sub-folder name only if the filename gives nothing
-                // (e.g. a generic "movie.mkv" inside a properly named folder).
-                var fnParse = ParseFileName(fileName, patterns);
-                if (fnParse.IsMatched && fnParse.Episode >= 1900 && fnParse.Episode <= 2099)
+                // H-1: extract the year via a dedicated regex, not by abusing the
+                // episode-pattern engine. Real-world filenames like
+                // "Inception.2010.1080p.BluRay.mkv" don't match any rename pattern,
+                // so the previous reliance on ParseFileName returning Episode∈[1900,2099]
+                // silently dropped the year.
+                var nameNoExt = Path.GetFileNameWithoutExtension(fileName);
+                var fnYearMatch = Regex.Match(nameNoExt, @"(?<![0-9])(19\d{2}|20\d{2})(?![0-9])");
+                if (fnYearMatch.Success && int.TryParse(fnYearMatch.Value, out var fnYear))
                 {
-                    year = fnParse.Episode;
+                    year = fnYear;
                     appendYear = true;
                 }
-                movieTitle = CleanMovieTitle(Path.GetFileNameWithoutExtension(fileName), year);
+                movieTitle = CleanMovieTitle(nameNoExt, year);
 
                 if (string.IsNullOrWhiteSpace(movieTitle) && !atRoot)
                 {
@@ -276,10 +329,18 @@ public partial class PatternMatchService(IOptions<AppSettings> appOptions) : IPa
         // 4. Detect season from folder path if not found in filename
         int? seasonFromPath = null;
         if (!parse2.Season.HasValue)
-            seasonFromPath = DetectSeasonFromPath(dir);
+            seasonFromPath = DetectSeasonFromPath(dir, folderRoot);
+
+        // Phase 1.3: look up the episode title for the resolved (season, episode) if a map was supplied.
+        string? episodeName = null;
+        if (episodeNames is not null && parse2.IsMatched && parse2.Episode > 0)
+        {
+            var s = parse2.Season ?? seasonFromPath ?? 1;
+            episodeNames.TryGetValue((s, parse2.Episode), out episodeName);
+        }
 
         // 5. Build target name
-        var newName = BuildTargetName(parse2, seasonFromPath, kind, ext);
+        var newName = BuildTargetName(parse2, seasonFromPath, kind, ext, episodeName);
         if (newName is null)
         {
             item.Status = PreviewStatus.WillSkip;

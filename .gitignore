@@ -22,8 +22,9 @@
 *.log
 logs/
 
-## Docker data volume (local)
-data/
+## Docker data volume (local) — anchored to repo root so it doesn't match
+## src/Animarr.Web/Data/ (the EF Core source folder) on case-insensitive FS.
+/data/
 
 ## Deploy scripts (private)
 deploy/

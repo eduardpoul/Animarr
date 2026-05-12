@@ -15,14 +15,14 @@
 
         <FluentStack Orientation="Orientation.Horizontal" Style="margin-bottom:16px;gap:10px;flex-wrap:wrap;"
                      VerticalAlignment="VerticalAlignment.Bottom">
-            <FluentSelect TOption="string" Value="@_filterFolder" ValueChanged="@((string v) => { _filterFolder = v; StateHasChanged(); })" Label="@(L["history.filter_folder_label"])" Style="min-width:200px;">
+            <FluentSelect TOption="string" Value="@_filterFolder" ValueChanged="@(async (string v) => { _filterFolder = v; await OnFilterChangedAsync(); })" Label="@(L["history.filter_folder_label"])" Style="min-width:200px;">
                 <FluentOption Value="">@L["history.filter_folder_all"]</FluentOption>
                 @foreach (var f in _allFolders)
                 {
                     <FluentOption Value="@f.Id.ToString()">@f.Label</FluentOption>
                 }
             </FluentSelect>
-            <FluentSelect TOption="string" Value="@_filterStatus" ValueChanged="@((string v) => { _filterStatus = v; StateHasChanged(); })" Label="@(L["history.filter_status_label"])" Style="min-width:160px;">
+            <FluentSelect TOption="string" Value="@_filterStatus" ValueChanged="@(async (string v) => { _filterStatus = v; await OnFilterChangedAsync(); })" Label="@(L["history.filter_status_label"])" Style="min-width:160px;">
                 <FluentOption Value="">@L["history.filter_status_all"]</FluentOption>
                 <FluentOption Value="Renamed">@L["history.status_renamed"]</FluentOption>
                 <FluentOption Value="Skipped">@L["history.status_skipped"]</FluentOption>
@@ -40,8 +40,8 @@
         }
         else
         {
-            <FluentDataGrid Items="@FilteredItems()" TGridItem="RenameHistory"
-                            ShowHover="true" Pagination="@_pagination"
+            <FluentDataGrid Items="@_pageItems.AsQueryable()" TGridItem="RenameHistory"
+                            ShowHover="true"
                             RowSize="DataGridRowSize.Medium"
                             Style="font-size:13px;width:100%;">
                 <TemplateColumn Title="@(L["history.col_date"])" Width="120px">
@@ -75,7 +75,19 @@
                     }
                 </TemplateColumn>
             </FluentDataGrid>
-            <FluentPaginator State="@_pagination" />
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;font-size:13px;">
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size16.ChevronLeft())"
+                              Disabled="@(_pageIndex == 0)"
+                              OnClick="PrevPageAsync" />
+                <span style="color:var(--neutral-foreground-hint);">
+                    @(_totalCount == 0 ? 0 : _pageIndex * PageSize + 1)–@(Math.Min(_totalCount, (_pageIndex + 1) * PageSize)) / @_totalCount
+                </span>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size16.ChevronRight())"
+                              Disabled="@((_pageIndex + 1) * PageSize >= _totalCount)"
+                              OnClick="NextPageAsync" />
+            </div>
         }
         </div>
     </FluentTab>
@@ -177,7 +189,13 @@
 </FluentDialog>
 
 @code {
-    private List<RenameHistory> _history = [];
+    private const int PageSize = 50;
+
+    // H-6: server-side paginated history page.
+    private List<RenameHistory> _pageItems = [];
+    private int _pageIndex;
+    private int _totalCount;
+
     private List<FolderWatcher> _allFolders = [];
     private List<IdentificationQueue> _scanJobs = [];
     private bool _loading = true;
@@ -186,7 +204,6 @@
     private string _scanFilterFolder = "";
     private string _scanFilterStatus = "";
     private string _activeTab = "renames";
-    private PaginationState _pagination = new() { ItemsPerPage = 50 };
     private HashSet<Guid> _expandedScanIds = [];
 
     private bool _revertHidden = true;
@@ -202,7 +219,7 @@
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         _allFolders = await db.FolderWatchers.OrderBy(f => f.Label).ToListAsync();
-        _history    = await db.RenameHistories.OrderByDescending(h => h.ProcessedAt).ToListAsync();
+        await LoadHistoryPageAsync(db);
         _scanJobs   = await db.IdentificationQueues
             .OrderByDescending(q => q.ProcessedAt ?? q.QueuedAt)
             .Take(200)
@@ -210,18 +227,56 @@
         StateHasChanged();
     }
 
-    private void ResetFilters()     { _filterFolder = ""; _filterStatus = ""; }
-    private void ResetScanFilters() { _scanFilterFolder = ""; _scanFilterStatus = ""; }
-
-    private IQueryable<RenameHistory> FilteredItems()
+    private async Task LoadHistoryPageAsync(AppDbContext db)
     {
-        var q = _history.AsQueryable();
+        // Build the filter at the DB level so we don't load 10k rows into memory.
+        IQueryable<RenameHistory> q = db.RenameHistories;
         if (!string.IsNullOrEmpty(_filterFolder) && Guid.TryParse(_filterFolder, out var fid))
             q = q.Where(h => h.FolderId == fid);
         if (!string.IsNullOrEmpty(_filterStatus) && Enum.TryParse<RenameStatus>(_filterStatus, out var st))
             q = q.Where(h => h.Status == st);
-        return q;
+
+        _totalCount = await q.CountAsync();
+        if (_pageIndex * PageSize >= _totalCount)
+            _pageIndex = Math.Max(0, (_totalCount - 1) / PageSize);
+
+        _pageItems = await q
+            .OrderByDescending(h => h.ProcessedAt)
+            .Skip(_pageIndex * PageSize)
+            .Take(PageSize)
+            .ToListAsync();
     }
+
+    private async Task OnFilterChangedAsync()
+    {
+        _pageIndex = 0;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await LoadHistoryPageAsync(db);
+    }
+
+    private async Task NextPageAsync()
+    {
+        if ((_pageIndex + 1) * PageSize >= _totalCount) return;
+        _pageIndex++;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await LoadHistoryPageAsync(db);
+    }
+
+    private async Task PrevPageAsync()
+    {
+        if (_pageIndex == 0) return;
+        _pageIndex--;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await LoadHistoryPageAsync(db);
+    }
+
+    private async Task ResetFilters()
+    {
+        _filterFolder = ""; _filterStatus = "";
+        await OnFilterChangedAsync();
+    }
+
+    private void ResetScanFilters() { _scanFilterFolder = ""; _scanFilterStatus = ""; }
 
     private IEnumerable<IdentificationQueue> FilteredScanJobs()
     {
