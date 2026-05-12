@@ -595,9 +595,26 @@ else
                 _fanartUrl = BuildUrl(_item.Folder.Path, _item.FanartPath, _imageVersion);
                 _logoUrl   = BuildUrl(_item.Folder.Path, _item.LogoPath,   _imageVersion);
 
-                LoadFilesystem(_item.Folder.Path);
-                await LoadSubDirMediaIdsAsync(db, _item.Folder.Path);
-                await BuildEpisodeFileMapAsync(_item.Folder.Id, _item.Folder.Path, _item.Folder.FolderType);
+                // SingleFilePath entries are individual movies stored as bare
+                // files inside a flat section; the "containing folder" is the
+                // section root shared with many other movies. Don't render the
+                // entire section's file list — just this one file.
+                if (_item.Folder.SingleFilePath is { Length: > 0 } single && File.Exists(single))
+                {
+                    var fi = new FileInfo(single);
+                    _subDirs  = [];
+                    _subFiles = [new FileEntry(
+                        Name:     fi.Name,
+                        FullPath: fi.FullName,
+                        Size:     fi.Length,
+                        Ext:      fi.Extension)];
+                }
+                else
+                {
+                    LoadFilesystem(_item.Folder.Path);
+                    await LoadSubDirMediaIdsAsync(db, _item.Folder.Path);
+                    await BuildEpisodeFileMapAsync(_item.Folder.Id, _item.Folder.Path, _item.Folder.FolderType);
+                }
             }
 
             // Auto-load first season episodes
