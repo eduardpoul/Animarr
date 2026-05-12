@@ -49,7 +49,7 @@ public class FolderWatcherService(
 
         foreach (var folder in enabledFolders)
         {
-            StartWatcherInternal(folder.Id, folder.Path, folder.IsSection);
+            StartWatcherInternal(folder.Id, folder.Path, folder.IsSection, folder.FlatSection);
         }
 
         logger.LogInformation("Started {Count} folder watchers.", _watchers.Count);
@@ -84,7 +84,7 @@ public class FolderWatcherService(
             var folder = await db.FolderWatchers.FindAsync(folderId);
             if (folder is null) return;
 
-            StartWatcherInternal(folderId, folder.Path, folder.IsSection);
+            StartWatcherInternal(folderId, folder.Path, folder.IsSection, folder.FlatSection);
             logger.LogInformation("Watcher started for folder {Id} ({Path})", folderId, folder.Path);
         }
         finally
@@ -112,9 +112,15 @@ public class FolderWatcherService(
 
     public bool IsWatching(Guid folderId) => _watchers.ContainsKey(folderId);
 
+    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v",
+        ".ts", ".m2ts", ".webm", ".flv", ".ogv"
+    };
+
     // ─── Internal watcher creation ────────────────────────────────────────────
 
-    private void StartWatcherInternal(Guid folderId, string path, bool isSection = false)
+    private void StartWatcherInternal(Guid folderId, string path, bool isSection = false, bool flatSection = false)
     {
         if (!Directory.Exists(path))
         {
@@ -136,14 +142,30 @@ public class FolderWatcherService(
         FileSystemWatcher? dirWatcher = null;
         if (isSection)
         {
-            dirWatcher = new FileSystemWatcher(path)
+            if (flatSection)
             {
-                IncludeSubdirectories = false,
-                NotifyFilter = NotifyFilters.DirectoryName,
-                EnableRaisingEvents = true,
-            };
-            dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
-            dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
+                // Flat section: watch for video files directly in the root
+                dirWatcher = new FileSystemWatcher(path)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.FileName,
+                    EnableRaisingEvents = true,
+                };
+                dirWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+                dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FlatWatcher error for {Path}", path);
+            }
+            else
+            {
+                // Normal section: watch for new subdirectories
+                dirWatcher = new FileSystemWatcher(path)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.DirectoryName,
+                    EnableRaisingEvents = true,
+                };
+                dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
+                dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
+            }
         }
 
         _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher);
@@ -233,6 +255,78 @@ public class FolderWatcherService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error auto-registering subfolder {Path}", dirPath);
+            }
+        });
+    }
+
+    private void OnVideoFileCreated(string filePath, Guid sectionId)
+    {
+        // Only handle video files directly in the section root
+        if (!_videoExtensions.Contains(Path.GetExtension(filePath))) return;
+        if (!string.Equals(Path.GetDirectoryName(filePath), null, StringComparison.OrdinalIgnoreCase))
+        {
+            // Ensure the file is directly in the section root (not a subfolder)
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(500);
+
+                await using var db = await dbFactory.CreateDbContextAsync();
+
+                // Skip if already registered by SingleFilePath
+                if (await db.FolderWatchers.AnyAsync(f => f.SingleFilePath == filePath))
+                    return;
+
+                var section = await db.FolderWatchers.FindAsync(sectionId);
+                if (section is null) return;
+
+                var newFolder = new FolderWatcher
+                {
+                    Id              = Guid.NewGuid(),
+                    Path            = section.Path,
+                    SingleFilePath  = filePath,
+                    Label           = Path.GetFileNameWithoutExtension(filePath),
+                    WatchEnabled    = false,   // flat entries don't need their own watcher
+                    RenameEnabled   = section.RenameEnabled,
+                    IdentifyEnabled = section.IdentifyEnabled,
+                    FolderType      = FolderType.Movie,
+                    IsSection       = false,
+                    FlatSection     = false,
+                    ParentSectionId = sectionId,
+                    CreatedAt       = DateTime.UtcNow,
+                };
+                db.FolderWatchers.Add(newFolder);
+                await db.SaveChangesAsync();
+
+                logger.LogInformation("Auto-registered flat movie: {Path}", filePath);
+
+                // Enqueue identification if AutoIdentify is enabled AND section allows it
+                using (var scope = scopeFactory.CreateScope())
+                {
+                    var appCfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+                    var autoIdentify = await appCfg.GetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, true);
+                    if (autoIdentify && newFolder.IdentifyEnabled)
+                    {
+                        await using var idDb = await dbFactory.CreateDbContextAsync();
+                        idDb.IdentificationQueues.Add(new Data.Models.IdentificationQueue
+                        {
+                            Id       = Guid.NewGuid(),
+                            FolderId = newFolder.Id,
+                            QueuedAt = DateTime.UtcNow,
+                        });
+                        await idDb.SaveChangesAsync();
+                        logger.LogDebug("Queued identification for flat movie {Path}", filePath);
+                    }
+                }
+
+                SubfolderCreated?.Invoke(sectionId, newFolder.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error auto-registering flat movie {Path}", filePath);
             }
         });
     }

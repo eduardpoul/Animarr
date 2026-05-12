@@ -65,8 +65,12 @@ public class MetadataService(
         item.LlmIdentifiedTitle = llmResult?.Title;
         item.LlmConfidence      = llmResult?.Confidence;
 
-        var searchTitle = llmResult?.Title ?? ParseTitleFromPath(folder.Path);
-        var folderYear  = llmResult?.Year ?? ExtractYearFromPath(folder.Path);
+        // Title/year source — flat files use the filename without extension; otherwise the folder path.
+        var titleSource = folder.SingleFilePath != null
+            ? Path.GetFileNameWithoutExtension(folder.SingleFilePath)
+            : folder.Path;
+        var searchTitle = llmResult?.Title ?? ParseTitleFromPath(titleSource);
+        var folderYear  = llmResult?.Year ?? ExtractYearFromPath(titleSource);
 
         // Phase 1.5: prefer LLM type hint over manual FolderType when confidence is decent.
         // This biases TMDB endpoint selection (TV vs Movie) without forcing the user to
@@ -329,9 +333,12 @@ public class MetadataService(
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
         if (!ok)
-            throw new InvalidOperationException(
-                $"ID \u00ab{externalId}\u00bb: metadata fetch failed for source '{source}'. " +
-                $"TMDB requires a valid API key (configure in Settings).");
+        {
+            var hint = source.StartsWith("tmdb", StringComparison.Ordinal)
+                ? await BuildTmdbErrorHintAsync(externalId.ToString(), source, ct)
+                : $"ID «{externalId}» not found in source '{source}'.";
+            throw new InvalidOperationException(hint);
+        }
     }
 
     /// <summary>Apply metadata using a string external ID (IMDb "tt...", TVDB integer as string).</summary>
@@ -392,6 +399,23 @@ public class MetadataService(
     }
 
     // ── Public: image picker ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a human-readable error message for a failed TMDB manual lookup.
+    /// Distinguishes between: missing/invalid API key, ID exists but wrong media type, ID doesn't exist.
+    /// </summary>
+    private async Task<string> BuildTmdbErrorHintAsync(string idStr, string source, CancellationToken ct)
+    {
+        var apiKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return $"ID «{idStr}»: TMDB API key is not configured (go to Settings → API Keys).";
+
+        // The key exists but the call failed. Give a hint about wrong source.
+        var otherSource = source == "tmdb_tv" ? "tmdb_movie" : "tmdb_tv";
+        var otherLabel  = source == "tmdb_tv" ? "a Movie" : "a TV Series";
+        return $"ID «{idStr}» was not found as {(source == "tmdb_tv" ? "a TV Series" : "a Movie")} on TMDB. " +
+               $"If this is {otherLabel}, switch the source dropdown to \"{otherSource}\" and try again.";
+    }
 
     /// <summary>Returns all available poster/backdrop/logo URLs for the item (requires TmdbId or cross-referenceable ImdbId/TvdbId).</summary>
     public async Task<(List<string> Posters, List<string> Backdrops, List<string> Logos)>
@@ -480,7 +504,7 @@ public class MetadataService(
 
         var metaDir  = MetaDir(folder);
         var destPath = Path.Combine(metaDir, fileName);
-        var relPath  = Path.Combine(".animarr", fileName);
+        var relPath  = Path.GetRelativePath(folder.Path, destPath);
         if (!await tmdb.DownloadImageAsync(fullUrl, destPath, ct))
             throw new InvalidOperationException($"Failed to download image from {fullUrl}");
 
@@ -998,7 +1022,9 @@ public class MetadataService(
 
     private static string MetaDir(FolderWatcher folder)
     {
-        var dir = Path.Combine(folder.Path, ".animarr");
+        var dir = folder.SingleFilePath != null
+            ? Path.Combine(folder.Path, ".animarr", folder.Id.ToString("N"))
+            : Path.Combine(folder.Path, ".animarr");
         Directory.CreateDirectory(dir);
         return dir;
     }
@@ -1019,8 +1045,8 @@ public class MetadataService(
         {
             var ext  = Path.GetExtension(poster.Split('?')[0]);
             var name = "poster" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
-            var rel  = Path.Combine(".animarr", name);
             var dest = Path.Combine(metaDir, name);
+            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
                 log?.Invoke($"[Images] Downloading poster → {rel}");
@@ -1044,8 +1070,8 @@ public class MetadataService(
         {
             var ext  = Path.GetExtension(fanart.Split('?')[0]);
             var name = "fanart" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
-            var rel  = Path.Combine(".animarr", name);
             var dest = Path.Combine(metaDir, name);
+            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
                 log?.Invoke($"[Images] Downloading fanart → {rel}");
@@ -1065,8 +1091,8 @@ public class MetadataService(
         {
             var ext  = Path.GetExtension(logo.Split('?')[0]);
             var name = "logo" + (string.IsNullOrEmpty(ext) ? ".png" : ext);
-            var rel  = Path.Combine(".animarr", name);
             var dest = Path.Combine(metaDir, name);
+            var rel  = Path.GetRelativePath(folder.Path, dest);
             if (forceRefresh || !File.Exists(dest))
             {
                 log?.Invoke($"[Images] Downloading logo → {rel}");
@@ -1203,15 +1229,22 @@ public class MetadataService(
         name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(](1080p|720p|480p|4K|UHD|BluRay|BDRip|WEB-DL|WEBRip|HEVC|x265|x264|AVC|AAC|DTS|FLAC|HDR|SDR).*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         name = name.Replace('.', ' ').Replace('_', ' ');
         name = System.Text.RegularExpressions.Regex.Replace(name, @"\s{2,}", " ").Trim();
+        // Strip trailing standalone 4-digit year (e.g. "Movie Name 2024" from "Movie.Name.2024")
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s(19|20)\d{2}\s*$", "").Trim();
         return name;
     }
 
     private static int? ExtractYearFromPath(string folderPath)
     {
         var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
+        // Bracketed year: (2024) or [2024]
         var m = System.Text.RegularExpressions.Regex.Match(name, @"[\[\(](\d{4})[\]\)]");
         if (m.Success && int.TryParse(m.Groups[1].Value, out var y) && y is >= 1900 and <= 2099)
             return y;
+        // Dot/space/dash-separated trailing year: Movie.Name.2024 or Movie Name - 2024
+        var m2 = System.Text.RegularExpressions.Regex.Match(name, @"[.\s\-]((?:19|20)\d{2})(?:[.\s]|$)");
+        if (m2.Success && int.TryParse(m2.Groups[1].Value, out var y2) && y2 is >= 1900 and <= 2099)
+            return y2;
         return null;
     }
 
