@@ -1137,15 +1137,16 @@ else
         {
             var section = new FolderWatcher
             {
-                Id            = Guid.NewGuid(),
-                Path          = _formPath.Trim(),
-                Label         = _formLabel.Trim(),
-                WatchEnabled  = _formWatch,
-                RenameEnabled = _formRenameEnabled,
-                FlatSection   = _formFlatSection,
-                FolderType    = _formRenameEnabled ? folderType : FolderType.Auto,
-                IsSection     = true,
-                CreatedAt     = DateTime.UtcNow,
+                Id              = Guid.NewGuid(),
+                Path            = _formPath.Trim(),
+                Label           = _formLabel.Trim(),
+                WatchEnabled    = _formWatch,
+                IdentifyEnabled = _formWatch,            // master "Active" → also auto-identify
+                RenameEnabled   = _formRenameEnabled,
+                FlatSection     = _formFlatSection,
+                FolderType      = _formRenameEnabled ? folderType : FolderType.Auto,
+                IsSection       = true,
+                CreatedAt       = DateTime.UtcNow,
             };
             db.FolderWatchers.Add(section);
             await db.SaveChangesAsync();
@@ -1158,12 +1159,13 @@ else
             var entity = await db.FolderWatchers.FindAsync(_sectionEditTarget.Id);
             if (entity is null) return;
             var wasEnabled = entity.WatchEnabled;
-            entity.Path          = _formPath.Trim();
-            entity.Label         = _formLabel.Trim();
-            entity.WatchEnabled  = _formWatch;
-            entity.RenameEnabled = _formRenameEnabled;
-            entity.FlatSection   = _formFlatSection;
-            entity.FolderType    = _formRenameEnabled ? folderType : FolderType.Auto;
+            entity.Path            = _formPath.Trim();
+            entity.Label           = _formLabel.Trim();
+            entity.WatchEnabled    = _formWatch;
+            entity.IdentifyEnabled = _formWatch;
+            entity.RenameEnabled   = _formRenameEnabled;
+            entity.FlatSection     = _formFlatSection;
+            entity.FolderType      = _formRenameEnabled ? folderType : FolderType.Auto;
             await db.SaveChangesAsync();
             if (!wasEnabled && _formWatch) await WatcherService.StartWatcherAsync(entity.Id);
             else if (wasEnabled && !_formWatch) await WatcherService.StopWatcherAsync(entity.Id);
@@ -1422,6 +1424,7 @@ else
                 Path            = norm,
                 Label           = Path.GetFileName(norm),
                 WatchEnabled    = section.WatchEnabled,
+                IdentifyEnabled = section.IdentifyEnabled,   // inherit from section so Rescan picks them up
                 FolderType      = section.FolderType,
                 RenameEnabled   = section.RenameEnabled,
                 IsSection       = false,
