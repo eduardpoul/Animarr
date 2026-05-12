@@ -242,12 +242,18 @@ public class MetadataService(
         }
 
         // ── Phase 3: Apply winner ─────────────────────────────────────────────
+        // Treat newly-created MediaItems as forceRefresh — the .animarr/<folderHex>/
+        // image directory may still contain stale files from a previous, wrong
+        // identification on the same folder (e.g. The Gorge 1968 → corrected to 2025
+        // but the 1968 poster lingered in cache). The folder hex is keyed on
+        // FolderWatcher.Id, which is stable across MediaItem re-creation.
+        var imgRefresh = forceRefresh || isNew;
         bool identified = winner.Source switch
         {
-            "tmdb_tv"      => await PopulateTvFromTmdbAsync(item, folder, winner.Id, forceRefresh, log, ct),
-            "tmdb_movie"   => await PopulateMovieFromTmdbAsync(item, folder, winner.Id, forceRefresh, log, ct),
+            "tmdb_tv"      => await PopulateTvFromTmdbAsync(item, folder, winner.Id, imgRefresh, log, ct),
+            "tmdb_movie"   => await PopulateMovieFromTmdbAsync(item, folder, winner.Id, imgRefresh, log, ct),
             "mal"          => await PopulateFromMalAsync(item, folder, winner.Id, log, ct),
-            "imdb_search"  => await PopulateFromImdbSearchAsync(item, folder, winner.StringId!, winner.IsTv, forceRefresh, log, ct),
+            "imdb_search"  => await PopulateFromImdbSearchAsync(item, folder, winner.StringId!, winner.IsTv, imgRefresh, log, ct),
             _              => false,
         };
 
