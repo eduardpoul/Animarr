@@ -1394,6 +1394,10 @@ else
             .Where(f => f.ParentSectionId == section.Id)
             .Select(f => f.Path)
             .ToHashSetAsync();
+        var existingSingleFiles = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == section.Id && f.SingleFilePath != null)
+            .Select(f => f.SingleFilePath!)
+            .ToHashSetAsync();
 
         // Bug-fix "New Folder reappears": load dismissed-paths set for this section.
         var dismissedKey = $"dismissed.section.{section.Id}";
@@ -1428,6 +1432,34 @@ else
                 FolderType      = section.FolderType,
                 RenameEnabled   = section.RenameEnabled,
                 IsSection       = false,
+                ParentSectionId = section.Id,
+                CreatedAt       = DateTime.UtcNow,
+            });
+        }
+
+        // Also pick up top-level video files as flat-section MediaItems. Always
+        // run this so the user doesn't have to know about the FlatSection flag —
+        // dismissed-paths handles the case where they want a file ignored.
+        var videoExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".m2ts" };
+        foreach (var file in Directory.EnumerateFiles(section.Path))
+        {
+            if (!videoExts.Contains(Path.GetExtension(file))) continue;
+            if (existingSingleFiles.Contains(file)) continue;
+            if (dismissed.Contains(file)) continue;
+
+            toAdd.Add(new FolderWatcher
+            {
+                Id              = Guid.NewGuid(),
+                Path            = section.Path,          // logical "folder" is the section root
+                SingleFilePath  = file,
+                Label           = Path.GetFileNameWithoutExtension(file),
+                WatchEnabled    = false,                  // flat entries don't need their own watcher
+                IdentifyEnabled = section.IdentifyEnabled,
+                FolderType      = FolderType.Movie,       // single-file entries are always movies
+                RenameEnabled   = section.RenameEnabled,
+                IsSection       = false,
+                FlatSection     = false,
                 ParentSectionId = section.Id,
                 CreatedAt       = DateTime.UtcNow,
             });
