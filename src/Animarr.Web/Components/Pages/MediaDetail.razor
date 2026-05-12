@@ -575,7 +575,7 @@ else
     private Dictionary<(int s, int ep), string> _episodeFileMap = [];
 
     // Phase 2.3: top-3 candidates parsed from MediaItem.CandidatesJson
-    private record CandidateRow(int Id, string? StringId, string Title, int? Year, string Type, string? Overview, string? PosterUrl);
+    private record CandidateRow(int Id, string? StringId, string Title, int? Year, string Type, bool IsTv, string? Overview, string? PosterUrl);
     private List<CandidateRow> _candidateList = [];
     private bool _applyingCandidate;
 
@@ -690,9 +690,10 @@ else
                 var title     = el.TryGetProperty("Title",     out var pTit) ? pTit.GetString() ?? "" : "";
                 int? year     = el.TryGetProperty("Year",      out var pYr)  && pYr.ValueKind == System.Text.Json.JsonValueKind.Number ? pYr.GetInt32() : null;
                 var type      = el.TryGetProperty("Type",      out var pTy)  ? pTy.GetString() ?? "" : "";
+                var isTv      = el.TryGetProperty("IsTv",      out var pIt)  && pIt.ValueKind == System.Text.Json.JsonValueKind.True;
                 var ov        = el.TryGetProperty("Overview",  out var pOv)  && pOv.ValueKind == System.Text.Json.JsonValueKind.String ? pOv.GetString() : null;
                 var posterUrl = el.TryGetProperty("PosterUrl", out var pPu)  && pPu.ValueKind == System.Text.Json.JsonValueKind.String ? pPu.GetString() : null;
-                list.Add(new CandidateRow(id, stringId, title, year, type, ov, posterUrl));
+                list.Add(new CandidateRow(id, stringId, title, year, type, isTv, ov, posterUrl));
             }
             return list;
         }
@@ -716,7 +717,20 @@ else
         try
         {
             // CandidateRow.Type is the source key from MetadataService (e.g. "tmdb_tv").
-            await MetadataService.ApplyManualAsync(_item.FolderId, cand.Type, cand.Id);
+            // IMDb candidates carry their tt-id in StringId, not Id (Id is 0). The string
+            // overload of ApplyManualAsync expects sources "imdb_tv" / "imdb_movie" — map
+            // "imdb_search" using IsTv so the right TMDB FindByExternalId path is taken.
+            if (cand.Type == "imdb_search")
+            {
+                if (string.IsNullOrEmpty(cand.StringId))
+                    throw new InvalidOperationException("IMDb candidate is missing its tt-id.");
+                var imdbSource = cand.IsTv ? "imdb_tv" : "imdb_movie";
+                await MetadataService.ApplyManualAsync(_item.FolderId, imdbSource, cand.StringId);
+            }
+            else
+            {
+                await MetadataService.ApplyManualAsync(_item.FolderId, cand.Type, cand.Id);
+            }
             ToastService.ShowToast(ToastIntent.Success, L["media_detail.review_applied"]);
             // Reload everything.
             await OnParametersSetAsync();

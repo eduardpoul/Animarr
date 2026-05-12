@@ -209,6 +209,7 @@ public class MetadataService(
                 Title     = c.Title,
                 Year      = c.Year,
                 Type      = c.Source,
+                IsTv      = c.IsTv,        // needed by UI to dispatch imdb_search → imdb_tv vs imdb_movie
                 Overview  = c.Overview,
                 PosterUrl = c.PosterUrl,
             }).ToList(), _json);
