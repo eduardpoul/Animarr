@@ -158,6 +158,15 @@
     @if (_navStack.Count == 0)
     {
         <span style="font-size:22px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@L["explorer.title"]</span>
+        @* Global: rescan every section for newly-arrived subfolders + queue identification
+           for any unidentified library entries. Useful after upgrading the app or after
+           adding folders on disk while the container was off. *@
+        <FluentButton Appearance="Appearance.Outline"
+                      IconStart="@(new Icons.Regular.Size20.ArrowSync())"
+                      Disabled="@_rescanningAll"
+                      OnClick="RescanAllAsync">
+            @(_rescanningAll ? L["folders.btn_identifying"] : L["explorer.btn_rescan_all"])
+        </FluentButton>
         <FluentButton Appearance="Appearance.Accent"
                       IconStart="@(new Icons.Regular.Size20.Add())"
                       OnClick="@(() => OpenSectionDialog(null))">
@@ -266,6 +275,16 @@ else
             @if (_currentFolderWatcher != null)
             {
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    @if (_currentFolderWatcher.IsSection)
+                    {
+                        @* Re-scan section for new subfolders that appeared on disk
+                           (e.g. added while the container was off, or pre-update). *@
+                        <FluentButton Appearance="Appearance.Outline"
+                                      IconStart="@(new Icons.Regular.Size16.ArrowSync())"
+                                      OnClick="@(() => RefreshSection(_currentFolderWatcher))">
+                            @L["explorer.btn_refresh_tooltip"]
+                        </FluentButton>
+                    }
                     <FluentButton Appearance="Appearance.Outline"
                                   IconStart="@(new Icons.Regular.Size16.DocumentSearch())"
                                   OnClick="IdentifyCurrentFolderAsync">
@@ -1303,6 +1322,66 @@ else
                 ? L.Get("explorer.toast_found_subfolders", count)
                 : L["explorer.toast_no_subfolders"]);
         await LoadAsync();
+    }
+
+    private bool _rescanningAll;
+
+    /// <summary>
+    /// Whole-library rescan: walks every section, picks up subfolders that
+    /// appeared on disk while the watcher was off / before the upgrade, then
+    /// queues identification for anything still un-identified.
+    /// </summary>
+    private async Task RescanAllAsync()
+    {
+        _rescanningAll = true;
+        StateHasChanged();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var sections = await db.FolderWatchers
+                .Where(f => f.IsSection)
+                .ToListAsync();
+
+            int discovered = 0;
+            foreach (var s in sections)
+                discovered += await DiscoverChildrenAsync(db, s);
+
+            // Queue identification for every folder that hasn't been identified yet.
+            var pendingFolderIds = await db.FolderWatchers
+                .Where(f => !f.IsSection && f.IdentifyEnabled)
+                .Where(f => !db.MediaItems.Any(m =>
+                    m.FolderId == f.Id &&
+                    (m.IdentificationStatus == IdentificationStatus.Identified ||
+                     m.IdentificationStatus == IdentificationStatus.Manual)))
+                .Select(f => f.Id)
+                .ToListAsync();
+
+            int queued = 0;
+            foreach (var id in pendingFolderIds)
+            {
+                var already = await db.IdentificationQueues.AnyAsync(q =>
+                    q.FolderId == id &&
+                    (q.Status == IdentificationQueueStatus.Queued ||
+                     q.Status == IdentificationQueueStatus.Processing));
+                if (already) continue;
+                db.IdentificationQueues.Add(new IdentificationQueue
+                {
+                    Id       = Guid.NewGuid(),
+                    FolderId = id,
+                    QueuedAt = DateTime.UtcNow,
+                });
+                queued++;
+            }
+            if (queued > 0) await db.SaveChangesAsync();
+
+            ToastService.ShowToast(ToastIntent.Success,
+                L.Get("explorer.toast_rescan_done", discovered, queued));
+            await LoadAsync();
+        }
+        finally
+        {
+            _rescanningAll = false;
+        }
     }
 
     private async Task<int> DiscoverChildrenAsync(AppDbContext db, FolderWatcher section)

@@ -196,6 +196,8 @@
   "explorer.empty": "No sections added. Click \u00abAdd Section\u00bb to get started.",
   "explorer.tooltip_monitor": "Toggle monitoring",
   "explorer.btn_refresh_tooltip": "Scan for new subfolders",
+  "explorer.btn_rescan_all": "Rescan library",
+  "explorer.toast_rescan_done": "Rescan done — {0} new subfolders, {1} queued for identification.",
   "explorer.btn_scan": "Scan files",
   "explorer.btn_identify": "Identify",
   "explorer.btn_hide_scan": "Hide scan",

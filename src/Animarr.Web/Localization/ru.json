@@ -198,6 +198,8 @@
   "explorer.empty": "Разделы не добавлены. Нажмите «Добавить раздел» чтобы начать.",
   "explorer.tooltip_monitor": "Вкл/выкл мониторинг",
   "explorer.btn_refresh_tooltip": "Найти новые подпапки",
+  "explorer.btn_rescan_all": "Пересканировать библиотеку",
+  "explorer.toast_rescan_done": "Готово — {0} новых подпапок, {1} в очереди на опознание.",
   "explorer.btn_scan": "Сканировать файлы",
   "explorer.btn_identify": "Определить",
   "explorer.btn_hide_scan": "Скрыть сканирование",
