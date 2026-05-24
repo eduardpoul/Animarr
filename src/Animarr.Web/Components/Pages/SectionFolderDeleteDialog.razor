@@ -1,0 +1,105 @@
+@*
+    Section folder delete-confirm dialog.
+    Used from Settings → Root folders. The cascade-delete logic mirrors what
+    Explorer.razor::ConfirmDelete did for sections (drop child watchers + their
+    queue rows + cascade MediaItems). Files on disk are always preserved.
+*@
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IToastService Toast
+@inject FolderWatcherService WatcherService
+
+<div class="sfdd-overlay" @onclick="CancelAsync"></div>
+<div class="sfdd" role="dialog" aria-modal="true" @onclick:stopPropagation>
+    <header class="sfdd__header">
+        <div class="sfdd__header-icon"><DIcon Name="warn" Size="17" /></div>
+        <div class="sfdd__header-text">
+            <div class="sfdd__overline">DANGER</div>
+            <h2 class="sfdd__title">@L.Get("settings.root_folders.delete_title", Section.Label)</h2>
+            <div class="sfdd__sub">@L["settings.root_folders.delete_body"]</div>
+        </div>
+        <button type="button" class="sfdd__close" @onclick="CancelAsync" aria-label="Close">
+            <DIcon Name="x" Size="18" />
+        </button>
+    </header>
+
+    <footer class="sfdd__footer">
+        @* Remove cascades through children + queue rows + (optionally) files —
+           surface the in-flight state via the Btn primitive. Spec: loaders.html §04. *@
+        <Btn Variant="danger" Size="md" OnClick="ConfirmAsync" Loading="@_removing">
+            @L["settings.root_folders.btn_remove"]
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CancelAsync" Disabled="@_removing">
+            @L["settings.root_folders.btn_cancel"]
+        </Btn>
+    </footer>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public FolderWatcher Section { get; set; } = null!;
+    [Parameter] public EventCallback OnRemoved { get; set; }
+    [Parameter] public EventCallback OnCanceled { get; set; }
+
+    private bool _removing;
+
+    private async Task ConfirmAsync()
+    {
+        _removing = true;
+        StateHasChanged();
+        try
+        {
+            // Stop the section's own watcher first.
+            try { await WatcherService.StopWatcherAsync(Section.Id); } catch { /* best-effort */ }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Stop and remove every child watcher of this section.
+            var children = await db.FolderWatchers
+                .Where(f => f.ParentSectionId == Section.Id)
+                .ToListAsync();
+            foreach (var child in children)
+            {
+                try { await WatcherService.StopWatcherAsync(child.Id); } catch { /* best-effort */ }
+            }
+            var childIds = children.Select(c => c.Id).ToList();
+
+            // Drop child MediaItems so the catalog doesn't keep ghosts.
+            // (MediaItems cascade-link to FolderWatchers via FolderId.)
+            if (childIds.Count > 0)
+            {
+                await db.MediaItems
+                    .Where(m => childIds.Contains(m.FolderId))
+                    .ExecuteDeleteAsync();
+
+                // Drop any pending identification queue rows for those children.
+                await db.IdentificationQueues
+                    .Where(q => childIds.Contains(q.FolderId)
+                                && q.Status != IdentificationQueueStatus.Processing)
+                    .ExecuteDeleteAsync();
+            }
+
+            // Drop the child FolderWatchers themselves.
+            db.FolderWatchers.RemoveRange(children);
+
+            // Finally, remove the section itself.
+            var entity = await db.FolderWatchers.FindAsync(Section.Id);
+            if (entity is not null)
+                db.FolderWatchers.Remove(entity);
+            await db.SaveChangesAsync();
+
+            Toast.ShowSuccess(L.Get("settings.root_folders.toast_removed", Section.Label));
+            await OnRemoved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.ShowError(ex.Message);
+        }
+        finally
+        {
+            _removing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CancelAsync() => await OnCanceled.InvokeAsync();
+}

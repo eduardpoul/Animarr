@@ -1,0 +1,24 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<header class="fdlg__header">
+    <div class="fdlg__header-body">@ChildContent</div>
+    @if (ShowDismiss)
+    {
+        <button type="button" class="fdlg__close" @onclick="OnDismiss" aria-label="Close">
+            <DIcon Name="x" Size="18" />
+        </button>
+    }
+</header>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool ShowDismiss { get; set; }
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+
+    private async Task OnDismiss()
+    {
+        if (Dialog is null) return;
+        Dialog.Hidden = true;
+        await Dialog.HiddenChanged.InvokeAsync(true);
+    }
+}

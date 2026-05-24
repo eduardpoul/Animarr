@@ -1,0 +1,24 @@
+.fpag {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    justify-content: flex-end;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.fpag__btn {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.fpag__btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent-line); }
+.fpag__btn:disabled { opacity: 0.4; cursor: not-allowed; }

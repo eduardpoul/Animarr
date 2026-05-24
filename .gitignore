@@ -29,6 +29,12 @@ logs/
 ## Deploy scripts (private)
 deploy/
 
+## Blazor Data Protection keys — server-local secrets, NEVER commit.
+**/dp-keys/
+
+## Claude Code session state / worktrees / cache.
+.claude/
+
 ## Node
 node_modules/
 

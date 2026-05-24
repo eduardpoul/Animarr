@@ -1,0 +1,56 @@
+@implements IDisposable
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IdentificationQueueProcessorService QueueProc
+
+@*
+    Catalog filter-bar chip that opens the NeedsReview modal inline (NOT via
+    DialogService — we want pixel-perfect chrome that matches the design
+    spec exactly, not FluentDialog's wrapper).
+*@
+
+@if (_count > 0)
+{
+    <button type="button" class="nr-chip" @onclick="@(() => _open = true)" title="@($"{_count} need review")">
+        <DIcon Name="warn" Size="14" />
+        <span class="nr-chip__label">NEEDS REVIEW · @_count</span>
+        <span class="nr-chip__dot"></span>
+    </button>
+}
+
+<NeedsReviewDialog IsOpen="_open" OnClose="OnDialogClose" />
+
+@code {
+    private int  _count;
+    private bool _open;
+
+    protected override async Task OnInitializedAsync()
+    {
+        QueueProc.ItemIdentified += OnItemIdentified;
+        await RefreshCountAsync();
+    }
+
+    private async Task RefreshCountAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _count = await db.MediaItems
+            .CountAsync(m => m.IdentificationStatus == IdentificationStatus.NeedsReview);
+    }
+
+    private void OnItemIdentified(Guid _) => InvokeAsync(async () =>
+    {
+        await RefreshCountAsync();
+        StateHasChanged();
+    });
+
+    private async Task OnDialogClose()
+    {
+        _open = false;
+        await RefreshCountAsync();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        QueueProc.ItemIdentified -= OnItemIdentified;
+    }
+}

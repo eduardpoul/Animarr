@@ -23,6 +23,16 @@ public class MetadataService(
 {
     private static readonly JsonSerializerOptions _json = new() { WriteIndented = false };
 
+    /// <summary>Fires after a MediaItem's metadata has been changed (manual apply, basics save,
+    /// re-identify, image swap). Subscribers re-query their slice — Catalog grid refreshes the
+    /// poster, NeedsReview chip re-counts, MediaDetail page re-loads. Pure push, no payload —
+    /// subscribers go back to the DB for the new state.</summary>
+    public event Action<Guid>? MediaItemChanged;
+
+    /// <summary>Raise the change notification — called by ApplyManualAsync, ApplySelectedImageAsync,
+    /// and any other write-path that needs to signal UI subscribers.</summary>
+    public void NotifyMediaItemChanged(Guid folderId) => MediaItemChanged?.Invoke(folderId);
+
     // Candidate gathered from any search source
     private sealed record MetadataCandidate(
         string  Source,          // "tmdb_tv" | "tmdb_movie" | "mal" | "imdb_search"
@@ -299,7 +309,13 @@ public class MetadataService(
             //   ≥ autoApply           → Identified (use as-is, auto-rename)
             //   ≥ needsReview         → NeedsReview (poster shown, badge "needs review", top-3 in CandidatesJson)
             //   < needsReview         → Failed
-            var autoThreshold   = await appConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence, 0.85, ct);
+            // Auto-apply default raised from 0.85 → 0.95 after the user observed
+            // false-positives sneaking in around 85-90% confidence (LLM-normalised
+            // weak base scores were flooring at the review threshold). At 0.95
+            // only TMDB hits with 475+ votes or strong LLM+source agreement pass
+            // auto-apply; everything else lands in NeedsReview with top-3
+            // candidates for manual review via the design's NR modal.
+            var autoThreshold   = await appConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence, 0.95, ct);
             var reviewThreshold = await appConfig.GetAsync<double>(AppConfigKeys.NeedsReviewConfidence, 0.50, ct);
 
             if (winner.Score >= autoThreshold)
@@ -370,6 +386,13 @@ public class MetadataService(
         // Clear stale metadata so we get a clean slate
         item.TmdbId = null; item.ImdbId = null; item.TvdbId = null; item.MalId = null;
         item.PosterPath = null; item.FanartPath = null; item.LogoPath = null;
+        // New design fields: clear too so a re-identify against a different source can't carry over
+        // a stale studio/language/tags string from the previous match.
+        item.Studio = null; item.Language = null; item.EpisodeCount = null; item.SeasonLabel = null;
+        item.CjkTitle = null; item.EnglishTitle = null; item.TagsJson = null;
+        item.TmdbConfidence = null; item.MalConfidence = null; item.ImdbConfidence = null;
+        // Hue is intentionally preserved across re-identify — the user may have manually edited it,
+        // and the same title should keep its tint even after switching source.
 
         bool ok = source switch
         {
@@ -378,6 +401,23 @@ public class MetadataService(
             "mal"        => await PopulateFromMalAsync(item, folder, externalId, null, ct),
             _            => false,
         };
+
+        // TMDB IDs don't overlap between /tv/ and /movie/, but a folder's
+        // initial MediaType guess (which decides which endpoint we tried first)
+        // is frequently wrong — a "Movies" section can contain a series and
+        // vice versa. So if the first endpoint 404'd, transparently try the
+        // other one. PopulateXxxFromTmdb sets MediaType to Series/Movie itself,
+        // so the item ends up correctly typed regardless of the folder's guess.
+        if (!ok && source == "tmdb_tv")
+        {
+            ok = await PopulateMovieFromTmdbAsync(item, folder, externalId, true, null, ct);
+            if (ok) source = "tmdb_movie";
+        }
+        else if (!ok && source == "tmdb_movie")
+        {
+            ok = await PopulateTvFromTmdbAsync(item, folder, externalId, true, null, ct);
+            if (ok) source = "tmdb_tv";
+        }
 
         if (ok)
         {
@@ -388,6 +428,7 @@ public class MetadataService(
 
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
+        if (ok) NotifyMediaItemChanged(folderId);
         if (!ok)
         {
             var hint = source.StartsWith("tmdb", StringComparison.Ordinal)
@@ -411,6 +452,13 @@ public class MetadataService(
         // Clear stale metadata so we get a clean slate
         item.TmdbId = null; item.ImdbId = null; item.TvdbId = null; item.MalId = null;
         item.PosterPath = null; item.FanartPath = null; item.LogoPath = null;
+        // New design fields: clear too so a re-identify against a different source can't carry over
+        // a stale studio/language/tags string from the previous match.
+        item.Studio = null; item.Language = null; item.EpisodeCount = null; item.SeasonLabel = null;
+        item.CjkTitle = null; item.EnglishTitle = null; item.TagsJson = null;
+        item.TmdbConfidence = null; item.MalConfidence = null; item.ImdbConfidence = null;
+        // Hue is intentionally preserved across re-identify — the user may have manually edited it,
+        // and the same title should keep its tint even after switching source.
 
         bool ok = false;
         if (source is "imdb_tv" or "imdb_movie" or "tvdb_tv")
@@ -512,26 +560,45 @@ public class MetadataService(
             }
         }
 
-        if (!item.TmdbId.HasValue)
-            return ([], [], []);
+        var posters   = new List<string>();
+        var backdrops = new List<string>();
+        var logos     = new List<string>();
 
-        var isTv   = item.MediaType != MediaItemType.Movie;
-        var images = isTv
-            ? await tmdb.GetTvImagesAsync(item.TmdbId.Value, ct)
-            : await tmdb.GetMovieImagesAsync(item.TmdbId.Value, ct);
+        // TMDB (multiple variants per image, vote-sorted)
+        if (item.TmdbId.HasValue)
+        {
+            var isTv   = item.MediaType != MediaItemType.Movie;
+            var images = isTv
+                ? await tmdb.GetTvImagesAsync(item.TmdbId.Value, ct)
+                : await tmdb.GetMovieImagesAsync(item.TmdbId.Value, ct);
 
-        if (images is null) return ([], [], []);
+            if (images is not null)
+            {
+                static IEnumerable<string> ToUrls(List<TmdbImage> list, Func<string, string> urlFn)
+                    => list.OrderByDescending(i => i.VoteAverage).Select(i => urlFn(i.FilePath));
 
-        static List<string> ToUrls(List<TmdbImage> list, Func<string, string> urlFn)
-            => list.OrderByDescending(i => i.VoteAverage)
-                   .Select(i => urlFn(i.FilePath))
-                   .ToList();
+                posters  .AddRange(ToUrls(images.Posters,   p => TmdbClient.PosterUrl(p,   "w342")));
+                backdrops.AddRange(ToUrls(images.Backdrops, p => TmdbClient.BackdropUrl(p, "w780")));
+                logos    .AddRange(ToUrls(images.Logos,     p => TmdbClient.LogoUrl(p,     "w300")));
+            }
+        }
 
-        return (
-            ToUrls(images.Posters,   p => TmdbClient.PosterUrl(p, "w342")),
-            ToUrls(images.Backdrops, p => TmdbClient.BackdropUrl(p, "w780")),
-            ToUrls(images.Logos,     p => TmdbClient.LogoUrl(p, "w300"))
-        );
+        // MAL (anime) — append any extra poster candidates from the pictures array
+        if (item.MalId.HasValue)
+        {
+            var malDetail = await mal.GetDetailAsync(item.MalId.Value, ct);
+            if (malDetail is not null)
+            {
+                IEnumerable<string?> malPosters = malDetail.Pictures
+                    .Select(p => p.Large ?? p.Medium)
+                    .Prepend(malDetail.MainPicture?.Large ?? malDetail.MainPicture?.Medium);
+                foreach (var url in malPosters)
+                    if (!string.IsNullOrWhiteSpace(url) && !posters.Contains(url))
+                        posters.Add(url);
+            }
+        }
+
+        return (posters, backdrops, logos);
     }
 
     /// <summary>Downloads the chosen image and saves it as poster/fanart/logo for the folder.</summary>
@@ -973,9 +1040,37 @@ public class MetadataService(
         item.ContentRating = detail.ContentRating;
         item.Rating        = detail.VoteAverage > 0 ? detail.VoteAverage : null;
         item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
+        item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
         item.Runtime       = detail.EpisodeRunTime.FirstOrDefault();
         item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
+        item.Studio        = detail.StudioName;
+        item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
+        item.EpisodeCount  = detail.NumberOfEpisodes > 0
+            ? detail.NumberOfEpisodes
+            : detail.Seasons.Where(s => s.SeasonNumber > 0).Sum(s => s.EpisodeCount);
+        item.SeasonLabel   = detail.NumberOfSeasons > 1
+            ? $"S{detail.NumberOfSeasons}"
+            : null;
         item.MediaType     = MediaItemType.Series;
+        item.Hue          ??= HueHash.For(detail.Name);
+
+        // Per-source confidence — TMDB has solid vote_count signal; map to 0..1.
+        // (VoteCount of 500+ pegs at 1.0; 0 votes → 0.0 — keeps the curve readable in UI.)
+        item.TmdbConfidence = Math.Min(1.0, detail.VoteCount / 500.0);
+
+        // Descriptive tags from keywords (Donghua/Cultivation/Mecha-style labels).
+        // Stored separately from genres because the design hero uses "tags pills" rather than genre tags.
+        var keywords = detail.Keywords?.All.Select(k => k.Name).Take(8).ToList() ?? [];
+        if (keywords.Count > 0)
+            item.TagsJson = JsonSerializer.Serialize(keywords, _json);
+
+        // CJK title — if the original language is a CJK locale, mirror OriginalName into CjkTitle
+        // so the hero CJK watermark has a value separate from English-aliased OriginalTitle.
+        if (detail.OriginalLanguage is "zh" or "ja" or "ko" && !string.IsNullOrWhiteSpace(detail.OriginalName))
+            item.CjkTitle = detail.OriginalName;
+
+        // English alternative — fetch translations and pick the en-US "name" if it differs from Title.
+        await TryEnrichEnglishTitleAsync(item, isTv: true, detail.Id, ct);
 
         // Seasons — include PosterPath so Explorer can show thumbnails
         var seasons = detail.Seasons
@@ -1033,9 +1128,25 @@ public class MetadataService(
         item.ContentRating = detail.ContentRating;
         item.Rating        = detail.VoteAverage > 0 ? detail.VoteAverage : null;
         item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
+        item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
         item.Runtime       = detail.Runtime;
         item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
+        item.Studio        = detail.StudioName;
+        item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
+        item.EpisodeCount  = null;          // movies have no episodes — explicit null beats stale value on re-identify
+        item.SeasonLabel   = null;
         item.MediaType     = MediaItemType.Movie;
+        item.Hue          ??= HueHash.For(detail.Title);
+        item.TmdbConfidence = Math.Min(1.0, detail.VoteCount / 500.0);
+
+        var keywords = detail.Keywords?.All.Select(k => k.Name).Take(8).ToList() ?? [];
+        if (keywords.Count > 0)
+            item.TagsJson = JsonSerializer.Serialize(keywords, _json);
+
+        if (detail.OriginalLanguage is "zh" or "ja" or "ko" && !string.IsNullOrWhiteSpace(detail.OriginalTitle))
+            item.CjkTitle = detail.OriginalTitle;
+
+        await TryEnrichEnglishTitleAsync(item, isTv: false, detail.Id, ct);
 
         item.IdentificationStatus = IdentificationStatus.Identified;
 
@@ -1061,10 +1172,34 @@ public class MetadataService(
         item.MalId         = detail.Id;
         item.Title         = detail.EnglishTitle ?? detail.Title;
         item.OriginalTitle = detail.AlternativeTitles?.Ja ?? detail.Title;
+        // MAL anime are virtually always Japanese — populate CjkTitle when we have a JA alt-title
+        // distinct from the romanized display title.
+        if (!string.IsNullOrWhiteSpace(detail.AlternativeTitles?.Ja)
+            && detail.AlternativeTitles.Ja != item.Title)
+            item.CjkTitle = detail.AlternativeTitles.Ja;
+        if (!string.IsNullOrWhiteSpace(detail.AlternativeTitles?.En)
+            && detail.AlternativeTitles.En != item.Title)
+            item.EnglishTitle = detail.AlternativeTitles.En;
         item.Year          ??= detail.Year;
         item.Description   ??= detail.Synopsis;
         if (item.Rating is null && detail.Mean.HasValue)               item.Rating      = detail.Mean;
         if (item.RatingCount is null && detail.NumScoringUsers.HasValue) item.RatingCount = detail.NumScoringUsers;
+        if (item.Popularity is null && detail.Popularity.HasValue)     item.Popularity  = detail.Popularity;
+        if (item.Studio is null && detail.StudioName is not null)      item.Studio      = detail.StudioName;
+        if (item.Runtime is null && detail.RuntimeMinutes.HasValue)    item.Runtime     = detail.RuntimeMinutes;
+        // MAL anime are Japanese by default — only set if not already set by a higher-priority TMDB pass.
+        item.Language     ??= "Japanese";
+        if (detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
+            item.EpisodeCount = detail.NumEpisodes;
+        item.SeasonLabel  ??= detail.StartSeason is not null
+            ? $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}"
+            : null;
+        item.Hue          ??= HueHash.For(item.Title);
+        // MAL confidence proxy: num_scoring_users — 50k+ voters pegs at 1.0.
+        item.MalConfidence = detail.NumScoringUsers.HasValue
+            ? Math.Min(1.0, detail.NumScoringUsers.Value / 50000.0)
+            : null;
+
         if (detail.Genres.Count > 0)
             item.GenresJson = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
 
@@ -1165,12 +1300,16 @@ public class MetadataService(
         {
             item.Rating      = detail.Rating.AggregateRating;
             item.RatingCount = detail.Rating.VoteCount;
+            // IMDb confidence proxy: vote_count. IMDb's bar is higher than TMDB's because
+            // it's the long-tail source — 10k voters → ~1.0; matches what "established title" feels like.
+            item.ImdbConfidence = Math.Min(1.0, detail.Rating.VoteCount / 10000.0);
         }
         if (detail.Genres.Count > 0)
             item.GenresJson = JsonSerializer.Serialize(detail.Genres, _json);
 
         bool isTv = detail.Type is "tvSeries" or "tvMiniSeries" or "tvSpecial";
         item.MediaType = isTv ? MediaItemType.Series : MediaItemType.Movie;
+        item.Hue      ??= HueHash.For(detail.PrimaryTitle);
         item.IdentificationStatus = IdentificationStatus.Identified;
 
         // Download poster from imdbapi.dev primaryImage if available
@@ -1209,10 +1348,28 @@ public class MetadataService(
         item.MalId = detail.Id;
         if (string.IsNullOrWhiteSpace(item.Title))    item.Title         = detail.EnglishTitle;
         if (item.OriginalTitle is null)                item.OriginalTitle = detail.AlternativeTitles?.Ja ?? detail.Title;
+        // Enrich CJK / English alts only when missing — TMDB pass already populated them when it ran first.
+        if (item.CjkTitle is null && !string.IsNullOrWhiteSpace(detail.AlternativeTitles?.Ja))
+            item.CjkTitle = detail.AlternativeTitles.Ja;
+        if (item.EnglishTitle is null && !string.IsNullOrWhiteSpace(detail.AlternativeTitles?.En)
+            && detail.AlternativeTitles.En != item.Title)
+            item.EnglishTitle = detail.AlternativeTitles.En;
         if (item.Year is null)                         item.Year          = detail.Year;
         if (item.Description is null)                  item.Description   = detail.Synopsis;
         if (item.Rating is null && detail.Mean.HasValue)               item.Rating     = detail.Mean;
         if (item.RatingCount is null && detail.NumScoringUsers.HasValue) item.RatingCount = detail.NumScoringUsers;
+        if (item.Popularity is null && detail.Popularity.HasValue)      item.Popularity = detail.Popularity;
+        if (item.Studio is null && detail.StudioName is not null)       item.Studio     = detail.StudioName;
+        if (item.Runtime is null && detail.RuntimeMinutes.HasValue)     item.Runtime    = detail.RuntimeMinutes;
+        item.Language ??= "Japanese";
+        if (item.EpisodeCount is null && detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
+            item.EpisodeCount = detail.NumEpisodes;
+        if (item.SeasonLabel is null && detail.StartSeason is not null)
+            item.SeasonLabel = $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}";
+        item.Hue ??= HueHash.For(item.Title);
+        item.MalConfidence ??= detail.NumScoringUsers.HasValue
+            ? Math.Min(1.0, detail.NumScoringUsers.Value / 50000.0)
+            : null;
         if (item.GenresJson is null && detail.Genres.Count > 0)
             item.GenresJson = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
 
@@ -1233,6 +1390,32 @@ public class MetadataService(
                 item.PosterPath = destPath;
             }
         }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string Capitalize(string s)
+        => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
+
+    /// <summary>Fetch translations and pick the en-US "name"/"title" when it differs from item.Title.
+    /// Cheap (one extra GET) but only fires when the primary detail came back in a non-English locale.</summary>
+    private async Task TryEnrichEnglishTitleAsync(MediaItem item, bool isTv, int tmdbId, CancellationToken ct)
+    {
+        // Skip when we already have a distinct English title or the primary title is already English.
+        if (!string.IsNullOrWhiteSpace(item.EnglishTitle)) return;
+
+        var translations = isTv
+            ? await tmdb.GetTvTranslationsAsync(tmdbId, ct)
+            : await tmdb.GetMovieTranslationsAsync(tmdbId, ct);
+        if (translations is null) return;
+
+        var en = translations.Translations
+            .FirstOrDefault(t => t.Language == "en" && t.Country == "US")
+            ?? translations.Translations.FirstOrDefault(t => t.Language == "en");
+
+        var enTitle = en?.Data?.DisplayTitle;
+        if (!string.IsNullOrWhiteSpace(enTitle) && enTitle != item.Title)
+            item.EnglishTitle = enTitle;
     }
 
     // ── Image download ────────────────────────────────────────────────────────
@@ -1435,15 +1618,49 @@ public class MetadataService(
     private static string ParseTitleFromPath(string folderPath)
     {
         var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
+
+        // 1. Bracketed year — strip the bracket cluster only (year still extracted by ExtractYearFromPath)
         name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(]\d{4}[\]\)]?\s*$", "").Trim();
+
+        // 2. Season/episode markers (TV files that slipped into a Movies section)
         name = System.Text.RegularExpressions.Regex.Replace(name, @"\s*-?\s*S\d{1,2}(E\d{1,2})?(\s*-\s*S?\d{1,2}E\d{1,2})?\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+(Season|Series|Part)\s*\d+.*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+\d+(st|nd|rd|th)\s+Season.*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(](1080p|720p|480p|4K|UHD|BluRay|BDRip|WEB-DL|WEBRip|HEVC|x265|x264|AVC|AAC|DTS|FLAC|HDR|SDR).*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+        // 3. Bracketed release-tag cluster (e.g. "(1080p BluRay x265)") — strip from the marker on
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(](1080p|720p|480p|2160p|4K|UHD|BluRay|BDRip|WEB-DL|WEBRip|HEVC|x265|x264|AVC|AAC|DTS|FLAC|HDR|SDR).*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+        // 4. Normalise separators — dots/underscores → spaces, then collapse runs.
         name = name.Replace('.', ' ').Replace('_', ' ');
         name = System.Text.RegularExpressions.Regex.Replace(name, @"\s{2,}", " ").Trim();
-        // Strip trailing standalone 4-digit year (e.g. "Movie Name 2024" from "Movie.Name.2024")
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s(19|20)\d{2}\s*$", "").Trim();
+
+        // 5. Release-noise word/year stripping. Many torrent-style filenames have the title +
+        //    a dot-separated release-tag run: "Соник 2 в кино 2022 UHD Blu-Ray Remux 2160p"
+        //    becomes "Соник 2 в кино" after this pass. Walk from the right, drop each token
+        //    that looks like noise; stop at the first token that doesn't match.
+        //    The earlier `\s(19|20)\d{2}\s*$` rule only caught the year if it was already
+        //    the trailing token after the regexes above — for files with year + release tags
+        //    after it, it missed.
+        var noise = new System.Text.RegularExpressions.Regex(
+            @"^(1080p|720p|480p|2160p|4K|UHD|BluRay|Blu-Ray|BDRip|BRRip|DVDRip|WEB-?DL|WEBRip|HEVC|x265|x264|H\.?265|H\.?264|AVC|AAC|AC3|DTS(?:-HD)?|TrueHD|FLAC|HDR|HDR10\+?|SDR|10bit|8bit|REMUX|Atmos|2CH|6CH|MA|Dolby|Hybrid|Extended|Director'?s?Cut|UNRATED|Theatrical|REPACK|PROPER|MULTi|DUAL|RUS|ENG|JAP|CHS|CHT|EN|RU|JA|ZH|KO|FR|DE|ES|IT|SUB|SUBS|DUB|DUBBED|FANSUB|YIFY|YTS|RARBG|FGT|EVO|CMRG|GalaxyRG|TGx|d3g|Telesync|TS|CAM|HDCAM|TC|TBS|VC-?1|10-?bit|HQ|HDTV|SDTV|BDR|BDRemux|REMASTERED|MAR-CAS|MeGusta|EPSiLON|SPARKS|NTb|FraMeSToR|DEFLATE|tigole|UTR|d3g)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+        var year = new System.Text.RegularExpressions.Regex(@"^(19|20)\d{2}$");
+
+        var tokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (tokens.Count > 0)
+        {
+            var last = tokens[^1];
+            if (noise.IsMatch(last) || year.IsMatch(last))
+            {
+                tokens.RemoveAt(tokens.Count - 1);
+                continue;
+            }
+            break;
+        }
+        name = string.Join(' ', tokens).Trim();
+
+        // Trailing punctuation that survived the strip.
+        name = name.Trim('-', '.', ' ', '_');
         return name;
     }
 

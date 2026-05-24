@@ -1,0 +1,10 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<div class="@($"flayout {CssClass}")" style="@Style" @attributes="Extra">@ChildContent</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? Style { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+}

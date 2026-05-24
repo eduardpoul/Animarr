@@ -1,98 +1,247 @@
-.page {
-    position: relative;
+/* ============================================================
+   MainLayout — scoped styles.
+   Owns the page chrome (sidebar + main column) and the
+   always-on backdrop slideshow positioning.
+   ============================================================ */
+
+.animarr-shell {
+    height: 100vh;
     display: flex;
     flex-direction: column;
 }
 
-main {
+/* Backdrop layer: fixed under everything, painted by backdrop.js.
+   Stack (z-order, bottom→top):
+     0  page background (bg-0)
+     1  slide A / slide B (painted by backdrop.js, blur/brightness/saturate applied)
+     2  vignette (radial fade-to-dark at edges)
+     3  hue tint (subtle accent wash) */
+.animarr-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* The slide elements themselves get their background-image + opacity
+   set by backdrop.js. Transition timing is overridden by the
+   .backdrop-slide rule in tokens.css to the design's 1.6s cross-fade. */
+.animarr-backdrop ::deep .backdrop-slide {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    pointer-events: none;
+}
+
+/* Vignette — radial darken at edges, lets center breathe. */
+.animarr-backdrop__vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 80% at 50% 30%,
+        transparent 0%,
+        rgba(10, 8, 7, 0.5) 60%,
+        rgba(10, 8, 7, 0.95) 100%);
+}
+
+/* Hue tint — pulls the whole backdrop toward the current accent palette.
+   Low opacity so the source image still reads through. */
+.animarr-backdrop__hue-tint {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: oklch(0.66 0.20 var(--accent-hue) / 0.10);
+    mix-blend-mode: color;
+}
+
+/* Body row: sidebar + main column */
+.animarr-body {
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    position: relative;
+    z-index: 2;
 }
 
-.sidebar {
-    background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
+/* ── Sidebar ─────────────────────────────────────────── */
+.animarr-sidebar {
+    width: var(--width-sidebar, 230px);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, rgba(20, 15, 12, 0.92), rgba(10, 8, 7, 0.88));
+    backdrop-filter: blur(20px);
+    border-right: 1px solid var(--border);
 }
 
-.top-row {
-    background-color: #f7f7f7;
-    border-bottom: 1px solid #d6d5d5;
-    justify-content: flex-end;
-    height: 3.5rem;
+/* SidebarLlmStatus uses margin-top: auto on .llm-card to pin itself to the bottom. */
+
+.animarr-brand {
     display: flex;
     align-items: center;
+    gap: 12px;
+    padding: 18px 18px 16px;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none;
+    color: inherit;
+    flex-shrink: 0;
 }
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
-        white-space: nowrap;
-        margin-left: 1.5rem;
-        text-decoration: none;
-    }
+/* Gradient mark — CANVAS §01.6.6.
+   Inline letter "A" in Archivo Black 16px on a 135° accent→darker-accent fill. */
+.animarr-brand-mark {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue)));
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    color: #fff;
+    font-size: 16px;
+    flex-shrink: 0;
+    line-height: 1;
+}
 
-    .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
-        text-decoration: underline;
-    }
+.animarr-brand-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    color: var(--text);
+}
 
-    .top-row ::deep a:first-child {
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
+.animarr-brand-build {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-faint);
+    margin-top: 3px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
 
-@media (max-width: 640.98px) {
-    .top-row {
-        justify-content: space-between;
-    }
+/* Count badge — small mono number on the right of nav items. */
+.animarr-sidebar ::deep .sb-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+}
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
-        margin-left: 0;
+/* LIVE badge — pulsing green dot + uppercase mono label, success colored. */
+.animarr-sidebar ::deep .sb-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--success);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+.animarr-sidebar ::deep .sb-live__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 6px;
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+    animation: sb-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sb-live-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+}
+
+/* ── Main content column ─────────────────────────────── */
+.animarr-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px 24px 24px;
+}
+
+/* ──────────────────────────────────────────────────────
+   Mobile / tablet — collapse the 230px sidebar.
+   .d-mobile-nav and .d-tabbar visibility flips live in
+   Styles/components.css §14 (they're outside this scoped
+   CSS file). Here we only hide the desktop sidebar and
+   add the bottom-tabbar-safe padding to the main column.
+   ────────────────────────────────────────────────────── */
+@media (max-width: 959px) {
+    .animarr-body {
+        flex-direction: column;
+    }
+    .animarr-sidebar {
+        display: none;
+    }
+    .animarr-main {
+        /* Above the bottom tabbar (78px) — generous so action buttons clear. */
+        padding: 14px 16px 96px;
     }
 }
 
-@media (min-width: 641px) {
-    .page {
-        flex-direction: row;
-    }
-
-    .sidebar {
-        width: 250px;
-        height: 100vh;
-        position: sticky;
-        top: 0;
-    }
-
-    .top-row {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-    }
-
-    .top-row.auth ::deep a:first-child {
-        flex: 1;
-        text-align: right;
-        width: 0;
-    }
-
-    .top-row, article {
-        padding-left: 2rem !important;
-        padding-right: 1.5rem !important;
+@media (max-width: 639px) {
+    .animarr-main {
+        padding: 12px 14px 96px;
     }
 }
 
-#blazor-error-ui {
-    color-scheme: light only;
-    background: lightyellow;
-    bottom: 0;
-    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
-    box-sizing: border-box;
-    display: none;
-    left: 0;
-    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+/* ── Toast stack — replaces FluentToastProvider.
+   Lives at the bottom-right of the viewport, above the backdrop and
+   sidebar; pointer-events: none on the stack so the page underneath
+   remains clickable, but individual toasts opt back in. */
+.ml-toast-stack {
     position: fixed;
-    width: 100%;
-    z-index: 1000;
+    right: 22px;
+    bottom: 22px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
 }
 
-    #blazor-error-ui .dismiss {
-        cursor: pointer;
-        position: absolute;
-        right: 0.75rem;
-        top: 0.5rem;
-    }
+.ml-toast {
+    pointer-events: auto;
+    min-width: 240px;
+    max-width: 360px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    box-shadow: var(--shadow-modal);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    animation: ml-toast-in 0.2s ease;
+}
+
+@keyframes ml-toast-in {
+    from { transform: translateY(8px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+
+.ml-toast--success { border-left-color: var(--success); }
+.ml-toast--warning { border-left-color: var(--warn); }
+.ml-toast--error   { border-left-color: oklch(0.66 0.20 25); }
+.ml-toast--info    { border-left-color: var(--info); }
+
+.ml-toast__msg { flex: 1; }
+.ml-toast__close {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    padding: 2px 4px;
+    margin: -2px -4px;
+}
+.ml-toast__close:hover { color: var(--text); }

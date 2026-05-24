@@ -1,0 +1,146 @@
+@*
+    Episode card with the design's ON DISK / MISSING visual language plus
+    two-corner chips (CHANGELOG §4). The chips on the thumbnail are peers:
+
+      • TOP-RIGHT — disk-status (immutable):
+          ✓  green tint  = file on disk
+          ⚠  amber tint  = missing
+
+      • BOTTOM-RIGHT — watched-eye (user toggles):
+          eye-open  = unwatched
+          eye-off   = watched (closed eye + green tint)
+
+    Watched-state modifier (.d-ep--watched) drops opacity + saturates the
+    thumb + flips the left strip to text-faint.
+
+    Bottom progress bar overlays the thumb's bottom edge: gradient when
+    in-progress, flat text-faint when fully watched.
+
+    Spec: design_handoff_animarr/CHANGELOG_FOR_CLAUDE_CODE.md §4.
+*@
+
+<div class="@CssClass" title="@Title">
+    <div class="d-ep__strip"></div>
+    <div class="d-ep__art">
+        @if (!string.IsNullOrEmpty(ThumbUrl))
+        {
+            <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" />
+        }
+        else
+        {
+            <div class="d-ep__placeholder"><DIcon Name="video" Size="20" /></div>
+        }
+
+        @* Big episode number sits over the thumb, top-left. *@
+        <div class="d-ep__num">@Number.ToString("00")</div>
+
+        @* TOP-RIGHT — disk-status chip. 26×26, peers with the eye below. *@
+        @if (Have)
+        {
+            <div class="d-ep__chip d-ep__chip--ok"
+                 title="On disk"><DIcon Name="check" Size="13" /></div>
+        }
+        else
+        {
+            <div class="d-ep__chip d-ep__chip--miss"
+                 title="Missing — not downloaded"><DIcon Name="warn" Size="13" /></div>
+        }
+
+        @* BOTTOM-RIGHT — watched-eye chip. Same 26×26 box size as disk-status
+           per CHANGELOG §4 ("must be the same size on the same card").
+           Only renders when the file is on disk — there's nothing to mark as
+           watched when it's missing. *@
+        @if (Have)
+        {
+            <button type="button"
+                    class="@EyeClass"
+                    title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
+                    @onclick="OnEyeClick"
+                    @onclick:stopPropagation="true">
+                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="13" />
+            </button>
+        }
+
+        @* Hover overlays — play button for on-disk, EMPTY box for missing. *@
+        @if (Have)
+        {
+            <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="22" /></div>
+        }
+        else
+        {
+            <div class="d-ep__overlay d-ep__overlay--miss">
+                <DIcon Name="download" Size="18" />
+                <span class="d-ep__overlay-label">EMPTY</span>
+            </div>
+        }
+
+        @* Progress bar — 3px on episode card. Pinned to thumb bottom edge.
+           Inline width is the only data-bound style allowed (spec §constraints). *@
+        @if (Have && (IsWatched || ProgressPct > 0))
+        {
+            <div class="d-ep__pb">
+                <div class="@ProgressFillClass" style="width: @(IsWatched ? 100 : ProgressPct)%"></div>
+            </div>
+        }
+    </div>
+
+    <div class="d-ep__body">
+        <div class="d-ep__title">@Title</div>
+        <div class="d-ep__meta">@Meta</div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int     Number   { get; set; }
+    [Parameter] public string  Title    { get; set; } = "";
+    [Parameter] public string? ThumbUrl { get; set; }
+    [Parameter] public string  Meta     { get; set; } = "";
+    [Parameter] public bool    Have     { get; set; }
+
+    /// <summary>Per-episode WatchState as resolved by the parent (MediaDetail).
+    /// Null = user hasn't touched this episode yet (no row in WatchStates).</summary>
+    [Parameter] public WatchState? WatchState { get; set; }
+
+    /// <summary>Fires when the user clicks the watched-eye chip. Parent calls
+    /// IWatchStateService.MarkEpisodeAsync.</summary>
+    [Parameter] public EventCallback OnToggleWatched { get; set; }
+
+    private bool IsWatched => WatchState?.IsWatched == true;
+
+    /// <summary>Progress percentage 1..99 when mid-watch, else 0. Capped so the
+    /// bar never reaches 100% unless IsWatched is true (avoids the "stuck at end" look).</summary>
+    private int ProgressPct
+    {
+        get
+        {
+            if (WatchState is { ProgressMs: > 0, RuntimeMs: > 0 } w)
+            {
+                var pct = (int)Math.Round(100.0 * w.ProgressMs!.Value / w.RuntimeMs!.Value);
+                return Math.Clamp(pct, 1, 99);
+            }
+            return 0;
+        }
+    }
+
+    private string CssClass
+    {
+        get
+        {
+            var cls = Have ? "d-ep d-ep--have" : "d-ep d-ep--miss";
+            if (Have && IsWatched) cls += " d-ep--watched";
+            return cls;
+        }
+    }
+
+    /// <summary>Watched-eye chip variants. Same dimensions as the disk-status chip
+    /// so they stay visually paired in the corner — CHANGELOG §4 "peers".</summary>
+    private string EyeClass => IsWatched
+        ? "d-ep__chip d-ep__chip--eye d-ep__chip--eye-on"
+        : "d-ep__chip d-ep__chip--eye d-ep__chip--eye-off";
+
+    private string ProgressFillClass => IsWatched
+        ? "d-ep__pb-fill d-ep__pb-fill--done"
+        : "d-ep__pb-fill d-ep__pb-fill--inprog";
+
+    private Task OnEyeClick() => OnToggleWatched.InvokeAsync();
+}

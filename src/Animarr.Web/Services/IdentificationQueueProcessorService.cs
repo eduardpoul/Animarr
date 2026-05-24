@@ -18,15 +18,56 @@ public class IdentificationQueueProcessorService(
     private const int PollMs    = 2000;
     private const int MaxRetries = 3;
 
+    // ── Live counters & events ──────────────────────────────────────────────
+    // Subscribed by the sidebar LLM status card, Settings → AI/LLM hero card,
+    // and the Catalog NeedsReview chip. In-process events replace the SignalR
+    // hub channels described in the design contract — same push semantics, no
+    // protocol overhead.
+
+    public int  QueueDepth { get; private set; }
+    public int  QueueProcessedSinceStart { get; private set; }
+    public Guid? CurrentlyProcessingFolderId { get; private set; }
+
+    /// <summary>Count of items the pipeline finished as Identified | Manual since process start.</summary>
+    public int HitCount  { get; private set; }
+    /// <summary>Count of items that ended up NeedsReview | Failed since process start.</summary>
+    public int MissCount { get; private set; }
+    /// <summary>HitCount / (HitCount + MissCount). Returns 0 with no samples.</summary>
+    public double HitRate => (HitCount + MissCount) == 0
+        ? 0
+        : (double)HitCount / (HitCount + MissCount);
+
+    /// <summary>Fires when QueueDepth or CurrentlyProcessingFolderId changes — sidebar/AI panel re-render.</summary>
+    public event Action? QueueChanged;
+
+    /// <summary>Fires when an item finishes identification (success or failure).
+    /// Argument is the folder id whose status changed. Catalog/NeedsReview/MediaDetail react.</summary>
+    public event Action<Guid>? ItemIdentified;
+
+    private async Task RefreshQueueDepthAsync(CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var newDepth = await db.IdentificationQueues
+            .CountAsync(q => q.Status == IdentificationQueueStatus.Queued
+                          || q.Status == IdentificationQueueStatus.Processing, ct);
+        if (newDepth != QueueDepth)
+        {
+            QueueDepth = newDepth;
+            QueueChanged?.Invoke();
+        }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await RecoverInterruptedJobsAsync();
+        await RefreshQueueDepthAsync(stoppingToken);
         _ = WarmUpOllamaAsync(stoppingToken);   // fire-and-forget warm-up
 
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollMs));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             await ProcessNextJobAsync(stoppingToken);
+            await RefreshQueueDepthAsync(stoppingToken);
         }
     }
 
@@ -77,6 +118,9 @@ public class IdentificationQueueProcessorService(
 
         job.Status = IdentificationQueueStatus.Processing;
         await db.SaveChangesAsync(ct);
+
+        CurrentlyProcessingFolderId = job.FolderId;
+        QueueChanged?.Invoke();
 
         try
         {
@@ -193,5 +237,25 @@ public class IdentificationQueueProcessorService(
         }
 
         await db.SaveChangesAsync(ct);
+
+        // Update hit-rate from the final MediaItem state.
+        await using (var statDb = await dbFactory.CreateDbContextAsync(ct))
+        {
+            var status = await statDb.MediaItems
+                .Where(m => m.FolderId == job.FolderId)
+                .Select(m => (IdentificationStatus?)m.IdentificationStatus)
+                .FirstOrDefaultAsync(ct);
+            if (status is IdentificationStatus.Identified or IdentificationStatus.Manual)
+                HitCount++;
+            else if (status is IdentificationStatus.NeedsReview or IdentificationStatus.Failed)
+                MissCount++;
+        }
+
+        // Notify subscribers that this folder's identification finished (success OR failure).
+        // Catalog/NeedsReview/MediaDetail subscribers re-query.
+        CurrentlyProcessingFolderId = null;
+        QueueProcessedSinceStart++;
+        ItemIdentified?.Invoke(job.FolderId);
+        QueueChanged?.Invoke();
     }
 }

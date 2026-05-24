@@ -9,7 +9,13 @@ public class LocalizationService
 
     public string CurrentLanguage => _currentLanguage;
     public IReadOnlyList<(string Code, string Label)> SupportedLanguages { get; } =
-        [("en", "English"), ("ru", "Русский")];
+    [
+        ("en", "English"),
+        ("ru", "Русский"),
+        ("uk", "Українська"),
+        ("de", "Deutsch"),
+        ("es", "Español"),
+    ];
 
     public event Action? LanguageChanged;
 

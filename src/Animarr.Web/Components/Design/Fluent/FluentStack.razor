@@ -1,0 +1,37 @@
+@*
+    FluentStack: a flex container.
+    Common params: Orientation, VerticalAlignment, HorizontalAlignment, Style.
+*@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<div class="fstack" style="@Compose()" @attributes="Extra">@ChildContent</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public Orientation Orientation { get; set; } = Orientation.Horizontal;
+    [Parameter] public VerticalAlignment   VerticalAlignment   { get; set; } = VerticalAlignment.Center;
+    [Parameter] public HorizontalAlignment HorizontalAlignment { get; set; } = HorizontalAlignment.Start;
+    [Parameter] public string? Style { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+
+    private string Compose()
+    {
+        var dir = Orientation == Orientation.Vertical ? "column" : "row";
+        var ai  = VerticalAlignment switch
+        {
+            VerticalAlignment.Top    => "flex-start",
+            VerticalAlignment.Bottom => "flex-end",
+            VerticalAlignment.Stretch => "stretch",
+            _                        => "center",
+        };
+        var ji  = HorizontalAlignment switch
+        {
+            HorizontalAlignment.Center => "center",
+            HorizontalAlignment.End or HorizontalAlignment.Right => "flex-end",
+            HorizontalAlignment.Stretch => "stretch",
+            HorizontalAlignment.Space   => "space-between",
+            _                           => "flex-start",
+        };
+        return $"display:flex;flex-direction:{dir};align-items:{ai};justify-content:{ji};{Style}";
+    }
+}

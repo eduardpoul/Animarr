@@ -1,0 +1,42 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+@typeparam TValue
+
+<label class="ffield">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <span class="ffield__label">@Label</span>
+    }
+    <input class="ffield__input ffield__input--mono" type="number"
+           value="@Value?.ToString()"
+           placeholder="@Placeholder"
+           min="@Min?.ToString()" max="@Max?.ToString()" step="@(Step?.ToString() ?? "1")"
+           disabled="@Disabled"
+           style="@Style"
+           @oninput="OnInput"
+           @attributes="Extra" />
+</label>
+
+@code {
+    [Parameter] public TValue? Value { get; set; }
+    [Parameter] public EventCallback<TValue?> ValueChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public bool    Disabled { get; set; }
+    [Parameter] public TValue? Min { get; set; }
+    [Parameter] public TValue? Max { get; set; }
+    [Parameter] public TValue? Step { get; set; }
+    [Parameter] public string? Style { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString() ?? "";
+        if (string.IsNullOrEmpty(raw)) { await ValueChanged.InvokeAsync(default); return; }
+        try
+        {
+            var converted = (TValue?)Convert.ChangeType(raw, Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue));
+            await ValueChanged.InvokeAsync(converted);
+        }
+        catch { /* swallow parse errors */ }
+    }
+}

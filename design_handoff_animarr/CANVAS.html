@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr — Design Canvas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Archivo+Black&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+
+<style>
+:root {
+  --bg-0: #0a0807; --bg-1: #100d0b;
+  --surface: #15110e; --surface-2: #1c1814; --surface-3: #25201b;
+  --border: rgba(255, 240, 220, 0.07);
+  --border-strong: rgba(255, 240, 220, 0.14);
+  --text: #f4eee6; --text-dim: #a8a097; --text-faint: #5d564f;
+  --accent: oklch(0.66 0.20 25);
+  --accent-hi: oklch(0.74 0.21 25);
+  --accent-soft: oklch(0.66 0.20 25 / 0.16);
+  --accent-line: oklch(0.66 0.20 25 / 0.40);
+  --success: oklch(0.74 0.15 150);
+  --warn: oklch(0.80 0.17 75);
+  --info: oklch(0.74 0.10 240);
+  --font-ui: 'Geist', system-ui, sans-serif;
+  --font-display: 'Archivo Black', 'Geist', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-cjk: 'Noto Serif SC', serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background:
+    radial-gradient(60% 50% at 20% 0%, oklch(0.30 0.10 25 / 0.10), transparent 70%),
+    radial-gradient(50% 40% at 90% 30%, oklch(0.30 0.15 60 / 0.06), transparent 70%),
+    #050403;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 12px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+
+/* ===== top nav ===== */
+.topnav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,8,7,0.78);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 24px;
+  padding: 14px 28px;
+}
+.topnav .brand {
+  display: flex; align-items: center; gap: 12px;
+}
+.topnav .brand-mark {
+  width: 32px; height: 32px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 25));
+  display: grid; place-items: center;
+  font-family: var(--font-display); color: #fff; font-size: 18px;
+  box-shadow: 0 4px 16px var(--accent-soft);
+}
+.topnav .brand-text { font-family: var(--font-display); letter-spacing: -0.4px; font-size: 18px; }
+.topnav .sub { color: var(--text-dim); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.6px; }
+.topnav .links {
+  margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;
+}
+.topnav .links a {
+  text-decoration: none; color: var(--text-dim);
+  padding: 6px 12px; border-radius: 7px;
+  font-size: 12.5px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border);
+  transition: color .15s, background .15s, border-color .15s;
+}
+.topnav .links a:hover {
+  color: var(--text); background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+/* ===== sections ===== */
+.section {
+  padding: 60px 40px;
+  max-width: 1840px;
+  margin: 0 auto;
+}
+.section-head {
+  display: flex; align-items: flex-end; gap: 22px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+  margin-bottom: 38px;
+}
+.section-head .num {
+  font-family: var(--font-mono); color: var(--text-faint);
+  font-size: 12px; letter-spacing: 1.4px;
+  width: 60px;
+}
+.section-head h2 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 48px; line-height: 0.95; letter-spacing: -1.4px;
+  flex: 1;
+}
+.section-head p {
+  margin: 0 0 0 20px; color: var(--text-dim);
+  max-width: 460px; font-size: 14px;
+  text-align: right;
+}
+
+.section-sub {
+  font-family: var(--font-mono); color: var(--accent-hi);
+  font-size: 11px; letter-spacing: 1.4px;
+  margin: 36px 0 14px;
+}
+
+/* ===== design tokens cards ===== */
+.token-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.swatch {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+}
+.swatch .chip {
+  height: 80px; position: relative;
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.04) 75%),
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.04) 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+}
+.swatch .chip-inner { position: absolute; inset: 0; }
+.swatch .body { padding: 12px 14px; }
+.swatch .name {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.4px;
+  color: var(--text); font-weight: 600;
+}
+.swatch .val {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-faint); margin-top: 3px;
+  word-break: break-all;
+}
+
+/* ===== type specimens ===== */
+.type-row {
+  display: grid; grid-template-columns: 200px 1fr 160px;
+  gap: 24px; align-items: baseline;
+  padding: 20px 0; border-bottom: 1px solid var(--border);
+}
+.type-row .role {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px;
+  color: var(--text-faint); text-transform: uppercase;
+}
+.type-row .spec {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  text-align: right;
+}
+
+/* ===== spacing scale ===== */
+.spacing-row {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 8px;
+}
+.spacing-row .label {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-faint); width: 60px;
+}
+.spacing-row .bar {
+  height: 10px; background: var(--accent); border-radius: 2px;
+  box-shadow: 0 0 12px var(--accent-soft);
+}
+
+/* ===== icon grid ===== */
+.icon-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+}
+.icon-cell {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 8px; text-align: center;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  letter-spacing: 0.4px;
+}
+.icon-cell svg { color: var(--text-dim); margin-bottom: 8px; }
+
+/* ===== components inventory cards ===== */
+.comp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+}
+.comp-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+}
+.comp-card .head {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.comp-card .head .title {
+  font-family: var(--font-display); font-size: 13px; letter-spacing: -0.2px;
+}
+.comp-card .head .tag {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.6px;
+  color: var(--text-faint); text-transform: uppercase;
+}
+.comp-card .body {
+  padding: 20px 18px; background: var(--bg-1);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 80px; flex-wrap: wrap;
+}
+
+/* primitives — match real components */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 12px;
+  font-size: 12.5px; font-weight: 600;
+  border-radius: 6px; cursor: pointer; border: 1px solid transparent;
+  font-family: var(--font-ui);
+}
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.solid   { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+.btn.ghost   { background: transparent; color: var(--text-dim); border-color: var(--border-strong); }
+.btn.flat    { background: transparent; color: var(--text-dim); }
+.btn.danger  { background: transparent; color: var(--accent-hi); border-color: var(--accent-line); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.6px;
+  padding: 3px 7px; border-radius: 4px; text-transform: uppercase;
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.pill.accent  { background: var(--accent-soft); color: var(--accent-hi); border-color: var(--accent-line); }
+.pill.success { background: oklch(0.74 0.15 150 / 0.15); color: var(--success); border-color: oklch(0.55 0.15 150 / 0.35); }
+.pill.warn    { background: oklch(0.80 0.17 75 / 0.15); color: var(--warn); border-color: oklch(0.60 0.16 75 / 0.4); }
+
+.toggle {
+  width: 34px; height: 18px; border-radius: 18px;
+  background: rgba(255,255,255,0.12); position: relative;
+  display: inline-block;
+}
+.toggle.on { background: var(--accent); box-shadow: 0 0 12px var(--accent-soft); }
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 14px; background: #fff;
+  transition: left .15s ease;
+}
+.toggle.on::after { left: 18px; }
+
+/* status edge episode preview */
+.ep-mini {
+  width: 220px; height: 200px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; position: relative;
+  display: flex; flex-direction: column;
+}
+.ep-mini.missing { opacity: 0.45; border-style: dashed; border-color: rgba(255,240,220,0.12); }
+.ep-mini .strip {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--success); box-shadow: 0 0 12px var(--success);
+  z-index: 2;
+}
+.ep-mini.missing .strip { background: var(--warn); box-shadow: none; }
+.ep-mini .thumb {
+  flex: 1; position: relative;
+  background-size: cover; background-position: center;
+}
+.ep-mini.missing .thumb { filter: grayscale(1) brightness(0.55); }
+.ep-mini .thumb::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.78) 100%);
+}
+.ep-mini .num {
+  position: absolute; top: 10px; left: 14px;
+  font-family: var(--font-display); font-size: 30px; color: #fff;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.7); line-height: 1;
+  z-index: 1;
+}
+.ep-mini.missing .num { color: rgba(255,255,255,0.55); }
+.ep-mini .corner {
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  width: 26px; height: 26px; border-radius: 6px;
+  background: oklch(0.74 0.15 150 / 0.18);
+  border: 1px solid var(--success);
+  color: var(--success);
+  display: grid; place-items: center;
+}
+.ep-mini.missing .corner {
+  background: oklch(0.80 0.17 75 / 0.20);
+  border-color: var(--warn); color: var(--warn);
+}
+.ep-mini .meta {
+  padding: 10px 14px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  letter-spacing: 0.3px;
+}
+.ep-mini .meta .title {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 600;
+  color: var(--text); margin-bottom: 4px; letter-spacing: 0;
+}
+.ep-mini.missing .meta .title { color: var(--text-dim); }
+.ep-mini .meta .warn-color { color: var(--warn); }
+
+/* mini poster */
+.poster-mini {
+  width: 150px; height: 220px;
+  border-radius: 10px; overflow: hidden; position: relative;
+  background-size: cover; background-position: center;
+  box-shadow: 0 10px 30px -16px rgba(0,0,0,0.7);
+}
+.poster-mini::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 35%, rgba(0,0,0,0.85) 100%);
+}
+.poster-mini .cjk-wm {
+  position: absolute; top: 8px; right: 8px;
+  font-family: var(--font-cjk); font-size: 32px; line-height: 0.85;
+  color: rgba(255,255,255,0.55);
+  writing-mode: vertical-rl; text-orientation: upright;
+  letter-spacing: 2px;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.5);
+}
+.poster-mini .ribbon {
+  position: absolute; top: 8px; left: 8px;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.4px;
+  padding: 2px 6px; border-radius: 3px;
+  background: rgba(0,0,0,0.55); color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+  text-transform: uppercase;
+}
+.poster-mini .title-block {
+  position: absolute; left: 10px; right: 10px; bottom: 10px;
+}
+.poster-mini .title-block .title {
+  font-family: var(--font-display); font-size: 14px; color: #fff;
+  line-height: 1.05; letter-spacing: -0.3px;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.7);
+}
+.poster-mini .title-block .meta {
+  font-family: var(--font-mono); font-size: 9.5px;
+  color: var(--text-dim); margin-top: 4px;
+  display: flex; gap: 6px;
+}
+.poster-mini .title-block .meta .star { color: var(--accent-hi); }
+
+/* sidebar preview */
+.sidebar-preview {
+  width: 230px; padding: 18px; gap: 6px;
+  background: linear-gradient(180deg, rgba(20,15,12,0.92), rgba(10,8,7,0.88));
+  border: 1px solid var(--border); border-radius: 12px;
+  display: flex; flex-direction: column;
+}
+.sidebar-preview .brand-row {
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 14px; border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.sidebar-preview .nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px; border-radius: 8px;
+  color: var(--text-dim); font-size: 13px; font-weight: 500;
+  position: relative;
+}
+.sidebar-preview .nav-item.active {
+  background: linear-gradient(90deg, var(--accent-soft), transparent 80%);
+  color: var(--text); font-weight: 600;
+}
+.sidebar-preview .nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+  background: var(--accent); border-radius: 2px;
+}
+.sidebar-preview .nav-item .count {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+}
+.sidebar-preview .nav-item .live-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 9px; color: var(--success);
+  text-transform: uppercase; margin-left: auto;
+}
+.sidebar-preview .nav-item .live-badge .dot {
+  width: 6px; height: 6px; border-radius: 6px; background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+/* ===== frame grid (screen previews) ===== */
+.frame-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr));
+  gap: 28px;
+}
+.frame-grid.mobile {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+.frame {
+  position: relative;
+}
+.frame .label {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim); letter-spacing: 0.4px;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.frame .label .num {
+  background: var(--accent-soft); color: var(--accent-hi);
+  border: 1px solid var(--accent-line);
+  padding: 2px 6px; border-radius: 4px;
+  font-weight: 700; font-size: 10px;
+}
+.frame .label .title { color: var(--text); font-weight: 600; }
+.frame .label .open {
+  margin-left: auto; color: var(--text-faint); font-size: 10.5px;
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.frame .label .open:hover { color: var(--accent-hi); }
+.frame .canvas {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,0.7);
+}
+.frame .canvas iframe {
+  border: 0; display: block;
+  transform-origin: top left;
+}
+/* desktop frame: 1600x1000 scaled down to fit ~620 wide column */
+.frame-grid:not(.mobile) .canvas {
+  aspect-ratio: 1600 / 1000;
+  width: 100%;
+}
+.frame-grid:not(.mobile) .canvas iframe {
+  width: 1600px; height: 1000px;
+  transform: scale(calc((100vw - 80px - 28px) / 2 / 1600));
+}
+@media (max-width: 1200px) {
+  .frame-grid:not(.mobile) .canvas iframe {
+    transform: scale(calc((100vw - 80px) / 1600));
+  }
+}
+@media (min-width: 1840px) {
+  .frame-grid:not(.mobile) .canvas iframe {
+    transform: scale(calc(880 / 1600));
+  }
+}
+
+/* mobile frame */
+.frame-grid.mobile .canvas {
+  aspect-ratio: 600 / 920;
+  width: 100%;
+}
+.frame-grid.mobile .canvas iframe {
+  width: 600px; height: 920px;
+  transform: scale(calc((100vw - 80px - 28px - 28px) / 3 / 600));
+}
+@media (min-width: 1200px) and (max-width: 1839px) {
+  .frame-grid.mobile .canvas iframe { transform: scale(0.55); }
+}
+@media (min-width: 1840px) {
+  .frame-grid.mobile .canvas iframe { transform: scale(0.58); }
+}
+@media (max-width: 720px) {
+  .frame-grid.mobile .canvas iframe { transform: scale(calc((100vw - 80px) / 600)); }
+}
+
+/* ===== sitemap diagram ===== */
+.sitemap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 30px;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.85;
+  white-space: pre; color: var(--text-dim);
+  overflow-x: auto;
+}
+.sitemap .root { color: var(--text); font-weight: 700; }
+.sitemap .nav  { color: var(--accent-hi); }
+.sitemap .leaf { color: var(--text); }
+.sitemap .note { color: var(--text-faint); }
+
+/* footer */
+.footer {
+  padding: 40px; text-align: center;
+  color: var(--text-faint); font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.6px;
+}
+</style>
+</head>
+<body>
+
+<header class="topnav">
+  <div class="brand">
+    <div class="brand-mark">A</div>
+    <div>
+      <div class="brand-text">ANIMARR · DESIGN CANVAS</div>
+      <div class="sub">v3 desktop · mobile · design system</div>
+    </div>
+  </div>
+  <nav class="links">
+    <a href="#overview">Overview</a>
+    <a href="#system">Design system</a>
+    <a href="#sitemap">Sitemap</a>
+    <a href="#desktop">Desktop screens</a>
+    <a href="#mobile">Mobile screens</a>
+    <a href="pages/INDEX.html">↗ Open all states</a>
+  </nav>
+</header>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<!-- OVERVIEW -->
+<!-- ─────────────────────────────────────────────────────────── -->
+<section class="section" id="overview">
+  <div class="section-head">
+    <div class="num">00</div>
+    <h2>OVERVIEW</h2>
+    <p>Animarr — single-user, self-hosted media library with LLM-driven identification and built-in BitTorrent. Three top-level destinations (Catalog · Torrents · Settings), one shared visual language across desktop and mobile.</p>
+  </div>
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
+    <div class="swatch"><div class="body">
+      <div class="name" style="font-size:36px; line-height:1; font-family:var(--font-display); letter-spacing:-1px; color:var(--accent-hi);">3</div>
+      <div class="val" style="font-size:11px; margin-top:6px;">Top-level destinations</div>
+    </div></div>
+    <div class="swatch"><div class="body">
+      <div class="name" style="font-size:36px; line-height:1; font-family:var(--font-display); letter-spacing:-1px; color:var(--accent-hi);">9</div>
+      <div class="val" style="font-size:11px; margin-top:6px;">Settings tabs / sub-screens</div>
+    </div></div>
+    <div class="swatch"><div class="body">
+      <div class="name" style="font-size:36px; line-height:1; font-family:var(--font-display); letter-spacing:-1px; color:var(--accent-hi);">6</div>
+      <div class="val" style="font-size:11px; margin-top:6px;">Edit-metadata tabs</div>
+    </div></div>
+    <div class="swatch"><div class="body">
+      <div class="name" style="font-size:36px; line-height:1; font-family:var(--font-display); letter-spacing:-1px; color:var(--accent-hi);">29</div>
+      <div class="val" style="font-size:11px; margin-top:6px;">Total screen states</div>
+    </div></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<!-- DESIGN SYSTEM -->
+<!-- ─────────────────────────────────────────────────────────── -->
+<section class="section" id="system">
+  <div class="section-head">
+    <div class="num">01</div>
+    <h2>DESIGN SYSTEM</h2>
+    <p>Tokens, primitives and components. Recreate these in Fluent UI Blazor / MAUI with the exact values. Accent is runtime-swappable.</p>
+  </div>
+
+  <!-- Colors -->
+  <div class="section-sub">01.1 — COLOR TOKENS</div>
+  <div class="token-grid">
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#0a0807"></div></div><div class="body"><div class="name">--bg-0</div><div class="val">#0a0807 · base</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#100d0b"></div></div><div class="body"><div class="name">--bg-1</div><div class="val">#100d0b · panel inset</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#15110e"></div></div><div class="body"><div class="name">--surface</div><div class="val">#15110e · default card</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#1c1814"></div></div><div class="body"><div class="name">--surface-2</div><div class="val">#1c1814 · drawer / elevated</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#25201b"></div></div><div class="body"><div class="name">--surface-3</div><div class="val">#25201b · hover / active</div></div></div>
+
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: oklch(0.66 0.20 25)"></div></div><div class="body"><div class="name">--accent · crimson</div><div class="val">oklch(0.66 0.20 25)</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: oklch(0.74 0.21 25)"></div></div><div class="body"><div class="name">--accent-hi</div><div class="val">oklch(0.74 0.21 25) · hover</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: var(--accent-soft)"></div></div><div class="body"><div class="name">--accent-soft</div><div class="val">/0.16 · tinted bg</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: var(--accent-line)"></div></div><div class="body"><div class="name">--accent-line</div><div class="val">/0.40 · borders</div></div></div>
+
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: oklch(0.74 0.15 150)"></div></div><div class="body"><div class="name">--success</div><div class="val">on disk · seeding</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: oklch(0.80 0.17 75)"></div></div><div class="body"><div class="name">--warn</div><div class="val">missing · needs review</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background: oklch(0.74 0.10 240)"></div></div><div class="body"><div class="name">--info</div><div class="val">info accent</div></div></div>
+
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#f4eee6"></div></div><div class="body"><div class="name">--text</div><div class="val">#f4eee6 · body</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#a8a097"></div></div><div class="body"><div class="name">--text-dim</div><div class="val">#a8a097 · meta</div></div></div>
+    <div class="swatch"><div class="chip"><div class="chip-inner" style="background:#5d564f"></div></div><div class="body"><div class="name">--text-faint</div><div class="val">#5d564f · placeholder</div></div></div>
+  </div>
+
+  <div class="section-sub" style="margin-top:36px;">01.2 — ACCENT PRESETS (swappable at runtime via Tweaks)</div>
+  <div style="display:flex; gap:14px; flex-wrap:wrap;">
+    <div style="text-align:center;"><div style="width:56px; height:56px; border-radius:28px; background: oklch(0.66 0.20 25); box-shadow:0 0 0 2px var(--bg-0), 0 0 0 4px oklch(0.66 0.20 25);"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">CRIMSON</div></div>
+    <div style="text-align:center;"><div style="width:56px; height:56px; border-radius:28px; background: oklch(0.72 0.17 60);"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">AMBER</div></div>
+    <div style="text-align:center;"><div style="width:56px; height:56px; border-radius:28px; background: oklch(0.74 0.15 150);"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">GREEN</div></div>
+    <div style="text-align:center;"><div style="width:56px; height:56px; border-radius:28px; background: oklch(0.66 0.16 240);"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">BLUE</div></div>
+    <div style="text-align:center;"><div style="width:56px; height:56px; border-radius:28px; background: oklch(0.66 0.20 290);"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">VIOLET</div></div>
+  </div>
+
+  <!-- Typography -->
+  <div class="section-sub" style="margin-top:48px;">01.3 — TYPE SCALE</div>
+  <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 26px 30px;">
+    <div class="type-row" style="padding-top:0; border-top:none;">
+      <div class="role">Display XL</div>
+      <div style="font-family: var(--font-display); font-size: 96px; line-height: 0.88; letter-spacing: -3px;">ANIMARR</div>
+      <div class="spec">Archivo Black · 96–120px<br>line-height 0.86–0.88<br>tracking −2 to −3.4</div>
+    </div>
+    <div class="type-row">
+      <div class="role">Display L</div>
+      <div style="font-family: var(--font-display); font-size: 44px; line-height: 0.95; letter-spacing: -1px;">SEASON 01</div>
+      <div class="spec">Archivo Black · 44px<br>line-height 0.95 · −1</div>
+    </div>
+    <div class="type-row">
+      <div class="role">Display M</div>
+      <div style="font-family: var(--font-display); font-size: 22px; letter-spacing:-0.4px;">EDIT METADATA</div>
+      <div class="spec">Archivo Black · 22px<br>−0.4 · card titles</div>
+    </div>
+    <div class="type-row">
+      <div class="role">UI body</div>
+      <div style="font-size: 15px; line-height: 1.65; color: var(--text);">Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world.</div>
+      <div class="spec">Geist · 13–15px · 1.55–1.65</div>
+    </div>
+    <div class="type-row">
+      <div class="role">UI meta</div>
+      <div style="font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); letter-spacing: 0.8px;">★ 8.5 · 2018 · 270 EP · YUEWEN · MANDARIN</div>
+      <div class="spec">Geist Mono · 11–12.5px<br>tracking 0.6–1.4 · uppercase</div>
+    </div>
+    <div class="type-row" style="border-bottom: none;">
+      <div class="role">Decorative CJK</div>
+      <div style="font-family: var(--font-cjk); font-size: 64px; color: var(--accent-hi); writing-mode: horizontal-tb; opacity: 0.45;">完美世界</div>
+      <div class="spec">Noto Serif SC · 60–360px<br>watermark · opacity 0.07–0.55</div>
+    </div>
+  </div>
+
+  <!-- Spacing -->
+  <div class="section-sub" style="margin-top:48px;">01.4 — SPACING SCALE</div>
+  <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px 30px;">
+    <div class="spacing-row"><span class="label">4</span><span class="bar" style="width:4px;"></span></div>
+    <div class="spacing-row"><span class="label">6</span><span class="bar" style="width:6px;"></span></div>
+    <div class="spacing-row"><span class="label">8</span><span class="bar" style="width:8px;"></span></div>
+    <div class="spacing-row"><span class="label">10</span><span class="bar" style="width:10px;"></span></div>
+    <div class="spacing-row"><span class="label">12</span><span class="bar" style="width:12px;"></span></div>
+    <div class="spacing-row"><span class="label">14</span><span class="bar" style="width:14px;"></span></div>
+    <div class="spacing-row"><span class="label">16</span><span class="bar" style="width:16px;"></span></div>
+    <div class="spacing-row"><span class="label">18</span><span class="bar" style="width:18px;"></span></div>
+    <div class="spacing-row"><span class="label">22</span><span class="bar" style="width:22px;"></span></div>
+    <div class="spacing-row"><span class="label">26</span><span class="bar" style="width:26px;"></span></div>
+    <div class="spacing-row"><span class="label">36</span><span class="bar" style="width:36px;"></span></div>
+    <div class="spacing-row" style="margin-bottom:0;"><span class="label">48</span><span class="bar" style="width:48px;"></span></div>
+  </div>
+
+  <div class="section-sub" style="margin-top:48px;">01.5 — RADIUS SCALE</div>
+  <div style="display:flex; gap:14px; align-items:flex-end;">
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:4px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">4 · badges</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:6px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">6 · controls</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:8px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">8 · chips</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:10px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">10 · cards</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:14px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">14 · panels</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:18px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">18 · hero card</div></div>
+    <div style="text-align:center;"><div style="width:48px; height:48px; background:var(--surface-3); border:1px solid var(--border); border-radius:22px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">22 · modal</div></div>
+    <div style="text-align:center;"><div style="width:80px; height:30px; background:var(--surface-3); border:1px solid var(--border); border-radius:999px;"></div><div style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); margin-top:8px;">999 · pill</div></div>
+  </div>
+
+  <!-- Components inventory -->
+  <div class="section-sub" style="margin-top:60px;">01.6 — COMPONENT INVENTORY</div>
+  <div class="comp-grid">
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Buttons</div><div class="tag">5 variants</div></div>
+      <div class="body">
+        <button class="btn primary">Apply 12 renames</button>
+        <button class="btn solid">TMDB</button>
+        <button class="btn ghost">Re-identify</button>
+        <button class="btn flat">Revert</button>
+        <button class="btn danger">Delete</button>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Pills</div><div class="tag">5 tones</div></div>
+      <div class="body">
+        <span class="pill">Anime</span>
+        <span class="pill accent">Featured</span>
+        <span class="pill success">On disk</span>
+        <span class="pill warn">Missing</span>
+        <span class="pill">12 watchers</span>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Toggles</div><div class="tag">on / off</div></div>
+      <div class="body">
+        <span class="toggle"></span>
+        <span class="toggle on"></span>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Posters</div><div class="tag">image + CJK + title</div></div>
+      <div class="body" style="background: var(--bg-0); padding: 22px;">
+        <div class="poster-mini" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');">
+          <div class="cjk-wm">完美世界</div>
+          <div class="ribbon">Anime</div>
+          <div class="title-block">
+            <div class="title">PERFECT WORLD</div>
+            <div class="meta">
+              <span>2018</span><span>· 270 EP</span>
+              <span class="star" style="margin-left:auto;">★ 8.5</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Episode cards — 4 states</div><div class="tag">have / watched / in-progress / missing</div></div>
+      <div class="body" style="background: var(--bg-0); flex-wrap: wrap;">
+        <div class="ep-mini">
+          <div class="strip"></div>
+          <div class="thumb" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+          <div class="num">12</div>
+          <div class="corner" style="background: rgba(0,0,0,0.45); border-color: rgba(255,255,255,0.18); color: #fff;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div class="meta"><div class="title">Episode 12</div><div>20m · 1080p</div></div>
+        </div>
+        <div class="ep-mini" style="opacity: 0.72;">
+          <div class="strip" style="background: var(--text-faint); box-shadow: none;"></div>
+          <div class="thumb" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70'); filter: saturate(0.6) brightness(0.7);"></div>
+          <div class="num">04</div>
+          <div class="corner" style="background: oklch(0.74 0.15 150 / 0.25);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div style="position:absolute; left: 0; right: 0; bottom: 56px; height: 3px; background: rgba(255,255,255,0.08); z-index: 3;">
+            <div style="width: 100%; height: 100%; background: var(--text-faint);"></div>
+          </div>
+          <div class="meta"><div class="title" style="color: var(--text-dim);">Episode 04</div><div><span style="color: var(--success);">Watched</span></div></div>
+        </div>
+        <div class="ep-mini">
+          <div class="strip"></div>
+          <div class="thumb" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+          <div class="num">05</div>
+          <div class="corner" style="background: rgba(0,0,0,0.45); border-color: rgba(255,255,255,0.18); color: #fff;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 4.24A10.1 10.1 0 0 1 12 4c7 0 10 8 10 8a17.7 17.7 0 0 1-2.16 3.19"/><path d="M6.61 6.61A17.6 17.6 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M1 1l22 22"/></svg>
+          </div>
+          <div style="position:absolute; left: 0; right: 0; bottom: 56px; height: 3px; background: rgba(255,255,255,0.08); z-index: 3;">
+            <div style="width: 38%; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-hi)); box-shadow: 0 0 8px var(--accent-soft);"></div>
+          </div>
+          <div class="meta"><div class="title">Episode 05</div><div><span style="color: var(--accent-hi);">38% watched</span></div></div>
+        </div>
+        <div class="ep-mini missing">
+          <div class="strip"></div>
+          <div class="thumb" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+          <div class="num">13</div>
+          <div class="corner">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><circle cx="12" cy="17" r=".5" fill="currentColor"/><path d="M10.6 3.7 1.7 18.4A2 2 0 0 0 3.4 21h17.2a2 2 0 0 0 1.7-2.6L13.4 3.7a2 2 0 0 0-2.8 0z"/></svg>
+          </div>
+          <div class="meta">
+            <div class="title">Episode 13</div>
+            <div>20m · <span class="warn-color">Not downloaded</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Sidebar — desktop</div><div class="tag">230px</div></div>
+      <div class="body" style="background: var(--bg-0); align-items: flex-start;">
+        <div class="sidebar-preview">
+          <div class="brand-row">
+            <div style="width:28px; height:28px; border-radius:6px; background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 25)); display:grid; place-items:center; font-family:var(--font-display); color:#fff; font-size:16px;">A</div>
+            <div>
+              <div style="font-family:var(--font-display); font-size:14px; letter-spacing:-0.3px;">ANIMARR</div>
+              <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-faint); letter-spacing:0.6px; margin-top:3px;">v2.0 · LOCAL</div>
+            </div>
+          </div>
+          <div class="nav-item active">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            Catalog <span class="count">24</span>
+          </div>
+          <div class="nav-item">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M5 20h14"/></svg>
+            Torrents <span class="live-badge"><span class="dot"></span>LIVE</span>
+          </div>
+          <div class="nav-item">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+            Settings
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Status edges</div><div class="tag">left strip + corner chip</div></div>
+      <div class="body" style="flex-direction: column; align-items: stretch; padding: 16px;">
+        <div style="display:grid; grid-template-columns: 24px 1fr 32px; gap: 12px; align-items: center; padding: 12px; background: var(--surface); border-radius: 8px; border-left: 3px solid var(--success); box-shadow: -3px 0 12px var(--success); position: relative;">
+          <span class="pill success" style="font-size:8px;">ON</span>
+          <span style="font-size: 13px;">Episode 12 — on disk</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-12"/></svg>
+        </div>
+        <div style="height:8px;"></div>
+        <div style="display:grid; grid-template-columns: 24px 1fr 32px; gap: 12px; align-items: center; padding: 12px; background: var(--surface); border-radius: 8px; border-left: 3px solid var(--warn); opacity: 0.55;">
+          <span class="pill warn" style="font-size:8px;">??</span>
+          <span style="font-size: 13px; color: var(--text-dim);">Episode 13 — missing</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><circle cx="12" cy="17" r=".5" fill="currentColor"/><path d="M10.6 3.7 1.7 18.4A2 2 0 0 0 3.4 21h17.2a2 2 0 0 0 1.7-2.6L13.4 3.7a2 2 0 0 0-2.8 0z"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="head"><div class="title">Backdrop layer</div><div class="tag">global, blurred</div></div>
+      <div class="body" style="padding: 0; min-height: 140px; position: relative; overflow: hidden;">
+        <div style="position:absolute; inset:0; background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=800&q=70'); background-size:cover; background-position:center; filter:blur(14px) brightness(38%) saturate(0.95);"></div>
+        <div style="position:absolute; inset:0; background: radial-gradient(120% 80% at 50% 30%, transparent 0%, rgba(10,8,7,0.5) 60%, rgba(10,8,7,0.95) 100%);"></div>
+        <div style="position:relative; padding:18px; font-family:var(--font-mono); font-size:11px; color:var(--text); letter-spacing:0.6px;">
+          blur(14px) · brightness(38%) · saturate(0.95)<br>
+          <span style="color:var(--text-dim);">+ vignette + hue tint by current title</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-sub" style="margin-top:60px;">01.7 — ICON SET</div>
+  <div class="icon-grid">
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg><div>catalog</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M5 20h14"/></svg><div>torrent</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><div>folder</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div>clock</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/></svg><div>settings</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div>search</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg><div>play</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><div>plus</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-12"/></svg><div>check</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6l-12 12"/></svg><div>x</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><circle cx="12" cy="17" r=".5" fill="currentColor"/><path d="M10.6 3.7 1.7 18.4A2 2 0 0 0 3.4 21h17.2a2 2 0 0 0 1.7-2.6L13.4 3.7a2 2 0 0 0-2.8 0z"/></svg><div>warn</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m13 4 1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/></svg><div>magic / LLM</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><div>pencil</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg><div>trash</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg><div>refresh</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg><div>undo</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg><div>external</div></div>
+    <div class="icon-cell"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 9v6l-4-2v-4z"/></svg><div>filter</div></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<!-- SITEMAP -->
+<!-- ─────────────────────────────────────────────────────────── -->
+<section class="section" id="sitemap">
+  <div class="section-head">
+    <div class="num">02</div>
+    <h2>SITEMAP</h2>
+    <p>Three destinations on both desktop and mobile. Library (old Explorer) and Rename History merged into Settings.</p>
+  </div>
+
+<div class="sitemap"><span class="root">/  (Catalog)</span>
+├── <span class="leaf">hero</span>             rotates through featured ★≥8.0 titles
+├── <span class="leaf">filter bar</span>       type tabs · search · Rescan all · <span class="nav">NeedsReview chip</span>
+├── <span class="leaf">folder chips</span>     filter by SectionFolder.title
+├── <span class="leaf">poster grid</span>      MediaItem cards
+│
+├── <span class="nav">popup: NeedsReview modal</span>
+│        Triggered by NR chip. Lists folders with candidate matches.
+│
+└── <span class="nav">pushed: MediaDetail/{id}</span>
+    ├── <span class="leaf">hero</span>          poster + title + meta + actions
+    ├── <span class="leaf">body</span>          3-column · Synopsis · Details · Identification
+    ├── <span class="leaf">episodes</span>      grid per season · status edges
+    │
+    └── <span class="nav">drawer: EditMetadata</span>
+        ├── <span class="leaf">tab: Source IDs</span>     TMDB · MAL · IMDb · AniDB
+        ├── <span class="leaf">tab: Basics</span>         title · cjk · year · type · lang · studio
+        ├── <span class="leaf">tab: Poster</span>         10 candidates from sources + upload
+        ├── <span class="leaf">tab: Backdrop</span>       12 candidates from sources + upload
+        ├── <span class="leaf">tab: Tags</span>           add · chips · suggested
+        └── <span class="leaf">tab: Manage</span>         Rescan · Apply · Revert · Danger zone
+
+<span class="root">/torrents</span>
+├── <span class="leaf">header strip</span>     active count · DOWN · UP · Add button
+├── <span class="leaf">tab segment</span>      Active / Queued / All
+├── <span class="leaf">torrent list</span>     live progress over SignalR
+└── <span class="nav">drawer/sheet: Add torrent</span>
+    File/Magnet · destination (identified titles) · path · caps · toggles
+
+<span class="root">/settings</span>
+├── <span class="leaf">General</span>          language · read-only watcher params
+├── <span class="leaf">Root folders</span>     <span class="note">← moved from Explorer</span>
+├── <span class="leaf">Rename history</span>   <span class="note">← moved from /history</span>
+├── <span class="leaf">Appearance</span>       theme · accent swatches · backdrop sliders
+├── <span class="leaf">AI / LLM</span>         provider · model · status hero
+├── <span class="leaf">Patterns</span>         regex table with priority + scope
+├── <span class="leaf">Ignore rules</span>     glob table
+├── <span class="leaf">Torrent</span>          ports · global caps · DHT/PEX/UPnP
+└── <span class="leaf">Metadata</span>         TMDB · MAL · IMDb · AniDB order</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<!-- DESKTOP -->
+<!-- ─────────────────────────────────────────────────────────── -->
+<section class="section" id="desktop">
+  <div class="section-head">
+    <div class="num">03</div>
+    <h2>DESKTOP — v3 FULL-WIDTH</h2>
+    <p>20 screen states. Each frame is the live prototype, scaled to fit. Click "open" to view full-size.</p>
+  </div>
+
+  <div class="section-sub">03.1 — CATALOG (2)</div>
+  <div class="frame-grid" data-group="catalog"></div>
+
+  <div class="section-sub" style="margin-top:40px;">03.2 — MEDIA DETAIL + EDIT METADATA (7)</div>
+  <div class="frame-grid" data-group="detail"></div>
+
+  <div class="section-sub" style="margin-top:40px;">03.3 — TORRENTS (2)</div>
+  <div class="frame-grid" data-group="torrents"></div>
+
+  <div class="section-sub" style="margin-top:40px;">03.4 — SETTINGS (9)</div>
+  <div class="frame-grid" data-group="settings"></div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<!-- MOBILE -->
+<!-- ─────────────────────────────────────────────────────────── -->
+<section class="section" id="mobile">
+  <div class="section-head">
+    <div class="num">04</div>
+    <h2>MOBILE — iPHONE FRAME</h2>
+    <p>9 screen states. Bottom-tab navigation, bottom sheets in place of drawers.</p>
+  </div>
+
+  <div class="frame-grid mobile" data-group="mobile-all"></div>
+</section>
+
+<div class="footer">
+  Animarr · Design canvas · Generated from prototype · Open <a href="pages/INDEX.html" style="color:var(--accent-hi);">pages/INDEX.html</a> for direct state links
+</div>
+
+<script>
+// Populate frame grids from manifest
+const DESKTOP = [
+  ["catalog", [
+    { f: "01-catalog.html",              n: "01", t: "Catalog — default" },
+    { f: "02-catalog-needs-review.html", n: "02", t: "Catalog — NeedsReview modal" },
+  ]],
+  ["detail", [
+    { f: "03-media-detail.html",            n: "03", t: "Media detail" },
+    { f: "04-media-detail-edit-ids.html",   n: "04", t: "Edit · Source IDs" },
+    { f: "05-media-detail-edit-basics.html",n: "05", t: "Edit · Basics" },
+    { f: "06-media-detail-edit-poster.html",n: "06", t: "Edit · Poster gallery" },
+    { f: "07-media-detail-edit-backdrop.html", n:"07", t: "Edit · Backdrop gallery" },
+    { f: "08-media-detail-edit-tags.html",  n: "08", t: "Edit · Tags" },
+    { f: "09-media-detail-edit-manage.html",n: "09", t: "Edit · Manage / Danger" },
+    { f: "21-media-detail-movie.html",      n: "21", t: "Media detail — MOVIE (file card + watched)" },
+  ]],
+  ["torrents", [
+    { f: "10-torrents.html",     n: "10", t: "Torrents — list" },
+    { f: "11-torrents-add.html", n: "11", t: "Torrents — Add drawer" },
+  ]],
+  ["settings", [
+    { f: "12-settings-general.html",    n: "12", t: "Settings · General" },
+    { f: "13-settings-folders.html",    n: "13", t: "Settings · Root folders" },
+    { f: "14-settings-history.html",    n: "14", t: "Settings · Rename history" },
+    { f: "15-settings-appearance.html", n: "15", t: "Settings · Appearance" },
+    { f: "16-settings-llm.html",        n: "16", t: "Settings · AI / LLM" },
+    { f: "17-settings-patterns.html",   n: "17", t: "Settings · Patterns" },
+    { f: "18-settings-ignore.html",     n: "18", t: "Settings · Ignore rules" },
+    { f: "19-settings-torrent.html",    n: "19", t: "Settings · Torrent" },
+    { f: "20-settings-metadata.html",   n: "20", t: "Settings · Metadata" },
+  ]],
+];
+
+const MOBILE = [
+  { f: "01-catalog.html",              n: "M1", t: "Catalog" },
+  { f: "02-catalog-needs-review.html", n: "M2", t: "Catalog · NR sheet" },
+  { f: "03-media-detail.html",         n: "M3", t: "Media detail" },
+  { f: "04-media-detail-edit.html",    n: "M4", t: "Edit metadata sheet" },
+  { f: "05-torrents.html",             n: "M5", t: "Torrents" },
+  { f: "06-torrents-add.html",         n: "M6", t: "Add torrent sheet" },
+  { f: "07-settings.html",             n: "M7", t: "Settings root" },
+  { f: "08-settings-history.html",     n: "M8", t: "Rename history" },
+  { f: "09-settings-folders.html",     n: "M9", t: "Root folders" },
+  { f: "10-media-detail-movie.html",   n: "M10", t: "Movie detail — file card + watched" },
+];
+
+function makeFrame(href, num, title) {
+  const wrap = document.createElement("div");
+  wrap.className = "frame";
+  wrap.innerHTML = `
+    <div class="label">
+      <span class="num">${num}</span>
+      <span class="title">${title}</span>
+      <a href="${href}" target="_blank" class="open">open ↗</a>
+    </div>
+    <div class="canvas">
+      <iframe src="${href}" loading="lazy"></iframe>
+    </div>
+  `;
+  return wrap;
+}
+
+for (const [group, items] of DESKTOP) {
+  const root = document.querySelector(`.frame-grid[data-group="${group}"]`);
+  for (const it of items) root.appendChild(makeFrame("pages/desktop/" + it.f, it.n, it.t));
+}
+const mobileRoot = document.querySelector('.frame-grid[data-group="mobile-all"]');
+for (const it of MOBILE) mobileRoot.appendChild(makeFrame("pages/mobile/" + it.f, it.n, it.t));
+</script>
+
+</body>
+</html>

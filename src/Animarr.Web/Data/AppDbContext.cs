@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MediaTag> MediaTags => Set<MediaTag>();
     public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
+    public DbSet<WatchState> WatchStates => Set<WatchState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -157,6 +158,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.FolderId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.FolderId, x.Status });
+        });
+
+        modelBuilder.Entity<WatchState>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One state row per (item, season, episode). Movies use NULL/NULL
+            // and therefore are limited to a single row per MediaItem. SQLite
+            // treats NULL as distinct, so we still need a filtered index for
+            // the movie case to keep the "one row per movie" invariant.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode }).IsUnique();
+            e.HasIndex(x => x.MediaItemId);
+            e.HasIndex(x => x.LastSeenAt);
         });
     }
 }

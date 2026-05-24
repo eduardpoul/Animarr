@@ -1,47 +1,49 @@
 /* ============================================================
-   Fluent UI + Tailwind — кастомные классы компонентов
-   Версия: 3.0 | Платформа: Blazor Web
-   ПРАВИЛО: использовать CSS-переменные из @theme где возможно.
-            var(--neutral-*) — FluentUI runtime vars (адаптируются к теме).
-            var(--spacing-f-*) / var(--radius-fluent*) — из @theme.
+   Legacy Fluent helper classes — in-flight migration.
+
+   These classes wrap Fluent widgets with common patterns
+   (cards, info boxes, status dots). Used by Torrents,
+   TorrentEdit, TorrentHistory; slated for replacement by
+   Design/Primitives during Phase 6 of the UI migration.
+
+   Token references updated to use Animarr design tokens
+   (tokens.css) instead of the old Fluent Office palette.
    ============================================================ */
 
 @layer components {
 
-    /* ── КНОПКИ ───────────────────────────────────────────── */
-
+    /* ── Buttons ──────────────────────────────────────────── */
     .fluent-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: var(--spacing-f-xs, 0.25rem);
-        min-height: var(--height-touch, 2rem);
-        padding: 0 var(--spacing-f-m, 0.75rem);
-        border-radius: var(--radius-fluent, 0.25rem);
-        font-size: 0.875rem;
+        gap: var(--space-1);
+        min-height: 32px;
+        padding: 0 var(--space-5);
+        border-radius: var(--radius-ctrl);
+        font-size: 13px;
         font-weight: 600;
-        line-height: 1.25rem;
+        line-height: 1.4;
         white-space: nowrap;
         cursor: pointer;
-        transition: background-color 0.1s, border-color 0.1s;
+        transition: background-color var(--motion-fast), border-color var(--motion-fast);
     }
 
     .fluent-btn--icon {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: var(--height-touch, 2rem);
-        min-width: var(--height-touch, 2rem);
+        min-height: 32px;
+        min-width: 32px;
         padding: 0;
-        border-radius: var(--radius-fluent, 0.25rem);
+        border-radius: var(--radius-ctrl);
     }
 
-    /* ── ПОЛЯ ВВОДА ───────────────────────────────────────── */
-
+    /* ── Inputs ───────────────────────────────────────────── */
     .fluent-input {
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-f-xs, 0.25rem);
+        gap: var(--space-1);
     }
 
     .fluent-input fluent-text-field,
@@ -52,197 +54,113 @@
         width: 100%;
     }
 
-    /* ── КАРТОЧКИ ─────────────────────────────────────────── */
-
+    /* ── Cards ────────────────────────────────────────────── */
     .fluent-card {
-        background: var(--neutral-layer-2, #fafafa);
-        border: 1px solid var(--neutral-stroke-rest, #d1d1d1);
-        border-radius: var(--radius-fluent-lg, 0.5rem);
-        padding: var(--spacing-f-l, 1rem);
-        box-shadow: var(--shadow-fluent-4, 0 2px 4px rgba(0,0,0,0.14));
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: var(--space-7);
+        box-shadow: var(--shadow-card);
     }
 
-    /* ── ПАНЕЛИ (sidebar / drawer) ────────────────────────── */
-
+    /* ── Panels (sidebar/drawer surfaces) ─────────────────── */
     .fluent-panel {
-        background: var(--neutral-layer-floating, #ffffff);
-        border-radius: var(--radius-fluent-lg, 0.5rem);
-        box-shadow: var(--shadow-fluent-8, 0 4px 8px rgba(0,0,0,0.14));
+        background: var(--surface-2);
+        border-radius: var(--radius-panel);
+        box-shadow: var(--shadow-drawer);
     }
 
-    /* ── ТАБЛИЦЫ ─────────────────────────────────────────── */
-
+    /* ── Tables ───────────────────────────────────────────── */
     .fluent-table {
         width: 100%;
-        font-size: 0.875rem;
+        font-size: 13px;
     }
 
-    /* ── СТРАНИЦЫ ─────────────────────────────────────────── */
-
+    /* ── Page chrome ──────────────────────────────────────── */
     .fluent-page {
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-f-xxl, 1.5rem);
-        padding: var(--spacing-f-xxl, 1.5rem);
+        gap: var(--space-9);
+        padding: var(--space-9);
     }
 
     .fluent-page-header {
         display: flex;
         align-items: center;
-        gap: var(--spacing-f-m, 0.75rem);
-        min-height: 2.5rem;
+        gap: var(--space-5);
+        min-height: 40px;
     }
 
-    /* ── ФОРМЫ ───────────────────────────────────────────── */
-
+    /* ── Forms ────────────────────────────────────────────── */
     .fluent-form {
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-f-l, 1rem);
+        gap: var(--space-7);
     }
 
     .fluent-form-row {
         display: flex;
-        gap: var(--spacing-f-m, 0.75rem);
+        gap: var(--space-5);
         align-items: flex-end;
         flex-wrap: wrap;
     }
 
-    /* ── СЕКЦИИ ──────────────────────────────────────────── */
-
+    /* ── Sections ─────────────────────────────────────────── */
     .fluent-section {
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-f-m, 0.75rem);
+        gap: var(--space-5);
     }
 
     .fluent-section-header {
         display: flex;
         align-items: center;
-        gap: var(--spacing-f-m, 0.75rem);
-        padding-bottom: var(--spacing-f-s, 0.5rem);
-        border-bottom: 1px solid var(--neutral-stroke-subtle, #e0e0e0);
+        gap: var(--space-5);
+        padding-bottom: var(--space-3);
+        border-bottom: 1px solid var(--border);
     }
 
-    /* ── ПУСТОЕ СОСТОЯНИЕ ────────────────────────────────── */
-
+    /* ── Empty state ──────────────────────────────────────── */
     .fluent-empty-state {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: var(--spacing-f-m, 0.75rem);
-        padding: var(--spacing-f-4xl, 2.5rem) var(--spacing-f-xxl, 1.5rem);
+        gap: var(--space-5);
+        padding: var(--space-12) var(--space-9);
         text-align: center;
-        color: var(--neutral-foreground-hint, #616161);
+        color: var(--text-dim);
     }
 
-    /* ── ИНФОРМАЦИОННАЯ ПАНЕЛЬ (результаты, подсказки) ────── */
-
+    /* ── Info box ─────────────────────────────────────────── */
     .fluent-info-box {
-        background: var(--neutral-layer-3, #f5f5f5);
-        border: 1px solid var(--neutral-stroke-subtle, #e0e0e0);
-        border-radius: var(--radius-fluent, 0.25rem);
-        padding: var(--spacing-f-m, 0.75rem) var(--spacing-f-l, 1rem);
-        font-size: 0.875rem;
-        color: var(--neutral-foreground-rest, #242424);
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-ctrl);
+        padding: var(--space-5) var(--space-7);
+        font-size: 13px;
+        color: var(--text);
     }
 
-    /* ── СТАТУСЫ ─────────────────────────────────────────── */
-
+    /* ── Status dots ──────────────────────────────────────── */
     .fluent-status-dot {
-        width: 0.625rem;
-        height: 0.625rem;
+        width: 10px;
+        height: 10px;
         border-radius: 9999px;
         flex-shrink: 0;
         margin: auto;
     }
 
-    .fluent-status-dot--success { background-color: var(--colorStatusSuccessForeground1, #107C10); }
-    .fluent-status-dot--error   { background-color: var(--colorStatusDangerForeground1,  #D13438); }
-    .fluent-status-dot--warning { background-color: var(--colorStatusWarningForeground1, #F7630C); }
-    .fluent-status-dot--neutral { background-color: var(--neutral-foreground-hint,       #898989); }
-    .fluent-status-dot--info    { background-color: var(--accent-fill-rest,              #0F6CBD); }
-
+    .fluent-status-dot--success { background-color: var(--success); }
+    .fluent-status-dot--error   { background-color: var(--warn); }
+    .fluent-status-dot--warning { background-color: var(--warn); }
+    .fluent-status-dot--neutral { background-color: var(--text-faint); }
+    .fluent-status-dot--info    { background-color: var(--info); }
 }
 
-/* ============================================================
-   Тёмная тема — смягчение рамки вокруг инпутов/селектов
-   FluentUI ставит data-theme="dark" на <body> при тёмной теме.
-   Переопределяем --neutral-stroke-rest чтобы рамка была менее
-   яркой/белой и выглядела так же деликатно, как в Windows 11.
-   ============================================================ */
-
-/* ============================================================
-   Frosted-glass nav sidebar — проявляется когда за ним есть
-   фоновое изображение (MediaDetail fanart background).
-   color-mix даёт полупрозрачность без потери темы.
-   ============================================================ */
-/* fluent-nav-menu itself is transparent — .animarr-sidebar wrapper handles glass */
+/* ── FluentNavMenu transparency — surface is owned by .animarr-sidebar
+   wrapper in MainLayout.razor.css. ─────────────────────────────── */
 fluent-nav-menu {
     background: transparent !important;
     border-right: none !important;
-}
-
-/* Sidebar wrapper: logo + nav links with frosted glass */
-.animarr-sidebar {
-    position: relative;
-    z-index: 2;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    background-color: color-mix(in srgb, var(--neutral-layer-1, #1c1c1c) 70%, transparent) !important;
-    border-right: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-/* White nav text + icon tint when backdrop is active */
-body.has-backdrop .animarr-sidebar {
-    --neutral-foreground-rest:        rgba(255,255,255,0.92);
-    --neutral-foreground-hover:       #ffffff;
-    --neutral-foreground-active:      #ffffff;
-    --neutral-fill-stealth-rest:      rgba(255,255,255,0.04);
-    --neutral-fill-stealth-hover:     rgba(255,255,255,0.11);
-    --neutral-fill-stealth-active:    rgba(255,255,255,0.17);
-    --neutral-fill-rest:              rgba(255,255,255,0.09);
-    --neutral-fill-hover:             rgba(255,255,255,0.14);
-    --neutral-fill-active:            rgba(255,255,255,0.19);
-    --accent-fill-rest:               rgba(255,255,255,0.22);
-    --accent-fill-hover:              rgba(255,255,255,0.28);
-    --accent-foreground-rest:         #ffffff;
-    color:                            rgba(255,255,255,0.92);
-}
-
-/* White text in main content area when backdrop is active */
-body.has-backdrop .main-content {
-    --neutral-foreground-rest:        rgba(255,255,255,0.92);
-    --neutral-foreground-hover:       #ffffff;
-    --neutral-foreground-active:      #ffffff;
-    --neutral-foreground-hint:        rgba(255,255,255,0.55);
-    --neutral-fill-stealth-rest:      rgba(255,255,255,0.04);
-    --neutral-fill-stealth-hover:     rgba(255,255,255,0.10);
-    --neutral-fill-stealth-active:    rgba(255,255,255,0.15);
-    --neutral-fill-rest:              rgba(255,255,255,0.08);
-    --neutral-fill-hover:             rgba(255,255,255,0.13);
-    --neutral-fill-active:            rgba(255,255,255,0.18);
-    --neutral-layer-1:                rgba(0,0,0,0.35);
-    --neutral-layer-2:                rgba(0,0,0,0.25);
-    --neutral-layer-floating:         rgba(20,20,20,0.85);
-    --neutral-stroke-rest:            rgba(255,255,255,0.14);
-    --neutral-stroke-hover:           rgba(255,255,255,0.22);
-    --accent-foreground-rest:         #ffffff;
-    color:                            rgba(255,255,255,0.92);
-}
-
-body[data-theme="dark"] fluent-select,
-body[data-theme="dark"] fluent-text-field,
-body[data-theme="dark"] fluent-number-field,
-body[data-theme="dark"] fluent-combobox,
-body[data-theme="dark"] fluent-text-area {
-    --neutral-stroke-rest:   rgba(255, 255, 255, 0.12);
-    --neutral-stroke-hover:  rgba(255, 255, 255, 0.18);
-    --neutral-stroke-active: rgba(255, 255, 255, 0.22);
-    --neutral-stroke-focus1: rgba(255, 255, 255, 0.30);
-    --neutral-stroke-focus2: rgba(255, 255, 255, 0.08);
 }

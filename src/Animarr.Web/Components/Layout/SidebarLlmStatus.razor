@@ -1,0 +1,147 @@
+@implements IDisposable
+@inject IAppConfigService AppConfig
+@inject ILlmService Llm
+@inject IdentificationQueueProcessorService QueueProc
+
+@*
+    Sidebar footer status card.
+
+    State sources:
+      - Configured + reachable     → ILlmService.GetTelemetry().LastProbeOk
+                                     (updated on every Identify call) +
+                                     IsAvailableAsync fallback probe.
+      - Provider + model labels    → AppConfig
+      - Queue depth                → IdentificationQueueProcessorService.QueueDepth
+
+    Re-evaluation:
+      - First render → initial probe
+      - QueueChanged event → telemetry-based refresh (no extra HTTP)
+      - 30-second timer → fallback probe so a transient outage clears once
+        the endpoint comes back, even when there's no queue activity
+*@
+
+<div class="llm-card @(_state)" title="@_tooltip">
+    <div class="llm-card__row">
+        <span class="llm-card__dot"></span>
+        <span class="llm-card__label">LLM</span>
+        <span class="llm-card__state">@_stateText</span>
+    </div>
+    @if (!string.IsNullOrEmpty(_provider))
+    {
+        <div class="llm-card__meta">
+            <span class="llm-card__provider">@_provider</span>
+            @if (!string.IsNullOrEmpty(_model))
+            {
+                <span class="llm-card__sep">·</span>
+                <span class="llm-card__model">@_model</span>
+            }
+        </div>
+    }
+    @if (QueueProc.QueueDepth > 0)
+    {
+        <div class="llm-card__queue">
+            <span class="llm-card__queue-label">QUEUE</span>
+            <span class="llm-card__queue-count">@QueueProc.QueueDepth</span>
+        </div>
+    }
+</div>
+
+@code {
+    private string  _state    = "off";
+    private string  _stateText = "OFF";
+    private string  _tooltip  = "LLM disabled in settings";
+    private string? _provider;
+    private string? _model;
+    private bool    _enabled;
+    private System.Threading.Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        QueueProc.QueueChanged += OnQueueChanged;
+        // Fallback re-probe every 30s so a transient outage clears itself when
+        // the endpoint comes back, even without queue activity.
+        _refreshTimer = new System.Threading.Timer(_ => RefreshFromTelemetry(),
+            null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await ProbeAsync();
+    }
+
+    /// <summary>Full probe — used on first render and on the 30s timer fallback.
+    /// Hits IsAvailableAsync (cheap network call), updates state + tooltip.</summary>
+    private async Task ProbeAsync()
+    {
+        _enabled = await AppConfig.GetAsync<bool>(AppConfigKeys.LlmEnabled, false);
+        if (!_enabled)
+        {
+            _state    = "off";
+            _stateText = "OFF";
+            _tooltip  = "LLM disabled in settings";
+            _provider = null;
+            _model    = null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _provider = await AppConfig.GetAsync(AppConfigKeys.LlmProvider, default(CancellationToken)) ?? "compatible";
+        _model    = await AppConfig.GetAsync(AppConfigKeys.LlmModel,    default(CancellationToken));
+
+        bool available;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            available = await Llm.IsAvailableAsync(cts.Token);
+        }
+        catch { available = false; }
+
+        ApplyState(available);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Cheap refresh — uses the LastProbeOk flag updated by every
+    /// Identify call. No new HTTP roundtrip. Triggered by QueueChanged events
+    /// and the 30s timer (if a successful call has happened since the last
+    /// probe, we already know we're online).</summary>
+    private void RefreshFromTelemetry()
+    {
+        if (!_enabled)
+        {
+            // The 30s timer may run before OnAfterRenderAsync has loaded config.
+            // Trigger a full probe in that case to discover enabled state.
+            InvokeAsync(ProbeAsync);
+            return;
+        }
+
+        var t = Llm.GetTelemetry();
+        // Recent successful call → trust it. Otherwise fall through to a fresh probe.
+        if (t.LastProbeOk && t.LastProbeAt is { } at && (DateTime.UtcNow - at) < TimeSpan.FromMinutes(2))
+        {
+            ApplyState(true);
+            InvokeAsync(StateHasChanged);
+            return;
+        }
+        InvokeAsync(ProbeAsync);
+    }
+
+    private void ApplyState(bool available)
+    {
+        var telemetry = Llm.GetTelemetry();
+        _state     = available ? "online" : "error";
+        _stateText = available ? "ONLINE" : "ERROR";
+        _tooltip   = available
+            ? $"{_provider} · {_model} · avg {telemetry.AverageLatencyMs}ms over {telemetry.CallCount} calls"
+            : "Cannot reach LLM endpoint — check Settings → AI/LLM";
+    }
+
+    private void OnQueueChanged() => RefreshFromTelemetry();
+
+    public void Dispose()
+    {
+        QueueProc.QueueChanged -= OnQueueChanged;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+}

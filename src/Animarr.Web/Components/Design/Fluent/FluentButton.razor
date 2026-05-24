@@ -1,0 +1,41 @@
+@*
+    Drop-in replacement for Fluent UI's FluentButton.
+    Same parameter shape: Appearance + IconStart + IconEnd + OnClick + Disabled + Title + Style.
+    Renders as a native <button> styled by our design tokens.
+*@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<button type="button"
+        class="@CssClass"
+        title="@Title"
+        disabled="@Disabled"
+        style="@Style"
+        @attributes="Extra"
+        @onclick="OnClick">
+    @if (IconStart is not null)
+    {
+        <DIcon Name="@IconStart.Name" Size="14" />
+    }
+    @if (ChildContent is not null)
+    {
+        <span class="fbtn__label">@ChildContent</span>
+    }
+    @if (IconEnd is not null)
+    {
+        <DIcon Name="@IconEnd.Name" Size="14" />
+    }
+</button>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public Appearance Appearance { get; set; } = Appearance.Neutral;
+    [Parameter] public Icon?     IconStart  { get; set; }
+    [Parameter] public Icon?     IconEnd    { get; set; }
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+    [Parameter] public bool      Disabled   { get; set; }
+    [Parameter] public string?   Title      { get; set; }
+    [Parameter] public string?   Style      { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+
+    private string CssClass => $"fbtn fbtn--{Appearance.ToString().ToLowerInvariant()}";
+}

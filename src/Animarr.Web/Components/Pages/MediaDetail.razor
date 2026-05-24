@@ -12,508 +12,339 @@
 @inject ILogger<MediaDetail> Logger
 @inject ILlmService Llm
 @inject MediaCachePaths CachePaths
+@inject IWatchStateService WatchSvc
 
 <PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
 
-<style>
-    .md-files-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        gap: 10px;
-    }
-    .md-file-card {
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--neutral-layer-2);
-        border: 1px solid transparent;
-        transition: transform .15s ease, box-shadow .15s ease;
-        user-select: none;
-    }
-    .md-file-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 24px rgba(0,0,0,.35);
-        border-color: var(--neutral-stroke-strong);
-    }
-    .md-file-art {
-        aspect-ratio: 16/9;
-        overflow: hidden;
-        background: var(--neutral-layer-3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-    }
-    .md-file-card:hover .md-file-play-overlay {
-        opacity: 1;
-    }
-    .md-file-play-overlay {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0;
-        transition: opacity .15s;
-        background: rgba(0,0,0,.3);
-    }
-    .md-file-label {
-        padding: 6px 8px 7px;
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 1.3;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .md-file-meta {
-        padding: 0 8px 7px;
-        font-size: 11px;
-        color: var(--neutral-foreground-hint);
-    }
-    /* ── episode cards ── */
-    .ep-card {
-        border-radius: 6px;
-        overflow: hidden;
-        background: var(--neutral-layer-2);
-        position: relative;
-        transition: opacity .15s;
-    }
-    .ep-card.ep-has-file { cursor: pointer; }
-    .ep-play-overlay {
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,0);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 2;
-        transition: background .2s;
-        pointer-events: none;
-    }
-    .ep-card.ep-has-file:hover .ep-play-overlay { background: rgba(0,0,0,.42); }
-    .ep-play-btn {
-        opacity: 0;
-        transform: scale(0.75);
-        transition: opacity .2s, transform .2s;
-        color: white;
-        width: 46px;
-        height: 46px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        background: rgba(255,255,255,.18);
-        backdrop-filter: blur(4px);
-        border: 1.5px solid rgba(255,255,255,.35);
-    }
-    .ep-card.ep-has-file:hover .ep-play-btn { opacity: 1; transform: scale(1); }
-    /* ── video player overlay ── */
-    .vp-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 9000;
-        background: rgba(0,0,0,.78);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .vp-shell {
-        background: #000;
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 24px 80px rgba(0,0,0,.7);
-        max-width: min(92vw, 1100px);
-        display: flex;
-        flex-direction: column;
-    }
-    .vp-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 10px;
-        background: rgba(30,30,30,.95);
-        border-bottom: 1px solid rgba(255,255,255,.08);
-    }
-    .vp-title {
-        flex: 1;
-        font-size: 13px;
-        color: rgba(255,255,255,.75);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    /* ── image preview ── */
-    .md-img-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 9000;
-        background: rgba(0,0,0,.9);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: zoom-out;
-    }
-    .md-img-preview {
-        max-width: min(94vw, 1200px);
-        max-height: 94vh;
-        object-fit: contain;
-        border-radius: 8px;
-        box-shadow: 0 24px 80px rgba(0,0,0,.6);
-        cursor: default;
-    }
-    .md-img-close {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 9001;
-        opacity: 0.6;
-    }
-    .md-img-close:hover { opacity: 1; }
-    .md-poster-wrap {
-        position: relative;
-        width: 200px;
-        cursor: zoom-in;
-    }
-    .md-poster-overlay {
-        position: absolute;
-        inset: 0;
-        border-radius: 8px;
-        background: rgba(0,0,0,0);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background .2s;
-    }
-    .md-poster-wrap:hover .md-poster-overlay { background: rgba(0,0,0,.35); }
-    .md-poster-zoom {
-        opacity: 0;
-        transition: opacity .2s;
-        color: white;
-    }
-    .md-poster-wrap:hover .md-poster-zoom { opacity: 1; }
-</style>
-
 @if (_loading)
 {
-    <FluentProgress Width="100%" />
+    <div class="animarr-progress">
+        <div class="animarr-progress__track">
+            <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+        </div>
+    </div>
 }
 else if (_item is null)
 {
-    <div style="text-align:center;padding:60px 0;">
-        <FluentLabel Style="color:var(--neutral-foreground-hint);">@L["media_detail.not_found"]</FluentLabel>
-        <br />
-        <FluentButton OnClick="@(() => Nav.NavigateTo("/"))">← @L["media_detail.btn_back"]</FluentButton>
+    <div class="md-not-found">
+        <div class="md-not-found__text">@L["media_detail.not_found"]</div>
+        <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/"))">
+            <DIcon Name="chev-l" Size="14" /> @L["media_detail.btn_back"]
+        </Btn>
     </div>
 }
 else
 {
 
-    <!-- ══ Back + Title Row ════════════════════════════════════════════════ -->
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
-        <FluentButton Appearance="Appearance.Stealth"
-                      IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
-                      OnClick="@(() => Nav.NavigateTo("/"))">
-            @L["media_detail.btn_back"]
-        </FluentButton>
-        <div style="flex:1;"></div>
-        <FluentButton Appearance="Appearance.Stealth"
-                      IconStart="@(new Icons.Regular.Size20.Edit())"
-                      OnClick="OpenEditPanel"
-                      title="@L["catalog.btn_edit_folder"]">
-            @L["catalog.btn_edit_folder"]
-        </FluentButton>
-        <FluentButton Appearance="Appearance.Neutral"
-                      IconStart="@(new Icons.Regular.Size20.ArrowSync())"
-                      OnClick="ReidentifyAsync"
-                      title="@L["catalog.btn_reidentify"]">
-            @L["catalog.btn_reidentify"]
-        </FluentButton>
-    </div>
+    @* ══ Design hero block (replaces the old Back+Title row + Poster+Meta layout) ══ *@
+    <MediaDetailHero Item="@_item"
+                     OnEditClick="OpenEditPanel"
+                     Continue="@_continueAction"
+                     OnContinueClick="HandleContinueClick" />
 
-    <!-- ══ Main content ════════════════════════════════════════════════════ -->
-    <div style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;">
-
-        <!-- Poster -->
-        <div class="md-poster-wrap" @onclick="@(() => { if (_posterUrl != null) OpenImagePreview(_posterUrl); })">
-            @if (_posterUrl != null)
+    @* ══ 3-column body: Synopsis · Details · Identification ════════════════
+       Spec source: design_handoff_animarr/screens-v3.jsx::MediaDetailV3 lines 412-478.
+       Synopsis owns the inline CTA row (Play / Edit metadata / Re-identify) — no
+       separate action row above the body block. Tags render inline in Details,
+       not as Pills under Synopsis (design intentionally treats them as dim text). *@
+    <div class="md-body">
+        @* Synopsis — overline + prose + action row (3 buttons per spec lines 424-428). *@
+        <section class="md-body__col md-synopsis">
+            <div class="md-overline">SYNOPSIS</div>
+            @if (!string.IsNullOrEmpty(_item.Description))
             {
-                <img src="@_posterUrl" alt="@_item.Title"
-                     style="width:200px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.3);display:block;"
-                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
-                <div style="display:none;width:200px;aspect-ratio:2/3;border-radius:8px;background:var(--neutral-layer-3);align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.3);">
-                    <FluentIcon Value="@(new Icons.Regular.Size48.VideoClip())" Style="opacity:0.25;" />
-                </div>
+                <p class="md-prose">@_item.Description</p>
             }
             else
             {
-                <div style="width:200px;aspect-ratio:2/3;border-radius:8px;background:var(--neutral-layer-3);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.3);">
-                    <FluentIcon Value="@(new Icons.Regular.Size48.VideoClip())" Style="opacity:0.25;" />
-                </div>
+                <p class="md-prose md-prose--empty">No synopsis available.</p>
             }
-            @if (_posterUrl != null)
-            {
-                <div class="md-poster-overlay">
-                    <div class="md-poster-zoom">
-                        <FluentIcon Value="@(new Icons.Regular.Size24.ZoomIn())" />
-                    </div>
-                </div>
-            }
-        </div>
-
-        <!-- Meta block -->
-        <div style="flex:1;min-width:240px;">
-            <!-- Title / logo / year / original -->
-            @if (_logoUrl != null)
-            {
-                <img src="@_logoUrl" alt="@_item.Title" style="max-height:70px;max-width:300px;object-fit:contain;object-position:left;display:block;margin-bottom:8px;" />
-            }
-            <FluentLabel Typo="Typography.H3" Style="margin-bottom:4px;">@_item.Title</FluentLabel>
-            @if (!string.IsNullOrEmpty(_item.OriginalTitle) && _item.OriginalTitle != _item.Title)
-            {
-                <div style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:6px;">@_item.OriginalTitle</div>
-            }
-
-            <!-- Pills row -->
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
-                @if (_item.Year.HasValue)
-                {
-                    <FluentBadge Appearance="Appearance.Neutral">@_item.Year</FluentBadge>
-                }
-                <FluentBadge Appearance="Appearance.Accent">
-                    @(_item.MediaType switch {
-                        MediaItemType.Anime  => L["catalog.badge_anime"],
-                        MediaItemType.Series => L["catalog.badge_series"],
-                        MediaItemType.Movie  => L["catalog.badge_movie"],
-                        _                    => L["catalog.badge_unknown"],
-                    })
-                </FluentBadge>
-                @if (!string.IsNullOrEmpty(_item.ContentRating))
-                {
-                    <FluentBadge Appearance="Appearance.Neutral">@_item.ContentRating</FluentBadge>
-                }
-                @if (_item.Rating.HasValue)
-                {
-                    <FluentBadge Appearance="Appearance.Neutral">★ @_item.Rating.Value.ToString("F1")</FluentBadge>
-                }
-                @if (!string.IsNullOrEmpty(_item.Status))
-                {
-                    <FluentBadge Appearance="Appearance.Lightweight">@_item.Status</FluentBadge>
-                }
+            @* Primary CTA moved into the hero (CHANGELOG §2). Secondary actions stay here. *@
+            <div class="md-actions">
+                <Btn Variant="solid" Size="md" OnClick="OpenEditPanel">
+                    <DIcon Name="pencil" Size="14" /> Edit metadata
+                </Btn>
+                <Btn Variant="ghost" Size="md" OnClick="ReidentifyAsync">
+                    <DIcon Name="refresh" Size="14" /> @L["catalog.btn_reidentify"]
+                </Btn>
             </div>
+        </section>
 
-            <!-- Genres -->
-            @if (_genres.Count > 0)
+        @* Details — mono key/value table; tags inline as " · " separated text per spec lines 433-441. *@
+        <section class="md-body__col md-details">
+            <div class="md-overline">DETAILS</div>
+            <dl class="md-kv">
+                @if (!string.IsNullOrEmpty(_item.Studio)) { <dt>Studio</dt><dd>@_item.Studio</dd> }
+                @if (!string.IsNullOrEmpty(_item.Language)) { <dt>Language</dt><dd>@_item.Language</dd> }
+                @if (_item.Runtime is > 0) { <dt>Runtime</dt><dd>@_item.Runtime m</dd> }
+                @if (_item.EpisodeCount is > 0) { <dt>Episodes</dt><dd>@_item.EpisodeCount</dd> }
+                @if (!string.IsNullOrEmpty(_item.SeasonLabel)) { <dt>Season</dt><dd>@_item.SeasonLabel</dd> }
+                @if (!string.IsNullOrEmpty(_item.Status)) { <dt>Status</dt><dd>@_item.Status</dd> }
+                @if (!string.IsNullOrEmpty(_item.ContentRating)) { <dt>Rating</dt><dd>@_item.ContentRating</dd> }
+                @if (_genres.Count > 0)
+                {
+                    <dt>Tags</dt>
+                    <dd class="md-kv__tags">@string.Join(" · ", _genres)</dd>
+                }
+            </dl>
+        </section>
+
+        @* Identification — surface card with source rows (dashed bottom border)
+           + ON DISK section below. Spec lines 451-477. *@
+        <section class="md-body__col md-ident">
+            <div class="md-overline md-overline--dim">IDENTIFICATION</div>
+
+            @if (_item.TmdbId is not null)
             {
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
-                    @foreach (var g in _genres)
+                <div class="md-id-row">
+                    <span class="md-id-row__src">TMDB</span>
+                    <a class="md-id-row__val"
+                       href="https://www.themoviedb.org/@(_item.MediaType == MediaItemType.Movie ? "movie" : "tv")/@_item.TmdbId"
+                       target="_blank" rel="noopener">#@_item.TmdbId</a>
+                    @if (_item.TmdbConfidence is > 0)
                     {
-                        <span style="font-size:12px;padding:2px 8px;background:var(--neutral-layer-3);border-radius:12px;color:var(--neutral-foreground-hint);">@g</span>
+                        <span class="@($"md-id-row__conf {ConfClass(_item.TmdbConfidence)}")">@($"{_item.TmdbConfidence:P0}")</span>
                     }
                 </div>
             }
-
-            <!-- Description -->
-            @if (!string.IsNullOrEmpty(_item.Description))
+            @if (_item.MalId is not null)
             {
-                <div style="font-size:14px;line-height:1.6;color:var(--neutral-foreground-rest);margin-bottom:12px;max-width:680px;">
-                    @_item.Description
+                <div class="md-id-row">
+                    <span class="md-id-row__src">MAL</span>
+                    <a class="md-id-row__val"
+                       href="https://myanimelist.net/anime/@_item.MalId"
+                       target="_blank" rel="noopener">#@_item.MalId</a>
+                    @if (_item.MalConfidence is > 0)
+                    {
+                        <span class="@($"md-id-row__conf {ConfClass(_item.MalConfidence)}")">@($"{_item.MalConfidence:P0}")</span>
+                    }
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_item.ImdbId))
+            {
+                <div class="md-id-row">
+                    <span class="md-id-row__src">IMDb</span>
+                    <a class="md-id-row__val"
+                       href="https://www.imdb.com/title/@_item.ImdbId/"
+                       target="_blank" rel="noopener">@_item.ImdbId</a>
+                    @if (_item.ImdbConfidence is > 0)
+                    {
+                        <span class="@($"md-id-row__conf {ConfClass(_item.ImdbConfidence)}")">@($"{_item.ImdbConfidence:P0}")</span>
+                    }
+                </div>
+            }
+            @if (_item.TvdbId is not null)
+            {
+                <div class="md-id-row">
+                    <span class="md-id-row__src">TVDB</span>
+                    <span class="md-id-row__val">#@_item.TvdbId</span>
                 </div>
             }
 
-            <!-- IDs -->
-            <div style="font-size:12px;color:var(--neutral-foreground-hint);display:flex;gap:16px;flex-wrap:wrap;">
-                @if (_item.TmdbId.HasValue)
-                {
-                    <a href="https://www.themoviedb.org/@(_item.MediaType == MediaItemType.Movie ? "movie" : "tv")/@_item.TmdbId"
-                       target="_blank" rel="noopener" style="color:inherit;">TMDB #@_item.TmdbId</a>
-                }
-                @if (_item.MalId.HasValue)
-                {
-                    <a href="https://myanimelist.net/anime/@_item.MalId"
-                       target="_blank" rel="noopener" style="color:inherit;">MAL #@_item.MalId</a>
-                }
-                <span style="opacity:.6;">@_item.Folder?.Path</span>
-            </div>
-        </div>
+            <div class="md-overline md-overline--dim md-ident__on-disk-label">ON DISK</div>
+            <code class="md-ident__path">@_item.Folder?.Path</code>
+        </section>
     </div>
 
-    @* Phase 2.3: NeedsReview banner with top-3 candidates *@
+    @* CHANGELOG §3 — Movie file card. Renders after the body for type == Movie
+       so the user gets a per-file action surface (play / mark watched / etc.)
+       in lieu of the episode grid that series show. *@
+    @if (_item.MediaType == MediaItemType.Movie)
+    {
+        var moviePath = _item.Folder?.SingleFilePath
+            ?? (_subFiles.Count == 1 && IsVideo(_subFiles[0].Ext) ? _subFiles[0].FullPath : null);
+        var movieHave = !string.IsNullOrEmpty(moviePath) && File.Exists(moviePath);
+        var movieInfo = SniffMovieFile(moviePath);
+        <section class="md-movie">
+            <div class="md-overline">FILE</div>
+            <MovieFileCard Title="@_item.Title"
+                           FileName="@(moviePath != null ? Path.GetFileName(moviePath) : null)"
+                           ThumbUrl="@_fanartUrl"
+                           Runtime="@(_item.Runtime is > 0 ? $"{_item.Runtime} min" : null)"
+                           Resolution="@movieInfo.Resolution"
+                           Codec="@movieInfo.Codec"
+                           Size="@movieInfo.Size"
+                           Have="@movieHave"
+                           WatchState="@_movieWatch"
+                           PlayLabel="@(_continueAction?.Label ?? "Play movie")"
+                           PlayIcon="@(_continueAction?.IconName ?? "play")"
+                           OnPlayClick="@(() => _continueAction is null ? Task.CompletedTask : HandleContinueClick(_continueAction))"
+                           OnToggleWatched="ToggleMovieWatchedAsync" />
+        </section>
+    }
+
+    @* NeedsReview top-3 candidates — restyled per design's warn-tinted block.
+       The full picker lives in the catalog NR modal; this is a quick-apply hint. *@
     @if (_item.IdentificationStatus == IdentificationStatus.NeedsReview && _candidateList.Count > 0)
     {
-        <div style="margin-top:24px;padding:14px 16px;border:1px solid var(--accent-fill-rest);border-radius:8px;background:var(--neutral-layer-2);">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                <FluentIcon Value="@(new Icons.Regular.Size20.Warning())" Style="color:var(--accent-fill-rest);" />
-                <FluentLabel Typo="Typography.Subject" Style="margin:0;">@L["media_detail.review_title"]</FluentLabel>
+        <section class="md-nr">
+            <div class="md-nr__head">
+                <div class="md-nr__icon"><DIcon Name="warn" Size="16" /></div>
+                <div class="md-nr__head-text">
+                    <div class="md-overline md-overline--warn">NEEDS REVIEW</div>
+                    <div class="md-nr__hint">@L["media_detail.review_hint"]</div>
+                </div>
             </div>
-            <div style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:12px;">
-                @L["media_detail.review_hint"]
-            </div>
-            <div style="display:flex;flex-direction:column;gap:8px;">
+            <div class="md-nr__list">
                 @foreach (var c in _candidateList)
                 {
                     var cand = c;
                     var sourceUrl = BuildSourceUrl(cand);
-                    <div style="display:flex;gap:12px;align-items:flex-start;padding:8px;border-radius:6px;background:var(--neutral-layer-3);">
+                    <div class="md-nr-card">
                         @if (!string.IsNullOrEmpty(cand.PosterUrl))
                         {
                             <img src="@cand.PosterUrl"
                                  alt="poster"
                                  loading="lazy"
-                                 style="width:60px;height:90px;object-fit:cover;border-radius:4px;flex-shrink:0;cursor:zoom-in;background:var(--neutral-layer-1);"
+                                 class="md-nr-card__poster"
                                  @onclick="@(() => OpenImagePreview(cand.PosterUrl!))" />
                         }
                         else
                         {
-                            <div style="width:60px;height:90px;border-radius:4px;flex-shrink:0;background:var(--neutral-layer-1);display:flex;align-items:center;justify-content:center;color:var(--neutral-foreground-hint);">
-                                <FluentIcon Value="@(new Icons.Regular.Size20.ImageOff())" />
+                            <div class="md-nr-card__poster md-nr-card__poster--empty">
+                                <DIcon Name="video" Size="22" />
                             </div>
                         }
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-size:14px;font-weight:600;">@cand.Title @(cand.Year.HasValue ? $"({cand.Year})" : "")</div>
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);">@cand.Type</div>
+                        <div class="md-nr-card__body">
+                            <div class="md-nr-card__title">@cand.Title @(cand.Year.HasValue ? $"({cand.Year})" : "")</div>
+                            <div class="md-nr-card__type">@cand.Type</div>
                             @if (!string.IsNullOrEmpty(cand.Overview))
                             {
-                                <div style="font-size:12px;margin-top:4px;color:var(--neutral-foreground-rest);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">
-                                    @cand.Overview
-                                </div>
+                                <div class="md-nr-card__overview">@cand.Overview</div>
                             }
                         </div>
-                        <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;flex-shrink:0;">
-                            <FluentButton Appearance="Appearance.Accent"
-                                          Disabled="@_applyingCandidate"
-                                          OnClick="@(() => ApplyCandidateAsync(cand))">
+                        <div class="md-nr-card__actions">
+                            <Btn Variant="primary" Size="sm"
+                                 Disabled="@_applyingCandidate"
+                                 OnClick="@(() => ApplyCandidateAsync(cand))">
                                 @L["media_detail.review_apply"]
-                            </FluentButton>
+                            </Btn>
                             @if (sourceUrl is not null)
                             {
-                                <FluentAnchor Href="@sourceUrl"
-                                              Target="_blank"
-                                              rel="noopener noreferrer"
-                                              Appearance="Appearance.Outline"
-                                              IconStart="@(new Icons.Regular.Size16.Open())">
-                                    @L["media_detail.review_open_source"]
-                                </FluentAnchor>
+                                <a class="md-nr-card__src" href="@sourceUrl" target="_blank" rel="noopener noreferrer">
+                                    <DIcon Name="external" Size="11" /> @L["media_detail.review_open_source"]
+                                </a>
                             }
                         </div>
                     </div>
                 }
             </div>
-        </div>
+        </section>
     }
 
-    <!-- ══ Seasons / Episodes ══════════════════════════════════════════════ -->
+    @* ══ Seasons / Episodes ══════════════════════════════════════════════
+       Spec source: design_handoff_animarr/screens-v3.jsx::MediaDetailV3 lines 481-515.
+       Overline EPISODES + SEASON 0N display heading + "N/M on disk" inline count.
+       Season switcher is a row of buttons on the right (accent-soft when active). *@
     @if (_seasons.Count > 0)
     {
-        <FluentDivider Style="margin:28px 0 20px;" />
-        <FluentLabel Typo="Typography.H3" Style="margin-bottom:16px;">@L["media_detail.seasons_title"]</FluentLabel>
+        var currentSeasonNum = int.TryParse(_activeSeason.TrimStart('s'), out var sn) ? sn : (_seasons.FirstOrDefault()?.Number ?? 1);
+        var currentSeason = _seasons.FirstOrDefault(x => x.Number == currentSeasonNum) ?? _seasons.First();
+        var currentEps = _episodesBySeason.TryGetValue(currentSeason.Number, out var loadedEps) ? loadedEps : null;
+        var haveCount = currentEps?.Count(e => _episodeFileMap.ContainsKey((currentSeason.Number, e.Number))) ?? 0;
+        var totalCount = currentEps?.Count ?? currentSeason.EpisodeCount;
 
-        <FluentTabs @bind-ActiveTabId="_activeSeason" OnTabChange="OnSeasonTabChangedAsync">
-            @foreach (var s in _seasons)
-            {
-                <FluentTab Id="@($"s{s.Number}")" Label="@(s.Name ?? L.Get("media_detail.season_default", s.Number))">
-                    <div style="padding-top:16px;">
-                        @if (_episodesBySeason.TryGetValue(s.Number, out var eps) && eps.Count > 0)
+        <section class="md-eps">
+            <div class="md-eps__head">
+                <div>
+                    <div class="md-overline">EPISODES</div>
+                    <h2 class="md-eps__title">
+                        SEASON @currentSeason.Number.ToString("00")
+                        @if (totalCount > 0)
                         {
-                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;">
-                                @foreach (var ep in eps)
-                                {
-                                    var hasFile = _episodeFileMap.ContainsKey((s.Number, ep.Number));
-                                    <div class="ep-card @(hasFile ? "ep-has-file" : "")"
-                                         style="opacity:@(hasFile ? "1" : "0.55")"
-                                         @onclick="@(() => { if (hasFile && ep.FileName != null) OpenPlayer(ep.FileName); })">
-                                        <!-- availability badge -->
-                                        <div style="position:absolute;top:5px;right:5px;z-index:3;">
-                                            @if (hasFile)
-                                            {
-                                                <span title="@Path.GetFileName(ep.FileName ?? "")"
-                                                      style="color:rgba(255,255,255,0.45);display:inline-flex;align-items:center;">
-                                                    <FluentIcon Value="@(new Icons.Regular.Size16.CheckmarkCircle())" />
-                                                </span>
-                                            }
-                                            else
-                                            {
-                                                <span style="display:inline-flex;align-items:center;background:rgba(0,0,0,0.5);color:rgba(255,255,255,0.7);border-radius:4px;padding:2px 5px;font-size:10px;backdrop-filter:blur(4px);">
-                                                    <FluentIcon Value="@(new Icons.Regular.Size16.ArrowDownload())" />
-                                                </span>
-                                            }
-                                        </div>
-                                        <!-- image area + play overlay -->
-                                        <div style="position:relative;">
-                                            @if (!string.IsNullOrEmpty(ep.StillUrl))
-                                            {
-                                                <img loading="lazy" src="@ep.StillUrl" alt="@ep.Name"
-                                                     style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block;" />
-                                            }
-                                            else
-                                            {
-                                                <div style="width:100%;aspect-ratio:16/9;background:var(--neutral-layer-3);display:flex;align-items:center;justify-content:center;">
-                                                    <FluentIcon Value="@(new Icons.Regular.Size24.Play())" Style="opacity:0.3;" />
-                                                </div>
-                                            }
-                                            @if (hasFile)
-                                            {
-                                                <div class="ep-play-overlay">
-                                                    <div class="ep-play-btn">
-                                                        <FluentIcon Value="@(new Icons.Filled.Size32.Play())" />
-                                                    </div>
-                                                </div>
-                                            }
-                                        </div>
-                                        <div style="padding:6px 8px;">
-                                            <div style="font-size:11px;color:var(--neutral-foreground-hint);">@L["media_detail.ep_prefix"] @ep.Number</div>
-                                            <div style="font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="@ep.Name">@ep.Name</div>
-                                        </div>
-                                    </div>
-                                }
-                            </div>
+                            <span class="md-eps__count">@haveCount/@totalCount on disk</span>
                         }
-                        else if (_item.TmdbId.HasValue)
+                    </h2>
+                </div>
+                @if (_seasons.Count > 1)
+                {
+                    <div class="md-eps__seasons">
+                        @foreach (var s in _seasons)
                         {
-                            <FluentButton Appearance="Appearance.Neutral"
-                                          OnClick="@(() => LoadSeasonEpisodesAsync(s.Number))">
-                                @L["media_detail.btn_load_episodes"]
-                            </FluentButton>
-                        }
-                        else
-                        {
-                            <div style="color:var(--neutral-foreground-hint);font-size:13px;">
-                                @L.Get("media_detail.no_episodes_hint", s.EpisodeCount)
-                            </div>
+                            var sNum = s.Number;
+                            var isActive = sNum == currentSeason.Number;
+                            <button type="button"
+                                    class="@($"md-eps__season-btn {(isActive ? "md-eps__season-btn--active" : "")}")"
+                                    @onclick="@(() => SetActiveSeasonAsync(sNum))">
+                                SEASON @sNum.ToString("00")
+                            </button>
                         }
                     </div>
-                </FluentTab>
-            }
-        </FluentTabs>
-    }
+                }
+            </div>
 
-    <!-- ══ Files ═══════════════════════════════════════════════════════════ -->
-    @if (_subFiles.Count > 0 && _seasons.Count == 0)
-    {
-        <FluentDivider Style="margin:28px 0 20px;" />
-        <FluentLabel Typo="Typography.H3" Style="margin-bottom:12px;">@L["media_detail.files"]</FluentLabel>
-        <div class="md-files-grid">
-            @foreach (var f in _subFiles)
+            @if (currentEps is { Count: > 0 })
             {
-                <div class="md-file-card" style="@(IsVideo(f.Ext) ? "cursor:pointer;" : "")"
-                     @onclick="@(() => { if (IsVideo(f.Ext)) OpenPlayer(f.FullPath); })">
-                    <div class="md-file-art">
-                        @if (IsVideo(f.Ext))
-                        {
-                            <FluentIcon Value="@(new Icons.Regular.Size32.Play())" Style="opacity:0.35;" />
-                            <div class="md-file-play-overlay">
-                                <FluentIcon Value="@(new Icons.Filled.Size32.Play())" Style="color:white;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));" />
-                            </div>
-                        }
-                        else
-                        {
-                            <FluentIcon Value="@(new Icons.Regular.Size32.ClosedCaption())" Style="opacity:0.35;" />
-                        }
-                    </div>
-                    <div class="md-file-label" title="@f.Name">@f.Name</div>
-                    <div class="md-file-meta">@FormatSize(f.Size)</div>
+                <div class="md-eps-grid">
+                    @foreach (var ep in currentEps)
+                    {
+                        var seasonNum = currentSeason.Number;
+                        var hasFile = _episodeFileMap.ContainsKey((seasonNum, ep.Number));
+                        _watchByKey.TryGetValue((seasonNum, ep.Number), out var ws);
+                        @* CHANGELOG §4 meta line — strictly "{runtime} · 1080p · H.265 · {size}"
+                           for on-disk episodes, "{runtime} · Missing" for missing. NO
+                           "Watched" / "Not downloaded" / "38% watched" status words. *@
+                        var meta = hasFile ? BuildEpisodeMeta(ep) : BuildMissingMeta(ep);
+                        var epNum = ep.Number;
+                        var fileName = ep.FileName;
+                        <div @onclick="@(() => { if (hasFile && fileName != null) OpenPlayer(fileName); })">
+                            <EpisodeCard
+                                Number="@epNum"
+                                Title="@ep.Name"
+                                ThumbUrl="@ep.StillUrl"
+                                Meta="@meta"
+                                Have="@hasFile"
+                                WatchState="@ws"
+                                OnToggleWatched="@(() => ToggleEpisodeWatchedAsync(seasonNum, epNum, fileName))" />
+                        </div>
+                    }
                 </div>
             }
-        </div>
+            else if (_item.TmdbId.HasValue)
+            {
+                <Btn Variant="solid" Size="md" OnClick="@(() => LoadSeasonEpisodesAsync(currentSeason.Number))">
+                    @L["media_detail.btn_load_episodes"]
+                </Btn>
+            }
+            else
+            {
+                <div class="md-eps__empty">@L.Get("media_detail.no_episodes_hint", currentSeason.EpisodeCount)</div>
+            }
+        </section>
+    }
+
+    @* ══ Files (only when there's no TMDB season metadata).
+       Movies render their canonical MovieFileCard above — skip this section
+       for type == Movie so the user doesn't see a duplicate generic file row. *@
+    @if (_subFiles.Count > 0 && _seasons.Count == 0 && _item.MediaType != MediaItemType.Movie)
+    {
+        <section class="md-files">
+            <div class="md-overline">FILES</div>
+            <div class="md-files-grid">
+                @foreach (var f in _subFiles)
+                {
+                    var isVid = IsVideo(f.Ext);
+                    <div class="@($"md-file-card {(isVid ? "md-file-card--clickable" : "")}")"
+                         @onclick="@(() => { if (isVid) OpenPlayer(f.FullPath); })">
+                        <div class="md-file-art">
+                            @if (isVid)
+                            {
+                                <DIcon Name="play" Size="28" />
+                                <div class="md-file-play-overlay">
+                                    <DIcon Name="play" Size="28" />
+                                </div>
+                            }
+                            else
+                            {
+                                <DIcon Name="file" Size="24" />
+                            }
+                        </div>
+                        <div class="md-file-label" title="@f.Name">@f.Name</div>
+                        <div class="md-file-meta">@FormatSize(f.Size)</div>
+                    </div>
+                }
+            </div>
+        </section>
     }
 }
 
@@ -523,13 +354,11 @@ else
         <div class="vp-shell" @onclick:stopPropagation>
             <div class="vp-header">
                 <span class="vp-title" title="@_playerPath">@Path.GetFileName(_playerPath)</span>
-                <FluentButton Appearance="Appearance.Stealth"
-                              IconStart="@(new Icons.Regular.Size20.Dismiss())"
-                              Style="min-width:28px;width:28px;height:28px;padding:0;color:rgba(255,255,255,.6);"
-                              OnClick="ClosePlayer" />
+                <button type="button" class="vp-close" @onclick="ClosePlayer" aria-label="Close">
+                    <DIcon Name="x" Size="16" />
+                </button>
             </div>
-            <video controls autoplay
-                   style="display:block;width:min(92vw,1100px);max-height:calc(90vh - 48px);background:#000;"
+            <video controls autoplay class="vp-video"
                    src="@($"/api/video?path={Uri.EscapeDataString(_playerPath)}")">
             </video>
         </div>
@@ -539,18 +368,20 @@ else
 @if (_previewImageUrl is not null)
 {
     <div class="md-img-backdrop" @onclick="CloseImagePreview">
-        <FluentButton class="md-img-close"
-                      Appearance="Appearance.Stealth"
-                      IconStart="@(new Icons.Regular.Size20.Dismiss())"
-                      Style="min-width:36px;width:36px;height:36px;padding:0;color:white;background:rgba(0,0,0,.5);border-radius:50%;"
-                      OnClick="CloseImagePreview" />
+        <button type="button" class="md-img-close" @onclick="CloseImagePreview" aria-label="Close">
+            <DIcon Name="x" Size="18" />
+        </button>
         <img src="@_previewImageUrl" alt="preview" class="md-img-preview" @onclick:stopPropagation />
     </div>
 }
 
 @if (_showEdit && _item?.Folder is not null)
 {
-    <FolderEditPanel Folder="_item.Folder" OnSaved="HandleEditSaved" OnClosed="CloseEditPanel" />
+    @* Pixel-perfect drawer per design_handoff_animarr/screens-v3.jsx (560px, 6 tabs).
+       This is the only folder-level metadata editor now that Explorer is gone. *@
+    <EditMetadataDrawer Item="_item"
+                        OnClose="CloseEditPanel"
+                        OnSaved="HandleEditSaved" />
 }
 
 @code {
@@ -590,6 +421,15 @@ else
 
     // Edit panel
     private bool _showEdit;
+
+    // CHANGELOG §2 — dynamic Continue / Play CTA shown in the hero.
+    private ContinueAction? _continueAction;
+
+    // CHANGELOG §4 — (season, episode) → WatchState for the rendered series.
+    // Looked up by EpisodeCard via the explicit Parameter — keeps the loop cheap.
+    private Dictionary<(int s, int ep), WatchState> _watchByKey = new();
+    // Movie watch state (single row, Season/Episode null).
+    private WatchState? _movieWatch;
 
     // Filesystem content
     private List<SubDirEntry> _subDirs = [];
@@ -651,8 +491,131 @@ else
         }
 
         _downloadThumbs = await AppConfig.GetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, false);
+
+        await LoadWatchStatesAsync();
+        await RecomputeContinueAsync();
+
         _loading = false;
         _backdropOwned = false; // reset on parameter change so backdrop restarts
+    }
+
+    protected override void OnInitialized()
+    {
+        // Refresh when MarkEpisodeAsync / MarkMovieAsync fires the change event.
+        WatchSvc.WatchStateChanged += OnWatchStateChanged;
+    }
+
+    private async void OnWatchStateChanged(Guid mediaItemId)
+    {
+        if (_item is null || mediaItemId != _item.Id) return;
+        await LoadWatchStatesAsync();
+        await RecomputeContinueAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Refresh the (season, episode) → WatchState map after a toggle
+    /// or on initial load. Movies use _movieWatch instead.</summary>
+    private async Task LoadWatchStatesAsync()
+    {
+        _watchByKey = new();
+        _movieWatch = null;
+        if (_item is null) return;
+
+        if (_item.MediaType == MediaItemType.Movie)
+        {
+            _movieWatch = await WatchSvc.GetForMovieAsync(_item.Id);
+        }
+        else
+        {
+            var states = await WatchSvc.GetForSeriesAsync(_item.Id);
+            foreach (var s in states)
+            {
+                if (s.Season is null || s.Episode is null) continue;
+                _watchByKey[(s.Season.Value, s.Episode.Value)] = s;
+            }
+        }
+    }
+
+    /// <summary>Recompute the hero CTA after a load / watch-state change.
+    /// Movies use the single WatchState row; series builds a have-list from
+    /// _episodeFileMap (whose key set IS the on-disk episodes).</summary>
+    private async Task RecomputeContinueAsync()
+    {
+        if (_item is null) { _continueAction = null; return; }
+
+        if (_item.MediaType == MediaItemType.Movie)
+        {
+            _continueAction = await ContinueResolver.ResolveAsync(WatchSvc, _item, Array.Empty<ContinueEpisode>());
+            return;
+        }
+
+        // Series: have-list is (season, episode) pairs present in _episodeFileMap.
+        var eps = _episodeFileMap.Keys
+            .Select(k => new ContinueEpisode(k.s, k.ep, true))
+            .ToList();
+        _continueAction = await ContinueResolver.ResolveAsync(WatchSvc, _item, eps);
+    }
+
+    /// <summary>Resolves the file path the Continue/Play CTA should open, then
+    /// hands it to the existing inline player overlay (`_playerPath` →
+    /// `<video src="/api/video?path=…">`). Picks:
+    ///   • Movie  → SingleFilePath, falling back to the lone video file in the folder.
+    ///   • Series with (Season, Episode) hint → the matching file from _episodeFileMap.
+    ///   • Series without hint (Play first / Replay) → the first on-disk episode by (season, episode).</summary>
+    private Task HandleContinueClick(ContinueAction action)
+    {
+        if (_item is null) return Task.CompletedTask;
+
+        string? path = null;
+        if (_item.MediaType == MediaItemType.Movie)
+        {
+            path = _item.Folder?.SingleFilePath;
+            if (string.IsNullOrEmpty(path))
+            {
+                var firstVid = _subFiles.FirstOrDefault(f => IsVideo(f.Ext));
+                if (firstVid is not null) path = firstVid.FullPath;
+            }
+        }
+        else if (action.SeasonHint is int s && action.EpisodeHint is int e
+                 && _episodeFileMap.TryGetValue((s, e), out var hinted))
+        {
+            path = hinted;
+        }
+        else if (_episodeFileMap.Count > 0)
+        {
+            // No hint (Play first episode / Replay) → take the lowest (season, episode).
+            var first = _episodeFileMap
+                .OrderBy(kv => kv.Key.Item1).ThenBy(kv => kv.Key.Item2)
+                .First();
+            path = first.Value;
+        }
+
+        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        {
+            OpenPlayer(path);
+        }
+        else
+        {
+            ToastService.ShowWarning("No playable file found on disk for this title.");
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Called by an EpisodeCard's watched-eye chip. Persists then
+    /// the WatchStateChanged event refreshes us.</summary>
+    private async Task ToggleEpisodeWatchedAsync(int season, int episode, string? filePath)
+    {
+        if (_item is null) return;
+        _watchByKey.TryGetValue((season, episode), out var existing);
+        var nextWatched = existing is null ? true : !existing.IsWatched;
+        await WatchSvc.MarkEpisodeAsync(_item.Id, season, episode, nextWatched, filePath);
+    }
+
+    private async Task ToggleMovieWatchedAsync()
+    {
+        if (_item is null) return;
+        var nextWatched = !(_movieWatch?.IsWatched ?? false);
+        await WatchSvc.MarkMovieAsync(_item.Id, nextWatched);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -673,6 +636,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        WatchSvc.WatchStateChanged -= OnWatchStateChanged;
         if (_backdropOwned)
             try { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); } catch { }
     }
@@ -1057,24 +1021,23 @@ else
         return null;
     }
 
-    private void NavigateToSubfolder(string path)
+    /// <summary>Switch the visible season + lazy-load episodes from TMDB on demand.
+    /// Called by the design-spec season switcher buttons in the episodes block.</summary>
+    private async Task SetActiveSeasonAsync(int seasonNumber)
     {
-        if (_subDirMediaIds.TryGetValue(path, out var mediaId))
-            Nav.NavigateTo($"/catalog/{mediaId}");
-        else
-            Nav.NavigateTo($"/browse?path={Uri.EscapeDataString(path)}&back={Id}");
+        _activeSeason = $"s{seasonNumber}";
+        if (!_episodesBySeason.ContainsKey(seasonNumber) && _item?.TmdbId.HasValue == true)
+            await LoadSeasonEpisodesAsync(seasonNumber);
+        StateHasChanged();
     }
 
-    private async Task OnSeasonTabChangedAsync(FluentTab tab)
+    /// <summary>CSS class for confidence chip — success/warn/faint per design spec lines 467-470.</summary>
+    private static string ConfClass(double? c) => c switch
     {
-        var idStr = tab.Id?.TrimStart('s') ?? "";
-        if (int.TryParse(idStr, out var seasonNumber) &&
-            !_episodesBySeason.ContainsKey(seasonNumber) &&
-            _item?.TmdbId.HasValue == true)
-        {
-            await LoadSeasonEpisodesAsync(seasonNumber);
-        }
-    }
+        > 0.9 => "md-id-row__conf--ok",
+        > 0.7 => "md-id-row__conf--warn",
+        _     => "md-id-row__conf--low",
+    };
 
     private void OpenEditPanel()  => _showEdit = true;
     private void CloseEditPanel() => _showEdit = false;
@@ -1139,15 +1102,6 @@ else
         _                => $"{bytes} B",
     };
 
-    private static Microsoft.FluentUI.AspNetCore.Components.Icon FileIcon(string ext) => ext switch
-    {
-        ".mkv" or ".mp4" or ".avi" or ".m4v" or ".mov" or ".wmv" or ".ts" or ".m2ts"
-            => new Icons.Regular.Size20.Video(),
-        ".srt" or ".ass" or ".ssa" or ".sub" or ".vtt"
-            => new Icons.Regular.Size20.ClosedCaption(),
-        _   => new Icons.Regular.Size20.Document(),
-    };
-
     private async Task LoadSeasonEpisodesAsync(int seasonNumber)
     {
         if (_item?.TmdbId is null || _item.Folder is null) return;
@@ -1203,6 +1157,80 @@ else
     }
 
     private record EpisodeVm(int Number, string Name, string? Overview, string? StillUrl, string? FileName = null);
+
+    /// <summary>Surface-level format guess for a movie's file metadata cells.
+    /// Resolution + codec are sniffed from the filename via regex (consistent
+    /// with the per-episode meta builder). Size comes from FileInfo. No DB
+    /// columns are persisted for this — CHANGELOG §3 explicitly says "Don't
+    /// add new DB columns."
+    /// TODO: Once ffprobe metadata lands on FolderWatcher/MediaItem, swap
+    /// these sniffs for the persisted values. </summary>
+    private record MovieFileInfo(string? Resolution, string? Codec, string? Size);
+
+    private static MovieFileInfo SniffMovieFile(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return new MovieFileInfo(null, null, null);
+        string? res = null, codec = null, size = null;
+        var name = Path.GetFileName(path);
+        var resMatch = System.Text.RegularExpressions.Regex.Match(name, @"\b(2160|1440|1080|720|480)p\b");
+        if (resMatch.Success) res = resMatch.Value;
+        var codecMatch = System.Text.RegularExpressions.Regex.Match(
+            name, @"\b(H\.?265|H\.?264|HEVC|AVC|x264|x265|AV1)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (codecMatch.Success) codec = codecMatch.Value.ToUpperInvariant();
+        try
+        {
+            if (File.Exists(path))
+            {
+                var bytes  = new FileInfo(path).Length;
+                var sizeGb = bytes / 1024d / 1024d / 1024d;
+                size = sizeGb >= 1 ? $"{sizeGb:F2} GB" : $"{bytes / 1024d / 1024d:F0} MB";
+            }
+        }
+        catch { /* ignore */ }
+        return new MovieFileInfo(res, codec, size);
+    }
+
+    /// <summary>
+    /// Build the mono meta line under an on-disk episode title. CHANGELOG §4
+    /// canonical form: "{runtime} · 1080p · H.265 · {size}". Each segment
+    /// drops out gracefully when unparseable, so a low-info file just shows
+    /// "{runtime} · {size}". No status words ("Watched", "Not downloaded",
+    /// "38% watched") — visuals carry that load now.
+    /// </summary>
+    private string BuildEpisodeMeta(EpisodeVm ep)
+    {
+        var parts = new List<string>();
+        if (_item?.Runtime is > 0) parts.Add($"{_item.Runtime}m");
+
+        if (!string.IsNullOrEmpty(ep.FileName) && File.Exists(ep.FileName))
+        {
+            try
+            {
+                var size  = new FileInfo(ep.FileName).Length;
+                var name  = Path.GetFileName(ep.FileName);
+                var res   = System.Text.RegularExpressions.Regex.Match(name, @"\b(2160|1440|1080|720|480)p\b");
+                if (res.Success) parts.Add(res.Value);
+                var codec = System.Text.RegularExpressions.Regex.Match(name, @"\b(H\.?265|H\.?264|HEVC|AVC|x264|x265|AV1)\b",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (codec.Success) parts.Add(codec.Value.ToUpperInvariant());
+                var sizeGb = size / 1024d / 1024d / 1024d;
+                parts.Add(sizeGb >= 1
+                    ? $"{sizeGb:F2} GB"
+                    : $"{size / 1024d / 1024d:F0} MB");
+            }
+            catch { /* ignore — fall back to runtime-only */ }
+        }
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Meta line for missing episodes — CHANGELOG §4 mandates
+    /// "{runtime} · Missing" with no other status words.</summary>
+    private string BuildMissingMeta(EpisodeVm _)
+    {
+        var runtime = _item?.Runtime is > 0 ? $"{_item.Runtime}m" : null;
+        return runtime is not null ? $"{runtime} · Missing" : "Missing";
+    }
     private record SubDirEntry(string Name, string Path, string? PosterUrl);
     private record FileEntry(string Name, long Size, string Ext, string FullPath = "");
 }

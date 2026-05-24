@@ -1,0 +1,42 @@
+@inject NavigationManager Nav
+@namespace Microsoft.FluentUI.AspNetCore.Components
+@implements IDisposable
+
+<a href="@Href" class="@($"fnavlink {(IsActive() ? "fnavlink--active" : "")}")">
+    @if (Icon is not null)
+    {
+        <span class="fnavlink__icon"><DIcon Name="@Icon.Name" Size="@Icon.Size" /></span>
+    }
+    <span class="fnavlink__label">@ChildContent</span>
+    @if (Trailing is not null)
+    {
+        <span class="fnavlink__trailing">@Trailing</span>
+    }
+</a>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>Optional trailing element — count badge, LIVE indicator, etc.</summary>
+    [Parameter] public RenderFragment? Trailing { get; set; }
+    [Parameter] public string Href { get; set; } = "/";
+    [Parameter] public Icon? Icon { get; set; }
+    [Parameter] public Microsoft.AspNetCore.Components.Routing.NavLinkMatch Match { get; set; } = Microsoft.AspNetCore.Components.Routing.NavLinkMatch.Prefix;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private bool IsActive()
+    {
+        var current = new Uri(Nav.Uri).AbsolutePath;
+        if (Match == Microsoft.AspNetCore.Components.Routing.NavLinkMatch.All)
+            return string.Equals(current, Href, StringComparison.OrdinalIgnoreCase);
+        return current.StartsWith(Href, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose() { Nav.LocationChanged -= OnLocationChanged; }
+}

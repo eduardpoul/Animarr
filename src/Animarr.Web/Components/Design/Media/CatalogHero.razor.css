@@ -1,0 +1,215 @@
+.d-hero {
+    position: relative;
+    height: clamp(420px, 70vh, 720px);
+    margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-9)) var(--space-9);
+    overflow: hidden;
+    border-radius: 0 0 var(--radius-hero) var(--radius-hero);
+}
+
+.d-hero__bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+}
+
+.d-hero__bg-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    display: block;
+    /* Sharp full-brightness — the global blurred backdrop sits beneath. */
+}
+
+.d-hero__wash {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, rgba(10, 8, 7, 0.85) 0%, transparent 55%),
+        linear-gradient(180deg, transparent 50%, rgba(10, 8, 7, 0.95) 100%),
+        radial-gradient(
+            70% 50% at 12% 100%,
+            oklch(0.66 0.20 var(--hue) / 0.30),
+            transparent 70%
+        );
+    pointer-events: none;
+}
+
+.d-hero__cjk {
+    position: absolute;
+    top: var(--space-7);
+    right: var(--space-9);
+    font-family: var(--font-cjk);
+    font-size: clamp(140px, 16vw, 280px);
+    line-height: 0.9;
+    color: oklch(0.95 0.1 var(--hue) / 0.08);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+    animation: cjk-fade-in var(--motion-hero-cjk);
+}
+
+.d-hero__content {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 2;
+    padding: var(--space-9) var(--space-11) var(--space-11);
+    display: flex;
+    flex-direction: column;
+    /* Explicit flex-start — overrides the legacy .d-hero__content rule in
+       Styles/components.css §6 which ships `align-items: flex-end` (designed
+       for an earlier hero layout with a `__main` child wrapper that no longer
+       exists). Without this, children get right-aligned because the
+       flex-direction:column + flex-end cascade. */
+    align-items: flex-start;
+    gap: var(--space-5);
+    max-width: 920px;
+}
+
+.d-hero__pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.d-hero__title {
+    font-family: var(--font-display);
+    font-size: clamp(56px, 8vw, 120px);
+    line-height: 0.87;
+    letter-spacing: -0.022em;
+    text-transform: uppercase;
+    color: var(--text);
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    margin: 0;
+}
+
+.d-hero__meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    /* CatalogV3 line 126: 22px gap, no inline separator dots. */
+    gap: 22px;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+.d-hero__rating {
+    color: var(--accent-hi);
+    font-weight: 700;
+}
+
+.d-hero__overview {
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.d-hero__actions {
+    display: flex;
+    gap: var(--space-5);
+    align-items: center;
+    margin-top: var(--space-3);
+}
+
+/* Featured pager — vertical numbered side rail per CatalogV3 lines 148-164.
+   Sits bottom-right of the hero, aligned to the content baseline. */
+.d-hero__pager {
+    position: absolute;
+    right: var(--space-11);
+    bottom: var(--space-12);
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 12px;
+}
+
+.d-hero__pager-item {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    padding: 6px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    transition: color var(--motion-base);
+}
+
+.d-hero__pager-line {
+    display: inline-block;
+    width: 14px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.18);
+    transition: width var(--motion-base), background var(--motion-base);
+}
+
+.d-hero__pager-num { line-height: 1; }
+
+.d-hero__pager-item:hover { color: var(--text-dim); }
+
+.d-hero__pager-item--active {
+    color: var(--accent-hi);
+}
+
+.d-hero__pager-item--active .d-hero__pager-line {
+    width: 28px;
+    background: var(--accent);
+}
+
+/* ── Mobile / tablet — shrink hero, tuck pager into bottom row. */
+@media (max-width: 959px) {
+    .d-hero {
+        height: clamp(360px, 56vh, 520px);
+        margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-7);
+    }
+    .d-hero__content {
+        padding: var(--space-6) var(--space-7) var(--space-7);
+        gap: var(--space-4);
+        max-width: 100%;
+    }
+    .d-hero__overview {
+        -webkit-line-clamp: 2;
+    }
+    .d-hero__pager {
+        position: static;
+        flex-direction: row;
+        margin-top: var(--space-3);
+        padding-bottom: 0;
+    }
+}
+
+/* ── Phone — single-column title, hide oversized CJK watermark. */
+@media (max-width: 639px) {
+    .d-hero {
+        height: clamp(320px, 52vh, 460px);
+    }
+    .d-hero__content {
+        padding: var(--space-5) var(--space-5) var(--space-6);
+    }
+    .d-hero__cjk {
+        font-size: clamp(80px, 22vw, 140px);
+        right: var(--space-3);
+        top: var(--space-3);
+    }
+    .d-hero__title {
+        font-size: clamp(36px, 9vw, 52px);
+    }
+    .d-hero__meta { gap: 12px; font-size: 11px; }
+    .d-hero__actions { flex-wrap: wrap; gap: var(--space-3); }
+}
