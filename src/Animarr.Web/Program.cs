@@ -72,23 +72,37 @@ builder.Services.AddScoped<TmdbClient>();
 builder.Services.AddScoped<MalClient>();
 builder.Services.AddScoped<ImdbSearchClient>();
 builder.Services.AddScoped<MetadataService>();
+builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
 builder.Services.AddScoped<ILlmService, MicrosoftAiLlmService>();
-builder.Services.AddHostedService<IdentificationQueueProcessorService>();
+// Dual-registration: same instance available for DI into Blazor components
+// (so the sidebar LLM status card + NeedsReview chip can subscribe to events)
+// AND runs as a hosted service.
+builder.Services.AddSingleton<IdentificationQueueProcessorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationQueueProcessorService>());
 
-// Blazor + FluentUI
+// Blazor + custom design components (FluentUI removed; shims live in Components/Design/Fluent)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddFluentUIComponents();
+// Wire our drop-in services in the same DI slots the old Fluent ones lived in.
+builder.Services.AddScoped<Microsoft.FluentUI.AspNetCore.Components.IToastService,
+                          Microsoft.FluentUI.AspNetCore.Components.ToastService>();
+builder.Services.AddScoped<Microsoft.FluentUI.AspNetCore.Components.IDialogService,
+                          Microsoft.FluentUI.AspNetCore.Components.DialogService>();
 
 var app = builder.Build();
 
-// Apply EF Core migrations on startup
+// Apply EF Core migrations on startup. Skipped only when the DB is already up-to-date
+// — we check by looking for the latest expected migration row, since the migration lock
+// acquire path can spin for 90s on some systems even when no work is needed.
 using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     await using var db = await dbFactory.CreateDbContextAsync();
-    await db.Database.MigrateAsync();
+
+    var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+    if (pending.Count > 0)
+        await db.Database.MigrateAsync();
 
     // Seed built-in patterns and ignore rules
     var seeder = scope.ServiceProvider.GetRequiredService<SeedDataService>();
@@ -123,6 +137,15 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseAntiforgery();
+
+// Map modern font MIME types — Kestrel's default for .ttf is the obsolete
+// `application/x-font-ttf` which some browsers refuse to apply. font/ttf is
+// the current standard (RFC 8081).
+var contentTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+contentTypes.Mappings[".ttf"]   = "font/ttf";
+contentTypes.Mappings[".woff"]  = "font/woff";
+contentTypes.Mappings[".woff2"] = "font/woff2";
+app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

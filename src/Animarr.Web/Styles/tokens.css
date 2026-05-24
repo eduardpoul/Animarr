@@ -1,0 +1,192 @@
+/* ============================================================
+   Animarr design tokens — single source of truth.
+   Mirrors design_handoff_animarr/README.md §Design Tokens.
+   Consumed by: every component (via var(--*)), app.css @theme
+   (Tailwind utility aliases), and fluent-overrides.css (Fluent
+   widget re-skin).
+   ============================================================ */
+
+/* ── Self-hosted fonts (inline @font-face so they live in the
+   primary CSS bundle and load before any element resolves a
+   font-family token). Absolute URLs so location-of-CSS doesn't
+   matter; the static asset middleware serves these unfingerprinted. */
+
+@font-face {
+    font-family: 'Geist';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-400.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-500.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-600.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-700.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist Mono';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-mono-400.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist Mono';
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/geist-mono-500.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Archivo Black';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/lib/fonts/archivo-black-400.ttf') format('truetype');
+}
+
+:root {
+    /* ── Backgrounds ──────────────────────────────────────── */
+    --bg-0:        #0a0807;
+    --bg-1:        #100d0b;
+    --surface:     #15110e;
+    --surface-2:   #1c1814;
+    --surface-3:   #25201b;
+
+    /* ── Borders ──────────────────────────────────────────── */
+    --border:        rgba(255, 240, 220, 0.07);
+    --border-strong: rgba(255, 240, 220, 0.14);
+
+    /* ── Text ─────────────────────────────────────────────── */
+    --text:       #f4eee6;
+    --text-dim:   #a8a097;
+    --text-faint: #5d564f;
+
+    /* ── Accent (oklch, runtime-swappable via --accent-hue) ─
+       Default hue 25 = crimson. Appearance panel updates
+       --accent-hue and the four derived vars recompute. */
+    --accent-hue:  25;
+    --accent:      oklch(0.66 0.20 var(--accent-hue));
+    --accent-hi:   oklch(0.74 0.21 var(--accent-hue));
+    --accent-soft: oklch(0.66 0.20 var(--accent-hue) / 0.16);
+    --accent-line: oklch(0.66 0.20 var(--accent-hue) / 0.40);
+
+    /* ── Semantic ─────────────────────────────────────────── */
+    --success: oklch(0.74 0.15 150);
+    --warn:    oklch(0.80 0.17  75);
+    --info:    oklch(0.74 0.10 240);
+
+    /* ── Typography ───────────────────────────────────────── */
+    --font-ui:      'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Archivo Black', 'Geist', system-ui, sans-serif;
+    --font-mono:    'Geist Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+    --font-cjk:     'Noto Serif SC', serif;
+
+    /* ── Spacing scale (px) ───────────────────────────────── */
+    --space-1:  4px;
+    --space-2:  6px;
+    --space-3:  8px;
+    --space-4: 10px;
+    --space-5: 12px;
+    --space-6: 14px;
+    --space-7: 16px;
+    --space-8: 18px;
+    --space-9: 22px;
+    --space-10: 26px;
+    --space-11: 36px;
+    --space-12: 48px;
+
+    /* ── Radius scale ──────────────────────────────────────
+       CANVAS §01.5 defines a tight scale (4/6/8/10/12/14/18/22).
+       At those values, inputs and cards LOOK angular against the
+       app's flat dark background — 4–6px corners read as sharp at
+       viewing distance. Bumped each step by ~50% so the rounding
+       is obvious without violating the design's intent. Relative
+       scale + role assignments stay the same. */
+    --radius-badge:   6px;   /* tiny mono uppercase tags */
+    --radius-ctrl:    8px;   /* buttons, inputs, selects */
+    --radius-chip:   10px;   /* pills with bg, info boxes */
+    --radius-card:   12px;
+    --radius-card-lg: 14px;
+    --radius-panel:  16px;
+    --radius-hero:   20px;
+    --radius-modal:  24px;
+    --radius-pill: 9999px;
+
+    /* ── Shadows ──────────────────────────────────────────── */
+    --shadow-card:    0 10px 30px -16px rgba(0,0,0,0.7),
+                      inset 0 0 0 1px rgba(255,255,255,0.04);
+    --shadow-card-hi: 0 14px 36px -14px rgba(0,0,0,0.78),
+                      inset 0 0 0 1px rgba(255,255,255,0.06);
+    --shadow-modal:   0 40px 80px -20px rgba(0,0,0,0.7);
+    --shadow-drawer:  -30px 0 60px -20px rgba(0,0,0,0.6);
+
+    /* ── Motion ───────────────────────────────────────────── */
+    --motion-fast:      120ms ease;
+    --motion-base:      200ms ease;
+    --motion-slow:      400ms ease;
+    --motion-crossfade: 1600ms ease;
+    --motion-hero-cjk:  1400ms ease;
+}
+
+/* ── Film-grain overlay layer ─────────────────────────────
+   Sits above the backdrop slideshow, below page content.
+   `mix-blend-mode: overlay` adds texture without obscuring.
+   SVG noise inlined to avoid an extra HTTP request. */
+.film-grain {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ── CJK decorative watermark ─────────────────────────────
+   Vertical-rl, low-opacity hero accent. Sets language tone
+   without screaming "asian media library". */
+.cjk-watermark {
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-family: var(--font-cjk);
+    font-size: clamp(140px, 22vw, 360px);
+    color: oklch(0.95 0.1 var(--accent-hue) / 0.08);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    user-select: none;
+    pointer-events: none;
+    line-height: 1;
+    animation: cjk-fade-in var(--motion-hero-cjk);
+}
+
+@keyframes cjk-fade-in {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Backdrop cross-fade override ─────────────────────────
+   Existing backdrop.js sets transition: opacity 1.2s ease.
+   The design calls for 1.4–1.8s. We bump it via class
+   targeting the slide elements — JS keeps inline opacity
+   as the animating property. */
+.backdrop-slide {
+    transition: opacity var(--motion-crossfade) !important;
+}

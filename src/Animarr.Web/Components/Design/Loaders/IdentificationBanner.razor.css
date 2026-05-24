@@ -1,0 +1,84 @@
+/* Spec: design_handoff_animarr/pages/loaders.html §05. */
+
+.d-id-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background:
+        linear-gradient(135deg, var(--accent-soft), transparent 75%),
+        var(--bg-1);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--radius-card-lg);
+    padding: 14px 18px;
+    margin-bottom: 18px;
+}
+
+.d-id-banner__icon {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-chip);
+    background: var(--accent);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    position: relative;
+    flex-shrink: 0;
+}
+.d-id-banner__icon::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border: 1.5px solid var(--accent);
+    border-radius: calc(var(--radius-chip) + 3px);
+    opacity: 0.5;
+    animation: d-id-pulse-ring 1.6s ease-out infinite;
+}
+@keyframes d-id-pulse-ring {
+    0%   { transform: scale(1);    opacity: 0.5; }
+    100% { transform: scale(1.35); opacity: 0;   }
+}
+
+.d-id-banner__text { flex: 1; min-width: 0; }
+.d-id-banner__title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.d-id-banner__sub {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    font-family: var(--font-mono);
+}
+
+.d-id-banner__progress {
+    width: 160px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.d-id-banner__progress > div {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+    box-shadow: 0 0 8px var(--accent-soft);
+    animation: d-id-progress-creep 6s ease-in-out infinite;
+}
+@keyframes d-id-progress-creep {
+    0%   { width: 18%; }
+    50%  { width: 78%; }
+    100% { width: 18%; }
+}
+
+.d-id-banner__count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.6px;
+    min-width: 64px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* Mobile — count + progress bar wrap below text. */
+@media (max-width: 639px) {
+    .d-id-banner       { flex-wrap: wrap; }
+    .d-id-banner__text { flex-basis: 100%; }
+}

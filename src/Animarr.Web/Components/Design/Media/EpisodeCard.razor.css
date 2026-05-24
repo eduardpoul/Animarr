@@ -1,0 +1,292 @@
+/* Spec-match: design_handoff_animarr/CANVAS.html §01.6.5 (.ep-mini) +
+   CHANGELOG_FOR_CLAUDE_CODE.md §4 (two-corner chips + progress bar +
+   watched-state visuals).
+
+   States supported:
+     .d-ep--have                      → on-disk default
+     .d-ep--miss                      → not downloaded (dashed warn border)
+     .d-ep--have.d-ep--watched        → user marked watched (dim + saturate)
+
+   Both chips (disk-status + watched-eye) share .d-ep__chip dimensions so
+   they're visually peers per CHANGELOG §4.
+*/
+
+.d-ep {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    transition:
+        transform var(--motion-base),
+        border-color var(--motion-base),
+        opacity var(--motion-base);
+    cursor: pointer;
+}
+
+.d-ep__strip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    z-index: 2;
+}
+
+/* ── ON DISK ─────────────────────────────────────────────── */
+.d-ep--have .d-ep__strip {
+    background: var(--success);
+    box-shadow: 0 0 12px var(--success);
+}
+
+/* ── MISSING ─────────────────────────────────────────────── */
+.d-ep--miss {
+    opacity: 0.48;
+    border-style: dashed;
+    border-color: oklch(0.80 0.17 75 / 0.30);
+}
+.d-ep--miss .d-ep__strip {
+    background: var(--warn);
+}
+
+/* ── WATCHED — CHANGELOG §4 visuals.
+   Card opacity 0.72 (0.7 on mobile, see media query), thumb saturate(0.6)
+   brightness(0.7), strip flat var(--text-faint), title dims. */
+.d-ep--watched {
+    opacity: 0.72;
+}
+.d-ep--watched .d-ep__strip {
+    background: var(--text-faint);
+    box-shadow: none;
+}
+.d-ep--watched .d-ep__img {
+    filter: saturate(0.6) brightness(0.7);
+}
+.d-ep--watched .d-ep__title {
+    color: var(--text-dim);
+}
+
+@media (hover: hover) {
+    .d-ep--have:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent-line);
+    }
+    .d-ep--have:hover .d-ep__overlay--play { opacity: 1; }
+    .d-ep--miss:hover .d-ep__overlay--miss { opacity: 1; }
+}
+
+/* ── Art / thumb ─────────────────────────────────────────── */
+.d-ep__art {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+
+.d-ep__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: filter var(--motion-base);
+}
+
+.d-ep--miss .d-ep__img { filter: grayscale(1) brightness(0.55); }
+
+/* Vignette gradient on thumb so the white episode number stays legible. */
+.d-ep__art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.78) 100%);
+    pointer-events: none;
+}
+
+.d-ep__placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+
+/* Big episode number — Archivo Black, white, sits on top-left of thumb. */
+.d-ep__num {
+    position: absolute;
+    top: 10px;
+    left: 14px;
+    z-index: 1;
+    font-family: var(--font-display);
+    font-size: 30px;
+    color: #fff;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+    line-height: 1;
+}
+.d-ep--miss .d-ep__num { color: rgba(255, 255, 255, 0.55); }
+
+/* ── Two-corner chips ────────────────────────────────────────
+   Both peers share size + radius. 26×26 desktop, 24×24 mobile.
+   CHANGELOG §4 strictly forbids one being larger than the other. */
+.d-ep__chip {
+    position: absolute;
+    z-index: 2;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-ctrl);
+    display: grid;
+    place-items: center;
+    backdrop-filter: blur(6px);
+}
+
+/* TOP-RIGHT — disk-status (immutable). */
+.d-ep__chip--ok,
+.d-ep__chip--miss {
+    top: 10px;
+    right: 10px;
+}
+.d-ep__chip--ok {
+    background: oklch(0.74 0.15 150 / 0.18);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+.d-ep__chip--miss {
+    background: oklch(0.80 0.17 75 / 0.20);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+}
+
+/* BOTTOM-RIGHT — watched-eye (user-controlled). Same box, different corner.
+   Rendered as a <button>, so reset chrome explicitly. */
+button.d-ep__chip--eye {
+    bottom: 14px;          /* clear of the progress bar (3px + breathing room) */
+    right: 10px;
+    appearance: none;
+    cursor: pointer;
+    transition: transform var(--motion-fast), background var(--motion-base);
+}
+button.d-ep__chip--eye:hover { transform: scale(1.08); }
+
+.d-ep__chip--eye-off {        /* unwatched (default) — neutral chrome */
+    background: rgba(20, 15, 12, 0.55);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+.d-ep__chip--eye-on {         /* watched — green-tint, matches design recipe */
+    background: oklch(0.74 0.15 150 / 0.18);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+/* ── Progress bar — 3px tall, pinned to thumb bottom edge.
+   CHANGELOG §4 "Progress bar". Background is a thin overlay so the
+   thumbnail still bleeds through under it. */
+.d-ep__pb {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    z-index: 2;
+    overflow: hidden;
+}
+.d-ep__pb-fill {
+    height: 100%;
+}
+.d-ep__pb-fill--inprog {
+    background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+    box-shadow: 0 0 8px var(--accent-soft);
+}
+.d-ep__pb-fill--done {
+    background: var(--text-faint);
+    box-shadow: none;
+}
+
+/* ── Hover overlays ──────────────────────────────────────────
+   z-index: 3 puts the play icon visually above the chips, but
+   pointer-events: none lets clicks fall through to the chips
+   (so the watched-eye is still clickable even while hovering). */
+.d-ep__overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-base);
+}
+
+.d-ep__overlay--play {
+    background: rgba(0, 0, 0, 0.45);
+    color: var(--text);
+}
+
+.d-ep__overlay--miss {
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.4);
+}
+.d-ep__overlay--miss > :not(.d-ep__overlay-label) {
+    width: 56px;
+    height: 56px;
+    border: 1px dashed var(--warn);
+    border-radius: var(--radius-ctrl);
+    color: var(--warn);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.d-ep__overlay-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--warn);
+}
+
+/* ── Body / caption ──────────────────────────────────────── */
+.d-ep__body {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.d-ep__title {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.d-ep--miss .d-ep__title { color: var(--text-dim); }
+
+.d-ep__meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.d-ep--miss .d-ep__meta { color: var(--warn); }
+
+/* ── Mobile — CHANGELOG §4 sizing table: 24×24 chips, 0.7 watched opacity. */
+@media (max-width: 639px) {
+    .d-ep__chip {
+        width: 24px;
+        height: 24px;
+    }
+    .d-ep--watched {
+        opacity: 0.7;
+    }
+}

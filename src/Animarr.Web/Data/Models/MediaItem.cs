@@ -2,10 +2,11 @@ namespace Animarr.Web.Data.Models;
 
 public enum MediaItemType
 {
-    Unknown = 0,
-    Anime   = 1,
-    Series  = 2,
-    Movie   = 3,
+    Unknown     = 0,
+    Anime       = 1,
+    Series      = 2,
+    Movie       = 3,
+    Multserials = 4,
 }
 
 public enum IdentificationStatus
@@ -20,7 +21,7 @@ public enum IdentificationStatus
 /// <summary>
 /// Stores metadata for a media folder (series, anime, movie).
 /// One MediaItem per FolderWatcher (IsSection=false only).
-/// Image paths are relative to the folder root (e.g. "poster.jpg").
+/// Image paths are absolute cache paths managed by MediaCachePaths.
 /// </summary>
 public class MediaItem
 {
@@ -30,8 +31,16 @@ public class MediaItem
     public FolderWatcher Folder { get; set; } = null!;
 
     // ─── Identity ──────────────────────────────────────────────────────────
+    /// <summary>Display title, normally in the user's locale (English unless overridden).</summary>
     public string Title { get; set; } = string.Empty;
+    /// <summary>Original title as published by the source (e.g. romanji "Shingeki no Kyojin").</summary>
     public string? OriginalTitle { get; set; }
+    /// <summary>CJK-script title (Hanzi/Kanji/Hangul). Separate from OriginalTitle because the
+    /// original can be romanji while CjkTitle is always native script. Used for the hero CJK watermark.</summary>
+    public string? CjkTitle { get; set; }
+    /// <summary>English title when distinct from Title. Filled when the source's preferred English
+    /// alternative differs from the display title (common for MAL / Donghua releases).</summary>
+    public string? EnglishTitle { get; set; }
     public int? Year { get; set; }
     public MediaItemType MediaType { get; set; } = MediaItemType.Unknown;
 
@@ -41,7 +50,7 @@ public class MediaItem
     public string? ImdbId { get; set; }
     public int?    TvdbId { get; set; }
 
-    // ─── Local image paths (relative to FolderWatcher.Path) ───────────────
+    // ─── Local image paths (absolute paths to MediaCachePaths.ForFolder dir) ─
     /// <summary>poster.jpg — primary poster art (portrait)</summary>
     public string? PosterPath { get; set; }
     /// <summary>fanart.jpg — wide backdrop used as hero/background</summary>
@@ -54,14 +63,35 @@ public class MediaItem
     public string? Tagline { get; set; }
     /// <summary>JSON array of genre names: ["Action","Drama"]</summary>
     public string? GenresJson { get; set; }
+    /// <summary>JSON array of descriptive tag strings: ["Donghua","Cultivation","Mecha"].
+    /// Distinct from MediaTag/MediaItemTag (which models user collections); these are
+    /// source-derived labels used by hero/poster overlays.</summary>
+    public string? TagsJson { get; set; }
     public double? Rating { get; set; }
     public int? RatingCount { get; set; }
+    /// <summary>Popularity score from TMDB / MAL (>0). Used for candidate scoring tiebreakers.</summary>
+    public double? Popularity { get; set; }
     /// <summary>e.g. "Ended", "Returning Series", "Canceled", "Finished Airing"</summary>
     public string? Status { get; set; }
     /// <summary>Age rating: PG-13, R, TV-MA, PG, etc.</summary>
     public string? ContentRating { get; set; }
-    /// <summary>Runtime in minutes</summary>
+    /// <summary>Runtime in minutes (per-episode for series, total for movies).</summary>
     public int? Runtime { get; set; }
+    /// <summary>Original audio language as display name ("Mandarin", "Japanese", "English").
+    /// Derived from source ISO-639-1 code via LanguageNameMap.</summary>
+    public string? Language { get; set; }
+    /// <summary>Production studio or network ("Fortiche", "Sunrise", "Bilibili", "HBO").
+    /// Sourced from TMDB networks/production_companies or MAL studios.</summary>
+    public string? Studio { get; set; }
+    /// <summary>Denormalised count of episodes across all seasons. Cached for the catalog grid
+    /// which renders 200+ posters and shouldn't deserialize SeasonsJson per card.</summary>
+    public int? EpisodeCount { get; set; }
+    /// <summary>Display label shown under the poster ("TV-1", "S2", "Movie"). Auto-derived from
+    /// MediaType + season count when null.</summary>
+    public string? SeasonLabel { get; set; }
+    /// <summary>Hue in degrees (0..360) used for poster wash + CJK watermark color.
+    /// Deterministically derived from Title hash on first identify; user-editable.</summary>
+    public int? Hue { get; set; }
     /// <summary>
     /// JSON array of SeasonMeta objects:
     /// [{"number":1,"episodeCount":13,"posterPath":"season01/poster.jpg","overview":"...","airDate":"2013-04-07"}]
@@ -72,6 +102,13 @@ public class MediaItem
     /// Cleared after user picks one.
     /// </summary>
     public string? CandidatesJson { get; set; }
+
+    // ─── Per-source match confidence (0..1) ───────────────────────────────
+    /// <summary>TMDB match confidence — typically based on vote_count + title-similarity.
+    /// Falls back to LlmConfidence when null.</summary>
+    public double? TmdbConfidence { get; set; }
+    public double? MalConfidence  { get; set; }
+    public double? ImdbConfidence { get; set; }
 
     // ─── LLM ───────────────────────────────────────────────────────────────
     /// <summary>Title extracted by LLM before external search (for debugging/display)</summary>

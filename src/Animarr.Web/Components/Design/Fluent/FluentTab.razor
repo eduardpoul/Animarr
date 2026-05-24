@@ -1,0 +1,16 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+@if (Parent?.IsActive(Id) ?? false)
+{
+    <div class="ftab" style="@Style">@ChildContent</div>
+}
+
+@code {
+    [CascadingParameter] public FluentTabs? Parent { get; set; }
+    [Parameter] public string Id { get; set; } = "";
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    protected override void OnInitialized() => Parent?.Register(this);
+}

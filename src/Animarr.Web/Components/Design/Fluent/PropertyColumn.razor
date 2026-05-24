@@ -1,0 +1,30 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+@typeparam TGridItem
+@typeparam TProp
+@implements IFluentColumn<TGridItem>
+
+@code {
+    [CascadingParameter] public FluentDataGrid<TGridItem>? Grid { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Width { get; set; }
+    [Parameter] public Align Align { get; set; } = Align.Start;
+    [Parameter] public bool Sortable { get; set; }
+    [Parameter] public System.Linq.Expressions.Expression<Func<TGridItem, TProp>> Property { get; set; } = null!;
+
+    private Func<TGridItem, TProp>? _compiled;
+
+    Align IFluentColumn<TGridItem>.Align => Align;
+
+    protected override void OnInitialized()
+    {
+        _compiled = Property?.Compile();
+        Grid?.Register(this);
+    }
+
+    public RenderFragment Render(TGridItem item) => builder =>
+    {
+        if (_compiled is null) return;
+        var v = _compiled(item);
+        builder.AddContent(0, v?.ToString());
+    };
+}

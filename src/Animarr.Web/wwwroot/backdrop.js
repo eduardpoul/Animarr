@@ -42,7 +42,10 @@ window.initBackdrop = function (urls, intervalSec, blurPx, brightness) {
     const b = document.getElementById('backdrop-slide-b');
     if (!a || !b) return;
 
-    const filter = `blur(${blurPx}px) brightness(${brightness / 100})`;
+    // CANVAS §01.6.8: blur(14) · brightness(38%) · saturate(0.95).
+    // Saturate is hard-pinned at 0.95 (always desaturate-toward-neutral);
+    // blur and brightness still come from settings so users can dial them.
+    const filter = `blur(${blurPx}px) brightness(${brightness / 100}) saturate(0.95)`;
     const style = `position:absolute;inset:0;background-size:cover;background-position:center;transition:opacity 1.2s ease;pointer-events:none;filter:${filter};`;
 
     a.style.cssText = style + `background-image:url('${_encUrl(urls[0])}');opacity:1;`;

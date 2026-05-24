@@ -1,0 +1,41 @@
+@*
+    KPI tiles for Settings → Rename history.
+    Spec: design_handoff_animarr/screens.jsx::SettingsHistory tiles block (lines 1402-1414).
+    4 tiles: TOTAL · TODAY · REVERTED · PATTERNS USED.
+*@
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<div class="hkpi">
+    <div class="hkpi__tile">
+        <div class="hkpi__label">TOTAL RENAMES</div>
+        <div class="hkpi__value" style="color:var(--text)">@_total</div>
+    </div>
+    <div class="hkpi__tile">
+        <div class="hkpi__label">TODAY</div>
+        <div class="hkpi__value" style="color:var(--accent-hi)">@_today</div>
+    </div>
+    <div class="hkpi__tile">
+        <div class="hkpi__label">REVERTED</div>
+        <div class="hkpi__value" style="color:var(--warn)">@_reverted</div>
+    </div>
+    <div class="hkpi__tile">
+        <div class="hkpi__label">PATTERNS USED</div>
+        <div class="hkpi__value" style="color:var(--success)">@_patterns</div>
+    </div>
+</div>
+
+@code {
+    private int _total, _today, _reverted, _patterns;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var today = DateTime.UtcNow.Date;
+        _total    = await db.RenameHistories.CountAsync();
+        _today    = await db.RenameHistories.CountAsync(h => h.ProcessedAt >= today);
+        _reverted = await db.RenameHistories.CountAsync(h => h.IsReverted);
+        // Distinct patterns is not directly stored on history rows; approximate by counting Renamed entries.
+        _patterns = await db.RenamePatterns.CountAsync();
+    }
+}

@@ -1,0 +1,878 @@
+@*
+    Edit Metadata drawer — design Phase 5.
+    Spec: design_handoff_animarr/screens-v3.jsx::EditMetadataDrawer (lines 658+).
+
+    560px right-side drawer, gradient surface → surface-2, 6 underline tabs,
+    sticky footer with Save / Cancel / Re-run LLM. Owns its own header (icon
+    + EDIT METADATA overline + Archivo Black title) and animates in.
+
+    Triggered from MediaDetail's hero "EDIT METADATA" chip via cascading param.
+*@
+
+@implements IDisposable
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject MetadataService MetadataService
+@inject IRenameService RenameService
+@inject FolderWatcherService WatcherService
+@inject IdentificationQueueProcessorService QueueProc
+@inject IToastService Toast
+@inject NavigationManager Nav
+
+@if (Item is not null)
+{
+    <div class="emd-overlay" @onclick="OnCloseAsync"></div>
+    <div class="emd">
+        <header class="emd__header">
+            <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
+            <div class="emd__header-text">
+                <div class="emd__overline">EDIT METADATA</div>
+                <div class="emd__title">@Item.Title</div>
+                <div class="emd__hint">SQLite metadata only — folders on disk stay untouched</div>
+            </div>
+            <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="Close">
+                <DIcon Name="x" Size="20" />
+            </button>
+        </header>
+
+        <nav class="emd__tabs">
+            @foreach (var t in _tabDefs)
+            {
+                var key = t.Key;
+                var label = t.Value;
+                <button type="button"
+                        class="@($"emd__tab {(_tab == key ? "emd__tab--active" : "")}")"
+                        @onclick="@(() => SwitchTab(key))">
+                    @label
+                </button>
+            }
+        </nav>
+
+        <div class="emd__body">
+            @* Razor's @switch with @FragmentMethod() calls breaks the C# parser —
+               an if/else chain is the supported pattern for routing between
+               RenderFragments. *@
+            @if (_tab == "ids")      { @SourceIdsTab() }
+            else if (_tab == "basics")   { @BasicsTab() }
+            else if (_tab == "poster")   { @PosterTab() }
+            else if (_tab == "backdrop") { @BackdropTab() }
+            else if (_tab == "tags")     { @TagsTab() }
+            else if (_tab == "manage")   { @ManageTab() }
+        </div>
+
+        <footer class="emd__footer">
+            @* Spec: loaders.html §04 — primary action shows mini ring + busy-cursor
+               while the save request is in flight. The drawer's own button class
+               (.emd__btn) stays — the Spinner primitive is just inlined. *@
+            <button type="button" class="@($"emd__btn emd__btn--primary {(_saving ? "emd__btn--loading" : "")}")"
+                    @onclick="SaveAsync" disabled="@_saving">
+                @if (_saving) { <Spinner Size="sm" Tone="light" /> }
+                else          { <DIcon Name="check" Size="14" /> }
+                @(_saving ? "Saving…" : "Save changes")
+            </button>
+            <button type="button" class="emd__btn emd__btn--ghost" @onclick="OnCloseAsync">Cancel</button>
+            <div class="emd__footer-spacer"></div>
+            @* Re-run LLM is fire-and-forget (just queues a row) — no Loading per the brief. *@
+            <button type="button" class="emd__btn emd__btn--flat emd__btn--xs" @onclick="ReidentifyAsync">
+                <DIcon Name="magic" Size="13" /> Re-run LLM
+            </button>
+        </footer>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public MediaItem? Item { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private string _tab = "ids";
+    private bool _saving;
+
+    // ── Image galleries (Poster / Backdrop tabs) ──────────────────────────
+    // Lazy-fetched from MetadataService.GetAvailableImagesAsync on first
+    // activation of each tab. Skeletons render while in-flight; clicking a
+    // candidate calls ApplySelectedImageAsync which downloads the full-res
+    // version and pins it as the current poster/fanart.
+    private List<string> _posterCandidates    = [];
+    private List<string> _backdropCandidates  = [];
+    private bool _loadingPosters;
+    private bool _loadingBackdrops;
+    private bool _postersLoaded;     // becomes true after first fetch (success or empty) — no re-fetch on tab re-entry
+    private bool _backdropsLoaded;
+    private bool _applyingImage;     // disables the gallery buttons while a pick is being downloaded
+
+    private static readonly KeyValuePair<string, string>[] _tabDefs =
+    [
+        new("ids",      "Source IDs"),
+        new("basics",   "Basics"),
+        new("poster",   "Poster"),
+        new("backdrop", "Backdrop"),
+        new("tags",     "Tags"),
+        new("manage",   "Manage"),
+    ];
+
+    // ── Basics state ──────────────────────────────────────────────────────
+    private string  _bTitle = "";
+    private string? _bEnglish;
+    private string? _bCjk;
+    private int?    _bYear;
+    private MediaItemType _bType;
+    private string? _bLanguage;
+    private string? _bStudio;
+    private int?    _bRuntime;
+    private int?    _bHue;
+
+    // ── Tags ──────────────────────────────────────────────────────────────
+    private List<string> _tags = [];
+    private string _newTag = "";
+
+    // ── Source IDs ────────────────────────────────────────────────────────
+    private string? _tmdbIdInput;
+    private string? _malIdInput;
+    private string? _imdbIdInput;
+    private string  _pasteUrl = "";
+    /// <summary>TV/Movie picker for the TMDB Search button. Defaults from current
+    /// item's MediaType; flipped on "Paste URL" parsing or by clicking the toggle.</summary>
+    private bool _tmdbIsTv = true;
+
+    // ── Tag suggestions (design spec list, filtered by current tags) ──────
+    private static readonly string[] _suggestedTags =
+    [
+        "Cultivation", "Donghua", "Action", "Romance", "Fantasy",
+        "Mecha", "Slice of Life", "Mystery", "Shonen", "Adventure",
+    ];
+
+    // ── Manage state ──────────────────────────────────────────────────────
+    private bool _deleteFromDisk;
+    private bool _confirmDelete;
+    private bool _manageBusy;
+    private string? _manageStatus;
+    private List<RenamePreviewItem>? _renamePreview;
+
+    protected override void OnParametersSet()
+    {
+        if (Item is null) return;
+        _bTitle    = Item.Title;
+        _bEnglish  = Item.EnglishTitle;
+        _bCjk      = Item.CjkTitle;
+        _bYear     = Item.Year;
+        _bType     = Item.MediaType;
+        _bLanguage = Item.Language;
+        _bStudio   = Item.Studio;
+        _bRuntime  = Item.Runtime;
+        _bHue      = Item.Hue;
+        _tmdbIdInput = Item.TmdbId?.ToString();
+        _malIdInput  = Item.MalId?.ToString();
+        _imdbIdInput = Item.ImdbId;
+        // Default the TV/Movie toggle from the current item type; the user can flip it.
+        _tmdbIsTv    = Item.MediaType != MediaItemType.Movie;
+        _tags = string.IsNullOrEmpty(Item.TagsJson)
+            ? []
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(Item.TagsJson) ?? []);
+    }
+
+    private async Task OnCloseAsync() => await OnClose.InvokeAsync();
+
+    /// <summary>Activates a tab and kicks off any one-shot lazy loads it needs.
+    /// Poster + Backdrop galleries fetch alternates from TMDB the first time
+    /// they're opened; subsequent re-entries reuse the cached results.</summary>
+    private async Task SwitchTab(string key)
+    {
+        _tab = key;
+        if (Item is null) return;
+        switch (key)
+        {
+            case "poster" when !_postersLoaded && !_loadingPosters:
+                _ = LoadPosterCandidatesAsync();
+                break;
+            case "backdrop" when !_backdropsLoaded && !_loadingBackdrops:
+                _ = LoadBackdropCandidatesAsync();
+                break;
+        }
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Fetches poster URLs from TMDB and fills _posterCandidates.
+    /// Sets _loadingPosters during the in-flight call so the UI can show
+    /// shimmer placeholders. Excludes the URL whose path already matches
+    /// the saved poster (no point offering the user the one they already have).</summary>
+    private async Task LoadPosterCandidatesAsync()
+    {
+        if (Item is null) return;
+        _loadingPosters = true;
+        StateHasChanged();
+        try
+        {
+            var (posters, _, _) = await MetadataService.GetAvailableImagesAsync(Item.FolderId);
+            _posterCandidates = [..posters];
+        }
+        catch (Exception ex)
+        {
+            Toast.ShowError($"Couldn't fetch poster alternates: {ex.Message}");
+        }
+        finally
+        {
+            _loadingPosters = false;
+            _postersLoaded  = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadBackdropCandidatesAsync()
+    {
+        if (Item is null) return;
+        _loadingBackdrops = true;
+        StateHasChanged();
+        try
+        {
+            var (_, backdrops, _) = await MetadataService.GetAvailableImagesAsync(Item.FolderId);
+            _backdropCandidates = [..backdrops];
+        }
+        catch (Exception ex)
+        {
+            Toast.ShowError($"Couldn't fetch backdrop alternates: {ex.Message}");
+        }
+        finally
+        {
+            _loadingBackdrops = false;
+            _backdropsLoaded  = true;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Apply a user-picked image as the new poster/fanart.
+    /// MetadataService downloads it full-res, writes to the cache dir, updates
+    /// PosterPath/FanartPath. The OnSaved callback refreshes the parent so the
+    /// hero/grid immediately re-renders with the new image.</summary>
+    private async Task ApplyPickedImageAsync(string imageType, string url)
+    {
+        if (Item is null || _applyingImage) return;
+        _applyingImage = true;
+        StateHasChanged();
+        try
+        {
+            await MetadataService.ApplySelectedImageAsync(Item.FolderId, imageType, url);
+            Toast.ShowSuccess(imageType == "poster" ? "Poster updated" : "Backdrop updated");
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.ShowError(ex.Message);
+        }
+        finally
+        {
+            _applyingImage = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Item is null) return;
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var e = await db.MediaItems.FindAsync(Item.Id);
+            if (e is null) return;
+            e.Title         = _bTitle.Trim();
+            e.EnglishTitle  = string.IsNullOrWhiteSpace(_bEnglish) ? null : _bEnglish.Trim();
+            e.CjkTitle      = string.IsNullOrWhiteSpace(_bCjk)     ? null : _bCjk.Trim();
+            e.Year          = _bYear;
+            e.MediaType     = _bType;
+            e.Language      = string.IsNullOrWhiteSpace(_bLanguage) ? null : _bLanguage.Trim();
+            e.Studio        = string.IsNullOrWhiteSpace(_bStudio)   ? null : _bStudio.Trim();
+            e.Runtime       = _bRuntime;
+            e.Hue           = _bHue;
+            e.TagsJson      = _tags.Count == 0
+                ? null
+                : System.Text.Json.JsonSerializer.Serialize(_tags);
+            e.IdentificationStatus    = IdentificationStatus.Manual;
+            e.LastMetadataRefreshedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            MetadataService.NotifyMediaItemChanged(e.FolderId);
+            Toast.ShowSuccess("Metadata saved");
+            await OnSaved.InvokeAsync();
+            await OnClose.InvokeAsync();
+        }
+        catch (Exception ex) { Toast.ShowError($"Save failed: {ex.Message}"); }
+        finally { _saving = false; StateHasChanged(); }
+    }
+
+    private async Task ReidentifyAsync()
+    {
+        if (Item is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var exists = await db.IdentificationQueues.AnyAsync(q =>
+            q.FolderId == Item.FolderId &&
+            (q.Status == IdentificationQueueStatus.Queued ||
+             q.Status == IdentificationQueueStatus.Processing));
+        if (!exists)
+        {
+            db.IdentificationQueues.Add(new IdentificationQueue
+            {
+                Id           = Guid.NewGuid(),
+                FolderId     = Item.FolderId,
+                ForceRefresh = true,
+                Status       = IdentificationQueueStatus.Queued,
+                QueuedAt     = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        Toast.ShowInfo("Queued for re-identification");
+    }
+
+    // ── Tag handlers ──────────────────────────────────────────────────────
+    private void AddTag()
+    {
+        var t = _newTag.Trim();
+        if (string.IsNullOrEmpty(t)) return;
+        if (!_tags.Any(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
+            _tags.Add(t);
+        _newTag = "";
+    }
+
+    private void RemoveTag(string t) =>
+        _tags.RemoveAll(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase));
+
+    private void OnTagKeyDown(KeyboardEventArgs e) { if (e.Key == "Enter") AddTag(); }
+
+    // ── Source-ID handlers ────────────────────────────────────────────────
+    private async Task ApplyTmdbAsync()
+    {
+        if (Item is null || !int.TryParse(_tmdbIdInput, out var id)) return;
+        try
+        {
+            // _tmdbIsTv comes from the explicit TV/Movie toggle next to the input,
+            // not from the item's MediaType — those are inherited from the parent
+            // folder type and frequently disagree with the actual show.
+            var source = _tmdbIsTv ? "tmdb_tv" : "tmdb_movie";
+            await MetadataService.ApplyManualAsync(Item.FolderId, source, id);
+            Toast.ShowSuccess("Applied TMDB ID");
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+    }
+
+    private async Task ApplyMalAsync()
+    {
+        if (Item is null || !int.TryParse(_malIdInput, out var id)) return;
+        try { await MetadataService.ApplyManualAsync(Item.FolderId, "mal", id); Toast.ShowSuccess("Applied MAL ID"); await OnSaved.InvokeAsync(); }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+    }
+
+    private async Task ApplyImdbAsync()
+    {
+        if (Item is null || string.IsNullOrWhiteSpace(_imdbIdInput)) return;
+        try { await MetadataService.ApplyManualAsync(Item.FolderId, "imdb_tv", _imdbIdInput.Trim()); Toast.ShowSuccess("Applied IMDb ID"); await OnSaved.InvokeAsync(); }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+    }
+
+    private void ParsePastedUrl()
+    {
+        var u = _pasteUrl.Trim();
+        if (u.Length == 0) return;
+        var tmdb = System.Text.RegularExpressions.Regex.Match(u, @"themoviedb\.org/(tv|movie)/(\d+)");
+        if (tmdb.Success)
+        {
+            _tmdbIdInput = tmdb.Groups[2].Value;
+            // URL path tells us the kind unambiguously; flip the toggle so the
+            // next Search button click hits the matching endpoint.
+            _tmdbIsTv = tmdb.Groups[1].Value == "tv";
+            _pasteUrl = "";
+            return;
+        }
+        var mal = System.Text.RegularExpressions.Regex.Match(u, @"myanimelist\.net/anime/(\d+)");
+        if (mal.Success) { _malIdInput = mal.Groups[1].Value; _pasteUrl = ""; return; }
+        var imdb = System.Text.RegularExpressions.Regex.Match(u, @"imdb\.com/title/(tt\d+)");
+        if (imdb.Success) { _imdbIdInput = imdb.Groups[1].Value; _pasteUrl = ""; return; }
+        Toast.ShowError("Couldn't parse TMDB / MAL / IMDb URL");
+    }
+
+    // ── Manage handlers ───────────────────────────────────────────────────
+    private async Task RescanAsync() => await ReidentifyAsync();
+
+    private async Task PreviewRenamesAsync()
+    {
+        if (Item is null) return;
+        _manageBusy = true; StateHasChanged();
+        try { _renamePreview = await RenameService.ScanFolderAsync(Item.FolderId);
+              var n = _renamePreview.Count(p => p.Status == PreviewStatus.WillRename);
+              _manageStatus = n == 0 ? "All files already match patterns." : $"{n} pending rename(s)."; }
+        catch (Exception ex) { _manageStatus = ex.Message; }
+        finally { _manageBusy = false; StateHasChanged(); }
+    }
+
+    private async Task ApplyRenamesAsync()
+    {
+        if (Item is null || _renamePreview is null) return;
+        _manageBusy = true; StateHasChanged();
+        try {
+            foreach (var p in _renamePreview)
+                if (p.Status == PreviewStatus.WillRename) p.IsSelected = true;
+            await RenameService.ApplyRenamesAsync(Item.FolderId, _renamePreview);
+            var n = _renamePreview.Count(p => p.Status == PreviewStatus.WillRename);
+            _manageStatus = $"Applied {n} rename(s).";
+            _renamePreview = null;
+            Toast.ShowSuccess(_manageStatus);
+        }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+        finally { _manageBusy = false; StateHasChanged(); }
+    }
+
+    private async Task RevertAllAsync()
+    {
+        if (Item is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var rows = await db.RenameHistories
+            .Where(h => h.FolderId == Item.FolderId
+                     && h.Status == RenameStatus.Renamed
+                     && !h.IsReverted)
+            .OrderByDescending(h => h.ProcessedAt)
+            .ToListAsync();
+        int reverted = 0;
+        foreach (var r in rows)
+            if (await RenameService.RevertAsync(r.Id))
+                reverted++;
+        Toast.ShowInfo($"Reverted {reverted} rename(s)");
+    }
+
+    private async Task DoDangerRemoveAsync()
+    {
+        if (Item is null) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var folderId = Item.FolderId;
+            var entity = await db.MediaItems.FindAsync(Item.Id);
+            if (entity is not null) db.MediaItems.Remove(entity);
+            var folder = await db.FolderWatchers.FindAsync(folderId);
+            if (folder is not null && !folder.IsSection)
+            {
+                await db.IdentificationQueues
+                    .Where(q => q.FolderId == folderId && q.Status != IdentificationQueueStatus.Processing)
+                    .ExecuteDeleteAsync();
+                try { await WatcherService.StopWatcherAsync(folderId); } catch { }
+                var path = folder.Path;
+                var parentSectionId = folder.ParentSectionId;
+                db.FolderWatchers.Remove(folder);
+                await db.SaveChangesAsync();
+                if (parentSectionId.HasValue)
+                    await WatcherService.DismissChildPathAsync(parentSectionId.Value, path);
+                if (_deleteFromDisk)
+                    try { if (Directory.Exists(path)) Directory.Delete(path, true); }
+                    catch (Exception ex) { Toast.ShowError($"Couldn't delete files: {ex.Message}"); }
+            }
+            else await db.SaveChangesAsync();
+            Toast.ShowSuccess("Removed from Animarr");
+            Nav.NavigateTo("/");
+            await OnClose.InvokeAsync();
+        }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+    }
+
+    public void Dispose() { }
+
+    // ── Tab renderfragments ───────────────────────────────────────────────
+    // Razor template syntax (=> @<element>) is what produces a RenderFragment
+    // from inline markup. A raw C# `=> __builder => { ... }` lambda doesn't
+    // parse the <markup> as Razor — the < gets read as a less-than operator
+    // and the whole class body unravels.
+    private RenderFragment SourceIdsTab() => @<div class="emd-form">
+            <div class="emd-automatch">
+                <div class="emd-automatch__icon"><DIcon Name="sparkle" Size="14" /></div>
+                <div>
+                    <div class="emd-automatch__title">Auto-match · @($"{(Item!.LlmConfidence ?? 0):P0}")</div>
+                    <div class="emd-automatch__hint">@(Item.LlmIdentifiedTitle ?? Item.Title) → @Item.Title</div>
+                </div>
+            </div>
+
+            <div class="emd-idfield">
+                <div class="emd-idfield__head">
+                    <span class="emd-idfield__label">TMDB ID</span>
+                    @if (Item.TmdbId is not null)
+                    {
+                        var url = $"https://www.themoviedb.org/{(Item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{Item.TmdbId}";
+                        <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    }
+                </div>
+                @* TV/Movie picker is necessary because TMDB's /tv/{id} and /movie/{id}
+                   spaces overlap — the same integer can resolve to different shows
+                   (e.g. 127651 = "The Witch's Diner" as TV, "The Seasoning House" as Movie).
+                   Defaults from item.MediaType but user can override per-apply. Paste URL
+                   sets it automatically from the path segment. *@
+                <div class="emd-idfield__row">
+                    <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                           value="@(_tmdbIdInput ?? "")"
+                           @oninput="@(e => _tmdbIdInput = e.Value?.ToString())" />
+                    <div class="emd-segmented" role="group" aria-label="TMDB kind">
+                        <button type="button"
+                                class="@($"emd-segmented__btn {(_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
+                                @onclick="@(() => _tmdbIsTv = true)">TV</button>
+                        <button type="button"
+                                class="@($"emd-segmented__btn {(!_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
+                                @onclick="@(() => _tmdbIsTv = false)">Movie</button>
+                    </div>
+                    <button class="emd__btn emd__btn--solid" @onclick="ApplyTmdbAsync"><DIcon Name="refresh" Size="13" /> Search</button>
+                </div>
+            </div>
+
+            <div class="emd-idfield">
+                <div class="emd-idfield__head">
+                    <span class="emd-idfield__label">MAL ID</span>
+                    @if (Item.MalId is not null)
+                    {
+                        <a href="https://myanimelist.net/anime/@Item.MalId" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    }
+                </div>
+                <div class="emd-idfield__row">
+                    <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                           value="@(_malIdInput ?? "")"
+                           @oninput="@(e => _malIdInput = e.Value?.ToString())" />
+                    <button class="emd__btn emd__btn--solid" @onclick="ApplyMalAsync"><DIcon Name="refresh" Size="13" /> Search</button>
+                </div>
+            </div>
+
+            <div class="emd-idfield">
+                <div class="emd-idfield__head">
+                    <span class="emd-idfield__label">IMDb ID</span>
+                    @if (!string.IsNullOrEmpty(Item.ImdbId))
+                    {
+                        <a href="https://www.imdb.com/title/@Item.ImdbId/" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    }
+                </div>
+                <div class="emd-idfield__row">
+                    <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                           value="@(_imdbIdInput ?? "")"
+                           @oninput="@(e => _imdbIdInput = e.Value?.ToString())" />
+                    <button class="emd__btn emd__btn--solid" @onclick="ApplyImdbAsync"><DIcon Name="refresh" Size="13" /> Search</button>
+                </div>
+            </div>
+
+            @* AniDB slot — design spec shows the field even though Animarr's
+               metadata pipeline doesn't currently consume AniDB IDs. Input is
+               disabled with a hint so users know it's coming. *@
+            <div class="emd-idfield">
+                <div class="emd-idfield__head">
+                    <span class="emd-idfield__label">AniDB ID</span>
+                </div>
+                <div class="emd-idfield__row">
+                    <input class="emd-input emd-input--mono" placeholder="(not supported yet)" disabled />
+                    <button class="emd__btn emd__btn--solid" disabled><DIcon Name="refresh" Size="13" /> Search</button>
+                </div>
+            </div>
+
+            <div class="emd-idfield">
+                <div class="emd-idfield__head">
+                    <span class="emd-idfield__label">Or paste a source URL</span>
+                </div>
+                <div class="emd-idfield__hint">Animarr parses the ID automatically. Supports TMDB, MAL, IMDb URLs.</div>
+                <div class="emd-idfield__row">
+                    <input class="emd-input emd-input--mono" placeholder="https://www.themoviedb.org/tv/12345-…"
+                           value="@_pasteUrl"
+                           @oninput="@(e => _pasteUrl = e.Value?.ToString() ?? "")" />
+                    <button class="emd__btn emd__btn--solid" @onclick="ParsePastedUrl">Parse</button>
+                </div>
+            </div>
+        </div>;
+
+    private RenderFragment BasicsTab() => @<div class="emd-form emd-basics-grid">
+            <label class="emd-field emd-field--full">
+                <span>Display title</span>
+                <input class="emd-input" value="@_bTitle"
+                       @oninput="@(e => _bTitle = e.Value?.ToString() ?? "")" />
+            </label>
+            <label class="emd-field">
+                <span>English title</span>
+                <input class="emd-input" value="@(_bEnglish ?? "")"
+                       @oninput="@(e => _bEnglish = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value?.ToString())" />
+            </label>
+            <label class="emd-field">
+                <span>Original (CJK)</span>
+                <input class="emd-input emd-input--cjk" value="@(_bCjk ?? "")"
+                       @oninput="@(e => _bCjk = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value?.ToString())" />
+            </label>
+            <label class="emd-field">
+                <span>Year</span>
+                <input type="number" class="emd-input emd-input--mono" value="@(_bYear?.ToString() ?? "")"
+                       @oninput="@(e => _bYear = int.TryParse(e.Value?.ToString(), out var y) ? y : (int?)null)" />
+            </label>
+            <label class="emd-field">
+                <span>Type</span>
+                <select class="emd-input" value="@_bType.ToString()"
+                        @onchange="@(e => _bType = Enum.TryParse<MediaItemType>(e.Value?.ToString(), out var t) ? t : MediaItemType.Unknown)">
+                    <option value="Anime">Anime</option>
+                    <option value="Movie">Movie</option>
+                    <option value="Series">Series</option>
+                    <option value="Multserials">Multserials</option>
+                    <option value="Unknown">Unknown</option>
+                </select>
+            </label>
+            <label class="emd-field">
+                <span>Language</span>
+                <select class="emd-input" value="@(_bLanguage ?? "")"
+                        @onchange="@(e => _bLanguage = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value?.ToString())">
+                    <option value="">(none)</option>
+                    <option value="Mandarin">Mandarin</option>
+                    <option value="Japanese">Japanese</option>
+                    <option value="English">English</option>
+                    <option value="Russian">Russian</option>
+                    <option value="Korean">Korean</option>
+                </select>
+            </label>
+            <label class="emd-field">
+                <span>Studio</span>
+                <input class="emd-input" value="@(_bStudio ?? "")"
+                       @oninput="@(e => _bStudio = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value?.ToString())" />
+            </label>
+            <label class="emd-field emd-field--full">
+                <span>Runtime per episode (min)</span>
+                <input type="number" class="emd-input emd-input--mono" value="@(_bRuntime?.ToString() ?? "")"
+                       @oninput="@(e => _bRuntime = int.TryParse(e.Value?.ToString(), out var r) ? r : (int?)null)" />
+            </label>
+            @* Hue is intentionally omitted from Basics — design spec has no hue control here.
+               It still ships in the schema/MediaItem.Hue, but lives elsewhere (theme picker). *@
+        </div>;
+
+    @* Multi-root tabs use <text> as a transparent Razor wrapper so the template
+       syntax (=> @<element>) still has a single template node. *@
+    private RenderFragment PosterTab() => @<text>
+        <div class="emd-gallery-head">
+            <span>Pick a poster from the source galleries, or upload your own.</span>
+            <button type="button" class="emd__btn emd__btn--ghost emd__btn--xs" disabled>
+                <DIcon Name="upload" Size="13" /> Upload
+            </button>
+        </div>
+        <div class="emd-gallery emd-gallery--posters">
+            @* CURRENT (always rendered first). Click is a no-op — it's the
+               active selection. *@
+            @if (Item!.PosterPath is not null)
+            {
+                <button type="button" class="emd-gallery__item emd-gallery__item--selected">
+                    <div class="emd-gallery__img-wrap">
+                        <img src="@($"/api/image?path={Uri.EscapeDataString(Item.PosterPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}")" alt="poster" />
+                    </div>
+                    <div class="emd-gallery__check"><DIcon Name="check" Size="11" /></div>
+                    <div class="emd-gallery__caption">CURRENT</div>
+                </button>
+            }
+
+            @* Alternates from TMDB/MAL. Lazy-loaded on first tab activation
+               via MetadataService.GetAvailableImagesAsync. Skeletons while
+               in-flight. *@
+            @if (_loadingPosters)
+            {
+                @for (int i = 0; i < 6; i++)
+                {
+                    <div class="emd-gallery__skel"><Skeleton Variant="plain" /></div>
+                }
+            }
+            else
+            {
+                @foreach (var url in _posterCandidates)
+                {
+                    var clickUrl = url;
+                    <button type="button" class="emd-gallery__item"
+                            disabled="@_applyingImage"
+                            @onclick="@(() => ApplyPickedImageAsync("poster", clickUrl))">
+                        <div class="emd-gallery__img-wrap">
+                            <img src="@clickUrl" alt="poster alternate" loading="lazy" />
+                        </div>
+                    </button>
+                }
+            }
+        </div>
+        @if (!_loadingPosters && _posterCandidates.Count == 0 && Item.TmdbId is null)
+        {
+            <div class="emd-gallery-hint">No TMDB ID linked yet — alternates can't be fetched. Link a source ID on the IDs tab first.</div>
+        }
+    </text>;
+
+    private RenderFragment BackdropTab() => @<text>
+        <div class="emd-gallery-head">
+            <span>Backdrop is shown behind hero and pages. Pick or upload.</span>
+            <button type="button" class="emd__btn emd__btn--ghost emd__btn--xs" disabled>
+                <DIcon Name="upload" Size="13" /> Upload
+            </button>
+        </div>
+        <div class="emd-gallery emd-gallery--backdrops">
+            @if (Item!.FanartPath is not null)
+            {
+                <button type="button" class="emd-gallery__bd emd-gallery__bd--selected"
+                        style="background-image:url(@($"/api/image?path={Uri.EscapeDataString(Item.FanartPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}"))">
+                    <div class="emd-gallery__bd-scrim"></div>
+                    <div class="emd-gallery__check"><DIcon Name="check" Size="11" /></div>
+                    <div class="emd-gallery__source">CURRENT</div>
+                </button>
+            }
+
+            @if (_loadingBackdrops)
+            {
+                @for (int i = 0; i < 3; i++)
+                {
+                    <div class="emd-gallery__bd-skel"><Skeleton Variant="plain" /></div>
+                }
+            }
+            else
+            {
+                @foreach (var url in _backdropCandidates)
+                {
+                    var clickUrl = url;
+                    <button type="button" class="emd-gallery__bd"
+                            disabled="@_applyingImage"
+                            style="background-image:url('@clickUrl')"
+                            @onclick="@(() => ApplyPickedImageAsync("fanart", clickUrl))">
+                        <div class="emd-gallery__bd-scrim"></div>
+                    </button>
+                }
+            }
+        </div>
+        @if (!_loadingBackdrops && _backdropCandidates.Count == 0 && Item.TmdbId is null)
+        {
+            <div class="emd-gallery-hint">No TMDB ID linked yet — alternates can't be fetched. Link a source ID on the IDs tab first.</div>
+        }
+    </text>;
+
+    private RenderFragment TagsTab() => @<text>
+        <label class="emd-field emd-field--full">
+            <span>Add tag</span>
+            <div class="emd-idfield__row">
+                <input class="emd-input" value="@_newTag"
+                       @oninput="@(e => _newTag = e.Value?.ToString() ?? "")"
+                       @onkeydown="OnTagKeyDown"
+                       placeholder="e.g. Cultivation" />
+                <button class="emd__btn emd__btn--solid" @onclick="AddTag"><DIcon Name="plus" Size="13" /> Add</button>
+            </div>
+        </label>
+        <div class="emd-tags">
+            @foreach (var t in _tags)
+            {
+                <span class="emd-tag">
+                    @t
+                    <button type="button" class="emd-tag__x" @onclick="@(() => RemoveTag(t))" aria-label="@($"Remove {t}")">
+                        <DIcon Name="x" Size="10" />
+                    </button>
+                </span>
+            }
+            @if (_tags.Count == 0)
+            {
+                <div class="emd-tags__empty">No tags yet.</div>
+            }
+        </div>
+
+        @* SUGGESTED — design spec shows curated genre quick-adds below the
+           active tag list. Hidden once all suggestions are already applied. *@
+        @{
+            var available = _suggestedTags
+                .Where(s => !_tags.Any(t => string.Equals(t, s, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+        }
+        @if (available.Length > 0)
+        {
+            <div class="emd-tags-suggest">
+                <div class="emd-tags-suggest__label">SUGGESTED</div>
+                <div class="emd-tags-suggest__list">
+                    @foreach (var s in available)
+                    {
+                        <button type="button" class="emd-tag-suggest"
+                                @onclick="@(() => { _tags.Add(s); })">+ @s</button>
+                    }
+                </div>
+            </div>
+        }
+    </text>;
+
+    private RenderFragment ManageTab() => @<div class="emd-manage">
+            <div class="emd-manage__block">
+                <div class="emd-manage__head">
+                    <div class="emd-manage__icon"><DIcon Name="refresh" Size="13" /></div>
+                    <div>
+                        <div class="emd-manage__title">Rescan files</div>
+                        <div class="emd-manage__body">Re-read everything inside this title's folder and re-queue identification.</div>
+                    </div>
+                </div>
+                <div class="emd-manage__actions">
+                    <button class="emd__btn emd__btn--solid" @onclick="RescanAsync"><DIcon Name="refresh" Size="13" /> Rescan now</button>
+                    <button class="emd__btn emd__btn--flat" @onclick="ReidentifyAsync"><DIcon Name="magic" Size="13" /> Identify queue (LLM)</button>
+                </div>
+            </div>
+
+            <div class="emd-manage__block">
+                <div class="emd-manage__head">
+                    <div class="emd-manage__icon"><DIcon Name="check" Size="13" /></div>
+                    <div>
+                        <div class="emd-manage__title">Apply pending renames</div>
+                        <div class="emd-manage__body">Renames files on disk according to active patterns. Writes RenameHistory with revert option.</div>
+                    </div>
+                </div>
+                <div class="emd-manage__actions">
+                    @* Apply / Preview both run RenameService against disk —
+                       loaders.html §04: leading Spinner + disabled while busy.
+                       _manageBusy is the shared in-flight flag both handlers toggle. *@
+                    <button class="@($"emd__btn emd__btn--primary {(_manageBusy ? "emd__btn--loading" : "")}")"
+                            @onclick="ApplyRenamesAsync"
+                            disabled="@(_manageBusy || _renamePreview is null || !_renamePreview.Any(p => p.Status == PreviewStatus.WillRename))">
+                        @if (_manageBusy) { <Spinner Size="sm" Tone="light" /> }
+                        else              { <DIcon Name="check" Size="13" /> }
+                        @(_renamePreview is null ? "Apply renames" : $"Apply {_renamePreview.Count(p => p.Status == PreviewStatus.WillRename)} renames")
+                    </button>
+                    <button class="@($"emd__btn emd__btn--flat {(_manageBusy ? "emd__btn--loading" : "")}")"
+                            @onclick="PreviewRenamesAsync" disabled="@_manageBusy">
+                        @if (_manageBusy) { <Spinner Size="sm" Tone="accent" /> }
+                        else              { <DIcon Name="info" Size="13" /> }
+                        Preview
+                    </button>
+                </div>
+                @if (_manageStatus is not null)
+                {
+                    <div class="emd-manage__status">@_manageStatus</div>
+                }
+            </div>
+
+            <div class="emd-manage__block">
+                <div class="emd-manage__head">
+                    <div class="emd-manage__icon"><DIcon Name="undo" Size="13" /></div>
+                    <div>
+                        <div class="emd-manage__title">Revert all renames in this folder</div>
+                        <div class="emd-manage__body">Restore original filenames for every history entry in this folder.</div>
+                    </div>
+                </div>
+                <div class="emd-manage__actions">
+                    <button class="emd__btn emd__btn--ghost" @onclick="RevertAllAsync"><DIcon Name="undo" Size="13" /> Revert all</button>
+                </div>
+            </div>
+
+            <div class="emd-danger">
+                <div class="emd-danger__head">
+                    <div class="emd-danger__icon"><DIcon Name="trash" Size="13" /></div>
+                    <div>
+                        <div class="emd-danger__title">DANGER ZONE</div>
+                        <div class="emd-danger__sub">Remove this title from Animarr. Files on disk stay by default.</div>
+                    </div>
+                </div>
+                <div class="emd-danger__toggle">
+                    <Toggle Checked="_deleteFromDisk" CheckedChanged="@((bool v) => _deleteFromDisk = v)" />
+                    <div>
+                        <div class="emd-danger__toggle-label">Also delete files from disk</div>
+                        <div class="emd-danger__toggle-hint">Permanently removes every video/subtitle inside <code>@(Item!.Folder?.Path)</code>. The folder itself stays.</div>
+                    </div>
+                </div>
+                @if (!_confirmDelete)
+                {
+                    <button class="emd-danger__btn" @onclick="@(() => _confirmDelete = true)">
+                        <DIcon Name="trash" Size="13" />
+                        @(_deleteFromDisk ? "Remove + delete files" : "Remove from Animarr")
+                    </button>
+                }
+                else
+                {
+                    <div class="emd-danger__confirm">
+                        <button class="emd-danger__btn emd-danger__btn--solid" @onclick="DoDangerRemoveAsync">
+                            <DIcon Name="trash" Size="13" /> Yes, @(_deleteFromDisk ? "delete everything" : "remove")
+                        </button>
+                        <button class="emd__btn emd__btn--ghost" @onclick="@(() => _confirmDelete = false)">Cancel</button>
+                    </div>
+                }
+            </div>
+        </div>;
+}

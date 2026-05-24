@@ -1,0 +1,163 @@
+@*
+    Catalog hero — full-bleed fanart of the currently-featured item.
+    Rotates every IntervalSec across Items[]; also pushes its FanartPath
+    into the global backdrop layer so the page-wide blurred backdrop matches.
+
+    The hero owns its own visual layer (sharp fanart), separate from the
+    global backdrop (blurred). Both layers cross-fade in lockstep.
+*@
+
+@implements IDisposable
+@inject IJSRuntime JS
+
+@if (_active is not null)
+{
+    var item = _active;
+    <section class="d-hero" style="--hue: @(item.Hue ?? 0)">
+        <div class="d-hero__bg">
+            @if (!string.IsNullOrEmpty(item.FanartPath))
+            {
+                @* Cache-buster on LastMetadataRefreshedAt so rescans surface the new image. *@
+                <img src="@($"/api/image?path={Uri.EscapeDataString(item.FanartPath)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+                     alt="@item.Title"
+                     class="d-hero__bg-img" />
+            }
+            <div class="d-hero__wash"></div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(item.CjkTitle))
+        {
+            <div class="d-hero__cjk">@item.CjkTitle</div>
+        }
+
+        <div class="d-hero__content">
+            <div class="d-hero__pills">
+                <Pill Tone="accent" Dense="false">@TypeLabel(item.MediaType)</Pill>
+                @foreach (var tag in TagPreview(item))
+                {
+                    <Pill Tone="default">@tag</Pill>
+                }
+            </div>
+
+            <h1 class="d-hero__title">@item.Title</h1>
+
+            <div class="d-hero__meta">
+                @if (item.Rating is > 0) { <span class="d-hero__rating">★ @($"{item.Rating:F1}")</span> }
+                @if (item.Year is not null) { <span>@item.Year</span> }
+                @if (item.EpisodeCount is > 0) { <span>@item.EpisodeCount EP</span> }
+                @if (!string.IsNullOrEmpty(item.Studio)) { <span>@item.Studio</span> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <span>@item.Language.ToUpperInvariant()</span> }
+            </div>
+
+            @if (!string.IsNullOrEmpty(item.Description))
+            {
+                <p class="d-hero__overview">@item.Description</p>
+            }
+
+            <div class="d-hero__actions">
+                <Btn Variant="primary" Size="lg" OnClick="@(() => Nav.NavigateTo($"/catalog/{item.Id}"))">
+                    <DIcon Name="play" Size="16" /> Open detail
+                </Btn>
+            </div>
+        </div>
+
+        @* Featured pager — vertical numbered list on the right edge.
+           Spec: design_handoff_animarr/screens-v3.jsx::CatalogV3 lines 148-164. *@
+        @if (Items.Count > 1)
+        {
+            <div class="d-hero__pager">
+                @for (int i = 0; i < Items.Count; i++)
+                {
+                    var idx = i;
+                    var active = idx == _index;
+                    <button type="button"
+                            class="@($"d-hero__pager-item {(active ? "d-hero__pager-item--active" : "")}")"
+                            @onclick="@(() => SetIndex(idx))"
+                            aria-label="@($"Show featured {idx + 1}")">
+                        <span class="d-hero__pager-line"></span>
+                        <span class="d-hero__pager-num">@((idx + 1).ToString("00"))</span>
+                    </button>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<MediaItem> Items { get; set; } = [];
+    [Parameter] public int IntervalSec { get; set; } = 30;
+    [Inject] public NavigationManager Nav { get; set; } = null!;
+
+    private int _index;
+    private MediaItem? _active;
+    private System.Threading.Timer? _timer;
+
+    protected override void OnParametersSet()
+    {
+        _active = Items.Count > 0 ? Items[_index % Items.Count] : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Items.Count > 1)
+        {
+            _timer = new System.Threading.Timer(_ => InvokeAsync(Rotate),
+                null, TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+        }
+        if (_active is not null && !string.IsNullOrEmpty(_active.FanartPath))
+        {
+            // Push current fanart URL to the global backdrop so the blurred
+            // layer matches the hero. (backdrop.js handles cross-fade.)
+            await PushBackdropAsync(_active.FanartPath);
+        }
+    }
+
+    private async Task Rotate()
+    {
+        if (Items.Count == 0) return;
+        _index  = (_index + 1) % Items.Count;
+        _active = Items[_index];
+        StateHasChanged();
+        if (!string.IsNullOrEmpty(_active.FanartPath))
+            await PushBackdropAsync(_active.FanartPath);
+    }
+
+    private async Task SetIndex(int i)
+    {
+        _index  = i;
+        _active = Items[i];
+        StateHasChanged();
+        if (_active.FanartPath is { Length: > 0 } p)
+            await PushBackdropAsync(p);
+    }
+
+    private async Task PushBackdropAsync(string path)
+    {
+        // Tick suffix forces the browser to fetch the new file after a rescan.
+        var v = _active.LastMetadataRefreshedAt?.Ticks ?? 0;
+        var url = $"/api/image?path={Uri.EscapeDataString(path)}&t={v}";
+        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
+    }
+
+    private static string TypeLabel(MediaItemType t) => t switch
+    {
+        MediaItemType.Anime       => "ANIME",
+        MediaItemType.Movie       => "MOVIE",
+        MediaItemType.Series      => "SERIES",
+        MediaItemType.Multserials => "MULTI",
+        _                         => "MEDIA",
+    };
+
+    private static IEnumerable<string> TagPreview(MediaItem item)
+    {
+        // Limit to 3 tags from TagsJson; quietly noop if not parseable.
+        if (string.IsNullOrEmpty(item.TagsJson)) yield break;
+        List<string>? tags = null;
+        try { tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(item.TagsJson); }
+        catch { yield break; }
+        if (tags is null) yield break;
+        foreach (var t in tags.Take(3)) yield return t.ToUpperInvariant();
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

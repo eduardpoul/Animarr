@@ -10,637 +10,858 @@
 @inject NavigationManager Nav
 @inject IAppConfigService AppConfig
 @inject ILlmService LlmService
+@inject IdentificationQueueProcessorService QueueProc
 
 <PageTitle>Animarr</PageTitle>
 
-<FluentLabel Typo="Typography.H4" Style="margin-bottom:20px;">@L["settings.title"]</FluentLabel>
+<header class="d-page-header">
+    <div class="d-page-header__main">
+        <div class="d-page-header__overline">CONFIG</div>
+        <h1 class="d-page-header__title">SETTINGS</h1>
+        <div class="d-page-header__sub">Single-user, no auth. Changes apply live — no restart required.</div>
+    </div>
+</header>
 
-<FluentTabs @bind-ActiveTabId="_activeTab">
+<div class="settings-grid">
+    <nav class="settings-nav">
+        @foreach (var (key, label) in _settingsTabs)
+        {
+            var k = key;
+            <button type="button"
+                    class="@($"settings-nav__btn {(_activeTab == k ? "settings-nav__btn--active" : "")}")"
+                    @onclick="@(() => _activeTab = k)">@label</button>
+        }
+    </nav>
+    <div class="settings-content">
+
 
     <!-- ============================================================ -->
     <!-- TAB: General -->
     <!-- ============================================================ -->
-    <FluentTab Id="general" Label="@(L["settings.tab_general"])">
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:24px;padding-top:16px;">
-
-            <div>
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.section_language"]</FluentLabel>
-                <FluentSelect TOption="string"
-                              Value="@L.CurrentLanguage"
-                              ValueChanged="OnLanguageChanged"
-                              Label="@(L["settings.language_label"])"
-                              style="width:240px;">
+    @if (_activeTab == "general") {
+        <div class="settings-card">
+            <h3 class="settings-card__title">LANGUAGE</h3>
+            <div class="settings-card__sub">Switches instantly. All copy is translated server-side.</div>
+            @* Design pattern: mono uppercase label above the control (Field primitive
+               from screens.jsx:394). Native <select> styled via .d-select primitive. *@
+            <label class="settings-field settings-field--240">
+                <span class="settings-field__label">Interface language</span>
+                <select class="settings-field__select" value="@L.CurrentLanguage"
+                        @onchange="@(async e => await OnLanguageChanged(e.Value?.ToString() ?? "en"))">
                     @foreach (var lang in L.SupportedLanguages)
                     {
-                        <FluentOption TOption="string" Value="@lang.Code">@lang.Label</FluentOption>
+                        <option value="@lang.Code">@lang.Label</option>
                     }
-                </FluentSelect>
+                </select>
+            </label>
+        </div>
+
+        <div class="settings-card">
+            <h3 class="settings-card__title">APPLICATION PARAMETERS</h3>
+            <div class="settings-card__sub">Read-only — set via appsettings.json or Docker env vars (e.g. <code>AppSettings__WatcherDelayMs=2000</code>).</div>
+            <div class="settings-readonly">
+                <span class="settings-readonly__key">Watcher delay</span><span class="settings-readonly__val">@_cfg.WatcherDelayMs ms</span>
+                <span class="settings-readonly__key">Video ext.</span><span class="settings-readonly__val settings-readonly__val--dim">@string.Join(" ", _cfg.VideoExtensions)</span>
+                <span class="settings-readonly__key">Subtitles</span><span class="settings-readonly__val settings-readonly__val--dim">@string.Join(" ", _cfg.SubtitleExtensions)</span>
+                <span class="settings-readonly__key">Images</span><span class="settings-readonly__val settings-readonly__val--dim">@string.Join(" ", _cfg.ImageExtensions)</span>
             </div>
+        </div>
+    }
 
-            <FluentDivider />
-
-            <div>
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">@L["settings.section_app_params"]</FluentLabel>
-                <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:12px;">
-                    @L["settings.app_params_hint"]
-                </FluentLabel>
-                <div style="padding:16px;background:var(--neutral-layer-2,#f3f2f1);border-radius:6px;font-size:13px;line-height:2;">
-                    <div><b>@L["settings.param_watcher_delay"]</b> @_cfg.WatcherDelayMs ms</div>
-                    <div><b>@L["settings.param_video_ext"]</b> @string.Join(", ", _cfg.VideoExtensions)</div>
-                    <div><b>@L["settings.param_subtitles"]</b> @string.Join(", ", _cfg.SubtitleExtensions)</div>
-                    <div><b>@L["settings.param_images"]</b> @string.Join(", ", _cfg.ImageExtensions)</div>
+    <!-- ============================================================ -->
+    <!-- TAB: Root folders (inline CRUD — replaces /explorer) -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "root_folders") {
+        <div class="settings-card">
+            @* Header row pairs the title/sub with a top-right Rescan-all action
+               (moved off the catalog filter bar — Settings is the new home for
+               config-level operations). *@
+            <div class="settings-card__head">
+                <div class="settings-card__head-text">
+                    <h3 class="settings-card__title">ROOT FOLDERS</h3>
+                    <div class="settings-card__sub">Section folders Animarr watches. Each immediate subdirectory becomes its own FolderWatcher. Animarr never renames folders on disk.</div>
                 </div>
+                <Btn Variant="ghost" Size="md" OnClick="RescanAllAsync">
+                    <DIcon Name="refresh" Size="14" /> Rescan all
+                </Btn>
             </div>
 
-        </FluentStack>
-    </FluentTab>
+            <RootFoldersList ReloadToken="@_rfReloadToken"
+                             OnEdit="@OpenEditSection"
+                             OnDelete="@OpenDeleteSection" />
+
+            @* Design Btn primitive — primary variant matches CANVAS §01.6.1.
+               Opens an inline dialog instead of navigating. *@
+            <div class="settings-add">
+                <Btn Variant="primary" Size="md" OnClick="OpenAddSection">
+                    <DIcon Name="plus" Size="13" /> Add section folder
+                </Btn>
+            </div>
+        </div>
+    }
+
+    <!-- ============================================================ -->
+    <!-- TAB: Rename history (embedded HistoryView) -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "rename_history") {
+        <div class="settings-card">
+            <h3 class="settings-card__title">RENAME HISTORY</h3>
+            <div class="settings-card__sub">Every file rename, persisted in SQLite. One-click revert restores the original filename on disk. Folder names are never touched.</div>
+            <HistoryKpiTiles />
+            <HistoryView />
+        </div>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: Appearance -->
     <!-- ============================================================ -->
-    <FluentTab Id="appearance" Label="@(L["settings.tab_appearance"])">
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:24px;padding-top:16px;">
+    @if (_activeTab == "appearance") {
+        @* ── Theme buttons (design Phase 6: locked Dark but UI kept for parity) ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">THEME</h3>
+            <div class="settings-card__sub">Light, dark, or follow system. Dark recommended for the cinematic backdrop.</div>
+            <div class="theme-buttons">
+                @foreach (var (key, label) in new[] { ("System", "System"), ("Light", "Light"), ("Dark", "Dark") })
+                {
+                    var k = key;
+                    <button type="button"
+                            class="@($"theme-btn {(_themeStr == k ? "theme-btn--active" : "")}")"
+                            @onclick="@(() => OnThemeChanged(k))">@label</button>
+                }
+            </div>
+        </div>
 
-            <div>
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.section_appearance"]</FluentLabel>
-                <FluentSelect TOption="string"
-                              Value="@_themeStr"
-                              ValueChanged="OnThemeChanged"
-                              Label="@(L["settings.theme_label"])"
-                              style="width:240px;">
-                    <FluentOption TOption="string" Value="System">@L["settings.theme_system"]</FluentOption>
-                    <FluentOption TOption="string" Value="Dark">@L["settings.theme_dark"]</FluentOption>
-                    <FluentOption TOption="string" Value="Light">@L["settings.theme_light"]</FluentOption>
-                </FluentSelect>
-
-                <div style="margin-top:16px;">
-                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);display:block;margin-bottom:8px;">
-                        @L["settings.accent_color_label"]
-                    </FluentLabel>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                        @foreach (var (color, hex) in _accentColors)
+        @* ── Accent swatches: design wants 6 oklch colors as 42x42 circles ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">ACCENT</h3>
+            <div class="settings-card__sub">A single accent color flows through buttons, links, progress bars and active states.</div>
+            <div class="accent-swatches">
+                @foreach (var (label, hue) in _accentHues)
+                {
+                    var isSelected = _accentHueValue == hue;
+                    var bg         = $"oklch(0.66 0.20 {hue})";
+                    <button type="button"
+                            class="@($"accent-swatch {(isSelected ? "accent-swatch--active" : "")}")"
+                            style="@($"--c:{bg};")"
+                            title="@label"
+                            @onclick="@(() => OnAccentHueChanged(hue))">
+                        @if (isSelected)
                         {
-                            var isSelected = _accentColorValue == color;
-                            var isDefault = color == null;
-                            <FluentTooltip Anchor="@($"swatch-{(color == null ? "default" : color.ToString())}")" Position="TooltipPosition.Bottom">
-                                @(isDefault ? L["settings.accent_color_default"] : color!.ToString())
-                            </FluentTooltip>
-                            <button id="@($"swatch-{(color == null ? "default" : color.ToString())}")"
-                                    title="@(isDefault ? L["settings.accent_color_default"] : color!.ToString())"
-                                    @onclick="() => OnAccentColorChanged(color)"
-                                    style="@($"width:24px;height:24px;border-radius:50%;border:{(isSelected ? "3px solid var(--neutral-foreground-rest)" : "2px solid transparent")};padding:0;cursor:pointer;background:{(isDefault ? "conic-gradient(red,orange,yellow,green,cyan,blue,violet,red)" : hex)};outline:{(isSelected ? "2px solid var(--accent-fill-rest)" : "none")};outline-offset:2px;")">
-                            </button>
+                            <DIcon Name="check" Size="16" />
                         }
-                    </div>
-                </div>
+                    </button>
+                }
             </div>
+        </div>
 
-            <FluentDivider />
-
-            <!-- ── Backdrop ── -->
-            <div>
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.backdrop_title"]</FluentLabel>
-                <div style="display:flex;flex-direction:column;gap:12px;max-width:400px;">
-                    <FluentSwitch @bind-Value="_backdropEnabled">@L["settings.backdrop_enabled_switch"]</FluentSwitch>
-                    <FluentNumberField @bind-Value="_backdropIntervalSec"
-                                       Label="@(L["settings.backdrop_interval_label"])"
-                                       Min="5" Max="300" style="width:160px;"
-                                       Disabled="@(!_backdropEnabled)" />
-                    <div>
-                        <FluentLabel Style="font-size:13px;margin-bottom:6px;display:block;">
-                            @L["settings.backdrop_blur_label"]: <b>@_backdropBlurPx px</b>
-                        </FluentLabel>
-                        <input type="range" min="0" max="20" step="1"
-                               value="@_backdropBlurPx"
-                               @oninput="@(e => _backdropBlurPx = int.TryParse(e.Value?.ToString(), out var v) ? v : _backdropBlurPx)"
-                               disabled="@(!_backdropEnabled)"
-                               style="width:280px;accent-color:var(--accent-fill-rest);" />
-                        <div style="display:flex;justify-content:space-between;width:280px;font-size:11px;color:var(--neutral-foreground-hint);margin-top:2px;">
-                            <span>0</span><span>5</span><span>10</span><span>15</span><span>20</span>
-                        </div>
-                    </div>
-                    <div>
-                        <FluentLabel Style="font-size:13px;margin-bottom:6px;display:block;">
-                            @L["settings.backdrop_brightness_label"]: <b>@_backdropBrightness%</b>
-                        </FluentLabel>
-                        <input type="range" min="10" max="100" step="5"
-                               value="@_backdropBrightness"
-                               @oninput="@(e => _backdropBrightness = int.TryParse(e.Value?.ToString(), out var v) ? v : _backdropBrightness)"
-                               disabled="@(!_backdropEnabled)"
-                               style="width:280px;accent-color:var(--accent-fill-rest);" />
-                        <div style="display:flex;justify-content:space-between;width:280px;font-size:11px;color:var(--neutral-foreground-hint);margin-top:2px;">
-                            <span>10%</span><span>30%</span><span>50%</span><span>70%</span><span>100%</span>
-                        </div>
-                    </div>
-                </div>
+        @* ── Backdrop ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">BACKDROP</h3>
+            <div class="settings-card__sub">Ambient fanart slideshow behind every page. Sourced from your library.</div>
+            <div class="backdrop-row">
+                <span>Show animated backdrop on all pages</span>
+                @* Design Toggle primitive — matches CANVAS §01.6.3 (34×18, accent fill, glow). *@
+                <Toggle Checked="_backdropEnabled" CheckedChanged="@(v => _backdropEnabled = v)" />
             </div>
-
-            <div>
-                <FluentButton Appearance="Appearance.Accent" OnClick="SaveAppearanceAsync">
-                    @L["settings.btn_save_appearance"]
-                </FluentButton>
+            <div class="backdrop-sliders @(_backdropEnabled ? "" : "backdrop-sliders--disabled")">
+                <label class="settings-field">
+                    <span class="settings-field__label">Rotation interval (s)</span>
+                    @* Native number input styled via .settings-field__input--mono — matches the design Input primitive. *@
+                    <input type="number" min="5" max="300"
+                           class="settings-field__input settings-field__input--mono settings-field__input--120"
+                           value="@_backdropIntervalSec"
+                           @oninput="@(e => _backdropIntervalSec = int.TryParse(e.Value?.ToString(), out var v) ? v : _backdropIntervalSec)"
+                           disabled="@(!_backdropEnabled)" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">Blur · @_backdropBlurPx px</span>
+                    <input type="range" min="0" max="20" step="1"
+                           class="settings-range"
+                           value="@_backdropBlurPx"
+                           @oninput="@(e => _backdropBlurPx = int.TryParse(e.Value?.ToString(), out var v) ? v : _backdropBlurPx)"
+                           disabled="@(!_backdropEnabled)" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">Brightness · @_backdropBrightness%</span>
+                    <input type="range" min="10" max="100" step="5"
+                           class="settings-range"
+                           value="@_backdropBrightness"
+                           @oninput="@(e => _backdropBrightness = int.TryParse(e.Value?.ToString(), out var v) ? v : _backdropBrightness)"
+                           disabled="@(!_backdropEnabled)" />
+                </label>
             </div>
-
-        </FluentStack>
-    </FluentTab>
+            <div class="settings-actions">
+                <Btn Variant="primary" OnClick="SaveAppearanceAsync" Loading="@_appearanceSaving">
+                    <DIcon Name="check" Size="13" /> Save appearance
+                </Btn>
+            </div>
+        </div>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: Patterns -->
     <!-- ============================================================ -->
-    <FluentTab Id="patterns" Label="@(L["settings.tab_patterns"])">
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:16px;padding-top:16px;">
-
-            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="margin-bottom:4px;">
-                <FluentLabel Typo="Typography.H3" Style="flex:1;margin:0;">@L["patterns.title"]</FluentLabel>
-                <FluentButton Appearance="Appearance.Accent"
-                              IconStart="@(new Icons.Regular.Size20.Add())"
-                              Title="@(L["patterns.add_button"])"
-                              OnClick="@(() => OpenPatternDialog(null))" />
-            </FluentStack>
+    @if (_activeTab == "patterns") {
+        <div class="settings-card">
+            <h3 class="settings-card__title">RENAME PATTERNS</h3>
+            <div class="settings-card__sub">Regex with named groups: <code>(?&lt;season&gt;)</code> <code>(?&lt;episode&gt;)</code> <code>(?&lt;title&gt;)</code> <code>(?&lt;year&gt;)</code>. Higher priority wins.</div>
 
             @if (_patternsLoading)
             {
-                <FluentProgress Width="100%" />
+                @* Skeleton rows — same form-row visual rhythm as the real list.
+                   Spec: design_handoff_animarr/pages/loaders.html §03. *@
+                <div class="settings-skel">
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                </div>
             }
             else
             {
-                <FluentDataGrid Items="@_patterns.AsQueryable()" TGridItem="RenamePattern" ShowHover="true">
-                    <TemplateColumn Title="@(L["patterns.col_priority"])" Width="60px" Align="Align.Center">
-                        @context.Priority
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(p => p.Name)" Title="@(L["patterns.col_name"])" />
-                    <TemplateColumn Title="@(L["patterns.col_regex"])">
-                        <code style="font-size:11px;word-break:break-all;">@context.Pattern</code>
-                    </TemplateColumn>
-                    <TemplateColumn Title="@(L["patterns.col_type"])" Width="140px">
-                        <FluentBadge Appearance="@(context.IsBuiltIn ? Appearance.Accent : Appearance.Neutral)">
-                            @(context.IsBuiltIn ? L["patterns.type_builtin"] : L["patterns.type_custom"])
-                        </FluentBadge>
-                    </TemplateColumn>
-                    <TemplateColumn Title="@(L["patterns.col_applicable"])" Width="240px">
-                        @(context.ApplicableTo switch {
-                            FolderType.Movie  => L["patterns.applicable_movie"],
-                            FolderType.Series => L["patterns.applicable_series"],
-                            _                 => L["patterns.applicable_all"]
-                        })
-                    </TemplateColumn>
-                    <TemplateColumn Title="@(L["patterns.col_actions"])" Align="Align.End" Width="140px">
-                        @if (!context.IsBuiltIn)
-                        {
-                            <FluentButton IconStart="@(new Icons.Regular.Size20.Edit())"
-                                          Title="@(L["patterns.btn_edit"])"
-                                          OnClick="@(() => OpenPatternDialog(context))" />
-                            <FluentButton Appearance="Appearance.Stealth"
-                                          IconStart="@(new Icons.Regular.Size20.Delete())"
-                                          Title="@(L["patterns.btn_delete"])"
-                                          OnClick="@(() => DeletePattern(context))" />
-                        }
-                    </TemplateColumn>
-                </FluentDataGrid>
+                @* Design pattern: native grid table (screens.jsx::SettingsPatterns 1591-1620).
+                   Columns: 40 / 1fr / 1.5fr / 110 / 80 / 70 — first slot is a Toggle in the
+                   design (per-pattern enable). Animarr's data model stores IsBuiltIn instead
+                   of an Enable flag, so the first cell shows the source pill (BUILT-IN/CUSTOM)
+                   and the SCOPE column shows the applicable folder type. *@
+                <div class="ntable ntable--patterns">
+                    <div class="ntable__head">
+                        <span>SRC</span>
+                        <span>NAME</span>
+                        <span>REGEX</span>
+                        <span>SCOPE</span>
+                        <span>PRIO</span>
+                        <span></span>
+                    </div>
+                    @foreach (var p in _patterns)
+                    {
+                        <div class="ntable__row">
+                            <Pill Tone="@(p.IsBuiltIn ? "accent" : "default")">
+                                @(p.IsBuiltIn ? "BUILT-IN" : "CUSTOM")
+                            </Pill>
+                            <span class="ntable__name">@p.Name</span>
+                            <code class="ntable__regex">@p.Pattern</code>
+                            <span class="ntable__scope">
+                                @(p.ApplicableTo switch {
+                                    FolderType.Movie  => "MOVIE",
+                                    FolderType.Series => "SERIES",
+                                    _                 => "ALL"
+                                })
+                            </span>
+                            <span class="ntable__prio">@p.Priority</span>
+                            <span class="ntable__actions">
+                                @if (!p.IsBuiltIn)
+                                {
+                                    <button type="button" title="Edit" class="ntable__icon"
+                                            @onclick="@(() => OpenPatternDialog(p))">
+                                        <DIcon Name="pencil" Size="14" />
+                                    </button>
+                                    <button type="button" title="Delete" class="ntable__icon"
+                                            @onclick="@(() => DeletePattern(p))">
+                                        <DIcon Name="trash" Size="14" />
+                                    </button>
+                                }
+                            </span>
+                        </div>
+                    }
+                </div>
+                <div class="settings-actions">
+                    <Btn Variant="primary" OnClick="@(() => OpenPatternDialog(null))">
+                        <DIcon Name="plus" Size="13" /> New pattern
+                    </Btn>
+                </div>
 
-                <FluentDivider Style="margin:28px 0 20px;" />
+                @* Tester section. The design only shows a list + Add CTA in this card;
+                   the tester is an Animarr-specific affordance kept below the divider. *@
+                <hr class="settings-divider" />
 
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:12px;">@L["patterns.test_title"]</FluentLabel>
-                <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:10px;">
-                    @L["patterns.test_hint"]
-                </FluentLabel>
-                <FluentStack Orientation="Orientation.Horizontal" Style="gap:10px;max-width:800px;" VerticalAlignment="VerticalAlignment.Bottom">
-                    <FluentTextField @bind-Value="_testInput"
-                                     Label="@(L["patterns.test_field_label"])"
-                                     Placeholder="@(L["patterns.test_placeholder"])"
-                                     style="flex:1;" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="TestPattern">@L["patterns.test_button"]</FluentButton>
-                    <FluentButton Appearance="Appearance.Neutral"
-                                  Disabled="@(_llmSuggestBusy || string.IsNullOrWhiteSpace(_testInput))"
-                                  OnClick="SuggestRegexAsync"
-                                  title="@L["patterns.llm_suggest_tooltip"]">
+                <h4 class="settings-subhead">@L["patterns.test_title"]</h4>
+                <div class="settings-subhead__hint">@L["patterns.test_hint"]</div>
+
+                <div class="ptest-row">
+                    <label class="settings-field settings-field--grow">
+                        <span class="settings-field__label">@L["patterns.test_field_label"]</span>
+                        <input class="settings-field__input settings-field__input--mono"
+                               placeholder="@L["patterns.test_placeholder"]"
+                               value="@_testInput"
+                               @oninput="@(e => _testInput = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <Btn Variant="primary" OnClick="TestPattern">@L["patterns.test_button"]</Btn>
+                    <Btn Variant="ghost"
+                         Disabled="@(_llmSuggestBusy || string.IsNullOrWhiteSpace(_testInput))"
+                         OnClick="SuggestRegexAsync"
+                         title="@L["patterns.llm_suggest_tooltip"]">
                         @if (_llmSuggestBusy)
                         {
-                            <FluentProgress Width="60px" />
+                            <span>…</span>
                         }
                         else
                         {
+                            <DIcon Name="sparkle" Size="13" />
                             @L["patterns.llm_suggest_btn"]
                         }
-                    </FluentButton>
-                </FluentStack>
+                    </Btn>
+                </div>
 
                 @if (_llmSuggestion != null)
                 {
-                    <div style="margin-top:10px;padding:12px;background:var(--neutral-layer-2);border-radius:6px;max-width:800px;">
-                        <div style="font-size:12px;font-weight:600;margin-bottom:4px;">@L["patterns.llm_suggest_result"]</div>
-                        <div style="font-family:monospace;font-size:13px;word-break:break-all;margin-bottom:4px;">@_llmSuggestion.Pattern</div>
+                    <div class="ptest-panel">
+                        <div class="ptest-panel__title">@L["patterns.llm_suggest_result"]</div>
+                        <code class="ptest-panel__code">@_llmSuggestion.Pattern</code>
                         @if (!string.IsNullOrEmpty(_llmSuggestion.Explanation))
                         {
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);">@_llmSuggestion.Explanation</div>
+                            <div class="ptest-panel__hint">@_llmSuggestion.Explanation</div>
                         }
-                        <div style="margin-top:8px;display:flex;gap:8px;">
-                            <FluentButton Appearance="Appearance.Accent" style="font-size:12px;"
-                                          OnClick="UseAiSuggestion">
+                        <div class="ptest-panel__actions">
+                            <Btn Variant="primary" Size="sm" OnClick="UseAiSuggestion">
                                 @L["patterns.llm_suggest_use"]
-                            </FluentButton>
-                            <FluentButton Appearance="Appearance.Stealth" style="font-size:12px;"
-                                          OnClick="@(() => _llmSuggestion = null)">
+                            </Btn>
+                            <Btn Variant="flat" Size="sm" OnClick="@(() => _llmSuggestion = null)">
                                 @L["patterns.llm_suggest_dismiss"]
-                            </FluentButton>
+                            </Btn>
                         </div>
                     </div>
                 }
 
                 @if (_testResult is not null)
                 {
-                    <div style="margin-top:14px;padding:14px;background:var(--neutral-layer-2,#f3f2f1);border-radius:6px;">
+                    <div class="ptest-panel @(_testResult.IsMatched ? "ptest-panel--ok" : "ptest-panel--err")">
                         @if (_testResult.IsMatched)
                         {
-                            <div style="color:var(--color-fluent-success);font-weight:600;margin-bottom:6px;">@L["patterns.test_matched"]</div>
-                            <div style="font-family:monospace;font-size:13px;line-height:1.8;">
-                                @L["patterns.test_season_label"] <b>@(_testResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b><br />
-                                @L["patterns.test_episode_label"] <b>@_testResult.Episode</b><br />
-                                @L["patterns.test_kind_label"] <b>@_testKind</b><br />
-                                @L["patterns.test_new_name_label"] <b style="color:var(--color-fluent-success);">@(_testNewName ?? "—")</b>
+                            <div class="ptest-panel__title ptest-panel__title--ok">@L["patterns.test_matched"]</div>
+                            <div class="ptest-panel__rows">
+                                <div>@L["patterns.test_season_label"] <b>@(_testResult.Season?.ToString() ?? L["patterns.test_season_not_found"])</b></div>
+                                <div>@L["patterns.test_episode_label"] <b>@_testResult.Episode</b></div>
+                                <div>@L["patterns.test_kind_label"] <b>@_testKind</b></div>
+                                <div>@L["patterns.test_new_name_label"] <b class="ptest-panel__newname">@(_testNewName ?? "—")</b></div>
                             </div>
                         }
                         else
                         {
-                            <div style="color:var(--color-fluent-error);font-weight:600;">@L["patterns.test_not_matched"]</div>
+                            <div class="ptest-panel__title ptest-panel__title--err">@L["patterns.test_not_matched"]</div>
                         }
                     </div>
                 }
             }
 
-        </FluentStack>
-    </FluentTab>
+        </div>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: Ignore Rules -->
     <!-- ============================================================ -->
-    <FluentTab Id="rules" Label="@(L["settings.tab_rules"])">
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:16px;padding-top:16px;">
+    @if (_activeTab == "rules") {
+        <div class="settings-card">
+            <h3 class="settings-card__title">IGNORE RULES</h3>
+            <div class="settings-card__sub">Glob patterns. Matching files are invisible to watchers, scans and rename queues.</div>
 
             @if (_loading)
             {
-                <FluentProgress Width="100%" />
+                <div class="settings-skel">
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                </div>
             }
             else
             {
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:6px;">@L["settings.section_ignore_rules"]</FluentLabel>
-                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:14px;">
-                        @L["settings.ignore_rules_hint"]
-                    </FluentLabel>
+                @* Inline add-rule row — mono input + primary Btn, matching the design's
+                   "New rule" CTA pattern (screens.jsx::SettingsIgnore line 1641). *@
+                <div class="ignore-add">
+                    <input class="settings-field__input settings-field__input--mono ignore-add__input"
+                           placeholder="*.nfo, fanart*, sample.*, …"
+                           value="@_newMask"
+                           @oninput="@(e => _newMask = e.Value?.ToString() ?? "")" />
+                    <Btn Variant="primary"
+                         Disabled="@string.IsNullOrWhiteSpace(_newMask)"
+                         Loading="@_ruleSaving"
+                         OnClick="AddRule">
+                        <DIcon Name="plus" Size="13" /> Add
+                    </Btn>
+                </div>
 
-                    <FluentStack Orientation="Orientation.Horizontal" Style="margin-bottom:14px;gap:8px;"
-                                 VerticalAlignment="VerticalAlignment.Bottom">
-                        <FluentTextField @bind-Value="_newMask"
-                                         Placeholder="@(L["settings.new_mask_placeholder"])"
-                                         Label="@(L["settings.new_mask_label"])"
-                                         style="flex:1;" />
-                        <FluentButton Appearance="Appearance.Accent"
-                                      IconStart="@(new Icons.Regular.Size20.Add())"
-                                      OnClick="AddRule"
-                                      Title="@(L["settings.btn_add_mask"])"
-                                      Disabled="@string.IsNullOrWhiteSpace(_newMask)" />
-                    </FluentStack>
-
-                    <FluentDataGrid Items="@_rules.AsQueryable()" TGridItem="IgnoreRule" ShowHover="true">
-                        <PropertyColumn Property="@(r => r.Mask)" Title="@(L["settings.col_mask"])" />
-                        <TemplateColumn Title="" Align="Align.End" Width="100px">
-                            <FluentButton Appearance="Appearance.Stealth"
-                                          IconStart="@(new Icons.Regular.Size20.Delete())"
-                                          Title="@(L["settings.btn_delete_mask"])"
-                                          OnClick="@(() => DeleteRule(context))" />
-                        </TemplateColumn>
-                    </FluentDataGrid>
+                @* Native grid table — columns: 1fr / 130 / 70 (design line 1628). *@
+                <div class="ntable ntable--ignore">
+                    <div class="ntable__head">
+                        <span>GLOB</span>
+                        <span>SCOPE</span>
+                        <span></span>
+                    </div>
+                    @foreach (var r in _rules)
+                    {
+                        <div class="ntable__row">
+                            <span class="ntable__name ntable__name--mono">@r.Mask</span>
+                            <Pill>GLOBAL</Pill>
+                            <span class="ntable__actions">
+                                <button type="button" class="ntable__icon" title="Delete"
+                                        @onclick="@(() => DeleteRule(r))">
+                                    <DIcon Name="trash" Size="14" />
+                                </button>
+                            </span>
+                        </div>
+                    }
                 </div>
             }
-
-        </FluentStack>
-    </FluentTab>
+        </div>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: Torrent -->
     <!-- ============================================================ -->
-    <FluentTab Id="torrent" Label="@(L["settings.tab_torrent"])">
+    @if (_activeTab == "torrent") {
         @if (_torrentCfg is null)
         {
-            <FluentProgress Width="100%" Style="margin-top:var(--spacingVerticalL);" />
+            <div class="settings-card">
+                <div class="settings-skel">
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                </div>
+            </div>
         }
         else
         {
-            <FluentStack Orientation="Orientation.Vertical" Style="gap:20px;padding-top:16px;">
+        <div class="settings-card">
+            <h3 class="settings-card__title">TORRENT</h3>
+            <div class="settings-card__sub">Global limits override individual torrents only when lower.</div>
 
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_speed_title"]</FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:10px;">
-                        <FluentNumberField @bind-Value="_globalDlLimitMbps"
-                                           Label="@(L["settings.torrent_dl_limit_label"])"
-                                           Min="0" style="width:260px;" />
-                        <FluentNumberField @bind-Value="_globalUlLimitMbps"
-                                           Label="@(L["settings.torrent_ul_limit_label"])"
-                                           Min="0" style="width:260px;" />
-                    </div>
+            @* Design pattern (screens.jsx::SettingsTorrent 1645-1662):
+               2-col grid of Field/Input pairs followed by a column of ToggleRow rows. *@
+            <div class="settings-fields-2col">
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.torrent_dl_limit_label"]</span>
+                    <input type="number" min="0" class="settings-field__input settings-field__input--mono"
+                           value="@_globalDlLimitMbps"
+                           @oninput="@(e => _globalDlLimitMbps = int.TryParse(e.Value?.ToString(), out var v) ? v : _globalDlLimitMbps)" />
+                    <span class="settings-field__hint">0 = unlimited</span>
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.torrent_ul_limit_label"]</span>
+                    <input type="number" min="0" class="settings-field__input settings-field__input--mono"
+                           value="@_globalUlLimitMbps"
+                           @oninput="@(e => _globalUlLimitMbps = int.TryParse(e.Value?.ToString(), out var v) ? v : _globalUlLimitMbps)" />
+                    <span class="settings-field__hint">0 = unlimited</span>
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.torrent_port_label"]</span>
+                    <input type="number" min="1024" max="65535" class="settings-field__input settings-field__input--mono"
+                           value="@_torrentCfg.ListenPort"
+                           @oninput="@(e => _torrentCfg.ListenPort = int.TryParse(e.Value?.ToString(), out var v) ? v : _torrentCfg.ListenPort)" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.torrent_max_connections_label"]</span>
+                    <input type="number" min="1" max="2000" class="settings-field__input settings-field__input--mono"
+                           value="@_torrentCfg.MaxConnections"
+                           @oninput="@(e => _torrentCfg.MaxConnections = int.TryParse(e.Value?.ToString(), out var v) ? v : _torrentCfg.MaxConnections)" />
+                </label>
+            </div>
+
+            @* ToggleRow column — Toggle + label, 13px text-dim, matches ToggleRow primitive
+               (screens.jsx::ToggleRow 1167-1175). *@
+            <div class="settings-toggles">
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_torrentCfg.EnableDHT" CheckedChanged="@(v => _torrentCfg.EnableDHT = v)" />
+                    <span>@L["settings.torrent_dht_switch"]</span>
+                </label>
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_torrentCfg.EnableLSD" CheckedChanged="@(v => _torrentCfg.EnableLSD = v)" />
+                    <span>@L["settings.torrent_lsd_switch"]</span>
+                </label>
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_torrentCfg.EnableUPnP" CheckedChanged="@(v => _torrentCfg.EnableUPnP = v)" />
+                    <span>@L["settings.torrent_upnp_switch"]</span>
+                </label>
+            </div>
+
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">@L["settings.torrent_seeding_done_title"]</h4>
+            <div class="settings-toggles">
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_torrentCfg.StopSeedingAfterDone"
+                            CheckedChanged="@(v => _torrentCfg.StopSeedingAfterDone = v)" />
+                    <span>@L["settings.torrent_stop_after_done"]</span>
+                </label>
+                <div class="settings-inline-field">
+                    <span class="settings-field__label settings-field__label--inline">@L["settings.torrent_stop_ratio_label"]</span>
+                    <input type="number" min="0" step="0.1"
+                           class="settings-field__input settings-field__input--mono settings-field__input--120"
+                           value="@_torrentCfg.StopSeedingRatio"
+                           @oninput="@(e => _torrentCfg.StopSeedingRatio = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : _torrentCfg.StopSeedingRatio)" />
+                    <span class="settings-field__hint">@L["settings.torrent_stop_ratio_hint"]</span>
                 </div>
+            </div>
 
-                <FluentDivider />
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">@L["settings.torrent_automation_title"]</h4>
+            <div class="settings-toggles">
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_torrentCfg.AutoRenameAfterDownload"
+                            CheckedChanged="@(v => _torrentCfg.AutoRenameAfterDownload = v)" />
+                    <span>@L["settings.torrent_auto_rename_switch"]</span>
+                </label>
+            </div>
 
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_connections_title"]</FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px;">
-                        <FluentNumberField @bind-Value="_torrentCfg.ListenPort"
-                                           Label="@(L["settings.torrent_port_label"])" Min="1024" Max="65535"
-                                           style="width:200px;" />
-                        <FluentNumberField @bind-Value="_torrentCfg.MaxConnections"
-                                           Label="@(L["settings.torrent_max_connections_label"])" Min="1" Max="2000"
-                                           style="width:200px;" />
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <FluentSwitch @bind-Value="_torrentCfg.EnableDHT">@L["settings.torrent_dht_switch"]</FluentSwitch>
-                        <FluentSwitch @bind-Value="_torrentCfg.EnableLSD">@L["settings.torrent_lsd_switch"]</FluentSwitch>
-                        <FluentSwitch @bind-Value="_torrentCfg.EnableUPnP">@L["settings.torrent_upnp_switch"]</FluentSwitch>
-                    </div>
-                </div>
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">@L["settings.torrent_service_title"]</h4>
+            <div class="settings-readonly settings-readonly--inline">
+                <span class="settings-readonly__key">@L["settings.torrent_cache_dir_label"]</span>
+                <span class="settings-readonly__val">@_torrentCfg.CacheDirectory</span>
+            </div>
 
-                <FluentDivider />
-
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_seeding_done_title"]</FluentLabel>
-                    <FluentSwitch @bind-Value="_torrentCfg.StopSeedingAfterDone">@L["settings.torrent_stop_after_done"]</FluentSwitch>
-                    <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
-                        <FluentLabel Style="font-size:13px;">@L["settings.torrent_stop_ratio_label"]</FluentLabel>
-                        <FluentNumberField @bind-Value="_torrentCfg.StopSeedingRatio"
-                                           Min="0" Step="0.1" style="width:120px;" />
-                        <FluentLabel Style="font-size:12px;color:var(--neutral-foreground-hint);">@L["settings.torrent_stop_ratio_hint"]</FluentLabel>
-                    </div>
-                </div>
-
-                <FluentDivider />
-
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.torrent_automation_title"]</FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <FluentSwitch @bind-Value="_torrentCfg.AutoRenameAfterDownload">
-                            @L["settings.torrent_auto_rename_switch"]
-                        </FluentSwitch>
-
-                    </div>
-                </div>
-
-                <FluentDivider />
-
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:8px;">@L["settings.torrent_service_title"]</FluentLabel>
-                    <div style="font-size:13px;color:var(--neutral-foreground-hint);">
-                        <div>@L["settings.torrent_cache_dir_label"] <code>@_torrentCfg.CacheDirectory</code></div>
-                    </div>
-                </div>
-
-                <div>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="SaveTorrentSettingsAsync">
-                        @L["settings.btn_save_torrent"]
-                    </FluentButton>
-                </div>
-
-            </FluentStack>
+            <div class="settings-actions">
+                <Btn Variant="primary" OnClick="SaveTorrentSettingsAsync" Loading="@_torrentSaving">
+                    <DIcon Name="check" Size="13" /> @L["settings.btn_save_torrent"]
+                </Btn>
+            </div>
+        </div>
         }
-    </FluentTab>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: Metadata & LLM -->
     <!-- ============================================================ -->
-    <FluentTab Id="metadata" Label="@(L["settings.tab_metadata"])">
+    @if (_activeTab == "metadata") {
         @if (_metaLoading)
         {
-            <FluentProgress Width="100%" Style="margin-top:var(--spacingVerticalL);" />
+            <div class="settings-card">
+                <div class="settings-skel">
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                    <Skeleton Variant="row" Height="48" />
+                </div>
+            </div>
         }
         else
         {
-            <FluentStack Orientation="Orientation.Vertical" Style="gap:24px;padding-top:16px;">
+        <div class="settings-card">
+            <h3 class="settings-card__title">METADATA SOURCES</h3>
+            <div class="settings-card__sub">@L["settings.meta_sources_hint"]</div>
 
-                <!-- ── Metadata sources ── -->
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:6px;">@L["settings.meta_sources_title"]</FluentLabel>
-                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:14px;">
-                        @L["settings.meta_sources_hint"]
-                    </FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:14px;max-width:520px;">
-                        <div>
-                            <FluentTextField @bind-Value="_tmdbApiKey"
-                                             Label="@(L["settings.tmdb_key_label"])"
-                                             Placeholder="@(L["settings.tmdb_key_placeholder"])"
-                                             style="width:100%;" />
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">@L["settings.tmdb_key_hint"]</div>
-                        </div>
-                        <div>
-                            <FluentTextField @bind-Value="_malClientId"
-                                             Label="@(L["settings.mal_client_id_label"])"
-                                             Placeholder="@(L["settings.mal_client_id_placeholder"])"
-                                             style="width:100%;" />
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">@L["settings.mal_client_id_hint"]</div>
-                        </div>
+            @* API keys — Field/Input pattern (screens.jsx::Field 394, Input 402). *@
+            <div class="settings-fields-stack">
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.tmdb_key_label"]</span>
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@L["settings.tmdb_key_placeholder"]"
+                           value="@_tmdbApiKey"
+                           @oninput="@(e => _tmdbApiKey = e.Value?.ToString() ?? "")" />
+                    <span class="settings-field__hint">@L["settings.tmdb_key_hint"]</span>
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.mal_client_id_label"]</span>
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@L["settings.mal_client_id_placeholder"]"
+                           value="@_malClientId"
+                           @oninput="@(e => _malClientId = e.Value?.ToString() ?? "")" />
+                    <span class="settings-field__hint">@L["settings.mal_client_id_hint"]</span>
+                </label>
+            </div>
+
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">@L["settings.search_sources_title"]</h4>
+            <div class="settings-subhead__hint">@L["settings.search_sources_hint"]</div>
+
+            @* Source priority list — design ::SettingsMeta 1664-1683 uses a rows table.
+               Animarr's variant adds order indices + up/down reorder controls. *@
+            <div class="meta-sources">
+                @for (int i = 0; i < _searchSources.Count; i++)
+                {
+                    var idx = i;
+                    var src = _searchSources[idx];
+                    <div class="meta-sources__row">
+                        <span class="meta-sources__idx">@(idx + 1)</span>
+                        <Toggle Checked="src.Enabled" CheckedChanged="@(v => src.Enabled = v)" />
+                        <span class="meta-sources__name">@SourceLabel(src.Id)</span>
+                        <button type="button" class="ntable__icon meta-sources__chev-up" title="Move up"
+                                disabled="@(idx == 0)"
+                                @onclick="@(() => MoveSourceUp(idx))">
+                            <DIcon Name="chev-d" Size="14" />
+                        </button>
+                        <button type="button" class="ntable__icon" title="Move down"
+                                disabled="@(idx == _searchSources.Count - 1)"
+                                @onclick="@(() => MoveSourceDown(idx))">
+                            <DIcon Name="chev-d" Size="14" />
+                        </button>
                     </div>
+                }
+            </div>
+
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">@L["settings.meta_auto_title"]</h4>
+            <div class="settings-toggles">
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_autoIdentifyEnabled" CheckedChanged="@(v => _autoIdentifyEnabled = v)" />
+                    <span>@L["settings.auto_identify_switch"]</span>
+                </label>
+                <div class="settings-toggle-block">
+                    <label class="settings-toggle-row">
+                        <Toggle Checked="_downloadEpThumbs" CheckedChanged="@(v => _downloadEpThumbs = v)" />
+                        <span>@L["settings.download_ep_thumbs_switch"]</span>
+                    </label>
+                    <div class="settings-toggle-block__hint">@L["settings.download_ep_thumbs_hint"]</div>
                 </div>
-
-                <FluentDivider />
-
-                <!-- ── Source priority ── -->
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:6px;">@L["settings.search_sources_title"]</FluentLabel>
-                    <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:14px;">
-                        @L["settings.search_sources_hint"]
-                    </FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:8px;max-width:400px;">
-                        @for (int i = 0; i < _searchSources.Count; i++)
-                        {
-                            var idx = i;
-                            var src = _searchSources[idx];
-                            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--neutral-layer-3);border-radius:6px;">
-                                <div style="font-size:12px;color:var(--neutral-foreground-hint);width:20px;text-align:center;font-weight:600;">@(idx + 1)</div>
-                                <FluentCheckbox @bind-Value="src.Enabled" style="margin:0;" />
-                                <div style="flex:1;font-size:14px;">@SourceLabel(src.Id)</div>
-                                <FluentButton Appearance="Appearance.Stealth"
-                                              IconStart="@(new Icons.Regular.Size16.ChevronUp())"
-                                              Disabled="@(idx == 0)"
-                                              OnClick="@(() => MoveSourceUp(idx))"
-                                              style="min-width:0;padding:4px;" />
-                                <FluentButton Appearance="Appearance.Stealth"
-                                              IconStart="@(new Icons.Regular.Size16.ChevronDown())"
-                                              Disabled="@(idx == _searchSources.Count - 1)"
-                                              OnClick="@(() => MoveSourceDown(idx))"
-                                              style="min-width:0;padding:4px;" />
-                            </div>
-                        }
-                    </div>
+                @* Auto-rename of container folders was removed after two catastrophic
+                   data-corruption incidents. Identification only updates DB associations now. *@
+                <div class="settings-toggle-block">
+                    <label class="settings-toggle-row">
+                        <Toggle Checked="_includeEpisodeName" CheckedChanged="@(v => _includeEpisodeName = v)" />
+                        <span>@L["settings.include_episode_name_switch"]</span>
+                    </label>
+                    <div class="settings-toggle-block__hint">@L["settings.include_episode_name_hint"]</div>
                 </div>
+            </div>
 
-                <FluentDivider />
-
-                <!-- ── Automation ── -->
-                <div>
-                    <FluentLabel Typo="Typography.H3" Style="margin-bottom:10px;">@L["settings.meta_auto_title"]</FluentLabel>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <FluentSwitch @bind-Value="_autoIdentifyEnabled">@L["settings.auto_identify_switch"]</FluentSwitch>
-                        <div>
-                            <FluentSwitch @bind-Value="_downloadEpThumbs">@L["settings.download_ep_thumbs_switch"]</FluentSwitch>
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;padding-left:4px;">@L["settings.download_ep_thumbs_hint"]</div>
-                        </div>
-                        @* Auto-rename of container folders was removed after two
-                           catastrophic data-corruption incidents. Identification
-                           only updates DB associations now; on-disk paths are
-                           never modified. *@
-                        <div>
-                            <FluentSwitch @bind-Value="_includeEpisodeName">@L["settings.include_episode_name_switch"]</FluentSwitch>
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;padding-left:4px;">@L["settings.include_episode_name_hint"]</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="SaveMetadataSettingsAsync">
-                        @L["settings.btn_save_metadata"]
-                    </FluentButton>
-                </div>
-
-            </FluentStack>
+            <div class="settings-actions">
+                <Btn Variant="primary" OnClick="SaveMetadataSettingsAsync" Loading="@_metaSaving">
+                    <DIcon Name="check" Size="13" /> @L["settings.btn_save_metadata"]
+                </Btn>
+            </div>
+        </div>
         }
-    </FluentTab>
+    }
 
     <!-- ============================================================ -->
     <!-- TAB: AI / LLM -->
     <!-- ============================================================ -->
-    <FluentTab Id="ai" Label="@(L["settings.tab_ai"])">
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:24px;padding-top:16px;">
+    @if (_activeTab == "ai") {
+        <div class="settings-card">
+            <h3 class="settings-card__title">AI / LLM</h3>
+            <div class="settings-card__sub">Optional language-model assist for filename → canonical title normalisation. Local (Ollama, LM Studio) or any OpenAI-compatible endpoint.</div>
 
-            <!-- ── LLM / AI ── -->
-            <div>
-                <FluentLabel Typo="Typography.H3" Style="margin-bottom:6px;">@L["settings.llm_title"]</FluentLabel>
-                <FluentLabel Style="font-size:13px;color:var(--neutral-foreground-hint);margin-bottom:14px;">
-                    @L["settings.llm_hint"]
-                </FluentLabel>
-                <div style="display:flex;flex-direction:column;gap:14px;max-width:520px;">
-
-                    <FluentSwitch @bind-Value="_llmEnabled">@L["settings.llm_enabled_switch"]</FluentSwitch>
-
-                    <!-- Provider selector -->
-                    <div>
-                        <FluentLabel style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">
-                            @L["settings.llm_provider_label"]
-                        </FluentLabel>
-                        <FluentSelect TOption="string" @bind-Value="_llmProvider" style="width:100%;" Disabled="@(!_llmEnabled)">
-                            <FluentOption TOption="string" Value="compatible">@L["settings.llm_provider_compatible"]</FluentOption>
-                            <FluentOption TOption="string" Value="openai">@L["settings.llm_provider_openai"]</FluentOption>
-                        </FluentSelect>
-                        <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">@L["settings.llm_provider_hint"]</div>
+            @* ── AI/LLM hero status card (sparkle gradient + live counters).
+                  Spec: screens.jsx::SettingsLLM 1545-1558. *@
+            @{
+                var llmTel = LlmService.GetTelemetry();
+                var statusClass = !_llmEnabled ? "off" : llmTel.LastProbeOk ? "online" : "error";
+                var statusText  = !_llmEnabled ? "DISABLED"
+                                 : llmTel.LastProbeOk ? "ACTIVE"
+                                 : llmTel.LastProbeAt is not null ? "ERROR" : "PROBING";
+            }
+            <div class="@($"llm-hero llm-hero--{statusClass}")">
+                <div class="llm-hero__icon"><DIcon Name="sparkle" Size="18" /></div>
+                <div class="llm-hero__text">
+                    <div class="llm-hero__title">@statusText · @(_llmProvider ?? "—") · @(_llmModel ?? "—")</div>
+                    <div class="llm-hero__meta">
+                        @QueueProc.QueueDepth in queue
+                        @if (llmTel.CallCount > 0) { <span> · avg @llmTel.AverageLatencyMs ms/item</span> }
+                        @if (QueueProc.HitCount + QueueProc.MissCount > 0)
+                        {
+                            <span> · @($"{QueueProc.HitRate:P1}") TMDB hit-rate</span>
+                        }
                     </div>
-
-                    <!-- Base URL (shown for compatible provider) -->
-                    @if (_llmProvider == "compatible")
-                    {
-                        <div>
-                            <FluentTextField @bind-Value="_llmBaseUrl"
-                                             Label="@(L["settings.llm_base_url_label"])"
-                                             Placeholder="@(L["settings.llm_base_url_placeholder"])"
-                                             style="width:100%;"
-                                             Disabled="@(!_llmEnabled)" />
-                            <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">@L["settings.llm_base_url_hint"]</div>
-                        </div>
-                    }
-
-                    <!-- API Key -->
-                    <div>
-                        <FluentTextField @bind-Value="_llmApiKey"
-                                         Label="@(L["settings.llm_api_key_label"])"
-                                         Placeholder="@(_llmProvider == "openai" ? L["settings.llm_api_key_placeholder_openai"] : L["settings.llm_api_key_placeholder_local"])"
-                                         TextFieldType="TextFieldType.Password"
-                                         style="width:100%;"
-                                         Disabled="@(!_llmEnabled)" />
-                        <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">
-                            @(_llmProvider == "openai" ? L["settings.llm_api_key_hint_openai"] : L["settings.llm_api_key_hint_local"])
-                        </div>
-                    </div>
-
-                    <!-- Model -->
-                    <div>
-                        <FluentTextField @bind-Value="_llmModel"
-                                         Label="@(L["settings.llm_model_label"])"
-                                         Placeholder="@(_llmProvider == "openai" ? "gpt-4o-mini" : "qwen2.5:1.5b")"
-                                         style="width:240px;"
-                                         Disabled="@(!_llmEnabled)" />
-                        <div style="font-size:12px;color:var(--neutral-foreground-hint);margin-top:4px;">@L["settings.llm_model_hint"]</div>
-                    </div>
-
-                    <!-- Connection check -->
-                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap:12px;">
-                        <FluentButton Appearance="Appearance.Neutral"
-                                      Disabled="@(!_llmEnabled || _llmChecking)"
-                                      OnClick="CheckLlmAsync">
-                            @L["settings.llm_btn_check"]
-                        </FluentButton>
-                        <span style="font-size:13px;">
-                            @L["settings.llm_status_label"]
-                            @if (_llmChecking)
-                            {
-                                <span style="color:var(--neutral-foreground-hint);margin-left:6px;">@L["settings.llm_status_checking"]</span>
-                            }
-                            else if (_llmStatus == true)
-                            {
-                                <span style="color:var(--colorPaletteGreenForeground2,#107c10);font-weight:600;margin-left:6px;">✓ @L["settings.llm_status_ok"]</span>
-                            }
-                            else if (_llmStatus == false)
-                            {
-                                <span style="color:var(--colorPaletteRedForeground2,#a4262c);font-weight:600;margin-left:6px;">✗ @L["settings.llm_status_error"]</span>
-                            }
-                        </span>
-                    </FluentStack>
                 </div>
+                <button type="button" class="llm-hero__btn" @onclick="CheckLlmAsync" disabled="@_llmChecking">
+                    @(_llmChecking ? "Testing…" : "Test connection")
+                </button>
             </div>
 
-            <div>
-                <FluentButton Appearance="Appearance.Accent" OnClick="SaveAiSettingsAsync">
-                    @L["settings.btn_save_ai"]
-                </FluentButton>
+            @* Hint copy stays as a small block above the form. *@
+            <div class="settings-subhead__hint settings-subhead__hint--top">@L["settings.llm_hint"]</div>
+
+            @* Master enable toggle. *@
+            <div class="settings-toggles">
+                <label class="settings-toggle-row">
+                    <Toggle Checked="_llmEnabled" CheckedChanged="@(v => _llmEnabled = v)" />
+                    <span>@L["settings.llm_enabled_switch"]</span>
+                </label>
             </div>
 
-        </FluentStack>
-    </FluentTab>
+            @* 2-col grid of Field/Input pairs (screens.jsx::SettingsLLM 1559-1582):
+               Provider | Model
+               Base URL | API Key *@
+            <div class="settings-fields-2col @(!_llmEnabled ? "settings-fields-2col--disabled" : "")">
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.llm_provider_label"]</span>
+                    <select class="settings-field__select"
+                            value="@_llmProvider"
+                            disabled="@(!_llmEnabled)"
+                            @onchange="@(e => _llmProvider = e.Value?.ToString() ?? "compatible")">
+                        <option value="compatible">@L["settings.llm_provider_compatible"]</option>
+                        <option value="openai">@L["settings.llm_provider_openai"]</option>
+                    </select>
+                    <span class="settings-field__hint">@L["settings.llm_provider_hint"]</span>
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.llm_model_label"]</span>
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@(_llmProvider == "openai" ? "gpt-4o-mini" : "qwen2.5:1.5b")"
+                           disabled="@(!_llmEnabled)"
+                           value="@_llmModel"
+                           @oninput="@(e => _llmModel = e.Value?.ToString() ?? "")" />
+                    <span class="settings-field__hint">@L["settings.llm_model_hint"]</span>
+                </label>
+                @if (_llmProvider == "compatible")
+                {
+                    <label class="settings-field">
+                        <span class="settings-field__label">@L["settings.llm_base_url_label"]</span>
+                        <input class="settings-field__input settings-field__input--mono"
+                               placeholder="@L["settings.llm_base_url_placeholder"]"
+                               disabled="@(!_llmEnabled)"
+                               value="@_llmBaseUrl"
+                               @oninput="@(e => _llmBaseUrl = e.Value?.ToString() ?? "")" />
+                        <span class="settings-field__hint">@L["settings.llm_base_url_hint"]</span>
+                    </label>
+                }
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["settings.llm_api_key_label"]</span>
+                    <input type="password"
+                           class="settings-field__input settings-field__input--mono"
+                           placeholder="@(_llmProvider == "openai" ? L["settings.llm_api_key_placeholder_openai"] : L["settings.llm_api_key_placeholder_local"])"
+                           disabled="@(!_llmEnabled)"
+                           value="@_llmApiKey"
+                           @oninput="@(e => _llmApiKey = e.Value?.ToString() ?? "")" />
+                    <span class="settings-field__hint">
+                        @(_llmProvider == "openai" ? L["settings.llm_api_key_hint_openai"] : L["settings.llm_api_key_hint_local"])
+                    </span>
+                </label>
+            </div>
 
-</FluentTabs>
+            @* Confidence thresholds — auto-apply vs needs-review.
+               Higher auto-apply → fewer false positives, more NeedsReview entries
+               for the user to confirm manually. Lower needs-review → fewer Failed
+               drops, more low-confidence guesses surfaced for review. *@
+            <hr class="settings-divider" />
+            <h4 class="settings-subhead">Match confidence</h4>
+            <div class="settings-fields-stack">
+                <label class="settings-field">
+                    <span class="settings-field__label">
+                        Auto-apply threshold · <span class="settings-field__inline-val">@(_autoApplyConf.ToString("P0", System.Globalization.CultureInfo.InvariantCulture))</span>
+                    </span>
+                    <input type="range" min="50" max="100" step="1"
+                           value="@((int)Math.Round(_autoApplyConf * 100))"
+                           @oninput="@(e => _autoApplyConf = (int.TryParse(e.Value?.ToString(), out var v) ? v : 95) / 100.0)" />
+                    <span class="settings-field__hint">
+                        At or above this score the LLM/source winner is silently saved as identified.
+                        Below it lands in <strong>Needs Review</strong> with top-3 candidates.
+                        Default 95%.
+                    </span>
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">
+                        Needs-review floor · <span class="settings-field__inline-val">@(_needsReviewConf.ToString("P0", System.Globalization.CultureInfo.InvariantCulture))</span>
+                    </span>
+                    <input type="range" min="10" max="90" step="1"
+                           value="@((int)Math.Round(_needsReviewConf * 100))"
+                           @oninput="@(e => _needsReviewConf = (int.TryParse(e.Value?.ToString(), out var v) ? v : 50) / 100.0)" />
+                    <span class="settings-field__hint">
+                        Below this floor the match is marked <strong>Failed</strong> (not surfaced in the NR modal).
+                        Default 50%.
+                    </span>
+                </label>
+            </div>
 
-<!-- Add/Edit pattern dialog -->
-<FluentDialog @bind-Hidden="_patternDialogHidden" Modal="true" TrapFocus="true" PreventScroll="true" Width="540px">
-    <FluentDialogHeader ShowDismiss="true">
-        <FluentLabel Typo="Typography.H4">
-            @(_patternEditTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
-        </FluentLabel>
-    </FluentDialogHeader>
-    <FluentDialogBody>
-        <FluentStack Orientation="Orientation.Vertical" Style="gap:14px;">
-            <FluentTextField @bind-Value="_formName" Label="@(L["patterns.field_name_label"])" Placeholder="@(L["patterns.field_name_placeholder"])" style="width:100%;" />
-            <FluentTextField @bind-Value="_formPattern"
-                             Label="@(L["patterns.field_regex_label"])"
-                             Placeholder="@(L["patterns.field_regex_placeholder"])"
-                             style="width:100%;font-family:monospace;" />
-            <FluentNumberField TValue="int" @bind-Value="_formPriority"
-                               Label="@(L["patterns.field_priority_label"])"
-                               Min="1" Max="999" style="width:160px;" />
-            <FluentSelect TOption="string"
-                          Label="@(L["patterns.field_applicable_label"])"
-                          Value="@(_formApplicableTo?.ToString() ?? "")"
-                          ValueChanged="@(v => _formApplicableTo = string.IsNullOrEmpty(v) ? null : Enum.Parse<FolderType>(v))"
-                          style="width:240px;">
-                <FluentOption TOption="string" Value="">@L["patterns.applicable_all"]</FluentOption>
-                <FluentOption TOption="string" Value="Series">@L["patterns.applicable_series"]</FluentOption>
-                <FluentOption TOption="string" Value="Movie">@L["patterns.applicable_movie"]</FluentOption>
-            </FluentSelect>
-        </FluentStack>
-    </FluentDialogBody>
-    <FluentDialogFooter>
-        <FluentButton Appearance="Appearance.Accent" OnClick="SavePattern"
-                      Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern))">
-            @L["patterns.btn_save"]
-        </FluentButton>
-        <FluentButton OnClick="@(() => _patternDialogHidden = true)">@L["patterns.btn_cancel"]</FluentButton>
-    </FluentDialogFooter>
-</FluentDialog>
+            @* Connection check row — ghost Btn + status text. *@
+            <div class="llm-check">
+                <Btn Variant="ghost"
+                     Disabled="@(!_llmEnabled)"
+                     Loading="@_llmChecking"
+                     OnClick="CheckLlmAsync">
+                    @L["settings.llm_btn_check"]
+                </Btn>
+                <span class="llm-check__status">
+                    @L["settings.llm_status_label"]
+                    @if (_llmChecking)
+                    {
+                        <span class="llm-check__status--probing">@L["settings.llm_status_checking"]</span>
+                    }
+                    else if (_llmStatus == true)
+                    {
+                        <span class="llm-check__status--ok">✓ @L["settings.llm_status_ok"]</span>
+                    }
+                    else if (_llmStatus == false)
+                    {
+                        <span class="llm-check__status--err">✗ @L["settings.llm_status_error"]</span>
+                    }
+                </span>
+            </div>
+
+            <div class="settings-actions">
+                <Btn Variant="primary" OnClick="SaveAiSettingsAsync" Loading="@_llmSaving">
+                    <DIcon Name="check" Size="13" /> @L["settings.btn_save_ai"]
+                </Btn>
+            </div>
+        </div>
+    }
+
+</div>  @* settings-content *@
+</div>
+
+<!-- Add/Edit pattern dialog — native modal w/ scoped .pdlg-* styles. -->
+@if (!_patternDialogHidden)
+{
+    <div class="pdlg-overlay" @onclick="@(() => _patternDialogHidden = true)"></div>
+    <div class="pdlg" role="dialog" aria-modal="true">
+        <header class="pdlg__header">
+            <h4 class="pdlg__title">
+                @(_patternEditTarget is null ? L["patterns.dialog_add_title"] : L["patterns.dialog_edit_title"])
+            </h4>
+            <button type="button" class="pdlg__close" @onclick="@(() => _patternDialogHidden = true)" aria-label="Close">
+                <DIcon Name="x" Size="18" />
+            </button>
+        </header>
+        <div class="pdlg__body">
+            <div class="pdlg__form">
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["patterns.field_name_label"]</span>
+                    <input class="settings-field__input"
+                           placeholder="@L["patterns.field_name_placeholder"]"
+                           value="@_formName"
+                           @oninput="@(e => _formName = e.Value?.ToString() ?? "")" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">@L["patterns.field_regex_label"]</span>
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@L["patterns.field_regex_placeholder"]"
+                           value="@_formPattern"
+                           @oninput="@(e => _formPattern = e.Value?.ToString() ?? "")" />
+                </label>
+                <label class="settings-field settings-field--160">
+                    <span class="settings-field__label">@L["patterns.field_priority_label"]</span>
+                    <input type="number" min="1" max="999"
+                           class="settings-field__input settings-field__input--mono"
+                           value="@_formPriority"
+                           @oninput="@(e => _formPriority = int.TryParse(e.Value?.ToString(), out var v) ? v : _formPriority)" />
+                </label>
+                <label class="settings-field settings-field--240">
+                    <span class="settings-field__label">@L["patterns.field_applicable_label"]</span>
+                    <select class="settings-field__select"
+                            value="@(_formApplicableTo?.ToString() ?? "")"
+                            @onchange="@(e => _formApplicableTo = string.IsNullOrEmpty(e.Value?.ToString()) ? null : Enum.Parse<FolderType>(e.Value!.ToString()!))">
+                        <option value="">@L["patterns.applicable_all"]</option>
+                        <option value="Series">@L["patterns.applicable_series"]</option>
+                        <option value="Movie">@L["patterns.applicable_movie"]</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        <footer class="pdlg__footer">
+            <Btn Variant="primary" OnClick="SavePattern"
+                 Loading="@_patternSaving"
+                 Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern))">
+                @L["patterns.btn_save"]
+            </Btn>
+            <Btn Variant="flat" OnClick="@(() => _patternDialogHidden = true)">@L["patterns.btn_cancel"]</Btn>
+        </footer>
+    </div>
+}
+
+@* Root folder Add/Edit dialog — inline replacement for /explorer. *@
+@if (_sectionDialogOpen)
+{
+    <SectionFolderDialog Existing="_sectionEditTarget"
+                         OnSaved="OnSectionSaved"
+                         OnCanceled="CloseSectionDialog" />
+}
+
+@* Root folder delete-confirm dialog. *@
+@if (_sectionDeleteTarget is not null)
+{
+    <SectionFolderDeleteDialog Section="_sectionDeleteTarget"
+                               OnRemoved="OnSectionRemoved"
+                               OnCanceled="CloseDeleteDialog" />
+}
 
 @code {
     // ── General / Rules / Torrent state ──────────────────────────
@@ -649,28 +870,32 @@
     private string _newMask = "";
     private AppSettings _cfg = new();
     private string _themeStr = "System";
-    private OfficeColor? _accentColorValue;
+    // Current selected accent hue (degrees). Default crimson per CANVAS §01.2.
+    private int _accentHueValue = ThemeService.DefaultHue;
     private string _activeTab = "general";
 
-    private static readonly (OfficeColor? Color, string Hex)[] _accentColors =
+    private static readonly (string Key, string Label)[] _settingsTabs =
     [
-        (null,                        "#808080"),
-        (OfficeColor.Outlook,         "#0f6cbd"),
-        (OfficeColor.Teams,           "#6264a7"),
-        (OfficeColor.Word,            "#2b579a"),
-        (OfficeColor.Excel,           "#217346"),
-        (OfficeColor.PowerPoint,      "#b7472a"),
-        (OfficeColor.OneNote,         "#7719aa"),
-        (OfficeColor.PowerApps,       "#742774"),
-        (OfficeColor.Stream,          "#bc1948"),
-        (OfficeColor.Sway,            "#008272"),
-        (OfficeColor.Publisher,       "#077568"),
-        (OfficeColor.Planner,         "#31752f"),
-        (OfficeColor.Visio,           "#3955a3"),
-        (OfficeColor.Yammer,          "#106ebe"),
-        (OfficeColor.PowerBI,         "#f2c811"),
-        (OfficeColor.Office,          "#d83b01"),
-        (OfficeColor.Access,          "#a4373a"),
+        ("general",        "General"),
+        ("root_folders",   "Root folders"),
+        ("rename_history", "Rename history"),
+        ("appearance",     "Appearance"),
+        ("ai",             "AI / LLM"),
+        ("patterns",       "Patterns"),
+        ("rules",          "Ignore rules"),
+        ("torrent",        "Torrent"),
+        ("metadata",       "Metadata"),
+    ];
+
+    // 5 canonical accent presets per CANVAS §01.2. Each entry is a hue degree;
+    // the swatch renders as `oklch(0.66 0.20 N)` so it matches the runtime tint.
+    private static readonly (string Label, int Hue)[] _accentHues =
+    [
+        ("Crimson", 25),
+        ("Amber",   75),
+        ("Green",  150),
+        ("Blue",   240),
+        ("Violet", 300),
     ];
     private TorrentConfig? _torrentCfg;
     private int _globalDlLimitMbps;
@@ -701,12 +926,30 @@
     private string _llmBaseUrl  = "http://ollama:11434";
     private string _llmApiKey   = "";
     private string _llmModel    = "qwen2.5:1.5b";
+    /// <summary>Auto-apply confidence threshold. ≥ this → silently saved
+    /// as Identified; below → NeedsReview with top-3 candidates. Default
+    /// 0.95 (tightened from earlier 0.85 after false-positive reports).</summary>
+    private double _autoApplyConf   = 0.95;
+    /// <summary>NeedsReview floor — below this score the match is Failed,
+    /// not surfaced in NR modal. Default 0.50.</summary>
+    private double _needsReviewConf = 0.50;
     private bool   _backdropEnabled = true;
     private int    _backdropIntervalSec = 30;
     private int    _backdropBlurPx = 2;
     private int    _backdropBrightness = 60;
     private bool?  _llmStatus;     // null=untested, true=ok, false=error
     private bool   _llmChecking = false;
+
+    // ── Save-in-flight flags ─────────────────────────────────────
+    // One bool per save handler so each Btn primitive can flip into
+    // the loader state without re-triggering the others. Spec:
+    // design_handoff_animarr/pages/loaders.html §04.
+    private bool _llmSaving;
+    private bool _torrentSaving;
+    private bool _metaSaving;
+    private bool _appearanceSaving;
+    private bool _patternSaving;
+    private bool _ruleSaving;
 
     // ── Patterns state ───────────────────────────────────────────
     private List<RenamePattern> _patterns = [];
@@ -727,6 +970,85 @@
     // LLM suggestions
     private bool _llmSuggestBusy = false;
     private LlmRegexResult? _llmSuggestion;
+
+    // ── Root folder dialog state ─────────────────────────────────
+    private bool _sectionDialogOpen;
+    private FolderWatcher? _sectionEditTarget;
+    private FolderWatcher? _sectionDeleteTarget;
+    private int _rfReloadToken;
+
+    private void OpenAddSection()
+    {
+        _sectionEditTarget   = null;
+        _sectionDialogOpen   = true;
+    }
+
+    /// <summary>Queues every identify-enabled child folder across ALL sections
+    /// for re-identification. Moved here from the Catalog filter bar — per design,
+    /// config-level actions belong in Settings, not the catalog.</summary>
+    private async Task RescanAllAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var folderIds = await db.FolderWatchers
+            .Where(f => !f.IsSection && f.IdentifyEnabled)
+            .Select(f => f.Id)
+            .ToListAsync();
+        int queued = 0;
+        foreach (var fid in folderIds)
+        {
+            // Skip folders already in flight to avoid duplicate queue entries.
+            if (await db.IdentificationQueues.AnyAsync(q =>
+                q.FolderId == fid &&
+                (q.Status == IdentificationQueueStatus.Queued || q.Status == IdentificationQueueStatus.Processing)))
+                continue;
+            db.IdentificationQueues.Add(new IdentificationQueue
+            {
+                Id = Guid.NewGuid(),
+                FolderId = fid,
+                ForceRefresh = true,
+                Status = IdentificationQueueStatus.Queued,
+                QueuedAt = DateTime.UtcNow,
+            });
+            queued++;
+        }
+        await db.SaveChangesAsync();
+        ToastService.ShowToast(ToastIntent.Info, $"Queued {queued} folder(s) for rescan.");
+    }
+
+    private void OpenEditSection(FolderWatcher section)
+    {
+        _sectionEditTarget   = section;
+        _sectionDialogOpen   = true;
+    }
+
+    private void CloseSectionDialog()
+    {
+        _sectionDialogOpen   = false;
+        _sectionEditTarget   = null;
+    }
+
+    private void OnSectionSaved()
+    {
+        _sectionDialogOpen   = false;
+        _sectionEditTarget   = null;
+        _rfReloadToken++;
+    }
+
+    private void OpenDeleteSection(FolderWatcher section)
+    {
+        _sectionDeleteTarget = section;
+    }
+
+    private void CloseDeleteDialog()
+    {
+        _sectionDeleteTarget = null;
+    }
+
+    private void OnSectionRemoved()
+    {
+        _sectionDeleteTarget = null;
+        _rfReloadToken++;
+    }
 
     private async Task SuggestRegexAsync()
     {
@@ -758,7 +1080,8 @@
         if (qs["tab"] is { Length: > 0 } tab) _activeTab = tab;
 
         _themeStr = ThemeService.Mode.ToString();
-        _accentColorValue = ThemeService.AccentColor;        _cfg = AppSettingsOptions.Value;
+        _accentHueValue = ThemeService.AccentHue;
+        _cfg = AppSettingsOptions.Value;
         await ReloadRulesAsync();
         _loading = false;
 
@@ -781,10 +1104,14 @@
             ThemeService.Set(mode);
     }
 
-    private void OnAccentColorChanged(OfficeColor? color)
+    private void OnAccentHueChanged(int hue)
     {
-        _accentColorValue = color;
-        ThemeService.SetAccentColor(color);
+        _accentHueValue = hue;
+        // ThemeService fires OnChange; MainLayout listens and pushes the new
+        // hue into the `--accent-hue` CSS custom property on the document
+        // root (which all oklch(...) rules read). Persistence: MainLayout
+        // also stores the new value in localStorage so the choice survives.
+        ThemeService.SetAccentHue(hue);
     }
 
     private async Task OnLanguageChanged(string lang)
@@ -815,12 +1142,17 @@
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.IgnoreRules.Add(new IgnoreRule { Id = Guid.NewGuid(), Mask = mask, Scope = RuleScope.Global });
-        await db.SaveChangesAsync();
-        _newMask = "";
-        ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_added", mask));
-        await ReloadRulesAsync();
+        _ruleSaving = true; StateHasChanged();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.IgnoreRules.Add(new IgnoreRule { Id = Guid.NewGuid(), Mask = mask, Scope = RuleScope.Global });
+            await db.SaveChangesAsync();
+            _newMask = "";
+            ToastService.ShowToast(ToastIntent.Success, L.Get("settings.toast_rule_added", mask));
+            await ReloadRulesAsync();
+        }
+        finally { _ruleSaving = false; StateHasChanged(); }
     }
 
     private async Task DeleteRule(IgnoreRule rule)
@@ -856,35 +1188,40 @@
     {
         if (string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formPattern)) return;
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        if (_patternEditTarget is null)
+        _patternSaving = true; StateHasChanged();
+        try
         {
-            db.RenamePatterns.Add(new RenamePattern
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (_patternEditTarget is null)
             {
-                Id = Guid.NewGuid(),
-                Name = _formName.Trim(),
-                Pattern = _formPattern.Trim(),
-                Priority = _formPriority,
-                ApplicableTo = _formApplicableTo,
-                Scope = PatternScope.Global,
-                IsBuiltIn = false,
-            });
-            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_added"]);
-        }
-        else
-        {
-            var entity = await db.RenamePatterns.FindAsync(_patternEditTarget.Id);
-            if (entity is null) return;
-            entity.Name = _formName.Trim();
-            entity.Pattern = _formPattern.Trim();
-            entity.Priority = _formPriority;
-            entity.ApplicableTo = _formApplicableTo;
-            ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
-        }
+                db.RenamePatterns.Add(new RenamePattern
+                {
+                    Id = Guid.NewGuid(),
+                    Name = _formName.Trim(),
+                    Pattern = _formPattern.Trim(),
+                    Priority = _formPriority,
+                    ApplicableTo = _formApplicableTo,
+                    Scope = PatternScope.Global,
+                    IsBuiltIn = false,
+                });
+                ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_added"]);
+            }
+            else
+            {
+                var entity = await db.RenamePatterns.FindAsync(_patternEditTarget.Id);
+                if (entity is null) return;
+                entity.Name = _formName.Trim();
+                entity.Pattern = _formPattern.Trim();
+                entity.Priority = _formPriority;
+                entity.ApplicableTo = _formApplicableTo;
+                ToastService.ShowToast(ToastIntent.Success, L["patterns.toast_updated"]);
+            }
 
-        await db.SaveChangesAsync();
-        _patternDialogHidden = true;
-        await LoadPatternsAsync();
+            await db.SaveChangesAsync();
+            _patternDialogHidden = true;
+            await LoadPatternsAsync();
+        }
+        finally { _patternSaving = false; StateHasChanged(); }
     }
 
     private async Task DeletePattern(RenamePattern pattern)
@@ -911,32 +1248,37 @@
     private async Task SaveTorrentSettingsAsync()
     {
         if (_torrentCfg is null) return;
-        _torrentCfg.GlobalDownloadLimit = _globalDlLimitMbps * 125000;
-        _torrentCfg.GlobalUploadLimit   = _globalUlLimitMbps * 125000;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var existing = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
-        if (existing is null)
+        _torrentSaving = true; StateHasChanged();
+        try
         {
-            _torrentCfg.Id = 1;
-            db.TorrentConfig.Add(_torrentCfg);
+            _torrentCfg.GlobalDownloadLimit = _globalDlLimitMbps * 125000;
+            _torrentCfg.GlobalUploadLimit   = _globalUlLimitMbps * 125000;
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var existing = await db.TorrentConfig.FirstOrDefaultAsync(c => c.Id == 1);
+            if (existing is null)
+            {
+                _torrentCfg.Id = 1;
+                db.TorrentConfig.Add(_torrentCfg);
+            }
+            else
+            {
+                existing.GlobalDownloadLimit = _torrentCfg.GlobalDownloadLimit;
+                existing.GlobalUploadLimit = _torrentCfg.GlobalUploadLimit;
+                existing.ListenPort = _torrentCfg.ListenPort;
+                existing.MaxConnections = _torrentCfg.MaxConnections;
+                existing.EnableDHT = _torrentCfg.EnableDHT;
+                existing.EnableLSD = _torrentCfg.EnableLSD;
+                existing.EnableUPnP = _torrentCfg.EnableUPnP;
+                existing.StopSeedingAfterDone = _torrentCfg.StopSeedingAfterDone;
+                existing.StopSeedingRatio = _torrentCfg.StopSeedingRatio;
+                existing.AutoRenameAfterDownload = _torrentCfg.AutoRenameAfterDownload;
+                existing.CacheDirectory = _torrentCfg.CacheDirectory;
+            }
+            await db.SaveChangesAsync();
+            await TorrentEngine.UpdateGlobalSettingsAsync(_torrentCfg);
+            ToastService.ShowToast(ToastIntent.Success, L["settings.toast_torrent_saved"]);
         }
-        else
-        {
-            existing.GlobalDownloadLimit = _torrentCfg.GlobalDownloadLimit;
-            existing.GlobalUploadLimit = _torrentCfg.GlobalUploadLimit;
-            existing.ListenPort = _torrentCfg.ListenPort;
-            existing.MaxConnections = _torrentCfg.MaxConnections;
-            existing.EnableDHT = _torrentCfg.EnableDHT;
-            existing.EnableLSD = _torrentCfg.EnableLSD;
-            existing.EnableUPnP = _torrentCfg.EnableUPnP;
-            existing.StopSeedingAfterDone = _torrentCfg.StopSeedingAfterDone;
-            existing.StopSeedingRatio = _torrentCfg.StopSeedingRatio;
-            existing.AutoRenameAfterDownload = _torrentCfg.AutoRenameAfterDownload;
-            existing.CacheDirectory = _torrentCfg.CacheDirectory;
-        }
-        await db.SaveChangesAsync();
-        await TorrentEngine.UpdateGlobalSettingsAsync(_torrentCfg);
-        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_torrent_saved"]);
+        finally { _torrentSaving = false; StateHasChanged(); }
     }
 
     // ── Metadata / LLM methods ───────────────────────────────────
@@ -983,6 +1325,9 @@
                     ?? "qwen2.5:1.5b";
 #pragma warning restore CS0618
 
+        _autoApplyConf   = await AppConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence,   0.95);
+        _needsReviewConf = await AppConfig.GetAsync<double>(AppConfigKeys.NeedsReviewConfidence, 0.50);
+
         _backdropEnabled     = await AppConfig.GetAsync<bool>(AppConfigKeys.BackdropEnabled, true);
         _backdropIntervalSec = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropIntervalSec, 30);
         _backdropBlurPx      = await AppConfig.GetAsync<int>(AppConfigKeys.BackdropBlurPx, 0);
@@ -992,15 +1337,20 @@
 
     private async Task SaveMetadataSettingsAsync()
     {
-        await AppConfig.SetAsync(AppConfigKeys.TmdbApiKey, _tmdbApiKey);
-        await AppConfig.SetAsync(AppConfigKeys.MalClientId, _malClientId);
-        await AppConfig.SetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, _autoIdentifyEnabled);
-        await AppConfig.SetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, _downloadEpThumbs);
-        await AppConfig.SetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, _includeEpisodeName);
-        var sourceOrderJson = System.Text.Json.JsonSerializer.Serialize(
-            _searchSources.Select(s => new { s.Id, s.Enabled }));
-        await AppConfig.SetAsync(AppConfigKeys.SearchSourceOrder, sourceOrderJson);
-        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_metadata_saved"]);
+        _metaSaving = true; StateHasChanged();
+        try
+        {
+            await AppConfig.SetAsync(AppConfigKeys.TmdbApiKey, _tmdbApiKey);
+            await AppConfig.SetAsync(AppConfigKeys.MalClientId, _malClientId);
+            await AppConfig.SetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, _autoIdentifyEnabled);
+            await AppConfig.SetAsync<bool>(AppConfigKeys.DownloadEpisodeThumbs, _downloadEpThumbs);
+            await AppConfig.SetAsync<bool>(AppConfigKeys.IncludeEpisodeNameInFile, _includeEpisodeName);
+            var sourceOrderJson = System.Text.Json.JsonSerializer.Serialize(
+                _searchSources.Select(s => new { s.Id, s.Enabled }));
+            await AppConfig.SetAsync(AppConfigKeys.SearchSourceOrder, sourceOrderJson);
+            ToastService.ShowToast(ToastIntent.Success, L["settings.toast_metadata_saved"]);
+        }
+        finally { _metaSaving = false; StateHasChanged(); }
     }
 
     private void MoveSourceUp(int idx)
@@ -1026,23 +1376,35 @@
 
     private async Task SaveAiSettingsAsync()
     {
-        await AppConfig.SetAsync<bool>(AppConfigKeys.LlmEnabled, _llmEnabled);
-        await AppConfig.SetAsync(AppConfigKeys.LlmProvider, _llmProvider);
-        await AppConfig.SetAsync(AppConfigKeys.LlmBaseUrl, _llmBaseUrl);
-        await AppConfig.SetAsync(AppConfigKeys.LlmApiKey, _llmApiKey);
-        await AppConfig.SetAsync(AppConfigKeys.LlmModel, _llmModel);
-        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_ai_saved"]);
+        _llmSaving = true; StateHasChanged();
+        try
+        {
+            await AppConfig.SetAsync<bool>(AppConfigKeys.LlmEnabled, _llmEnabled);
+            await AppConfig.SetAsync(AppConfigKeys.LlmProvider, _llmProvider);
+            await AppConfig.SetAsync(AppConfigKeys.LlmBaseUrl, _llmBaseUrl);
+            await AppConfig.SetAsync(AppConfigKeys.LlmApiKey, _llmApiKey);
+            await AppConfig.SetAsync(AppConfigKeys.LlmModel, _llmModel);
+            await AppConfig.SetAsync<double>(AppConfigKeys.AutoApplyConfidence,   _autoApplyConf);
+            await AppConfig.SetAsync<double>(AppConfigKeys.NeedsReviewConfidence, _needsReviewConf);
+            ToastService.ShowToast(ToastIntent.Success, L["settings.toast_ai_saved"]);
+        }
+        finally { _llmSaving = false; StateHasChanged(); }
     }
 
     private async Task SaveAppearanceAsync()
     {
-        await AppConfig.SetAsync<bool>(AppConfigKeys.BackdropEnabled, _backdropEnabled);
-        await AppConfig.SetAsync<int>(AppConfigKeys.BackdropIntervalSec, _backdropIntervalSec);
-        await AppConfig.SetAsync<int>(AppConfigKeys.BackdropBlurPx, _backdropBlurPx);
-        await AppConfig.SetAsync<int>(AppConfigKeys.BackdropBrightness, _backdropBrightness);
-        await AppConfig.SetAsync(AppConfigKeys.ThemeMode, _themeStr);
-        await AppConfig.SetAsync(AppConfigKeys.AccentColor, _accentColorValue?.ToString());
-        ToastService.ShowToast(ToastIntent.Success, L["settings.toast_appearance_saved"]);
+        _appearanceSaving = true; StateHasChanged();
+        try
+        {
+            await AppConfig.SetAsync<bool>(AppConfigKeys.BackdropEnabled, _backdropEnabled);
+            await AppConfig.SetAsync<int>(AppConfigKeys.BackdropIntervalSec, _backdropIntervalSec);
+            await AppConfig.SetAsync<int>(AppConfigKeys.BackdropBlurPx, _backdropBlurPx);
+            await AppConfig.SetAsync<int>(AppConfigKeys.BackdropBrightness, _backdropBrightness);
+            await AppConfig.SetAsync(AppConfigKeys.ThemeMode, _themeStr);
+            await AppConfig.SetAsync(AppConfigKeys.AccentColor, _accentHueValue.ToString());
+            ToastService.ShowToast(ToastIntent.Success, L["settings.toast_appearance_saved"]);
+        }
+        finally { _appearanceSaving = false; StateHasChanged(); }
     }
 
     private async Task CheckLlmAsync()

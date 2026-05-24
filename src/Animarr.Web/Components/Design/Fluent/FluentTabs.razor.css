@@ -1,0 +1,65 @@
+.ftabs--horizontal { display: flex; flex-direction: column; }
+.ftabs--horizontal .ftabs__nav {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    width: fit-content;
+    margin-bottom: 18px;
+}
+.ftabs--horizontal .ftabs__tab {
+    height: 28px;
+    padding: 0 14px;
+    border-radius: var(--radius-ctrl);
+}
+.ftabs--horizontal .ftabs__tab--active {
+    background: var(--surface-3);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+.ftabs--vertical {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 32px;
+}
+.ftabs--vertical .ftabs__nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card-lg);
+    align-self: flex-start;
+    position: sticky;
+    top: 20px;
+}
+.ftabs--vertical .ftabs__tab {
+    padding: 9px 12px;
+    border-radius: var(--radius-ctrl);
+    text-align: left;
+    border-left: 2px solid transparent;
+    white-space: nowrap;
+}
+.ftabs--vertical .ftabs__tab--active {
+    background: var(--surface-3);
+    border-left-color: var(--accent);
+}
+
+.ftabs__tab {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: background var(--motion-base), color var(--motion-base);
+}
+.ftabs__tab:hover { color: var(--text); }
+.ftabs__tab--active { color: var(--text); }
+
+.ftabs__panel { min-width: 0; }

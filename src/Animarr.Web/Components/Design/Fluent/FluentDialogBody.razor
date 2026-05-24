@@ -1,0 +1,7 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<div class="fdlg__body">@ChildContent</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

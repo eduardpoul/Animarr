@@ -1,0 +1,41 @@
+/* Spec-match: design_handoff_animarr/CANVAS.html §01.6.2.
+   FluentBadge shim — same spec as Pill primitive.
+   Tiny mono uppercase tag, 10px / 0.6px tracking, radius-badge (4). */
+
+.fbadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border-radius: var(--radius-badge);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.fbadge--accent {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    border-color: var(--accent-line);
+}
+.fbadge--success {
+    background: oklch(0.74 0.15 150 / 0.15);
+    color: var(--success);
+    border-color: oklch(0.55 0.15 150 / 0.35);
+}
+.fbadge--warn {
+    background: oklch(0.80 0.17 75 / 0.15);
+    color: var(--warn);
+    border-color: oklch(0.60 0.16 75 / 0.40);
+}
+.fbadge--lightweight {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-faint);
+}

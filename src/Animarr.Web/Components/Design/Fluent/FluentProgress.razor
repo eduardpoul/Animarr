@@ -1,0 +1,12 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<div class="fprog" style="@Style">
+    <div class="fprog__fill @(Value is null ? "fprog__fill--indeterminate" : "")"
+         style="@(Value is null ? "" : $"width:{Math.Clamp((double)Value, 0, 100):F1}%")"></div>
+</div>
+
+@code {
+    [Parameter] public double? Value { get; set; }
+    [Parameter] public string? Width { get; set; }
+    [Parameter] public string? Style { get; set; }
+}

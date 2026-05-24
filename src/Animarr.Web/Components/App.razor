@@ -6,10 +6,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <ResourcePreloader />
+    @* Inline @font-face declarations at the very top of HEAD so the browser
+       discovers them BEFORE parsing any other stylesheet. Combined with
+       <link rel=preload>, this guarantees fonts download and apply before
+       first paint regardless of CSS bundle order. *@
+    <style>
+        @@font-face { font-family: 'Geist';        font-weight: 400; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-400.ttf')         format('truetype'); }
+        @@font-face { font-family: 'Geist';        font-weight: 500; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-500.ttf')         format('truetype'); }
+        @@font-face { font-family: 'Geist';        font-weight: 600; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-600.ttf')         format('truetype'); }
+        @@font-face { font-family: 'Geist';        font-weight: 700; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-700.ttf')         format('truetype'); }
+        @@font-face { font-family: 'Geist Mono';   font-weight: 400; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-mono-400.ttf')    format('truetype'); }
+        @@font-face { font-family: 'Geist Mono';   font-weight: 500; font-style: normal; font-display: swap; src: url('/lib/fonts/geist-mono-500.ttf')    format('truetype'); }
+        @@font-face { font-family: 'Archivo Black'; font-weight: 400; font-style: normal; font-display: swap; src: url('/lib/fonts/archivo-black-400.ttf') format('truetype'); }
+    </style>
+    <link rel="preload" href="/lib/fonts/geist-400.ttf"         as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/lib/fonts/geist-500.ttf"         as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/lib/fonts/geist-600.ttf"         as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/lib/fonts/geist-mono-400.ttf"    as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/lib/fonts/archivo-black-400.ttf" as="font" type="font/ttf" crossorigin />
+    @* Noto Serif SC (CJK watermark) stays on Google Fonts CDN. *@
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&display=swap" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["Animarr.Web.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+    @* ── PWA: manifest + theme colour + Apple touch icon.
+       Blazor Server can't be made fully offline (every interactive click
+       needs SignalR), but the manifest still gives us:
+         • Installable to home-screen / app-bar on desktop + mobile.
+         • Standalone display (no browser chrome) when launched as PWA.
+         • App-shell + static asset cache via sw.js — faster repeat loads.
+         • Branded offline page when the network is down. *@
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0a0807" />
+    <meta name="application-name" content="Animarr" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Animarr" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
@@ -37,6 +76,36 @@
         });
     </script>
     <script src="/backdrop.js"></script>
+    <script>
+        // Setter for the runtime accent hue. Every oklch(L C var(--accent-hue))
+        // rule in the stylesheet reads this property — flipping it from JS lets
+        // Settings → Accent rotate the whole palette without a page reload.
+        // Apply early-cached value before Blazor wires up to avoid a red flash.
+        window.animarr_setAccentHue = function (hue) {
+            if (typeof hue !== 'number') hue = parseInt(hue, 10);
+            if (Number.isFinite(hue))
+                document.documentElement.style.setProperty('--accent-hue', hue);
+        };
+        (function () {
+            var stored = localStorage.getItem('animarr-accent');
+            if (stored && /^\d+$/.test(stored)) {
+                window.animarr_setAccentHue(parseInt(stored, 10));
+            }
+        })();
+    </script>
+
+    @* ── PWA service worker registration.
+       Registered after page load (`window.load`) so the SW install doesn't
+       compete with the initial paint. Re-registration is idempotent — the
+       browser ignores it once the SW is already in the same scope. *@
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .catch(function (err) { console.warn('SW registration failed:', err); });
+            });
+        }
+    </script>
 </body>
 
 </html>

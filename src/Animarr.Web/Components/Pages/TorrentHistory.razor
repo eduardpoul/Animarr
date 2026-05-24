@@ -6,72 +6,85 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<div style="display:flex;align-items:center;margin-bottom:16px;gap:12px;">
-    <FluentLabel Typo="Typography.H4" Style="flex:1;margin:0;">@L["torrent_history.title"]</FluentLabel>
-    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.ArrowLeft())" Title="@L["torrent_history.back_link"]" OnClick="@(() => Nav.NavigateTo("/torrents"))" />
+<div class="th-header">
+    <h1 class="th-header__title">@L["torrent_history.title"]</h1>
+    <Btn Variant="ghost" Size="sm" OnClick="@(() => Nav.NavigateTo("/torrents"))">
+        <DIcon Name="chev-l" Size="14" /> @L["torrent_history.back_link"]
+    </Btn>
 </div>
 
 @if (_loading)
 {
-    <div style="display:flex;justify-content:center;align-items:center;padding:80px 0;">
-        <FluentProgressRing />
+    @* Inline dots replace the old indeterminate progress bar while the
+       initial DB query is in flight. Spec: loaders.html §06. *@
+    <div class="th-loading">
+        <InlineDots Label="Loading torrent history" />
     </div>
 }
 else if (_records.Count == 0)
 {
-    <FluentLabel Style="color:var(--neutral-foreground-hint);font-size:14px;">
-        @L["torrent_history.empty"]
-    </FluentLabel>
+    <div class="th-empty">@L["torrent_history.empty"]</div>
 }
 else
 {
-    <FluentDataGrid Items="@_records.AsQueryable()" TGridItem="TorrentRecord"
-                    ShowHover="true" Style="font-size:13px;" Pagination="@_pagination">
-        <TemplateColumn Title="" Width="18px">
-            <div class="fluent-status-dot fluent-status-dot--@StateColorClass(context.State)"
-                 title="@context.State.ToString()"></div>
-        </TemplateColumn>
-
-        <PropertyColumn Property="@(r => r.Name)" Title="@(L["torrent_history.col_name"])" Sortable="true" />
-
-        <TemplateColumn Title="@(L["torrent_history.col_folder"])" Width="180px">
-            <span title="@context.SavePath" style="font-size:12px;color:var(--neutral-foreground-hint);">
-                @System.IO.Path.GetFileName(context.SavePath.TrimEnd('/', '\\'))
-            </span>
-        </TemplateColumn>
-
-        <TemplateColumn Title="@(L["torrent_history.col_size"])" Width="90px">
-            <span style="font-size:12px;">@FormatBytes(context.TotalSize)</span>
-        </TemplateColumn>
-
-        <TemplateColumn Title="@(L["torrent_history.col_speed"])" Width="120px">
-            <span style="font-size:12px;">@FormatBytes(context.Downloaded) / @FormatBytes(context.Uploaded)</span>
-        </TemplateColumn>
-
-        <TemplateColumn Title="@(L["torrent_history.col_added"])" Width="140px">
-            <span style="font-size:12px;">@context.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
-        </TemplateColumn>
-
-        <TemplateColumn Title="@(L["torrent_history.col_completed"])" Width="140px">
-            <span style="font-size:12px;">
-                @(context.CompletedAt.HasValue
-                    ? context.CompletedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
-                    : "—")
-            </span>
-        </TemplateColumn>
-
-        <TemplateColumn Title="@(L["torrent_history.col_status"])" Width="110px">
-            <span style="font-size:12px;">@StateLabel(context.State)</span>
-        </TemplateColumn>
-    </FluentDataGrid>
-
-    <FluentPaginator State="@_pagination" />
+    var paged = _records.Skip(_pageIndex * _pageSize).Take(_pageSize).ToList();
+    var pageCount = (int)Math.Ceiling(_records.Count / (double)_pageSize);
+    <div class="th-table-wrap">
+        <table class="th-table">
+            <thead>
+                <tr>
+                    <th class="th-col-dot"></th>
+                    <th>@L["torrent_history.col_name"]</th>
+                    <th class="th-col-folder">@L["torrent_history.col_folder"]</th>
+                    <th class="th-col-mono">@L["torrent_history.col_size"]</th>
+                    <th class="th-col-mono">@L["torrent_history.col_speed"]</th>
+                    <th class="th-col-date">@L["torrent_history.col_added"]</th>
+                    <th class="th-col-date">@L["torrent_history.col_completed"]</th>
+                    <th class="th-col-status">@L["torrent_history.col_status"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in paged)
+                {
+                    <tr>
+                        <td class="th-col-dot">
+                            <span class="tor-dot tor-dot--@StateColorClass(r.State)" title="@r.State.ToString()"></span>
+                        </td>
+                        <td>@r.Name</td>
+                        <td class="tor-cell tor-cell--dim" title="@r.SavePath">
+                            @System.IO.Path.GetFileName(r.SavePath.TrimEnd('/', '\\'))
+                        </td>
+                        <td class="tor-cell tor-cell--mono">@FormatBytes(r.TotalSize)</td>
+                        <td class="tor-cell tor-cell--mono">@FormatBytes(r.Downloaded) / @FormatBytes(r.Uploaded)</td>
+                        <td class="tor-cell tor-cell--mono">@r.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td class="tor-cell tor-cell--mono">
+                            @(r.CompletedAt.HasValue ? r.CompletedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "—")
+                        </td>
+                        <td class="tor-cell">@StateLabel(r.State)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (pageCount > 1)
+    {
+        <div class="th-paginator">
+            <Btn Variant="ghost" Size="sm" Disabled="@(_pageIndex == 0)" OnClick="@(() => _pageIndex--)">
+                <DIcon Name="chev-l" Size="13" />
+            </Btn>
+            <span class="th-paginator__label">@(_pageIndex + 1) / @pageCount</span>
+            <Btn Variant="ghost" Size="sm" Disabled="@(_pageIndex >= pageCount - 1)" OnClick="@(() => _pageIndex++)">
+                <DIcon Name="chev-r" Size="13" />
+            </Btn>
+        </div>
+    }
 }
 
 @code {
     private List<TorrentRecord> _records = [];
     private bool _loading = true;
-    private readonly PaginationState _pagination = new() { ItemsPerPage = 25 };
+    private int _pageIndex;
+    private const int _pageSize = 25;
 
     protected override async Task OnInitializedAsync()
     {
@@ -90,7 +103,7 @@ else
         TorrentRecordState.Stopped     => "neutral",
         TorrentRecordState.Error       => "error",
         TorrentRecordState.Hashing     => "warning",
-        TorrentRecordState.Downloading => "informative",
+        TorrentRecordState.Downloading => "info",
         _                              => "neutral",
     };
 

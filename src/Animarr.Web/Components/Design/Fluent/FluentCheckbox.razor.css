@@ -1,0 +1,19 @@
+.fchk { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.fchk__cb { position: absolute; opacity: 0; pointer-events: none; }
+.fchk__box {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    background: var(--bg-1);
+    border: 1px solid var(--border-strong);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    transition: background var(--motion-base), border-color var(--motion-base);
+}
+.fchk__cb:checked ~ .fchk__box {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.fchk__label { font-size: 13px; color: var(--text); }

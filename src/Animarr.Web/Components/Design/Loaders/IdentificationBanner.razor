@@ -1,0 +1,56 @@
+@*
+    Identification banner — sits above Catalog grid (or in Settings → AI/LLM)
+    and shows ambient progress while the LLM queue is working. Pulsing ring
+    around the ✨ icon + slow accent gradient bar + live count. Auto-hides
+    when queue is empty.
+
+    Spec: design_handoff_animarr/pages/loaders.html §05.
+*@
+
+@implements IDisposable
+@inject IdentificationQueueProcessorService QueueProc
+@inject IAppConfigService AppConfig
+
+@if (QueueProc.QueueDepth > 0)
+{
+    <div class="d-id-banner" role="status" aria-live="polite">
+        <div class="d-id-banner__icon">
+            <DIcon Name="sparkle" Size="18" />
+        </div>
+        <div class="d-id-banner__text">
+            <div class="d-id-banner__title">@L["loader.identifying_title"]</div>
+            <div class="d-id-banner__sub">@_subtitle</div>
+        </div>
+        <div class="d-id-banner__progress"><div></div></div>
+        <div class="d-id-banner__count">@QueueProc.QueueDepth pending</div>
+    </div>
+}
+
+@code {
+    private string _subtitle = "queue processing…";
+
+    protected override async Task OnInitializedAsync()
+    {
+        QueueProc.QueueChanged += OnQueueChanged;
+        await RefreshSubtitleAsync();
+    }
+
+    private void OnQueueChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Provider · model — same labels the sidebar LLM card shows.</summary>
+    private async Task RefreshSubtitleAsync()
+    {
+        try
+        {
+            var provider = await AppConfig.GetAsync(AppConfigKeys.LlmProvider) ?? "compatible";
+            var model    = await AppConfig.GetAsync(AppConfigKeys.LlmModel)    ?? "";
+            _subtitle = string.IsNullOrEmpty(model)
+                ? $"{provider} · normalising folder names"
+                : $"{provider} · {model} · normalising folder names";
+            StateHasChanged();
+        }
+        catch { /* config not ready */ }
+    }
+
+    public void Dispose() { QueueProc.QueueChanged -= OnQueueChanged; }
+}

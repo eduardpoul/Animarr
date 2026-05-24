@@ -1,0 +1,168 @@
+/* TorrentHistory — plain HTML table replacing the old FluentDataGrid layout.
+   Status dot + mono numerics are duplicated here from Torrents.razor.css
+   because scoped razor.css doesn't cross component boundaries. */
+
+/* Status dot — solid colored circle keyed off the row state. */
+.tor-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: var(--text-faint);
+    flex-shrink: 0;
+}
+.tor-dot--info     { background: var(--accent-hi); box-shadow: 0 0 10px var(--accent-soft); }
+.tor-dot--success  { background: var(--success);   box-shadow: 0 0 10px oklch(0.74 0.15 150 / 0.45); }
+.tor-dot--warning  { background: var(--warn); }
+.tor-dot--error    { background: oklch(0.66 0.22 25); }
+.tor-dot--neutral  { background: var(--text-faint); }
+
+.tor-cell        { font-size: 12.5px; color: var(--text); }
+.tor-cell--mono  { font-family: var(--font-mono); font-size: 11.5px; }
+.tor-cell--dim   { color: var(--text-dim); }
+
+
+.th-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5);
+    margin-bottom: var(--space-7);
+    padding-bottom: var(--space-5);
+    border-bottom: 1px solid var(--border);
+}
+
+.th-header__title {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.0;
+    letter-spacing: -0.018em;
+    text-transform: uppercase;
+    color: var(--text);
+    margin: 0;
+}
+
+.th-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: var(--space-12) 0;
+}
+
+.th-empty {
+    color: var(--text-faint);
+    font-size: 14px;
+    padding: var(--space-7) 0;
+}
+
+.th-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+}
+
+.th-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.th-table thead th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.th-table tbody td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.th-table tbody tr:last-child td { border-bottom: 0; }
+.th-table tbody tr:hover { background: var(--bg-1); }
+
+.th-col-dot     { width: 24px; }
+.th-col-folder  { width: 180px; }
+.th-col-mono    { width: 110px; }
+.th-col-date    { width: 140px; }
+.th-col-status  { width: 110px; }
+
+/* Paginator row under the table */
+.th-paginator {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+
+.th-paginator__label {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    min-width: 56px;
+    text-align: center;
+}
+
+/* ── Mobile / tablet — drop low-priority columns, allow name to wrap. */
+@media (max-width: 959px) {
+    .th-header { flex-wrap: wrap; gap: var(--space-4); }
+    .th-header__title { font-size: 24px; }
+    .th-table-wrap {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        overflow-x: auto;
+    }
+    .th-table { min-width: 540px; }
+    .th-col-folder { width: 120px; }
+    .th-col-date   { width: 110px; }
+}
+
+/* ── Phone — collapse to a single-card-per-row layout. */
+@media (max-width: 639px) {
+    .th-table { min-width: 0; display: block; }
+    .th-table thead { display: none; }
+    .th-table tbody { display: block; }
+    .th-table tbody tr {
+        display: grid;
+        grid-template-columns: 16px 1fr auto;
+        grid-template-areas:
+            "dot name status"
+            ".   folder folder"
+            ".   speed size"
+            ".   added completed";
+        gap: 4px var(--space-3);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: var(--space-4) var(--space-5);
+        margin-bottom: var(--space-3);
+    }
+    .th-table tbody tr:hover { background: var(--surface); }
+    .th-table tbody td {
+        display: block;
+        padding: 0;
+        border-bottom: 0;
+        min-width: 0;
+    }
+    .th-table tbody tr td:nth-child(1) { grid-area: dot; }
+    .th-table tbody tr td:nth-child(2) { grid-area: name; word-break: break-word; }
+    .th-table tbody tr td:nth-child(3) { grid-area: folder; color: var(--text-faint); font-size: 11px; }
+    .th-table tbody tr td:nth-child(4) { grid-area: size; text-align: right; }
+    .th-table tbody tr td:nth-child(5) { grid-area: speed; }
+    .th-table tbody tr td:nth-child(6) { grid-area: added; font-size: 11px; }
+    .th-table tbody tr td:nth-child(7) { grid-area: completed; font-size: 11px; text-align: right; }
+    .th-table tbody tr td:nth-child(8) { grid-area: status; text-align: right; }
+
+    .th-paginator { justify-content: center; }
+}

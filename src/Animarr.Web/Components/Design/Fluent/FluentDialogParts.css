@@ -1,0 +1,41 @@
+/* Header/body/footer shared styling — applied globally since these components
+   appear inside FluentDialog with its own scoped scope. Easier to ship as plain
+   CSS in app.css than three near-identical scoped sheets. */
+
+.fdlg__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 20px 24px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.fdlg__header-body { flex: 1; min-width: 0; color: var(--text); }
+.fdlg__close {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    padding: 6px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+.fdlg__close:hover { color: var(--text); background: var(--surface); }
+
+.fdlg__body {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 24px;
+    color: var(--text);
+}
+
+.fdlg__footer {
+    display: flex;
+    gap: 10px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--border);
+    justify-content: flex-end;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, transparent, var(--surface-2));
+}

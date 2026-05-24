@@ -1,0 +1,15 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<span class="fi" style="@Style" @attributes="Extra">
+    @if (Value is not null)
+    {
+        <DIcon Name="@Value.Name" Size="@Value.Size" />
+    }
+</span>
+
+@code {
+    [Parameter] public Icon?   Value { get; set; }
+    [Parameter] public Color?  Color { get; set; }
+    [Parameter] public string? Style { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+}

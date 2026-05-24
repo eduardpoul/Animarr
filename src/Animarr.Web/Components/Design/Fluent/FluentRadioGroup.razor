@@ -1,0 +1,23 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+@typeparam TValue
+
+<CascadingValue Value="this" IsFixed="false">
+    <div class="@($"fradiogroup fradiogroup--{Orientation.ToString().ToLowerInvariant()}")" style="@Style">
+        @ChildContent
+    </div>
+</CascadingValue>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public TValue? Value { get; set; }
+    [Parameter] public EventCallback<TValue?> ValueChanged { get; set; }
+    [Parameter] public Orientation Orientation { get; set; } = Orientation.Vertical;
+    [Parameter] public string? Style { get; set; }
+
+    internal async Task SetAsync(TValue? value)
+    {
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+    internal bool IsSelected(TValue? v) => EqualityComparer<TValue?>.Default.Equals(Value, v);
+}

@@ -1,0 +1,20 @@
+@namespace Microsoft.FluentUI.AspNetCore.Components
+
+<a href="@Href" target="@Target" rel="@Rel" class="@($"fanchor fanchor--{Appearance.ToString().ToLowerInvariant()}")"
+   style="@Style" @attributes="Extra">
+    @if (IconStart is not null) { <DIcon Name="@IconStart.Name" Size="14" /> }
+    @ChildContent
+    @if (IconEnd is not null) { <DIcon Name="@IconEnd.Name" Size="14" /> }
+</a>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Href { get; set; }
+    [Parameter] public string? Target { get; set; }
+    [Parameter] public string? Rel { get; set; }
+    [Parameter] public Appearance Appearance { get; set; } = Appearance.Hypertext;
+    [Parameter] public Icon? IconStart { get; set; }
+    [Parameter] public Icon? IconEnd { get; set; }
+    [Parameter] public string? Style { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+}

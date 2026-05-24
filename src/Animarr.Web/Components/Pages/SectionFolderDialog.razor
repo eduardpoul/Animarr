@@ -1,0 +1,377 @@
+@*
+    Section folder Add / Edit dialog — inline modal used by Settings → Root folders.
+    Replaces the navigate-to-/explorer flow.
+
+    Slots:
+      - Header: NEW SECTION or EDIT SECTION (Archivo Black, uppercase)
+      - Fields: Title (text) + Path (text + Pick…) + Section type select
+      - Footer: Save + Cancel
+    Save commits via DbContext; for edits the entity is updated in place.
+*@
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IToastService Toast
+@inject FolderWatcherService WatcherService
+
+<div class="sfd-overlay" @onclick="CancelAsync"></div>
+<div class="sfd" role="dialog" aria-modal="true" @onclick:stopPropagation>
+    <header class="sfd__header">
+        <div class="sfd__header-text">
+            <div class="sfd__overline">SETTINGS</div>
+            <h2 class="sfd__title">@(Existing is null ? L["settings.root_folders.add_title"] : L["settings.root_folders.edit_title"])</h2>
+            <div class="sfd__sub">@L["settings.root_folders.dialog_sub"]</div>
+        </div>
+        <button type="button" class="sfd__close" @onclick="CancelAsync" aria-label="Close">
+            <DIcon Name="x" Size="18" />
+        </button>
+    </header>
+
+    <div class="sfd__body">
+        @if (!_pickerOpen)
+        {
+            @* Title *@
+            <label class="settings-field">
+                <span class="settings-field__label">@L["settings.root_folders.field_title"]</span>
+                <input class="settings-field__input"
+                       placeholder="@L["settings.root_folders.field_title_placeholder"]"
+                       value="@_title"
+                       @oninput="@(e => _title = e.Value?.ToString() ?? "")" />
+            </label>
+
+            @* Path *@
+            <label class="settings-field">
+                <span class="settings-field__label">@L["settings.root_folders.field_path"]</span>
+                <div class="sfd__row">
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@L["settings.root_folders.field_path_placeholder"]"
+                           value="@_path"
+                           @oninput="@(e => _path = e.Value?.ToString() ?? "")" />
+                    <Btn Variant="ghost" Size="md" OnClick="OpenPicker">
+                        <DIcon Name="folder" Size="13" /> @L["settings.root_folders.btn_pick"]
+                    </Btn>
+                </div>
+            </label>
+
+            @* Section type *@
+            <label class="settings-field settings-field--240">
+                <span class="settings-field__label">@L["settings.root_folders.field_type"]</span>
+                <select class="settings-field__select"
+                        value="@_typeStr"
+                        @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
+                    <option value="Auto">@L["settings.root_folders.type_auto"]</option>
+                    <option value="Series">@L["settings.root_folders.type_series"]</option>
+                    <option value="Movie">@L["settings.root_folders.type_movie"]</option>
+                </select>
+            </label>
+        }
+        else
+        {
+            @* Folder picker — drills into the file system. *@
+            <div class="sfd-picker">
+                <div class="sfd-picker__title">@L["settings.root_folders.picker_title"]</div>
+
+                @if (_pickerCurrent is null)
+                {
+                    <div class="sfd-picker__roots">
+                        @foreach (var root in _pickerRoots)
+                        {
+                            var r = root;
+                            <button type="button" class="sfd-picker__root" @onclick="@(() => PickerSelectRoot(r))">
+                                <DIcon Name="folder" Size="14" />
+                                <span>@r</span>
+                            </button>
+                        }
+                        @if (_pickerRoots.Count == 0)
+                        {
+                            <div class="sfd-picker__empty">@L["settings.root_folders.picker_no_roots"]</div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="sfd-picker__crumb">
+                        <Btn Variant="ghost" Size="sm" OnClick="PickerUp">
+                            <DIcon Name="chev-l" Size="13" />
+                        </Btn>
+                        <span class="sfd-picker__crumb-path" title="@_pickerCurrent">@_pickerCurrent</span>
+                    </div>
+
+                    <div class="sfd-picker__list">
+                        @if (_pickerChildren.Count == 0)
+                        {
+                            <div class="sfd-picker__empty">@L["settings.root_folders.picker_empty"]</div>
+                        }
+                        else
+                        {
+                            @foreach (var dir in _pickerChildren)
+                            {
+                                var d = dir;
+                                <div class="sfd-picker__row" @onclick="@(() => PickerInto(d))">
+                                    <DIcon Name="folder" Size="14" />
+                                    <span>@Path.GetFileName(d)</span>
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="sfd-picker__foot">
+                        <span class="sfd-picker__selected" title="@_pickerCurrent">
+                            @L["settings.root_folders.picker_selected"] <b>@Path.GetFileName(_pickerCurrent)</b>
+                        </span>
+                        <Btn Variant="primary" Size="sm" OnClick="PickerConfirm">
+                            @L["settings.root_folders.picker_use"]
+                        </Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _pickerOpen = false)">
+                            @L["settings.root_folders.btn_cancel"]
+                        </Btn>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @if (!_pickerOpen)
+    {
+        <footer class="sfd__footer">
+            @* Save runs the DB write + watcher discovery — surface that
+               with the Btn primitive's Loading mode. Spec: loaders.html §04. *@
+            <Btn Variant="primary" Size="md" OnClick="SaveAsync"
+                 Loading="@_saving"
+                 Disabled="@(string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_path))">
+                @L["settings.root_folders.btn_save"]
+            </Btn>
+            <Btn Variant="ghost" Size="md" OnClick="CancelAsync">
+                @L["settings.root_folders.btn_cancel"]
+            </Btn>
+        </footer>
+    }
+</div>
+
+@code {
+    [Parameter] public FolderWatcher? Existing { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnCanceled { get; set; }
+
+    private string _title = "";
+    private string _path = "";
+    private string _typeStr = "Auto";
+    private bool _saving;
+
+    // Picker state
+    private bool _pickerOpen;
+    private string? _pickerCurrent;
+    private List<string> _pickerChildren = [];
+    private List<string> _pickerRoots = [];
+
+    protected override void OnParametersSet()
+    {
+        if (Existing is not null)
+        {
+            _title   = Existing.Label;
+            _path    = Existing.Path;
+            _typeStr = Existing.FolderType.ToString();
+        }
+        else
+        {
+            _title   = "";
+            _path    = "";
+            _typeStr = "Auto";
+        }
+    }
+
+    // ── Picker ────────────────────────────────────────────────────
+
+    private void OpenPicker()
+    {
+        _pickerOpen     = true;
+        _pickerCurrent  = null;
+        _pickerChildren = [];
+        _pickerRoots    = DiscoverRoots();
+
+        // If the field already has a (real) path, jump straight into it.
+        if (!string.IsNullOrWhiteSpace(_path))
+        {
+            try
+            {
+                if (Directory.Exists(_path))
+                {
+                    _pickerCurrent  = _path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    _pickerChildren = SafeChildren(_pickerCurrent);
+                }
+            }
+            catch { /* ignore */ }
+        }
+    }
+
+    private static List<string> DiscoverRoots()
+    {
+        // Per the contract: list /mnt and /Pool-D1/Media style mounts. We also
+        // fall back to drive letters on Windows since the app may run as a
+        // local dev process there.
+        var candidates = new List<string>();
+        try
+        {
+            if (Directory.Exists("/mnt"))
+                foreach (var d in Directory.GetDirectories("/mnt"))
+                    candidates.Add(d);
+        }
+        catch { /* ignore */ }
+
+        try
+        {
+            // /Pool-*/* (e.g. /Pool-D1/Media). One level deep so we don't enumerate the universe.
+            foreach (var pool in Directory.EnumerateDirectories("/")
+                .Where(d => Path.GetFileName(d).StartsWith("Pool-", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    foreach (var d in Directory.GetDirectories(pool))
+                        candidates.Add(d);
+                }
+                catch { /* ignore */ }
+            }
+        }
+        catch { /* ignore */ }
+
+        // Windows drive letters as a fallback (no-op on Linux containers).
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
+                candidates.Add(drive.RootDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar));
+        }
+        catch { /* ignore */ }
+
+        return candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void PickerSelectRoot(string root)
+    {
+        _pickerCurrent  = root.TrimEnd(Path.DirectorySeparatorChar, '/');
+        _pickerChildren = SafeChildren(_pickerCurrent);
+    }
+
+    private void PickerInto(string dir)
+    {
+        _pickerCurrent  = dir;
+        _pickerChildren = SafeChildren(dir);
+    }
+
+    private void PickerUp()
+    {
+        if (_pickerCurrent is null) return;
+        var parent = Path.GetDirectoryName(_pickerCurrent);
+        if (string.IsNullOrEmpty(parent))
+        {
+            _pickerCurrent  = null;
+            _pickerChildren = [];
+        }
+        else
+        {
+            _pickerCurrent  = parent;
+            _pickerChildren = SafeChildren(parent);
+        }
+    }
+
+    private void PickerConfirm()
+    {
+        if (_pickerCurrent is null) return;
+        _path = _pickerCurrent;
+        if (string.IsNullOrWhiteSpace(_title))
+            _title = Path.GetFileName(_pickerCurrent) ?? _pickerCurrent;
+        _pickerOpen = false;
+    }
+
+    private static List<string> SafeChildren(string dir)
+    {
+        try { return [.. Directory.GetDirectories(dir).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)]; }
+        catch { return []; }
+    }
+
+    // ── Save / Cancel ─────────────────────────────────────────────
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_path)) return;
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            var folderType = Enum.TryParse<FolderType>(_typeStr, out var ft) ? ft : FolderType.Auto;
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (Existing is null)
+            {
+                var entity = new FolderWatcher
+                {
+                    Id              = Guid.NewGuid(),
+                    Path            = _path.Trim(),
+                    Label           = _title.Trim(),
+                    WatchEnabled    = true,
+                    IdentifyEnabled = true,
+                    RenameEnabled   = true,
+                    FolderType      = folderType,
+                    IsSection       = true,
+                    CreatedAt       = DateTime.UtcNow,
+                    Hue             = HueHash.For(_title.Trim()),
+                };
+                db.FolderWatchers.Add(entity);
+                await db.SaveChangesAsync();
+                try { await WatcherService.StartWatcherAsync(entity.Id); }
+                catch { /* best-effort */ }
+
+                // Discover existing subdirectories — the FSW only fires for
+                // dirs created AFTER it starts. Without this, adding an already-
+                // populated /Pool-D1/Media/Anime would leave 0 child watchers
+                // and "Rescan" would queue nothing.
+                List<Guid> discovered = [];
+                try { discovered = await WatcherService.DiscoverChildrenAsync(entity.Id); }
+                catch { /* best-effort */ }
+
+                // Auto-queue identification for the freshly-discovered children
+                // (mirrors the policy in OnDirectoryCreated for live additions).
+                if (discovered.Count > 0)
+                {
+                    foreach (var fid in discovered)
+                    {
+                        db.IdentificationQueues.Add(new IdentificationQueue
+                        {
+                            Id       = Guid.NewGuid(),
+                            FolderId = fid,
+                            Status   = IdentificationQueueStatus.Queued,
+                            QueuedAt = DateTime.UtcNow,
+                        });
+                    }
+                    await db.SaveChangesAsync();
+                }
+
+                Toast.ShowSuccess(discovered.Count > 0
+                    ? L.Get("settings.root_folders.toast_added_with_count", entity.Label, discovered.Count)
+                    : L.Get("settings.root_folders.toast_added", entity.Label));
+            }
+            else
+            {
+                var entity = await db.FolderWatchers.FindAsync(Existing.Id);
+                if (entity is null) return;
+                entity.Label      = _title.Trim();
+                entity.Path       = _path.Trim();
+                entity.FolderType = folderType;
+                entity.IsSection  = true;
+                await db.SaveChangesAsync();
+                Toast.ShowSuccess(L.Get("settings.root_folders.toast_updated", entity.Label));
+            }
+
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.ShowError(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CancelAsync() => await OnCanceled.InvokeAsync();
+}
