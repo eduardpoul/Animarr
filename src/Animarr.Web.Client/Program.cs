@@ -20,6 +20,7 @@ builder.Services.AddScoped(sp =>
 builder.Services.AddAnimarrApiClient();
 builder.Services.AddScoped<LocalizationService>();
 builder.Services.AddSingleton<ThemeService>();
+builder.Services.AddSingleton<ToastService>();
 
 var host = builder.Build();
 

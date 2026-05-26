@@ -1,63 +1,241 @@
-@*
-    Top-level layout for Animarr.UI's WASM + MAUI hosts.
-
-    Loads the active language pack on first render (idempotent — Web.Client's
-    Program.cs may have pre-loaded "en" already; the MAUI hybrid relies on
-    this path entirely). Wires the NeedsReviewChip into the header nav so
-    catalog-wide identification status is visible from every page.
-*@
 @inherits LayoutComponentBase
-@inject LocalizationService Loc
+@implements IAsyncDisposable
+@inject ThemeService ThemeService
+@inject IJSRuntime JS
 @inject IAnimarrApiClient Api
 @inject HttpClient Http
-@inject IJSRuntime JS
+@inject ToastService Toasts
+@inject NavigationManager Nav
 
-<div class="ui-shell">
-    <header class="ui-shell-header">
-        <a href="" class="ui-shell-logo">Animarr</a>
-        <nav class="ui-shell-nav">
-            <NavLink href="" Match="NavLinkMatch.All">Catalog</NavLink>
-            <NavLink href="torrents">Torrents</NavLink>
-            <NavLink href="history">History</NavLink>
-            <NavLink href="settings">Settings</NavLink>
-        </nav>
-        <div class="ui-shell-spacer"></div>
-        <Animarr.UI.Components.Pages.NeedsReviewChip />
-    </header>
-    <main class="ui-shell-main">
-        @Body
-    </main>
+@using Microsoft.AspNetCore.SignalR.Client
+
+<div class="animarr-shell">
+
+    <div class="animarr-backdrop">
+        <div id="backdrop-container">
+            <div id="backdrop-slide-a" class="backdrop-slide"></div>
+            <div id="backdrop-slide-b" class="backdrop-slide"></div>
+        </div>
+        <div class="animarr-backdrop__vignette" aria-hidden="true"></div>
+        <div class="animarr-backdrop__hue-tint" aria-hidden="true"></div>
+    </div>
+
+    <div class="film-grain"></div>
+
+    <nav class="d-mobile-nav" aria-label="Top navigation">
+        <a href="/" class="d-mobile-nav__brand">
+            <span class="animarr-brand-mark">A</span>
+            <span class="animarr-brand-name">ANIMARR</span>
+        </a>
+        <span class="d-mobile-nav__spacer"></span>
+        @if (_activeDownloads > 0)
+        {
+            <span class="sb-live" title="@_activeDownloads active">
+                <span class="sb-live__dot"></span>@_activeDownloads LIVE
+            </span>
+        }
+    </nav>
+
+    <div class="animarr-body">
+        <aside class="animarr-sidebar">
+            <a href="/" class="animarr-brand">
+                <span class="animarr-brand-mark">A</span>
+                <div>
+                    <div class="animarr-brand-name">ANIMARR</div>
+                    <div class="animarr-brand-build">v0.4 · WASM</div>
+                </div>
+            </a>
+
+            <nav class="fluent-nav-menu" role="navigation" aria-label="Primary">
+                <NavLink class="fluent-nav-link" Match="NavLinkMatch.All" href="">
+                    <span class="fluent-nav-link__icon"><DIcon Name="catalog" Size="20" /></span>
+                    <span class="fluent-nav-link__label">@L["nav.catalog"]</span>
+                    @if (_catalogCount is int n && n > 0)
+                    {
+                        <span class="sb-count">@n</span>
+                    }
+                </NavLink>
+                <NavLink class="fluent-nav-link" Match="NavLinkMatch.All" href="torrents">
+                    <span class="fluent-nav-link__icon"><DIcon Name="torrent" Size="20" /></span>
+                    <span class="fluent-nav-link__label">@L["nav.torrents"]</span>
+                    @if (_activeDownloads > 0)
+                    {
+                        <span class="sb-live"><span class="sb-live__dot"></span>@_activeDownloads LIVE</span>
+                    }
+                </NavLink>
+                <NavLink class="fluent-nav-link" Match="NavLinkMatch.Prefix" href="settings">
+                    <span class="fluent-nav-link__icon"><DIcon Name="settings" Size="20" /></span>
+                    <span class="fluent-nav-link__label">@L["nav.settings"]</span>
+                </NavLink>
+            </nav>
+        </aside>
+
+        <main class="animarr-main">
+            @Body
+        </main>
+    </div>
+
+    <nav class="d-tabbar" aria-label="Primary mobile navigation">
+        <NavLink class="d-tabbar__item" Match="NavLinkMatch.All" href="" ActiveClass="d-tabbar__item--active">
+            <DIcon Name="catalog" Size="22" />
+            <span class="d-tabbar__label">@L["nav.catalog"]</span>
+        </NavLink>
+        <NavLink class="d-tabbar__item" Match="NavLinkMatch.All" href="torrents" ActiveClass="d-tabbar__item--active">
+            <DIcon Name="torrent" Size="22" />
+            <span class="d-tabbar__label">@L["nav.torrents"]</span>
+        </NavLink>
+        <NavLink class="d-tabbar__item" Match="NavLinkMatch.Prefix" href="settings" ActiveClass="d-tabbar__item--active">
+            <DIcon Name="settings" Size="22" />
+            <span class="d-tabbar__label">@L["nav.settings"]</span>
+        </NavLink>
+    </nav>
+</div>
+
+<div class="ml-toast-stack">
+    @foreach (var t in _toasts)
+    {
+        <div class="@($"ml-toast ml-toast--{t.Intent.ToString().ToLowerInvariant()}")">
+            <span class="ml-toast__msg">@t.Message</span>
+            <button type="button" class="ml-toast__close" @onclick="@(() => _toasts.Remove(t))" aria-label="Close">
+                <DIcon Name="x" Size="13" />
+            </button>
+        </div>
+    }
 </div>
 
 @code {
+    private const string AccentStorageKey = "animarr-accent";
+    private bool _everywhereBackdropStarted;
+    private int? _catalogCount;
+    private int _activeDownloads;
+    private HubConnection? _hub;
+
+    private readonly List<ToastInfo> _toasts = new();
+    private const int ToastAutoDismissMs = 4000;
+
     protected override async Task OnInitializedAsync()
     {
-        // Resolve the user's preferred language from server config before
-        // pulling the corresponding pack. Falls back to whatever Program.cs
-        // pre-loaded if the lookup fails (e.g. server unreachable).
+        ThemeService.OnChange += OnThemeChanged;
+        L.LanguageChanged += OnLanguageChanged;
+        Toasts.OnShow += OnToastShown;
+
         try
         {
             var pref = await Api.GetAppConfigValueAsync(AppConfigKeys.Language);
             var lang = pref?.Value ?? "en";
-            if (!string.Equals(lang, Loc.CurrentLanguage, StringComparison.OrdinalIgnoreCase))
-                await Loc.LoadAsync(lang);
+            if (!string.Equals(lang, L.CurrentLanguage, StringComparison.OrdinalIgnoreCase))
+                await L.LoadAsync(lang);
         }
-        catch { /* offline / first start — keys-as-values is fine */ }
+        catch { }
     }
+
+    private void OnToastShown(ToastInfo info) => InvokeAsync(async () =>
+    {
+        _toasts.Add(info);
+        StateHasChanged();
+        await Task.Delay(ToastAutoDismissMs);
+        _toasts.Remove(info);
+        StateHasChanged();
+    });
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        // Tell animarr-player.js where the API lives so its fetch() calls and
-        // HLS manifest URLs resolve to the right origin. WASM serves from the
-        // API host so HttpClient.BaseAddress matches the page origin; MAUI's
-        // BlazorWebView serves from a local virtual host and the BaseAddress
-        // points at the remote server — this line covers both cases.
+
         try
         {
             var apiBase = Http.BaseAddress?.ToString().TrimEnd('/') ?? "";
             await JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';");
         }
-        catch { /* WebView or interop not ready — player falls back to '' */ }
+        catch { }
+
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", AccentStorageKey);
+            if (!string.IsNullOrEmpty(stored) && int.TryParse(stored, out var hue))
+                ThemeService.SetAccentHue(hue);
+        }
+        catch { }
+        await ApplyAccentHueToDomAsync(ThemeService.AccentHue);
+
+        try
+        {
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000 });
+            _catalogCount = items.Length;
+        }
+        catch { }
+        StateHasChanged();
+
+        try
+        {
+            var enabledPref = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropEnabled);
+            var enabled = (enabledPref?.Value ?? "true") != "false";
+            if (enabled)
+            {
+                var intervalStr   = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
+                var blurStr       = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropBlurPx);
+                var brightnessStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropBrightness);
+                var interval   = int.TryParse(intervalStr?.Value,   out var iv) ? iv : 30;
+                var blur       = int.TryParse(blurStr?.Value,       out var bl) ? bl : 14;
+                var brightness = int.TryParse(brightnessStr?.Value, out var br) ? br : 38;
+                if (blur > 30) blur = 14;
+
+                var paths = await Api.GetBackdropRotationAsync();
+                if (paths.Length > 0)
+                {
+                    var urls = paths
+                        .Select(p => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(p)}")
+                        .ToArray();
+                    _everywhereBackdropStarted = true;
+                    await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
+                }
+            }
+        }
+        catch { }
+
+        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
+        {
+            var live = env.Items.Count(s =>
+                s.State == "Downloading" || s.DownloadRate > 0 || s.UploadRate > 0);
+            if (live != _activeDownloads)
+            {
+                _activeDownloads = live;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+        try { await _hub.StartAsync(); } catch { }
+    }
+
+    private void OnThemeChanged()
+    {
+        InvokeAsync(SaveAccentColorAsync);
+        InvokeAsync(() => ApplyAccentHueToDomAsync(ThemeService.AccentHue));
+    }
+
+    private async Task ApplyAccentHueToDomAsync(int hue)
+    {
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); }
+        catch { }
+    }
+
+    private async Task SaveAccentColorAsync()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", AccentStorageKey, ThemeService.AccentHue.ToString()); }
+        catch { }
+        StateHasChanged();
+    }
+
+    private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
+
+    public async ValueTask DisposeAsync()
+    {
+        ThemeService.OnChange -= OnThemeChanged;
+        L.LanguageChanged -= OnLanguageChanged;
+        Toasts.OnShow -= OnToastShown;
+        if (_hub is not null) await _hub.DisposeAsync();
+        if (_everywhereBackdropStarted)
+            try { await JS.InvokeVoidAsync("stopBackdrop"); } catch { }
     }
 }

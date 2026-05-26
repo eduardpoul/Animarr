@@ -1,0 +1,153 @@
+@*
+    MediaDetail hero — full-bleed fanart, BACK + EDIT glass chips, poster +
+    title + meta strip. Pushes Item.FanartPath into the global backdrop on mount.
+
+    Layout: 68vh / min 580px hero, bottom row "260px poster | flex 1 title block".
+*@
+
+@implements IDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<section class="d-mdhero" style="--hue: @(Item.Hue ?? 0)">
+    <div class="d-mdhero__bg">
+        @if (!string.IsNullOrEmpty(Item.FanartPath))
+        {
+            @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
+            <img src="@($"/api/image?path={Uri.EscapeDataString(Item.FanartPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+                 alt="" class="d-mdhero__bg-img" />
+        }
+        <div class="d-mdhero__wash"></div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Item.CjkTitle))
+    {
+        <div class="d-mdhero__cjk">@Item.CjkTitle</div>
+    }
+
+    <button type="button" class="d-mdhero__back surface-glass"
+            @onclick="@(() => Nav.NavigateTo(BackHref))">
+        <DIcon Name="chev-l" Size="14" /> BACK
+    </button>
+
+    <button type="button" class="d-mdhero__edit surface-glass" @onclick="OnEdit">
+        <DIcon Name="pencil" Size="14" /> EDIT METADATA
+    </button>
+
+    <div class="d-mdhero__content">
+        @if (!string.IsNullOrEmpty(Item.PosterPath))
+        {
+            @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
+            <img src="@($"/api/image?path={Uri.EscapeDataString(Item.PosterPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+                 alt="@Item.Title" class="d-mdhero__poster" />
+        }
+        else
+        {
+            <div class="d-mdhero__poster d-mdhero__poster--placeholder">
+                <DIcon Name="video" Size="48" />
+            </div>
+        }
+
+        <div class="d-mdhero__title-block">
+            <div class="d-mdhero__pills">
+                <Pill Tone="accent">@TypeLabel(Item.MediaType)</Pill>
+                @if (Item.IdentificationStatus == IdentificationStatus.Manual) { <Pill Tone="info">MANUAL</Pill> }
+                @if (Item.IdentificationStatus == IdentificationStatus.NeedsReview) { <Pill Tone="warn">NEEDS REVIEW</Pill> }
+                @foreach (var tag in TagPreview(Item))
+                {
+                    <Pill>@tag</Pill>
+                }
+            </div>
+
+            <h1 class="d-mdhero__title">@Item.Title</h1>
+            @if (!string.IsNullOrEmpty(Item.EnglishTitle) && Item.EnglishTitle != Item.Title)
+            {
+                <div class="d-mdhero__alt">@Item.EnglishTitle</div>
+            }
+
+            <div class="d-mdhero__meta">
+                @if (Item.Rating is > 0) { <span>★ @($"{Item.Rating:F1}")</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.Year is not null) { <span>@Item.Year</span><span class="d-mdhero__dot">·</span> }
+                @if (!string.IsNullOrEmpty(Item.Studio)) { <span>@Item.Studio</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.Runtime is > 0) { <span>@Item.Runtime m</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.EpisodeCount is > 0) { <span>@Item.EpisodeCount EP</span><span class="d-mdhero__dot">·</span> }
+                @if (!string.IsNullOrEmpty(Item.Language)) { <span>@Item.Language.ToUpperInvariant()</span><span class="d-mdhero__dot">·</span> }
+                @if (BestConfidence is > 0)
+                {
+                    <span class="d-mdhero__conf">@($"{BestConfidence:P0}") MATCH</span>
+                }
+            </div>
+
+            @* Primary CTA — label resolves per CHANGELOG §2 (7-state matrix).
+               Click is a no-op until the inline player is wired up; the label
+               carrying the right user state is the point of this iteration. *@
+            @if (Continue is not null)
+            {
+                <div class="d-mdhero__cta">
+                    <Btn Variant="primary" Size="lg" OnClick="OnContinue">
+                        <DIcon Name="@Continue.IconName" Size="14" />
+                        @Continue.Label
+                    </Btn>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
+    [Parameter] public string BackHref { get; set; } = "/";
+    [Parameter] public EventCallback OnEditClick { get; set; }
+    /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
+    [Parameter] public ContinueAction? Continue { get; set; }
+    [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }
+
+    private double BestConfidence
+    {
+        get
+        {
+            // Pick the highest confidence we have. UI shows ONE number.
+            double[] vals = [
+                Item.TmdbConfidence ?? 0,
+                Item.MalConfidence  ?? 0,
+                Item.ImdbConfidence ?? 0,
+                Item.LlmConfidence  ?? 0,
+            ];
+            return vals.Max();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !string.IsNullOrEmpty(Item.FanartPath))
+        {
+            var url = $"/api/image?path={Uri.EscapeDataString(Item.FanartPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}";
+            try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
+        }
+    }
+
+    private Task OnEdit() => OnEditClick.InvokeAsync();
+
+    private Task OnContinue()
+    {
+        // TODO: wire to inline player once it lands; for now the parent gets
+        // the resolved action to decide what to do (resume, start fresh, etc.).
+        return Continue is null ? Task.CompletedTask : OnContinueClick.InvokeAsync(Continue);
+    }
+
+    private static string TypeLabel(MediaItemType t) => t switch
+    {
+        MediaItemType.Anime       => "ANIME",
+        MediaItemType.Movie       => "MOVIE",
+        MediaItemType.Series      => "SERIES",
+        MediaItemType.Multserials => "MULTI",
+        _                         => "MEDIA",
+    };
+
+    private static IEnumerable<string> TagPreview(MediaItemDto item)
+    {
+        foreach (var t in item.Tags.Take(3)) yield return t.ToUpperInvariant();
+    }
+
+    public void Dispose() { /* JS layer owns the backdrop lifecycle */ }
+}
