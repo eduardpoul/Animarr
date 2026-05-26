@@ -168,6 +168,11 @@ contentTypes.Mappings[".woff"]  = "font/woff";
 contentTypes.Mappings[".woff2"] = "font/woff2";
 app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
 
+// WASM client hosting — UseBlazorFrameworkFiles serves the framework runtime
+// (.dll bundle, blazor.webassembly.js) from Animarr.Web.Client's wwwroot,
+// which is copied into our wwwroot at publish via the ProjectReference.
+app.UseBlazorFrameworkFiles();
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -1141,6 +1146,12 @@ app.MapGet("/api/mpv-tracker.lua", (HttpContext http, DlnaService dlna) =>
 })
 .WithName("MpvTrackerScript")
 .AllowAnonymous();
+
+// SPA fallback — anything not matched by an API endpoint, Razor page, or
+// static file falls through to Animarr.Web.Client's index.html. The WASM
+// router then claims the URL client-side. Keep this LAST so it doesn't
+// shadow the explicit routes above.
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
