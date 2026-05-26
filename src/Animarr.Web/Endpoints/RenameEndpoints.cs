@@ -32,18 +32,34 @@ internal static class RenameEndpoints
         });
 
         // ─── Rename history ──────────────────────────────────────────────
+        // Accepts skip/take + optional folderId/status filters so the History
+        // page can paginate server-side. Returns the items + total count in
+        // one round trip — saves a second COUNT(*) request from the client.
         app.MapGet(ApiRoutes.RenameHistory, async (
+            int? skip,
             int? take,
+            Guid? folderId,
+            Animarr.Shared.RenameStatus? status,
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var rows = await db.RenameHistories
-                .Include(h => h.Folder)
+            IQueryable<RenameHistory> q = db.RenameHistories.Include(h => h.Folder);
+            if (folderId is not null) q = q.Where(h => h.FolderId == folderId.Value);
+            if (status is not null)
+                q = q.Where(h => (int)h.Status == (int)status.Value);
+
+            var total = await q.CountAsync(ct);
+            var rows = await q
                 .OrderByDescending(h => h.ProcessedAt)
-                .Take(take ?? 500)
+                .Skip(skip ?? 0)
+                .Take(take ?? 50)
                 .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+            return Results.Ok(new
+            {
+                items = rows.Select(r => r.ToDto()).ToArray(),
+                total = total,
+            });
         });
 
         app.MapPost(ApiRoutes.RenameHistoryRevert, async (

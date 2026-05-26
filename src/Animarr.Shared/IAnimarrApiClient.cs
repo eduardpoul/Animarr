@@ -72,6 +72,8 @@ public interface IAnimarrApiClient
     // ─── Rename + identification queues ──────────────────────────────────
     Task<RenameQueueEntryDto[]>   GetRenameQueueAsync(CancellationToken ct = default);
     Task<RenameHistoryEntryDto[]> GetRenameHistoryAsync(int? take, CancellationToken ct = default);
+    Task<PagedResult<RenameHistoryEntryDto>> GetRenameHistoryPageAsync(
+        int skip, int take, Guid? folderId, RenameStatus? status, CancellationToken ct = default);
     Task                          RevertRenameAsync(Guid id, CancellationToken ct = default);
     Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default);
     Task                          EnqueueIdentificationAsync(Guid folderId, bool forceRefresh, CancellationToken ct = default);

@@ -233,21 +233,65 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     }
 
     // ── Audio tab ──
-    // The audio-offset sliders in the server-side Razor page use
-    // `window.animarrCalibrate` (localStorage-backed) — values are
-    // per-browser, not server-stored. The in-player audio-offset
-    // popup is the same control as those sliders. Until the WASM
-    // client wires up animarr-calibrate.js, the Audio tab points
-    // users at the in-player adjustment.
-    private RenderFragment AudioTab() => @<section class="settings-section">
+    // The audio-offset values are localStorage-backed (per-browser) and the
+    // canonical store is window.animarrCalibrate, defined in
+    // animarr-calibrate.js. Sliders read the cached value on init via
+    // getCached() and write back through setManual().
+    private RenderFragment AudioTab() => @<section class="settings-section settings-audio">
         <h2>Audio sync</h2>
         <p class="settings-hint">
-            Audio-offset calibration is per-browser (stored in localStorage,
-            not the server config). Open any video in the player and click
-            the <strong>audio-offset</strong> icon to adjust — the chosen
-            value persists for that codec pipeline (HW re-encode vs
-            stream-copy) across sessions on this device.
+            The server picks one of two pipelines per file (hardware re-encode
+            vs stream-copy). Each has its own audio-vs-video latency profile
+            that a single offset can't tune for both. Drag a slider while a
+            matching codec is playing in another tab — close and reopen the
+            player for the new value to take effect.
+            <br/><br/>
+            <strong>Positive delays audio</strong> (use when audio feels ahead
+            of picture). Negative pulls audio forward.
         </p>
+
+        <div class="audio-sync-slider">
+            <label class="settings-field">
+                <span class="settings-field__label">
+                    Hardware re-encode (HEVC 8-bit) ·
+                    <strong id="animarr-sync-hw-value">70</strong> ms
+                </span>
+                <input type="range" min="-200" max="300" step="5"
+                       id="animarr-sync-hw-range" class="settings-range" value="70"
+                       oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-hw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('hw',v);})(this)" />
+            </label>
+        </div>
+
+        <div class="audio-sync-slider">
+            <label class="settings-field">
+                <span class="settings-field__label">
+                    Stream-copy (HEVC 10-bit / HDR / DV) ·
+                    <strong id="animarr-sync-sw-value">0</strong> ms
+                </span>
+                <input type="range" min="-200" max="700" step="5"
+                       id="animarr-sync-sw-range" class="settings-range" value="0"
+                       oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-sw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('sw',v);})(this)" />
+            </label>
+        </div>
+
+        <script suppress-error="BL9992">
+            // Pull current values out of localStorage so the sliders show the
+            // actual stored offsets when the tab opens.
+            (function syncSlidersInitial() {
+                if (!window.animarrCalibrate) return;
+                var init = function (rangeId, labelId, channel, dflt) {
+                    var range = document.getElementById(rangeId);
+                    var label = document.getElementById(labelId);
+                    if (!range || !label) return;
+                    var stored = window.animarrCalibrate.getCached(channel);
+                    var v = (stored === null || stored === undefined) ? dflt : stored;
+                    range.value = v;
+                    label.innerText = v;
+                };
+                init('animarr-sync-hw-range', 'animarr-sync-hw-value', 'hw', 70);
+                init('animarr-sync-sw-range', 'animarr-sync-sw-value', 'sw', 0);
+            })();
+        </script>
     </section>;
 
     // ── Hardware tab ──

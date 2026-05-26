@@ -266,8 +266,19 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task<RenameHistoryEntryDto[]> GetRenameHistoryAsync(int? take, CancellationToken ct = default)
     {
         var url = take is null ? ApiRoutes.RenameHistory : $"{ApiRoutes.RenameHistory}?take={take}";
-        return await _http.GetFromJsonAsync<RenameHistoryEntryDto[]>(url, JsonOpts, ct)
-            ?? Array.Empty<RenameHistoryEntryDto>();
+        var page = await _http.GetFromJsonAsync<PagedResult<RenameHistoryEntryDto>>(url, JsonOpts, ct);
+        return page?.Items ?? Array.Empty<RenameHistoryEntryDto>();
+    }
+
+    public async Task<PagedResult<RenameHistoryEntryDto>> GetRenameHistoryPageAsync(
+        int skip, int take, Guid? folderId, RenameStatus? status, CancellationToken ct = default)
+    {
+        var args = new List<string> { $"skip={skip}", $"take={take}" };
+        if (folderId is not null) args.Add($"folderId={folderId}");
+        if (status is not null)   args.Add($"status={status}");
+        var url = $"{ApiRoutes.RenameHistory}?{string.Join('&', args)}";
+        return await _http.GetFromJsonAsync<PagedResult<RenameHistoryEntryDto>>(url, JsonOpts, ct)
+            ?? new PagedResult<RenameHistoryEntryDto>(Array.Empty<RenameHistoryEntryDto>(), 0);
     }
 
     public async Task RevertRenameAsync(Guid id, CancellationToken ct = default)

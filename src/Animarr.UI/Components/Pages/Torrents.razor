@@ -34,12 +34,37 @@
 @if (_addOpen)
 {
     <div class="torrent-add">
-        <label class="settings-field">
-            <span class="settings-field__label">Magnet URI</span>
-            <input class="settings-field__input" placeholder="magnet:?xt=urn:btih:…"
-                   value="@_addMagnet"
-                   @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
-        </label>
+        <div class="torrent-add__src">
+            <button type="button"
+                    class="@($"torrent-add__src-btn {(_addSource == "magnet" ? "torrent-add__src-btn--active" : "")}")"
+                    @onclick="@(() => _addSource = "magnet")">Magnet</button>
+            <button type="button"
+                    class="@($"torrent-add__src-btn {(_addSource == "file" ? "torrent-add__src-btn--active" : "")}")"
+                    @onclick="@(() => _addSource = "file")">.torrent file</button>
+        </div>
+
+        @if (_addSource == "magnet")
+        {
+            <label class="settings-field">
+                <span class="settings-field__label">Magnet URI</span>
+                <input class="settings-field__input" placeholder="magnet:?xt=urn:btih:…"
+                       value="@_addMagnet"
+                       @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
+            </label>
+        }
+        else
+        {
+            <label class="settings-field">
+                <span class="settings-field__label">.torrent file</span>
+                <InputFile OnChange="OnTorrentFilePicked" accept=".torrent" />
+                @if (_addFileName is not null)
+                {
+                    <div class="torrent-add__filehint">
+                        <DIcon Name="paperclip" Size="12" /> @_addFileName (@FormatBytesShort(_addFileSize))
+                    </div>
+                }
+            </label>
+        }
         <label class="settings-field">
             <span class="settings-field__label">Save to folder</span>
             <select class="settings-field__select"
@@ -66,8 +91,8 @@
         </div>
         <div class="torrent-add__actions">
             <Btn Variant="primary" Size="md" Loading="@_adding"
-                 Disabled="@(string.IsNullOrWhiteSpace(_addMagnet) || _adding)"
-                 OnClick="AddMagnetAsync">
+                 Disabled="@(!CanAdd || _adding)"
+                 OnClick="AddTorrentAsync">
                 Add torrent
             </Btn>
             <Btn Variant="ghost" Size="md" OnClick="@(() => _addOpen = false)">Cancel</Btn>
@@ -144,11 +169,22 @@ else
     private HubConnection? _hub;
 
     private bool   _addOpen;
+    private string _addSource = "magnet";
     private string _addMagnet = "";
+    private string? _addFileName;
+    private byte[]? _addFileBytes;
+    private long   _addFileSize;
     private Guid?  _addFolderId;
     private bool   _addAutoRename = true;
     private bool   _addStopAfter;
     private bool   _adding;
+
+    private bool CanAdd => _addSource switch
+    {
+        "magnet" => !string.IsNullOrWhiteSpace(_addMagnet),
+        "file"   => _addFileBytes is { Length: > 0 },
+        _        => false,
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -180,27 +216,67 @@ else
         StateHasChanged();
     }
 
-    private async Task AddMagnetAsync()
+    private async Task OnTorrentFilePicked(InputFileChangeEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_addMagnet)) return;
+        var file = e.File;
+        if (file is null) return;
+        // .torrent files top out around 100KB — small enough to keep in
+        // memory and ship as Base64 in the request body.
+        const long MaxBytes = 5 * 1024 * 1024;
+        if (file.Size > MaxBytes) return;
+        using var ms = new System.IO.MemoryStream();
+        await file.OpenReadStream(MaxBytes).CopyToAsync(ms);
+        _addFileBytes = ms.ToArray();
+        _addFileName  = file.Name;
+        _addFileSize  = file.Size;
+        StateHasChanged();
+    }
+
+    private async Task AddTorrentAsync()
+    {
+        if (!CanAdd) return;
         _adding = true;
         StateHasChanged();
         try
         {
-            await Api.AddMagnetAsync(new AddMagnetRequest(
-                MagnetLink:             _addMagnet.Trim(),
-                FolderWatcherId:        _addFolderId,
-                AutoRename:             _addAutoRename,
-                StopAfterDownload:      _addStopAfter,
-                SkipSubfolderStructure: false,
-                SuppressRootFolder:     false,
-                CustomRootFolderName:   null));
+            if (_addSource == "magnet")
+            {
+                await Api.AddMagnetAsync(new AddMagnetRequest(
+                    MagnetLink:             _addMagnet.Trim(),
+                    FolderWatcherId:        _addFolderId,
+                    AutoRename:             _addAutoRename,
+                    StopAfterDownload:      _addStopAfter,
+                    SkipSubfolderStructure: false,
+                    SuppressRootFolder:     false,
+                    CustomRootFolderName:   null));
+            }
+            else if (_addFileBytes is not null)
+            {
+                await Api.AddTorrentFileAsync(new AddTorrentFileRequest(
+                    Filename:               _addFileName ?? "torrent.torrent",
+                    Base64Content:          Convert.ToBase64String(_addFileBytes),
+                    FolderWatcherId:        _addFolderId,
+                    AutoRename:             _addAutoRename,
+                    StopAfterDownload:      _addStopAfter,
+                    SkipSubfolderStructure: false,
+                    SuppressRootFolder:     false,
+                    CustomRootFolderName:   null));
+            }
             _addMagnet = "";
+            _addFileBytes = null;
+            _addFileName  = null;
             _addOpen = false;
             await LoadAsync();
         }
         catch { /* swallow */ }
         finally { _adding = false; StateHasChanged(); }
+    }
+
+    private static string FormatBytesShort(long bytes)
+    {
+        if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)      return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
     }
 
     private async Task PauseAsync(Guid id)

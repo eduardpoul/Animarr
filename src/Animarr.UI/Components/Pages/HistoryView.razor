@@ -27,7 +27,7 @@
         <label class="settings-field hv-filter-field">
             <span class="settings-field__label">@L["history.filter_folder_label"]</span>
             <select class="settings-field__select" value="@_filterFolder"
-                    @onchange="@(e => { _filterFolder = e.Value?.ToString() ?? ""; _pageIndex = 0; StateHasChanged(); })">
+                    @onchange="@(async e => { _filterFolder = e.Value?.ToString() ?? ""; await OnFilterChangedAsync(); })">
                 <option value="">@L["history.filter_folder_all"]</option>
                 @foreach (var f in _allFolders)
                 {
@@ -38,7 +38,7 @@
         <label class="settings-field hv-filter-field hv-filter-field--narrow">
             <span class="settings-field__label">@L["history.filter_status_label"]</span>
             <select class="settings-field__select" value="@_filterStatus"
-                    @onchange="@(e => { _filterStatus = e.Value?.ToString() ?? ""; _pageIndex = 0; StateHasChanged(); })">
+                    @onchange="@(async e => { _filterStatus = e.Value?.ToString() ?? ""; await OnFilterChangedAsync(); })">
                 <option value="">@L["history.filter_status_all"]</option>
                 <option value="Renamed">@L["history.status_renamed"]</option>
                 <option value="Skipped">@L["history.status_skipped"]</option>
@@ -57,9 +57,8 @@
     }
     else
     {
-        var filtered = FilteredHistory();
-        var total = filtered.Count;
-        var page = filtered.Skip(_pageIndex * PageSize).Take(PageSize).ToList();
+        var page = _historyPage;
+        var total = _historyTotal;
 
         <div class="d-table-wrap">
             <table class="d-table d-table--renames">
@@ -75,7 +74,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @if (page.Count == 0)
+                    @if (page.Length == 0)
                     {
                         <tr><td colspan="7" class="d-table__empty">@L["history.empty"]</td></tr>
                     }
@@ -112,7 +111,7 @@
         <div class="hv-pager">
             <button type="button" class="hv-icon-btn"
                     disabled="@(_pageIndex == 0)"
-                    @onclick="@(() => { _pageIndex--; StateHasChanged(); })">
+                    @onclick="@(async () => { _pageIndex--; await LoadHistoryPageAsync(); StateHasChanged(); })">
                 <DIcon Name="chev-l" Size="14" />
             </button>
             <span class="hv-pager__label">
@@ -120,7 +119,7 @@
             </span>
             <button type="button" class="hv-icon-btn"
                     disabled="@((_pageIndex + 1) * PageSize >= total)"
-                    @onclick="@(() => { _pageIndex++; StateHasChanged(); })">
+                    @onclick="@(async () => { _pageIndex++; await LoadHistoryPageAsync(); StateHasChanged(); })">
                 <DIcon Name="chev-r" Size="14" />
             </button>
         </div>
@@ -239,7 +238,8 @@
 @code {
     private const int PageSize = 50;
 
-    private List<RenameHistoryEntryDto>       _history = new();
+    private RenameHistoryEntryDto[]           _historyPage = Array.Empty<RenameHistoryEntryDto>();
+    private int                               _historyTotal;
     private List<FolderWatcherDto>            _allFolders = new();
     private List<IdentificationQueueEntryDto> _scanJobs = new();
 
@@ -268,29 +268,53 @@
         try
         {
             var folders = await Api.GetFoldersAsync();
-            var hist = await Api.GetRenameHistoryAsync(take: 500);
             var scan = await Api.GetIdentificationQueueAsync();
 
             _allFolders = folders.OrderBy(f => f.Label).ToList();
-            _history    = hist.OrderByDescending(h => h.ProcessedAt).ToList();
             _scanJobs   = scan
                 .OrderByDescending(j => j.ProcessedAt ?? j.QueuedAt)
                 .Take(200)
                 .ToList();
+
+            await LoadHistoryPageAsync();
         }
         catch { /* network blip — leave lists alone */ }
         _loading = false;
         StateHasChanged();
     }
 
-    private List<RenameHistoryEntryDto> FilteredHistory()
+    /// <summary>Server-side paged fetch for the current filter + page index.
+    /// Returns ascending page slices so we never round-trip more than
+    /// <see cref="PageSize"/> rows at once.</summary>
+    private async Task LoadHistoryPageAsync()
     {
-        IEnumerable<RenameHistoryEntryDto> q = _history;
-        if (!string.IsNullOrEmpty(_filterFolder) && Guid.TryParse(_filterFolder, out var fid))
-            q = q.Where(h => h.FolderId == fid);
-        if (!string.IsNullOrEmpty(_filterStatus) && Enum.TryParse<RenameStatus>(_filterStatus, out var st))
-            q = q.Where(h => h.Status == st);
-        return q.ToList();
+        Guid? folderId = (!string.IsNullOrEmpty(_filterFolder) && Guid.TryParse(_filterFolder, out var fid)) ? fid : null;
+        RenameStatus? status = (!string.IsNullOrEmpty(_filterStatus) && Enum.TryParse<RenameStatus>(_filterStatus, out var st)) ? st : null;
+
+        try
+        {
+            var page = await Api.GetRenameHistoryPageAsync(
+                skip:     _pageIndex * PageSize,
+                take:     PageSize,
+                folderId: folderId,
+                status:   status);
+            _historyPage = page.Items;
+            _historyTotal = page.Total;
+            // Snap the cursor back if a filter change pushed us past the end.
+            if (_pageIndex > 0 && _historyPage.Length == 0 && _historyTotal > 0)
+            {
+                _pageIndex = Math.Max(0, (_historyTotal - 1) / PageSize);
+                await LoadHistoryPageAsync();
+            }
+        }
+        catch { _historyPage = Array.Empty<RenameHistoryEntryDto>(); _historyTotal = 0; }
+    }
+
+    private async Task OnFilterChangedAsync()
+    {
+        _pageIndex = 0;
+        await LoadHistoryPageAsync();
+        StateHasChanged();
     }
 
     private async Task ResetFilters()
@@ -298,7 +322,7 @@
         _filterFolder = "";
         _filterStatus = "";
         _pageIndex = 0;
-        await Task.CompletedTask;
+        await LoadHistoryPageAsync();
         StateHasChanged();
     }
 
