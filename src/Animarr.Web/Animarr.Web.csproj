@@ -17,6 +17,10 @@
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Animarr.Shared\Animarr.Shared.csproj" />
+  </ItemGroup>
+
   <!-- Tailwind CSS build -->
   <Target Name="BuildTailwindCSS" BeforeTargets="Build">
     <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)"
