@@ -106,4 +106,24 @@ public interface IAnimarrApiClient
     // ─── DLNA ────────────────────────────────────────────────────────────
     Task<DlnaRendererDto[]> GetDlnaRenderersAsync(CancellationToken ct = default);
     Task                    DlnaPlayAsync(DlnaPlayRequest request, CancellationToken ct = default);
+
+    // ─── Auth + per-user (v4) ────────────────────────────────────────────
+    Task<AuthStatusDto>     GetAuthStatusAsync(CancellationToken ct = default);
+    Task<UserDto?>          LoginAsync(LoginRequest request, CancellationToken ct = default);
+    Task                    LogoutAsync(CancellationToken ct = default);
+    Task<UserDto?>          SetupInitialMasterAsync(SetupRequest request, CancellationToken ct = default);
+    Task<MeDto?>            GetMeAsync(CancellationToken ct = default);
+    Task<UserPreferencesDto> GetMyPreferencesAsync(CancellationToken ct = default);
+    Task<UserPreferencesDto> UpdateMyPreferencesAsync(UpdatePreferencesRequest request, CancellationToken ct = default);
+    Task                    ChangeMyPasswordAsync(ChangePasswordRequest request, CancellationToken ct = default);
+
+    // ─── User + Role admin (v4, manageUsers permission required) ────────
+    Task<UserDto[]>         GetUsersAsync(CancellationToken ct = default);
+    Task<UserDto>           CreateUserAsync(CreateUserRequest request, CancellationToken ct = default);
+    Task<UserDto>           UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default);
+    Task                    DeleteUserAsync(Guid id, CancellationToken ct = default);
+    Task<RoleDto[]>         GetRolesAsync(CancellationToken ct = default);
+    Task<RoleDto>           CreateRoleAsync(CreateRoleRequest request, CancellationToken ct = default);
+    Task<RoleDto>           UpdateRoleAsync(Guid id, UpdateRoleRequest request, CancellationToken ct = default);
+    Task                    DeleteRoleAsync(Guid id, CancellationToken ct = default);
 }

@@ -452,6 +452,49 @@ namespace Animarr.Web.Migrations
                     b.ToTable("RenameQueues");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.Role", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FoldersJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PermManageUsers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PermSystemSettings")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PermUploadContent")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PermViewContent")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Roles");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.TorrentConfig", b =>
                 {
                     b.Property<int>("Id")
@@ -608,6 +651,133 @@ namespace Animarr.Web.Migrations
                     b.ToTable("TorrentRecords");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AvatarHue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AvatarPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.UserFavorite", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "MediaItemId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserFavorites");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.UserPreferences", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AccentHue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AudioPassthrough")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AudioPreferredLanguage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BackdropBlurPx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BackdropBrightness")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("BackdropEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BackdropIntervalSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DefaultVolume")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("NormalizeVolume")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SubtitlePreferredLanguage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SubtitleSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TvMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("UserPreferences");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.WatchState", b =>
                 {
                     b.Property<Guid>("Id")
@@ -647,13 +817,18 @@ namespace Animarr.Web.Migrations
                     b.Property<long>("TotalWatchTimeSec")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("LastSeenAt");
 
                     b.HasIndex("MediaItemId");
 
-                    b.HasIndex("MediaItemId", "Season", "Episode")
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "MediaItemId", "Season", "Episode")
                         .IsUnique();
 
                     b.ToTable("WatchStates");
@@ -763,6 +938,47 @@ namespace Animarr.Web.Migrations
                     b.Navigation("FolderWatcher");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.Role", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.UserFavorite", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.UserPreferences", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.WatchState", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
@@ -771,7 +987,14 @@ namespace Animarr.Web.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("MediaItem");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>

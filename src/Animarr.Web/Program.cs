@@ -4,6 +4,8 @@ using Animarr.Web.Data.Models;
 using Animarr.Web.Endpoints;
 using Animarr.Web.Hubs;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
@@ -91,6 +93,56 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationQueu
 // (/hubs/torrents, /hubs/identification) are scoped under /hubs so they
 // don't collide with /api/* or the WASM SPA fallback.
 builder.Services.AddSignalR();
+
+// ─── v4 auth: cookie session + per-request user context ────────────────
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IUserContext, UserContext>();
+builder.Services.AddSingleton<AuthService>();
+
+builder.Services
+    .AddAuthentication(AuthConstants.CookieScheme)
+    .AddCookie(AuthConstants.CookieScheme, options =>
+    {
+        options.Cookie.Name        = AuthConstants.CookieName;
+        options.Cookie.HttpOnly    = true;
+        options.Cookie.SameSite    = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan      = TimeSpan.FromDays(14);
+        options.SlidingExpiration   = true;
+        // No login redirects — the SPA handles auth flow client-side. API
+        // endpoints return 401 JSON so the client router can react.
+        options.Events.OnRedirectToLogin = ctx =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = ctx =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    });
+
+builder.Services.AddScoped<
+    Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+    PermissionAuthorizationHandler>();
+builder.Services.AddAuthorization(options =>
+{
+    // Each policy is a PermissionRequirement carrying a selector against the
+    // user's Role. The single PermissionAuthorizationHandler hydrates the
+    // user through IUserContext (request-scoped cache) — first policy in a
+    // request pays the DB hit, subsequent ones get the cached User.
+    static Microsoft.AspNetCore.Authorization.AuthorizationPolicy PolicyFor(
+        Func<Animarr.Web.Data.Models.Role, bool> selector) =>
+        new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(AuthConstants.CookieScheme)
+            .RequireAuthenticatedUser()
+            .AddRequirements(new PermissionRequirement(selector))
+            .Build();
+    options.AddPolicy(AuthConstants.Policies.ViewContent,    PolicyFor(r => r.PermViewContent));
+    options.AddPolicy(AuthConstants.Policies.UploadContent,  PolicyFor(r => r.PermUploadContent));
+    options.AddPolicy(AuthConstants.Policies.SystemSettings, PolicyFor(r => r.PermSystemSettings));
+    options.AddPolicy(AuthConstants.Policies.ManageUsers,    PolicyFor(r => r.PermManageUsers));
+});
 builder.Services.AddSingleton<TorrentHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcaster>());
 builder.Services.AddSingleton<IdentificationHubBroadcaster>();
@@ -113,6 +165,12 @@ using (var scope = app.Services.CreateScope())
     // Seed built-in patterns and ignore rules
     var seeder = scope.ServiceProvider.GetRequiredService<SeedDataService>();
     await seeder.SeedAsync();
+
+    // v4: ensure the two built-in roles exist. Idempotent — safe to call
+    // every startup. AuthService.CreateInitialMasterAsync (driven by the
+    // /setup wizard) references these by name.
+    var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
+    await auth.EnsureBuiltInRolesAsync();
 }
 
 // Appearance settings (language, theme, accent) are loaded client-side now
@@ -146,9 +204,16 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes })
 // endpoint: ''". One call to MapStaticAssets is enough.
 app.MapStaticAssets();
 
+// v4 auth middleware — must come BEFORE endpoint mappings so the cookie is
+// resolved into HttpContext.User before [Authorize] checks run.
+app.UseAuthentication();
+app.UseAuthorization();
+
 // ─── Animarr.Shared REST surface ──────────────────────────────────────────
 // Each endpoint group backs one slice of the IAnimarrApiClient contract that
 // Animarr.UI / Animarr.Web.Client / Animarr.App all consume.
+app.MapAuthEndpoints();
+app.MapUsersEndpoints();
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();

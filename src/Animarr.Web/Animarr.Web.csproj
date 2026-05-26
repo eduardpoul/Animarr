@@ -16,6 +16,9 @@
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
     <!-- Hosts the WASM client's _framework bundle + maps SPA fallback. -->
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.8" />
+    <!-- v4 auth: BCrypt for password hashing (work factor 12, ~250ms verify).
+         BCrypt.Net-Next is the canonical .NET fork — actively maintained. -->
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
   </ItemGroup>
 
   <ItemGroup>

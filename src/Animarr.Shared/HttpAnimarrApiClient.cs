@@ -464,4 +464,108 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<TResp>(JsonOpts, ct))!;
     }
+
+    // ─── Auth + per-user (v4) ────────────────────────────────────────────
+
+    public async Task<AuthStatusDto> GetAuthStatusAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<AuthStatusDto>(ApiRoutes.AuthStatus, JsonOpts, ct))!;
+
+    public async Task<UserDto?> LoginAsync(LoginRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthLogin, request, JsonOpts, ct);
+        if (resp.StatusCode is HttpStatusCode.Unauthorized) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
+    }
+
+    public async Task LogoutAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.AuthLogout, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<UserDto?> SetupInitialMasterAsync(SetupRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthSetup, request, JsonOpts, ct);
+        if (resp.StatusCode is HttpStatusCode.BadRequest) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
+    }
+
+    public Task<MeDto?> GetMeAsync(CancellationToken ct = default)
+        => GetOrNullAsync<MeDto>(ApiRoutes.Me, ct);
+
+    public async Task<UserPreferencesDto> GetMyPreferencesAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<UserPreferencesDto>(ApiRoutes.MePreferences, JsonOpts, ct))!;
+
+    public async Task<UserPreferencesDto> UpdateMyPreferencesAsync(
+        UpdatePreferencesRequest request, CancellationToken ct = default)
+    {
+        // PATCH — System.Net.Http doesn't ship a PatchAsJsonAsync extension,
+        // so build the request explicitly. JsonOpts skip null fields so the
+        // "leave this value alone" semantics round-trip.
+        using var msg = new HttpRequestMessage(HttpMethod.Patch, ApiRoutes.MePreferences)
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<UserPreferencesDto>(JsonOpts, ct))!;
+    }
+
+    public async Task ChangeMyPasswordAsync(ChangePasswordRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MePassword, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    // ─── User + Role admin ──────────────────────────────────────────────
+
+    public async Task<UserDto[]> GetUsersAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<UserDto[]>(ApiRoutes.Users, JsonOpts, ct))
+            ?? Array.Empty<UserDto>();
+
+    public Task<UserDto> CreateUserAsync(CreateUserRequest request, CancellationToken ct = default)
+        => PostForJsonAsync<CreateUserRequest, UserDto>(ApiRoutes.Users, request, ct);
+
+    public async Task<UserDto> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default)
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Patch, ApiRoutes.User(id))
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct))!;
+    }
+
+    public async Task DeleteUserAsync(Guid id, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.User(id), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<RoleDto[]> GetRolesAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<RoleDto[]>(ApiRoutes.Roles, JsonOpts, ct))
+            ?? Array.Empty<RoleDto>();
+
+    public Task<RoleDto> CreateRoleAsync(CreateRoleRequest request, CancellationToken ct = default)
+        => PostForJsonAsync<CreateRoleRequest, RoleDto>(ApiRoutes.Roles, request, ct);
+
+    public async Task<RoleDto> UpdateRoleAsync(Guid id, UpdateRoleRequest request, CancellationToken ct = default)
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Patch, ApiRoutes.Role(id))
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<RoleDto>(JsonOpts, ct))!;
+    }
+
+    public async Task DeleteRoleAsync(Guid id, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.Role(id), ct);
+        resp.EnsureSuccessStatusCode();
+    }
 }

@@ -1,4 +1,4 @@
-﻿using Animarr.Web.Data.Models;
+using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Data;
@@ -21,6 +21,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
     public DbSet<WatchState> WatchStates => Set<WatchState>();
+
+    // ─── Multi-user (v4) ──────────────────────────────────────────────────────
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
+    public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -168,13 +174,76 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(x => x.MediaItemId)
              .OnDelete(DeleteBehavior.Cascade);
-            // One state row per (item, season, episode). Movies use NULL/NULL
-            // and therefore are limited to a single row per MediaItem. SQLite
-            // treats NULL as distinct, so we still need a filtered index for
-            // the movie case to keep the "one row per movie" invariant.
-            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode }).IsUnique();
+            // v4: scope per user. SetNull on user delete so the data isn't lost
+            // — admin can reassign orphan rows later if desired.
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+            // One state row per (user, item, season, episode). Movies use
+            // NULL/NULL for season/episode and therefore are limited to a
+            // single row per (user, MediaItem). SQLite treats NULL as
+            // distinct in indexes — the v4 unique constraint includes UserId
+            // so two users can independently mark the same episode.
+            e.HasIndex(x => new { x.UserId, x.MediaItemId, x.Season, x.Episode }).IsUnique();
             e.HasIndex(x => x.MediaItemId);
+            e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.LastSeenAt);
+        });
+
+        // ─── Multi-user (v4) ────────────────────────────────────────────────
+
+        modelBuilder.Entity<User>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Username).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(128).IsRequired();
+            e.Property(x => x.PasswordHash).HasMaxLength(128).IsRequired();
+            // Case-insensitive uniqueness — usernames are stored lowercase by
+            // AuthService.NormaliseUsername. The unique index on the lowered
+            // value gives us "alice == ALICE == Alice" with no extra work.
+            e.HasIndex(x => x.Username).IsUnique();
+            e.HasOne(x => x.Role)
+             .WithMany()
+             .HasForeignKey(x => x.RoleId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Role>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Name).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(256);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<UserPreferences>(e =>
+        {
+            e.HasKey(x => x.UserId);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.AudioPreferredLanguage).HasMaxLength(32);
+            e.Property(x => x.SubtitlePreferredLanguage).HasMaxLength(32);
+            e.Property(x => x.Language).HasMaxLength(8);
+        });
+
+        modelBuilder.Entity<UserFavorite>(e =>
+        {
+            e.HasKey(x => new { x.UserId, x.MediaItemId });
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.UserId);
         });
     }
 }

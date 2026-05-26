@@ -16,6 +16,15 @@ public class WatchState
     public Guid MediaItemId { get; set; }
     public MediaItem? MediaItem { get; set; }
 
+    /// <summary>FK → User.Id — added in v4 to scope watch state per-user.
+    /// Nullable for pre-v4 rows that were created while Animarr was single-user;
+    /// post-migration those rows are orphans (no user owns them) and stay
+    /// invisible to all users until reassigned manually. New rows always have
+    /// a value because <c>WatchStateService</c> reads <c>IUserContext.CurrentUserId</c>
+    /// before writing.</summary>
+    public Guid? UserId { get; set; }
+    public User? User { get; set; }
+
     /// <summary>Season number for series episodes; NULL for movies and one-file flat entries.</summary>
     public int? Season { get; set; }
 
