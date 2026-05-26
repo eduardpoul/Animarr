@@ -1,6 +1,141 @@
 /* MediaDetail page-local styles.
-   Spec source: design_handoff_animarr/screens-v3.jsx::MediaDetailV3.
-   The hero is rendered by <MediaDetailHero /> with its own scoped CSS. */
+   Hero styling is inlined here (the original Animarr.Web used a separate
+   MediaDetailHero component with its own scoped CSS — we collapsed that
+   into the page for the trimmed migration). */
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.md-hero {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 32px;
+    margin: 24px 0;
+    align-items: start;
+}
+
+.md-hero__poster {
+    aspect-ratio: 2 / 3;
+    background: #14171b;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.md-hero__poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.md-hero__overline {
+    color: #5b6470;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.md-hero__title {
+    margin: 6px 0 0;
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.md-hero__sub {
+    margin-top: 4px;
+    color: #a0a8b0;
+    font-size: 14px;
+}
+
+.md-hero__meta {
+    margin-top: 12px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    color: #a0a8b0;
+    font-size: 13px;
+}
+
+.md-hero__cta {
+    margin-top: 24px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* ── Season picker ────────────────────────────────────────── */
+.md-seasons {
+    margin-top: 32px;
+}
+
+.md-season-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #21262d;
+    margin-bottom: 16px;
+}
+
+.md-season-tab {
+    background: transparent;
+    border: 0;
+    color: #a0a8b0;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font: inherit;
+}
+
+.md-season-tab:hover { color: #f0f1f3; }
+.md-season-tab--active { color: #f0f1f3; border-bottom-color: oklch(60% 0.18 25); }
+.md-season-tab__count {
+    margin-left: 6px;
+    color: #5b6470;
+    font-size: 11px;
+}
+
+.md-season-overview {
+    margin: 8px 0 16px;
+    color: #a0a8b0;
+}
+
+.md-episode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.md-episode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #14171b;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+}
+
+.md-episode-num {
+    font-family: ui-monospace, monospace;
+    color: #a0a8b0;
+}
+
+.md-episode-watch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #a0a8b0;
+}
+
+.md-movie-row {
+    margin-top: 24px;
+    padding: 16px;
+    background: #14171b;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+}
+
 
 /* ── Not-found state ───────────────────────────────────────── */
 .md-not-found {

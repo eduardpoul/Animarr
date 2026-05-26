@@ -1,13 +1,14 @@
 @*
-    Minimal top-level layout for Animarr.UI's WASM + MAUI hosts.
+    Top-level layout for Animarr.UI's WASM + MAUI hosts.
 
-    The full Razor MainLayout from Animarr.Web (header chrome, sidebar,
-    sidebar LLM status, reconnect modal) still lives in Animarr.Web and
-    is used by the Blazor Server deployment. This trimmer version is what
-    the WASM client renders — no SignalR-driven sidebar yet, no toast/dialog
-    providers wired up. Phase 3 will keep porting pieces over.
+    Loads the active language pack on first render (idempotent — Web.Client's
+    Program.cs may have pre-loaded "en" already; the MAUI hybrid relies on
+    this path entirely). Wires the NeedsReviewChip into the header nav so
+    catalog-wide identification status is visible from every page.
 *@
 @inherits LayoutComponentBase
+@inject LocalizationService Loc
+@inject IAnimarrApiClient Api
 
 <div class="ui-shell">
     <header class="ui-shell-header">
@@ -18,8 +19,27 @@
             <NavLink href="history">History</NavLink>
             <NavLink href="settings">Settings</NavLink>
         </nav>
+        <div class="ui-shell-spacer"></div>
+        <Animarr.UI.Components.Pages.NeedsReviewChip />
     </header>
     <main class="ui-shell-main">
         @Body
     </main>
 </div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        // Resolve the user's preferred language from server config before
+        // pulling the corresponding pack. Falls back to whatever Program.cs
+        // pre-loaded if the lookup fails (e.g. server unreachable).
+        try
+        {
+            var pref = await Api.GetAppConfigValueAsync(AppConfigKeys.Language);
+            var lang = pref?.Value ?? "en";
+            if (!string.Equals(lang, Loc.CurrentLanguage, StringComparison.OrdinalIgnoreCase))
+                await Loc.LoadAsync(lang);
+        }
+        catch { /* offline / first start — keys-as-values is fine */ }
+    }
+}

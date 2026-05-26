@@ -37,8 +37,12 @@ public class LocalizationService
     {
         try
         {
+            // The packs ship as static web assets inside the RCL, so both
+            // standalone WASM (Animarr.Web.Client) and the MAUI hybrid
+            // (Animarr.App) find them at the same well-known URL relative
+            // to the host without any extra wiring.
             var dict = await _http.GetFromJsonAsync<Dictionary<string, string>>(
-                $"/lang/{language}.json", ct);
+                $"_content/Animarr.UI/lang/{language}.json", ct);
             if (dict is not null)
             {
                 _strings = dict;

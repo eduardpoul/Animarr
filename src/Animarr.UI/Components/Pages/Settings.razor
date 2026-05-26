@@ -27,7 +27,7 @@
         var k = key;
         <button type="button"
                 class="@($"settings-tab {(_activeTab == k ? "settings-tab--active" : "")}")"
-                @onclick="@(() => _activeTab = k)">
+                @onclick="@(() => SwitchTabAsync(k))">
             @label
         </button>
     }
@@ -92,15 +92,41 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
     protected override async Task OnInitializedAsync()
     {
-        var pairs = await Api.GetAppConfigAsync();
-        _config = pairs.ToDictionary(p => p.Key, p => p.Value);
+        try
+        {
+            var pairs = await Api.GetAppConfigAsync();
+            _config = pairs.ToDictionary(p => p.Key, p => p.Value);
+        }
+        catch { /* offline — config dict stays empty */ }
 
+        // Deep-link via ?tab= — e.g. /settings?tab=patterns (legacy Patterns redirect).
         var uri = new Uri(Nav.Uri);
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
         var requestedTab = query["tab"];
         if (!string.IsNullOrEmpty(requestedTab) && _settingsTabs.Any(t => t.Key == requestedTab))
             _activeTab = requestedTab;
+
+        await EnsureTabDataAsync(_activeTab);
     }
+
+    /// <summary>Lazy-fetch the per-tab data the first time the tab is opened.
+    /// Tabs that just read from the pre-loaded <c>_config</c> dict don't need
+    /// extra work — those are no-ops here.</summary>
+    private async Task SwitchTabAsync(string key)
+    {
+        _activeTab = key;
+        await EnsureTabDataAsync(key);
+        StateHasChanged();
+    }
+
+    private async Task EnsureTabDataAsync(string key) => await (key switch
+    {
+        "hardware" when _hw is null         => LoadHardwareAsync(),
+        "patterns" when _patterns is null   => LoadPatternsAsync(),
+        "rules"    when _ignoreRules is null => LoadIgnoreAsync(),
+        "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
+        _ => Task.CompletedTask,
+    });
 
     private async Task SetConfigAsync(string key, string? value)
     {
@@ -207,30 +233,22 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     }
 
     // ── Audio tab ──
-    private RenderFragment AudioTab()
-    {
-        var hwMsStr = _config.GetValueOrDefault("playback.audio_offset_hw_ms") ?? "0";
-        var swMsStr = _config.GetValueOrDefault("playback.audio_offset_sw_ms") ?? "0";
-        return @<section class="settings-section">
-            <h2>Audio sync</h2>
-            <p class="settings-hint">
-                Push the audio stream forward (positive) or backward (negative). Two offsets:
-                one for hardware-decoded sessions (NVENC/VAAPI), one for software fallback.
-            </p>
-            <label class="settings-field">
-                <span class="settings-field__label">Hardware offset (ms)</span>
-                <input class="settings-field__input" type="number" step="10"
-                       value="@hwMsStr"
-                       @onchange="@(e => SetConfigAsync("playback.audio_offset_hw_ms", e.Value?.ToString()))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">Software offset (ms)</span>
-                <input class="settings-field__input" type="number" step="10"
-                       value="@swMsStr"
-                       @onchange="@(e => SetConfigAsync("playback.audio_offset_sw_ms", e.Value?.ToString()))" />
-            </label>
-        </section>;
-    }
+    // The audio-offset sliders in the server-side Razor page use
+    // `window.animarrCalibrate` (localStorage-backed) — values are
+    // per-browser, not server-stored. The in-player audio-offset
+    // popup is the same control as those sliders. Until the WASM
+    // client wires up animarr-calibrate.js, the Audio tab points
+    // users at the in-player adjustment.
+    private RenderFragment AudioTab() => @<section class="settings-section">
+        <h2>Audio sync</h2>
+        <p class="settings-hint">
+            Audio-offset calibration is per-browser (stored in localStorage,
+            not the server config). Open any video in the player and click
+            the <strong>audio-offset</strong> icon to adjust — the chosen
+            value persists for that codec pipeline (HW re-encode vs
+            stream-copy) across sessions on this device.
+        </p>
+    </section>;
 
     // ── Hardware tab ──
     private RenderFragment HardwareTab() => @<section class="settings-section">
