@@ -11,6 +11,7 @@
 @inject IAppConfigService AppConfig
 @inject ILlmService LlmService
 @inject IdentificationQueueProcessorService QueueProc
+@inject HardwareInfoService Hardware
 
 <PageTitle>Animarr</PageTitle>
 
@@ -154,6 +155,363 @@
             </div>
         </div>
 
+        @* AUDIO SYNC, HARDWARE ACCELERATION, EXTERNAL PLAYER moved into
+           their own tabs (Audio + Hardware) — see below this Appearance
+           block. Keeps each tab focused on one concern. *@
+    }
+
+    <!-- ============================================================ -->
+    <!-- TAB: Audio -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "audio") {
+        @* ── Audio sync calibration (two channels) ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">AUDIO SYNC</h3>
+            <div class="settings-card__sub">
+                The server picks one of two pipelines per file based on its
+                codec. Each has its own audio-vs-video latency profile that
+                a single offset can't tune for both. Drag each slider while a
+                file of that type is playing in another tab; close + reopen
+                the player for the new value to take effect.
+                <br /><br />
+                <strong>Positive values delay audio</strong> (use when audio
+                feels ahead of picture). Negative pulls audio forward.
+            </div>
+
+            @* ── HW channel: VAAPI re-encode (HEVC 8-bit → H.264) ── *@
+            <div class="audio-sync-slider" id="animarr-sync-hw-block">
+                <label class="settings-field">
+                    <span class="settings-field__label">
+                        Hardware re-encode (HEVC 8-bit) ·
+                        <strong id="animarr-sync-hw-value">70</strong> ms
+                    </span>
+                    @* Inline oninput is intentional — Blazor interactive
+                       re-renders blow away addEventListener handlers attached
+                       elsewhere. Attribute-bound handlers survive the diff. *@
+                    <input type="range" min="-200" max="300" step="5"
+                           id="animarr-sync-hw-range"
+                           class="settings-range"
+                           value="70"
+                           oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-hw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('hw',v);})(this)" />
+                </label>
+                <div class="audio-sync-slider__hint">
+                    Applies to <strong>H.264 stream-copy isn't affected</strong>
+                    (PCR sync in MPEG-TS is already accurate), but HEVC 8-bit
+                    re-encoded via VAAPI uses this value. The auto-calibration
+                    measures and writes here.
+                </div>
+                <div class="audio-sync-slider__buttons">
+                    <button type="button" class="settings-btn"
+                            onclick="var el=document.getElementById('animarr-sync-hw-range');el.value=70;el.dispatchEvent(new Event('input'));">
+                        Reset to 70 ms
+                    </button>
+                    <button type="button" class="settings-btn"
+                            onclick="window.animarrCalibrate&&window.animarrCalibrate.clearCache('hw');var el=document.getElementById('animarr-sync-hw-range');el.value=70;el.dispatchEvent(new Event('input'));">
+                        Re-run auto calibration
+                    </button>
+                </div>
+            </div>
+
+            @* ── SW channel: stream-copy (HEVC 10-bit / HDR / DV) ── *@
+            <div class="audio-sync-slider" id="animarr-sync-sw-block">
+                <label class="settings-field">
+                    <span class="settings-field__label">
+                        Stream-copy (HEVC 10-bit / HDR / DV) ·
+                        <strong id="animarr-sync-sw-value">0</strong> ms
+                    </span>
+                    @* Range bumped to 700ms — UHD BluRay remuxes use deep B-frame
+                       structures (B7-B15 at 23.976 fps = 292-625ms of display
+                       reorder), and audio-ahead of that magnitude is real. The
+                       previous 300ms cap was clamping users with B15 content. *@
+                    <input type="range" min="-200" max="700" step="5"
+                           id="animarr-sync-sw-range"
+                           class="settings-range"
+                           value="0"
+                           oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-sw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('sw',v);})(this)" />
+                </label>
+                <div class="audio-sync-slider__hint">
+                    HEVC 10-bit content can't be hardware-encoded by Vega 11,
+                    so it ships stream-copied as fMP4. The B-frame display
+                    reorder leaves audio <strong>200-500&nbsp;ms ahead</strong>
+                    of video depending on GOP depth — UHD BluRay remuxes with
+                    deep B15 structures need the higher end. Start with
+                    <strong>+300&nbsp;ms</strong>, slide up if audio still leads.
+                </div>
+                <div class="audio-sync-slider__buttons">
+                    <button type="button" class="settings-btn"
+                            onclick="var el=document.getElementById('animarr-sync-sw-range');el.value=0;el.dispatchEvent(new Event('input'));">
+                        Reset to 0 ms
+                    </button>
+                    <button type="button" class="settings-btn"
+                            onclick="var el=document.getElementById('animarr-sync-sw-range');el.value=300;el.dispatchEvent(new Event('input'));">
+                        Try +300 ms (UHD remux)
+                    </button>
+                </div>
+            </div>
+
+            <script suppress-error="BL9992">
+                // Initial values pulled from localStorage so the sliders show
+                // the actual stored offsets when the page opens.
+                (function syncSlidersInitial() {
+                    if (!window.animarrCalibrate) return;
+                    const init = (rangeId, labelId, channel, dflt) => {
+                        const range = document.getElementById(rangeId);
+                        const label = document.getElementById(labelId);
+                        if (!range || !label) return;
+                        const stored = window.animarrCalibrate.getCached(channel);
+                        const value = (stored === null) ? dflt : stored;
+                        range.value = value;
+                        label.innerText = value;
+                    };
+                    init('animarr-sync-hw-range', 'animarr-sync-hw-value', 'hw', 70);
+                    init('animarr-sync-sw-range', 'animarr-sync-sw-value', 'sw', 0);
+                })();
+            </script>
+        </div>
+
+        @* External player + hardware-acceleration cards moved out — see
+           Audio tab (External Player) and Hardware tab (Hardware Accel) below. *@
+    }
+
+    <!-- ============================================================ -->
+    <!-- TAB: Hardware -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "hardware") {
+        @* ── Hardware acceleration status ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">HARDWARE ACCELERATION</h3>
+            <div class="settings-card__sub">
+                What the server detected at startup. Animarr automatically picks
+                the best encoder for each file — NVENC &gt; VAAPI &gt; software
+                stream-copy. To enable a vendor that shows ❌, follow the help
+                under it (requires host-side setup + container restart).
+            </div>
+            @if (_hwInfo is null)
+            {
+                <div class="hw-row">Loading…</div>
+            }
+            else
+            {
+                <div class="hw-grid">
+                    @* VAAPI row (AMD / older Intel) *@
+                    <div class="@($"hw-row {(_hwInfo.Vaapi.Available ? "hw-row--ok" : "hw-row--off")}")">
+                        <div class="hw-row__label">
+                            <span class="hw-row__icon">@(_hwInfo.Vaapi.Available ? "✅" : "❌")</span>
+                            <strong>VAAPI</strong>
+                            <span class="hw-row__sub">(AMD / Intel)</span>
+                        </div>
+                        <div class="hw-row__detail">
+                            @if (_hwInfo.Vaapi.Available)
+                            {
+                                @if (!string.IsNullOrEmpty(_hwInfo.Vaapi.DeviceName))
+                                {
+                                    <div class="hw-row__device">@_hwInfo.Vaapi.DeviceName</div>
+                                }
+                                <div class="hw-row__line">@_hwInfo.Vaapi.Detail</div>
+                            }
+                            else
+                            {
+                                <div class="hw-row__line">@_hwInfo.Vaapi.Detail</div>
+                                <details class="hw-row__help">
+                                    <summary>How to enable</summary>
+                                    <p>On the docker host, add to <code>docker run</code>:</p>
+                                    <pre>--device /dev/dri:/dev/dri --group-add video</pre>
+                                    <p>The deploy script adds this automatically when <code>/dev/dri</code> is present on the host.</p>
+                                </details>
+                            }
+                        </div>
+                    </div>
+
+                    @* NVENC row *@
+                    <div class="@($"hw-row {(_hwInfo.Nvenc.Available ? "hw-row--ok" : "hw-row--off")}")">
+                        <div class="hw-row__label">
+                            <span class="hw-row__icon">@(_hwInfo.Nvenc.Available ? "✅" : "❌")</span>
+                            <strong>NVENC</strong>
+                            <span class="hw-row__sub">(NVIDIA)</span>
+                        </div>
+                        <div class="hw-row__detail">
+                            @if (_hwInfo.Nvenc.Available)
+                            {
+                                <div class="hw-row__device">@_hwInfo.Nvenc.DeviceName</div>
+                                <div class="hw-row__line">@_hwInfo.Nvenc.DriverInfo · @_hwInfo.Nvenc.Detail</div>
+                            }
+                            else
+                            {
+                                <div class="hw-row__line">@_hwInfo.Nvenc.Detail</div>
+                                <details class="hw-row__help">
+                                    <summary>How to enable</summary>
+                                    <ol class="hw-row__steps">
+                                        <li>Install NVIDIA driver on the host: <code>sudo apt install nvidia-driver-535</code></li>
+                                        <li>Install nvidia-container-toolkit: <code>sudo apt install nvidia-container-toolkit</code></li>
+                                        <li>Restart Docker: <code>sudo systemctl restart docker</code></li>
+                                        <li>Re-deploy Animarr — the deploy script auto-detects and adds <code>--gpus all</code></li>
+                                    </ol>
+                                </details>
+                            }
+                        </div>
+                    </div>
+
+                    @* QSV row (Intel) — informational only, we use VAAPI for Intel currently *@
+                    <div class="@($"hw-row {(_hwInfo.Qsv.Available ? "hw-row--ok" : "hw-row--off")}")">
+                        <div class="hw-row__label">
+                            <span class="hw-row__icon">@(_hwInfo.Qsv.Available ? "✅" : "❌")</span>
+                            <strong>QSV</strong>
+                            <span class="hw-row__sub">(Intel Quick Sync)</span>
+                        </div>
+                        <div class="hw-row__detail">
+                            <div class="hw-row__line">@_hwInfo.Qsv.Detail</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="hw-actions">
+                    <button type="button" class="settings-btn" @onclick="RescanHardwareAsync">Re-scan</button>
+                    <span class="hw-actions__hint">Last probed: @_hwInfo.ProbedAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                </div>
+            }
+        </div>
+
+    }
+
+    <!-- ============================================================ -->
+    <!-- TAB: Audio (continued — External Player) -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "audio") {
+        @* ── External player handoff ─── *@
+        <div class="settings-card">
+            <h3 class="settings-card__title">EXTERNAL PLAYER</h3>
+            <div class="settings-card__sub">
+                The external-icon button in the in-browser player hands the
+                current file off to a native player (better HDR / DV / Atmos
+                than browser HLS). Pick which player to use here. <strong>mpv</strong>
+                also reports progress back to Animarr (Continue / % watched
+                stays in sync); the others just play.
+            </div>
+            <label class="settings-field settings-field--240">
+                <span class="settings-field__label">Preferred external player</span>
+                <select class="settings-field__select"
+                        @bind="_externalPlayer"
+                        @bind:after="SaveExternalPlayerAsync">
+                    <option value="mpv">mpv (desktop, with progress tracking)</option>
+                    <option value="iina">IINA (macOS)</option>
+                    <option value="infuse">Infuse (iOS / tvOS / macOS)</option>
+                    <option value="vlc_ios">VLC (iOS — vlc-x-callback)</option>
+                    <option value="m3u">.m3u download (universal — works with VLC, MPC, PotPlayer, etc.)</option>
+                    <option value="custom">Custom URI template</option>
+                </select>
+            </label>
+            @if (_externalPlayer == "custom")
+            {
+                <label class="settings-field">
+                    <span class="settings-field__label">
+                        Custom URI template (use <code>&#123;url&#125;</code> for the stream URL)
+                    </span>
+                    <input type="text"
+                           class="settings-field__input"
+                           placeholder="potplayer://{url}"
+                           @bind="_externalPlayerCustom"
+                           @bind:after="SaveExternalPlayerAsync" />
+                </label>
+            }
+            @if (_externalPlayer == "mpv")
+            {
+                <details class="mpv-install-wrap" open>
+                    <summary class="mpv-install-summary">mpv setup instructions</summary>
+                    <ol class="mpv-install">
+                        <li>
+                            Install mpv.net (Windows) or mpv (Linux / macOS) —
+                            both register the <code>mpv://</code> URI scheme.
+                            <div class="ext-btn-row">
+                                <a class="settings-btn settings-btn--icon"
+                                   href="https://mpv.net" target="_blank" rel="noopener">
+                                    <DIcon Name="external" Size="14" /> mpv.net (Windows)
+                                </a>
+                                <a class="settings-btn settings-btn--icon"
+                                   href="https://mpv.io/installation/" target="_blank" rel="noopener">
+                                    <DIcon Name="external" Size="14" /> mpv.io (Linux / macOS)
+                                </a>
+                            </div>
+                        </li>
+                        <li>
+                            Download the tracker script.
+                            <div class="ext-btn-row">
+                                <a class="settings-btn settings-btn--icon"
+                                   href="/api/mpv-tracker.lua"
+                                   download="animarr-tracker.lua">
+                                    <DIcon Name="download" Size="14" /> animarr-tracker.lua
+                                </a>
+                            </div>
+                        </li>
+                        <li>
+                            Drop it into your mpv scripts directory:
+                            <ul class="mpv-install__paths">
+                                <li><code>%APPDATA%\mpv.net\scripts\</code> — mpv.net (Windows)</li>
+                                <li><code>~/.config/mpv/scripts/</code> — mpv (Linux / macOS)</li>
+                            </ul>
+                        </li>
+                        <li>Restart mpv. Clicking the external icon in any video now plays + tracks.</li>
+                    </ol>
+                </details>
+            }
+            else if (_externalPlayer == "m3u")
+            {
+                <div class="mpv-install-note">
+                    <strong>One-click flow:</strong> in the player's top bar, click
+                    the external icon → browser auto-downloads a tiny <code>.m3u</code>
+                    file → OS opens it with whatever player is set as default
+                    for <code>.m3u</code>. No URLs to copy, no setup beyond
+                    setting your preferred player as the default <code>.m3u</code>
+                    handler in your OS (most installers do this automatically).
+                </div>
+            }
+            else if (_externalPlayer == "iina")
+            {
+                <div class="mpv-install-note">
+                    IINA on macOS handles <code>iina://weblink?url=...</code>
+                    out of the box.
+                </div>
+                <div class="ext-btn-row">
+                    <a class="settings-btn settings-btn--icon"
+                       href="https://iina.io" target="_blank" rel="noopener">
+                        <DIcon Name="external" Size="14" /> iina.io
+                    </a>
+                </div>
+            }
+            else if (_externalPlayer == "infuse")
+            {
+                <div class="mpv-install-note">
+                    Infuse on iOS / tvOS / macOS accepts
+                    <code>infuse://x-callback-url/play?url=...</code>.
+                </div>
+                <div class="ext-btn-row">
+                    <a class="settings-btn settings-btn--icon"
+                       href="https://firecore.com/infuse" target="_blank" rel="noopener">
+                        <DIcon Name="external" Size="14" /> firecore.com/infuse
+                    </a>
+                </div>
+            }
+            else if (_externalPlayer == "vlc_ios")
+            {
+                <div class="mpv-install-note">
+                    VLC on iOS responds to
+                    <code>vlc-x-callback://x-callback-url/stream?url=...</code>.
+                    Doesn't apply to VLC desktop — use the <strong>.m3u
+                    download</strong> option for that.
+                </div>
+                <div class="ext-btn-row">
+                    <a class="settings-btn settings-btn--icon"
+                       href="https://apps.apple.com/app/vlc-for-mobile/id650377962"
+                       target="_blank" rel="noopener">
+                        <DIcon Name="external" Size="14" /> VLC on App Store
+                    </a>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- ============================================================ -->
+    <!-- TAB: Appearance (continued — Backdrop) -->
+    <!-- ============================================================ -->
+    @if (_activeTab == "appearance") {
         @* ── Backdrop ─── *@
         <div class="settings-card">
             <h3 class="settings-card__title">BACKDROP</h3>
@@ -880,6 +1238,8 @@
         ("root_folders",   "Root folders"),
         ("rename_history", "Rename history"),
         ("appearance",     "Appearance"),
+        ("audio",          "Audio"),
+        ("hardware",       "Hardware"),
         ("ai",             "AI / LLM"),
         ("patterns",       "Patterns"),
         ("rules",          "Ignore rules"),
@@ -1095,6 +1455,43 @@
 
         await LoadMetadataSettingsAsync();
         _metaLoading = false;
+
+        // Hardware-acceleration report from the runtime probe.
+        await LoadHardwareInfoAsync();
+
+        // External-player preference (default: mpv when unset).
+        _externalPlayer       = await AppConfig.GetAsync(AppConfigKeys.ExternalPlayer) ?? "mpv";
+        _externalPlayerCustom = await AppConfig.GetAsync(AppConfigKeys.ExternalPlayerCustom) ?? "";
+    }
+
+    // ── External player picker ────────────────────────────────────────
+    private string _externalPlayer = "mpv";
+    private string _externalPlayerCustom = "";
+
+    private async Task SaveExternalPlayerAsync()
+    {
+        await AppConfig.SetAsync(AppConfigKeys.ExternalPlayer, _externalPlayer);
+        if (_externalPlayer == "custom")
+            await AppConfig.SetAsync(AppConfigKeys.ExternalPlayerCustom, _externalPlayerCustom);
+        ToastService.ShowSuccess("External player preference saved");
+    }
+
+    // ── Hardware acceleration display ─────────────────────────────────
+    // Inject the service directly (we're Blazor InteractiveServer — same
+    // process as the probe), no HTTP round-trip needed.
+    private HardwareInfoService.HardwareReport? _hwInfo;
+
+    private Task LoadHardwareInfoAsync()
+    {
+        _hwInfo = Hardware.Current;
+        return Task.CompletedTask;
+    }
+
+    private async Task RescanHardwareAsync()
+    {
+        await Task.Run(() => Hardware.Rescan());
+        _hwInfo = Hardware.Current;
+        StateHasChanged();
     }
 
     private void OnThemeChanged(string value)

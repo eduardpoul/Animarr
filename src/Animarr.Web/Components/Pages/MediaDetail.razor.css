@@ -162,6 +162,19 @@
     word-break: break-all;
 }
 
+/* Raw folder/file name — emphasised vs the full path: a touch larger,
+   text instead of text-dim, lets the user spot identification mismatches
+   without parsing a long path. */
+.md-ident__rawname {
+    color: var(--text);
+    font-size: 12.5px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+
 /* ── NeedsReview block (top-3 candidates) ─────────────────── */
 .md-nr {
     margin: var(--space-9) 0 var(--space-12);
@@ -439,53 +452,214 @@
     place-items: center;
 }
 
+/* Shell wraps the Artplayer container. Sizing only — no transforms /
+   backdrop-filters that could block NVIDIA RTX VSR from engaging on
+   the inner <video>. Artplayer builds its own chrome inside .vp-art
+   and handles its own idle-fade. */
 .vp-shell {
+    position: relative;          /* anchor for floating chips/cast menu */
     background: #000;
     border-radius: var(--radius-card);
     overflow: hidden;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
-    max-width: min(92vw, 1100px);
+    width: min(96vw, 1800px);
+    aspect-ratio: 16 / 9;        /* placeholder until Artplayer sizes itself */
 }
 
-.vp-header {
+/* Artplayer mount point — fills the shell. */
+.vp-art {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Media-info chips overlay ──────────────────────────────────────── */
+/* Top-left corner of the shell, always visible during playback. Previous
+   auto-hide attempts via :has(.art-hide-cursor) and JS mouse-activity
+   timers either fired at the wrong cadence or didn't get the events
+   (Artplayer captures mouse activity on its inner DOM, our listeners on
+   .vp-shell miss them). Always-on is the simplest robust answer and
+   matches what the user explicitly asks for — they want the chips for
+   information, not as transient indicators. */
+.vp-mediainfo {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    z-index: 5;
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: rgba(30, 30, 30, 0.95);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 6px;
+    flex-wrap: wrap;
+    pointer-events: none;
+    opacity: 1;
 }
-
-.vp-title {
-    flex: 1;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.75);
-    overflow: hidden;
-    text-overflow: ellipsis;
+.vp-mi-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
     white-space: nowrap;
 }
+/* HDR-type chips get a warm gold accent — same convention Plex uses,
+   visually distinct from the codec/resolution chips. */
+.vp-mi-chip--hdr {
+    background: linear-gradient(180deg, #c89c4a, #8e6a26);
+    color: #fff;
+}
+.vp-mi-chip--tier {
+    background: rgba(120, 200, 255, 0.18);
+    color: #9bd6ff;
+}
+.vp-mi-chip--directplay {
+    background: rgba(120, 255, 180, 0.18);
+    color: #8be5b2;
+}
 
-.vp-close {
-    appearance: none;
-    cursor: pointer;
+/* ── Cast-to-TV menu (DLNA) ─────────────────────────────────── */
+/* Artplayer-era: cast button lives in Artplayer's chrome (added via
+   the controls array in animarr-player.js). Clicking it calls
+   ToggleCastMenuFromJs → Blazor toggles _castMenuOpen → this
+   floating menu renders absolute-positioned inside .vp-shell. */
+.vp-cast-menu--floating {
+    position: absolute;
+    /* Anchor near where Artplayer's right-side controls live —
+       bottom-right corner, just above the control bar. */
+    right: 12px;
+    bottom: 72px;
+    z-index: 15;
+}
+
+/* ── Audio-offset popup ──────────────────────────────────────── */
+/* Slider popup anchored just above the Artplayer chrome's right
+   cluster. Injected by JS (toggleAudioOffsetPopup) into the
+   Artplayer container — so it survives fullscreen with the player. */
+.vp-offset-popup {
+    position: absolute;
+    right: 12px;
+    bottom: 72px;
+    z-index: 20;
+    width: 280px;
+    padding: 12px 14px;
+    background: rgba(24, 24, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12px;
+    pointer-events: auto;
+}
+.vp-offset-popup__title {
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.95);
+}
+.vp-offset-popup__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+.vp-offset-popup__range {
+    flex: 1;
+    accent-color: var(--accent, #ff6b00);
+}
+.vp-offset-popup__value {
+    min-width: 60px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.7);
+}
+.vp-offset-popup__hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 6px;
+}
+.vp-cast-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 220px;
+    max-width: 320px;
+    background: rgba(24, 24, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+    padding: 6px;
+    z-index: 10;
+}
+.vp-cast-empty {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    text-align: center;
+}
+.vp-cast-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
     background: transparent;
     border: 0;
-    color: rgba(255, 255, 255, 0.6);
-    padding: 4px;
+    cursor: pointer;
+    padding: 8px 10px;
     border-radius: var(--radius-ctrl);
-    transition: color var(--motion-fast), background var(--motion-fast);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    text-align: left;
+    transition: background var(--motion-fast);
 }
-.vp-close:hover {
+.vp-cast-item:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+.vp-cast-item:disabled {
+    opacity: 0.5;
+    cursor: progress;
+}
+.vp-cast-item-name { font-weight: 500; }
+.vp-cast-item-model {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.vp-cast-refresh {
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-ctrl);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+.vp-cast-refresh:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
     color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+}
+.vp-cast-refresh:disabled { opacity: 0.5; cursor: progress; }
+
+.vp-cast-toast {
+    position: absolute;
+    top: 56px;
+    right: var(--space-4);
+    background: rgba(24, 24, 24, 0.96);
+    color: rgba(255, 255, 255, 0.92);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    z-index: 10;
 }
 
-.vp-video {
-    display: block;
-    width: min(92vw, 1100px);
-    max-height: calc(90vh - 48px);
-    background: #000;
-}
+/* .vp-video removed — was the Vidstack <media-player> sizing. Artplayer
+   uses .vp-art container instead (see above). */
 
 /* ── Image preview overlay ────────────────────────────────── */
 .md-img-backdrop {

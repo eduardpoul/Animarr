@@ -39,10 +39,17 @@
     case "external":  <svg @attributes="@P"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg> break;
     case "filter":    <svg @attributes="@P"><path d="M3 5h18l-7 9v6l-4-2v-4z" /></svg> break;
     case "sparkle":   <svg @attributes="@P"><path d="M12 3v6m0 6v6m9-9h-6m-6 0H3" /><path d="m18 6-3 3M6 18l3-3m9 3-3-3M6 6l3 3" /></svg> break;
+    @* TV with three signal arcs in the corner — universal "cast" glyph. *@
+    case "cast":      <svg @attributes="@P"><path d="M2 17a3 3 0 0 1 3 3" /><path d="M2 13a7 7 0 0 1 7 7" /><path d="M2 9a11 11 0 0 1 11 11" /><path d="M2 5h17a2 2 0 0 1 2 2v9" /></svg> break;
     @* Eye open = unwatched. Stroked outline + iris circle. *@
     case "eye":       <svg @attributes="@P"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg> break;
     @* Eye closed/off = watched. Diagonal slash through an open eye. *@
     case "eye-off":   <svg @attributes="@P"><path d="m3 3 18 18" /><path d="M10.6 10.6a3 3 0 0 0 4.2 4.2" /><path d="M9.4 5.2a10.4 10.4 0 0 1 2.6-.2c6.5 0 10 7 10 7a17 17 0 0 1-2.4 3.3" /><path d="M6.1 6.1A17 17 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5-1.3" /></svg> break;
+    @* "Expand to fill" — four arrows shooting outwards from corners.
+       Used by the player Fill-mode button when it's currently in Fit mode. *@
+    case "expand":    <svg @attributes="@P"><path d="M3 9V3h6" /><path d="M21 9V3h-6" /><path d="M3 15v6h6" /><path d="M21 15v6h-6" /></svg> break;
+    @* "Compress back" — arrows pointing inwards. Shown when Fill mode is on. *@
+    case "compress":  <svg @attributes="@P"><path d="M9 3v6H3" /><path d="M15 3v6h6" /><path d="M9 21v-6H3" /><path d="M15 21v-6h6" /></svg> break;
     default:          <span class="design-icon-missing" title="Unknown icon: @Name">?</span> break;
 }
 

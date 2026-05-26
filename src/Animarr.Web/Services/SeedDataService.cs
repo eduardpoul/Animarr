@@ -104,25 +104,41 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
             @"(?:^|[._\s\-])(?:ep?)?(?<episode>\d{2,4})(?:[._\s\-]|$)",
             Priority: 999
         ),
-        // ── Movie-specific patterns (ApplicableTo = Movie) ─────────────────
-        new(
-            "Movie - Year (Parentheses)",
-            // [HorribleSubs] Kimi no Na wa (2016) [1080p].mkv  /  Your Name (2016).mkv
-            @"(?i)\(\s*(?<episode>(?:19|20)\d{2})\s*\)",
-            Priority: 5,
-            ApplicableTo: FolderType.Movie
-        ),
-        new(
-            "Movie - Year Dotted",
-            // Inception.2010.1080p.BluRay.mkv  /  Your.Name.2016.mkv
-            @"(?i)(?:^|[._ ])(?<episode>(?:19|20)\d{2})(?:[._ ]|$)",
-            Priority: 6,
-            ApplicableTo: FolderType.Movie
-        ),
+        // ── Movie patterns are intentionally absent.
+        //
+        // Earlier seeds shipped "Movie - Year (Parentheses)" and "Movie - Year
+        // Dotted" — both captured YEAR into a `(?<episode>)` group, which the
+        // rename template then wrote out as `{episode}.{ext}`. Result: every
+        // movie on disk got reduced to `2025.mkv` / `2018.mkv` and collisions
+        // silently dropped files. Plain wrong by construction — year is not
+        // an episode, and a movie filename should come from MediaItem.Title
+        // (already filled by the LLM + TMDB identification pipeline).
+        //
+        // Cleanup of these stale rows is done in CleanupRemovedBuiltInsAsync
+        // below — runs on every startup so existing installs heal themselves.
+    ];
+
+    /// <summary>Names of built-in patterns we used to ship but have since
+    /// deleted. Existing installs may still carry them with IsBuiltIn=true;
+    /// we remove them on every seed pass.</summary>
+    private static readonly string[] RemovedBuiltInPatternNames =
+    [
+        "Movie - Year (Parentheses)",
+        "Movie - Year Dotted",
     ];
 
     private async Task SeedPatternsAsync(AppDbContext db)
     {
+        // First, remove any built-in patterns we used to ship but no longer do.
+        // Targeted by Name so user-customised patterns with overlapping names
+        // are NOT affected (they'd have IsBuiltIn=false).
+        var removed = await db.RenamePatterns
+            .Where(p => p.IsBuiltIn && RemovedBuiltInPatternNames.Contains(p.Name))
+            .ExecuteDeleteAsync();
+        if (removed > 0)
+            logger.LogInformation("Removed {Count} stale built-in rename pattern(s): {Names}",
+                removed, string.Join(", ", RemovedBuiltInPatternNames));
+
         var existingNames = await db.RenamePatterns
             .Where(p => p.IsBuiltIn)
             .Select(p => p.Name)

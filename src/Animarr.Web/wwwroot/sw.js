@@ -15,7 +15,7 @@
 //   • /api/video streaming (range requests, browser handles)
 //   • Anything POST/PUT/PATCH/DELETE (mutations)
 
-const VERSION       = 'animarr-v1';
+const VERSION       = 'animarr-v33-settings-action-buttons';
 const SHELL_CACHE   = `${VERSION}-shell`;
 const STATIC_CACHE  = `${VERSION}-static`;
 const IMAGE_CACHE   = `${VERSION}-images`;
@@ -72,6 +72,13 @@ function shouldBypass(url, request) {
     if (url.pathname.startsWith('/_framework/blazor.server')) return true;
     // Video streaming uses Range requests — SW can't cache range responses cleanly.
     if (url.pathname === '/api/video') return true;
+    // HLS pipeline: manifests are mutable (rewritten as ffmpeg encodes), segments
+    // are byte-range — neither plays well with the cache. Bypass the whole tree
+    // so a stale manifest from a closed session is never served on reopen.
+    if (url.pathname.startsWith('/api/hls/')) return true;
+    if (url.pathname === '/api/probe' || url.pathname === '/api/subtitle') return true;
+    // DLNA endpoints are dynamic — never cache.
+    if (url.pathname.startsWith('/dlna/') || url.pathname.startsWith('/api/dlna/')) return true;
     // External backdrops / scripts (CDN-cached anyway).
     if (url.hostname && url.hostname !== self.location.hostname && !isImage(url)) return true;
     return false;
