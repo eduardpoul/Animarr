@@ -224,6 +224,55 @@
     gap: 5px;
 }
 
+/* manual-search panel (inline, opens under the dashed search button) */
+.nrm-search-panel {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+}
+.nrm-search-panel__row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.nrm-search-panel__src {
+    padding: 6px 8px;
+    background: #0b0d10;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    color: inherit;
+}
+.nrm-search-panel__input {
+    flex: 1;
+    padding: 6px 10px;
+    background: #0b0d10;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    color: inherit;
+}
+.nrm-search-panel__results {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.nrm-search-panel__result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+}
+.nrm-search-panel__title { flex: 1; }
+.nrm-search-panel__meta {
+    color: #5b6470;
+    font-size: 12px;
+    min-width: 40px;
+    text-align: right;
+}
+
 /* manual-search empty card */
 .nrm-search {
     appearance: none;

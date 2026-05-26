@@ -1,11 +1,11 @@
 @*
-    Section folder Add / Edit dialog — inline modal used by Settings → Root folders.
+    Section folder Add / Edit dialog with drill-down filesystem picker.
 
-    The server-side version included a filesystem picker that called
-    Directory.GetDirectories — that won't work in WASM/MAUI where the
-    client has no access to the server's filesystem. This trimmed version
-    keeps the text input + Save / Cancel — folder browsing can land later
-    as a server-side endpoint (GET /api/folders/browse?path=...).
+    Picker enumerates the server's well-known roots (/mnt, /Pool-*/*, drives)
+    via /api/folders/browse, then drills down through subdirectories. Same
+    UX as the original Animarr.Web Razor version, but the directory listing
+    comes from the server over HTTP instead of Directory.GetDirectories
+    running in-process.
 *@
 
 @inject IAnimarrApiClient Api
@@ -24,44 +24,122 @@
     </header>
 
     <div class="sfd__body">
-        <label class="settings-field">
-            <span class="settings-field__label">@L["settings.root_folders.field_title"]</span>
-            <input class="settings-field__input"
-                   placeholder="@L["settings.root_folders.field_title_placeholder"]"
-                   value="@_title"
-                   @oninput="@(e => _title = e.Value?.ToString() ?? "")" />
-        </label>
+        @if (!_pickerOpen)
+        {
+            <label class="settings-field">
+                <span class="settings-field__label">@L["settings.root_folders.field_title"]</span>
+                <input class="settings-field__input"
+                       placeholder="@L["settings.root_folders.field_title_placeholder"]"
+                       value="@_title"
+                       @oninput="@(e => _title = e.Value?.ToString() ?? "")" />
+            </label>
 
-        <label class="settings-field">
-            <span class="settings-field__label">@L["settings.root_folders.field_path"]</span>
-            <input class="settings-field__input settings-field__input--mono"
-                   placeholder="@L["settings.root_folders.field_path_placeholder"]"
-                   value="@_path"
-                   @oninput="@(e => _path = e.Value?.ToString() ?? "")" />
-        </label>
+            <label class="settings-field">
+                <span class="settings-field__label">@L["settings.root_folders.field_path"]</span>
+                <div class="sfd__row">
+                    <input class="settings-field__input settings-field__input--mono"
+                           placeholder="@L["settings.root_folders.field_path_placeholder"]"
+                           value="@_path"
+                           @oninput="@(e => _path = e.Value?.ToString() ?? "")" />
+                    <Btn Variant="ghost" Size="md" OnClick="OpenPickerAsync">
+                        <DIcon Name="folder" Size="13" /> @L["settings.root_folders.btn_pick"]
+                    </Btn>
+                </div>
+            </label>
 
-        <label class="settings-field settings-field--240">
-            <span class="settings-field__label">@L["settings.root_folders.field_type"]</span>
-            <select class="settings-field__select"
-                    value="@_typeStr"
-                    @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
-                <option value="Auto">@L["settings.root_folders.type_auto"]</option>
-                <option value="Series">@L["settings.root_folders.type_series"]</option>
-                <option value="Movie">@L["settings.root_folders.type_movie"]</option>
-            </select>
-        </label>
+            <label class="settings-field settings-field--240">
+                <span class="settings-field__label">@L["settings.root_folders.field_type"]</span>
+                <select class="settings-field__select"
+                        value="@_typeStr"
+                        @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
+                    <option value="Auto">@L["settings.root_folders.type_auto"]</option>
+                    <option value="Series">@L["settings.root_folders.type_series"]</option>
+                    <option value="Movie">@L["settings.root_folders.type_movie"]</option>
+                </select>
+            </label>
+        }
+        else
+        {
+            <div class="sfd-picker">
+                <div class="sfd-picker__title">@L["settings.root_folders.picker_title"]</div>
+
+                @if (_pickerLoading)
+                {
+                    <div class="sfd-picker__empty"><InlineDots Label="Listing" /></div>
+                }
+                else if (_pickerCurrent is null)
+                {
+                    <div class="sfd-picker__roots">
+                        @foreach (var entry in _pickerEntries)
+                        {
+                            var e = entry;
+                            <button type="button" class="sfd-picker__root" @onclick="@(() => DrillInAsync(e.Path))">
+                                <DIcon Name="folder" Size="14" />
+                                <span>@e.Path</span>
+                            </button>
+                        }
+                        @if (_pickerEntries.Length == 0)
+                        {
+                            <div class="sfd-picker__empty">@L["settings.root_folders.picker_no_roots"]</div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="sfd-picker__crumb">
+                        <Btn Variant="ghost" Size="sm" OnClick="PickerUpAsync">
+                            <DIcon Name="chev-l" Size="13" />
+                        </Btn>
+                        <span class="sfd-picker__crumb-path" title="@_pickerCurrent">@_pickerCurrent</span>
+                    </div>
+
+                    <div class="sfd-picker__list">
+                        @if (_pickerEntries.Length == 0)
+                        {
+                            <div class="sfd-picker__empty">@L["settings.root_folders.picker_empty"]</div>
+                        }
+                        else
+                        {
+                            @foreach (var entry in _pickerEntries)
+                            {
+                                var e = entry;
+                                <div class="sfd-picker__row" @onclick="@(() => DrillInAsync(e.Path))">
+                                    <DIcon Name="folder" Size="14" />
+                                    <span>@e.Name</span>
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="sfd-picker__foot">
+                        <span class="sfd-picker__selected" title="@_pickerCurrent">
+                            @L["settings.root_folders.picker_selected"] <b>@System.IO.Path.GetFileName(_pickerCurrent)</b>
+                        </span>
+                        <Btn Variant="primary" Size="sm" OnClick="PickerConfirm">
+                            @L["settings.root_folders.picker_use"]
+                        </Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _pickerOpen = false)">
+                            @L["settings.root_folders.btn_cancel"]
+                        </Btn>
+                    </div>
+                }
+            </div>
+        }
     </div>
 
-    <footer class="sfd__footer">
-        <Btn Variant="primary" Size="md" OnClick="SaveAsync"
-             Loading="@_saving"
-             Disabled="@(string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_path))">
-            @L["settings.root_folders.btn_save"]
-        </Btn>
-        <Btn Variant="ghost" Size="md" OnClick="CancelAsync">
-            @L["settings.root_folders.btn_cancel"]
-        </Btn>
-    </footer>
+    @if (!_pickerOpen)
+    {
+        <footer class="sfd__footer">
+            <Btn Variant="primary" Size="md" OnClick="SaveAsync"
+                 Loading="@_saving"
+                 Disabled="@(string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_path))">
+                @L["settings.root_folders.btn_save"]
+            </Btn>
+            <Btn Variant="ghost" Size="md" OnClick="CancelAsync">
+                @L["settings.root_folders.btn_cancel"]
+            </Btn>
+        </footer>
+    }
 </div>
 
 @code {
@@ -73,6 +151,12 @@
     private string _path = "";
     private string _typeStr = "Auto";
     private bool _saving;
+
+    // ── Picker ──
+    private bool _pickerOpen;
+    private bool _pickerLoading;
+    private string? _pickerCurrent;
+    private FolderBrowseEntryDto[] _pickerEntries = Array.Empty<FolderBrowseEntryDto>();
 
     protected override void OnParametersSet()
     {
@@ -89,6 +173,58 @@
             _typeStr = "Auto";
         }
     }
+
+    // ── Picker handlers ──
+
+    private async Task OpenPickerAsync()
+    {
+        _pickerOpen     = true;
+        _pickerCurrent  = null;
+        await LoadPickerAsync(null);
+    }
+
+    private async Task LoadPickerAsync(string? path)
+    {
+        _pickerLoading = true;
+        StateHasChanged();
+        try { _pickerEntries = await Api.BrowseFolderAsync(path); }
+        catch { _pickerEntries = Array.Empty<FolderBrowseEntryDto>(); }
+        _pickerLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task DrillInAsync(string targetPath)
+    {
+        _pickerCurrent = targetPath;
+        await LoadPickerAsync(targetPath);
+    }
+
+    private async Task PickerUpAsync()
+    {
+        if (_pickerCurrent is null) return;
+        var parent = System.IO.Path.GetDirectoryName(_pickerCurrent);
+        if (string.IsNullOrEmpty(parent))
+        {
+            _pickerCurrent = null;
+            await LoadPickerAsync(null);
+        }
+        else
+        {
+            _pickerCurrent = parent;
+            await LoadPickerAsync(parent);
+        }
+    }
+
+    private void PickerConfirm()
+    {
+        if (_pickerCurrent is null) return;
+        _path = _pickerCurrent;
+        if (string.IsNullOrWhiteSpace(_title))
+            _title = System.IO.Path.GetFileName(_pickerCurrent.TrimEnd('/', '\\')) ?? _pickerCurrent;
+        _pickerOpen = false;
+    }
+
+    // ── Save ──
 
     private async Task SaveAsync()
     {

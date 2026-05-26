@@ -44,17 +44,19 @@
                 var label = t.Value;
                 <button type="button"
                         class="@($"emd__tab {(_tab == key ? "emd__tab--active" : "")}")"
-                        @onclick="@(() => _tab = key)">
+                        @onclick="@(() => SwitchTabAsync(key))">
                     @label
                 </button>
             }
         </nav>
 
         <div class="emd__body">
-            @if      (_tab == "ids")     { @SourceIdsTab()  }
-            else if  (_tab == "basics")  { @BasicsTab()     }
-            else if  (_tab == "tags")    { @TagsTab()       }
-            else if  (_tab == "manage")  { @ManageTab()     }
+            @if      (_tab == "ids")      { @SourceIdsTab()  }
+            else if  (_tab == "basics")   { @BasicsTab()     }
+            else if  (_tab == "poster")   { @PosterTab()     }
+            else if  (_tab == "backdrop") { @BackdropTab()   }
+            else if  (_tab == "tags")     { @TagsTab()       }
+            else if  (_tab == "manage")   { @ManageTab()     }
         </div>
 
         <footer class="emd__footer">
@@ -85,9 +87,20 @@
     [
         new("ids",      "Source IDs"),
         new("basics",   "Basics"),
+        new("poster",   "Poster"),
+        new("backdrop", "Backdrop"),
         new("tags",     "Tags"),
         new("manage",   "Manage"),
     ];
+
+    // ── Image gallery state (Poster / Backdrop tabs) ──
+    // One-shot lazy fetch on first visit per tab. Apply is per-candidate so
+    // the user can compare and pick.
+    private string[]? _posterCandidates;
+    private string[]? _backdropCandidates;
+    private bool _postersLoading;
+    private bool _backdropsLoading;
+    private string? _applyingImageUrl;
 
     // ── Basics state ──
     private string  _bTitle = "";
@@ -140,6 +153,56 @@
     }
 
     private async Task OnCloseAsync() => await OnClose.InvokeAsync();
+
+    /// <summary>Switch tab + lazy-fetch the image gallery the first time the
+    /// Poster / Backdrop tab is opened.</summary>
+    private async Task SwitchTabAsync(string key)
+    {
+        _tab = key;
+        if (Item is null) return;
+        if (key == "poster" && _posterCandidates is null && !_postersLoading)
+            _ = LoadPosterCandidatesAsync();
+        else if (key == "backdrop" && _backdropCandidates is null && !_backdropsLoading)
+            _ = LoadBackdropCandidatesAsync();
+        await Task.CompletedTask;
+    }
+
+    private async Task LoadPosterCandidatesAsync()
+    {
+        if (Item is null) return;
+        _postersLoading = true;
+        StateHasChanged();
+        try { _posterCandidates = await Api.GetPosterAlternativesAsync(Item.Id); }
+        catch { _posterCandidates = Array.Empty<string>(); }
+        _postersLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadBackdropCandidatesAsync()
+    {
+        if (Item is null) return;
+        _backdropsLoading = true;
+        StateHasChanged();
+        try { _backdropCandidates = await Api.GetBackdropAlternativesAsync(Item.Id); }
+        catch { _backdropCandidates = Array.Empty<string>(); }
+        _backdropsLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task ApplyImageAsync(string imageType, string url)
+    {
+        if (Item is null) return;
+        _applyingImageUrl = url;
+        StateHasChanged();
+        try
+        {
+            await Api.ApplyImageAsync(Item.Id, new ApplyImageRequest(imageType, url));
+            await OnSaved.InvokeAsync();
+        }
+        catch { /* swallow */ }
+        _applyingImageUrl = null;
+        StateHasChanged();
+    }
 
     private async Task SaveAsync()
     {
@@ -410,6 +473,60 @@
                 </button>
             }
         </div>
+    </div>;
+
+    private RenderFragment PosterTab() => @<div class="emd-form">
+        @if (_postersLoading)
+        {
+            <div class="emd-gallery-loading"><InlineDots Label="Fetching posters" /></div>
+        }
+        else if (_posterCandidates is null || _posterCandidates.Length == 0)
+        {
+            <div class="emd-gallery-empty">No alternative posters available — TMDB / MAL haven't surfaced any for this title.</div>
+        }
+        else
+        {
+            <div class="emd-gallery emd-gallery--posters">
+                @foreach (var url in _posterCandidates)
+                {
+                    var u = url;
+                    var busy = _applyingImageUrl == u;
+                    <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
+                            disabled="@busy"
+                            @onclick="@(() => ApplyImageAsync("poster", u))">
+                        <img loading="lazy" src="@u" alt="poster candidate" />
+                        @if (busy) { <div class="emd-gallery__overlay"><Spinner Size="md" Tone="light" /></div> }
+                    </button>
+                }
+            </div>
+        }
+    </div>;
+
+    private RenderFragment BackdropTab() => @<div class="emd-form">
+        @if (_backdropsLoading)
+        {
+            <div class="emd-gallery-loading"><InlineDots Label="Fetching backdrops" /></div>
+        }
+        else if (_backdropCandidates is null || _backdropCandidates.Length == 0)
+        {
+            <div class="emd-gallery-empty">No alternative backdrops available.</div>
+        }
+        else
+        {
+            <div class="emd-gallery emd-gallery--backdrops">
+                @foreach (var url in _backdropCandidates)
+                {
+                    var u = url;
+                    var busy = _applyingImageUrl == u;
+                    <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
+                            disabled="@busy"
+                            @onclick="@(() => ApplyImageAsync("fanart", u))">
+                        <img loading="lazy" src="@u" alt="backdrop candidate" />
+                        @if (busy) { <div class="emd-gallery__overlay"><Spinner Size="md" Tone="light" /></div> }
+                    </button>
+                }
+            </div>
+        }
     </div>;
 
     private RenderFragment ManageTab() => @<div class="emd-form">

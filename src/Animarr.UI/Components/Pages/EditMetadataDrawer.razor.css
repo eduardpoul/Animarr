@@ -2,6 +2,43 @@
    560px right-side drawer with gradient surface→surface-2, animated entry,
    underline tabs, sticky footer. */
 
+/* Image-gallery (Poster + Backdrop tabs). */
+.emd-gallery {
+    display: grid;
+    gap: 8px;
+}
+.emd-gallery--posters  { grid-template-columns: repeat(3, 1fr); }
+.emd-gallery--backdrops { grid-template-columns: repeat(2, 1fr); }
+.emd-gallery__card {
+    position: relative;
+    background: #14171b;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color .12s, transform .12s;
+}
+.emd-gallery__card:hover { border-color: oklch(60% 0.18 25); transform: scale(1.02); }
+.emd-gallery__card img { width: 100%; display: block; }
+.emd-gallery__card--busy { opacity: 0.6; cursor: wait; }
+.emd-gallery__overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+}
+.emd-gallery-empty, .emd-gallery-loading {
+    padding: 32px;
+    text-align: center;
+    color: #5b6470;
+    background: #14171b;
+    border: 1px dashed #21262d;
+    border-radius: 6px;
+}
+
 .emd-overlay {
     position: fixed;
     inset: 0;

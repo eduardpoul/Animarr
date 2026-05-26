@@ -67,6 +67,37 @@
     gap: 8px;
 }
 
+.torrent-add__src {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.torrent-add__src-btn {
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    color: #a0a8b0;
+    cursor: pointer;
+    font: inherit;
+}
+
+.torrent-add__src-btn--active {
+    background: oklch(60% 0.18 25);
+    border-color: transparent;
+    color: white;
+}
+
+.torrent-add__filehint {
+    margin-top: 6px;
+    color: #5b6470;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .torrent-empty {
     padding: 32px;
     text-align: center;
