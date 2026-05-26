@@ -1,0 +1,33 @@
+using Animarr.Shared;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Animarr.UI;
+
+/// <summary>
+/// DI registration helpers for Animarr.UI. Each host (Animarr.Web.Client
+/// WASM, Animarr.App MAUI Hybrid, Animarr.Web during transition) calls
+/// these in its <c>builder.Services</c> setup.
+///
+/// Animarr.UI itself doesn't depend on a concrete HttpClient or hub URL —
+/// the host wires those up. We just make sure <see cref="IAnimarrApiClient"/>
+/// is registered the canonical way every consumer expects.
+/// </summary>
+public static class AnimarrUiServiceCollectionExtensions
+{
+    /// <summary>
+    /// Register an HTTP-backed <see cref="IAnimarrApiClient"/> against the
+    /// host's pre-configured <c>HttpClient</c>. The host is responsible for
+    /// adding an <c>HttpClient</c> with the right <c>BaseAddress</c> — for
+    /// the WASM client that's the page origin; for MAUI it's the user's
+    /// configured server URL.
+    /// </summary>
+    public static IServiceCollection AddAnimarrApiClient(this IServiceCollection services)
+    {
+        services.AddScoped<IAnimarrApiClient>(sp =>
+        {
+            var http = sp.GetRequiredService<HttpClient>();
+            return new HttpAnimarrApiClient(http);
+        });
+        return services;
+    }
+}
