@@ -1,0 +1,58 @@
+@*
+    Section folder delete-confirm dialog. The server's DELETE /api/folders/{id}
+    cascades through child watchers, queue rows and MediaItems — so the client
+    just makes one call and reloads. Files on disk are never touched.
+*@
+
+@inject IAnimarrApiClient Api
+
+<div class="sfdd-overlay" @onclick="CancelAsync"></div>
+<div class="sfdd" role="dialog" aria-modal="true" @onclick:stopPropagation>
+    <header class="sfdd__header">
+        <div class="sfdd__header-icon"><DIcon Name="warn" Size="17" /></div>
+        <div class="sfdd__header-text">
+            <div class="sfdd__overline">DANGER</div>
+            <h2 class="sfdd__title">@L.Get("settings.root_folders.delete_title", Section.Label)</h2>
+            <div class="sfdd__sub">@L["settings.root_folders.delete_body"]</div>
+        </div>
+        <button type="button" class="sfdd__close" @onclick="CancelAsync" aria-label="Close">
+            <DIcon Name="x" Size="18" />
+        </button>
+    </header>
+
+    <footer class="sfdd__footer">
+        <Btn Variant="danger" Size="md" OnClick="ConfirmAsync" Loading="@_removing">
+            @L["settings.root_folders.btn_remove"]
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CancelAsync" Disabled="@_removing">
+            @L["settings.root_folders.btn_cancel"]
+        </Btn>
+    </footer>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public FolderWatcherDto Section { get; set; } = null!;
+    [Parameter] public EventCallback OnRemoved { get; set; }
+    [Parameter] public EventCallback OnCanceled { get; set; }
+
+    private bool _removing;
+
+    private async Task ConfirmAsync()
+    {
+        _removing = true;
+        StateHasChanged();
+        try
+        {
+            await Api.DeleteFolderAsync(Section.Id);
+            await OnRemoved.InvokeAsync();
+        }
+        catch { /* server-side delete failed — leave dialog open */ }
+        finally
+        {
+            _removing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CancelAsync() => await OnCanceled.InvokeAsync();
+}

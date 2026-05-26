@@ -1,20 +1,79 @@
 @page "/torrents"
-@inject IAnimarrApiClient Api
 @implements IAsyncDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
 
 @using Microsoft.AspNetCore.SignalR.Client
 
 @*
-    Lean torrents list. Fetches the persistent records via the API on first
-    render, then subscribes to TorrentHub for live snapshots (download rate,
-    seeds, peers, state). State merges over the persistent row by InfoHash.
+    Torrents list with add-magnet form + pause/resume/delete + per-row link
+    to TorrentEdit. SignalR live snapshots merge over the persistent record
+    by InfoHash for download/upload rates.
 
-    Add-torrent and per-torrent settings UIs still live in Animarr.Web's
-    Razor pages — those involve file-picker JS interop + complex form state
-    and migrate later in Phase 3 proper.
+    The full .torrent file upload UX still lives in Animarr.Web (uses
+    InputFile + JS interop for drag-and-drop). Magnet-add covers most of
+    the day-to-day need and lands here first.
 *@
 
-<h1>Torrents</h1>
+<header class="d-page-header">
+    <div class="d-page-header__main">
+        <div class="d-page-header__overline">TRANSFERS</div>
+        <h1 class="d-page-header__title">TORRENTS</h1>
+        <div class="d-page-header__sub">Live status pulled every 500ms via SignalR.</div>
+    </div>
+    <div class="d-page-header__actions">
+        <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
+            <DIcon Name="archive" Size="13" /> History
+        </Btn>
+        <Btn Variant="primary" Size="md" OnClick="@(() => _addOpen = !_addOpen)">
+            <DIcon Name="plus" Size="14" /> Add magnet
+        </Btn>
+    </div>
+</header>
+
+@if (_addOpen)
+{
+    <div class="torrent-add">
+        <label class="settings-field">
+            <span class="settings-field__label">Magnet URI</span>
+            <input class="settings-field__input" placeholder="magnet:?xt=urn:btih:…"
+                   value="@_addMagnet"
+                   @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
+        </label>
+        <label class="settings-field">
+            <span class="settings-field__label">Save to folder</span>
+            <select class="settings-field__select"
+                    value="@(_addFolderId?.ToString() ?? "")"
+                    @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                <option value="">— default —</option>
+                @foreach (var f in _folders ?? Array.Empty<FolderWatcherDto>())
+                {
+                    <option value="@f.Id">@f.Label — @f.Path</option>
+                }
+            </select>
+        </label>
+        <div class="torrent-add__row">
+            <label class="torrent-add__toggle">
+                <input type="checkbox" checked="@_addAutoRename"
+                       @onchange="@(e => _addAutoRename = (bool)e.Value!)" />
+                <span>Auto-rename when finished</span>
+            </label>
+            <label class="torrent-add__toggle">
+                <input type="checkbox" checked="@_addStopAfter"
+                       @onchange="@(e => _addStopAfter = (bool)e.Value!)" />
+                <span>Stop after download</span>
+            </label>
+        </div>
+        <div class="torrent-add__actions">
+            <Btn Variant="primary" Size="md" Loading="@_adding"
+                 Disabled="@(string.IsNullOrWhiteSpace(_addMagnet) || _adding)"
+                 OnClick="AddMagnetAsync">
+                Add torrent
+            </Btn>
+            <Btn Variant="ghost" Size="md" OnClick="@(() => _addOpen = false)">Cancel</Btn>
+        </div>
+    </div>
+}
 
 @if (_records is null)
 {
@@ -22,7 +81,7 @@
 }
 else if (_records.Length == 0)
 {
-    <p>No torrents yet. Add one via Animarr.Web for now — the WASM add-flow lands in Phase 3.</p>
+    <div class="torrent-empty">No torrents yet — paste a magnet above to start one.</div>
 }
 else
 {
@@ -32,24 +91,46 @@ else
                 <th>Name</th>
                 <th>State</th>
                 <th style="width:140px">Progress</th>
-                <th style="width:120px;text-align:right">Down</th>
-                <th style="width:120px;text-align:right">Up</th>
+                <th style="width:110px;text-align:right">Down</th>
+                <th style="width:110px;text-align:right">Up</th>
+                <th style="width:80px"></th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var t in _records)
+            @foreach (var t in _records.OrderByDescending(r => r.AddedAt))
             {
                 _live.TryGetValue(t.InfoHash, out var live);
                 var progress = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
+                var state = live?.State ?? t.State.ToString();
+                var paused = t.State == TorrentRecordState.Paused;
                 <tr>
-                    <td>@t.Name</td>
-                    <td>@(live?.State ?? t.State.ToString())</td>
+                    <td>
+                        <a href="@($"/torrents/{t.InfoHash}/edit")">@t.Name</a>
+                    </td>
+                    <td>@state</td>
                     <td>
                         <div class="bar"><div class="bar-fill" style="width:@(progress*100)%"></div></div>
                         <span class="bar-pct">@($"{progress * 100:F1}%")</span>
                     </td>
                     <td style="text-align:right">@FormatRate(live?.DownloadRate ?? 0)</td>
                     <td style="text-align:right">@FormatRate(live?.UploadRate ?? 0)</td>
+                    <td class="torrent-actions">
+                        @if (paused)
+                        {
+                            <button class="t-icon" title="Resume" @onclick="@(() => ResumeAsync(t.Id))">
+                                <DIcon Name="play" Size="13" />
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="t-icon" title="Pause" @onclick="@(() => PauseAsync(t.Id))">
+                                <DIcon Name="pause" Size="13" />
+                            </button>
+                        }
+                        <button class="t-icon t-icon--danger" title="Remove" @onclick="@(() => DeleteAsync(t.Id))">
+                            <DIcon Name="trash" Size="13" />
+                        </button>
+                    </td>
                 </tr>
             }
         </tbody>
@@ -58,33 +139,86 @@ else
 
 @code {
     private TorrentRecordDto[]? _records;
+    private FolderWatcherDto[]? _folders;
     private readonly Dictionary<string, TorrentLiveStatsDto> _live = new();
     private HubConnection? _hub;
 
-    [Inject] private NavigationManager Nav { get; set; } = default!;
+    private bool   _addOpen;
+    private string _addMagnet = "";
+    private Guid?  _addFolderId;
+    private bool   _addAutoRename = true;
+    private bool   _addStopAfter;
+    private bool   _adding;
 
     protected override async Task OnInitializedAsync()
     {
-        _records = await Api.GetTorrentsAsync();
-        StateHasChanged();
+        await LoadAsync();
 
-        // Build the absolute hub URL the same way HttpAnimarrApiClient
-        // builds its API calls — use the current navigation base address.
         var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
         _hub = new HubConnectionBuilder()
             .WithUrl(hubUri)
             .WithAutomaticReconnect()
             .Build();
-
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
         {
             _live.Clear();
             foreach (var s in env.Items) _live[s.InfoHash] = s;
             InvokeAsync(StateHasChanged);
         });
-
         try { await _hub.StartAsync(); }
-        catch { /* server doesn't run the hub — list still renders from REST */ }
+        catch { /* hub unavailable — list still renders from REST */ }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _records = await Api.GetTorrentsAsync();
+            _folders = await Api.GetFoldersAsync();
+        }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task AddMagnetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addMagnet)) return;
+        _adding = true;
+        StateHasChanged();
+        try
+        {
+            await Api.AddMagnetAsync(new AddMagnetRequest(
+                MagnetLink:             _addMagnet.Trim(),
+                FolderWatcherId:        _addFolderId,
+                AutoRename:             _addAutoRename,
+                StopAfterDownload:      _addStopAfter,
+                SkipSubfolderStructure: false,
+                SuppressRootFolder:     false,
+                CustomRootFolderName:   null));
+            _addMagnet = "";
+            _addOpen = false;
+            await LoadAsync();
+        }
+        catch { /* swallow */ }
+        finally { _adding = false; StateHasChanged(); }
+    }
+
+    private async Task PauseAsync(Guid id)
+    {
+        try { await Api.PauseTorrentAsync(id); await LoadAsync(); }
+        catch { /* swallow */ }
+    }
+
+    private async Task ResumeAsync(Guid id)
+    {
+        try { await Api.ResumeTorrentAsync(id); await LoadAsync(); }
+        catch { /* swallow */ }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try { await Api.DeleteTorrentAsync(id, deleteFiles: false); await LoadAsync(); }
+        catch { /* swallow */ }
     }
 
     public async ValueTask DisposeAsync()

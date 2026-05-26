@@ -1,0 +1,321 @@
+@page "/catalog/{Id:guid}"
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@*
+    Media detail — slimmed for the API-driven client.
+
+    Covered: poster + hero metadata, synopsis, details column, identification
+    sources (TMDB / MAL / IMDb links), tag list, season list with per-episode
+    watched toggles, Edit metadata drawer, Re-identify CTA, Continue-watching
+    hint surface.
+
+    Skipped relative to Animarr.Web:
+      • In-page video / HLS player launch — requires the file-enumeration
+        endpoint (currently not in the API surface; the server-side page
+        does it via PatternMatchService + filesystem walk). Tracked as a
+        follow-up; for now the "Play" CTA hands off to the server's
+        Razor MediaDetail page over a deep link.
+      • LLM-driven episode-to-file mapping — same reason.
+      • DLNA cast drawer — re-add once the player launch lands.
+*@
+
+<PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
+
+@if (_loading)
+{
+    <div class="animarr-progress">
+        <div class="animarr-progress__track">
+            <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+        </div>
+    </div>
+}
+else if (_item is null)
+{
+    <div class="md-not-found">
+        <div class="md-not-found__text">@L["media_detail.not_found"]</div>
+        <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/"))">
+            <DIcon Name="chev-l" Size="14" /> @L["media_detail.btn_back"]
+        </Btn>
+    </div>
+}
+else
+{
+    var item = _item;
+
+    @* ── Hero (inline — original MediaDetailHero hasn't been migrated yet) ── *@
+    <header class="md-hero">
+        <div class="md-hero__poster">
+            @if (!string.IsNullOrEmpty(item.PosterPath))
+            {
+                <img src="@PosterUrl(item.PosterPath)" alt="@item.Title" />
+            }
+        </div>
+        <div class="md-hero__main">
+            <div class="md-hero__overline">@item.MediaType.ToString().ToUpperInvariant()</div>
+            <h1 class="md-hero__title">@item.Title</h1>
+            @if (!string.IsNullOrEmpty(item.OriginalTitle))
+            {
+                <div class="md-hero__sub">@item.OriginalTitle</div>
+            }
+            <div class="md-hero__meta">
+                @if (item.Year is not null) { <span>@item.Year</span> }
+                @if (item.Rating is not null) { <span>★ @item.Rating?.ToString("F1")</span> }
+                @if (!string.IsNullOrEmpty(item.Status)) { <span>@item.Status</span> }
+                @if (!string.IsNullOrEmpty(item.ContentRating)) { <span>@item.ContentRating</span> }
+            </div>
+            <div class="md-hero__cta">
+                @if (_continue is not null)
+                {
+                    <Btn Variant="primary" Size="lg" OnClick="HandleContinueClick">
+                        <DIcon Name="play" Size="14" /> @_continue.Label
+                    </Btn>
+                }
+                <Btn Variant="ghost" Size="lg" OnClick="OpenEditPanel">
+                    <DIcon Name="pencil" Size="14" /> Edit metadata
+                </Btn>
+            </div>
+        </div>
+    </header>
+
+    <div class="md-body">
+        @* Synopsis *@
+        <section class="md-body__col md-synopsis">
+            <div class="md-overline">SYNOPSIS</div>
+            @if (!string.IsNullOrEmpty(item.Description))
+            {
+                <p class="md-prose">@item.Description</p>
+            }
+            else
+            {
+                <p class="md-prose md-prose--empty">No synopsis available.</p>
+            }
+            <div class="md-actions">
+                <Btn Variant="ghost" Size="md" OnClick="ReidentifyAsync">
+                    <DIcon Name="refresh" Size="14" /> @L["catalog.btn_reidentify"]
+                </Btn>
+            </div>
+        </section>
+
+        @* Details *@
+        <section class="md-body__col md-details">
+            <div class="md-overline">DETAILS</div>
+            <dl class="md-kv">
+                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>Studio</dt><dd>@item.Studio</dd> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <dt>Language</dt><dd>@item.Language</dd> }
+                @if (item.Runtime is > 0) { <dt>Runtime</dt><dd>@item.Runtime m</dd> }
+                @if (item.EpisodeCount is > 0) { <dt>Episodes</dt><dd>@item.EpisodeCount</dd> }
+                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>Season</dt><dd>@item.SeasonLabel</dd> }
+                @if (!string.IsNullOrEmpty(item.Status)) { <dt>Status</dt><dd>@item.Status</dd> }
+                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>Rating</dt><dd>@item.ContentRating</dd> }
+                @if (item.Genres.Length > 0)
+                {
+                    <dt>Tags</dt>
+                    <dd class="md-kv__tags">@string.Join(" · ", item.Genres)</dd>
+                }
+            </dl>
+        </section>
+
+        @* Identification *@
+        <section class="md-body__col md-ident">
+            <div class="md-overline md-overline--dim">IDENTIFICATION</div>
+            @if (item.TmdbId is not null)
+            {
+                <div class="md-id-row">
+                    <span class="md-id-row__src">TMDB</span>
+                    <a class="md-id-row__link"
+                       target="_blank" rel="noopener"
+                       href="@($"https://www.themoviedb.org/{(item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{item.TmdbId}")">
+                        @item.TmdbId
+                        <DIcon Name="external" Size="10" />
+                    </a>
+                </div>
+            }
+            @if (item.MalId is not null)
+            {
+                <div class="md-id-row">
+                    <span class="md-id-row__src">MAL</span>
+                    <a class="md-id-row__link"
+                       target="_blank" rel="noopener"
+                       href="@($"https://myanimelist.net/anime/{item.MalId}")">
+                        @item.MalId
+                        <DIcon Name="external" Size="10" />
+                    </a>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(item.ImdbId))
+            {
+                <div class="md-id-row">
+                    <span class="md-id-row__src">IMDb</span>
+                    <a class="md-id-row__link"
+                       target="_blank" rel="noopener"
+                       href="@($"https://www.imdb.com/title/{item.ImdbId}")">
+                        @item.ImdbId
+                        <DIcon Name="external" Size="10" />
+                    </a>
+                </div>
+            }
+        </section>
+    </div>
+
+    @* ── Seasons + episodes ── *@
+    @if (item.Seasons.Length > 0)
+    {
+        <div class="md-seasons">
+            <nav class="md-season-tabs">
+                @foreach (var s in item.Seasons.OrderBy(s => s.Number))
+                {
+                    var n = s.Number;
+                    <button type="button"
+                            class="@($"md-season-tab {(_activeSeason == n ? "md-season-tab--active" : "")}")"
+                            @onclick="@(() => _activeSeason = n)">
+                        @($"Season {n}") <span class="md-season-tab__count">@s.EpisodeCount</span>
+                    </button>
+                }
+            </nav>
+
+            @{ var active = item.Seasons.FirstOrDefault(s => s.Number == _activeSeason); }
+            @if (active is not null)
+            {
+                if (!string.IsNullOrEmpty(active.Overview))
+                {
+                    <p class="md-season-overview">@active.Overview</p>
+                }
+                <div class="md-episode-list">
+                    @for (int i = 1; i <= active.EpisodeCount; i++)
+                    {
+                        var ep = i;
+                        var watched = _watchStates.Any(w =>
+                            w.Season == _activeSeason && w.Episode == ep && w.IsWatched);
+                        <div class="md-episode-row">
+                            <span class="md-episode-num">EP @ep.ToString("D2")</span>
+                            <label class="md-episode-watch">
+                                <input type="checkbox" checked="@watched"
+                                       @onchange="@(e => ToggleEpisodeWatched(_activeSeason, ep, (bool)e.Value!))" />
+                                <span>Watched</span>
+                            </label>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else if (item.MediaType == MediaItemType.Movie)
+    {
+        <div class="md-movie-row">
+            <label class="md-episode-watch">
+                <input type="checkbox" checked="@_movieWatched"
+                       @onchange="@(e => ToggleMovieWatched((bool)e.Value!))" />
+                <span>Mark watched</span>
+            </label>
+        </div>
+    }
+}
+
+@* Edit metadata drawer *@
+@if (_editOpen && _item is not null)
+{
+    <EditMetadataDrawer Item="_item" OnClose="@(() => _editOpen = false)" OnSaved="OnEditSaved" />
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private MediaItemDto? _item;
+    private bool _loading = true;
+    private ContinueWatchDto? _continue;
+    private List<WatchStateDto> _watchStates = new();
+    private int _activeSeason = 1;
+    private bool _movieWatched;
+    private bool _editOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _item     = await Api.GetMediaItemAsync(Id);
+            _continue = await Api.GetContinueAsync(Id);
+            var states = await Api.GetWatchStatesAsync(Id);
+            _watchStates = states.ToList();
+            _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
+
+            // Default to first available season.
+            if (_item is not null && _item.Seasons.Length > 0)
+                _activeSeason = _item.Seasons.OrderBy(s => s.Number).First().Number;
+        }
+        catch { _item = null; }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task HandleContinueClick()
+    {
+        // The full server-side page launches the HLS player here; the WASM
+        // version doesn't have the file path resolver yet. Hand off to the
+        // server's Razor MediaDetail (same route) so the user gets playback
+        // until that endpoint lands.
+        if (_item is null) return;
+        Nav.NavigateTo($"/catalog/{_item.Id}", forceLoad: true);
+        await Task.CompletedTask;
+    }
+
+    private async Task ReidentifyAsync()
+    {
+        if (_item is null) return;
+        try { await Api.EnqueueIdentificationAsync(_item.FolderId, forceRefresh: true); }
+        catch { /* swallow */ }
+    }
+
+    private void OpenEditPanel() => _editOpen = true;
+
+    private async Task OnEditSaved()
+    {
+        _editOpen = false;
+        await LoadAsync();
+    }
+
+    private async Task ToggleEpisodeWatched(int season, int episode, bool watched)
+    {
+        if (_item is null) return;
+        try
+        {
+            var updated = await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
+                MediaItemId: _item.Id,
+                Season:      season,
+                Episode:     episode,
+                FilePath:    null,
+                IsWatched:   watched));
+            // Refresh the local list — the API returns the freshly-persisted row.
+            _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
+            _watchStates.Add(updated);
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task ToggleMovieWatched(bool watched)
+    {
+        if (_item is null) return;
+        try
+        {
+            await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
+                MediaItemId: _item.Id,
+                Season:      null,
+                Episode:     null,
+                FilePath:    null,
+                IsWatched:   watched));
+            _movieWatched = watched;
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private static string PosterUrl(string path)
+        => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(path)}";
+}

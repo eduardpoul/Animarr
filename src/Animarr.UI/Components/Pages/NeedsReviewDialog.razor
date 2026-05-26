@@ -1,0 +1,123 @@
+@*
+    NeedsReview modal.
+
+    Loads all MediaItems with IdentificationStatus=NeedsReview via the
+    REST API — the DTO already carries the parsed candidate list, so no
+    client-side JSON parsing is needed. Click "Use" → calls the resolve
+    endpoint which delegates to MetadataService.ApplyManualAsync server-side.
+*@
+
+@inject IAnimarrApiClient Api
+
+@if (IsOpen)
+{
+    <div class="nrm-overlay" @onclick="OnCloseAsync"></div>
+    <div class="nrm">
+        <header class="nrm__header">
+            <div class="nrm__header-icon"><DIcon Name="warn" Size="17" /></div>
+            <div class="nrm__header-text">
+                <div class="nrm__overline">NEEDS REVIEW</div>
+                <h2 class="nrm__title">@_items.Count TITLES BELOW CONFIDENCE</h2>
+                <div class="nrm__sub">Pick the right match — Animarr stores it in SQLite, leaves folders on disk untouched.</div>
+            </div>
+            <button type="button" class="nrm__close" @onclick="OnCloseAsync" aria-label="Close">
+                <DIcon Name="x" Size="18" />
+            </button>
+        </header>
+
+        <div class="nrm__body">
+            @if (_loading)
+            {
+                <div class="nrm__empty">Loading…</div>
+            }
+            else if (_items.Count == 0)
+            {
+                <div class="nrm__empty">All items are identified.</div>
+            }
+            else
+            {
+                @foreach (var item in _items)
+                {
+                    <div class="nrm-row">
+                        <div class="nrm-row__folder"><code>@item.Title</code></div>
+                        <div class="nrm-row__candidates">
+                            @foreach (var c in item.Candidates)
+                            {
+                                var key = $"{item.Id}|{c.Source}|{c.ExternalId}";
+                                <div class="nrm-card">
+                                    <div class="nrm-card__poster" style="--hue:@(item.Hue ?? 25);">
+                                        <span class="nrm-card__cjk">@(item.CjkTitle ?? "?")</span>
+                                    </div>
+                                    <div class="nrm-card__body">
+                                        <div>
+                                            <div class="nrm-card__title">@c.Title</div>
+                                            <div class="nrm-card__meta">@(c.Year?.ToString() ?? "—") · @c.Source.ToUpperInvariant()</div>
+                                        </div>
+                                        <div class="nrm-card__foot">
+                                            <span class="@($"nrm-card__conf {(c.Confidence > 0.7 ? "nrm-card__conf--ok" : "nrm-card__conf--warn")}")">
+                                                @($"{c.Confidence:P0}")
+                                            </span>
+                                            <button type="button"
+                                                    class="@($"nrm-card__use {(_busyKey == key ? "nrm-card__use--loading" : "")}")"
+                                                    disabled="@(_busyKey == key)"
+                                                    @onclick="@(() => ApplyAsync(item.Id, c))">
+                                                @if (_busyKey == key) { <Spinner Size="sm" Tone="light" /> }
+                                                Use
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                            <button type="button" class="nrm-search">
+                                <DIcon Name="search" Size="13" /> SEARCH MANUALLY
+                            </button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool _loading = true;
+    private string? _busyKey;
+    private List<MediaItemDto> _items = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && _items.Count == 0) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var fetched = await Api.GetNeedsReviewAsync();
+            _items = fetched.Where(m => m.Candidates.Length > 0).ToList();
+        }
+        catch { _items = new(); }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ApplyAsync(Guid mediaItemId, IdentificationCandidateDto cand)
+    {
+        _busyKey = $"{mediaItemId}|{cand.Source}|{cand.ExternalId}";
+        StateHasChanged();
+        try
+        {
+            await Api.ResolveMediaCandidateAsync(mediaItemId,
+                new ResolveCandidateRequest(cand.Source, cand.ExternalId));
+            await LoadAsync();
+        }
+        catch { /* toast not wired up yet in UI library — silent for now */ }
+        finally { _busyKey = null; StateHasChanged(); }
+    }
+
+    private async Task OnCloseAsync() => await OnClose.InvokeAsync();
+}

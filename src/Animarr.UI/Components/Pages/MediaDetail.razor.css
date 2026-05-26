@@ -1,0 +1,752 @@
+/* MediaDetail page-local styles.
+   Spec source: design_handoff_animarr/screens-v3.jsx::MediaDetailV3.
+   The hero is rendered by <MediaDetailHero /> with its own scoped CSS. */
+
+/* ── Not-found state ───────────────────────────────────────── */
+.md-not-found {
+    text-align: center;
+    padding: 60px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-5);
+}
+
+.md-not-found__text {
+    color: var(--text-dim);
+    font-size: 14px;
+}
+
+/* ── 3-column body grid ────────────────────────────────────── */
+/* Spec lines 412-420: 2.2fr / 1fr / 280-360px, 48px gap, 60px top pad. */
+.md-body {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) minmax(220px, 1fr) minmax(280px, 360px);
+    gap: var(--space-12);
+    padding-top: var(--space-12);
+    margin-bottom: var(--space-12);
+    align-items: start;
+}
+
+@media (max-width: 1000px) {
+    .md-body { grid-template-columns: 1fr; }
+}
+
+.md-body__col { min-width: 0; }
+
+/* Section overline — small mono uppercase, accent-hi tint per spec. */
+.md-overline {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    color: var(--accent-hi);
+    margin-bottom: var(--space-5);
+    text-transform: uppercase;
+}
+
+.md-overline--dim  { color: var(--text-faint); }
+.md-overline--warn { color: var(--warn); }
+
+/* ── Synopsis ─────────────────────────────────────────────── */
+.md-prose {
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--text);
+    margin: 0 0 var(--space-9);
+    text-wrap: pretty;
+}
+
+.md-prose--empty {
+    color: var(--text-faint);
+    font-style: italic;
+}
+
+.md-actions {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    margin-top: var(--space-10);
+}
+
+/* ── Details ──────────────────────────────────────────────── */
+.md-kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 18px;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.md-kv dt {
+    color: var(--text-faint);
+    text-transform: capitalize;
+    letter-spacing: 0;
+}
+
+.md-kv dd {
+    margin: 0;
+    color: var(--text);
+}
+
+.md-kv__tags { color: var(--text-dim); }
+
+/* ── Movie file card section — CHANGELOG §3.
+   The card itself is component-scoped in MovieFileCard.razor.css; this
+   only sets the section spacing so it matches sibling sections. */
+.md-movie {
+    margin-top: var(--space-9);
+    margin-bottom: var(--space-12);
+}
+
+/* ── Identification panel ─────────────────────────────────── */
+/* Spec lines 451-477: surface card, padding 18, dashed-bottom rows. */
+.md-ident {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card-lg);
+    padding: var(--space-8);
+}
+
+.md-id-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 1px dashed var(--border);
+    font-family: var(--font-mono);
+}
+
+.md-id-row:last-of-type { border-bottom: 0; }
+
+.md-id-row__src {
+    width: 38px;
+    flex-shrink: 0;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+}
+
+.md-id-row__val {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-decoration: none;
+}
+.md-id-row__val:hover { color: var(--accent-hi); }
+
+.md-id-row__conf {
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+}
+.md-id-row__conf--ok   { color: var(--success); }
+.md-id-row__conf--warn { color: var(--warn); }
+.md-id-row__conf--low  { color: var(--text-faint); }
+
+.md-ident__on-disk-label {
+    margin-top: var(--space-6);
+    margin-bottom: var(--space-3);
+}
+
+.md-ident__path {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    word-break: break-all;
+}
+
+/* Raw folder/file name — emphasised vs the full path: a touch larger,
+   text instead of text-dim, lets the user spot identification mismatches
+   without parsing a long path. */
+.md-ident__rawname {
+    color: var(--text);
+    font-size: 12.5px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+
+/* ── NeedsReview block (top-3 candidates) ─────────────────── */
+.md-nr {
+    margin: var(--space-9) 0 var(--space-12);
+    padding: var(--space-7) var(--space-8);
+    border: 1px solid oklch(0.60 0.16 75 / 0.40);
+    border-radius: var(--radius-card);
+    background: oklch(0.80 0.17 75 / 0.06);
+}
+
+.md-nr__head {
+    display: flex;
+    gap: var(--space-5);
+    margin-bottom: var(--space-7);
+}
+
+.md-nr__icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-chip);
+    display: grid;
+    place-items: center;
+    color: var(--warn);
+    background: oklch(0.80 0.17 75 / 0.18);
+    border: 1px solid oklch(0.60 0.16 75 / 0.40);
+    flex-shrink: 0;
+}
+
+.md-nr__head-text { flex: 1; }
+
+.md-nr__hint {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin-top: var(--space-1);
+}
+
+.md-nr__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.md-nr-card {
+    display: flex;
+    gap: var(--space-5);
+    align-items: flex-start;
+    padding: var(--space-3);
+    border-radius: var(--radius-chip);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.md-nr-card__poster {
+    width: 60px;
+    height: 90px;
+    object-fit: cover;
+    border-radius: var(--radius-badge);
+    background: var(--surface-3);
+    flex-shrink: 0;
+    cursor: zoom-in;
+}
+
+.md-nr-card__poster--empty {
+    display: grid;
+    place-items: center;
+    color: var(--text-faint);
+    cursor: default;
+}
+
+.md-nr-card__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.md-nr-card__title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    letter-spacing: -0.018em;
+    color: var(--text);
+}
+
+.md-nr-card__type {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: var(--space-1);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.md-nr-card__overview {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: var(--space-2);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.5;
+}
+
+.md-nr-card__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: stretch;
+    flex-shrink: 0;
+}
+
+.md-nr-card__src {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent-hi);
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    text-transform: uppercase;
+}
+.md-nr-card__src:hover { color: var(--text); }
+
+/* ── Episodes section ──────────────────────────────────────── */
+/* Spec lines 481-515: header row with EPISODES overline + SEASON 0N display,
+   "N/M on disk" inline subtitle, season switcher buttons on the right. */
+.md-eps {
+    padding: var(--space-10) 0 var(--space-12);
+}
+
+.md-eps__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-10);
+    gap: var(--space-7);
+    flex-wrap: wrap;
+}
+
+.md-eps__title {
+    font-family: var(--font-display);
+    font-size: 44px;
+    line-height: 1;
+    letter-spacing: -0.018em;
+    margin: var(--space-2) 0 0;
+    color: var(--text);
+}
+
+.md-eps__count {
+    font-family: var(--font-ui);
+    font-size: 18px;
+    color: var(--text-faint);
+    margin-left: var(--space-6);
+    letter-spacing: 0;
+    font-weight: 400;
+}
+
+.md-eps__seasons {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.md-eps__season-btn {
+    appearance: none;
+    cursor: pointer;
+    padding: 10px 18px;
+    border-radius: var(--radius-chip);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    background: var(--surface);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    transition: color var(--motion-base), background var(--motion-base), border-color var(--motion-base);
+}
+
+.md-eps__season-btn:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.md-eps__season-btn--active {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    border-color: var(--accent-line);
+}
+
+.md-eps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-7);
+}
+
+.md-eps__empty {
+    color: var(--text-faint);
+    font-size: 13px;
+    font-family: var(--font-mono);
+}
+
+/* ── Files section (only when no TMDB season metadata) ────── */
+.md-files {
+    padding: var(--space-10) 0 var(--space-12);
+}
+
+.md-files-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-5);
+}
+
+.md-file-card {
+    border-radius: var(--radius-chip);
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast), border-color var(--motion-fast);
+    user-select: none;
+}
+
+.md-file-card--clickable { cursor: pointer; }
+
+.md-file-card--clickable:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card);
+    border-color: var(--border-strong);
+}
+
+.md-file-art {
+    aspect-ratio: 16 / 9;
+    background: var(--surface-2);
+    display: grid;
+    place-items: center;
+    color: var(--text-faint);
+    position: relative;
+}
+
+.md-file-play-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.32);
+    opacity: 0;
+    transition: opacity var(--motion-fast);
+}
+
+.md-file-card--clickable:hover .md-file-play-overlay { opacity: 1; }
+
+.md-file-label {
+    padding: var(--space-2) var(--space-3) 3px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.md-file-meta {
+    padding: 0 var(--space-3) var(--space-2);
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+}
+
+/* ── Video player overlay ─────────────────────────────────── */
+.vp-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(0, 0, 0, 0.78);
+    display: grid;
+    place-items: center;
+}
+
+/* Shell wraps the Artplayer container. Sizing only — no transforms /
+   backdrop-filters that could block NVIDIA RTX VSR from engaging on
+   the inner <video>. Artplayer builds its own chrome inside .vp-art
+   and handles its own idle-fade. */
+.vp-shell {
+    position: relative;          /* anchor for floating chips/cast menu */
+    background: #000;
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+    width: min(96vw, 1800px);
+    aspect-ratio: 16 / 9;        /* placeholder until Artplayer sizes itself */
+}
+
+/* Artplayer mount point — fills the shell. */
+.vp-art {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Media-info chips overlay ──────────────────────────────────────── */
+/* Top-left corner of the shell, always visible during playback. Previous
+   auto-hide attempts via :has(.art-hide-cursor) and JS mouse-activity
+   timers either fired at the wrong cadence or didn't get the events
+   (Artplayer captures mouse activity on its inner DOM, our listeners on
+   .vp-shell miss them). Always-on is the simplest robust answer and
+   matches what the user explicitly asks for — they want the chips for
+   information, not as transient indicators. */
+.vp-mediainfo {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    pointer-events: none;
+    opacity: 1;
+}
+.vp-mi-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+/* HDR-type chips get a warm gold accent — same convention Plex uses,
+   visually distinct from the codec/resolution chips. */
+.vp-mi-chip--hdr {
+    background: linear-gradient(180deg, #c89c4a, #8e6a26);
+    color: #fff;
+}
+.vp-mi-chip--tier {
+    background: rgba(120, 200, 255, 0.18);
+    color: #9bd6ff;
+}
+.vp-mi-chip--directplay {
+    background: rgba(120, 255, 180, 0.18);
+    color: #8be5b2;
+}
+
+/* ── Cast-to-TV menu (DLNA) ─────────────────────────────────── */
+/* Artplayer-era: cast button lives in Artplayer's chrome (added via
+   the controls array in animarr-player.js). Clicking it calls
+   ToggleCastMenuFromJs → Blazor toggles _castMenuOpen → this
+   floating menu renders absolute-positioned inside .vp-shell. */
+.vp-cast-menu--floating {
+    position: absolute;
+    /* Anchor near where Artplayer's right-side controls live —
+       bottom-right corner, just above the control bar. */
+    right: 12px;
+    bottom: 72px;
+    z-index: 15;
+}
+
+/* ── Audio-offset popup ──────────────────────────────────────── */
+/* Slider popup anchored just above the Artplayer chrome's right
+   cluster. Injected by JS (toggleAudioOffsetPopup) into the
+   Artplayer container — so it survives fullscreen with the player. */
+.vp-offset-popup {
+    position: absolute;
+    right: 12px;
+    bottom: 72px;
+    z-index: 20;
+    width: 280px;
+    padding: 12px 14px;
+    background: rgba(24, 24, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12px;
+    pointer-events: auto;
+}
+.vp-offset-popup__title {
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.95);
+}
+.vp-offset-popup__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+.vp-offset-popup__range {
+    flex: 1;
+    accent-color: var(--accent, #ff6b00);
+}
+.vp-offset-popup__value {
+    min-width: 60px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.7);
+}
+.vp-offset-popup__hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 6px;
+}
+.vp-cast-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 220px;
+    max-width: 320px;
+    background: rgba(24, 24, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+    padding: 6px;
+    z-index: 10;
+}
+.vp-cast-empty {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    text-align: center;
+}
+.vp-cast-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 8px 10px;
+    border-radius: var(--radius-ctrl);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    text-align: left;
+    transition: background var(--motion-fast);
+}
+.vp-cast-item:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+.vp-cast-item:disabled {
+    opacity: 0.5;
+    cursor: progress;
+}
+.vp-cast-item-name { font-weight: 500; }
+.vp-cast-item-model {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.vp-cast-refresh {
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-ctrl);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+.vp-cast-refresh:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+.vp-cast-refresh:disabled { opacity: 0.5; cursor: progress; }
+
+.vp-cast-toast {
+    position: absolute;
+    top: 56px;
+    right: var(--space-4);
+    background: rgba(24, 24, 24, 0.96);
+    color: rgba(255, 255, 255, 0.92);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    z-index: 10;
+}
+
+/* .vp-video removed — was the Vidstack <media-player> sizing. Artplayer
+   uses .vp-art container instead (see above). */
+
+/* ── Image preview overlay ────────────────────────────────── */
+.md-img-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(0, 0, 0, 0.9);
+    display: grid;
+    place-items: center;
+    cursor: zoom-out;
+}
+
+.md-img-preview {
+    max-width: min(94vw, 1200px);
+    max-height: 94vh;
+    object-fit: contain;
+    border-radius: var(--radius-chip);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    cursor: default;
+}
+
+.md-img-close {
+    appearance: none;
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 9001;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 0;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    opacity: 0.7;
+    transition: opacity var(--motion-fast);
+}
+.md-img-close:hover { opacity: 1; }
+
+/* ── Mobile / tablet (≤ 959px) — stack the 3-col body, shrink episodes grid. */
+@media (max-width: 959px) {
+    .md-body {
+        grid-template-columns: 1fr;
+        gap: var(--space-7);
+        padding-top: var(--space-7);
+        margin-bottom: var(--space-9);
+    }
+    .md-eps {
+        padding: var(--space-7) 0 var(--space-9);
+    }
+    .md-eps__head {
+        gap: var(--space-4);
+    }
+    .md-eps__title { font-size: 30px; }
+    .md-eps__count { font-size: 14px; margin-left: var(--space-3); }
+    .md-eps-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-5);
+    }
+    .md-files-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    }
+    .md-nr {
+        padding: var(--space-5) var(--space-6);
+        margin: var(--space-7) 0 var(--space-9);
+    }
+    .md-nr__head { flex-wrap: wrap; }
+    .md-nr-card { flex-wrap: wrap; gap: var(--space-3); }
+    .md-nr-card__actions { flex-direction: row; flex: 1 1 auto; align-items: center; }
+    .md-prose { font-size: 15px; }
+}
+
+/* ── Phone (≤ 639px) — 2-col episode grid, smaller eps title. */
+@media (max-width: 639px) {
+    .md-eps-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+    }
+    .md-files-grid {
+        grid-template-columns: 1fr;
+    }
+    .md-eps__title { font-size: 24px; letter-spacing: -0.01em; }
+    .md-eps__count { font-size: 13px; }
+    .md-eps__season-btn { padding: 8px 12px; font-size: 11px; }
+    .md-ident { padding: var(--space-6); }
+    .md-actions { gap: var(--space-3); }
+    .md-actions > * { flex: 1 1 auto; min-width: 0; }
+}
