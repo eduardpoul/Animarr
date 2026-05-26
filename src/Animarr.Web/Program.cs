@@ -2,6 +2,8 @@
 using Animarr.Web.Configuration;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
+using Animarr.Web.Endpoints;
+using Animarr.Web.Hubs;
 using Animarr.Web.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -88,6 +90,16 @@ builder.Services.AddScoped<ILlmService, MicrosoftAiLlmService>();
 builder.Services.AddSingleton<IdentificationQueueProcessorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationQueueProcessorService>());
 
+// SignalR for the realtime hubs that the new Animarr.UI pages will consume.
+// Animarr.Web continues to serve Blazor Server until Phase 5, so SignalR runs
+// alongside it without conflict — the hub paths (/hubs/*) don't collide with
+// Blazor Server's own /_blazor SignalR connection.
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<TorrentHubBroadcaster>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcaster>());
+builder.Services.AddSingleton<IdentificationHubBroadcaster>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationHubBroadcaster>());
+
 // Blazor + custom design components (FluentUI removed; shims live in Components/Design/Fluent)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -158,6 +170,26 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes })
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// ─── Animarr.Shared REST surface ──────────────────────────────────────────
+// These endpoint groups back the IAnimarrApiClient contract — every method
+// in IAnimarrApiClient maps to one of the routes registered below. The UI
+// (Animarr.UI, Animarr.Web.Client WASM, Animarr.App MAUI) consumes them
+// uniformly. Razor pages in this project continue to use the underlying
+// services directly until Phase 3 migrates them to the RCL.
+app.MapFolderEndpoints();
+app.MapMediaEndpoints();
+app.MapWatchStateEndpoints();
+app.MapTorrentEndpoints();
+app.MapRenameEndpoints();
+app.MapMediaTagEndpoints();
+app.MapAppConfigEndpoints();
+app.MapSearchEndpoints();
+app.MapDlnaCastEndpoints();
+
+// SignalR hubs — push-only telemetry for torrents + identification queue.
+app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents);
+app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification);
 
 // ─── /api/image — serve media images from arbitrary disk paths ────────────
 // Security: path must resolve inside one of the registered FolderWatcher paths,
