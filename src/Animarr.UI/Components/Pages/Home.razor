@@ -1,0 +1,97 @@
+@page "/"
+@inject IAnimarrApiClient Api
+@implements IDisposable
+
+@*
+    Minimal catalog. Calls IAnimarrApiClient.GetMediaItemsAsync — same
+    surface the rich Animarr.Web Razor catalog will eventually use once
+    migrated. The grid is intentionally lightweight (CSS Grid + lazy
+    image loading) so it works identically on WASM and MAUI.
+*@
+
+<h1>Catalog</h1>
+
+<div class="catalog-toolbar">
+    <input type="text" placeholder="Search…" @bind="_search" @bind:event="oninput" />
+    <button @onclick="ReloadAsync">Reload</button>
+</div>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (_items is null || _items.Length == 0)
+{
+    <p>Nothing here yet. Add a folder under Settings → Root folders, then come back.</p>
+}
+else
+{
+    <div class="catalog-grid">
+        @foreach (var item in Filtered)
+        {
+            <a class="catalog-card" href="@($"media/{item.Id}")">
+                @if (!string.IsNullOrEmpty(item.PosterPath))
+                {
+                    <img loading="lazy" src="@PosterUrl(item.PosterPath)" alt="@item.Title" />
+                }
+                else
+                {
+                    <div class="catalog-card-placeholder">@(string.IsNullOrEmpty(item.Title) ? "?" : item.Title[..1])</div>
+                }
+                <div class="catalog-card-meta">
+                    <div class="catalog-card-title">@item.Title</div>
+                    @if (item.Year is not null)
+                    {
+                        <div class="catalog-card-year">@item.Year</div>
+                    }
+                </div>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private MediaItemDto[]? _items;
+    private bool _loading = true;
+    private string _search = string.Empty;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _items = await Api.GetMediaItemsAsync(
+                new MediaListQuery { Take = 200, Sort = "recent" },
+                _cts.Token);
+        }
+        catch (OperationCanceledException) { /* superseded */ }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<MediaItemDto> Filtered =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _items ?? Array.Empty<MediaItemDto>()
+            : (_items ?? Array.Empty<MediaItemDto>())
+                .Where(m => m.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    // Server-absolute disk paths are wrapped through /api/image so the
+    // browser fetches them from the API host with the right auth (none
+    // currently) and content-type negotiation.
+    private static string PosterUrl(string path)
+        => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(path)}";
+
+    public void Dispose() => _cts?.Cancel();
+}

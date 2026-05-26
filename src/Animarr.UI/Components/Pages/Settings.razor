@@ -1,0 +1,87 @@
+@page "/settings"
+@inject IAnimarrApiClient Api
+
+@*
+    Minimal settings page — exercises the AppConfig endpoint via the
+    IAnimarrApiClient. The full Settings page (tabs, hardware report,
+    external-player picker, etc.) still lives in Animarr.Web while it
+    gets migrated piecewise.
+*@
+
+<h1>Settings</h1>
+
+<section>
+    <h2>Hardware</h2>
+    @if (_hw is null)
+    {
+        <p>Probing…</p>
+    }
+    else
+    {
+        <ul class="hw-list">
+            <li><strong>VAAPI:</strong> @StatusLine(_hw.Vaapi)</li>
+            <li><strong>NVENC:</strong> @StatusLine(_hw.Nvenc)</li>
+            <li><strong>QSV:</strong> @StatusLine(_hw.Qsv)</li>
+        </ul>
+        <button @onclick="Rescan">Rescan</button>
+    }
+</section>
+
+<section>
+    <h2>Folders</h2>
+    @if (_folders is null)
+    {
+        <p>Loading…</p>
+    }
+    else if (_folders.Length == 0)
+    {
+        <p>No folders configured yet.</p>
+    }
+    else
+    {
+        <ul class="folder-list">
+            @foreach (var f in _folders)
+            {
+                <li>
+                    <strong>@f.Label</strong>
+                    <span class="folder-path">@f.Path</span>
+                    <span class="folder-tag">@f.FolderType</span>
+                    @if (f.IsSection) { <span class="folder-tag">section</span>}
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private HardwareReportDto? _hw;
+    private FolderWatcherDto[]? _folders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadHardwareAsync(false), LoadFoldersAsync());
+    }
+
+    private async Task LoadHardwareAsync(bool rescan)
+    {
+        _hw = await Api.GetHardwareReportAsync(rescan);
+        StateHasChanged();
+    }
+
+    private async Task LoadFoldersAsync()
+    {
+        _folders = await Api.GetFoldersAsync();
+        StateHasChanged();
+    }
+
+    private Task Rescan() => LoadHardwareAsync(true);
+
+    private static string StatusLine(EncoderStatusDto s)
+    {
+        if (!s.Available) return s.Detail ?? "unavailable";
+        var bits = new List<string>();
+        if (!string.IsNullOrEmpty(s.Vendor))     bits.Add(s.Vendor);
+        if (!string.IsNullOrEmpty(s.DeviceName)) bits.Add(s.DeviceName);
+        return bits.Count == 0 ? "available" : string.Join(" — ", bits);
+    }
+}

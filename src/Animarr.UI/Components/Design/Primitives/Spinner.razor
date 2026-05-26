@@ -1,0 +1,23 @@
+@*
+    Indeterminate ring spinner — mini white ring + accent top edge.
+    Spec: design_handoff_animarr/pages/loaders.html §02 (splash ring) + §04 (button mini-ring).
+
+    Sizes:
+      Size="sm"  → 13px, 1.6 stroke (used inside buttons)
+      Size="md"  → 18px, 2.0 stroke (default, used inline)
+      Size="lg"  → 36px, 3.0 stroke (used in centered empty states)
+
+    Tone:
+      Tone="accent" → top edge = var(--accent-hi), rest = 10% white
+      Tone="light"  → top edge = #fff, rest = 25% white (use inside accent-filled buttons)
+*@
+
+<span class="@CssClass" role="status" aria-label="@AriaLabel"></span>
+
+@code {
+    [Parameter] public string Size      { get; set; } = "md";   // sm | md | lg
+    [Parameter] public string Tone      { get; set; } = "accent"; // accent | light
+    [Parameter] public string AriaLabel { get; set; } = "Loading";
+
+    private string CssClass => $"d-spinner d-spinner--{Size} d-spinner--{Tone}";
+}

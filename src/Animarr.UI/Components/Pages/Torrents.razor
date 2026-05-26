@@ -1,0 +1,104 @@
+@page "/torrents"
+@inject IAnimarrApiClient Api
+@implements IAsyncDisposable
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+@*
+    Lean torrents list. Fetches the persistent records via the API on first
+    render, then subscribes to TorrentHub for live snapshots (download rate,
+    seeds, peers, state). State merges over the persistent row by InfoHash.
+
+    Add-torrent and per-torrent settings UIs still live in Animarr.Web's
+    Razor pages — those involve file-picker JS interop + complex form state
+    and migrate later in Phase 3 proper.
+*@
+
+<h1>Torrents</h1>
+
+@if (_records is null)
+{
+    <p>Loading…</p>
+}
+else if (_records.Length == 0)
+{
+    <p>No torrents yet. Add one via Animarr.Web for now — the WASM add-flow lands in Phase 3.</p>
+}
+else
+{
+    <table class="torrent-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th style="width:140px">Progress</th>
+                <th style="width:120px;text-align:right">Down</th>
+                <th style="width:120px;text-align:right">Up</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in _records)
+            {
+                _live.TryGetValue(t.InfoHash, out var live);
+                var progress = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
+                <tr>
+                    <td>@t.Name</td>
+                    <td>@(live?.State ?? t.State.ToString())</td>
+                    <td>
+                        <div class="bar"><div class="bar-fill" style="width:@(progress*100)%"></div></div>
+                        <span class="bar-pct">@($"{progress * 100:F1}%")</span>
+                    </td>
+                    <td style="text-align:right">@FormatRate(live?.DownloadRate ?? 0)</td>
+                    <td style="text-align:right">@FormatRate(live?.UploadRate ?? 0)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private TorrentRecordDto[]? _records;
+    private readonly Dictionary<string, TorrentLiveStatsDto> _live = new();
+    private HubConnection? _hub;
+
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _records = await Api.GetTorrentsAsync();
+        StateHasChanged();
+
+        // Build the absolute hub URL the same way HttpAnimarrApiClient
+        // builds its API calls — use the current navigation base address.
+        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder()
+            .WithUrl(hubUri)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
+        {
+            _live.Clear();
+            foreach (var s in env.Items) _live[s.InfoHash] = s;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try { await _hub.StartAsync(); }
+        catch { /* server doesn't run the hub — list still renders from REST */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null) await _hub.DisposeAsync();
+    }
+
+    private static string FormatRate(long bps)
+    {
+        if (bps <= 0) return "0";
+        var units = new[] { "B/s", "KB/s", "MB/s", "GB/s" };
+        double v = bps;
+        int i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return $"{v:F1} {units[i]}";
+    }
+}

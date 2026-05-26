@@ -1,0 +1,54 @@
+/* Spec-match: design_handoff_animarr/CANVAS.html §01.6.3.
+   34×18 track, 14×14 thumb, no border, white thumb always.
+   Glow on active state (box-shadow accent-soft). */
+
+.d-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+    user-select: none;
+}
+
+.d-toggle--disabled { opacity: 0.5; cursor: not-allowed; }
+
+.d-toggle__cb {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.d-toggle__track {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    transition: background var(--motion-base), box-shadow var(--motion-base);
+    flex-shrink: 0;
+}
+
+.d-toggle__thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: #fff;
+    border-radius: 14px;
+    transition: left 0.15s ease;
+}
+
+.d-toggle__cb:checked + .d-toggle__track {
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent-soft);
+}
+
+.d-toggle__cb:checked + .d-toggle__track .d-toggle__thumb {
+    left: 18px;
+}
+
+.d-toggle__label {
+    font-size: 13px;
+    color: var(--text);
+}

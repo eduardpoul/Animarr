@@ -1,0 +1,25 @@
+@*
+    Minimal top-level layout for Animarr.UI's WASM + MAUI hosts.
+
+    The full Razor MainLayout from Animarr.Web (header chrome, sidebar,
+    sidebar LLM status, reconnect modal) still lives in Animarr.Web and
+    is used by the Blazor Server deployment. This trimmer version is what
+    the WASM client renders — no SignalR-driven sidebar yet, no toast/dialog
+    providers wired up. Phase 3 will keep porting pieces over.
+*@
+@inherits LayoutComponentBase
+
+<div class="ui-shell">
+    <header class="ui-shell-header">
+        <a href="" class="ui-shell-logo">Animarr</a>
+        <nav class="ui-shell-nav">
+            <NavLink href="" Match="NavLinkMatch.All">Catalog</NavLink>
+            <NavLink href="torrents">Torrents</NavLink>
+            <NavLink href="history">History</NavLink>
+            <NavLink href="settings">Settings</NavLink>
+        </nav>
+    </header>
+    <main class="ui-shell-main">
+        @Body
+    </main>
+</div>

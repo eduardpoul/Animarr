@@ -1,0 +1,40 @@
+.torrent-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.torrent-table th, .torrent-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #21262d;
+    text-align: left;
+}
+
+.torrent-table th {
+    color: #5b6470;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.bar {
+    display: inline-block;
+    width: 100px;
+    height: 6px;
+    background: #21262d;
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+
+.bar-fill {
+    height: 100%;
+    background: oklch(60% 0.18 25);
+    transition: width .2s;
+}
+
+.bar-pct {
+    font-size: 12px;
+    color: #a0a8b0;
+}
