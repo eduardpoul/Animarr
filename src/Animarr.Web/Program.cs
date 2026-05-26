@@ -139,6 +139,14 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes })
 // which is copied into our wwwroot at publish via the ProjectReference.
 app.UseBlazorFrameworkFiles();
 
+// MapStaticAssets is what substitutes the `#[.{fingerprint}]` placeholder in
+// index.html's <script src="_framework/blazor.webassembly#[.{fingerprint}].js">
+// AND assigns the correct MIME type to scoped-CSS bundles (Animarr.UI's
+// Animarr.UI.bundle.scp.css). Without this middleware browsers refuse to
+// load the bundle ("MIME type ('')") and the framework script 404s on the
+// literal placeholder URL.
+app.MapStaticAssets();
+
 // ─── Animarr.Shared REST surface ──────────────────────────────────────────
 // Each endpoint group backs one slice of the IAnimarrApiClient contract that
 // Animarr.UI / Animarr.Web.Client / Animarr.App all consume.
