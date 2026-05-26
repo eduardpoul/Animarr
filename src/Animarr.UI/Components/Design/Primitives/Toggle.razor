@@ -1,0 +1,29 @@
+@*
+    iOS-style switch toggle. Pure CSS animation; no JS.
+    Use: <Toggle Checked="..." CheckedChanged="..." Label="..." />
+*@
+
+<label class="d-toggle @(Disabled ? "d-toggle--disabled" : "")">
+    <input type="checkbox"
+           class="d-toggle__cb"
+           checked="@Checked"
+           disabled="@Disabled"
+           @onchange="OnChange" />
+    <span class="d-toggle__track"><span class="d-toggle__thumb"></span></span>
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <span class="d-toggle__label">@Label</span>
+    }
+    @ChildContent
+</label>
+
+@code {
+    [Parameter] public bool   Checked  { get; set; }
+    [Parameter] public EventCallback<bool> CheckedChanged { get; set; }
+    [Parameter] public string? Label    { get; set; }
+    [Parameter] public bool   Disabled { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private Task OnChange(ChangeEventArgs e)
+        => CheckedChanged.InvokeAsync(e.Value is bool b && b);
+}

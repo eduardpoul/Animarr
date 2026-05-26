@@ -1,0 +1,52 @@
+/* Bare-bones shell — pages get their own scoped CSS. Picked here so the
+   WASM + MAUI builds have *something* coherent even before the full
+   header/sidebar lands. */
+
+.ui-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #0b0d10;
+    color: #f0f1f3;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.ui-shell-header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 24px;
+    background: #14171b;
+    border-bottom: 1px solid #21262d;
+}
+
+.ui-shell-logo {
+    font-weight: 700;
+    font-size: 18px;
+    color: #f0f1f3;
+    text-decoration: none;
+}
+
+.ui-shell-nav {
+    display: flex;
+    gap: 16px;
+}
+
+.ui-shell-nav a {
+    color: #a0a8b0;
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: background .12s, color .12s;
+}
+
+.ui-shell-nav a:hover { color: #f0f1f3; background: #21262d; }
+.ui-shell-nav a.active { color: #f0f1f3; background: oklch(60% 0.18 25); }
+
+.ui-shell-main {
+    flex: 1;
+    padding: 24px;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+}

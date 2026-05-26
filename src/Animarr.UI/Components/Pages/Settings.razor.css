@@ -1,0 +1,57 @@
+section {
+    margin: 24px 0;
+    padding: 16px 20px;
+    background: #14171b;
+    border: 1px solid #21262d;
+    border-radius: 10px;
+}
+
+section h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #a0a8b0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.hw-list, .folder-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.hw-list li, .folder-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.hw-list li:last-child, .folder-list li:last-child { border-bottom: 0; }
+
+.folder-path {
+    color: #5b6470;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+}
+
+.folder-tag {
+    padding: 2px 8px;
+    background: #21262d;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #a0a8b0;
+}
+
+button {
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: oklch(60% 0.18 25);
+    border: 0;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    font: inherit;
+}

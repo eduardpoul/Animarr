@@ -1,0 +1,64 @@
+/* Spec-match: design_handoff_animarr/CANVAS.html §01.6.2.
+   Tiny mono uppercase tag — 10px / 0.6px tracking / radius 4 (badge).
+   Despite the name "pill", the CANVAS uses radius-badge (4) here;
+   --radius-pill is the 9999 circular variant used for the LIVE dot etc. */
+
+.d-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border-radius: var(--radius-badge);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Dense — used in title-block meta etc. Same height-ish, smaller font. */
+.d-pill--dense { padding: 2px 6px; font-size: 9.5px; }
+
+/* Clickable variant (button-rendered, used by filter chips). */
+button.d-pill {
+    appearance: none;
+    cursor: pointer;
+    transition: background var(--motion-base), border-color var(--motion-base), color var(--motion-base);
+}
+button.d-pill:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+button.d-pill.d-pill--active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+/* ── Tones — exact CANVAS values ───────────────────────── */
+.d-pill--accent {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    border-color: var(--accent-line);
+}
+.d-pill--success {
+    background: oklch(0.74 0.15 150 / 0.15);
+    color: var(--success);
+    border-color: oklch(0.55 0.15 150 / 0.35);
+}
+.d-pill--warn {
+    background: oklch(0.80 0.17 75 / 0.15);
+    color: var(--warn);
+    border-color: oklch(0.60 0.16 75 / 0.40);
+}
+/* Info — extension beyond CANVAS spec but follows same recipe; used in NR modal. */
+.d-pill--info {
+    background: oklch(0.74 0.10 240 / 0.15);
+    color: var(--info);
+    border-color: oklch(0.55 0.10 240 / 0.35);
+}
