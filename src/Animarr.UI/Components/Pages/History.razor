@@ -1,0 +1,21 @@
+@page "/renames"
+@page "/history"
+
+@*
+    Thin route wrapper around HistoryView — mounts the embeddable component
+    behind a deep-linkable URL. The same view appears inside the Settings
+    page's "Rename history" tab.
+*@
+
+<PageTitle>Animarr — @L["history.title"]</PageTitle>
+
+<header class="d-page-header">
+    <div class="d-page-header__main">
+        <div class="d-page-header__overline">JOURNAL</div>
+        <h1 class="d-page-header__title">RENAME HISTORY</h1>
+        <div class="d-page-header__sub">Every file rename, persisted in SQLite. One-click revert restores the original filename on disk. Folder names are never touched.</div>
+    </div>
+</header>
+
+<HistoryKpiTiles />
+<HistoryView />

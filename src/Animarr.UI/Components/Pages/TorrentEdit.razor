@@ -1,0 +1,290 @@
+@page "/torrents/{Hash}/edit"
+@implements IAsyncDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+<PageTitle>Animarr</PageTitle>
+
+<div class="te-header">
+    <Btn Variant="ghost" Size="sm" OnClick="@(() => Nav.NavigateTo("/torrents"))">
+        <DIcon Name="chev-l" Size="14" /> @L["torrent_edit.btn_back"]
+    </Btn>
+    <h1 class="te-header__title">@(_record?.Name ?? Hash)</h1>
+    @if (_live is not null)
+    {
+        <span class="tor-dot tor-dot--@StateColorClass()" title="@_live.State"></span>
+        <span class="te-header__state">@_live.State</span>
+    }
+</div>
+
+@if (_record is null && !_loading)
+{
+    <div class="te-empty">@L["torrent_edit.not_found"]</div>
+}
+else if (_loading)
+{
+    <div class="te-loading"><InlineDots Label="Loading torrent" /></div>
+}
+else
+{
+    var rec = _record!;
+    <div class="te-grid">
+
+        @* ── FILE SELECTIONS ────────────────────────────────────────── *@
+        <section class="te-files">
+            <div class="te-files__head">
+                <h2 class="te-files__title">
+                    @L["torrent_edit.files_title"] (@rec.FileSelections.Length)
+                </h2>
+                <Btn Variant="primary" Size="sm" Disabled="@_saving" OnClick="SavePrioritiesAsync">
+                    @(_saving ? L["torrent_edit.btn_saving"] : L["torrent_edit.btn_save"])
+                </Btn>
+            </div>
+
+            <div class="te-tree">
+                @foreach (var sel in rec.FileSelections.OrderBy(s => s.FilePath))
+                {
+                    var path = sel.FilePath;
+                    var prio = _priorities.GetValueOrDefault(path, sel.Priority);
+                    <div class="te-tree__file" style="--depth:0">
+                        <input type="checkbox" checked="@(prio != 0)"
+                               @onchange="@(e => { _priorities[path] = (bool)e.Value! ? 1 : 0; StateHasChanged(); })" />
+                        <span class="te-tree__file-name" title="@path">@System.IO.Path.GetFileName(path)</span>
+                        <select class="te-tree__priority @(prio == 0 ? "te-tree__priority--skip" : "")"
+                                value="@prio"
+                                @onchange="@(e => _priorities[path] = int.TryParse(e.Value?.ToString(), out var p) ? p : 1)">
+                            <option value="0">@L["file_priority.skip"]</option>
+                            <option value="1">@L["file_priority.normal"]</option>
+                            <option value="2">@L["file_priority.high"]</option>
+                        </select>
+                    </div>
+                }
+            </div>
+        </section>
+
+        @* ── SETTINGS SIDEBAR ──────────────────────────────────────── *@
+        <aside class="te-side">
+
+            <div class="te-card">
+                <h3 class="te-card__title">@L["torrent_edit.speed_title"]</h3>
+                <label class="te-field">
+                    <span class="te-field__label">@L["torrent_edit.dl_limit_label"]</span>
+                    <input type="number" min="0" class="te-input"
+                           value="@_dlLimit"
+                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _dlLimit))" />
+                </label>
+                <label class="te-field">
+                    <span class="te-field__label">@L["torrent_edit.ul_limit_label"]</span>
+                    <input type="number" min="0" class="te-input"
+                           value="@_ulLimit"
+                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _ulLimit))" />
+                </label>
+                <Btn Variant="primary" Size="sm" OnClick="ApplySettingsAsync">@L["torrent_edit.btn_apply"]</Btn>
+            </div>
+
+            <div class="te-card">
+                <h3 class="te-card__title">@L["torrent_edit.options_title"]</h3>
+                <div class="te-toggle-row">
+                    <Toggle Checked="@_stopAfterDownload"
+                            CheckedChanged="@((bool v) => { _stopAfterDownload = v; })" />
+                    <span class="te-toggle-row__label">@L["torrent_edit.stop_after_download"]</span>
+                </div>
+                <div class="te-toggle-row te-toggle-row--disabled">
+                    <Toggle Checked="@_skipSubfolderStructure" Disabled="true"
+                            CheckedChanged="@((bool _) => {})" />
+                    <span class="te-toggle-row__label">@L["torrent_edit.flatten_subfolders"]</span>
+                </div>
+            </div>
+
+            <div class="te-card">
+                <h3 class="te-card__title">@L["torrent_edit.stats_title"]</h3>
+                <div class="te-stats">
+                    <div class="te-stats__row">
+                        <span class="te-stats__label">@L["torrent_edit.stat_progress"]</span>
+                        <b>@(Progress.ToString("F1"))%</b>
+                    </div>
+                    <div class="animarr-progress te-stats__bar">
+                        <div class="animarr-progress__track">
+                            <div class="animarr-progress__fill"
+                                 style="width:@(Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
+                        </div>
+                    </div>
+                    <div class="te-stats__row">
+                        <span class="te-stats__label">@L["torrent_edit.stat_downloaded"]</span>
+                        <span>@FormatBytes(rec.Downloaded) / @FormatBytes(rec.TotalSize)</span>
+                    </div>
+                    @if (_live is not null)
+                    {
+                        <div class="te-stats__row">
+                            <span class="te-stats__label">@L["torrent_edit.stat_dl_speed"]</span>
+                            <span>@FormatSpeed(_live.DownloadRate)</span>
+                        </div>
+                        <div class="te-stats__row">
+                            <span class="te-stats__label">@L["torrent_edit.stat_ul_speed"]</span>
+                            <span>@FormatSpeed(_live.UploadRate)</span>
+                        </div>
+                        <div class="te-stats__row">
+                            <span class="te-stats__label">@L["torrent_edit.stat_peers"]</span>
+                            <span>@L["torrent_details.seeds_label"] @_live.Seeds &nbsp; @L["torrent_details.peers_label"] @_live.Peers</span>
+                        </div>
+                    }
+                    <hr class="te-hr" />
+                    <div class="te-stats__path">
+                        <div>@L["torrent_edit.path_label"] @rec.SavePath</div>
+                        <div class="te-stats__hash">@L["torrent_edit.hash_label"] @rec.InfoHash[..Math.Min(20, rec.InfoHash.Length)]…</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="te-card">
+                <Btn Variant="danger" Size="sm" OnClick="DeleteAsync">
+                    <DIcon Name="trash" Size="13" /> Remove torrent
+                </Btn>
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public string Hash { get; set; } = "";
+
+    private TorrentRecordDto? _record;
+    private TorrentLiveStatsDto? _live;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _stopAfterDownload;
+    private bool _skipSubfolderStructure;
+    private int _dlLimit;
+    private int _ulLimit;
+    private Dictionary<string, int> _priorities = new();
+    private HubConnection? _hub;
+
+    private double Progress => _live?.Progress * 100
+        ?? (_record is { TotalSize: > 0 } r ? 100.0 * r.Downloaded / r.TotalSize : 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await ConnectHubAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            // The route param uses InfoHash; resolve via the torrent list so we
+            // get the Guid + persisted settings + file selections in one call.
+            var torrents = await Api.GetTorrentsAsync();
+            _record = torrents.FirstOrDefault(t => string.Equals(t.InfoHash, Hash, StringComparison.OrdinalIgnoreCase));
+            if (_record is not null)
+            {
+                _stopAfterDownload       = _record.StopAfterDownload;
+                _skipSubfolderStructure  = _record.SkipSubfolderStructure;
+                _dlLimit                 = _record.DownloadLimit / 125_000;
+                _ulLimit                 = _record.UploadLimit / 125_000;
+                _priorities              = _record.FileSelections.ToDictionary(s => s.FilePath, s => s.Priority);
+            }
+        }
+        catch { /* offline */ }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ConnectHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
+        {
+            var live = env.Items.FirstOrDefault(s =>
+                string.Equals(s.InfoHash, Hash, StringComparison.OrdinalIgnoreCase));
+            if (live is not null)
+            {
+                _live = live;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+        try { await _hub.StartAsync(); } catch { /* hub unavailable */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null) await _hub.DisposeAsync();
+    }
+
+    private async Task SavePrioritiesAsync()
+    {
+        if (_record is null) return;
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            var updates = _priorities
+                .Select(kv => new TorrentFileSelectionUpdate(kv.Key, kv.Value))
+                .ToArray();
+            await Api.UpdateTorrentFileSelectionsAsync(_record.Id, new UpdateFileSelectionsRequest(updates));
+        }
+        catch { /* swallow */ }
+        finally { _saving = false; StateHasChanged(); }
+    }
+
+    private async Task ApplySettingsAsync()
+    {
+        if (_record is null) return;
+        try
+        {
+            await Api.UpdateTorrentAsync(_record.Id, new UpdateTorrentRequest(
+                FolderWatcherId:        _record.FolderWatcherId,
+                AutoRename:             _record.AutoRename,
+                StopAfterDownload:      _stopAfterDownload,
+                DownloadLimit:          _dlLimit * 125_000,
+                UploadLimit:            _ulLimit * 125_000,
+                StopSeedingRatio:       _record.StopSeedingRatio,
+                SkipSubfolderStructure: _skipSubfolderStructure,
+                SuppressRootFolder:     _record.SuppressRootFolder,
+                CustomRootFolderName:   _record.CustomRootFolderName));
+            await LoadAsync();
+        }
+        catch { /* swallow */ }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_record is null) return;
+        try
+        {
+            await Api.DeleteTorrentAsync(_record.Id, deleteFiles: false);
+            Nav.NavigateTo("/torrents");
+        }
+        catch { /* swallow */ }
+    }
+
+    private string StateColorClass() => _live?.State switch
+    {
+        "Downloading" => "info",
+        "Metadata"    => "info",
+        "Seeding"     => "success",
+        "Paused"      => "warning",
+        "Stopped"     => "neutral",
+        "Error"       => "error",
+        "Hashing"     => "info",
+        _             => "neutral",
+    };
+
+    private static string FormatSpeed(long bps)
+    {
+        if (bps >= 1_048_576) return $"{bps / 1_048_576.0:F1} MB/s";
+        if (bps >= 1024)      return $"{bps / 1024.0:F0} KB/s";
+        return $"{bps} B/s";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+}

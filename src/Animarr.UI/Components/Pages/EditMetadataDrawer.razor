@@ -1,0 +1,439 @@
+@*
+    Edit Metadata drawer — slimmed for the API-driven client.
+
+    Tabs covered:
+      • Source IDs  — TMDB / MAL / IMDb links, "paste URL" parser, per-source
+        Apply buttons that route through Api.ResolveMediaCandidateAsync
+      • Basics      — title / english / cjk / year / type / language / studio /
+                      runtime / hue
+      • Tags        — chip list + suggested presets
+      • Manage      — Re-identify + Delete from catalog
+
+    Skipped relative to Animarr.Web:
+      • Poster/Backdrop galleries — server-side MetadataService.GetAvailableImagesAsync
+        isn't exposed via the API yet (returns empty from the placeholder
+        endpoints). When the metadata client grows that surface, the tabs land
+        here as a follow-up.
+      • In-drawer rename preview/apply (uses RenameService which doesn't have
+        a clean REST surface). Use the History page / Rescan instead.
+*@
+
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@if (Item is not null)
+{
+    <div class="emd-overlay" @onclick="OnCloseAsync"></div>
+    <div class="emd">
+        <header class="emd__header">
+            <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
+            <div class="emd__header-text">
+                <div class="emd__overline">EDIT METADATA</div>
+                <div class="emd__title">@Item.Title</div>
+                <div class="emd__hint">SQLite metadata only — folders on disk stay untouched</div>
+            </div>
+            <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="Close">
+                <DIcon Name="x" Size="20" />
+            </button>
+        </header>
+
+        <nav class="emd__tabs">
+            @foreach (var t in _tabDefs)
+            {
+                var key = t.Key;
+                var label = t.Value;
+                <button type="button"
+                        class="@($"emd__tab {(_tab == key ? "emd__tab--active" : "")}")"
+                        @onclick="@(() => _tab = key)">
+                    @label
+                </button>
+            }
+        </nav>
+
+        <div class="emd__body">
+            @if      (_tab == "ids")     { @SourceIdsTab()  }
+            else if  (_tab == "basics")  { @BasicsTab()     }
+            else if  (_tab == "tags")    { @TagsTab()       }
+            else if  (_tab == "manage")  { @ManageTab()     }
+        </div>
+
+        <footer class="emd__footer">
+            <button type="button" class="@($"emd__btn emd__btn--primary {(_saving ? "emd__btn--loading" : "")}")"
+                    @onclick="SaveAsync" disabled="@_saving">
+                @if (_saving) { <Spinner Size="sm" Tone="light" /> }
+                else          { <DIcon Name="check" Size="14" /> }
+                @(_saving ? "Saving…" : "Save changes")
+            </button>
+            <button type="button" class="emd__btn emd__btn--ghost" @onclick="OnCloseAsync">Cancel</button>
+            <div class="emd__footer-spacer"></div>
+            <button type="button" class="emd__btn emd__btn--flat emd__btn--xs" @onclick="ReidentifyAsync">
+                <DIcon Name="magic" Size="13" /> Re-run LLM
+            </button>
+        </footer>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public MediaItemDto? Item { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private string _tab = "ids";
+    private bool _saving;
+
+    private static readonly KeyValuePair<string, string>[] _tabDefs =
+    [
+        new("ids",      "Source IDs"),
+        new("basics",   "Basics"),
+        new("tags",     "Tags"),
+        new("manage",   "Manage"),
+    ];
+
+    // ── Basics state ──
+    private string  _bTitle = "";
+    private string? _bEnglish;
+    private string? _bCjk;
+    private int?    _bYear;
+    private MediaItemType _bType;
+    private string? _bLanguage;
+    private string? _bStudio;
+    private int?    _bRuntime;
+    private int?    _bHue;
+
+    // ── Tags ──
+    private List<string> _tags = new();
+    private string _newTag = "";
+
+    // ── Source IDs ──
+    private string? _tmdbIdInput;
+    private string? _malIdInput;
+    private string? _imdbIdInput;
+    private string  _pasteUrl = "";
+    private bool _tmdbIsTv = true;
+
+    private static readonly string[] _suggestedTags =
+    [
+        "Cultivation", "Donghua", "Action", "Romance", "Fantasy",
+        "Mecha", "Slice of Life", "Mystery", "Shonen", "Adventure",
+    ];
+
+    // ── Manage state ──
+    private bool _confirmDelete;
+
+    protected override void OnParametersSet()
+    {
+        if (Item is null) return;
+        _bTitle      = Item.Title;
+        _bEnglish    = Item.EnglishTitle;
+        _bCjk        = Item.CjkTitle;
+        _bYear       = Item.Year;
+        _bType       = Item.MediaType;
+        _bLanguage   = Item.Language;
+        _bStudio     = Item.Studio;
+        _bRuntime    = Item.Runtime;
+        _bHue        = Item.Hue;
+        _tmdbIdInput = Item.TmdbId?.ToString();
+        _malIdInput  = Item.MalId?.ToString();
+        _imdbIdInput = Item.ImdbId;
+        _tmdbIsTv    = Item.MediaType != MediaItemType.Movie;
+        _tags        = Item.Tags?.ToList() ?? new();
+    }
+
+    private async Task OnCloseAsync() => await OnClose.InvokeAsync();
+
+    private async Task SaveAsync()
+    {
+        if (Item is null) return;
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            var request = new UpdateMediaItemRequest(
+                Title:         _bTitle.Trim(),
+                OriginalTitle: null,
+                CjkTitle:      string.IsNullOrWhiteSpace(_bCjk)     ? null : _bCjk.Trim(),
+                EnglishTitle:  string.IsNullOrWhiteSpace(_bEnglish) ? null : _bEnglish.Trim(),
+                Year:          _bYear,
+                MediaType:     _bType,
+                Description:   null,
+                Tagline:       null,
+                Genres:        null,
+                Tags:          _tags.ToArray(),
+                Status:        null,
+                ContentRating: null,
+                Runtime:       _bRuntime,
+                Language:      string.IsNullOrWhiteSpace(_bLanguage) ? null : _bLanguage.Trim(),
+                Studio:        string.IsNullOrWhiteSpace(_bStudio)   ? null : _bStudio.Trim(),
+                SeasonLabel:   null,
+                Hue:           _bHue,
+                TagIds:        null,
+                PosterPath:    null,
+                FanartPath:    null,
+                LogoPath:      null);
+
+            await Api.UpdateMediaItemAsync(Item.Id, request);
+            await OnSaved.InvokeAsync();
+            await OnClose.InvokeAsync();
+        }
+        catch { /* TODO: surface via toast */ }
+        finally { _saving = false; StateHasChanged(); }
+    }
+
+    private async Task ReidentifyAsync()
+    {
+        if (Item is null) return;
+        try { await Api.EnqueueIdentificationAsync(Item.FolderId, forceRefresh: true); }
+        catch { /* swallow */ }
+    }
+
+    // ── Tag handlers ──
+    private void AddTag()
+    {
+        var t = _newTag.Trim();
+        if (string.IsNullOrEmpty(t)) return;
+        if (!_tags.Any(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
+            _tags.Add(t);
+        _newTag = "";
+    }
+
+    private void RemoveTag(string t) =>
+        _tags.RemoveAll(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase));
+
+    private void OnTagKeyDown(KeyboardEventArgs e) { if (e.Key == "Enter") AddTag(); }
+
+    // ── Source-ID handlers ──
+    private async Task ApplySourceAsync(string source, string externalId)
+    {
+        if (Item is null || string.IsNullOrWhiteSpace(externalId)) return;
+        try
+        {
+            await Api.ResolveMediaCandidateAsync(Item.Id,
+                new ResolveCandidateRequest(source, externalId.Trim()));
+            await OnSaved.InvokeAsync();
+        }
+        catch { /* swallow */ }
+    }
+
+    private Task ApplyTmdbAsync() => ApplySourceAsync(_tmdbIsTv ? "tmdb_tv" : "tmdb_movie", _tmdbIdInput ?? "");
+    private Task ApplyMalAsync()  => ApplySourceAsync("mal", _malIdInput ?? "");
+    private Task ApplyImdbAsync() => ApplySourceAsync("imdb_tv", _imdbIdInput ?? "");
+
+    private void ParsePastedUrl()
+    {
+        var u = _pasteUrl.Trim();
+        if (u.Length == 0) return;
+        var tmdb = System.Text.RegularExpressions.Regex.Match(u, @"themoviedb\.org/(tv|movie)/(\d+)");
+        if (tmdb.Success)
+        {
+            _tmdbIdInput = tmdb.Groups[2].Value;
+            _tmdbIsTv    = tmdb.Groups[1].Value == "tv";
+            _pasteUrl    = "";
+            return;
+        }
+        var mal = System.Text.RegularExpressions.Regex.Match(u, @"myanimelist\.net/anime/(\d+)");
+        if (mal.Success) { _malIdInput = mal.Groups[1].Value; _pasteUrl = ""; return; }
+        var imdb = System.Text.RegularExpressions.Regex.Match(u, @"imdb\.com/title/(tt\d+)");
+        if (imdb.Success) { _imdbIdInput = imdb.Groups[1].Value; _pasteUrl = ""; return; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Item is null) return;
+        try
+        {
+            await Api.DeleteMediaItemAsync(Item.Id);
+            Nav.NavigateTo("/");
+            await OnClose.InvokeAsync();
+        }
+        catch { /* swallow */ }
+    }
+
+    // ── Render fragments ──
+
+    private RenderFragment SourceIdsTab() => @<div class="emd-form">
+        <div class="emd-automatch">
+            <div class="emd-automatch__icon"><DIcon Name="sparkle" Size="14" /></div>
+            <div>
+                <div class="emd-automatch__title">Auto-match · @($"{(Item!.LlmConfidence ?? 0):P0}")</div>
+                <div class="emd-automatch__hint">@(Item.LlmIdentifiedTitle ?? Item.Title) → @Item.Title</div>
+            </div>
+        </div>
+
+        <div class="emd-idfield">
+            <div class="emd-idfield__head">
+                <span class="emd-idfield__label">TMDB ID</span>
+                @if (Item.TmdbId is not null)
+                {
+                    var url = $"https://www.themoviedb.org/{(Item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{Item.TmdbId}";
+                    <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                }
+            </div>
+            <div class="emd-idfield__row">
+                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                       value="@(_tmdbIdInput ?? "")"
+                       @oninput="@(e => _tmdbIdInput = e.Value?.ToString())" />
+                <div class="emd-segmented" role="group" aria-label="TMDB kind">
+                    <button type="button" class="@($"emd-segmented__btn {(_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
+                            @onclick="@(() => _tmdbIsTv = true)">TV</button>
+                    <button type="button" class="@($"emd-segmented__btn {(!_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
+                            @onclick="@(() => _tmdbIsTv = false)">Movie</button>
+                </div>
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyTmdbAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+            </div>
+        </div>
+
+        <div class="emd-idfield">
+            <div class="emd-idfield__head">
+                <span class="emd-idfield__label">MAL ID</span>
+                @if (Item.MalId is not null)
+                {
+                    <a href="@($"https://myanimelist.net/anime/{Item.MalId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                }
+            </div>
+            <div class="emd-idfield__row">
+                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                       value="@(_malIdInput ?? "")"
+                       @oninput="@(e => _malIdInput = e.Value?.ToString())" />
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyMalAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+            </div>
+        </div>
+
+        <div class="emd-idfield">
+            <div class="emd-idfield__head">
+                <span class="emd-idfield__label">IMDb ID</span>
+                @if (!string.IsNullOrEmpty(Item.ImdbId))
+                {
+                    <a href="@($"https://www.imdb.com/title/{Item.ImdbId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                }
+            </div>
+            <div class="emd-idfield__row">
+                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                       value="@(_imdbIdInput ?? "")"
+                       @oninput="@(e => _imdbIdInput = e.Value?.ToString())" />
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyImdbAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+            </div>
+        </div>
+
+        <div class="emd-idfield">
+            <div class="emd-idfield__head">
+                <span class="emd-idfield__label">Paste URL</span>
+            </div>
+            <div class="emd-idfield__row">
+                <input class="emd-input" placeholder="https://www.themoviedb.org/tv/12345"
+                       value="@_pasteUrl"
+                       @oninput="@(e => _pasteUrl = e.Value?.ToString() ?? "")" />
+                <button class="emd__btn emd__btn--solid" @onclick="ParsePastedUrl">Parse</button>
+            </div>
+        </div>
+    </div>;
+
+    private RenderFragment BasicsTab() => @<div class="emd-form">
+        <label class="emd-field">
+            <span class="emd-field__label">Title</span>
+            <input class="emd-input" value="@_bTitle" @oninput="@(e => _bTitle = e.Value?.ToString() ?? "")" />
+        </label>
+        <label class="emd-field">
+            <span class="emd-field__label">English title</span>
+            <input class="emd-input" value="@(_bEnglish ?? "")" @oninput="@(e => _bEnglish = e.Value?.ToString())" />
+        </label>
+        <label class="emd-field">
+            <span class="emd-field__label">Original / CJK title</span>
+            <input class="emd-input" value="@(_bCjk ?? "")" @oninput="@(e => _bCjk = e.Value?.ToString())" />
+        </label>
+        <div class="emd-grid-2">
+            <label class="emd-field">
+                <span class="emd-field__label">Year</span>
+                <input class="emd-input emd-input--narrow" type="number" value="@(_bYear?.ToString() ?? "")"
+                       @oninput="@(e => _bYear = int.TryParse(e.Value?.ToString(), out var y) ? y : null)" />
+            </label>
+            <label class="emd-field">
+                <span class="emd-field__label">Type</span>
+                <select class="emd-input" value="@_bType.ToString()"
+                        @onchange="@(e => _bType = Enum.TryParse<MediaItemType>(e.Value?.ToString(), out var t) ? t : MediaItemType.Unknown)">
+                    <option value="Unknown">Unknown</option>
+                    <option value="Anime">Anime</option>
+                    <option value="Series">Series</option>
+                    <option value="Movie">Movie</option>
+                    <option value="Multserials">Multserials</option>
+                </select>
+            </label>
+        </div>
+        <div class="emd-grid-2">
+            <label class="emd-field">
+                <span class="emd-field__label">Language</span>
+                <input class="emd-input" value="@(_bLanguage ?? "")" @oninput="@(e => _bLanguage = e.Value?.ToString())" />
+            </label>
+            <label class="emd-field">
+                <span class="emd-field__label">Studio</span>
+                <input class="emd-input" value="@(_bStudio ?? "")" @oninput="@(e => _bStudio = e.Value?.ToString())" />
+            </label>
+        </div>
+        <div class="emd-grid-2">
+            <label class="emd-field">
+                <span class="emd-field__label">Runtime (min)</span>
+                <input class="emd-input emd-input--narrow" type="number" value="@(_bRuntime?.ToString() ?? "")"
+                       @oninput="@(e => _bRuntime = int.TryParse(e.Value?.ToString(), out var r) ? r : null)" />
+            </label>
+            <label class="emd-field">
+                <span class="emd-field__label">Hue (0–360)</span>
+                <input class="emd-input emd-input--narrow" type="number" min="0" max="360"
+                       value="@(_bHue?.ToString() ?? "")"
+                       @oninput="@(e => _bHue = int.TryParse(e.Value?.ToString(), out var h) ? h : null)" />
+            </label>
+        </div>
+    </div>;
+
+    private RenderFragment TagsTab() => @<div class="emd-form">
+        <div class="emd-chips">
+            @foreach (var t in _tags)
+            {
+                var tag = t;
+                <button type="button" class="emd-chip emd-chip--active" @onclick="@(() => RemoveTag(tag))">
+                    @tag <DIcon Name="x" Size="10" />
+                </button>
+            }
+        </div>
+        <div class="emd-idfield__row">
+            <input class="emd-input" placeholder="Add tag…"
+                   value="@_newTag"
+                   @oninput="@(e => _newTag = e.Value?.ToString() ?? "")"
+                   @onkeydown="OnTagKeyDown" />
+            <button class="emd__btn emd__btn--solid" @onclick="AddTag">Add</button>
+        </div>
+        <div class="emd-field__label" style="margin-top:8px">SUGGESTED</div>
+        <div class="emd-chips">
+            @foreach (var t in _suggestedTags.Where(s => !_tags.Contains(s, StringComparer.OrdinalIgnoreCase)))
+            {
+                var tag = t;
+                <button type="button" class="emd-chip" @onclick="@(() => { _tags.Add(tag); })">
+                    + @tag
+                </button>
+            }
+        </div>
+    </div>;
+
+    private RenderFragment ManageTab() => @<div class="emd-form">
+        <div class="emd-manage-block">
+            <h4>Re-identify</h4>
+            <p>Queue this folder for a fresh LLM + TMDB/MAL/IMDb lookup, ignoring any
+               prior match. Useful when an automatic identification picked the wrong show.</p>
+            <button class="emd__btn emd__btn--solid" @onclick="ReidentifyAsync">
+                <DIcon Name="magic" Size="13" /> Queue re-identify
+            </button>
+        </div>
+
+        <div class="emd-manage-block emd-manage-block--danger">
+            <h4>Delete from catalog</h4>
+            <p>Removes the item from Animarr's SQLite catalog. Files on disk are
+               <strong>preserved</strong>. This action cannot be undone from the UI.</p>
+            <label class="emd-field" style="flex-direction:row;align-items:center;gap:8px">
+                <input type="checkbox" checked="@_confirmDelete"
+                       @onchange="@(e => _confirmDelete = e.Value is bool b && b)" />
+                <span>I understand</span>
+            </label>
+            <button class="emd__btn emd__btn--danger" disabled="@(!_confirmDelete)" @onclick="DeleteAsync">
+                <DIcon Name="trash" Size="13" /> Delete from catalog
+            </button>
+        </div>
+    </div>;
+}

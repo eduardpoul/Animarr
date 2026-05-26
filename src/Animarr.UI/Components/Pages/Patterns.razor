@@ -1,0 +1,12 @@
+@page "/patterns"
+@inject NavigationManager Nav
+
+@*
+    Legacy URL redirect — pattern CRUD lives inside Settings → Patterns
+    tab (mirroring the Animarr.Web behaviour). Keeps deep-links from older
+    versions working without duplicating the editor here.
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/settings?tab=patterns", replace: true);
+}
