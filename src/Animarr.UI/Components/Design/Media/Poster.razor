@@ -1,0 +1,80 @@
+@*
+    Catalog poster card. Procedural background from MediaItemDto.FanartPath
+    served via /api/image, washed with hue tint, CJK watermark corner,
+    type ribbon + confidence chip.
+
+    Click navigates to /catalog/{Id}.
+*@
+
+<a class="d-poster" href="/catalog/@Item.Id" title="@Item.Title"
+   style="--hue: @(Item.Hue ?? 0)">
+    <div class="d-poster__art">
+        @if (!string.IsNullOrEmpty(Item.PosterPath) || !string.IsNullOrEmpty(Item.FanartPath))
+        {
+            <img loading="lazy"
+                 src="@ImageUrl"
+                 alt="@Item.Title"
+                 class="d-poster__img" />
+        }
+        else
+        {
+            <div class="d-poster__placeholder">
+                <DIcon Name="video" Size="36" />
+            </div>
+        }
+
+        <div class="d-poster__wash"></div>
+
+        @if (!string.IsNullOrEmpty(Item.CjkTitle))
+        {
+            <div class="d-poster__cjk">@Item.CjkTitle</div>
+        }
+
+        @* CANVAS §01.6.4: type ribbon top-left — dark glass, smaller than a pill,
+           dedicated to the genre/type. Distinct from regular Pill tones. *@
+        <div class="d-poster__ribbon">@TypeLabel(Item.MediaType)</div>
+
+        @if ((Item.LlmConfidence ?? 1) < 0.85 && Item.IdentificationStatus != IdentificationStatus.Manual)
+        {
+            <div class="d-poster__conf">
+                <Pill Tone="warn" Dense="true">@($"{(Item.LlmConfidence ?? 0):P0}")</Pill>
+            </div>
+        }
+
+        <div class="d-poster__overlay">
+            <div class="d-poster__title">@Item.Title</div>
+            <div class="d-poster__meta">
+                @if (Item.Year is not null) { <span>@Item.Year</span> }
+                @if (Item.EpisodeCount is > 0) { <span class="d-poster__dot">·</span><span>@Item.EpisodeCount EP</span> }
+                @if (Item.Rating is > 0) { <span class="d-poster__dot">·</span><span>★ @($"{Item.Rating:F1}")</span> }
+            </div>
+        </div>
+    </div>
+</a>
+
+@code {
+    [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
+
+    private string ImageUrl
+    {
+        get
+        {
+            var path = Item.PosterPath ?? Item.FanartPath;
+            if (string.IsNullOrEmpty(path)) return "";
+            // Cache-buster: re-identification overwrites the file at the same path,
+            // so without this the browser keeps serving the stale image even after
+            // a rescan downloads a new poster.
+            var v = Item.LastMetadataRefreshedAt?.Ticks ?? 0;
+            return $"/api/image?path={Uri.EscapeDataString(path)}&t={v}";
+        }
+    }
+
+    private static string TypeLabel(MediaItemType t) => t switch
+    {
+        MediaItemType.Anime       => "ANIME",
+        MediaItemType.Movie       => "MOVIE",
+        MediaItemType.Series      => "SERIES",
+        MediaItemType.Multserials => "MULTI",
+        _                         => "MEDIA",
+    };
+}

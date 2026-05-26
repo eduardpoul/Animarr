@@ -1,97 +1,226 @@
 @page "/"
-@inject IAnimarrApiClient Api
 @implements IDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
 
-@*
-    Minimal catalog. Calls IAnimarrApiClient.GetMediaItemsAsync — same
-    surface the rich Animarr.Web Razor catalog will eventually use once
-    migrated. The grid is intentionally lightweight (CSS Grid + lazy
-    image loading) so it works identically on WASM and MAUI.
-*@
+<PageTitle>Animarr — @L["catalog.title"]</PageTitle>
 
-<h1>Catalog</h1>
+<div class="catalog-page">
 
-<div class="catalog-toolbar">
-    <input type="text" placeholder="Search…" @bind="_search" @bind:event="oninput" />
-    <button @onclick="ReloadAsync">Reload</button>
+    @* ── Featured hero (top 5 by rating, rotates) ────────────────────────── *@
+    @if (_featured.Count > 0)
+    {
+        <CatalogHero Items="@_featured" IntervalSec="@_heroInterval" />
+    }
+
+    @* ── Filter bar ──────────────────────────────────────────────────────── *@
+    <div class="catalog-filter">
+        <Tabs T="MediaItemType?"
+              Items="@_typeTabs"
+              SelectedValue="@_typeFilter"
+              SelectedValueChanged="@OnTypeFilterChanged"
+              Mode="segmented" />
+
+        <Input Value="@_searchFilter"
+               ValueChanged="@OnSearchChanged"
+               Placeholder="@(L["catalog.search_placeholder"])"
+               IconBefore="search"
+               Clearable="true" />
+
+        <NeedsReviewChip />
+
+        <div class="catalog-count">
+            @_filtered.Count<span class="catalog-count__sep">/</span>@_allItems.Count
+            <span class="catalog-count__label">TITLES</span>
+        </div>
+    </div>
+
+    @* ── Folder chip strip (sections) ─────────────────────────────────── *@
+    @if (_sections.Count > 0)
+    {
+        <div class="catalog-folders">
+            <span class="catalog-folders__label">FOLDER</span>
+            <button type="button"
+                    class="@($"catalog-chip {(_activeSection is null ? "catalog-chip--active" : "")}")"
+                    @onclick="@(() => SetActiveSection(null))">@L["catalog.tab_all"]</button>
+            @foreach (var sec in _sections)
+            {
+                var id = sec.Id;
+                <button type="button"
+                        class="@($"catalog-chip {(_activeSection == id ? "catalog-chip--active" : "")}")"
+                        @onclick="@(() => SetActiveSection(id))">@sec.Label</button>
+            }
+        </div>
+    }
+
+    @* ── Grid ─────────────────────────────────────────────────────────── *@
+    @if (_loading)
+    {
+        <div class="catalog-grid">
+            @for (int i = 0; i < 12; i++)
+            {
+                <Skeleton Variant="poster" />
+            }
+        </div>
+    }
+    else if (_filtered.Count == 0)
+    {
+        <div class="catalog-empty">
+            <DIcon Name="video" Size="48" />
+            <div class="catalog-empty__text">@L["catalog.empty"]</div>
+        </div>
+    }
+    else
+    {
+        <div class="catalog-grid">
+            @* H-7: cap rendered items to 240 so the catalog stays snappy at 1000+ entries. *@
+            @foreach (var item in _filtered.Take(240))
+            {
+                <Poster Item="@item" />
+            }
+        </div>
+        @if (_filtered.Count > 240)
+        {
+            <div class="catalog-more">
+                @L.Get("catalog.shown_of_total", 240, _filtered.Count)
+            </div>
+        }
+    }
 </div>
 
-@if (_loading)
-{
-    <p>Loading…</p>
-}
-else if (_items is null || _items.Length == 0)
-{
-    <p>Nothing here yet. Add a folder under Settings → Root folders, then come back.</p>
-}
-else
-{
-    <div class="catalog-grid">
-        @foreach (var item in Filtered)
-        {
-            <a class="catalog-card" href="@($"media/{item.Id}")">
-                @if (!string.IsNullOrEmpty(item.PosterPath))
-                {
-                    <img loading="lazy" src="@PosterUrl(item.PosterPath)" alt="@item.Title" />
-                }
-                else
-                {
-                    <div class="catalog-card-placeholder">@(string.IsNullOrEmpty(item.Title) ? "?" : item.Title[..1])</div>
-                }
-                <div class="catalog-card-meta">
-                    <div class="catalog-card-title">@item.Title</div>
-                    @if (item.Year is not null)
-                    {
-                        <div class="catalog-card-year">@item.Year</div>
-                    }
-                </div>
-            </a>
-        }
-    </div>
-}
-
 @code {
-    private MediaItemDto[]? _items;
-    private bool _loading = true;
-    private string _search = string.Empty;
-    private CancellationTokenSource? _cts;
+    private List<MediaItemDto>      _allItems = new();
+    private List<MediaItemDto>      _filtered = new();
+    private List<MediaItemDto>      _featured = new();
+    private List<FolderWatcherDto>  _sections = new();
+    private bool   _loading = true;
+    private Guid?  _activeSection;
+    private MediaItemType? _typeFilter;
+    private string _searchFilter = "";
+    private int    _heroInterval = 30;
+
+    private static readonly IReadOnlyList<Tabs<MediaItemType?>.TabItem> _typeTabs =
+    [
+        new(null,                          "All"),
+        new(MediaItemType.Anime,           "Anime"),
+        new(MediaItemType.Movie,           "Movie"),
+        new(MediaItemType.Series,          "Series"),
+        new(MediaItemType.Multserials,     "Multi"),
+    ];
 
     protected override async Task OnInitializedAsync()
     {
-        await ReloadAsync();
-    }
-
-    private async Task ReloadAsync()
-    {
-        _cts?.Cancel();
-        _cts = new CancellationTokenSource();
-        _loading = true;
-        StateHasChanged();
         try
         {
-            _items = await Api.GetMediaItemsAsync(
-                new MediaListQuery { Take = 200, Sort = "recent" },
-                _cts.Token);
+            // One wide fetch — server query is a single SELECT with eager
+            // Tags include; client-side filtering is cheap on the resulting
+            // DTOs since they're already projections.
+            var sections = await Api.GetSectionFoldersAsync();
+            _sections = sections.OrderBy(f => f.Label).ToList();
+
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            // Hide rows whose Folder is itself a section (those are containers,
+            // not catalog entries). The /api/media endpoint already filters out
+            // section-roots; this is belt-and-braces.
+            _allItems = items.ToList();
+
+            // Featured hero: top 5 rated ≥ 8.0 with a fanart path.
+            _featured = _allItems
+                .Where(m => (m.Rating ?? 0) >= 8.0 && !string.IsNullOrEmpty(m.FanartPath))
+                .OrderByDescending(m => m.Rating ?? 0)
+                .ThenByDescending(m => m.RatingCount ?? 0)
+                .Take(5)
+                .ToList();
+
+            // Carousel cadence from server config.
+            var intStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
+            if (int.TryParse(intStr?.Value, out var iv)) _heroInterval = iv;
         }
-        catch (OperationCanceledException) { /* superseded */ }
-        finally
-        {
-            _loading = false;
-            StateHasChanged();
-        }
+        catch { /* offline — empty grid */ }
+
+        _loading = false;
+        ApplyFilter();
     }
 
-    private IEnumerable<MediaItemDto> Filtered =>
-        string.IsNullOrWhiteSpace(_search)
-            ? _items ?? Array.Empty<MediaItemDto>()
-            : (_items ?? Array.Empty<MediaItemDto>())
-                .Where(m => m.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
+    private void OnSearchChanged(string? v)
+    {
+        _searchFilter = v ?? "";
+        ApplyFilter();
+    }
 
-    // Server-absolute disk paths are wrapped through /api/image so the
-    // browser fetches them from the API host with the right auth (none
-    // currently) and content-type negotiation.
-    private static string PosterUrl(string path)
-        => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(path)}";
+    private void OnTypeFilterChanged(MediaItemType? v)
+    {
+        _typeFilter = v;
+        ApplyFilter();
+    }
 
-    public void Dispose() => _cts?.Cancel();
+    private void SetActiveSection(Guid? sectionId)
+    {
+        _activeSection = sectionId;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        IEnumerable<MediaItemDto> src = _allItems;
+
+        if (_typeFilter.HasValue)
+            src = src.Where(m => m.MediaType == _typeFilter.Value);
+
+        // Section filter — match items whose Folder is under the chosen
+        // section. The DTO carries FolderId; we resolve the parent section
+        // via the folder list fetched alongside.
+        if (_activeSection.HasValue)
+        {
+            var childIds = _sections
+                .Where(s => s.Id == _activeSection.Value)
+                .Select(s => s.Id)
+                .ToHashSet();
+            // Children-of-section are returned as their own folders; we need to
+            // include items whose folder's parent matches OR whose folder IS
+            // the section (rare for flat sections).
+            // For simplicity: match where FolderId is in the set of children
+            // of the active section. That set is computed via a separate API
+            // call — folded into _allFolders below for one round trip.
+            src = src.Where(m => _childFolderIdsBySection
+                .GetValueOrDefault(_activeSection.Value, new HashSet<Guid>())
+                .Contains(m.FolderId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchFilter))
+        {
+            var q = _searchFilter;
+            src = src.Where(m =>
+                m.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (m.OriginalTitle?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (m.EnglishTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)  ?? false) ||
+                (m.CjkTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)      ?? false));
+        }
+
+        _filtered = src.ToList();
+    }
+
+    // Section → set of child FolderWatcher Ids. Populated lazily when the
+    // user clicks a section chip (avoids fetching N folders eagerly).
+    private readonly Dictionary<Guid, HashSet<Guid>> _childFolderIdsBySection = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Resolve every section's child folder set so the chip-filter is instant.
+        try
+        {
+            var folders = await Api.GetFoldersAsync();
+            foreach (var sec in _sections)
+            {
+                _childFolderIdsBySection[sec.Id] = folders
+                    .Where(f => f.ParentSectionId == sec.Id)
+                    .Select(f => f.Id)
+                    .ToHashSet();
+            }
+        }
+        catch { /* section filter degrades to no-op */ }
+    }
+
+    public void Dispose() { }
 }

@@ -1,12 +1,4 @@
-@* Global imports for every page/component in Animarr.UI.
-
-   Phase 3 (partial): Design/Primitives migrated; client-side services
-   (LocalizationService, ThemeService) live here. Layout + pages will
-   migrate piecewise — each one needs its DB-direct calls rewritten as
-   IAnimarrApiClient calls before it can live here.
-
-   The Layout/Loaders/Media folders aren't present yet — the imports
-   reappear once those components have been ported. *@
+@* Global imports for every page/component in Animarr.UI. *@
 @using System.Net.Http
 @using System.Net.Http.Json
 @using Microsoft.AspNetCore.Components
@@ -22,7 +14,9 @@
 @using Animarr.Shared.Requests
 @using Animarr.UI
 @using Animarr.UI.Components
+@using Animarr.UI.Components.Layout
 @using Animarr.UI.Components.Design
 @using Animarr.UI.Components.Design.Primitives
+@using Animarr.UI.Components.Design.Media
 @using Animarr.UI.Services
 @inject LocalizationService L
