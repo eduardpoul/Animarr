@@ -51,3 +51,18 @@
     border-radius: 9999px;
 }
 .d-input__clear:hover { color: var(--text); }
+
+/* Label wrapper — used when <Input Label="..." /> is set. */
+.d-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.d-input-group__label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.4px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+}

@@ -1,0 +1,75 @@
+@*
+    ProfilePanel (Phase 4 stub) — right-edge 480px drawer.
+
+    Currently shows a minimal "Identity" view with sign-out. Phase 4
+    fleshes out the 4 tabs (Identity / Appearance / Audio / Language)
+    with the full preferences UI.
+*@
+
+@inject UserContextState UserCtx
+@inject NavigationManager Nav
+
+@if (IsOpen && UserCtx.Me is { } me)
+{
+    <div class="d-profile__backdrop" @onclick="Close" aria-hidden="true"></div>
+    <aside class="d-profile" role="dialog" aria-label="Profile">
+        <header class="d-profile__head">
+            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="lg" />
+            <div class="d-profile__head-text">
+                <div class="d-profile__head-name">@me.User.Name</div>
+                <div class="d-profile__head-sub">@me.User.Username @(string.IsNullOrEmpty(me.User.Email) ? "" : "· " + me.User.Email)</div>
+            </div>
+            <button type="button" class="d-profile__close tv-focus" @onclick="Close" aria-label="Close">
+                <DIcon Name="x" Size="14" />
+            </button>
+        </header>
+
+        <section class="d-profile__body">
+            <div class="d-profile__rows">
+                <div class="d-profile__row">
+                    <span class="d-profile__row-key">USERNAME</span>
+                    <span class="d-profile__row-val">@me.User.Username</span>
+                </div>
+                <div class="d-profile__row">
+                    <span class="d-profile__row-key">ROLE</span>
+                    <span class="d-profile__row-val">@me.User.RoleName</span>
+                </div>
+                @if (!string.IsNullOrEmpty(me.User.Email))
+                {
+                    <div class="d-profile__row">
+                        <span class="d-profile__row-key">EMAIL</span>
+                        <span class="d-profile__row-val">@me.User.Email</span>
+                    </div>
+                }
+                <div class="d-profile__row">
+                    <span class="d-profile__row-key">CREATED</span>
+                    <span class="d-profile__row-val">@me.User.CreatedAt.ToString("yyyy-MM-dd")</span>
+                </div>
+            </div>
+
+            <div class="d-profile__placeholder">
+                Appearance / Audio / Language tabs land in Phase 4.
+            </div>
+
+            <div class="d-profile__actions">
+                <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
+                    <DIcon Name="x" Size="13" /> SIGN OUT
+                </button>
+            </div>
+        </section>
+    </aside>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnCloseEvent { get; set; }
+
+    private Task Close() => OnCloseEvent.InvokeAsync();
+
+    private async Task SignOut()
+    {
+        await UserCtx.SignOutAsync();
+        await Close();
+        Nav.NavigateTo("/welcome", forceLoad: false);
+    }
+}

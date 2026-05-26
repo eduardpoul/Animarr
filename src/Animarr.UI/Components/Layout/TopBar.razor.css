@@ -1,0 +1,212 @@
+/* ============================================================
+   TopBarV4 — 60px fixed header. Spec: screens-v4.jsx lines 251-366.
+   ============================================================ */
+
+.d-topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 60px;
+    z-index: 50;
+    background: linear-gradient(180deg, rgba(10, 8, 7, 0.78), rgba(10, 8, 7, 0.55));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 24px;
+}
+
+/* ── Brand ──────────────────────────────────────────────── */
+.d-topbar__brand {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex-shrink: 0;
+    padding: 0;
+    color: inherit;
+}
+
+.d-topbar__brand-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue, 25)));
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 17px;
+    box-shadow: 0 4px 16px -4px var(--accent-soft);
+    line-height: 1;
+}
+
+.d-topbar__brand-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    color: var(--text);
+}
+
+/* ── Folder nav (replaces v3 sidebar folder chips) ───────── */
+.d-topbar__nav {
+    display: flex;
+    gap: 4px;
+    margin-left: 16px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.d-topbar__nav::-webkit-scrollbar { display: none; }
+
+.d-topbar__pill {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border-radius: 8px;
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+.d-topbar__pill:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.d-topbar__pill--active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: 0 1px 0 var(--accent) inset;
+}
+
+/* ── LLM status pill ─────────────────────────────────────── */
+.d-topbar__llm {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text-dim);
+}
+.d-topbar__llm:hover { color: var(--text); }
+
+.d-topbar__llm-dot {
+    width: 7px; height: 7px;
+    border-radius: 7px;
+    background: var(--success);
+    box-shadow: 0 0 10px var(--success);
+    animation: llm-pulse 1.8s ease-in-out infinite;
+}
+@keyframes llm-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+}
+
+.d-topbar__llm-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.6px;
+}
+
+/* ── Icon buttons (Downloads, Admin) ─────────────────────── */
+.d-topbar__icon-btn {
+    appearance: none;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+.d-topbar__icon-btn:hover { color: var(--text); }
+.d-topbar__icon-btn--active {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--accent-hi);
+}
+
+.d-topbar__badge {
+    position: absolute;
+    top: -3px; right: -3px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--bg-0);
+    line-height: 1;
+}
+
+/* ── Profile chip ────────────────────────────────────────── */
+.d-topbar__profile {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px 4px 4px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-topbar__profile:hover { border-color: var(--border-strong); }
+
+.d-topbar__profile-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+    align-items: flex-start;
+}
+.d-topbar__profile-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+}
+.d-topbar__profile-role {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+/* ── Mobile (< 960px) — hide the desktop topbar entirely;
+   MobileShell renders its own header strip. ──────────── */
+@media (max-width: 959px) {
+    .d-topbar { display: none; }
+}

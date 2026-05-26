@@ -1,16 +1,36 @@
+@*
+    MainLayout (v4) — default layout for authenticated routes.
+
+    Composition:
+      • Backdrop layer (fanart slideshow + vignette + hue tint)
+      • TopBar.razor (desktop ≥ 960px)
+      • MobileShell.razor (< 960px, top strip + bottom tabbar)
+      • <main> body
+      • ProfilePanel drawer (Phase 4 — stub for now)
+      • LLMStatusPopup (anchored top-right under TopBar)
+      • Toast stack (bottom-right)
+
+    Boots /api/auth/status + /api/me on first render through
+    UserContextState. Redirects anonymous users to /welcome or /setup as
+    needed — those routes have their own AuthLayout that skips this shell.
+*@
+
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
-@inject ThemeService ThemeService
+@inject UserContextState UserCtx
 @inject IJSRuntime JS
 @inject IAnimarrApiClient Api
 @inject HttpClient Http
 @inject ToastService Toasts
 @inject NavigationManager Nav
+@inject ThemeService ThemeService
 
 @using Microsoft.AspNetCore.SignalR.Client
 
 <div class="animarr-shell">
 
+    @* Backdrop: fixed under everything. backdrop.js paints the slides;
+       vignette + hue tint are pure CSS. *@
     <div class="animarr-backdrop">
         <div id="backdrop-container">
             <div id="backdrop-slide-a" class="backdrop-slide"></div>
@@ -22,73 +42,34 @@
 
     <div class="film-grain"></div>
 
-    <nav class="d-mobile-nav" aria-label="Top navigation">
-        <a href="/" class="d-mobile-nav__brand">
-            <span class="animarr-brand-mark">A</span>
-            <span class="animarr-brand-name">ANIMARR</span>
-        </a>
-        <span class="d-mobile-nav__spacer"></span>
-        @if (_activeDownloads > 0)
-        {
-            <span class="sb-live" title="@_activeDownloads active">
-                <span class="sb-live__dot"></span>@_activeDownloads LIVE
-            </span>
-        }
-    </nav>
+    @if (UserCtx.Loaded && UserCtx.IsAuthenticated)
+    {
+        <TopBar ActiveDownloads="_activeDownloads"
+                LlmDone="_llmDone" LlmTotal="_llmTotal"
+                FolderNames="@_folderNames"
+                OnProfileClickEvent="@(() => _profileOpen = true)"
+                OnLlmClickEvent="@(() => _llmOpen = true)" />
 
-    <div class="animarr-body">
-        <aside class="animarr-sidebar">
-            <a href="/" class="animarr-brand">
-                <span class="animarr-brand-mark">A</span>
-                <div>
-                    <div class="animarr-brand-name">ANIMARR</div>
-                    <div class="animarr-brand-build">v0.4 · WASM</div>
-                </div>
-            </a>
+        <MobileShell ActiveDownloads="_activeDownloads"
+                     OnProfileClickEvent="@(() => _profileOpen = true)" />
+    }
 
-            <nav class="fluent-nav-menu" role="navigation" aria-label="Primary">
-                <NavLink class="fluent-nav-link" Match="NavLinkMatch.All" href="">
-                    <span class="fluent-nav-link__icon"><DIcon Name="catalog" Size="20" /></span>
-                    <span class="fluent-nav-link__label">@L["nav.catalog"]</span>
-                    @if (_catalogCount is int n && n > 0)
-                    {
-                        <span class="sb-count">@n</span>
-                    }
-                </NavLink>
-                <NavLink class="fluent-nav-link" Match="NavLinkMatch.All" href="torrents">
-                    <span class="fluent-nav-link__icon"><DIcon Name="torrent" Size="20" /></span>
-                    <span class="fluent-nav-link__label">@L["nav.torrents"]</span>
-                    @if (_activeDownloads > 0)
-                    {
-                        <span class="sb-live"><span class="sb-live__dot"></span>@_activeDownloads LIVE</span>
-                    }
-                </NavLink>
-                <NavLink class="fluent-nav-link" Match="NavLinkMatch.Prefix" href="settings">
-                    <span class="fluent-nav-link__icon"><DIcon Name="settings" Size="20" /></span>
-                    <span class="fluent-nav-link__label">@L["nav.settings"]</span>
-                </NavLink>
-            </nav>
-        </aside>
+    <main class="animarr-main">
+        @Body
+    </main>
 
-        <main class="animarr-main">
-            @Body
-        </main>
-    </div>
+    @* Phase 4 will replace this stub with the full ProfilePanel drawer. *@
+    @if (_profileOpen && UserCtx.Me is not null)
+    {
+        <ProfilePanel IsOpen="_profileOpen"
+                      OnCloseEvent="@(() => _profileOpen = false)" />
+    }
 
-    <nav class="d-tabbar" aria-label="Primary mobile navigation">
-        <NavLink class="d-tabbar__item" Match="NavLinkMatch.All" href="" ActiveClass="d-tabbar__item--active">
-            <DIcon Name="catalog" Size="22" />
-            <span class="d-tabbar__label">@L["nav.catalog"]</span>
-        </NavLink>
-        <NavLink class="d-tabbar__item" Match="NavLinkMatch.All" href="torrents" ActiveClass="d-tabbar__item--active">
-            <DIcon Name="torrent" Size="22" />
-            <span class="d-tabbar__label">@L["nav.torrents"]</span>
-        </NavLink>
-        <NavLink class="d-tabbar__item" Match="NavLinkMatch.Prefix" href="settings" ActiveClass="d-tabbar__item--active">
-            <DIcon Name="settings" Size="22" />
-            <span class="d-tabbar__label">@L["nav.settings"]</span>
-        </NavLink>
-    </nav>
+    <LLMStatusPopup Open="_llmOpen"
+                    Done="_llmDone" Total="_llmTotal"
+                    AvgMs="480" HitRate="99.2"
+                    Recent="_recentIdentifications"
+                    OnClose="@(() => _llmOpen = false)" />
 </div>
 
 <div class="ml-toast-stack">
@@ -105,29 +86,30 @@
 
 @code {
     private const string AccentStorageKey = "animarr-accent";
-    private bool _everywhereBackdropStarted;
-    private int? _catalogCount;
-    private int _activeDownloads;
-    private HubConnection? _hub;
 
+    private int _activeDownloads;
+    private int _llmDone;
+    private int _llmTotal;
+    private bool _profileOpen;
+    private bool _llmOpen;
+    private bool _everywhereBackdropStarted;
+    private HubConnection? _hub;
+    private string[] _folderNames = Array.Empty<string>();
     private readonly List<ToastInfo> _toasts = new();
     private const int ToastAutoDismissMs = 4000;
+    private IReadOnlyList<LLMStatusPopup.RecentItem> _recentIdentifications = Array.Empty<LLMStatusPopup.RecentItem>();
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
+        UserCtx.OnChange += OnUserCtxChanged;
         ThemeService.OnChange += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
         Toasts.OnShow += OnToastShown;
-
-        try
-        {
-            var pref = await Api.GetAppConfigValueAsync(AppConfigKeys.Language);
-            var lang = pref?.Value ?? "en";
-            if (!string.Equals(lang, L.CurrentLanguage, StringComparison.OrdinalIgnoreCase))
-                await L.LoadAsync(lang);
-        }
-        catch { }
     }
+
+    private void OnUserCtxChanged() => InvokeAsync(StateHasChanged);
+    private void OnThemeChanged()   => InvokeAsync(ApplyAccentHueToDomAsync);
+    private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
 
     private void OnToastShown(ToastInfo info) => InvokeAsync(async () =>
     {
@@ -142,6 +124,7 @@
     {
         if (!firstRender) return;
 
+        // 1. Bridge HttpClient base address to JS so it can build absolute URLs.
         try
         {
             var apiBase = Http.BaseAddress?.ToString().TrimEnd('/') ?? "";
@@ -149,50 +132,84 @@
         }
         catch { }
 
-        try
-        {
-            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", AccentStorageKey);
-            if (!string.IsNullOrEmpty(stored) && int.TryParse(stored, out var hue))
-                ThemeService.SetAccentHue(hue);
-        }
-        catch { }
-        await ApplyAccentHueToDomAsync(ThemeService.AccentHue);
+        // 2. Boot auth state. After this resolves, we know whether to redirect
+        //    or stay on the current route.
+        await UserCtx.LoadAsync();
 
-        try
-        {
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000 });
-            _catalogCount = items.Length;
-        }
-        catch { }
-        StateHasChanged();
+        // 3. Route guard — anonymous users go to /welcome (or /setup on first run).
+        var current = new Uri(Nav.Uri).AbsolutePath;
+        var isAuthRoute = current.StartsWith("/welcome", StringComparison.OrdinalIgnoreCase)
+                       || current.StartsWith("/login",   StringComparison.OrdinalIgnoreCase)
+                       || current.StartsWith("/setup",   StringComparison.OrdinalIgnoreCase);
 
+        if (UserCtx.AuthStatus is { SetupRequired: true } && !current.StartsWith("/setup"))
+        {
+            Nav.NavigateTo("/setup", replace: true);
+            return;
+        }
+        if (!UserCtx.IsAuthenticated && !isAuthRoute)
+        {
+            Nav.NavigateTo("/welcome", replace: true);
+            return;
+        }
+
+        // 4. Authenticated: apply preferences, start backdrop, fetch folder names, hub.
+        if (UserCtx.IsAuthenticated)
+        {
+            await ApplyAccentHueToDomAsync();
+            await StartBackdropAsync();
+            await LoadFolderNamesAsync();
+            await StartTorrentHubAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyAccentHueToDomAsync()
+    {
+        int hue = UserCtx.Preferences?.AccentHue ?? ThemeService.AccentHue;
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); }
+        catch { }
+    }
+
+    private async Task StartBackdropAsync()
+    {
+        var prefs = UserCtx.Preferences;
+        if (prefs?.BackdropEnabled == false) return;
         try
         {
-            var enabledPref = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropEnabled);
-            var enabled = (enabledPref?.Value ?? "true") != "false";
-            if (enabled)
+            var interval   = prefs?.BackdropIntervalSec ?? 30;
+            var blur       = prefs?.BackdropBlurPx      ?? 14;
+            var brightness = prefs?.BackdropBrightness  ?? 38;
+            if (blur > 30) blur = 14;
+
+            var paths = await Api.GetBackdropRotationAsync();
+            if (paths.Length > 0)
             {
-                var intervalStr   = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
-                var blurStr       = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropBlurPx);
-                var brightnessStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropBrightness);
-                var interval   = int.TryParse(intervalStr?.Value,   out var iv) ? iv : 30;
-                var blur       = int.TryParse(blurStr?.Value,       out var bl) ? bl : 14;
-                var brightness = int.TryParse(brightnessStr?.Value, out var br) ? br : 38;
-                if (blur > 30) blur = 14;
-
-                var paths = await Api.GetBackdropRotationAsync();
-                if (paths.Length > 0)
-                {
-                    var urls = paths
-                        .Select(p => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(p)}")
-                        .ToArray();
-                    _everywhereBackdropStarted = true;
-                    await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
-                }
+                var urls = paths
+                    .Select(p => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(p)}")
+                    .ToArray();
+                _everywhereBackdropStarted = true;
+                await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
             }
         }
         catch { }
+    }
 
+    private async Task LoadFolderNamesAsync()
+    {
+        try
+        {
+            var sections = await Api.GetSectionFoldersAsync();
+            _folderNames = sections
+                .OrderBy(f => f.Label)
+                .Select(f => f.Label)
+                .ToArray();
+        }
+        catch { _folderNames = Array.Empty<string>(); }
+    }
+
+    private async Task StartTorrentHubAsync()
+    {
         var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubTorrents);
         _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
@@ -208,29 +225,9 @@
         try { await _hub.StartAsync(); } catch { }
     }
 
-    private void OnThemeChanged()
-    {
-        InvokeAsync(SaveAccentColorAsync);
-        InvokeAsync(() => ApplyAccentHueToDomAsync(ThemeService.AccentHue));
-    }
-
-    private async Task ApplyAccentHueToDomAsync(int hue)
-    {
-        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); }
-        catch { }
-    }
-
-    private async Task SaveAccentColorAsync()
-    {
-        try { await JS.InvokeVoidAsync("localStorage.setItem", AccentStorageKey, ThemeService.AccentHue.ToString()); }
-        catch { }
-        StateHasChanged();
-    }
-
-    private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
-
     public async ValueTask DisposeAsync()
     {
+        UserCtx.OnChange -= OnUserCtxChanged;
         ThemeService.OnChange -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;
         Toasts.OnShow -= OnToastShown;

@@ -1,0 +1,138 @@
+@*
+    TopBarV4 — 60px fixed header that replaces the v3 sidebar. Holds:
+
+      [A] ANIMARR  All|Anime|Movies|...  ●17/25  [↓2]  [⚙]  [@Yuri · master]
+
+    - Brand → /catalog
+    - Folder strip → filters Home page by folder (writes to FolderJump state)
+    - LLM pill → opens LLMStatusPopup anchored top-right
+    - Downloads button → /downloads (visible only if uploadContent)
+    - Admin button → /server (visible only if systemSettings)
+    - Profile chip → opens ProfilePanel drawer
+
+    Spec: screens-v4.jsx lines 237-366.
+
+    Wired to UserContextState for current user + permissions, and to
+    FolderJumpService for cross-page folder selection.
+*@
+
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject FolderJumpService FolderJump
+
+<header class="d-topbar @ExtraClass">
+    <button type="button" class="d-topbar__brand tv-focus" @onclick="GoHome" aria-label="Animarr — go to catalog">
+        <span class="d-topbar__brand-mark">A</span>
+        <span class="d-topbar__brand-name">ANIMARR</span>
+    </button>
+
+    <nav class="d-topbar__nav d-scroll-x" aria-label="Folder navigation">
+        @foreach (var name in _folderNames)
+        {
+            var n = name;
+            var active = IsFolderActive(n);
+            <button type="button"
+                    class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
+                    @onclick="@(() => OnPickFolder(n))">@n</button>
+        }
+    </nav>
+
+    @* LLM status pill *@
+    <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">
+        <span class="d-topbar__llm-dot"></span>
+        <DIcon Name="magic" Size="13" />
+        <span class="d-topbar__llm-count">@_llmCount</span>
+    </button>
+
+    @if (UserCtx.Can(p => p.UploadContent))
+    {
+        <button type="button"
+                class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/downloads") ? "d-topbar__icon-btn--active" : "")}")"
+                @onclick="@(() => Nav.NavigateTo("/downloads"))"
+                title="Downloads">
+            <DIcon Name="torrent" Size="15" />
+            @if (_activeDownloads > 0)
+            {
+                <span class="d-topbar__badge">@_activeDownloads</span>
+            }
+        </button>
+    }
+
+    @if (UserCtx.Can(p => p.SystemSettings))
+    {
+        <button type="button"
+                class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/server") ? "d-topbar__icon-btn--active" : "")}")"
+                @onclick="@(() => Nav.NavigateTo("/server"))"
+                title="Server settings">
+            <DIcon Name="settings" Size="15" />
+        </button>
+    }
+
+    @if (UserCtx.Me is { } me)
+    {
+        <button type="button" class="d-topbar__profile tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
+            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
+            <span class="d-topbar__profile-text">
+                <span class="d-topbar__profile-name">@me.User.Name</span>
+                <span class="d-topbar__profile-role">@me.User.RoleName</span>
+            </span>
+        </button>
+    }
+</header>
+
+@code {
+    [Parameter] public string? ExtraClass { get; set; }
+    [Parameter] public int ActiveDownloads { get; set; }
+    [Parameter] public int LlmDone { get; set; }
+    [Parameter] public int LlmTotal { get; set; }
+    [Parameter] public EventCallback OnProfileClickEvent { get; set; }
+    [Parameter] public EventCallback OnLlmClickEvent { get; set; }
+    /// <summary>Folder section labels — passed in from MainLayout because the
+    /// fetch lives there to dedupe with the catalog's own folder fetch.</summary>
+    [Parameter] public IReadOnlyList<string>? FolderNames { get; set; }
+
+    private int _activeDownloads => ActiveDownloads;
+    private string _llmCount => $"{LlmDone}/{LlmTotal}";
+
+    private string[] _folderNames =>
+        FolderNames is { Count: > 0 } list
+            ? list.Prepend("All").ToArray()
+            : new[] { "All" };
+
+    private void GoHome()
+    {
+        FolderJump.SetActiveFolder(null);
+        Nav.NavigateTo("/");
+    }
+
+    private bool IsFolderActive(string name)
+    {
+        // Only the catalog page reflects folder state. On other routes the
+        // strip shows the last-known selection in case the user goes back.
+        if (!IsCatalogRoute()) return false;
+        return name == "All"
+            ? FolderJump.ActiveFolderName is null
+            : string.Equals(FolderJump.ActiveFolderName, name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnPickFolder(string name)
+    {
+        FolderJump.SetActiveFolder(name == "All" ? null : name);
+        if (!IsCatalogRoute()) Nav.NavigateTo("/");
+    }
+
+    private bool IsCatalogRoute()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath;
+        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog";
+    }
+
+    private bool IsRoute(string path)
+    {
+        var current = new Uri(Nav.Uri).AbsolutePath;
+        return current.StartsWith(path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
+    private Task ToggleLlm()      => OnLlmClickEvent.InvokeAsync();
+}

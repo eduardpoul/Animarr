@@ -1,0 +1,15 @@
+/* MobileShell — supplements components.css §14 with v4-specific bits
+   (avatar button in the top strip). The d-mobile-nav / d-tabbar
+   global rules live in components.css; this scoped file only adds
+   the avatar button. */
+
+.d-mobile-nav__avatar {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+}

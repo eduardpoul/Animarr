@@ -1,0 +1,31 @@
+/* Avatar — circular disc with initials over a hue-tinted gradient.
+   --hue is set inline per instance. */
+
+.d-avatar {
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    color: #fff;
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    flex-shrink: 0;
+    overflow: hidden;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 4px 12px -6px rgba(0, 0, 0, 0.6);
+    user-select: none;
+}
+
+.d-avatar--initials {
+    background: linear-gradient(135deg,
+        oklch(0.58 0.18 var(--hue, 25)),
+        oklch(0.40 0.16 var(--hue, 25)));
+}
+
+.d-avatar--sm { width: 28px; height: 28px; font-size: 11px; }
+.d-avatar--md { width: 36px; height: 36px; font-size: 13px; }
+.d-avatar--lg { width: 48px; height: 48px; font-size: 17px; letter-spacing: -0.4px; }
+
+img.d-avatar { object-fit: cover; }

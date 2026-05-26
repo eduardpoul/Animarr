@@ -1,0 +1,102 @@
+@*
+    LLM status popup — 360px wide, anchored top-right under the TopBar.
+    Shows queue progress + recent identifications + provider/model.
+
+    Click outside the popup → dismisses (transparent backdrop sibling
+    consumes the click). ESC also dismisses.
+
+    Spec: screens-v4.jsx → LLMStatusPopup lines 386-451.
+*@
+
+@inject IAnimarrApiClient Api
+@implements IDisposable
+
+@if (Open)
+{
+    <div class="d-llm-popup__backdrop" @onclick="OnDismiss" aria-hidden="true"></div>
+    <div class="d-llm-popup" role="dialog" aria-label="LLM status">
+        <div class="d-llm-popup__head">
+            <div class="d-llm-popup__head-tile"><DIcon Name="magic" Size="14" /></div>
+            <div class="d-llm-popup__head-text">
+                <div class="d-llm-popup__head-status">
+                    <span class="d-llm-popup__head-dot"></span>
+                    <span>ONLINE</span>
+                </div>
+                <div class="d-llm-popup__head-meta">@_provider · @_model</div>
+            </div>
+            <button type="button" class="d-llm-popup__close tv-focus"
+                    @onclick="OnDismiss" aria-label="Close">
+                <DIcon Name="x" Size="13" />
+            </button>
+        </div>
+
+        <div class="d-llm-popup__progress-row">
+            <div class="d-llm-popup__progress">
+                <div class="d-llm-popup__progress-fill" style="width: @($"{ProgressPct}%")"></div>
+            </div>
+            <span class="d-llm-popup__progress-text">@Done / @Total</span>
+        </div>
+
+        <div class="d-llm-popup__stats">
+            <div class="d-llm-popup__stat">
+                <div class="d-llm-popup__stat-label">AVG</div>
+                <div class="d-llm-popup__stat-value">@AvgMs ms/item</div>
+            </div>
+            <div class="d-llm-popup__stat d-llm-popup__stat--success">
+                <div class="d-llm-popup__stat-label">HIT RATE</div>
+                <div class="d-llm-popup__stat-value">@($"{HitRate:F1}")%</div>
+            </div>
+        </div>
+
+        @if (Recent is { Count: > 0 })
+        {
+            <div class="d-llm-popup__recent">
+                <div class="d-llm-popup__recent-label">RECENT</div>
+                @foreach (var r in Recent)
+                {
+                    <div class="d-llm-popup__recent-row">
+                        <span class="d-llm-popup__recent-title">@r.Title</span>
+                        <span class="@($"d-llm-popup__recent-conf {(r.Confidence >= 0.85 ? "is-success" : "is-warn")}")">
+                            @($"{(int)(r.Confidence * 100)}%")
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public int Done { get; set; }
+    [Parameter] public int Total { get; set; }
+    [Parameter] public int AvgMs { get; set; }
+    [Parameter] public double HitRate { get; set; }
+    [Parameter] public IReadOnlyList<RecentItem>? Recent { get; set; }
+
+    private string _provider = "ollama";
+    private string _model    = "qwen2.5:1.5b";
+
+    private int ProgressPct => Total > 0 ? Math.Clamp(Done * 100 / Math.Max(Total, 1), 0, 100) : 0;
+
+    private Task OnDismiss() => OnClose.InvokeAsync();
+
+    public record RecentItem(string Title, double Confidence);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Try to read the configured LLM model/provider from app config —
+        // best-effort; falls back to defaults if 401 or empty.
+        try
+        {
+            var prov = await Api.GetAppConfigValueAsync(AppConfigKeys.LlmProvider);
+            var mdl  = await Api.GetAppConfigValueAsync(AppConfigKeys.LlmModel);
+            if (!string.IsNullOrEmpty(prov?.Value)) _provider = prov.Value!;
+            if (!string.IsNullOrEmpty(mdl?.Value))  _model    = mdl.Value!;
+        }
+        catch { }
+    }
+
+    public void Dispose() { }
+}

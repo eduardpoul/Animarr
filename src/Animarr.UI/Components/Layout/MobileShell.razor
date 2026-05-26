@@ -1,0 +1,56 @@
+@*
+    Mobile shell — top 56px strip + bottom tabbar. Only rendered on
+    viewports < 960px (see d-mobile-nav / d-tabbar media queries in
+    Styles/components.css). Mirrors the v3 pattern; v4 adds an
+    Avatar-icon entry point to ProfilePanel.
+*@
+
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+
+<nav class="d-mobile-nav" aria-label="Top navigation">
+    <a href="/" class="d-mobile-nav__brand tv-focus">
+        <span class="animarr-brand-mark">A</span>
+        <span class="animarr-brand-name">ANIMARR</span>
+    </a>
+    <span class="d-mobile-nav__spacer"></span>
+    @if (ActiveDownloads > 0)
+    {
+        <span class="sb-live" title="@($"{ActiveDownloads} active")">
+            <span class="sb-live__dot"></span>@ActiveDownloads LIVE
+        </span>
+    }
+    @if (UserCtx.Me is { } me)
+    {
+        <button type="button" class="d-mobile-nav__avatar tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
+            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
+        </button>
+    }
+</nav>
+
+<nav class="d-tabbar" aria-label="Primary mobile navigation">
+    <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.All" href="" ActiveClass="d-tabbar__item--active">
+        <DIcon Name="catalog" Size="22" />
+        <span class="d-tabbar__label">@L["nav.catalog"]</span>
+    </NavLink>
+    @if (UserCtx.Can(p => p.UploadContent))
+    {
+        <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.Prefix" href="downloads" ActiveClass="d-tabbar__item--active">
+            <DIcon Name="torrent" Size="22" />
+            <span class="d-tabbar__label">@L["nav.torrents"]</span>
+        </NavLink>
+    }
+    @if (UserCtx.Can(p => p.SystemSettings))
+    {
+        <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.Prefix" href="server" ActiveClass="d-tabbar__item--active">
+            <DIcon Name="settings" Size="22" />
+            <span class="d-tabbar__label">SERVER</span>
+        </NavLink>
+    }
+</nav>
+
+@code {
+    [Parameter] public int ActiveDownloads { get; set; }
+    [Parameter] public EventCallback OnProfileClickEvent { get; set; }
+    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
+}

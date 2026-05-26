@@ -1,0 +1,15 @@
+@*
+    AuthLayout — full-bleed shell for /welcome, /login, /setup.
+    No TopBar, no sidebar, no nav. Just the global backdrop layers
+    + a film-grain overlay + @Body centered.
+
+    Used by setting `@layout AuthLayout` at the top of the page.
+*@
+
+@inherits LayoutComponentBase
+
+<div class="d-auth-shell">
+    <div class="d-auth-shell__backdrop" aria-hidden="true"></div>
+    <div class="d-auth-shell__grain film-grain" aria-hidden="true"></div>
+    @Body
+</div>

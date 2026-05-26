@@ -2,26 +2,23 @@
     Plain <input> styled with design tokens. No shadow DOM.
     Use directly for text/number/search. Bind via @bind-Value.
     For select dropdowns use <Select />; for switches use <Toggle />.
+
+    Optional <see cref="Label"/> renders a mono-cased label above the input —
+    used by Login/Setup/ProfilePanel where the field cluster needs a stable
+    semantic label, not just placeholder text.
 *@
 
-<div class="d-input @(IconBefore is not null ? "d-input--icon-before" : "")">
-    @if (IconBefore is not null)
-    {
-        <DIcon Name="@IconBefore" Size="14" />
-    }
-    <input @attributes="Extra"
-           type="@Type"
-           class="d-input__field"
-           value="@Value"
-           placeholder="@Placeholder"
-           @oninput="OnInput" />
-    @if (!string.IsNullOrEmpty(Value) && Clearable)
-    {
-        <button type="button" class="d-input__clear" @onclick="ClearAsync" aria-label="Clear">
-            <DIcon Name="x" Size="12" />
-        </button>
-    }
-</div>
+@if (!string.IsNullOrEmpty(Label))
+{
+    <label class="d-input-group">
+        <span class="d-input-group__label">@Label</span>
+        @RenderInput
+    </label>
+}
+else
+{
+    @RenderInput
+}
 
 @code {
     [Parameter] public string?  Value         { get; set; }
@@ -30,8 +27,35 @@
     [Parameter] public string?  Placeholder   { get; set; }
     [Parameter] public string?  IconBefore    { get; set; }
     [Parameter] public bool     Clearable     { get; set; }
+    [Parameter] public string?  Label         { get; set; }
+    [Parameter] public bool     Disabled      { get; set; }
+    [Parameter] public string?  Autocomplete  { get; set; }
     [Parameter(CaptureUnmatchedValues = true)]
     public Dictionary<string, object>? Extra { get; set; }
+
+    private RenderFragment RenderInput => __builder =>
+    {
+        <div class="d-input @(IconBefore is not null ? "d-input--icon-before" : "")">
+            @if (IconBefore is not null)
+            {
+                <DIcon Name="@IconBefore" Size="14" />
+            }
+            <input @attributes="Extra"
+                   type="@Type"
+                   class="d-input__field"
+                   value="@Value"
+                   placeholder="@Placeholder"
+                   disabled="@Disabled"
+                   autocomplete="@Autocomplete"
+                   @oninput="OnInput" />
+            @if (!string.IsNullOrEmpty(Value) && Clearable)
+            {
+                <button type="button" class="d-input__clear" @onclick="ClearAsync" aria-label="Clear">
+                    <DIcon Name="x" Size="12" />
+                </button>
+            }
+        </div>
+    };
 
     private Task OnInput(ChangeEventArgs e)
         => ValueChanged.InvokeAsync(e.Value?.ToString());
