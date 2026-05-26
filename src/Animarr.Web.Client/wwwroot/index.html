@@ -8,7 +8,11 @@
     <base href="/" />
     <link rel="preload" id="webassembly" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <link href="_content/Animarr.UI/Animarr.UI.bundle.scp.css" rel="stylesheet" />
+    <!-- Animarr.Web.Client.styles.css is the merged scoped-CSS bundle: Blazor
+         aggregates every referenced RCL's [b-xxx]-attribute rules into this
+         single stylesheet at build time, so we don't link Animarr.UI's bundle
+         separately (and the fingerprinted path wouldn't work in a static HTML
+         anyway — see the script-tag note below). -->
     <link href="Animarr.Web.Client.styles.css" rel="stylesheet" />
     <style>
         html, body { margin: 0; padding: 0; background: #0b0d10; color: #f0f1f3;
@@ -41,7 +45,11 @@
         <a href="." class="reload">Reload</a>
         <span class="dismiss">🗙</span>
     </div>
-    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <!-- Plain filename: `#[.{fingerprint}]` placeholder gets substituted by
+         MapStaticAssets only when Razor renders the page. Our index.html is
+         a static file, so the placeholder reaches the browser literally and
+         404s. Cache-busting is handled by blazor.boot.json's content hashes. -->
+    <script src="_framework/blazor.webassembly.js"></script>
 
     <!-- Audio-offset calibration (localStorage-backed) + player module. -->
     <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
