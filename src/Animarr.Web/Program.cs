@@ -134,17 +134,16 @@ contentTypes.Mappings[".woff"]  = "font/woff";
 contentTypes.Mappings[".woff2"] = "font/woff2";
 app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
 
-// WASM client hosting — UseBlazorFrameworkFiles serves the framework runtime
-// (.dll bundle, blazor.webassembly.js) from Animarr.Web.Client's wwwroot,
-// which is copied into our wwwroot at publish via the ProjectReference.
-app.UseBlazorFrameworkFiles();
-
-// MapStaticAssets is what substitutes the `#[.{fingerprint}]` placeholder in
-// index.html's <script src="_framework/blazor.webassembly#[.{fingerprint}].js">
-// AND assigns the correct MIME type to scoped-CSS bundles (Animarr.UI's
-// Animarr.UI.bundle.scp.css). Without this middleware browsers refuse to
-// load the bundle ("MIME type ('')") and the framework script 404s on the
-// literal placeholder URL.
+// In .NET 9+, MapStaticAssets is the single source of truth for static asset
+// routing — it surfaces every wwwroot/* file from this project AND from every
+// ProjectReference'd RCL/WASM client through the static-asset manifest. It
+// also serves Brotli/Gzip precompressed variants automatically.
+//
+// Calling UseBlazorFrameworkFiles() alongside this would register the same
+// /_framework/* paths twice, the route table picks the empty-name one first,
+// and the second middleware short-circuits without running the endpoint →
+// "The request reached the end of the pipeline without executing the
+// endpoint: ''". One call to MapStaticAssets is enough.
 app.MapStaticAssets();
 
 // ─── Animarr.Shared REST surface ──────────────────────────────────────────
