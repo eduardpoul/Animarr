@@ -26,12 +26,15 @@ COPY ["src/Animarr.Web/Animarr.Web.csproj",             "src/Animarr.Web/"]
 RUN dotnet restore "src/Animarr.Web/Animarr.Web.csproj"
 
 COPY . .
-WORKDIR "/src/src/Animarr.Web"
 
-# Install node deps after COPY so platform-specific optional packages
-# (@tailwindcss/oxide-linux-x64-gnu) are resolved for the Linux container.
+# Install node deps for Animarr.UI (the Tailwind build target lives there
+# since Phase 5 hard cutover stripped Razor + Tailwind from Animarr.Web).
+# Platform-specific optional packages (@tailwindcss/oxide-linux-x64-gnu)
+# are resolved by running `npm install` from inside the Linux container.
+WORKDIR "/src/src/Animarr.UI"
 RUN npm install
 
+WORKDIR "/src/src/Animarr.Web"
 RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 
 # Publish stage — produces the final layout including:
