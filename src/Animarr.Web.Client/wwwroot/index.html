@@ -8,7 +8,6 @@
     <base href="/" />
     <link rel="preload" id="webassembly" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <!-- Scoped CSS bundled from Animarr.UI's [b-xxx] components. -->
     <link href="_content/Animarr.UI/Animarr.UI.bundle.scp.css" rel="stylesheet" />
     <link href="Animarr.Web.Client.styles.css" rel="stylesheet" />
     <style>
@@ -21,6 +20,12 @@
                                     animation: spin 1s linear infinite; }
         @@keyframes spin { to { transform: rotate(360deg); } }
     </style>
+
+    <!-- Artplayer + hls.js — same CDN setup the server-side Razor uses.
+         animarr-player.js (shipped as a static web asset from Animarr.UI)
+         consumes both globals via Artplayer's customType.m3u8 hook. -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
 </head>
 
 <body>
@@ -37,6 +42,10 @@
         <span class="dismiss">🗙</span>
     </div>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+
+    <!-- Audio-offset calibration (localStorage-backed) + player module. -->
+    <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
+    <script src="_content/Animarr.UI/animarr-player.js"></script>
 </body>
 
 </html>

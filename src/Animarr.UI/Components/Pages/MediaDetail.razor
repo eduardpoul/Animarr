@@ -1,23 +1,20 @@
 @page "/catalog/{Id:guid}"
+@implements IAsyncDisposable
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @*
-    Media detail — slimmed for the API-driven client.
+    Media detail — full migration with player launch.
 
-    Covered: poster + hero metadata, synopsis, details column, identification
-    sources (TMDB / MAL / IMDb links), tag list, season list with per-episode
-    watched toggles, Edit metadata drawer, Re-identify CTA, Continue-watching
-    hint surface.
-
-    Skipped relative to Animarr.Web:
-      • In-page video / HLS player launch — requires the file-enumeration
-        endpoint (currently not in the API surface; the server-side page
-        does it via PatternMatchService + filesystem walk). Tracked as a
-        follow-up; for now the "Play" CTA hands off to the server's
-        Razor MediaDetail page over a deep link.
-      • LLM-driven episode-to-file mapping — same reason.
-      • DLNA cast drawer — re-add once the player launch lands.
+    Flow on Play / Continue:
+      1. Ask the server for the file map (/api/media/{id}/files).
+      2. Pick the file that matches the target (season, episode) — or the
+         first file for movies.
+      3. Set _playerPath + a fresh _playerElementId.
+      4. OnAfterRender calls animarrPlayer.attach via JS interop. The
+         player JS then drives Artplayer + hls.js, fetches /api/hls/start
+         and pushes progress back through OnPlayerProgress.
 *@
 
 <PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
@@ -43,7 +40,6 @@ else
 {
     var item = _item;
 
-    @* ── Hero (inline — original MediaDetailHero hasn't been migrated yet) ── *@
     <header class="md-hero">
         <div class="md-hero__poster">
             @if (!string.IsNullOrEmpty(item.PosterPath))
@@ -79,7 +75,6 @@ else
     </header>
 
     <div class="md-body">
-        @* Synopsis *@
         <section class="md-body__col md-synopsis">
             <div class="md-overline">SYNOPSIS</div>
             @if (!string.IsNullOrEmpty(item.Description))
@@ -97,7 +92,6 @@ else
             </div>
         </section>
 
-        @* Details *@
         <section class="md-body__col md-details">
             <div class="md-overline">DETAILS</div>
             <dl class="md-kv">
@@ -116,7 +110,6 @@ else
             </dl>
         </section>
 
-        @* Identification *@
         <section class="md-body__col md-ident">
             <div class="md-overline md-overline--dim">IDENTIFICATION</div>
             @if (item.TmdbId is not null)
@@ -158,7 +151,6 @@ else
         </section>
     </div>
 
-    @* ── Seasons + episodes ── *@
     @if (item.Seasons.Length > 0)
     {
         <div class="md-seasons">
@@ -187,8 +179,20 @@ else
                         var ep = i;
                         var watched = _watchStates.Any(w =>
                             w.Season == _activeSeason && w.Episode == ep && w.IsWatched);
+                        var hasFile = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
                         <div class="md-episode-row">
                             <span class="md-episode-num">EP @ep.ToString("D2")</span>
+                            <div class="md-episode-spacer"></div>
+                            @if (hasFile)
+                            {
+                                <Btn Variant="solid" Size="sm" OnClick="@(() => PlayEpisodeAsync(_activeSeason, ep))">
+                                    <DIcon Name="play" Size="12" /> Play
+                                </Btn>
+                            }
+                            else
+                            {
+                                <span class="md-episode-missing">no file</span>
+                            }
                             <label class="md-episode-watch">
                                 <input type="checkbox" checked="@watched"
                                        @onchange="@(e => ToggleEpisodeWatched(_activeSeason, ep, (bool)e.Value!))" />
@@ -203,6 +207,12 @@ else
     else if (item.MediaType == MediaItemType.Movie)
     {
         <div class="md-movie-row">
+            @if (_files.Length > 0)
+            {
+                <Btn Variant="primary" Size="md" OnClick="@(() => PlayPathAsync(_files[0].FilePath))">
+                    <DIcon Name="play" Size="14" /> Play movie
+                </Btn>
+            }
             <label class="md-episode-watch">
                 <input type="checkbox" checked="@_movieWatched"
                        @onchange="@(e => ToggleMovieWatched((bool)e.Value!))" />
@@ -210,6 +220,16 @@ else
             </label>
         </div>
     }
+}
+
+@* Player overlay — Artplayer mounts into the .vp-art container. *@
+@if (_playerPath is not null)
+{
+    <div class="vp-backdrop" @onclick="ClosePlayer">
+        <div class="vp-shell" @onclick:stopPropagation>
+            <div id="@_playerElementId" class="vp-art"></div>
+        </div>
+    </div>
 }
 
 @* Edit metadata drawer *@
@@ -222,12 +242,23 @@ else
     [Parameter] public Guid Id { get; set; }
 
     private MediaItemDto? _item;
+    private MediaFileDto[] _files = Array.Empty<MediaFileDto>();
     private bool _loading = true;
     private ContinueWatchDto? _continue;
     private List<WatchStateDto> _watchStates = new();
     private int _activeSeason = 1;
     private bool _movieWatched;
     private bool _editOpen;
+
+    // Player state — _playerPath drives the overlay render; _playerSelfRef
+    // is the DotNetObjectReference passed to animarrPlayer.attach so the JS
+    // module can call back into our JSInvokable methods.
+    private string? _playerPath;
+    private string  _playerElementId = $"vp-{Guid.NewGuid():N}";
+    private int?    _playerSeason;
+    private int?    _playerEpisode;
+    private DotNetObjectReference<MediaDetail>? _playerSelfRef;
+    private DateTime _lastProgressWrite = DateTime.MinValue;
 
     protected override async Task OnInitializedAsync()
     {
@@ -244,8 +275,8 @@ else
             var states = await Api.GetWatchStatesAsync(Id);
             _watchStates = states.ToList();
             _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
+            _files = await Api.GetMediaFilesAsync(Id);
 
-            // Default to first available season.
             if (_item is not null && _item.Seasons.Length > 0)
                 _activeSeason = _item.Seasons.OrderBy(s => s.Number).First().Number;
         }
@@ -256,14 +287,133 @@ else
 
     private async Task HandleContinueClick()
     {
-        // The full server-side page launches the HLS player here; the WASM
-        // version doesn't have the file path resolver yet. Hand off to the
-        // server's Razor MediaDetail (same route) so the user gets playback
-        // until that endpoint lands.
-        if (_item is null) return;
-        Nav.NavigateTo($"/catalog/{_item.Id}", forceLoad: true);
-        await Task.CompletedTask;
+        if (_item is null || _continue is null) return;
+
+        // Resolve which file to play: explicit season/episode from the
+        // continue hint, otherwise first file (movies, or "play first ep").
+        string? path = null;
+        if (_continue.Season is int s && _continue.Episode is int ep)
+        {
+            var f = _files.FirstOrDefault(x => x.Season == s && x.Episode == ep);
+            path = f?.FilePath;
+        }
+        path ??= _files.FirstOrDefault()?.FilePath;
+        if (path is null) return;
+
+        await PlayPathAsync(path, _continue.Season, _continue.Episode);
     }
+
+    private async Task PlayEpisodeAsync(int season, int episode)
+    {
+        var file = _files.FirstOrDefault(f => f.Season == season && f.Episode == episode);
+        if (file is null) return;
+        await PlayPathAsync(file.FilePath, season, episode);
+    }
+
+    private async Task PlayPathAsync(string path, int? season = null, int? episode = null)
+    {
+        // Tear down any previous Artplayer + HLS session before starting a new
+        // one — leaving the old WIRED entry up would leak the .NET ref and the
+        // server-side HLS keepalive timer.
+        if (_playerSelfRef is not null)
+        {
+            try { await JS.InvokeVoidAsync("animarrPlayer.flush",  _playerElementId); } catch { }
+            try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }
+            _playerSelfRef.Dispose();
+            _playerSelfRef = null;
+        }
+
+        _playerPath      = path;
+        _playerSeason    = season;
+        _playerEpisode   = episode;
+        _playerElementId = $"vp-{Guid.NewGuid():N}";
+        _lastProgressWrite = DateTime.MinValue;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Attach the player whenever a new _playerElementId has just hit the
+        // DOM and we don't already have a .NET ref wired up to JS.
+        if (_playerPath is not null && _playerSelfRef is null)
+        {
+            _playerSelfRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("animarrPlayer.attach",
+                    _playerElementId, _playerSelfRef, _playerPath);
+            }
+            catch (Exception ex)
+            {
+                _playerSelfRef?.Dispose();
+                _playerSelfRef = null;
+                Console.Error.WriteLine($"animarrPlayer.attach failed: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task ClosePlayer()
+    {
+        try { await JS.InvokeVoidAsync("animarrPlayer.flush",  _playerElementId); } catch { }
+        try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }
+        _playerSelfRef?.Dispose();
+        _playerSelfRef = null;
+        _playerPath = null;
+        _playerSeason = null;
+        _playerEpisode = null;
+        StateHasChanged();
+    }
+
+    // ─── JS-invokable callbacks from animarr-player.js ────────────────────
+
+    [JSInvokable]
+    public async Task<double?> GetResumePositionSec()
+    {
+        if (_item is null) return null;
+        var match = _watchStates.FirstOrDefault(w =>
+            w.Season == _playerSeason && w.Episode == _playerEpisode);
+        if (match?.ProgressMs is not > 0) return null;
+        return await Task.FromResult((double?)(match.ProgressMs.Value / 1000.0));
+    }
+
+    [JSInvokable]
+    public async Task OnPlayerProgress(double positionSec, double durationSec, int playedDeltaSec)
+    {
+        if (_item is null || _playerPath is null) return;
+        var now = DateTime.UtcNow;
+        if ((now - _lastProgressWrite).TotalSeconds < 2) return;
+        _lastProgressWrite = now;
+
+        try
+        {
+            await Api.RecordProgressAsync(new RecordProgressRequest(
+                MediaItemId: _item.Id,
+                Season:      _playerSeason,
+                Episode:     _playerEpisode,
+                FilePath:    _playerPath,
+                ProgressMs:  (long)(positionSec * 1000),
+                RuntimeMs:   durationSec > 0 ? (long)(durationSec * 1000) : null));
+        }
+        catch { /* network blip — next ping retries */ }
+    }
+
+    [JSInvokable]
+    public async Task ClosePlayerFromJs()
+    {
+        await InvokeAsync(ClosePlayer);
+    }
+
+    [JSInvokable]
+    public Task ToggleCastMenuFromJs() => Task.CompletedTask;
+
+    [JSInvokable]
+    public Task<string> GetMpvDeepLink() => Task.FromResult($"mpv://{ApiRoutes.File}?path={Uri.EscapeDataString(_playerPath ?? "")}");
+
+    [JSInvokable]
+    public Task ReceiveMediaInfo(System.Text.Json.JsonElement info)
+        => Task.CompletedTask;
+
+    // ─── Metadata ops ─────────────────────────────────────────────────────
 
     private async Task ReidentifyAsync()
     {
@@ -291,7 +441,6 @@ else
                 Episode:     episode,
                 FilePath:    null,
                 IsWatched:   watched));
-            // Refresh the local list — the API returns the freshly-persisted row.
             _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
             _watchStates.Add(updated);
         }
@@ -318,4 +467,13 @@ else
 
     private static string PosterUrl(string path)
         => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(path)}";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_playerSelfRef is not null)
+        {
+            try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }
+            _playerSelfRef.Dispose();
+        }
+    }
 }

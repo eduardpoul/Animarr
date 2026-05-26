@@ -12,6 +12,12 @@
                      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
         .status-bar-safe-area { height: env(safe-area-inset-top); background: #14171b; }
     </style>
+
+    <!-- Same player vendor setup as the WASM host. The BlazorWebView's
+         WebView shares the device network, so the CDN loads inside the
+         native app just like in a browser. -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
 </head>
 <body>
     <div class="status-bar-safe-area"></div>
@@ -22,5 +28,7 @@
         <span class="dismiss">🗙</span>
     </div>
     <script src="_framework/blazor.webview.js" autostart="false"></script>
+    <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
+    <script src="_content/Animarr.UI/animarr-player.js"></script>
 </body>
 </html>

@@ -9,6 +9,8 @@
 @inherits LayoutComponentBase
 @inject LocalizationService Loc
 @inject IAnimarrApiClient Api
+@inject HttpClient Http
+@inject IJSRuntime JS
 
 <div class="ui-shell">
     <header class="ui-shell-header">
@@ -41,5 +43,21 @@
                 await Loc.LoadAsync(lang);
         }
         catch { /* offline / first start — keys-as-values is fine */ }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Tell animarr-player.js where the API lives so its fetch() calls and
+        // HLS manifest URLs resolve to the right origin. WASM serves from the
+        // API host so HttpClient.BaseAddress matches the page origin; MAUI's
+        // BlazorWebView serves from a local virtual host and the BaseAddress
+        // points at the remote server — this line covers both cases.
+        try
+        {
+            var apiBase = Http.BaseAddress?.ToString().TrimEnd('/') ?? "";
+            await JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';");
+        }
+        catch { /* WebView or interop not ready — player falls back to '' */ }
     }
 }

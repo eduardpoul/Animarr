@@ -33,6 +33,11 @@ public interface IAnimarrApiClient
     Task<string[]>        GetBackdropRotationAsync(CancellationToken ct = default);
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
+    Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    Task ApplyImageAsync(Guid mediaItemId, ApplyImageRequest request, CancellationToken ct = default);
+
+    // ─── Folder browsing (server-side filesystem) ────────────────────────
+    Task<FolderBrowseEntryDto[]> BrowseFolderAsync(string? path, CancellationToken ct = default);
 
     // ─── Folder watchers ──────────────────────────────────────────────────
     Task<FolderWatcherDto[]> GetFoldersAsync(CancellationToken ct = default);

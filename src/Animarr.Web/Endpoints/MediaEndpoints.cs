@@ -204,13 +204,32 @@ internal static class MediaEndpoints
             return Results.Accepted();
         });
 
-        // Poster / backdrop alternatives — TMDB images endpoint exposes the
-        // candidate set; we return whatever the current fanart_path picker
-        // would consider. Stub until the metadata service grows the right API.
-        app.MapGet(ApiRoutes.MediaPosterAlts, (Guid id) =>
-            Results.Ok(Array.Empty<string>()));
-        app.MapGet(ApiRoutes.MediaBackdropAlts, (Guid id) =>
-            Results.Ok(Array.Empty<string>()));
+        // Poster / backdrop alternatives — projects the TMDB-image set fetched
+        // by MetadataService into the URL list the EditMetadataDrawer renders.
+        app.MapGet(ApiRoutes.MediaPosterAlts, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MetadataService metadata,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            var (posters, _, _) = await metadata.GetAvailableImagesAsync(entity.FolderId, ct);
+            return Results.Ok(posters.ToArray());
+        });
+        app.MapGet(ApiRoutes.MediaBackdropAlts, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MetadataService metadata,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            var (_, backdrops, _) = await metadata.GetAvailableImagesAsync(entity.FolderId, ct);
+            return Results.Ok(backdrops.ToArray());
+        });
 
         app.MapGet(ApiRoutes.MediaBackdropList, async (
             IDbContextFactory<AppDbContext> dbFactory,
@@ -237,6 +256,18 @@ internal static class MediaEndpoints
                 .OrderByDescending(m => m.CreatedAt)
                 .ToListAsync(ct);
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        // File enumeration — surfaces the (season, episode) → file mapping the
+        // Razor MediaDetail page computes locally. WASM/MAUI consumers use this
+        // to drive the per-episode Play CTA without filesystem access.
+        app.MapGet(ApiRoutes.MediaFiles, async (
+            Guid id,
+            MediaFileResolver resolver,
+            CancellationToken ct) =>
+        {
+            var files = await resolver.ResolveAsync(id, ct);
+            return Results.Ok(files);
         });
 
         // Lightweight continue-watching hint built straight from WatchState
