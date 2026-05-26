@@ -1,16 +1,28 @@
-﻿# Build stage
+# Build stage
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
-# Install Node.js 22 LTS (apt ships Node 18 which is too old for @tailwindcss/oxide 4.x)
+# Install Node.js 22 LTS (apt ships Node 18 which is too old for
+# @tailwindcss/oxide 4.x used by Animarr.Web's stylesheet build).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Install WASM build tooling — Animarr.Web.Client compiles to WebAssembly, and
+# the .NET SDK image doesn't include wasm-tools by default. Without this the
+# build of the WASM client (which Animarr.Web ProjectReferences for static-
+# file hosting) fails with "missing wasm-tools workload".
+RUN dotnet workload install wasm-tools
+
 WORKDIR /src
 
-COPY ["src/Animarr.Web/Animarr.Web.csproj", "src/Animarr.Web/"]
+# Copy all project files first so `dotnet restore` resolves the full graph
+# without yanking the full source tree (faster layer cache hit on edits).
+COPY ["src/Animarr.Shared/Animarr.Shared.csproj",       "src/Animarr.Shared/"]
+COPY ["src/Animarr.UI/Animarr.UI.csproj",               "src/Animarr.UI/"]
+COPY ["src/Animarr.Web.Client/Animarr.Web.Client.csproj","src/Animarr.Web.Client/"]
+COPY ["src/Animarr.Web/Animarr.Web.csproj",             "src/Animarr.Web/"]
 RUN dotnet restore "src/Animarr.Web/Animarr.Web.csproj"
 
 COPY . .
@@ -22,7 +34,10 @@ RUN npm install
 
 RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 
-# Publish stage
+# Publish stage — produces the final layout including:
+#   • Animarr.Web.dll (API + Razor + WASM static-file host)
+#   • wwwroot/_framework/* (WASM bundle from Animarr.Web.Client)
+#   • wwwroot/_content/Animarr.UI/* (RCL static web assets)
 FROM build AS publish
 RUN dotnet publish "Animarr.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
 

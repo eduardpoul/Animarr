@@ -15,10 +15,17 @@
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.5.2" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.2" />
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
+    <!-- Hosts the WASM client's _framework bundle + maps SPA fallback. -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.8" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Animarr.Shared\Animarr.Shared.csproj" />
+    <!-- Reference the WASM client so its static files (Animarr.Web.Client.bundle
+         scope CSS, _framework/blazor.webassembly.js, .dll bundle) get copied
+         into Animarr.Web's wwwroot at publish time. Map a fallback route in
+         Program.cs to serve them as the SPA. -->
+    <ProjectReference Include="..\Animarr.Web.Client\Animarr.Web.Client.csproj" />
   </ItemGroup>
 
   <!-- Tailwind CSS build -->

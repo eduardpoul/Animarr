@@ -30,6 +30,14 @@
     gap: 16px;
 }
 
+/* TV / 10ft layout — fewer, bigger cards so titles are readable from the couch. */
+@media (min-width: 1280px) and (orientation: landscape) and (pointer: coarse) {
+    .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; }
+    .catalog-card-title { font-size: 18px; }
+    .catalog-card-year  { font-size: 14px; }
+    .catalog-toolbar input { font-size: 18px; padding: 12px 16px; }
+}
+
 .catalog-card {
     display: flex;
     flex-direction: column;

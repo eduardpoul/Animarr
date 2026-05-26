@@ -52,3 +52,22 @@
     width: 100%;
     margin: 0 auto;
 }
+
+/* ── TV layout (landscape 10ft displays).
+   Triggers on landscape ≥ 1280px viewports with coarse pointer = TV remote / DPad.
+   Bigger logo + nav, no max-width on main, focus ring tuned for 10ft.       */
+@media (min-width: 1280px) and (orientation: landscape) and (pointer: coarse) {
+    .ui-shell-header { padding: 16px 32px; }
+    .ui-shell-logo   { font-size: 24px; }
+    .ui-shell-nav a  { font-size: 18px; padding: 10px 16px; }
+    .ui-shell-main   { padding: 32px; max-width: none; }
+}
+
+/* DPad-friendly focus ring — drawn around active card / button regardless
+   of focus-visible UA behaviour so the user always sees what's selected. */
+@media (pointer: coarse) {
+    *:focus-visible {
+        outline: 3px solid oklch(72% 0.18 25);
+        outline-offset: 2px;
+    }
+}
