@@ -4,7 +4,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
   <!-- L-12: pinned versions (resolved via `dotnet list package` 2026-05-12).
@@ -27,11 +26,5 @@
          Program.cs to serve them as the SPA. -->
     <ProjectReference Include="..\Animarr.Web.Client\Animarr.Web.Client.csproj" />
   </ItemGroup>
-
-  <!-- Tailwind CSS build -->
-  <Target Name="BuildTailwindCSS" BeforeTargets="Build">
-    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)"
-          ContinueOnError="false" />
-  </Target>
 
 </Project>

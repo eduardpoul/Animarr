@@ -126,7 +126,9 @@
 
     async function measure() {
         const video = document.createElement('video');
-        video.src = '/calibration.mp4';
+        // Shipped as a static web asset from Animarr.UI's wwwroot so both
+        // standalone WASM and the MAUI hybrid find it at the same path.
+        video.src = '_content/Animarr.UI/calibration.mp4';
         video.crossOrigin = 'anonymous';
         video.muted = false;
         // Full amplitude through the WebAudio graph — the muteGain below
