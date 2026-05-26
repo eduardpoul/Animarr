@@ -22,6 +22,9 @@ public static class ApiRoutes
     public const string MediaBackdropList = "/api/media/backdrops";
     public const string MediaNeedsReview  = "/api/media/needs-review";
     public const string MediaContinue     = "/api/media/{id}/continue";
+    public const string MediaFiles        = "/api/media/{id}/files";
+    public const string MediaApplyImage   = "/api/media/{id}/apply-image";
+    public const string FoldersBrowse     = "/api/folders/browse";
 
     // ─── Folder watchers ──────────────────────────────────────────────────
     public const string Folders        = "/api/folders";
@@ -110,6 +113,8 @@ public static class ApiRoutes
     public static string MediaPosterAlternatives(Guid id)   => MediaPosterAlts.Replace("{id}", id.ToString());
     public static string MediaBackdropAlternatives(Guid id) => MediaBackdropAlts.Replace("{id}", id.ToString());
     public static string MediaContinueFor(Guid id)     => MediaContinue.Replace("{id}", id.ToString());
+    public static string MediaFilesFor(Guid id)        => MediaFiles.Replace("{id}", id.ToString());
+    public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
     public static string FolderScanFor(Guid id)        => FolderScan.Replace("{id}", id.ToString());

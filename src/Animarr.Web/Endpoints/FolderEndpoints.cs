@@ -173,6 +173,79 @@ internal static class FolderEndpoints
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
         });
 
+        // Filesystem browser — backs the SectionFolderDialog's drill-down picker.
+        // Without a `path` arg, returns the server's well-known roots (/mnt,
+        // /Pool-*/*, Windows drive letters). With a `path`, returns its
+        // immediate subdirectories. Safe because we only ever expose Directory
+        // listings — file content stays gated by the existing /api/image,
+        // /api/video, /api/file path-whitelist checks.
+        app.MapGet(ApiRoutes.FoldersBrowse, (string? path) =>
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                var roots = DiscoverRoots()
+                    .Select(r => new Animarr.Shared.Models.FolderBrowseEntryDto(
+                        Path:   r,
+                        Name:   System.IO.Path.GetFileName(r.TrimEnd('/', '\\')) is { Length: > 0 } leaf ? leaf : r,
+                        IsRoot: true))
+                    .ToArray();
+                return Results.Ok(roots);
+            }
+
+            try
+            {
+                if (!Directory.Exists(path)) return Results.NotFound();
+                var children = Directory.GetDirectories(path)
+                    .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+                    .Select(d => new Animarr.Shared.Models.FolderBrowseEntryDto(
+                        Path:   d,
+                        Name:   System.IO.Path.GetFileName(d.TrimEnd('/', '\\')),
+                        IsRoot: false))
+                    .ToArray();
+                return Results.Ok(children);
+            }
+            catch (UnauthorizedAccessException) { return Results.Forbid(); }
+            catch (Exception) { return Results.Problem("Couldn't read directory."); }
+        });
+
         return app;
+    }
+
+    /// <summary>Same root-discovery the Razor SectionFolderDialog used.
+    /// Lists /mnt/*, /Pool-*/*, and Windows drive letters.</summary>
+    private static List<string> DiscoverRoots()
+    {
+        var candidates = new List<string>();
+        try
+        {
+            if (Directory.Exists("/mnt"))
+                foreach (var d in Directory.GetDirectories("/mnt"))
+                    candidates.Add(d);
+        }
+        catch { /* ignore */ }
+
+        try
+        {
+            foreach (var pool in Directory.EnumerateDirectories("/")
+                .Where(d => System.IO.Path.GetFileName(d).StartsWith("Pool-", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    foreach (var d in Directory.GetDirectories(pool))
+                        candidates.Add(d);
+                }
+                catch { /* ignore */ }
+            }
+        }
+        catch { /* ignore */ }
+
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
+                candidates.Add(drive.RootDirectory.FullName.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+        }
+        catch { /* ignore */ }
+
+        return candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 }

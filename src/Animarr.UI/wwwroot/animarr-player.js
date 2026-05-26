@@ -22,6 +22,14 @@
     // elementId → { art, abort, refRef, sessionToken, keepaliveTimer, totalDuration, resumeOffset }
     const WIRED = new Map();
 
+    // Hosts that don't share an origin with the API (MAUI's BlazorWebView is
+    // the only one currently — its WebView serves index.html from a local
+    // virtual host while the API lives on a remote tower) prepend a base URL
+    // to every /api/ path. WASM / Blazor-Server hosts leave it as '' so the
+    // page-origin behaviour stays unchanged.
+    const apiBase = () => (typeof window !== 'undefined' && window.animarrApiBase) || '';
+    const apiUrl  = (path) => apiBase() + path;
+
     // SVG icons used by custom controls. Stroked-line style to match the
     // rest of the app (DIcon set in C#).
     const ICONS = {
@@ -228,10 +236,10 @@
         // ── 3) Start session (Direct Play OR HLS, server decides) ──────────
         let manifestUrl = null;
         let directPlayUrl = null;
-        const startUrl = '/api/hls/start?path=' + encodeURIComponent(mediaPath)
+        const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + audioOffsetMsHw
-            + '&audioOffsetSwMs=' + audioOffsetMsSw;
+            + '&audioOffsetSwMs=' + audioOffsetMsSw);
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
@@ -269,7 +277,7 @@
         let mediaInfo = null;  // captured so we can decide offset-channel below
         if (mediaPath) {
             try {
-                const probeRes = await fetch('/api/probe?path=' + encodeURIComponent(mediaPath),
+                const probeRes = await fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)),
                     { signal: abort.signal });
                 if (abort.signal.aborted) return;
                 if (probeRes.ok) {
@@ -280,7 +288,7 @@
                         const label = (s.tags && (s.tags.title    || s.tags.TITLE))    || `Track ${idx + 1}`;
                         return {
                             name: label + (lang !== 'und' ? ` (${lang})` : ''),
-                            url:  '/api/subtitle?path=' + encodeURIComponent(mediaPath)
+                            url:  apiUrl('/api/subtitle?path=' + encodeURIComponent(mediaPath))
                                 + '&track=' + idx + '&format=webvtt',
                             default: !!(s.disposition && s.disposition.default)
                                   || (subs.length === 1 && idx === 0),
@@ -342,7 +350,13 @@
         const offsetChannel = determineOffsetChannel(mediaInfo);
 
         // ── 5) Instantiate Artplayer ───────────────────────────────────────
-        const playUrl = directPlayUrl || manifestUrl;
+        // For cross-origin hosts (MAUI BlazorWebView pointing at a remote
+        // server) we re-anchor the server-supplied URLs against the API
+        // base — server returns them as page-relative paths and the
+        // WebView's local origin would resolve them to nowhere.
+        const playUrl = directPlayUrl
+            ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
+            : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
         const isHls   = !directPlayUrl;
         const fileExt = mediaPath.toLowerCase().split('.').pop();
 
@@ -599,7 +613,7 @@
         if (entry.sessionToken) {
             entry.keepaliveTimer = setInterval(() => {
                 if (!entry.sessionToken) return;
-                fetch('/api/hls/keepalive?token=' + encodeURIComponent(entry.sessionToken),
+                fetch(apiUrl('/api/hls/keepalive?token=' + encodeURIComponent(entry.sessionToken)),
                     { method: 'POST', signal: abort.signal })
                     .catch(() => { /* tick will retry */ });
             }, 30000);
@@ -625,7 +639,7 @@
         // 3) Tell server to free ffmpeg + tmp dir.
         if (entry.sessionToken) {
             try {
-                fetch('/api/hls/' + encodeURIComponent(entry.sessionToken),
+                fetch(apiUrl('/api/hls/' + encodeURIComponent(entry.sessionToken)),
                     { method: 'DELETE', keepalive: true });
             } catch { }
         }

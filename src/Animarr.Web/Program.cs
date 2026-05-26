@@ -80,6 +80,7 @@ builder.Services.AddSingleton<DlnaService>();
 // Probes /dev/dri, vainfo, nvidia-smi, ffmpeg -hwaccels at startup so the
 // Settings UI can show what's actually usable on this host.
 builder.Services.AddSingleton<HardwareInfoService>();
+builder.Services.AddScoped<MediaFileResolver>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();

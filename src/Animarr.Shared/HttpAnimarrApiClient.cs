@@ -96,6 +96,25 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default)
         => GetOrNullAsync<ContinueWatchDto>(ApiRoutes.MediaContinueFor(mediaItemId), ct);
 
+    public async Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<MediaFileDto[]>(ApiRoutes.MediaFilesFor(mediaItemId), JsonOpts, ct)
+            ?? Array.Empty<MediaFileDto>();
+
+    public async Task ApplyImageAsync(Guid mediaItemId, ApplyImageRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MediaApplyImageFor(mediaItemId), request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<FolderBrowseEntryDto[]> BrowseFolderAsync(string? path, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrEmpty(path)
+            ? ApiRoutes.FoldersBrowse
+            : $"{ApiRoutes.FoldersBrowse}?path={Uri.EscapeDataString(path)}";
+        return await _http.GetFromJsonAsync<FolderBrowseEntryDto[]>(url, JsonOpts, ct)
+            ?? Array.Empty<FolderBrowseEntryDto>();
+    }
+
     // ─── Folder watchers ──────────────────────────────────────────────────
 
     public async Task<FolderWatcherDto[]> GetFoldersAsync(CancellationToken ct = default)
