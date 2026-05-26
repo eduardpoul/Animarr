@@ -1,0 +1,105 @@
+@*
+    WelcomeScreen — public landing for anonymous users.
+    Spec: screens-v4.jsx lines 7-124.
+*@
+
+@page "/welcome"
+@layout AuthLayout
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+
+<PageTitle>Animarr — Your library, understood.</PageTitle>
+
+<div class="d-welcome">
+    <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__gh-chip tv-focus">
+        <DIcon Name="github" Size="14" /> GITHUB
+    </a>
+
+    <div class="d-welcome__cjk" aria-hidden="true">动画</div>
+
+    <div class="d-welcome__content">
+        <header class="d-welcome__brand">
+            <span class="d-welcome__brand-mark">A</span>
+            <div>
+                <h2 class="d-welcome__brand-name">ANIMARR</h2>
+                <div class="d-welcome__brand-sub">v4 · LOCAL · LLM-DRIVEN</div>
+            </div>
+        </header>
+
+        <h1 class="d-welcome__title">YOUR LIBRARY, UNDERSTOOD.</h1>
+
+        <p class="d-welcome__lede">
+            Self-hosted anime and movie organiser. LLM-driven identification,
+            per-user watch state, and a built-in player that direct-plays your
+            files when the browser can, falls back to on-the-fly remux when it can't.
+        </p>
+
+        <div class="d-welcome__cta">
+            <Btn Variant="primary" Size="lg" OnClick="StartFlow">
+                START <DIcon Name="arrow-r" Size="13" />
+            </Btn>
+            <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__view-src tv-focus">
+                View source
+            </a>
+        </div>
+
+        <div class="d-welcome__features">
+            <div class="d-welcome__feature">
+                <div class="d-welcome__feature-overline">LLM-FIRST</div>
+                <div class="d-welcome__feature-title">Identifies every title automatically</div>
+                <p class="d-welcome__feature-body">
+                    Files dropped into a watched folder are matched against TMDB,
+                    MAL, IMDb and an on-host LLM that picks the best candidate
+                    when the metadata sources disagree.
+                </p>
+            </div>
+            <div class="d-welcome__feature">
+                <div class="d-welcome__feature-overline">SAFE BY DEFAULT</div>
+                <div class="d-welcome__feature-title">Your files stay where they are</div>
+                <p class="d-welcome__feature-body">
+                    Nothing is moved without your approval. Rename suggestions
+                    are queued, previewable, and reversible. Originals never
+                    leave your storage.
+                </p>
+            </div>
+            <div class="d-welcome__feature">
+                <div class="d-welcome__feature-overline">MULTI-USER</div>
+                <div class="d-welcome__feature-title">One server, many viewers</div>
+                <p class="d-welcome__feature-body">
+                    Per-user watch state, favorites and preferences. Custom
+                    roles can scope folder access — e.g. an Uploader role
+                    limited to specific source folders.
+                </p>
+            </div>
+        </div>
+
+        <footer class="d-welcome__footer">
+            <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__footer-link tv-focus">
+                github.com / animarr
+            </a>
+        </footer>
+    </div>
+</div>
+
+@code {
+    private const string GithubUrl = "https://github.com";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Probe auth state. If a cookie's already valid, skip ahead.
+        if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+        if (UserCtx.AuthStatus is { SetupRequired: true })
+            Nav.NavigateTo("/setup", replace: true);
+        else if (UserCtx.IsAuthenticated)
+            Nav.NavigateTo("/", replace: true);
+    }
+
+    private void StartFlow()
+    {
+        if (UserCtx.AuthStatus is { SetupRequired: true })
+            Nav.NavigateTo("/setup");
+        else
+            Nav.NavigateTo("/login");
+    }
+}

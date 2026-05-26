@@ -1,4 +1,5 @@
 using Animarr.Shared;
+using Animarr.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Animarr.UI;
@@ -28,6 +29,19 @@ public static class AnimarrUiServiceCollectionExtensions
             var http = sp.GetRequiredService<HttpClient>();
             return new HttpAnimarrApiClient(http);
         });
+        return services;
+    }
+
+    /// <summary>
+    /// Register the v4 UI plumbing — UserContextState (auth + preferences cache)
+    /// and FolderJumpService (catalog folder selection that lives above the
+    /// route in TopBar). Both are <see cref="ServiceLifetime.Scoped"/> — one
+    /// per circuit on Blazor Server, one per app instance on WASM/MAUI.
+    /// </summary>
+    public static IServiceCollection AddAnimarrUiState(this IServiceCollection services)
+    {
+        services.AddScoped<UserContextState>();
+        services.AddScoped<FolderJumpService>();
         return services;
     }
 }

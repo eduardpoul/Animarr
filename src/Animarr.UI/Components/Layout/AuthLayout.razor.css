@@ -1,0 +1,30 @@
+/* AuthLayout — full-bleed shell for unauthenticated pages.
+   Replaces the TopBar/sidebar with a single backdrop layer. */
+
+.d-auth-shell {
+    position: relative;
+    min-height: 100vh;
+    overflow: hidden;
+    background: var(--bg-0);
+    color: var(--text);
+}
+
+.d-auth-shell__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(120% 80% at 50% 30%,
+            transparent 0%,
+            rgba(10, 8, 7, 0.55) 60%,
+            rgba(10, 8, 7, 0.95) 100%),
+        var(--bg-0);
+}
+
+.d-auth-shell__grain {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+}

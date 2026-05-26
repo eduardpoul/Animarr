@@ -1,0 +1,120 @@
+@*
+    First-run Setup wizard. Only reachable when /api/auth/status returns
+    SetupRequired=true. Creates the initial Master user, then auto-signs
+    them in and redirects to /catalog.
+
+    Once the first user exists this route hard-redirects to /login.
+*@
+
+@page "/setup"
+@layout AuthLayout
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+
+<PageTitle>Animarr — Set up your master account</PageTitle>
+
+<div class="d-setup">
+    <button type="button" class="d-setup__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
+        <DIcon Name="arrow-l" Size="13" /> BACK
+    </button>
+
+    <div class="d-setup__card" role="dialog" aria-label="First-run setup">
+        <header class="d-setup__brand">
+            <span class="d-setup__brand-mark">A</span>
+            <div>
+                <div class="d-setup__brand-name">ANIMARR</div>
+                <div class="d-setup__brand-sub">First-run setup — create the master account</div>
+            </div>
+        </header>
+
+        <form class="d-setup__form" @onsubmit="OnSubmit" @onsubmit:preventDefault>
+            <div class="d-setup__row">
+                <Input @bind-Value="_name"     Placeholder="Your name"        Label="NAME"     Disabled="@_loading" />
+                <Input @bind-Value="_username" Placeholder="username"         Label="USERNAME" Disabled="@_loading" Autocomplete="username" />
+            </div>
+            <Input @bind-Value="_email" Placeholder="you@example.com (optional)" Label="EMAIL" Type="email" Disabled="@_loading" />
+            <div class="d-setup__row">
+                <Input @bind-Value="_password"        Placeholder="At least 6 characters" Label="PASSWORD"  Type="password" Disabled="@_loading" Autocomplete="new-password" />
+                <Input @bind-Value="_passwordConfirm" Placeholder="Repeat"                Label="REPEAT"    Type="password" Disabled="@_loading" Autocomplete="new-password" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="d-setup__error">@_error</div>
+            }
+
+            <div class="d-setup__hint">
+                Master users have full access to every folder, the server settings,
+                and user management. You can create restricted accounts later from
+                Server Settings → Users &amp; Roles.
+            </div>
+
+            <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || !CanSubmit)">
+                @if (_loading) { <Spinner Size="14" /><text>CREATING…</text> }
+                else
+                {
+                    <text>CREATE MASTER ACCOUNT</text>
+                    <DIcon Name="arrow-r" Size="13" />
+                }
+            </Btn>
+        </form>
+    </div>
+</div>
+
+@code {
+    private string _name             = "";
+    private string _username         = "";
+    private string _email            = "";
+    private string _password         = "";
+    private string _passwordConfirm  = "";
+    private string? _error;
+    private bool _loading;
+
+    private bool CanSubmit =>
+        !string.IsNullOrWhiteSpace(_name)
+        && !string.IsNullOrWhiteSpace(_username)
+        && _password.Length >= 6
+        && _password == _passwordConfirm;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+        // Setup is only reachable while Users table is empty.
+        if (UserCtx.AuthStatus is not null && !UserCtx.AuthStatus.SetupRequired)
+        {
+            Nav.NavigateTo(UserCtx.IsAuthenticated ? "/" : "/login", replace: true);
+        }
+    }
+
+    private async Task OnSubmit()
+    {
+        if (_loading || !CanSubmit) return;
+        _error = null;
+        _loading = true;
+        try
+        {
+            var req = new SetupRequest(
+                Name: _name.Trim(),
+                Username: _username.Trim(),
+                Email: string.IsNullOrWhiteSpace(_email) ? null : _email.Trim(),
+                Password: _password,
+                PasswordConfirm: _passwordConfirm);
+            var created = await Api.SetupInitialMasterAsync(req);
+            if (created is null)
+            {
+                _error = "Setup failed — check the fields and try again";
+                _loading = false;
+                return;
+            }
+            await UserCtx.RefreshMeAsync();
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Setup failed: {ex.Message}";
+            _loading = false;
+        }
+    }
+}

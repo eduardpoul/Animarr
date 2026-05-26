@@ -18,6 +18,7 @@ builder.Services.AddScoped(sp =>
 
 // IAnimarrApiClient + client-side state services that Animarr.UI pages depend on.
 builder.Services.AddAnimarrApiClient();
+builder.Services.AddAnimarrUiState();
 builder.Services.AddScoped<LocalizationService>();
 builder.Services.AddSingleton<ThemeService>();
 builder.Services.AddSingleton<ToastService>();

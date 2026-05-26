@@ -41,6 +41,7 @@ public static class MauiProgram
             Timeout     = TimeSpan.FromSeconds(30),
         });
         builder.Services.AddAnimarrApiClient();
+        builder.Services.AddAnimarrUiState();
         builder.Services.AddScoped<LocalizationService>();
         builder.Services.AddSingleton<ThemeService>();
         builder.Services.AddSingleton<ToastService>();
