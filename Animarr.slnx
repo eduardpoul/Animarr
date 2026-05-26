@@ -1,5 +1,9 @@
 ﻿<Solution>
   <Folder Name="/src/">
+    <Project Path="src/Animarr.Shared/Animarr.Shared.csproj" />
+    <Project Path="src/Animarr.UI/Animarr.UI.csproj" />
     <Project Path="src/Animarr.Web/Animarr.Web.csproj" />
+    <Project Path="src/Animarr.Web.Client/Animarr.Web.Client.csproj" />
+    <Project Path="src/Animarr.App/Animarr.App.csproj" />
   </Folder>
 </Solution>
