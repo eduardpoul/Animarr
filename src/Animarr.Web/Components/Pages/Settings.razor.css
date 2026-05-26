@@ -421,6 +421,121 @@
     width: 100%;
 }
 
+/* ── Audio-sync slider block (HW + SW variants share styling). ─────── */
+.audio-sync-slider {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    margin-top: 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.audio-sync-slider + .audio-sync-slider {
+    /* Visual separation between the two channel blocks. */
+    margin-top: 8px;
+}
+.audio-sync-slider__hint {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-dim, rgba(255, 255, 255, 0.6));
+}
+.audio-sync-slider__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+/* ── Plain button for settings-card actions ────────────────────────── *
+   The old code used `.settings-btn` without any CSS — buttons showed up
+   as default browser styling. This is the missing definition. Same
+   visual weight as a secondary FluentButton: subtle bg, accent on hover. */
+.settings-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text, #fff);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    white-space: nowrap;
+}
+.settings-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.20);
+}
+.settings-btn:active {
+    background: rgba(255, 255, 255, 0.14);
+}
+.settings-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Icon + label variant — used for download / open-in-new-tab buttons.
+   Lets the same .settings-btn skin work as an <a> with an SVG inside it
+   (DIcon emits an <svg>). Without this rule the icon and label butt
+   together without spacing. */
+.settings-btn.settings-btn--icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.settings-btn.settings-btn--icon svg {
+    flex-shrink: 0;
+}
+
+/* Container for multiple buttons in a row (mpv install steps, etc.).
+   Wraps on narrow screens so buttons stack instead of overflowing. */
+.ext-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+/* Info block shown under the player picker when the picked option has
+   no setup steps — just an explanation paragraph. */
+.mpv-install-note {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: rgba(155, 214, 255, 0.06);
+    border: 1px solid rgba(155, 214, 255, 0.15);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    line-height: 1.5;
+}
+.mpv-install-note code {
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 11px;
+    padding: 1px 4px;
+    background: rgba(155, 214, 255, 0.12);
+    border-radius: 3px;
+    color: #9bd6ff;
+}
+.mpv-install-wrap {
+    margin-top: 12px;
+}
+.mpv-install-summary {
+    cursor: pointer;
+    user-select: none;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 4px 0;
+}
+.mpv-install-summary:hover { color: #fff; }
+
 /* ── Ignore rules: add-row ─────────────────────────────────────────── */
 .ignore-add {
     display: flex;
@@ -430,6 +545,102 @@
 }
 
 .ignore-add__input { flex: 1 1 auto; min-width: 0; }
+
+/* ── Hardware acceleration status panel ───────────────────────────── */
+.hw-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+.hw-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hw-row--ok {
+    background: rgba(120, 255, 180, 0.05);
+    border-color: rgba(120, 255, 180, 0.2);
+}
+.hw-row--off {
+    background: rgba(255, 120, 120, 0.03);
+    border-color: rgba(255, 120, 120, 0.12);
+}
+.hw-row__label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+.hw-row__icon { font-size: 16px; }
+.hw-row__sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.hw-row__detail { font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+.hw-row__device {
+    font-size: 13px;
+    color: #fff;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+.hw-row__line { line-height: 1.5; }
+.hw-row__help {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font-size: 11px;
+}
+.hw-row__help summary {
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+    user-select: none;
+}
+.hw-row__help summary:hover { color: #fff; }
+.hw-row__help p, .hw-row__help ol {
+    margin: 8px 0 4px;
+    color: rgba(255, 255, 255, 0.7);
+}
+.hw-row__help pre {
+    margin: 4px 0;
+    padding: 6px 8px;
+    background: #000;
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 10px;
+    color: #9bd6ff;
+    overflow-x: auto;
+}
+.hw-row__help code {
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 10px;
+    padding: 1px 4px;
+    background: rgba(155, 214, 255, 0.12);
+    border-radius: 3px;
+    color: #9bd6ff;
+}
+.hw-row__steps {
+    margin: 6px 0 0 20px;
+    padding: 0;
+}
+.hw-row__steps li { margin-bottom: 4px; line-height: 1.4; }
+.hw-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+.hw-actions__hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
 
 /* ── Metadata source priority rows ─────────────────────────────────── */
 .meta-sources {

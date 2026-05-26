@@ -296,6 +296,18 @@ select.emd-input option {
 
 .emd-field--full { grid-column: 1 / -1; }
 
+/* Read-only original-name field — visually subdued so the user reads it
+   as a reference (not an input). Click-to-select still works for copy/paste. */
+.emd-field--readonly .emd-input {
+    background: var(--bg-1);
+    color: var(--text-dim);
+    cursor: text;
+    user-select: all;
+}
+.emd-field--readonly > span:first-child {
+    color: var(--text-faint);
+}
+
 .emd-field > span:first-child {
     font-family: var(--font-mono);
     font-size: 10px;

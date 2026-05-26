@@ -577,6 +577,28 @@
         </div>;
 
     private RenderFragment BasicsTab() => @<div class="emd-form emd-basics-grid">
+            @* Raw on-disk name on top of Basics — read-only, lets the user
+               see what file/folder the scanner actually picked up so a wrong
+               identification is obvious here too (we already surface it in
+               MediaDetail's Identification card; mirror it here so it's
+               in the user's face while editing). *@
+            @{
+                var diskRaw = Item!.Folder?.SingleFilePath is { Length: > 0 } sfp
+                    ? Path.GetFileName(sfp)
+                    : Path.GetFileName((Item.Folder?.Path ?? "").TrimEnd(
+                        Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                var diskKind = Item.Folder?.SingleFilePath is { Length: > 0 }
+                    ? "Original file"
+                    : "Original folder";
+            }
+            @if (!string.IsNullOrEmpty(diskRaw))
+            {
+                <label class="emd-field emd-field--full emd-field--readonly">
+                    <span>@diskKind</span>
+                    <input class="emd-input emd-input--mono" value="@diskRaw" readonly />
+                </label>
+            }
+
             <label class="emd-field emd-field--full">
                 <span>Display title</span>
                 <input class="emd-input" value="@_bTitle"

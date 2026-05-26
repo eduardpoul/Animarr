@@ -49,6 +49,16 @@
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
 
+    @* ── Artplayer (CDN). Config-driven HTML5 player with built-in
+       aspect-ratio modes, subtitle offset, screenshot, frame stepping,
+       and a clean controls array for adding custom buttons IN the bottom
+       chrome (no separate overlays — what Vidstack's opaque layout made
+       hard). hls.js loaded alongside; Artplayer's customType handler
+       wires HLS manually, keeping our hls.js timeout/buffer tuning that
+       the previous Vidstack provider-events hook used to apply. *@
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
+
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
@@ -76,6 +86,8 @@
         });
     </script>
     <script src="/backdrop.js"></script>
+    <script src="/animarr-calibrate.js"></script>
+    <script src="/animarr-player.js"></script>
     <script>
         // Setter for the runtime accent hue. Every oklch(L C var(--accent-hue))
         // rule in the stylesheet reads this property — flipping it from JS lets

@@ -141,6 +141,24 @@ else
                 </div>
             }
 
+            @* Raw on-disk name — folder for series, file for flat-section movies.
+               Surfaces what the scanner actually saw, so when the auto-identify
+               picks something obviously wrong, the user can compare side-by-side
+               with the displayed title and re-identify via Edit Metadata. *@
+            @{
+                string? rawDiskName  = _item.Folder?.SingleFilePath is { Length: > 0 } sfp
+                    ? Path.GetFileName(sfp)
+                    : (_item.Folder?.Path is { Length: > 0 } fp
+                        ? Path.GetFileName(fp.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                        : null);
+                string? rawDiskKind  = _item.Folder?.SingleFilePath is { Length: > 0 } ? "FILE" : "FOLDER";
+            }
+            @if (!string.IsNullOrEmpty(rawDiskName))
+            {
+                <div class="md-overline md-overline--dim md-ident__on-disk-label">ORIGINAL @rawDiskKind</div>
+                <code class="md-ident__path md-ident__rawname">@rawDiskName</code>
+            }
+
             <div class="md-overline md-overline--dim md-ident__on-disk-label">ON DISK</div>
             <code class="md-ident__path">@_item.Folder?.Path</code>
         </section>
@@ -287,7 +305,7 @@ else
                         var meta = hasFile ? BuildEpisodeMeta(ep) : BuildMissingMeta(ep);
                         var epNum = ep.Number;
                         var fileName = ep.FileName;
-                        <div @onclick="@(() => { if (hasFile && fileName != null) OpenPlayer(fileName); })">
+                        <div @onclick="@(async () => { if (hasFile && fileName != null) await OpenPlayer(fileName, seasonNum, epNum); })">
                             <EpisodeCard
                                 Number="@epNum"
                                 Title="@ep.Name"
@@ -325,7 +343,7 @@ else
                 {
                     var isVid = IsVideo(f.Ext);
                     <div class="@($"md-file-card {(isVid ? "md-file-card--clickable" : "")}")"
-                         @onclick="@(() => { if (isVid) OpenPlayer(f.FullPath); })">
+                         @onclick="@(async () => { if (isVid) await OpenPlayer(f.FullPath); })">
                         <div class="md-file-art">
                             @if (isVid)
                             {
@@ -350,17 +368,67 @@ else
 
 @if (_playerPath is not null)
 {
+    @* Artplayer-based player. The actual DOM is built by Artplayer
+       JS inside the container div — see animarr-player.js attach().
+       Custom buttons (Cast, mpv, Close) are added via Artplayer's
+       `controls` config so they live in the SAME bottom chrome as
+       Artplayer's built-in play/scrub/settings/fullscreen.
+
+       The media-info chip strip is rendered as an overlay layer
+       inside Artplayer's container so it fades together with chrome
+       and survives browser fullscreen. *@
     <div class="vp-backdrop" @onclick="ClosePlayer">
         <div class="vp-shell" @onclick:stopPropagation>
-            <div class="vp-header">
-                <span class="vp-title" title="@_playerPath">@Path.GetFileName(_playerPath)</span>
-                <button type="button" class="vp-close" @onclick="ClosePlayer" aria-label="Close">
-                    <DIcon Name="x" Size="16" />
-                </button>
-            </div>
-            <video controls autoplay class="vp-video"
-                   src="@($"/api/video?path={Uri.EscapeDataString(_playerPath)}")">
-            </video>
+            <div id="@_playerElementId" class="vp-art"></div>
+            @* Media-info chip strip is now rendered INSIDE Artplayer's
+               container as an Artplayer `layer` (see buildChipStripHtml +
+               layers config in animarr-player.js). Lives in the player DOM
+               tree, survives fullscreen, no Razor scoped-CSS or sibling-
+               z-index issues. The _playerInfo state is still kept C#-side
+               for the tooltip and for any future use, but visual render
+               happens entirely in JS. *@
+            @* Cast menu — Blazor renders the dropdown when JS toggles
+               _castMenuOpen via OnCastMenuToggleFromJs. Positioned absolutely
+               inside the shell so it sits above the player. *@
+            @if (_castMenuOpen)
+            {
+                <div class="vp-cast-menu vp-cast-menu--floating" @onclick:stopPropagation>
+                    @if (_castLoading)
+                    {
+                        <div class="vp-cast-empty">Searching…</div>
+                    }
+                    else if (_castRenderers.Count == 0)
+                    {
+                        <div class="vp-cast-empty">No TVs found on the network</div>
+                    }
+                    else
+                    {
+                        @foreach (var r in _castRenderers)
+                        {
+                            <button type="button"
+                                    class="vp-cast-item"
+                                    @onclick="@(() => CastToAsync(r.Udn, r.Name))"
+                                    disabled="@(_castInFlight == r.Udn)">
+                                <span class="vp-cast-item-name">@r.Name</span>
+                                @if (!string.IsNullOrWhiteSpace(r.Model))
+                                {
+                                    <span class="vp-cast-item-model">@r.Model</span>
+                                }
+                            </button>
+                        }
+                    }
+                    <button type="button"
+                            class="vp-cast-refresh"
+                            @onclick="LoadCastRenderersAsync"
+                            disabled="@_castLoading">
+                        Refresh
+                    </button>
+                </div>
+            }
+            @if (_castStatus is not null)
+            {
+                <div class="vp-cast-toast">@_castStatus</div>
+            }
         </div>
     </div>
 }
@@ -411,8 +479,200 @@ else
     private List<CandidateRow> _candidateList = [];
     private bool _applyingCandidate;
 
-    // Video player
+    // Video player — Vidstack <media-player> + JS bridge.
+    // _playerElementId is the DOM id of the current <media-player>; the JS
+    // helper attaches event listeners to it. _playerSelfRef is the DotNetObjectReference
+    // the helper invokes back through for progress writes.
     private string? _playerPath;
+    private string  _playerElementId = $"vp-{Guid.NewGuid():N}";
+    private int?    _playerSeason;
+    private int?    _playerEpisode;
+    // Fill-mode toggle: when true the player shell expands to fill the
+    // viewport and the inner <video> uses object-fit:cover (crops edges to
+    // remove black bars). Pure CSS — the JS bridge doesn't need to know.
+    private bool   _playerFillMode;
+    // Media info pushed up from animarr-player.js after /api/probe completes.
+    // Drives the chip in the player header; null until probe arrives.
+    private PlayerMediaInfo? _playerInfo;
+    public sealed class PlayerMediaInfo
+    {
+        public string? VideoCodec    { get; set; }
+        public int     Width         { get; set; }
+        public int     Height        { get; set; }
+        public int     BitDepth      { get; set; }
+        public string  Hdr           { get; set; } = "sdr"; // legacy: first format or "sdr"
+        // ALL detected HDR formats — a single UHD BluRay file frequently
+        // carries both DV metadata AND an HDR10 PQ base layer. Show every
+        // format the source actually has rather than only the "highest" one.
+        public string[] HdrFormats   { get; set; } = Array.Empty<string>();
+        public string? AudioCodec    { get; set; }
+        public int     AudioChannels { get; set; }
+        public string  PlaybackTier  { get; set; } = "hls"; // hls / directplay
+    }
+
+    /// <summary>Called from animarr-player.js after /api/probe completes.
+    /// Stores the codec summary so the player header can show users what's
+    /// in their file (and whether HDR can survive the chosen tier).</summary>
+    [JSInvokable]
+    public Task OnPlayerMediaInfo(PlayerMediaInfo info)
+    {
+        Console.WriteLine($"OnPlayerMediaInfo received: codec={info?.VideoCodec} {info?.Width}x{info?.Height} hdr={info?.Hdr} tier={info?.PlaybackTier}");
+        _playerInfo = info;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Called from animarr-player.js after the inline onclick
+    /// handler has flipped fullscreen + object-fit synchronously. We just
+    /// mirror the boolean so the button icon/title re-renders to match.
+    /// Also called when the browser exits fullscreen via ESC so the icon
+    /// doesn't get stuck inverted.</summary>
+    [JSInvokable]
+    public Task OnFillModeChanged(bool on)
+    {
+        if (_playerFillMode == on) return Task.CompletedTask;
+        _playerFillMode = on;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Invoked from Artplayer's Close custom-control button.
+    /// Mirrors the old vp-close button — closes player + cleans up session.
+    /// Must explicitly StateHasChanged: Blazor InteractiveServer does NOT
+    /// auto-re-render after a JSInvokable method's state changes, unlike a
+    /// regular @onclick handler. Without this the backdrop / shell stays
+    /// in the DOM even after Artplayer is destroyed (the bug the user hit).</summary>
+    [JSInvokable]
+    public async Task ClosePlayerFromJs()
+    {
+        await ClosePlayer();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Invoked from Artplayer's Cast custom-control button.
+    /// Toggles the floating cast-renderer dropdown. The dropdown itself
+    /// is Razor-rendered (so renderer-list state stays in C#); JS just
+    /// flips the open/close.</summary>
+    [JSInvokable]
+    public async Task ToggleCastMenuFromJs()
+    {
+        await ToggleCastMenuAsync();
+    }
+
+    /// <summary>Returns the external-player deep link for the currently-open
+    /// file. The link scheme depends on Settings → Audio → External Player
+    /// (mpv / IINA / Infuse / VLC-iOS / .m3u / custom). Artplayer's external-
+    /// icon button uses this as href; for .m3u it's a normal HTTP URL that
+    /// triggers a download.</summary>
+    [JSInvokable]
+    public string GetMpvDeepLink() => ExternalPlayerLink();
+
+    private string MediaInfoTooltip()
+    {
+        if (_playerInfo is null) return "";
+        var lines = new List<string>();
+        if (_playerInfo.Width > 0)
+            lines.Add($"Video: {_playerInfo.Width}×{_playerInfo.Height} {_playerInfo.VideoCodec?.ToUpperInvariant()} {_playerInfo.BitDepth}-bit");
+        if (!string.IsNullOrEmpty(_playerInfo.AudioCodec))
+            lines.Add($"Audio: {_playerInfo.AudioCodec.ToUpperInvariant()} {ChannelLabel(_playerInfo.AudioChannels)}");
+
+        var hdrList = _playerInfo.HdrFormats?.Length > 0
+            ? _playerInfo.HdrFormats
+            : (_playerInfo.Hdr != "sdr" && !string.IsNullOrEmpty(_playerInfo.Hdr)
+                ? new[] { _playerInfo.Hdr }
+                : Array.Empty<string>());
+        if (hdrList.Length == 0)
+        {
+            lines.Add("SDR");
+        }
+        else
+        {
+            var names = string.Join(" + ", hdrList.Select(HdrLabel));
+            lines.Add($"{names} (browser will likely tone-map to SDR — use mpv / DLNA cast for real HDR/DV)");
+        }
+
+        lines.Add(_playerInfo.PlaybackTier == "directplay"
+            ? "Tier: Direct Play (raw file → browser, no transcode)"
+            : "Tier: HLS (server transcoded/remuxed)");
+        return string.Join("\n", lines);
+    }
+
+    private static string ChannelLabel(int channels) => channels switch
+    {
+        1 => "Mono", 2 => "Stereo", 6 => "5.1", 7 => "6.1", 8 => "7.1",
+        _ => channels > 0 ? $"{channels}ch" : "",
+    };
+
+    private static string TierLabel(string tier) => tier switch
+    {
+        "directplay" => "Direct Play",
+        "hls"        => "HLS",
+        _            => tier,
+    };
+
+    private static string HdrLabel(string fmt) => fmt switch
+    {
+        "dolbyvision" => "Dolby Vision",
+        "hdr10"       => "HDR10",
+        "hlg"         => "HLG",
+        _             => fmt.ToUpperInvariant(),
+    };
+
+    /// <summary>Build a deep-link URL for whichever external player the user
+    /// picked in Settings → Audio → External Player. Stream URL embedded is
+    /// always /api/file (raw passthrough) so the external player pulls
+    /// byte-identical source and decodes with its own HDR/DV/Atmos stack.
+    /// Per-scheme templates:
+    ///   • mpv      — mpv.net (Win) / mpv with url-handler (Linux/mac)
+    ///   • iina     — IINA on macOS (`iina://weblink?url=…`)
+    ///   • infuse   — Infuse on iOS/tvOS (`infuse://x-callback-url/play?url=…`)
+    ///   • vlc_ios  — VLC on iOS (`vlc-x-callback://x-callback-url/stream?url=…`)
+    ///   • m3u      — generates /api/playlist.m3u link, browser downloads,
+    ///                OS opens with whatever player is associated
+    ///   • custom   — user-defined URI template with {url} placeholder</summary>
+    private string ExternalPlayerLink()
+    {
+        if (_playerPath is null) return "#";
+
+        var streamUrl = BuildPlainHttpFileUrl(_playerPath);
+        var kind   = _externalPlayerKind ?? "mpv";
+        var encoded = Uri.EscapeDataString(streamUrl);
+
+        return kind switch
+        {
+            "mpv"      => $"mpv://{streamUrl}",
+            "iina"     => $"iina://weblink?url={encoded}",
+            "infuse"   => $"infuse://x-callback-url/play?url={encoded}",
+            "vlc_ios"  => $"vlc-x-callback://x-callback-url/stream?url={encoded}",
+            "m3u"      => BuildPlainHttpFileUrl(_playerPath, "/api/playlist.m3u"),
+            "custom"   => (_externalPlayerCustom ?? "").Replace("{url}", streamUrl),
+            _          => $"mpv://{streamUrl}",  // fallback
+        };
+    }
+
+    /// <summary>Build an absolute URL pointing at a server endpoint. mpv-like
+    /// players don't trust Caddy's self-signed cert and can't follow https,
+    /// so we rewrite to plain HTTP on the raw 8080 port that DLNA also uses.</summary>
+    private string BuildPlainHttpFileUrl(string filePath, string endpoint = "/api/file")
+    {
+        var host = Nav.BaseUri.Replace("https://", "http://", StringComparison.OrdinalIgnoreCase);
+        host = System.Text.RegularExpressions.Regex.Replace(host, @":\d+(/|$)", ":8080$1");
+        return $"{host.TrimEnd('/')}{endpoint}?path={Uri.EscapeDataString(filePath)}";
+    }
+
+    // Loaded from AppConfig at OnInitialized / refreshed when user changes
+    // in Settings. Defaults to mpv if unset.
+    private string? _externalPlayerKind;
+    private string? _externalPlayerCustom;
+
+    // DLNA cast (Send-to-TV) state. We hit /api/dlna/renderers only when
+    // the user opens the cast menu — SSDP discovery is cheap but not free.
+    private sealed record CastRendererDto(string Udn, string Name, string? Model);
+    private bool                _castMenuOpen;
+    private bool                _castLoading;
+    private string?             _castInFlight;
+    private string?             _castStatus;
+    private List<CastRendererDto> _castRenderers = new();
+    private DotNetObjectReference<MediaDetail>? _playerSelfRef;
+    private DateTime _lastProgressWrite = DateTime.MinValue;
 
     // Image preview
     private string? _previewImageUrl;
@@ -442,6 +702,11 @@ else
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
+        // Load user's external-player choice for the icon's deep link.
+        // Cheap (single AppConfig lookup), default to mpv when unset.
+        _externalPlayerKind   = await AppConfig.GetAsync(AppConfigKeys.ExternalPlayer) ?? "mpv";
+        _externalPlayerCustom = await AppConfig.GetAsync(AppConfigKeys.ExternalPlayerCustom);
+
         await using var db = await DbFactory.CreateDbContextAsync();
         _item = await db.MediaItems
             .Include(m => m.Folder)
@@ -562,9 +827,9 @@ else
     ///   • Movie  → SingleFilePath, falling back to the lone video file in the folder.
     ///   • Series with (Season, Episode) hint → the matching file from _episodeFileMap.
     ///   • Series without hint (Play first / Replay) → the first on-disk episode by (season, episode).</summary>
-    private Task HandleContinueClick(ContinueAction action)
+    private async Task HandleContinueClick(ContinueAction action)
     {
-        if (_item is null) return Task.CompletedTask;
+        if (_item is null) return;
 
         string? path = null;
         if (_item.MediaType == MediaItemType.Movie)
@@ -592,13 +857,17 @@ else
 
         if (!string.IsNullOrEmpty(path) && File.Exists(path))
         {
-            OpenPlayer(path);
+            // For series we pass the hint so RecordProgressAsync keys WatchState
+            // on the right (season, episode). Movies use nulls — single WatchState
+            // row for the title overall.
+            await OpenPlayer(path,
+                action.SeasonHint  ?? (_item.MediaType == MediaItemType.Movie ? null : 1),
+                action.EpisodeHint);
         }
         else
         {
             ToastService.ShowWarning("No playable file found on disk for this title.");
         }
-        return Task.CompletedTask;
     }
 
     /// <summary>Called by an EpisodeCard's watched-eye chip. Persists then
@@ -620,6 +889,27 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Player attach — runs whenever a fresh _playerElementId hits the DOM.
+        // The JS helper is idempotent per element so re-running on every
+        // render is safe (it bails when the element is already wired).
+        if (_playerPath is not null && _playerSelfRef is null)
+        {
+            _playerSelfRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("animarrPlayer.attach",
+                    _playerElementId, _playerSelfRef, _playerPath);
+            }
+            catch (Exception ex)
+            {
+                // Helper missing or media-player not yet defined — leave the
+                // ref so subsequent renders can retry once Vidstack loads.
+                _playerSelfRef?.Dispose();
+                _playerSelfRef = null;
+                Console.Error.WriteLine($"animarrPlayer.attach failed: {ex.Message}");
+            }
+        }
+
         if (!_backdropOwned && _fanartUrl != null)
         {
             var enabled = await AppConfig.GetAsync<bool>(AppConfigKeys.BackdropEnabled, true);
@@ -637,6 +927,7 @@ else
     public async ValueTask DisposeAsync()
     {
         WatchSvc.WatchStateChanged -= OnWatchStateChanged;
+        _playerSelfRef?.Dispose();
         if (_backdropOwned)
             try { await JS.InvokeVoidAsync("restoreGlobalBackdrop"); } catch { }
     }
@@ -1042,8 +1333,162 @@ else
     private void OpenEditPanel()  => _showEdit = true;
     private void CloseEditPanel() => _showEdit = false;
 
-    private void OpenPlayer(string path) => _playerPath = path;
-    private void ClosePlayer()           => _playerPath = null;
+    /// <summary>Open the inline Vidstack player. The (season, episode) tuple
+    /// is what RecordProgressAsync writes against; for movies pass nulls.
+    /// The JS helper is wired up on the next render cycle via OnAfterRenderAsync.</summary>
+    private async Task OpenPlayer(string path, int? season = null, int? episode = null)
+    {
+        // If a previous playback is still active, tear it down cleanly first.
+        // We regenerate _playerElementId below (so the old <media-player>
+        // unmounts) — but without an explicit detach the old WIRED entry
+        // leaks: stale DotNetObjectReference, dangling HLS session on the
+        // server, keepalive timer firing forever. Mirror what ClosePlayer
+        // does, minus clearing _playerPath (we're about to set it again).
+        if (_playerSelfRef is not null)
+        {
+            try { await JS.InvokeVoidAsync("animarrPlayer.flush",  _playerElementId); } catch { }
+            try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }
+            _playerSelfRef.Dispose();
+            _playerSelfRef = null;
+        }
+        _castMenuOpen = false;
+        _castRenderers.Clear();
+        _castStatus = null;
+
+        _playerPath    = path;
+        _playerSeason  = season;
+        _playerEpisode = episode;
+        _playerElementId = $"vp-{Guid.NewGuid():N}";
+        _lastProgressWrite = DateTime.MinValue;
+        // Reset per-playback view state so a stale chip from a previous
+        // file (and any fill-mode the user toggled on) don't leak across.
+        _playerInfo    = null;
+        _playerFillMode = false;
+    }
+
+    private async Task ClosePlayer()
+    {
+        // Final progress flush before tearing down the player.
+        try { await JS.InvokeVoidAsync("animarrPlayer.flush", _playerElementId); }
+        catch { /* element may already be gone */ }
+        try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }
+        _playerSelfRef?.Dispose();
+        _playerSelfRef = null;
+        _playerPath = null;
+        _playerSeason = null;
+        _playerEpisode = null;
+        _playerInfo = null;
+        _playerFillMode = false;
+        _castMenuOpen = false;
+        _castRenderers.Clear();
+        _castStatus = null;
+        _castInFlight = null;
+    }
+
+    // ─── Cast to TV (DLNA ControlPoint) ─────────────────────────────────────
+
+    private async Task ToggleCastMenuAsync()
+    {
+        _castMenuOpen = !_castMenuOpen;
+        if (_castMenuOpen && _castRenderers.Count == 0)
+            await LoadCastRenderersAsync();
+    }
+
+    private async Task LoadCastRenderersAsync()
+    {
+        _castLoading = true;
+        _castStatus  = null;
+        StateHasChanged();
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(Nav.BaseUri) };
+            var list = await http.GetFromJsonAsync<List<CastRendererDto>>("api/dlna/renderers");
+            _castRenderers = list ?? new();
+        }
+        catch (Exception ex)
+        {
+            _castStatus = $"Failed to discover renderers: {ex.Message}";
+            _castRenderers = new();
+        }
+        finally
+        {
+            _castLoading = false;
+        }
+    }
+
+    private async Task CastToAsync(string udn, string rendererName)
+    {
+        if (_playerPath is null) return;
+        _castInFlight = udn;
+        _castStatus   = $"Sending to {rendererName}…";
+        StateHasChanged();
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(Nav.BaseUri) };
+            var resp = await http.PostAsJsonAsync("api/dlna/play",
+                new { udn, path = _playerPath, title = Path.GetFileNameWithoutExtension(_playerPath) });
+            if (resp.IsSuccessStatusCode)
+            {
+                _castStatus  = $"Playing on {rendererName}";
+                _castMenuOpen = false;
+                // Auto-clear toast after a few seconds.
+                _ = Task.Delay(3500).ContinueWith(_ => InvokeAsync(() =>
+                {
+                    _castStatus = null;
+                    StateHasChanged();
+                }));
+            }
+            else
+            {
+                _castStatus = $"{rendererName} rejected ({(int)resp.StatusCode})";
+            }
+        }
+        catch (Exception ex)
+        {
+            _castStatus = $"Cast failed: {ex.Message}";
+        }
+        finally
+        {
+            _castInFlight = null;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Called from JS every few seconds (or on pause/ended) with the
+    /// current playback position. Writes to WatchStates via the service,
+    /// which auto-flips IsWatched once we cross 90% per CHANGELOG §1.</summary>
+    [JSInvokable]
+    public async Task OnPlayerProgress(double positionSec, double durationSec, int playedDeltaSec)
+    {
+        if (_item is null || _playerPath is null) return;
+        // Throttle on the .NET side too — JS sends ~every 5s but we also debounce here.
+        var now = DateTime.UtcNow;
+        if ((now - _lastProgressWrite).TotalSeconds < 2) return;
+        _lastProgressWrite = now;
+
+        await WatchSvc.RecordProgressAsync(
+            _item.Id, _playerSeason, _playerEpisode, _playerPath,
+            positionMs:     (long)(positionSec * 1000),
+            runtimeMs:      durationSec > 0 ? (long?)(durationSec * 1000) : null,
+            playedDeltaSec: Math.Max(0, playedDeltaSec));
+    }
+
+    /// <summary>Called once on canplay to fetch the resume position from
+    /// the existing WatchState row (if any) and seek the player. Returns
+    /// the resume seconds, or null if there's nothing to resume from.</summary>
+    [JSInvokable]
+    public async Task<double?> GetResumePositionSec()
+    {
+        if (_item is null) return null;
+        WatchState? ws = (_playerSeason, _playerEpisode) switch
+        {
+            (int s, int e) => await WatchSvc.GetForEpisodeAsync(_item.Id, s, e),
+            _              => await WatchSvc.GetForMovieAsync(_item.Id),
+        };
+        if (ws?.ProgressMs is > 0 && !ws.IsWatched)
+            return ws.ProgressMs.Value / 1000.0;
+        return null;
+    }
 
     private async Task LoadSubDirMediaIdsAsync(AppDbContext db, string parentFolderPath)
     {
