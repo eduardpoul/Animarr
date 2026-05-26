@@ -98,6 +98,21 @@ public static class ApiRoutes
     public const string Probe          = "/api/probe";
     public const string Subtitle       = "/api/subtitle";
 
+    // ─── Auth (v4) ───────────────────────────────────────────────────────
+    public const string AuthLogin    = "/api/auth/login";
+    public const string AuthLogout   = "/api/auth/logout";
+    public const string AuthSetup    = "/api/auth/setup";
+    public const string AuthStatus   = "/api/auth/status";
+    public const string Me           = "/api/me";
+    public const string MePreferences = "/api/me/preferences";
+    public const string MePassword   = "/api/me/password";
+
+    // ─── User + Role admin (v4) ──────────────────────────────────────────
+    public const string Users       = "/api/users";
+    public const string UserById    = "/api/users/{id}";
+    public const string Roles       = "/api/roles";
+    public const string RoleById    = "/api/roles/{id}";
+
     // ─── SignalR hubs ────────────────────────────────────────────────────
     /// <summary>Stream of <c>TorrentLiveStatsDto</c> snapshots (~500 ms cadence).</summary>
     public const string HubTorrents       = "/hubs/torrents";
@@ -138,6 +153,9 @@ public static class ApiRoutes
 
     public static string HlsSegmentUrl(string token, string file)
         => HlsSegment.Replace("{token}", token).Replace("{file}", file);
+
+    public static string User(Guid id) => UserById.Replace("{id}", id.ToString());
+    public static string Role(Guid id) => RoleById.Replace("{id}", id.ToString());
 }
 
 /// <summary>
