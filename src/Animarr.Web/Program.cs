@@ -1,5 +1,4 @@
-﻿using Animarr.Web.Components;
-using Animarr.Web.Configuration;
+﻿using Animarr.Web.Configuration;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Endpoints;
@@ -7,7 +6,6 @@ using Animarr.Web.Hubs;
 using Animarr.Web.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.FluentUI.AspNetCore.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,8 +45,6 @@ builder.Services.AddScoped<IAppConfigService, AppConfigService>();
 builder.Services.AddSingleton<FolderWatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderWatcherService>());
 builder.Services.AddHostedService<RenameQueueProcessorService>();
-builder.Services.AddSingleton<ThemeService>();
-builder.Services.AddSingleton<LocalizationService>();
 builder.Services.AddSingleton<TorrentEngineService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentEngineService>());
 
@@ -91,25 +87,14 @@ builder.Services.AddScoped<ILlmService, MicrosoftAiLlmService>();
 builder.Services.AddSingleton<IdentificationQueueProcessorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationQueueProcessorService>());
 
-// SignalR for the realtime hubs that the new Animarr.UI pages will consume.
-// Animarr.Web continues to serve Blazor Server until Phase 5, so SignalR runs
-// alongside it without conflict — the hub paths (/hubs/*) don't collide with
-// Blazor Server's own /_blazor SignalR connection.
+// SignalR for the realtime hubs Animarr.UI pages consume. Hub paths
+// (/hubs/torrents, /hubs/identification) are scoped under /hubs so they
+// don't collide with /api/* or the WASM SPA fallback.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<TorrentHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcaster>());
 builder.Services.AddSingleton<IdentificationHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationHubBroadcaster>());
-
-// Blazor + custom design components (FluentUI removed; shims live in Components/Design/Fluent)
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
-// Wire our drop-in services in the same DI slots the old Fluent ones lived in.
-builder.Services.AddScoped<Microsoft.FluentUI.AspNetCore.Components.IToastService,
-                          Microsoft.FluentUI.AspNetCore.Components.ToastService>();
-builder.Services.AddScoped<Microsoft.FluentUI.AspNetCore.Components.IDialogService,
-                          Microsoft.FluentUI.AspNetCore.Components.DialogService>();
 
 var app = builder.Build();
 
@@ -130,34 +115,15 @@ using (var scope = app.Services.CreateScope())
     await seeder.SeedAsync();
 }
 
-// Load appearance settings persisted in the database (language, theme, accent colour)
-var localization = app.Services.GetRequiredService<LocalizationService>();
-var env = app.Services.GetRequiredService<IWebHostEnvironment>();
-var themeService = app.Services.GetRequiredService<ThemeService>();
-using (var appearanceScope = app.Services.CreateScope())
-{
-    var appCfg = appearanceScope.ServiceProvider.GetRequiredService<IAppConfigService>();
-
-    var lang = await appCfg.GetAsync(AppConfigKeys.Language) ?? "en";
-    await localization.LoadAsync(lang, env);
-
-    var themeStr = await appCfg.GetAsync(AppConfigKeys.ThemeMode);
-    if (themeStr is not null && Enum.TryParse<DesignThemeModes>(themeStr, out var themeMode))
-        themeService.Set(themeMode);
-
-    var accentStr = await appCfg.GetAsync(AppConfigKeys.AccentColor);
-    if (accentStr is not null && Enum.TryParse<OfficeColor>(accentStr, out var accent))
-        themeService.SetAccentColor(accent);
-}
+// Appearance settings (language, theme, accent) are loaded client-side now
+// — MainLayout in Animarr.UI fetches them from AppConfig on first render.
+// The server no longer needs an in-process LocalizationService / ThemeService.
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
-
-app.UseAntiforgery();
 
 // Map modern font MIME types — Kestrel's default for .ttf is the obsolete
 // `application/x-font-ttf` which some browsers refuse to apply. font/ttf is
@@ -173,16 +139,9 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes })
 // which is copied into our wwwroot at publish via the ProjectReference.
 app.UseBlazorFrameworkFiles();
 
-app.MapStaticAssets();
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
 // ─── Animarr.Shared REST surface ──────────────────────────────────────────
-// These endpoint groups back the IAnimarrApiClient contract — every method
-// in IAnimarrApiClient maps to one of the routes registered below. The UI
-// (Animarr.UI, Animarr.Web.Client WASM, Animarr.App MAUI) consumes them
-// uniformly. Razor pages in this project continue to use the underlying
-// services directly until Phase 3 migrates them to the RCL.
+// Each endpoint group backs one slice of the IAnimarrApiClient contract that
+// Animarr.UI / Animarr.Web.Client / Animarr.App all consume.
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();

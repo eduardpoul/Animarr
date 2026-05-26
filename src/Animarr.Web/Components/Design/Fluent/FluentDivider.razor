@@ -1,8 +1,0 @@
-@namespace Microsoft.FluentUI.AspNetCore.Components
-
-<hr style="@Style" class="fdivider" @attributes="Extra" />
-
-@code {
-    [Parameter] public string? Style { get; set; }
-    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
-}
