@@ -20,4 +20,16 @@
     <ProjectReference Include="..\Animarr.Shared\Animarr.Shared.csproj" />
   </ItemGroup>
 
+  <!-- Tailwind CSS build — compiles Styles/app.css (tokens + components +
+       fluent shims) into wwwroot/app.css before the Razor static-asset
+       pipeline picks it up. Node is required only at build time (the
+       Dockerfile installs it in the build stage). -->
+  <Target Name="BuildTailwindCSS" BeforeTargets="Build" Inputs="@(_TailwindInputs)" Outputs="wwwroot/app.css">
+    <ItemGroup>
+      <_TailwindInputs Include="Styles/*.css" />
+    </ItemGroup>
+    <Exec Command="npm install --no-audit --no-fund --silent" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="false" />
+    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="false" />
+  </Target>
+
 </Project>
