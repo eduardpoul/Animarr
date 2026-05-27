@@ -232,8 +232,23 @@ else
                         ? (item.Runtime is > 0 ? $"{item.Runtime}m" : "")
                         : L["episode_card.meta_missing"];
 
-                    <div class="md-episode-card"
-                         @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)">
+                    @* On TV the card itself MUST be focusable — without it, the
+                       D-pad has nothing to land on inside the episode grid and
+                       OK can't trigger Play. The wrapper was a plain <div> with
+                       click handler, which mouse + touch handle fine but the
+                       remote treats as un-targetable. tabindex+role+keydown
+                       turns it into a proper interactive widget that
+                       tv-nav.js's spatial scan picks up and that the OK key
+                       (Enter) activates. Disabled episodes (file missing)
+                       still render but tabindex=-1 so the remote skips over
+                       them — matches the visual --miss dim. *@
+                    <div class="md-episode-card tv-focus"
+                         tabindex="@(hasFile ? "0" : "-1")"
+                         role="button"
+                         aria-label="@($"Play episode {ep}")"
+                         aria-disabled="@(hasFile ? "false" : "true")"
+                         @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
+                         @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
                         <EpisodeCard Number="ep"
                                      Title="@epTitle"
                                      ThumbUrl="@seasonThumb"

@@ -53,11 +53,50 @@ internal sealed class AnimarrWebViewClient : WebViewClient
             var uri = request?.Url?.ToString();
             if (string.IsNullOrEmpty(uri)) return null;
 
-            // Only intercept plain HTTP. HTTPS goes through the WebView's
-            // own fetch — no mixed-content drama there. Bundle assets under
-            // https://0.0.0.x/ also go straight through.
-            if (!uri.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
-                return null;
+            // Resolve the real target URL one of two ways:
+            //
+            //   1. `/_animarr_proxy_/<url-encoded-base>/path?query`
+            //      — same-origin shim from animarr-player.js's
+            //      animarrSetApiBase helper. Chromium would block a raw
+            //      http:// fetch from an HTTPS page (mixed-content gate
+            //      fires before us), so the JS rewrites to this same-origin
+            //      path. We undo the rewrite here.
+            //
+            //   2. Plain `http://server/path` — direct cleartext URL, used
+            //      by <img>/<audio> tags that Chromium classifies as
+            //      "passive" mixed content and allows through to us.
+            string? targetUri = null;
+            const string proxyPrefix = "/_animarr_proxy_/";
+            int prefixIdx = uri.IndexOf(proxyPrefix, System.StringComparison.Ordinal);
+            if (prefixIdx >= 0)
+            {
+                var remainder = uri.Substring(prefixIdx + proxyPrefix.Length);
+                // Take the URL-encoded base up to the first '/' or '?'
+                // (whichever comes first); everything after is the path +
+                // query to append to the decoded base.
+                int slash = remainder.IndexOf('/');
+                int query = remainder.IndexOf('?');
+                int delim = (slash < 0) ? query
+                          : (query < 0) ? slash
+                          : System.Math.Min(slash, query);
+                string encodedBase, suffix;
+                if (delim >= 0)
+                {
+                    encodedBase = remainder.Substring(0, delim);
+                    suffix      = remainder.Substring(delim);
+                }
+                else
+                {
+                    encodedBase = remainder;
+                    suffix      = string.Empty;
+                }
+                targetUri = System.Uri.UnescapeDataString(encodedBase) + suffix;
+            }
+            else if (uri.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
+            {
+                targetUri = uri;
+            }
+            if (targetUri is null) return null;
 
             // Refetch through our own HttpClient. We pass through method +
             // headers from the original request so the server sees the same
@@ -66,7 +105,7 @@ internal sealed class AnimarrWebViewClient : WebViewClient
             // thread (not the UI thread) — blocking is the API's contract.
             using var req = new System.Net.Http.HttpRequestMessage
             {
-                RequestUri = new System.Uri(uri, System.UriKind.Absolute),
+                RequestUri = new System.Uri(targetUri, System.UriKind.Absolute),
                 Method     = new System.Net.Http.HttpMethod(request?.Method ?? "GET"),
             };
             if (request?.RequestHeaders is not null)

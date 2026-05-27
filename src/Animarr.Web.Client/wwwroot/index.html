@@ -81,6 +81,45 @@
             var storedTheme = localStorage.getItem('animarr-theme');
             document.documentElement.setAttribute('data-theme', storedTheme || 'quietude');
         })();
+
+        // ── TV-mode boot resolver ───────────────────────────────────────
+        // Mirrors the heavier resolver in Animarr.App's index.html, but for
+        // the pure WASM host (someone opening Animarr in a Tizen/webOS/
+        // Bravia browser, or a Chromecast-with-Google-TV Chromium build).
+        //
+        // Precedence:
+        //   1. localStorage.animarr_tv_mode override ("1" = force on, "0" =
+        //      force off — written by ProfilePanel → Appearance → TV mode).
+        //   2. UA / pointer heuristic: matches Leanback / Google TV /
+        //      Android TV / Bravia / Fire TV / Tizen / webOS / NetCast,
+        //      and the "no-touch + no-fine-pointer + landscape" combo that
+        //      stops every Smart TV browser ever shipped.
+        //
+        // Result: <html class="tv-mode"> is set on first paint, so
+        // tv-nav.js engages immediately and Login.razor's tv-mode JS check
+        // returns the real answer (so the redirect-to-/pair fires).
+        (function () {
+            var stored = null;
+            try { stored = localStorage.getItem('animarr_tv_mode'); } catch (_) {}
+
+            var isTv;
+            if (stored === '1') {
+                isTv = true;
+            } else if (stored === '0') {
+                isTv = false;
+            } else {
+                var ua = navigator.userAgent || '';
+                var uaLooksTv = /Leanback|Google TV|Android TV|; TV[^a-z]|BRAVIA|AFT[A-Z]|Tizen|Web0S|webOS|NetCast|HbbTV|SmartTV|VIDAA|VIZIO/i.test(ua);
+                var noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
+                var noFinePointer = window.matchMedia
+                    && !window.matchMedia('(pointer: fine)').matches;
+                var landscape = window.innerWidth > window.innerHeight;
+                isTv = uaLooksTv || (noTouch && noFinePointer && landscape);
+            }
+            if (isTv) {
+                document.documentElement.classList.add('tv-mode');
+            }
+        })();
     </script>
 </head>
 

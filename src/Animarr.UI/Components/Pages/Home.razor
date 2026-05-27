@@ -4,6 +4,7 @@
 @inject NavigationManager Nav
 @inject CategoryNavService CategoryNav
 @inject FolderJumpService FolderJump
+@inject Animarr.UI.Services.ServerRegistryState ServerReg
 
 <PageTitle>Animarr — @L["catalog.title"]</PageTitle>
 
@@ -76,15 +77,14 @@
     @* ── Grid ─────────────────────────────────────────────────────────── *@
     @if (_loading)
     {
-        @* Indeterminate progress bar instead of a poster-skeleton grid.
-           The grid of placeholders read as "the catalog is empty" while
-           the real items were still on the wire; a thin animated stripe
-           is closer to a router LED — clearly transient, no false promise
-           of layout. *@
-        <div class="animarr-progress">
-            <div class="animarr-progress__track">
-                <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
-            </div>
+        @* Centered loading screen with branded ring spinner — the previous
+           thin indeterminate bar at the top of the catalog let the page
+           look like "empty library" while the data was still in flight
+           (user reported this as "после деплоя всегда каталог пустой
+           пишет"). A foreground spinner is unmistakably a transient state. *@
+        <div class="catalog-loading">
+            <div class="catalog-loading__ring"></div>
+            <div class="catalog-loading__label">@L["catalog.loading"]</div>
         </div>
     }
     else if (_filtered.Count == 0)
@@ -143,6 +143,18 @@
         // via _sections lookup and reapply the same chip-style filter the
         // legacy v3 strip uses, so hero + grid both narrow to that folder.
         FolderJump.OnChange  += OnFolderJumpChanged;
+
+        // Hydrate the server registry FIRST. Without this, a cold-start
+        // that lands on /home directly (cookie-restored boot bypasses
+        // Welcome + Discovery) leaves ServerAddressProvider pointed at the
+        // compile-time placeholder URL — every Api.* call below fires
+        // against tower.one and times out. ServerReg.LoadAsync is
+        // idempotent (early-returns when already loaded) so this is safe
+        // to call from any page that fetches at boot, and it sequences
+        // BEFORE MainLayout.OnAfterRender because OnInitializedAsync runs
+        // on the child render pass.
+        try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup — fall through */ }
+
         try
         {
             // Categories — drive the chip strip. Admin manages them in

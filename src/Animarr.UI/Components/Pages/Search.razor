@@ -133,13 +133,32 @@
 
     /// <summary>Auto-focus the input on first paint so the user can start
     /// typing immediately. Only runs once — subsequent renders (from query
-    /// changes) shouldn't steal focus while the user is typing.</summary>
+    /// changes) shouldn't steal focus while the user is typing.
+    ///
+    /// Skip the auto-focus when html.tv-mode is on: the spatial navigator
+    /// (tv-nav.js) bails inside <input> elements so it can leave arrow keys
+    /// to cursor movement, which means a TV-remote user auto-focused into
+    /// the search box can't D-pad out — they're stuck unless they happen
+    /// to know Esc / Back closes the surrounding nothing. On TV the user
+    /// arrows down to the input on purpose, hits OK, then the platform IME
+    /// (Android TV's leanback keyboard, webOS's on-screen kbd) takes
+    /// over.</summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && !_inputFocused)
         {
             _inputFocused = true;
-            try { await _inputRef.FocusAsync(); } catch { /* ref not yet bound — let the user click */ }
+            bool isTv = false;
+            try
+            {
+                isTv = await JS.InvokeAsync<bool>("eval",
+                    "document.documentElement.classList.contains('tv-mode')");
+            }
+            catch { }
+            if (!isTv)
+            {
+                try { await _inputRef.FocusAsync(); } catch { /* ref not yet bound — let the user click */ }
+            }
         }
     }
 

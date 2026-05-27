@@ -120,6 +120,13 @@
         ThemeService.OnChange += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
         Toasts.OnShow += OnToastShown;
+        // Default-focus on navigation lives in tv-nav.js — it hooks
+        // history.pushState/replaceState so every Blazor NavigateTo fires
+        // an Animarr:navigated window event. Hooking the JS layer means
+        // AuthLayout-hosted routes (Welcome / Login / Setup / Pair /
+        // Discovery — the entire first-time TV flow) work too, which a
+        // LocationChanged subscription here would miss because MainLayout
+        // isn't instantiated on those routes.
     }
 
     private void OnUserCtxChanged() => InvokeAsync(StateHasChanged);
@@ -197,6 +204,30 @@
         if (prefHue is int hue && hue >= 0 && hue < 360)
         {
             try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+        }
+
+        // 2c. Reconcile tv-mode class with the server preference. index.html's
+        //     bootstrap resolver picks an initial value from localStorage +
+        //     UA heuristic; here we override with what the user actually
+        //     chose in ProfilePanel → Appearance, persisted server-side. If
+        //     the user toggled TV mode on a phone (localStorage was "0") but
+        //     turned it on from another device, this call adds the class
+        //     post-boot. Conversely if the heuristic auto-on'd it but the
+        //     user explicitly disabled it server-side, we strip the class.
+        //     Mirroring back into localStorage keeps the bootstrap resolver
+        //     and the server preference in lockstep on the next boot.
+        if (UserCtx.Preferences is { } prefs)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("eval",
+                    prefs.TvMode
+                        ? "document.documentElement.classList.add('tv-mode');" +
+                          "try{localStorage.setItem('animarr_tv_mode','1');}catch(_){};"
+                        : "document.documentElement.classList.remove('tv-mode');" +
+                          "try{localStorage.setItem('animarr_tv_mode','0');}catch(_){};");
+            }
+            catch { }
         }
 
         // 3. Route guard. Pages with @layout AuthLayout (Welcome / Login /
@@ -340,7 +371,14 @@
         Animarr.UI.Services.MediaUrl.SetBase(apiBase);
         // Also publish to JS; backdrop.js + animarr-player.js use this when
         // they construct absolute fetch URLs outside the HttpClient pipeline.
-        try { _ = JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';"); }
+        // animarrSetApiBase (defined in animarr-player.js) checks whether
+        // the page is HTTPS while the api base is HTTP — that's the MAUI
+        // BlazorWebView scenario where the virtual host forces HTTPS but
+        // the LAN server is plain HTTP. In that case the helper rewrites
+        // the base to a same-origin proxy path that AnimarrWebViewClient
+        // (Android) intercepts and proxies via native HttpClient. On
+        // matching schemes the helper is a passthrough.
+        try { _ = JS.InvokeVoidAsync("animarrSetApiBase", apiBase); }
         catch { /* JS not ready on first call — next render will succeed */ }
         // Force a re-render so any image whose src was cached at the wrong
         // base re-evaluates against the new one.
