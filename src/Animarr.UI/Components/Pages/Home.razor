@@ -3,6 +3,7 @@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 @inject CategoryNavService CategoryNav
+@inject FolderJumpService FolderJump
 
 <PageTitle>Animarr — @L["catalog.title"]</PageTitle>
 
@@ -11,31 +12,23 @@
     @* ── Hero — Continue Watching takes priority over Featured. v5
        design board ships this as the default top-of-page experience; if
        the user has nothing in progress, the older Featured-by-rating
-       carousel takes over so the slot doesn't go blank. *@
-    @if (_continueItems.Length > 0)
+       carousel takes over so the slot doesn't go blank.
+       Both bind to the section-filtered slice (_filteredContinue /
+       _filteredFeatured) so a TopBar folder pill narrows the hero to
+       that folder's items, not the global library. *@
+    @if (_filteredContinue.Length > 0)
     {
-        <CatalogContinueHero Items="@_continueItems" IntervalSec="@_heroInterval" />
+        <CatalogContinueHero Items="@_filteredContinue" IntervalSec="@_heroInterval" />
     }
-    else if (_featured.Count > 0)
+    else if (_filteredFeatured.Count > 0)
     {
-        <CatalogHero Items="@_featured" IntervalSec="@_heroInterval" />
+        <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
     }
 
-    @* ── Filter bar ──────────────────────────────────────────────────────── *@
-    <div class="catalog-filter">
-        <Input Value="@_searchFilter"
-               ValueChanged="@OnSearchChanged"
-               Placeholder="@(L["catalog.search_placeholder"])"
-               IconBefore="search"
-               Clearable="true" />
-
-        <NeedsReviewChip />
-
-        <div class="catalog-count">
-            @_filtered.Count<span class="catalog-count__sep">/</span>@_allItems.Count
-            <span class="catalog-count__label">TITLES</span>
-        </div>
-    </div>
+    @* NeedsReview pulse-chip — surfaces when titles are below confidence.
+       Free-text search now lives on /search (magnifier in TopBar); the bulky
+       Filter-by-title input + N/M counter that used to sit here are gone. *@
+    <NeedsReviewChip />
 
     @* ── Category chip strip (replaces v3 type tabs + folder chips) ────── *@
     @* Categories come from /api/categories (admin manages them in
@@ -122,6 +115,13 @@
     private List<FolderWatcherDto>  _sections   = new();
     private List<CategoryDto>       _categories = new();
     private ContinueWatchItemDto[]  _continueItems = Array.Empty<ContinueWatchItemDto>();
+    /// <summary>Continue-watching slice after section + category filters.
+    /// Hero binds to this so a TopBar folder pill narrows the hero alongside
+    /// the grid below. Falls back to the full list when no filter is set.</summary>
+    private ContinueWatchItemDto[]  _filteredContinue = Array.Empty<ContinueWatchItemDto>();
+    /// <summary>Featured-by-rating slice after section + category filters.
+    /// Same rationale as <see cref="_filteredContinue"/>.</summary>
+    private List<MediaItemDto>      _filteredFeatured = new();
     private bool   _loading = true;
     private Guid?  _activeSection;     // legacy v3 folder filter (fallback)
     // v5: source of truth for catalog filter is CategoryNavService.ActiveCategoryName
@@ -129,13 +129,16 @@
     // straight off the shared service so a TopBar click → ApplyFilter loop sees
     // the freshly-set value without an intermediate local field.
     private string? _activeCategory => CategoryNav.ActiveCategoryName;
-    private string _searchFilter = "";
     private int    _heroInterval = 30;
 
     protected override async Task OnInitializedAsync()
     {
         // Re-render whenever TopBar (or anyone) changes the active category.
         CategoryNav.OnChange += OnCategoryChanged;
+        // TopBar folder pills write to FolderJump. Resolve name → section Id
+        // via _sections lookup and reapply the same chip-style filter the
+        // legacy v3 strip uses, so hero + grid both narrow to that folder.
+        FolderJump.OnChange  += OnFolderJumpChanged;
         try
         {
             // Categories — drive the chip strip. Admin manages them in
@@ -196,12 +199,6 @@
         ApplyFilter();
     }
 
-    private void OnSearchChanged(string? v)
-    {
-        _searchFilter = v ?? "";
-        ApplyFilter();
-    }
-
     private void SetActiveCategory(string? name)
     {
         // Delegates to the shared service so TopBar and the page chip strip
@@ -220,6 +217,27 @@
     {
         _activeSection = sectionId;
         ApplyFilter();
+    }
+
+    /// <summary>Reconcile <see cref="_activeSection"/> with the new value of
+    /// <see cref="FolderJumpService.ActiveFolderName"/>. TopBar writes a label
+    /// (the section's display name), not a GUID, so we resolve through the
+    /// <see cref="_sections"/> list we already loaded. Unknown / empty names
+    /// clear the filter back to "all sections".</summary>
+    private void OnFolderJumpChanged()
+    {
+        var name = FolderJump.ActiveFolderName;
+        Guid? newSection = null;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var match = _sections.FirstOrDefault(s =>
+                string.Equals(s.Label, name, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) newSection = match.Id;
+        }
+        if (newSection == _activeSection) return;
+        _activeSection = newSection;
+        ApplyFilter();
+        StateHasChanged();
     }
 
     private void ApplyFilter()
@@ -258,23 +276,10 @@
                 .Contains(m.FolderId));
         }
 
-        if (!string.IsNullOrWhiteSpace(_searchFilter))
-        {
-            var q = _searchFilter;
-            src = src.Where(m =>
-                m.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (m.OriginalTitle?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (m.EnglishTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)  ?? false) ||
-                (m.CjkTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)      ?? false));
-        }
-
-        // Hide items that are currently rotating in the CatalogHero — they're
-        // big and visible at the top, no need to duplicate them in the grid
-        // below. When the user starts filtering (category / section / search)
-        // we SHOW them again because the filter changes the meaning of "featured".
+        // Free-text search moved to /search — Home only filters by category +
+        // section now. Hide hero items unless one of those filters is active.
         var hasActiveFilter = !string.IsNullOrWhiteSpace(activeCat)
-                          || _activeSection.HasValue
-                          || !string.IsNullOrWhiteSpace(_searchFilter);
+                          || _activeSection.HasValue;
         if (!hasActiveFilter && _featured.Count > 0)
         {
             var featuredIds = _featured.Select(f => f.Id).ToHashSet();
@@ -288,6 +293,31 @@
             .GroupBy(m => m.Id)
             .Select(g => g.First())
             .ToList();
+
+        // ── Hero slices follow the same section filter ────────────────────
+        // Featured is a MediaItemDto[] subset of _allItems — apply the same
+        // section-membership predicate so the rotating fanart matches the
+        // chosen folder. Category filter would also narrow this; for now
+        // we keep featured drawn from the cross-category top-rated pool, only
+        // intersected with the folder filter (matches user expectation that
+        // "this folder's best titles" still rotate when filtering by folder).
+        if (_activeSection.HasValue && _childFolderIdsBySection.TryGetValue(_activeSection.Value, out var secChildIds))
+        {
+            _filteredFeatured = _featured.Where(m => secChildIds.Contains(m.FolderId)).ToList();
+
+            // Continue items don't carry FolderId on the DTO, so resolve via
+            // _allItems by mediaId (fast — _allItems is already in memory and
+            // dictionary-friendly by Id).
+            var folderByMediaId = _allItems.ToDictionary(m => m.Id, m => m.FolderId);
+            _filteredContinue = _continueItems
+                .Where(c => folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid))
+                .ToArray();
+        }
+        else
+        {
+            _filteredFeatured = _featured;
+            _filteredContinue = _continueItems;
+        }
     }
 
     // Section → set of child FolderWatcher Ids. Populated lazily when the
@@ -315,5 +345,6 @@
     public void Dispose()
     {
         CategoryNav.OnChange -= OnCategoryChanged;
+        FolderJump.OnChange  -= OnFolderJumpChanged;
     }
 }

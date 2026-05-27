@@ -598,5 +598,13 @@
   "profile.server_settings_title": "Настройки сервера",
   "profile.server_settings_sub": "Папки · LLM · паттерны · загрузки",
 
-  "episode_card.meta_missing": "Не скачано"
+  "episode_card.meta_missing": "Не скачано",
+
+  "search.title": "Поиск",
+  "search.btn_back": "К каталогу",
+  "search.placeholder": "Поиск по названию…",
+  "search.btn_clear": "Очистить",
+  "search.results_label": "РЕЗУЛЬТАТЫ",
+  "search.empty_library": "Библиотека пуста.",
+  "search.no_matches": "Ничего не найдено по запросу «{0}»."
 }

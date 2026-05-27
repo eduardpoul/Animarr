@@ -797,6 +797,14 @@
   "episode_card.overlay_empty": "EMPTY",
   "episode_card.meta_missing": "Not downloaded",
 
+  "search.title": "Search",
+  "search.btn_back": "Back to catalog",
+  "search.placeholder": "Search by title…",
+  "search.btn_clear": "Clear",
+  "search.results_label": "RESULTS",
+  "search.empty_library": "Your library is empty.",
+  "search.no_matches": "No titles match “{0}”.",
+
   "poster.type_anime": "ANIME",
   "poster.type_movie": "MOVIE",
   "poster.type_series": "SERIES",
