@@ -143,6 +143,12 @@
         {
             var apiBase = Http.BaseAddress?.ToString().TrimEnd('/') ?? "";
             await JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';");
+            // Also seed the C# side MediaUrl helper so <img src> in components
+            // builds absolute URLs. Required for MAUI Hybrid on Windows where
+            // the WebView2 virtual host (0.0.0.1) doesn't proxy /api/* — images
+            // 404'd silently. WASM passes its origin here and keeps URLs
+            // effectively relative (same host).
+            Animarr.UI.Services.MediaUrl.SetBase(apiBase);
         }
         catch { }
 
