@@ -1,6 +1,7 @@
 ﻿using Android.App;
 using Android.Content;
 using Android.Content.PM;
+using Android.Net.Wifi;
 using Android.OS;
 
 namespace Animarr.App;
@@ -78,11 +79,42 @@ public class MainActivity : MauiAppCompatActivity
         return id;
     }
 
+    /// <summary>WiFi multicast lock — held for the lifetime of the activity so
+    /// the kernel doesn't drop the mDNS broadcasts the Animarr server publishes
+    /// on <c>_animarr._tcp.local</c>. Without it, Android's WiFi driver
+    /// filters all UDP 5353 traffic by default to save battery, and the
+    /// Discovery page's scan returns zero results even when the server is
+    /// happily advertising on the same LAN. CHANGE_WIFI_MULTICAST_STATE is
+    /// already in AndroidManifest.</summary>
+    private WifiManager.MulticastLock? _multicastLock;
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        AcquireMulticastLock();
         // Cold start launched via deep link — Intent's already on us.
         CaptureDeepLink(Intent);
+    }
+
+    private void AcquireMulticastLock()
+    {
+        try
+        {
+            // Use ApplicationContext so the lock isn't tied to the activity
+            // window — survives configuration changes (rotation etc.) without
+            // re-creating. The lock itself doesn't need release; releasing
+            // happens implicitly when the process exits.
+            var wifi = (WifiManager?)ApplicationContext?.GetSystemService(WifiService);
+            if (wifi is null) return;
+            _multicastLock = wifi.CreateMulticastLock("animarr-mdns");
+            _multicastLock.SetReferenceCounted(false);
+            _multicastLock.Acquire();
+        }
+        catch
+        {
+            // Permission denied / device without WiFi (emulator) — Discovery
+            // falls back to manual URL entry, no crash. Swallow.
+        }
     }
 
     protected override void OnNewIntent(Intent? intent)
