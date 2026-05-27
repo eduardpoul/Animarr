@@ -22,6 +22,27 @@
 .emd-gallery__card:hover { border-color: oklch(60% 0.18 25); transform: scale(1.02); }
 .emd-gallery__card img { width: 100%; display: block; }
 .emd-gallery__card--busy { opacity: 0.6; cursor: wait; }
+
+/* Pixel-dimension badge — top-right corner of each candidate card. Surfaces
+   the TMDB-reported width/height so the user can compare resolutions before
+   picking. Hidden via the @if in markup when source didn't report a size
+   (MAL pictures land with 0/0). */
+.emd-gallery__dim {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+}
+
 .emd-gallery__overlay {
     position: absolute;
     inset: 0;

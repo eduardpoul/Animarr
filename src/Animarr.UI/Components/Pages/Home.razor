@@ -76,11 +76,15 @@
     @* ── Grid ─────────────────────────────────────────────────────────── *@
     @if (_loading)
     {
-        <div class="catalog-grid">
-            @for (int i = 0; i < 12; i++)
-            {
-                <Skeleton Variant="poster" />
-            }
+        @* Indeterminate progress bar instead of a poster-skeleton grid.
+           The grid of placeholders read as "the catalog is empty" while
+           the real items were still on the wire; a thin animated stripe
+           is closer to a router LED — clearly transient, no false promise
+           of layout. *@
+        <div class="animarr-progress">
+            <div class="animarr-progress__track">
+                <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+            </div>
         </div>
     }
     else if (_filtered.Count == 0)

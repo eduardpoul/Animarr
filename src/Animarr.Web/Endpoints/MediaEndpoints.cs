@@ -251,7 +251,9 @@ internal static class MediaEndpoints
         });
 
         // Poster / backdrop alternatives — projects the TMDB-image set fetched
-        // by MetadataService into the URL list the EditMetadataDrawer renders.
+        // by MetadataService into the candidate list the EditMetadataDrawer
+        // renders. Each row is an ImageCandidateDto (Url + Width + Height) so
+        // the picker can render a "1280x720" badge next to each thumbnail.
         app.MapGet(ApiRoutes.MediaPosterAlts, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
@@ -275,6 +277,40 @@ internal static class MediaEndpoints
             if (entity is null) return Results.NotFound();
             var (_, backdrops, _) = await metadata.GetAvailableImagesAsync(entity.FolderId, ct);
             return Results.Ok(backdrops.ToArray());
+        });
+
+        // Apply chosen poster / backdrop / logo. Downloads the image from the
+        // candidate URL via TmdbClient.DownloadImageAsync, writes it to the
+        // folder's MetaDir, and updates MediaItem.PosterPath / FanartPath /
+        // LogoPath. Was missing on the API surface — the EditMetadataDrawer
+        // POST got back a 400 with no body, surfacing as
+        // "net_http_message_not_success_statuscode_reason" on the client.
+        app.MapPost(ApiRoutes.MediaApplyImage, async (
+            Guid id,
+            ApplyImageRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MetadataService metadata,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ImageType) ||
+                string.IsNullOrWhiteSpace(request.Url))
+                return Results.BadRequest(new { error = "ImageType and Url are required." });
+            if (request.ImageType is not ("poster" or "fanart" or "logo"))
+                return Results.BadRequest(new { error = $"Unknown ImageType '{request.ImageType}'. Use poster, fanart, or logo." });
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+
+            try
+            {
+                await metadata.ApplySelectedImageAsync(entity.FolderId, request.ImageType, request.Url, ct);
+                return Results.NoContent();
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
 
         app.MapGet(ApiRoutes.MediaBackdropList, async (

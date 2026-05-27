@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
@@ -521,8 +522,12 @@ public class MetadataService(
                $"If this is {otherLabel}, switch the source dropdown to \"{otherSource}\" and try again.";
     }
 
-    /// <summary>Returns all available poster/backdrop/logo URLs for the item (requires TmdbId or cross-referenceable ImdbId/TvdbId).</summary>
-    public async Task<(List<string> Posters, List<string> Backdrops, List<string> Logos)>
+    /// <summary>Returns all available poster/backdrop/logo candidates for the
+    /// item. Each row carries the URL plus pixel width/height when the source
+    /// reports them (TMDB does; MAL doesn't — those rows ship with 0/0 and
+    /// the UI hides the dimension badge). Requires TmdbId or
+    /// cross-referenceable ImdbId/TvdbId for the TMDB rows.</summary>
+    public async Task<(List<ImageCandidateDto> Posters, List<ImageCandidateDto> Backdrops, List<ImageCandidateDto> Logos)>
         GetAvailableImagesAsync(Guid folderId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -560,9 +565,9 @@ public class MetadataService(
             }
         }
 
-        var posters   = new List<string>();
-        var backdrops = new List<string>();
-        var logos     = new List<string>();
+        var posters   = new List<ImageCandidateDto>();
+        var backdrops = new List<ImageCandidateDto>();
+        var logos     = new List<ImageCandidateDto>();
 
         // TMDB (multiple variants per image, vote-sorted)
         if (item.TmdbId.HasValue)
@@ -574,16 +579,20 @@ public class MetadataService(
 
             if (images is not null)
             {
-                static IEnumerable<string> ToUrls(List<TmdbImage> list, Func<string, string> urlFn)
-                    => list.OrderByDescending(i => i.VoteAverage).Select(i => urlFn(i.FilePath));
+                static IEnumerable<ImageCandidateDto> ToCandidates(List<TmdbImage> list, Func<string, string> urlFn)
+                    => list
+                        .OrderByDescending(i => i.VoteAverage)
+                        .Select(i => new ImageCandidateDto(urlFn(i.FilePath), i.Width, i.Height));
 
-                posters  .AddRange(ToUrls(images.Posters,   p => TmdbClient.PosterUrl(p,   "w342")));
-                backdrops.AddRange(ToUrls(images.Backdrops, p => TmdbClient.BackdropUrl(p, "w780")));
-                logos    .AddRange(ToUrls(images.Logos,     p => TmdbClient.LogoUrl(p,     "w300")));
+                posters  .AddRange(ToCandidates(images.Posters,   p => TmdbClient.PosterUrl(p,   "w342")));
+                backdrops.AddRange(ToCandidates(images.Backdrops, p => TmdbClient.BackdropUrl(p, "w780")));
+                logos    .AddRange(ToCandidates(images.Logos,     p => TmdbClient.LogoUrl(p,     "w300")));
             }
         }
 
-        // MAL (anime) — append any extra poster candidates from the pictures array
+        // MAL (anime) — append any extra poster candidates from the pictures
+        // array. MAL doesn't report image dimensions in its API, so the
+        // candidates ship with 0/0 and the UI hides the badge for them.
         if (item.MalId.HasValue)
         {
             var malDetail = await mal.GetDetailAsync(item.MalId.Value, ct);
@@ -593,8 +602,11 @@ public class MetadataService(
                     .Select(p => p.Large ?? p.Medium)
                     .Prepend(malDetail.MainPicture?.Large ?? malDetail.MainPicture?.Medium);
                 foreach (var url in malPosters)
-                    if (!string.IsNullOrWhiteSpace(url) && !posters.Contains(url))
-                        posters.Add(url);
+                {
+                    if (string.IsNullOrWhiteSpace(url)) continue;
+                    if (posters.Any(p => p.Url == url)) continue;
+                    posters.Add(new ImageCandidateDto(url, 0, 0));
+                }
             }
         }
 
