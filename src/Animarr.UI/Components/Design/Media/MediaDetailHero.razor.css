@@ -70,15 +70,20 @@
 
 .d-mdhero__back {
     position: absolute;
-    top: var(--space-7);
+    /* Drop below the fixed TopBar (60px tall) — was var(--space-7) ≈ 16px
+       and the Back chip collided with the brand mark on the left. 72px
+       clears the bar with 12px of breathing room. */
+    top: 72px;
     left: var(--space-9);
 }
 
 /* v5: a row of action buttons (favorite + edit) is anchored top-right
-   instead of just the edit button — favorite gets its own pill. */
+   instead of just the edit button — favorite gets its own pill.
+   Matching top: 72px so favorite/edit chips also sit cleanly under the
+   TopBar's profile + LLM pills on the right. */
 .d-mdhero__top-actions {
     position: absolute;
-    top: var(--space-7);
+    top: 72px;
     right: var(--space-9);
     z-index: 3;
     display: inline-flex;
@@ -148,9 +153,14 @@
 
 .d-mdhero__title {
     font-family: var(--font-display);
-    font-size: clamp(40px, 6vw, 96px);
-    line-height: 0.9;
-    letter-spacing: -0.022em;
+    /* Was clamp(40, 6vw, 96px) — capped at 96px the title pushed the pills
+       row up into the fixed TopBar's zone on long anime/donghua names.
+       New clamp matches CatalogContinueHero so the two heros read at the
+       same visual weight, and tall titles wrap onto a second line
+       instead of forcing the row above to climb. */
+    font-size: clamp(28px, 4vw, 52px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
     text-transform: uppercase;
     color: var(--text);
     text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
