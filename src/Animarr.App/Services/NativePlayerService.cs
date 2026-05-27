@@ -152,7 +152,8 @@ public sealed class NativePlayerService : IDisposable
         if (pending.HasValue)
         {
             _pendingPlay = null;
-            _ = PlayAsync(pending.Value.Url, pending.Value.ResumeMs);
+            // Direct attach — don't recurse into PlayAsync (would re-queue).
+            DoPlay(pending.Value.Url, pending.Value.ResumeMs);
         }
         else if (_player is not null && s_textureView is not null)
         {
@@ -206,54 +207,40 @@ public sealed class NativePlayerService : IDisposable
 #if ANDROID
         try
         {
-            var ctx = Microsoft.Maui.ApplicationModel.Platform.AppContext;
-            if (ctx is null)
-            {
-                _logger.LogWarning("NativePlayer: AppContext null, cannot construct ExoPlayer");
-                return Task.CompletedTask;
-            }
+            // Stash the request first — actual ExoPlayer attach happens once
+            // we know the TextureView's SurfaceTexture is allocated. Without
+            // this we'd race the surface-allocation event and silently
+            // attach to a null surface (audio plays, video is black).
+            _pendingPlay = (url, resumeMs);
+            _logger.LogInformation("NativePlayer: PlayAsync url={Url} resume={ResumeMs}ms (queued, awaiting surface)",
+                url, resumeMs);
 
-            // If the TextureView's SurfaceTexture isn't ready yet (race with
-            // activity OnCreate), park the request — SurfaceWatcher drains
-            // it on the OnSurfaceTextureAvailable callback. Without this the
-            // first PlayAsync call after a cold app start would silently
-            // attach to a null surface and you'd hear audio with no video.
-            if (s_textureView is not null && !_surfaceReady &&
-                s_textureView.SurfaceTexture is null)
+            // The TextureView is created `Gone` in MainActivity so it doesn't
+            // consume compositor time when no playback is happening. Android
+            // only allocates a SurfaceTexture for VISIBLE TextureViews — so
+            // we have to flip to Visible BEFORE the surface can become ready.
+            // If the surface is ALREADY available (a previous play left it
+            // hot), drain the queue immediately on this same UI tick.
+            if (s_textureView is not null)
             {
-                _pendingPlay = (url, resumeMs);
-                _logger.LogInformation("NativePlayer: PlayAsync queued — surface not ready");
-                return Task.CompletedTask;
-            }
-
-            lock (_lock)
-            {
-                _player ??= BuildPlayer(ctx);
-
-                // Attach to the TextureView so frames render onscreen. Idempotent
-                // — ExoPlayer accepts a fresh attach call on every playback start.
-                if (s_textureView is not null)
+                s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
-                    // UI changes have to happen on the UI thread; the JS bridge
-                    // calls this from a Maui DI-resolved scope which may already
-                    // be on the UI thread, but Post()-ing is safe either way.
-                    s_textureView.Post(new Java.Lang.Runnable(() =>
+                    s_textureView.Visibility = ViewStates.Visible;
+                    s_textureView.KeepScreenOn = true;
+                    if (s_textureView.IsAvailable)
                     {
-                        s_textureView.Visibility = ViewStates.Visible;
-                        // KeepScreenOn while video plays — without it Android TV
-                        // sleeps mid-film once the HUD auto-hides because the
-                        // OS counts only touch / D-pad input as activity.
-                        s_textureView.KeepScreenOn = true;
-                    }));
-                    _player.SetVideoTextureView(s_textureView);
-                }
-
-                var item = MediaItem.FromUri(url);
-                _player.SetMediaItem(item);
-                _player.Prepare();
-                if (resumeMs > 0) _player.SeekTo(resumeMs);
-                _player.PlayWhenReady = true;
-                _logger.LogInformation("NativePlayer: PlayAsync url={Url} resume={ResumeMs}ms", url, resumeMs);
+                        // Subsequent play (surface kept from previous session) →
+                        // skip the listener round-trip and attach right away.
+                        OnSurfaceReady();
+                    }
+                    // Otherwise SurfaceWatcher.OnSurfaceTextureAvailable will
+                    // fire after Android allocates the texture and drain
+                    // _pendingPlay via OnSurfaceReady.
+                }));
+            }
+            else
+            {
+                _logger.LogWarning("NativePlayer: TextureView not registered yet; play will start when MainActivity registers it");
             }
         }
         catch (System.Exception ex)
@@ -263,6 +250,48 @@ public sealed class NativePlayerService : IDisposable
 #endif
         return Task.CompletedTask;
     }
+
+#if ANDROID
+    /// <summary>
+    /// Actual ExoPlayer attach + prepare. Called only when the surface is
+    /// confirmed ready — either directly from PlayAsync (subsequent plays
+    /// with kept-warm surface) or from <see cref="OnSurfaceReady"/> on the
+    /// first cold-start play. Idempotent against rapid re-entries because
+    /// we drain <c>_pendingPlay</c> before doing the work.
+    /// </summary>
+    private void DoPlay(string url, long resumeMs)
+    {
+        var ctx = Microsoft.Maui.ApplicationModel.Platform.AppContext;
+        if (ctx is null)
+        {
+            _logger.LogWarning("NativePlayer.DoPlay: AppContext null");
+            return;
+        }
+        try
+        {
+            lock (_lock)
+            {
+                _player ??= BuildPlayer(ctx);
+                if (s_textureView is not null)
+                {
+                    _player.SetVideoTextureView(s_textureView);
+                }
+                var item = MediaItem.FromUri(url);
+                _player.SetMediaItem(item);
+                _player.Prepare();
+                if (resumeMs > 0) _player.SeekTo(resumeMs);
+                _player.PlayWhenReady = true;
+                _logger.LogInformation("NativePlayer.DoPlay: attached + prepared {Url} resume={ResumeMs}ms",
+                    url, resumeMs);
+            }
+            ApplyAspectMatrix();  // re-apply user's aspect (or default fit) now that video size is incoming
+        }
+        catch (System.Exception ex)
+        {
+            _logger.LogError(ex, "NativePlayer.DoPlay failed");
+        }
+    }
+#endif
 
     public Task PauseAsync()
     {
