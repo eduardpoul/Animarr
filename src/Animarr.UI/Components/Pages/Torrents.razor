@@ -147,7 +147,8 @@ else
                     var paused = t.State == TorrentRecordState.Paused;
                     <tr>
                         <td class="tor-name">
-                            <a class="tor-name__text" href="@($"/torrents/{t.InfoHash}/edit")">@t.Name</a>
+                            <button type="button" class="tor-name__text"
+                                    @onclick="@(() => OpenEdit(t.InfoHash))">@t.Name</button>
                         </td>
                         <td class="tor-cell tor-cell--dim">@state</td>
                         <td>
@@ -188,6 +189,13 @@ else
     </div>
 }
 
+@if (_editHash is not null)
+{
+    <TorrentEdit Hash="@_editHash"
+                 OnClose="CloseEdit"
+                 OnDeleted="OnTorrentDeleted" />
+}
+
 @code {
     private TorrentRecordDto[]? _records;
     private FolderWatcherDto[]? _folders;
@@ -204,6 +212,21 @@ else
     private bool   _addAutoRename = true;
     private bool   _addStopAfter;
     private bool   _adding;
+
+    /// <summary>InfoHash of the torrent the right-edge edit drawer is bound
+    /// to. Null = drawer closed. Set by clicking a torrent name; cleared by
+    /// the drawer's Cancel button or after a successful Remove.</summary>
+    private string? _editHash;
+
+    private void OpenEdit(string infoHash) => _editHash = infoHash;
+
+    private void CloseEdit() => _editHash = null;
+
+    private async Task OnTorrentDeleted()
+    {
+        _editHash = null;
+        await LoadAsync();
+    }
 
     private bool CanAdd => _addSource switch
     {

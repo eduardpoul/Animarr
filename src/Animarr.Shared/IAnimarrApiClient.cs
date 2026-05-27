@@ -114,6 +114,14 @@ public interface IAnimarrApiClient
     /// probing arbitrary other servers — not the one this client is bound to.</summary>
     Task<ServerInfoDto?>    GetServerInfoAsync(string baseUrl, CancellationToken ct = default);
 
+    // ─── LLM diagnostics ─────────────────────────────────────────────────
+    /// <summary>Pings the currently-configured LLM with a tiny prompt. Used by
+    /// the AI settings tab's "Test connection" CTA so the admin can verify
+    /// the provider / base URL / API key / model combo without queuing a real
+    /// identification job. Saved AppConfig is what gets exercised — Save
+    /// pending changes before calling this.</summary>
+    Task<LlmTestResponse>   TestLlmAsync(CancellationToken ct = default);
+
     // ─── Auth + per-user (v4) ────────────────────────────────────────────
     Task<AuthStatusDto>     GetAuthStatusAsync(CancellationToken ct = default);
     Task<UserDto?>          LoginAsync(LoginRequest request, CancellationToken ct = default);

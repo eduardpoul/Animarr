@@ -1,34 +1,14 @@
-/* TorrentEdit — per-torrent settings page.
-   Layout: 2-column grid (file tree | sidebar of cards).
-   Token-driven; no Fluent dependency. */
+/* TorrentEdit — v5 panel refactor. The 2-column page layout is gone;
+   body now stacks vertically inside a <SettingsEditDrawer>. Most of the
+   card / files / stats styles below are reused, just no page header and
+   no .te-grid. */
 
-.te-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-7);
-    padding-bottom: var(--space-5);
-    border-bottom: 1px solid var(--border);
-}
-
-.te-header__title {
-    flex: 1;
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 24px;
-    line-height: 1.1;
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.te-header__state {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+.te-loading,
+.te-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 14px;
 }
 
 /* Status dot — duplicated from Torrents.razor.css because scoped css
@@ -47,90 +27,46 @@
 .tor-dot--error    { background: oklch(0.66 0.22 25); }
 .tor-dot--neutral  { background: var(--text-faint); }
 
-.te-empty {
-    color: var(--text-faint);
-    font-size: 14px;
-    padding: var(--space-7) 0;
-}
-
-.te-grid {
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: var(--space-8);
-    align-items: start;
-}
-
-@media (max-width: 900px) {
-    .te-grid { grid-template-columns: 1fr; }
-}
-
-/* ── Files panel ─────────────────────────────────────────────── */
-.te-files { min-width: 0; }
-
-.te-files__head {
+/* ── Card block (vertical stack inside the drawer body) ────── */
+.te-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: var(--space-5);
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-3);
-    margin-bottom: var(--space-3);
 }
+.te-card + .te-card { margin-top: var(--space-5); }
 
-.te-checkbox {
-    display: inline-flex;
-    align-items: center;
-}
-
-.te-files__title {
-    flex: 1;
-    margin: 0;
+.te-card__title {
+    margin: 0 0 var(--space-2);
     font-family: var(--font-display);
-    font-size: 16px;
+    font-size: 14px;
+    letter-spacing: 0.02em;
     color: var(--text);
 }
 
-.te-meta-loading {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    font-size: 13px;
-    color: var(--text-dim);
-    padding: var(--space-4);
-}
-
-.te-meta-loading__bar { width: 80px; }
-
+/* ── Files list ──────────────────────────────────────────────── */
 .te-tree {
     border: 1px solid var(--border);
     border-radius: var(--radius-ctrl);
     overflow: hidden;
-    max-height: calc(100vh - 220px);
+    max-height: 320px;
     overflow-y: auto;
     font-size: 12px;
-    background: var(--surface);
+    background: var(--bg-1);
 }
 
-.te-tree__folder,
 .te-tree__file {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 4px 6px;
+    padding: 6px 8px;
     padding-left: calc(var(--depth, 0) * 12px + 8px);
     border-bottom: 1px solid var(--border);
 }
-
-.te-tree__folder {
-    background: var(--bg-1);
-    font-weight: 600;
-    cursor: pointer;
-    user-select: none;
-}
-
-.te-tree__chev {
-    font-size: 9px;
-    width: 12px;
-    text-align: center;
-    color: var(--text-faint);
-}
+.te-tree__file:last-child { border-bottom: 0; }
 
 .te-tree__file-name {
     flex: 1;
@@ -139,15 +75,7 @@
     white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 11.5px;
-}
-
-.te-tree__file-size {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-faint);
-    min-width: 56px;
-    text-align: right;
-    flex-shrink: 0;
+    color: var(--text);
 }
 
 .te-tree__priority {
@@ -165,31 +93,7 @@
 }
 .te-tree__priority--skip { opacity: 0.4; }
 
-/* ── Sidebar cards ───────────────────────────────────────────── */
-.te-side {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-}
-
-.te-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
-    padding: var(--space-5);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.te-card__title {
-    margin: 0 0 var(--space-2);
-    font-family: var(--font-display);
-    font-size: 14px;
-    letter-spacing: 0.02em;
-    color: var(--text);
-}
-
+/* ── Speed / options fields ──────────────────────────────────── */
 .te-field {
     display: flex;
     flex-direction: column;
@@ -226,6 +130,7 @@
 .te-toggle-row--disabled { opacity: 0.55; }
 .te-toggle-row__label { color: var(--text-dim); }
 
+/* ── Stats ───────────────────────────────────────────────────── */
 .te-stats {
     display: flex;
     flex-direction: column;
@@ -242,6 +147,12 @@
 
 .te-stats__label { color: var(--text-faint); }
 
+.te-stats__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .te-stats__bar { margin: 4px 0; }
 
 .te-hr {
@@ -256,3 +167,7 @@
     word-break: break-all;
 }
 .te-stats__hash { margin-top: 4px; }
+
+/* ── Footer spacer — pushes the danger Remove button to the right
+   so it can't be accidentally clicked next to the Save button. ──── */
+.te-footer__spacer { flex: 1; }

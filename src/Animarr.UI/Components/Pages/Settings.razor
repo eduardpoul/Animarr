@@ -204,9 +204,14 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private RenderFragment RootFoldersTab() => @<section class="settings-section">
         <div class="settings-section-head">
             <h2>Root folders</h2>
-            <Btn Variant="primary" Size="sm" OnClick="@(() => { _folderDialogTarget = null; _folderDialogOpen = true; })">
+            @* Use the same compact accent CTA the v5 panels use elsewhere
+               (Users/Roles, Categories). The old Btn Size="sm" was visually
+               undersized next to the heading and looked cramped on wide
+               viewports. *@
+            <button type="button" class="settings-section-head__new tv-focus"
+                    @onclick="@(() => { _folderDialogTarget = null; _folderDialogOpen = true; })">
                 <DIcon Name="plus" Size="13" /> Add section folder
-            </Btn>
+            </button>
         </div>
         <RootFoldersList ReloadToken="_foldersReloadToken"
                          OnEdit="OnFolderEdit"
@@ -250,10 +255,17 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                     {
                         var hue = preset.Item2;
                         var name = preset.Item1;
-                        <button type="button" class="accent-swatch" style="--accent-hue:@hue"
+                        var isActive = int.TryParse(hueStr, out var current) && current == hue;
+                        <button type="button"
+                                class="@($"accent-swatch {(isActive ? "accent-swatch--active" : "")}")"
+                                style="--accent-hue:@hue"
                                 title="@name"
+                                aria-label="@name"
                                 @onclick="@(() => SetConfigAsync(AppConfigKeys.AccentColor, hue.ToString()))">
-                            @name
+                            @if (isActive)
+                            {
+                                <DIcon Name="check" Size="14" />
+                            }
                         </button>
                     }
                 </div>
@@ -409,7 +421,72 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEpisodeMapping, v ? "true" : "false"))" />
                 <span class="settings-field__label">Use LLM for episode-mapping fallback</span>
             </label>
+
+            @* ── Test connection card ──────────────────────────────────
+               Runs a single small ping against the configured LLM and
+               surfaces { latency, sample, error } so the admin can
+               confirm the provider works without queuing a real
+               identification job. Uses saved AppConfig — admin must
+               Save changes (input @onchange already does that
+               per-field) before hitting Test. *@
+            <div class="settings-llm-test">
+                <button type="button" class="settings-section-head__new tv-focus"
+                        @onclick="TestLlmAsync"
+                        disabled="@_llmTesting">
+                    <DIcon Name="@(_llmTesting ? "refresh" : "magic")" Size="13" />
+                    @(_llmTesting ? "Testing…" : "Test connection")
+                </button>
+                @if (_llmTestResult is { } r)
+                {
+                    <div class="@($"settings-llm-test__result {(r.Ok ? "is-ok" : "is-err")}")">
+                        @if (r.Ok)
+                        {
+                            <div class="settings-llm-test__line">
+                                <strong>Connected.</strong> Latency: @r.LatencyMs ms.
+                            </div>
+                            @if (!string.IsNullOrEmpty(r.Sample))
+                            {
+                                <div class="settings-llm-test__sample">
+                                    Sample: <code>@r.Sample</code>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="settings-llm-test__line">
+                                <strong>Failed</strong> after @r.LatencyMs ms.
+                            </div>
+                            @if (!string.IsNullOrEmpty(r.Error))
+                            {
+                                <div class="settings-llm-test__sample">@r.Error</div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
         </section>;
+    }
+
+    private bool _llmTesting;
+    private LlmTestResponse? _llmTestResult;
+
+    private async Task TestLlmAsync()
+    {
+        if (_llmTesting) return;
+        _llmTesting = true;
+        _llmTestResult = null;
+        StateHasChanged();
+        try { _llmTestResult = await Api.TestLlmAsync(); }
+        catch (Exception ex)
+        {
+            // Transport-level failure (DelegatingHandler couldn't resolve,
+            // server unreachable, etc.) — synthesise an error response so
+            // the result card path is unified.
+            _llmTestResult = new LlmTestResponse(
+                Ok: false, LatencyMs: 0, Sample: null, Error: ex.Message);
+        }
+        _llmTesting = false;
+        StateHasChanged();
     }
 
     // ── Patterns tab ──

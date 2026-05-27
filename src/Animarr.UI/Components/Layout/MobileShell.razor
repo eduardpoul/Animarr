@@ -40,17 +40,23 @@
             <span class="d-tabbar__label">@L["nav.torrents"]</span>
         </NavLink>
     }
-    @if (UserCtx.Can(p => p.SystemSettings))
-    {
-        <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.Prefix" href="server" ActiveClass="d-tabbar__item--active">
-            <DIcon Name="settings" Size="22" />
-            <span class="d-tabbar__label">SERVER</span>
-        </NavLink>
-    }
+    @* Settings tab — always visible. Opens ProfilePanel full-screen (the
+       panel's own media-query expands to width: 100vw on mobile). The
+       Server-Settings deep-link lives inside the panel's Identity tab,
+       gated by the systemSettings permission. The previous /server
+       NavLink that used to live here had two problems: it was hidden
+       for non-admin users, leaving them with no Settings entry, and it
+       skipped per-user prefs (theme / audio / language). *@
+    <button type="button" class="d-tabbar__item tv-focus" @onclick="OnSettingsClick"
+            aria-label="@L["nav.settings"]">
+        <DIcon Name="settings" Size="22" />
+        <span class="d-tabbar__label">@L["nav.settings"]</span>
+    </button>
 </nav>
 
 @code {
     [Parameter] public int ActiveDownloads { get; set; }
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }
-    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
+    private Task OnProfileClick()  => OnProfileClickEvent.InvokeAsync();
+    private Task OnSettingsClick() => OnProfileClickEvent.InvokeAsync();
 }

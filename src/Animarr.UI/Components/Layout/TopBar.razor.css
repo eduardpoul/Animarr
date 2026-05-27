@@ -7,10 +7,16 @@
     top: 0; left: 0; right: 0;
     height: 60px;
     z-index: 50;
-    background: linear-gradient(180deg, rgba(10, 8, 7, 0.78), rgba(10, 8, 7, 0.55));
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid var(--border);
+    /* Mostly transparent — backdrop slideshow paints through. Each
+       interactive pill (server, LLM, icon buttons, profile chip) keeps
+       its own backdrop-filter + translucent fill, so they stay readable
+       over bright fanart. A 1px hairline at the very bottom gives just
+       enough separation between fixed TopBar and the scrolling content
+       so the page header doesn't visually merge into it. */
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     align-items: center;
     gap: 16px;
@@ -22,8 +28,10 @@
    Click opens ProfilePanel pre-focused on the Server section. */
 .d-topbar__server-pill {
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-radius: 6px;
     cursor: pointer;
     flex-shrink: 0;
@@ -39,8 +47,8 @@
     transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .d-topbar__server-pill:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: var(--border-strong);
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.16);
 }
 
 .d-topbar__server-dot {
@@ -134,11 +142,11 @@
     align-items: center;
     transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
 }
-.d-topbar__pill:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.d-topbar__pill:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
 .d-topbar__pill--active {
     color: var(--text);
-    background: var(--surface-3);
-    box-shadow: 0 1px 0 var(--accent) inset;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 1px 0 var(--accent) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
 }
 
 /* ── LLM status pill ─────────────────────────────────────── */
@@ -151,13 +159,20 @@
     gap: 8px;
     padding: 6px 12px;
     border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     height: 36px;
     box-sizing: border-box;
     color: var(--text-dim);
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-topbar__llm:hover { color: var(--text); }
+.d-topbar__llm:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+}
 
 .d-topbar__llm-dot {
     width: 7px; height: 7px;
@@ -187,14 +202,20 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     color: var(--text-dim);
     display: grid;
     place-items: center;
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-topbar__icon-btn:hover { color: var(--text); }
+.d-topbar__icon-btn:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+}
 .d-topbar__icon-btn--active {
     background: var(--accent-soft);
     border-color: var(--accent-line);
@@ -229,14 +250,19 @@
     gap: 10px;
     padding: 4px 10px 4px 4px;
     border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     height: 36px;
     box-sizing: border-box;
     color: var(--text);
     transition: background var(--motion-fast), border-color var(--motion-fast);
 }
-.d-topbar__profile:hover { border-color: var(--border-strong); }
+.d-topbar__profile:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+}
 
 .d-topbar__profile-text {
     display: flex;

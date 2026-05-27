@@ -631,11 +631,38 @@
 
             <div class="d-profile__spacer"></div>
 
+            @* ── Server settings deep-link (gated by systemSettings).
+                 Sits directly above SIGN OUT so admins can reach
+                 LLM / patterns / folders / downloads config without
+                 hunting for a separate route on mobile (where the
+                 bottom tabbar's old /server NavLink was replaced by
+                 the Settings tab that opens this very panel). *@
+            @if (UserCtx.Can(p => p.SystemSettings))
+            {
+                <button type="button" class="d-profile__nav-row tv-focus"
+                        @onclick="OnServerSettingsClick">
+                    <span class="d-profile__nav-row__ic">
+                        <DIcon Name="settings" Size="14" />
+                    </span>
+                    <span class="d-profile__nav-row__body">
+                        <span class="d-profile__nav-row__name">@L["profile.server_settings_title"]</span>
+                        <span class="d-profile__nav-row__meta">@L["profile.server_settings_sub"]</span>
+                    </span>
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
+
             <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
                 <DIcon Name="logout" Size="13" /> SIGN OUT
             </button>
         </div>
     };
+
+    private async Task OnServerSettingsClick()
+    {
+        await Close();
+        Nav.NavigateTo("/server");
+    }
 
     // ─── v5 multi-server: switch / add server helpers ─────────────────
 

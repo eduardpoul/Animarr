@@ -222,14 +222,22 @@ else
                     var hasFile   = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
                     var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
                     var epTitle   = $"Episode {ep}";
-                    var epRuntime = item.Runtime is > 0 ? $"{item.Runtime}m" : "";
+                    // Design spec: on-disk shows runtime/codec/size; missing shows
+                    // "Not downloaded" in warn color (the .d-ep--miss .d-ep__meta
+                    // rule already tints it). Was hard-coded to runtime regardless,
+                    // so missing episodes showed e.g. "53m" in warn color — looks
+                    // like the file IS there with broken styling. Bug surfaced on
+                    // Death's Game where every episode is missing.
+                    var epMeta    = hasFile
+                        ? (item.Runtime is > 0 ? $"{item.Runtime}m" : "")
+                        : L["episode_card.meta_missing"];
 
                     <div class="md-episode-card"
                          @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)">
                         <EpisodeCard Number="ep"
                                      Title="@epTitle"
                                      ThumbUrl="@seasonThumb"
-                                     Meta="@epRuntime"
+                                     Meta="@epMeta"
                                      Have="hasFile"
                                      WatchStateDto="@watchDto"
                                      OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />

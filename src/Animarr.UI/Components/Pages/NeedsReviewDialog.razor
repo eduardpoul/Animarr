@@ -1,31 +1,30 @@
 @*
-    NeedsReview modal — auto-identified candidates + free-text manual search.
+    NeedsReview — right-edge SettingsEditDrawer (v5 panel refactor).
 
-    Click "Use" → calls the resolve endpoint with the picked candidate.
-    Click "Search manually" → opens an inline search panel that hits
-    /api/search/{tmdb,mal,imdb} via Api.Search*Async; picking one of the
-    results does the same resolve call.
+    Lists every MediaItem whose LLM identification dropped below the
+    auto-apply confidence threshold, with 2–3 candidate cards per row.
+    Click "Use" → resolves to that source/external-id pair.
+    Click "Search manually" → inline search panel (TMDB / MAL / IMDb).
+
+    Was a 720px centered modal; now slides in from the right. The candidate
+    grid collapses naturally to one column at drawer width (560px), which
+    matches mobile and is easier to scan top-to-bottom.
 *@
 
 @inject IAnimarrApiClient Api
 
+@using Animarr.UI.Components.Design.Layout
+
 @if (IsOpen)
 {
-    <div class="nrm-overlay" @onclick="OnCloseAsync"></div>
-    <div class="nrm">
-        <header class="nrm__header">
-            <div class="nrm__header-icon"><DIcon Name="warn" Size="17" /></div>
-            <div class="nrm__header-text">
-                <div class="nrm__overline">NEEDS REVIEW</div>
-                <h2 class="nrm__title">@_items.Count TITLES BELOW CONFIDENCE</h2>
-                <div class="nrm__sub">Pick the right match — Animarr stores it in SQLite, leaves folders on disk untouched.</div>
-            </div>
-            <button type="button" class="nrm__close" @onclick="OnCloseAsync" aria-label="Close">
-                <DIcon Name="x" Size="18" />
-            </button>
-        </header>
-
-        <div class="nrm__body">
+    <SettingsEditDrawer IsOpen="true"
+                        Title="@($"{_items.Count} titles below confidence")"
+                        Overline="NEEDS REVIEW"
+                        Hint="Pick the right match — Animarr stores it in SQLite, leaves folders on disk untouched."
+                        Icon="warn"
+                        Tone="warn"
+                        OnClose="OnCloseAsync">
+        <Body>
             @if (_loading)
             {
                 <div class="nrm__empty">Loading…</div>
@@ -123,8 +122,11 @@
                     </div>
                 }
             }
-        </div>
-    </div>
+        </Body>
+        <Footer>
+            <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">Close</Btn>
+        </Footer>
+    </SettingsEditDrawer>
 }
 
 @code {

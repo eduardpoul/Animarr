@@ -18,20 +18,30 @@
 
 <div class="d-srv-users">
 
-    @* ── Segmented Users / Roles control ──────────────────────── *@
+    @* ── Segmented Users / Roles control + contextual "+ New …" button ── *@
     @* v5 drawer refactor: segments only toggle between the two lists.
        Add / Edit affordances now slide a SettingsEditDrawer in from the
-       right (560px), leaving the list visible behind the backdrop. *@
-    <div class="d-srv-users__segment" role="tablist">
-        @foreach (var (key, label) in new[] { ("users", "Users"), ("roles", "Roles") })
-        {
-            var k = key;
-            var l = label;
-            var active = _view == k;
-            <button type="button"
-                    class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
-                    @onclick="@(() => _view = k)">@l</button>
-        }
+       right (560px), leaving the list visible behind the backdrop.
+
+       "+ New user" / "+ New role" sits on the right edge of the segment
+       bar — label switches with the active tab so a single button covers
+       both create actions without the wide full-width CTA at the bottom. *@
+    <div class="d-srv-users__segment-bar">
+        <div class="d-srv-users__segment" role="tablist">
+            @foreach (var (key, label) in new[] { ("users", "Users"), ("roles", "Roles") })
+            {
+                var k = key;
+                var l = label;
+                var active = _view == k;
+                <button type="button"
+                        class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
+                        @onclick="@(() => _view = k)">@l</button>
+            }
+        </div>
+        <button type="button" class="d-srv-users__new-btn tv-focus"
+                @onclick="OpenCurrentCreateDrawer">
+            <DIcon Name="plus" Size="13" /> New @(_view == "users" ? "user" : "role")
+        </button>
     </div>
 
     @if (_loading)
@@ -245,6 +255,15 @@
     {
         ResetRoleForm();
         _roleDrawerOpen = true;
+    }
+
+    /// <summary>Single-handler proxy used by the segment-bar's "+ New …"
+    /// button — picks the right drawer based on the active tab so the
+    /// button label and target stay in sync.</summary>
+    private void OpenCurrentCreateDrawer()
+    {
+        if (_view == "users") OpenCreateUserDrawer();
+        else                  OpenCreateRoleDrawer();
     }
 
     private async Task LoadAsync()
@@ -505,9 +524,6 @@
                     </div>
                 }
             </div>
-            <Btn Variant="primary" Size="md" OnClick="OpenCreateUserDrawer">
-                <DIcon Name="plus" Size="13" /> New user
-            </Btn>
         </div>
     };
 
@@ -560,9 +576,6 @@
                     </div>
                 }
             </div>
-            <Btn Variant="primary" Size="md" OnClick="OpenCreateRoleDrawer">
-                <DIcon Name="plus" Size="13" /> New role
-            </Btn>
         </div>
     };
 

@@ -51,11 +51,16 @@
 /* Main content column — pushed down by 60px to clear the fixed TopBar.
    No height constraint and no overflow: document body scrolls natively,
    so the catalog grid / media detail / settings page can be as tall as
-   they need without us managing a custom scroll container. */
+   they need without us managing a custom scroll container.
+
+   No z-index here on purpose — assigning one creates a stacking context
+   that would trap fixed-position drawers (SettingsEditDrawer z-60,
+   ProfilePanel z-60) below the fixed TopBar (root z-50). Stay
+   position:relative without z-index so the drawers compete with TopBar
+   at the root stacking level. */
 .animarr-main {
-    padding: 80px 24px 24px;   /* 60 topbar + 20 breathing room */
+    padding: 96px 24px 24px;   /* 60 topbar + 36 breathing — was tight on tabs */
     position: relative;
-    z-index: 2;
 }
 
 @media (max-width: 959px) {

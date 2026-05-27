@@ -964,5 +964,10 @@
   "reconnect.title_resume_failed": "Не вдалося відновити",
   "reconnect.sub_resume_failed": "Не вдалося відновити сесію.",
   "reconnect.btn_retry": "Повторити підключення",
-  "reconnect.btn_resume": "Відновити сесію"
+  "reconnect.btn_resume": "Відновити сесію",
+
+  "profile.server_settings_title": "Налаштування сервера",
+  "profile.server_settings_sub": "Папки · LLM · шаблони · завантаження",
+
+  "episode_card.meta_missing": "Не завантажено"
 }

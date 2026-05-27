@@ -964,5 +964,10 @@
   "reconnect.title_resume_failed": "Fortsetzen fehlgeschlagen",
   "reconnect.sub_resume_failed": "Die Sitzung konnte nicht fortgesetzt werden.",
   "reconnect.btn_retry": "Verbindung erneut versuchen",
-  "reconnect.btn_resume": "Sitzung fortsetzen"
+  "reconnect.btn_resume": "Sitzung fortsetzen",
+
+  "profile.server_settings_title": "Servereinstellungen",
+  "profile.server_settings_sub": "Ordner · LLM · Muster · Downloads",
+
+  "episode_card.meta_missing": "Nicht heruntergeladen"
 }

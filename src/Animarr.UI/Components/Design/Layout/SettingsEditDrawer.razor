@@ -25,7 +25,7 @@
 @if (IsOpen)
 {
     <div class="d-srv-drawer__backdrop" @onclick="HandleClose" aria-hidden="true"></div>
-    <aside class="d-srv-drawer" role="dialog" aria-modal="true" aria-label="@Title">
+    <aside class="@($"d-srv-drawer d-srv-drawer--{Tone}")" role="dialog" aria-modal="true" aria-label="@Title">
         <header class="d-srv-drawer__head">
             <div class="d-srv-drawer__head-ic">
                 <DIcon Name="@Icon" Size="18" />
@@ -63,6 +63,10 @@
     [Parameter] public string? Overline { get; set; }
     [Parameter] public string? Hint { get; set; }
     [Parameter] public string Icon { get; set; } = "pencil";
+    /// <summary>Color treatment for the header icon chip + overline. "accent"
+    /// (default) uses the brand accent; "warn" amber-tinted (delete confirms);
+    /// "danger" crimson-tinted (irreversible operations).</summary>
+    [Parameter] public string Tone { get; set; } = "accent";
 
     [Parameter, EditorRequired] public RenderFragment Body { get; set; } = default!;
     /// <summary>Sticky footer fragment — typically the Save + Cancel buttons

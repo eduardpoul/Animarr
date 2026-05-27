@@ -1,101 +1,13 @@
 /*
-    SectionFolderDialog — Settings → Root folders Add/Edit modal.
-    Pattern: centered modal, dark gradient surface, slide-in animation.
-    Adheres to var(--surface) → var(--surface-2), var(--radius-modal),
-    backdrop-blur backdrop. Mirrors NeedsReviewDialog conventions.
+    SectionFolderDialog — Settings → Root folders Add/Edit panel.
+
+    Modal scaffold was removed in the v5 panel refactor: this component
+    now embeds inside a <SettingsEditDrawer> (right-edge slide-in). The
+    only styles left are the picker subtree (the filesystem drill-down
+    UI inside the drawer body) and a couple of helper wrappers.
 */
 
-.sfd-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
-    animation: sfd-overlay-in 0.2s ease;
-}
-
-@keyframes sfd-overlay-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
-
-.sfd {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 560px;
-    max-width: 92vw;
-    max-height: 86vh;
-    z-index: 41;
-    display: flex;
-    flex-direction: column;
-    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-modal);
-    overflow: hidden;
-    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
-    animation: sfd-in 0.25s ease;
-}
-
-@keyframes sfd-in {
-    0%   { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
-    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-}
-
-.sfd__header {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 20px 24px 16px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-}
-
-.sfd__header-text {
-    flex: 1;
-    min-width: 0;
-}
-
-.sfd__overline {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: 0.14em;
-    color: var(--accent-hi);
-    text-transform: uppercase;
-}
-
-.sfd__title {
-    font-family: var(--font-display);
-    font-size: 22px;
-    letter-spacing: -0.018em;
-    margin: 4px 0 0;
-    color: var(--text);
-    text-transform: uppercase;
-}
-
-.sfd__sub {
-    font-size: 12.5px;
-    color: var(--text-dim);
-    margin-top: 4px;
-}
-
-.sfd__close {
-    appearance: none;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    color: var(--text-dim);
-    padding: 4px;
-    flex-shrink: 0;
-}
-.sfd__close:hover { color: var(--text); }
-
-.sfd__body {
-    flex: 1;
-    overflow: auto;
-    padding: 20px 24px;
+.sfd__form {
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -106,15 +18,7 @@
     gap: 8px;
     align-items: stretch;
 }
-.sfd__row > .settings-field__input { flex: 1; min-width: 0; }
-
-.sfd__footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    gap: 10px;
-    flex-shrink: 0;
-}
+.sfd__row > .d-input { flex: 1; min-width: 0; }
 
 /* ── Picker ─── */
 
@@ -224,25 +128,4 @@
 .sfd-picker__selected b {
     color: var(--text);
     font-weight: 600;
-}
-
-/* Mobile */
-@media (max-width: 600px) {
-    .sfd {
-        width: 100vw;
-        max-width: 100vw;
-        height: 100vh;
-        max-height: 100vh;
-        top: 0;
-        left: 0;
-        transform: none;
-        border-radius: 0;
-    }
-    @keyframes sfd-in {
-        0%   { opacity: 0; transform: translateY(20px); }
-        100% { opacity: 1; transform: translateY(0); }
-    }
-    .sfd__header { padding: 16px 18px 12px; }
-    .sfd__body   { padding: 16px 18px; }
-    .sfd__footer { padding: 12px 18px; }
 }

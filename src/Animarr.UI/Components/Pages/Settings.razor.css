@@ -223,23 +223,28 @@
     flex-wrap: wrap;
 }
 
+/* Color comes from --accent-hue set inline per-swatch. Was using an
+   undefined --c custom property so swatches had no background fill. */
 .accent-swatch {
     appearance: none;
     cursor: pointer;
     width: 42px;
     height: 42px;
     border-radius: var(--radius-pill);
-    background: var(--c);
+    background: oklch(0.66 0.20 var(--accent-hue));
     border: 0;
     position: relative;
     display: grid;
     place-items: center;
     color: #fff;
-    transition: box-shadow var(--motion-base);
+    transition: box-shadow var(--motion-base), transform var(--motion-fast);
 }
+.accent-swatch:hover { transform: scale(1.05); }
 
 .accent-swatch--active {
-    box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--c, var(--accent));
+    box-shadow:
+        0 0 0 2px var(--bg-0),
+        0 0 0 4px oklch(0.66 0.20 var(--accent-hue));
 }
 
 /* ── Backdrop row + sliders ──────────────────────────────────────────── */

@@ -2536,6 +2536,90 @@ button.d-pill:focus-visible {
     text-transform: var(--label-casing, none);
 }
 
+/* Compact accent CTA for "+ Add … " buttons in a section heading. Pairs with
+   the segment-bar pattern used by Users/Roles + Categories — keeps the
+   create button visually anchored next to the heading instead of dropping
+   to a wide full-width bar at the bottom. Global, not scoped, because the
+   Settings page composes RenderFragments and the scoped CSS bundle isn't
+   loaded for nested fragments. */
+.settings-section-head__new {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--accent);
+    border: 1px solid var(--accent-line);
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.settings-section-head__new:hover:not([disabled]) {
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
+}
+.settings-section-head__new[disabled] {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* ── AI / LLM "Test connection" result card ─────────────────────
+   Inline status surface under the LLM config form. Green tint on
+   success, red tint on failure. The button itself reuses
+   .settings-section-head__new for visual continuity with the
+   other primary CTAs. */
+.settings-llm-test {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: var(--space-6);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--border);
+}
+
+.settings-llm-test__result {
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.settings-llm-test__result.is-ok {
+    border-color: oklch(0.55 0.12 155 / 0.6);
+    background: oklch(0.55 0.12 155 / 0.08);
+}
+.settings-llm-test__result.is-err {
+    border-color: oklch(0.66 0.20 25 / 0.55);
+    background: oklch(0.66 0.20 25 / 0.08);
+}
+
+.settings-llm-test__line { color: var(--text); }
+.settings-llm-test__sample {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    background: var(--bg-0);
+    padding: 6px 8px;
+    border-radius: 6px;
+    word-break: break-word;
+}
+.settings-llm-test__sample > code {
+    font-family: inherit;
+    color: var(--accent-hi);
+}
+
 .settings-hint {
     font-size: 12px;
     color: var(--text-faint);
