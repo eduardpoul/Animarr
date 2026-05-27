@@ -318,6 +318,11 @@ public class TmdbImage
     [JsonPropertyName("file_path")]    public string  FilePath    { get; set; } = "";
     [JsonPropertyName("iso_639_1")]    public string? Iso6391     { get; set; }
     [JsonPropertyName("vote_average")] public double  VoteAverage { get; set; }
+    /// <summary>Asset pixel width as reported by TMDB. 0 when missing.
+    /// Surfaced on the Edit Metadata poster/backdrop picker as a badge so
+    /// the user can compare candidates by resolution before picking.</summary>
+    [JsonPropertyName("width")]        public int     Width       { get; set; }
+    [JsonPropertyName("height")]       public int     Height      { get; set; }
 }
 
 public class TmdbContentRatings

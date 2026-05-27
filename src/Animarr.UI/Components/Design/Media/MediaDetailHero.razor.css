@@ -2,12 +2,12 @@
     position: relative;
     /* Matched 1:1 to CatalogContinueHero (.d-chero) so a movie detail
        page's hero is the same height as the catalog hero one swipe ago.
-       Negative top margin negates .animarr-main's 96px padding-top so
-       the hero starts flush against the transparent TopBar; horizontal
-       -24px reaches both viewport edges; bottom var(--space-9) is the
-       gap before the synopsis / details columns. No rounding on any
-       corner — clean bleed on all four edges, matching catalog. */
-    height: clamp(360px, 50vh, 440px);
+       ~700px on a typical desktop. Negative top margin negates
+       .animarr-main's 96px padding-top so the hero starts flush against
+       the transparent TopBar; horizontal -24px reaches both viewport
+       edges; bottom var(--space-9) is the gap before the synopsis /
+       details columns. No rounding on any corner. */
+    height: clamp(480px, 75vh, 720px);
     margin: -96px -24px var(--space-9);
     overflow: hidden;
     border-radius: 0;
