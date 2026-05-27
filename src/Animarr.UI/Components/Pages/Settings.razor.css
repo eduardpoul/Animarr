@@ -966,3 +966,106 @@
     .settings-actions { flex-wrap: wrap; }
     .settings-add { margin-top: 6px; }
 }
+
+/* ── Metadata providers (sortable list) ──────────────────────────
+   Each row is one source. Number badge at left shows rank in the
+   probe order. Up/down chevrons reorder it; the input below holds
+   the API key. SearchSourceOrder (AppConfig) stores the resolved
+   CSV so a save → reload trip preserves whatever the admin set. */
+
+.settings-providers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+
+.settings-provider {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: 12px 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+}
+
+.settings-provider__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.settings-provider__rank {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    flex-shrink: 0;
+}
+
+.settings-provider__name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.settings-provider__hint {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.3px;
+    margin-top: 2px;
+    font-weight: 400;
+}
+
+.settings-provider__nav {
+    display: inline-flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.settings-provider__btn {
+    appearance: none;
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    transition: background var(--motion-fast), color var(--motion-fast),
+                border-color var(--motion-fast);
+}
+.settings-provider__btn:hover:not([disabled]) {
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+.settings-provider__btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.35;
+}
+
+/* The first chevron's icon needs flipping — chev-l is a left-pointing
+   arrow but it's used here for "move up". Rotate visually so the user
+   reads ↑ / ↓ pair instead of < / >. */
+.settings-provider__nav .settings-provider__btn:first-child > svg {
+    transform: rotate(90deg);
+}
+.settings-provider__nav .settings-provider__btn:nth-child(2) > svg {
+    transform: rotate(90deg);
+}
+.settings-provider__nav .settings-provider__btn:nth-child(2) > svg {
+    transform: rotate(-90deg);
+}

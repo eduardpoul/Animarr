@@ -256,21 +256,14 @@
                               && m.CategoryNames.Any(n => string.Equals(n, activeCat, StringComparison.OrdinalIgnoreCase)));
         }
 
-        // Section filter — match items whose Folder is under the chosen
-        // section. The DTO carries FolderId; we resolve the parent section
-        // via the folder list fetched alongside.
+        // Section filter — items whose Folder is under the chosen section.
+        // The lookup set is precomputed by OnAfterRenderAsync's /api/folders
+        // walk into _childFolderIdsBySection. Was a stray `var childIds = ...`
+        // declaration above that shadowed the later `out var childIds` in
+        // the hero-slice branch — both useless here because the actual
+        // membership test reads from _childFolderIdsBySection directly.
         if (_activeSection.HasValue)
         {
-            var childIds = _sections
-                .Where(s => s.Id == _activeSection.Value)
-                .Select(s => s.Id)
-                .ToHashSet();
-            // Children-of-section are returned as their own folders; we need to
-            // include items whose folder's parent matches OR whose folder IS
-            // the section (rare for flat sections).
-            // For simplicity: match where FolderId is in the set of children
-            // of the active section. That set is computed via a separate API
-            // call — folded into _allFolders below for one round trip.
             src = src.Where(m => _childFolderIdsBySection
                 .GetValueOrDefault(_activeSection.Value, new HashSet<Guid>())
                 .Contains(m.FolderId));

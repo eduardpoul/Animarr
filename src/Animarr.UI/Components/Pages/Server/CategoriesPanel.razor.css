@@ -181,32 +181,9 @@
     font-style: italic;
 }
 
-/* ── Categories panel header + header-CTAs ────────────────────
-   Top-right cluster: primary "+ New category" + ghost "Rescan all".
-   Mirrors the segment-bar pattern used by Users/Roles so admin-section
-   actions live next to the section title, not as huge full-width CTAs
-   at the bottom of the card. */
-.d-srv-card__head--with-cta {
-    flex-direction: row !important;   /* parent .d-srv-card__head is column */
-    align-items: flex-start;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-.d-srv-card__head-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-    min-width: 220px;
-}
-
-.d-srv-card__head-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-}
+/* .d-srv-card__head--with-cta + .d-srv-card__head-text / __head-actions
+   live in components.css now — they need to apply across every panel
+   that uses the same pattern. */
 
 /* Scoped copy of the Users/Roles "+ New …" button — scoped CSS doesn't
    cross component boundaries, so we redefine the rules here against

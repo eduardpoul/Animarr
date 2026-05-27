@@ -3,9 +3,14 @@
 .d-srv-about__kv {
     display: grid;
     grid-template-columns: 160px 1fr;
-    gap: 10px 24px;
+    /* Row gap was 10px — felt cramped between key/value rows on the
+       Quietude theme's dark navy. 16px gives the metadata block proper
+       breathing space and visually separates Version / Build / Runtime /
+       Mode / License so they read as individual facts, not a wall of mono. */
+    gap: 16px 24px;
     font-family: var(--font-mono);
     font-size: 12.5px;
+    padding: 8px 0;
 }
 
 .d-srv-about__key { color: var(--text-faint); }
@@ -13,9 +18,13 @@
 
 .d-srv-about__cta { text-decoration: none; }
 
+/* GitHub / Documentation / Report issue button row — extra top margin
+   so the buttons don't crowd the License row above. */
+::deep .d-srv-card__actions { margin-top: var(--space-6); }
+
 .d-srv-about__footer {
-    margin-top: 22px;
-    padding: 14px;
+    margin-top: var(--space-8);
+    padding: 16px 18px;
     background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: 10px;
