@@ -437,6 +437,27 @@ else
                             _playerElementId, meta, new { dotnetRef = _playerSelfRef });
                     }
                     catch { /* metadata is decoration, not playback — never throw */ }
+
+                    // Watch Next / Google-TV "Continue watching" carousel.
+                    // The bridge inside animarr-player.js mirrors every
+                    // progress tick to MAUI's WatchNextService → no-op on
+                    // non-Android-TV hosts. Posting the meta here (not at
+                    // attach()) means we have the resolved title and episode
+                    // labels, not just the raw media item.
+                    try
+                    {
+                        var watchNextMeta = new
+                        {
+                            mediaId   = _item.Id.ToString(),
+                            title,
+                            posterUrl = string.IsNullOrEmpty(artwork)
+                                ? string.Empty
+                                : new Uri(new Uri(Nav.BaseUri), artwork).ToString(),
+                        };
+                        await JS.InvokeVoidAsync("animarrPlayer.setWatchNextMeta",
+                            _playerElementId, watchNextMeta);
+                    }
+                    catch { /* host doesn't speak Watch Next — silent */ }
                 }
             }
             catch (Exception ex)

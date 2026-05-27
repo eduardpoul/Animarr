@@ -96,6 +96,12 @@ public static class MauiProgram
         // which Blazor page made the call.
         builder.Services.AddSingleton<MdnsBrowserService>();
 
+        // WatchNextService bridges the Artplayer-side progress events to the
+        // Android TV Watch Next channel (Google TV's "Continue watching" row).
+        // Singleton so the static Instance accessor used by the JS bridge
+        // always resolves to the same instance across page reloads.
+        builder.Services.AddSingleton<WatchNextService>();
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
@@ -109,6 +115,14 @@ public static class MauiProgram
         // Also publishes the static accessor used by MdnsBridge.
         var browser = app.Services.GetRequiredService<MdnsBrowserService>();
         MdnsBrowserService.RegisterStaticInstance(browser);
+
+        // Watch Next bridge: publish the singleton so the JS-side static
+        // [JSInvokable] in WatchNextBridge can dispatch to the live service
+        // regardless of which Blazor circuit fired the call. On non-Android
+        // hosts the service is a no-op shell — still resolved so the static
+        // accessor is non-null and the JS bridge needs no platform check.
+        var watchNext = app.Services.GetRequiredService<WatchNextService>();
+        WatchNextService.RegisterStaticInstance(watchNext);
 
         return app;
     }

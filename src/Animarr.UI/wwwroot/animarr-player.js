@@ -666,6 +666,18 @@
             }
             lastPosForDelta = pos;
             r.invokeMethodAsync('OnPlayerProgress', pos, dur, delta).catch(() => {});
+
+            // Mirror the same progress to the Android-TV "Continue watching"
+            // row via the MAUI-side bridge (no-op when the host doesn't expose
+            // it — i.e. browser WASM, or MAUI on a phone / Windows / iOS where
+            // FEATURE_LEANBACK is false). The metadata was attached by
+            // MediaDetail.razor right after attach() resolved.
+            const wn = entry.watchNext;
+            if (wn && typeof window.animarrWatchNextUpsert === 'function') {
+                const posMs = Math.round(pos * 1000);
+                const durMs = Math.round(dur * 1000);
+                window.animarrWatchNextUpsert(wn.mediaId, wn.title, wn.posterUrl, posMs, durMs);
+            }
         };
         art.on('video:timeupdate', () => {
             const now = Date.now();
@@ -786,6 +798,31 @@
     }
 
     /**
+     * Attach Watch Next / "Continue watching" metadata to this player session.
+     * Called once from MediaDetail.razor after attach() succeeds. The metadata
+     * stays on the WIRED entry, and sendProgress() pushes upserts every ~5s
+     * (timeupdate tick), on pause, and on ended. Idempotent — calling this
+     * twice replaces the previous metadata.
+     *
+     * On non-MAUI hosts window.animarrWatchNextUpsert is undefined, so the
+     * shim guard inside sendProgress() bails silently. WatchNextService on
+     * the MAUI side further short-circuits when the device isn't a TV.
+     *
+     * @param {string} elementId - player container ID
+     * @param {object} meta - { mediaId, title, posterUrl } — all required
+     */
+    function setWatchNextMeta(elementId, meta) {
+        const entry = WIRED.get(elementId);
+        if (!entry) return;
+        if (!meta || !meta.mediaId || !meta.title) return;
+        entry.watchNext = {
+            mediaId:    String(meta.mediaId),
+            title:      String(meta.title),
+            posterUrl:  meta.posterUrl ? String(meta.posterUrl) : '',
+        };
+    }
+
+    /**
      * Toggle Picture-in-Picture on the active player video. Returns a promise
      * that resolves true if we entered PiP, false otherwise.
      */
@@ -806,5 +843,5 @@
         return false;
     }
 
-    window.animarrPlayer = { attach, flush, detach, setMediaSession, togglePictureInPicture };
+    window.animarrPlayer = { attach, flush, detach, setMediaSession, setWatchNextMeta, togglePictureInPicture };
 })();

@@ -8,6 +8,7 @@
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
 @inject ServerRegistryState ServerReg
+@inject IJSRuntime JS
 
 <PageTitle>Animarr — Your library, understood.</PageTitle>
 
@@ -91,7 +92,22 @@
         // /discovery (first-run, no known servers) and /login (returning).
         if (!ServerReg.Loaded) await ServerReg.LoadAsync();
         if (UserCtx.IsAuthenticated)
-            Nav.NavigateTo("/", replace: true);
+        {
+            // If we were launched from Google TV's "Continue watching" tile
+            // (animarr://play/{mediaId} → MainActivity captures the ID), bypass
+            // the default landing page and route straight to that media. The
+            // JS shim is only registered by the MAUI host, so on WASM the
+            // call resolves to undefined → null and we fall through to the
+            // regular home redirect. We swallow JS errors so a missing shim
+            // never blocks the post-auth flow.
+            string? deepLinkId = null;
+            try { deepLinkId = await JS.InvokeAsync<string?>("animarrConsumePendingDeepLink"); }
+            catch { /* shim absent (browser WASM) — no deep link path */ }
+
+            Nav.NavigateTo(
+                !string.IsNullOrEmpty(deepLinkId) ? $"/media/{deepLinkId}" : "/",
+                replace: true);
+        }
     }
 
     private void StartFlow()
