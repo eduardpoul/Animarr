@@ -101,6 +101,34 @@
             document.documentElement.classList.add('tv-mode');
         })();
 
+        // ── Native TV-detect refine ───────────────────────────────────
+        // The heuristic above runs synchronously off UA + viewport, which
+        // works for "honest" Android TV / Google TV devices but misses
+        // Xiaomi Mi TV with MIUI for TV (custom UA), emulators, and OEM
+        // budget boxes that don't broadcast Leanback in their user agent.
+        //
+        // Once Blazor mounts we can ask the MAUI process directly via
+        // PlatformBridge.IsTelevision — that goes through UiModeManager +
+        // PackageManager.FEATURE_LEANBACK and is what Android itself uses
+        // to pick the right launcher. If the native check disagrees with
+        // the heuristic (heuristic missed a TV), we apply tv-mode classes
+        // post-boot. Pure-WASM browser context: DotNet bridge never
+        // appears, loop times out, no harm done.
+        (async function () {
+            for (var i = 0; i < 50; i++) {
+                if (window.DotNet && typeof window.DotNet.invokeMethodAsync === 'function') break;
+                await new Promise(function (r) { setTimeout(r, 100); });
+            }
+            if (!window.DotNet) return;
+            try {
+                var isTv = await window.DotNet.invokeMethodAsync('Animarr.App', 'IsTelevision');
+                if (isTv === true && !document.documentElement.classList.contains('tv-mode')) {
+                    document.documentElement.classList.add('animarr-tv-host');
+                    document.documentElement.classList.add('tv-mode');
+                }
+            } catch (_) { /* method not wired (non-MAUI host) — silent */ }
+        })();
+
         // Accent-hue setter (mirrors WASM host).
         window.animarr_setAccentHue = function (hue) {
             if (typeof hue !== 'number') hue = parseInt(hue, 10);
@@ -140,6 +168,35 @@
                 console.warn('animarrMdnsScan failed', e);
                 return [];
             }
+        };
+
+        // Drain the Watch-Next / "Continue watching" deep link the launcher
+        // dispatched to MainActivity (if any). Returns the media GUID to
+        // navigate to, or null when there's nothing pending. Called by
+        // Welcome.razor's OnAfterRenderAsync — when present, we route to
+        // /media/{id} instead of the default landing page.
+        window.animarrConsumePendingDeepLink = async function () {
+            try {
+                return await DotNet.invokeMethodAsync('Animarr.App', 'ConsumePendingDeepLink');
+            } catch { return null; }
+        };
+
+        // Watch-Next publish/remove. Fired from animarr-player.js on every
+        // progress tick + pause/ended. The static [JSInvokable] in
+        // WatchNextBridge routes to the singleton WatchNextService, which
+        // is a no-op on non-Leanback Androids and on non-Android platforms.
+        // We catch + swallow here so a Watch-Next failure never propagates
+        // back into the player's event loop.
+        window.animarrWatchNextUpsert = async function (mediaId, title, posterUrl, positionMs, durationMs) {
+            try {
+                await DotNet.invokeMethodAsync('Animarr.App', 'WatchNextUpsert',
+                    mediaId, title, posterUrl, positionMs, durationMs);
+            } catch { /* swallow */ }
+        };
+        window.animarrWatchNextRemove = async function (mediaId) {
+            try {
+                await DotNet.invokeMethodAsync('Animarr.App', 'WatchNextRemove', mediaId);
+            } catch { /* swallow */ }
         };
     </script>
 </head>
