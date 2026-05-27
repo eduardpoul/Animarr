@@ -344,12 +344,27 @@
       breaks at slash/dash boundaries, and tighten the right-side
       "connect" label so the row collapses neatly. */
 @media (max-width: 639px) {
+    /* Swap grid centering for a flex column. With grid + place-items the
+       480px-fixed card was anchored to the cell's centre but its rounded
+       corners visually clipped against the screen edges on tall phones —
+       the card looked "tilted right". Flex + width 100% lets the card
+       fill the gutter cleanly. */
     .d-discovery {
-        place-items: start center;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
         padding: 80px 16px 32px;
     }
     .d-discovery__card {
+        /* Drop the desktop's hard 480px floor — on phone the card always
+           takes the full content width minus padding. box-sizing keeps the
+           24px+22px inner padding inside that 100% allotment. */
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
         padding: 22px 18px 18px;
+        margin: 0;
     }
     .d-discovery__back {
         top: 16px; left: 16px;
