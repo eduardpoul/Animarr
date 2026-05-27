@@ -53,13 +53,20 @@
 }
 
 /* ── Art / thumbnail panel ────────────────────────────────── */
+/* No fixed aspect-ratio — let the grid row decide height based on the
+   info panel content (title + meta + actions). The thumb fills that
+   row 100% via stretch; object-fit: cover trims the image. Without
+   this the art block locked to 16/9 (≈202px tall on 360-wide column)
+   while the info panel grew to ~240px, leaving a gap below the image. */
 .d-mfc__art {
     position: relative;
-    aspect-ratio: 16 / 9;
     background: var(--surface-3);
     overflow: hidden;
+    min-height: 180px;
 }
 .d-mfc__img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;

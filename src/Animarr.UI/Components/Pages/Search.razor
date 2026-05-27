@@ -64,11 +64,12 @@
 
     @if (_loading)
     {
-        <div class="catalog-grid">
-            @for (int i = 0; i < 12; i++)
-            {
-                <Skeleton Variant="poster" />
-            }
+        @* Same indeterminate-stripe loader as /home — the poster grid skeleton
+           used to read like an empty library while items were still in flight. *@
+        <div class="animarr-progress">
+            <div class="animarr-progress__track">
+                <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+            </div>
         </div>
     }
     else if (_allItems.Count == 0)

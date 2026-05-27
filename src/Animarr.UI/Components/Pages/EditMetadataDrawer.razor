@@ -98,9 +98,11 @@
 
     // ── Image gallery state (Poster / Backdrop tabs) ──
     // One-shot lazy fetch on first visit per tab. Apply is per-candidate so
-    // the user can compare and pick.
-    private string[]? _posterCandidates;
-    private string[]? _backdropCandidates;
+    // the user can compare and pick. Each candidate carries the URL plus
+    // pixel width/height when the source reports them (TMDB does; MAL
+    // doesn't and ships 0/0 — the dimension badge hides itself in that case).
+    private ImageCandidateDto[]? _posterCandidates;
+    private ImageCandidateDto[]? _backdropCandidates;
     private bool _postersLoading;
     private bool _backdropsLoading;
     private string? _applyingImageUrl;
@@ -212,7 +214,7 @@
         _postersLoading = true;
         StateHasChanged();
         try { _posterCandidates = await Api.GetPosterAlternativesAsync(Item.Id); }
-        catch { _posterCandidates = Array.Empty<string>(); }
+        catch { _posterCandidates = Array.Empty<ImageCandidateDto>(); }
         _postersLoading = false;
         StateHasChanged();
     }
@@ -223,7 +225,7 @@
         _backdropsLoading = true;
         StateHasChanged();
         try { _backdropCandidates = await Api.GetBackdropAlternativesAsync(Item.Id); }
-        catch { _backdropCandidates = Array.Empty<string>(); }
+        catch { _backdropCandidates = Array.Empty<ImageCandidateDto>(); }
         _backdropsLoading = false;
         StateHasChanged();
     }
@@ -583,14 +585,18 @@
         else
         {
             <div class="emd-gallery emd-gallery--posters">
-                @foreach (var url in _posterCandidates)
+                @foreach (var cand in _posterCandidates)
                 {
-                    var u = url;
-                    var busy = _applyingImageUrl == u;
+                    var c = cand;
+                    var busy = _applyingImageUrl == c.Url;
                     <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
                             disabled="@busy"
-                            @onclick="@(() => ApplyImageAsync("poster", u))">
-                        <img loading="lazy" src="@u" alt="poster candidate" />
+                            @onclick="@(() => ApplyImageAsync("poster", c.Url))">
+                        <img loading="lazy" src="@c.Url" alt="poster candidate" />
+                        @if (c.Width > 0 && c.Height > 0)
+                        {
+                            <span class="emd-gallery__dim">@c.Width&times;@c.Height</span>
+                        }
                         @if (busy) { <div class="emd-gallery__overlay"><Spinner Size="md" Tone="light" /></div> }
                     </button>
                 }
@@ -610,14 +616,18 @@
         else
         {
             <div class="emd-gallery emd-gallery--backdrops">
-                @foreach (var url in _backdropCandidates)
+                @foreach (var cand in _backdropCandidates)
                 {
-                    var u = url;
-                    var busy = _applyingImageUrl == u;
+                    var c = cand;
+                    var busy = _applyingImageUrl == c.Url;
                     <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
                             disabled="@busy"
-                            @onclick="@(() => ApplyImageAsync("fanart", u))">
-                        <img loading="lazy" src="@u" alt="backdrop candidate" />
+                            @onclick="@(() => ApplyImageAsync("fanart", c.Url))">
+                        <img loading="lazy" src="@c.Url" alt="backdrop candidate" />
+                        @if (c.Width > 0 && c.Height > 0)
+                        {
+                            <span class="emd-gallery__dim">@c.Width&times;@c.Height</span>
+                        }
                         @if (busy) { <div class="emd-gallery__overlay"><Spinner Size="md" Tone="light" /></div> }
                     </button>
                 }

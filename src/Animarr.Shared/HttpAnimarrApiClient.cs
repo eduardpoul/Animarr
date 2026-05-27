@@ -77,13 +77,13 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return new MediaItemDto { Id = id };
     }
 
-    public async Task<string[]> GetPosterAlternativesAsync(Guid id, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<string[]>(ApiRoutes.MediaPosterAlternatives(id), JsonOpts, ct)
-            ?? Array.Empty<string>();
+    public async Task<ImageCandidateDto[]> GetPosterAlternativesAsync(Guid id, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<ImageCandidateDto[]>(ApiRoutes.MediaPosterAlternatives(id), JsonOpts, ct)
+            ?? Array.Empty<ImageCandidateDto>();
 
-    public async Task<string[]> GetBackdropAlternativesAsync(Guid id, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<string[]>(ApiRoutes.MediaBackdropAlternatives(id), JsonOpts, ct)
-            ?? Array.Empty<string>();
+    public async Task<ImageCandidateDto[]> GetBackdropAlternativesAsync(Guid id, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<ImageCandidateDto[]>(ApiRoutes.MediaBackdropAlternatives(id), JsonOpts, ct)
+            ?? Array.Empty<ImageCandidateDto>();
 
     public async Task<string[]> GetBackdropRotationAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<string[]>(ApiRoutes.MediaBackdropList, JsonOpts, ct)

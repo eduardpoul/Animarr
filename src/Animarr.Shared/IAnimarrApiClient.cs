@@ -28,9 +28,9 @@ public interface IAnimarrApiClient
     Task<IdentificationCandidateDto[]> GetMediaCandidatesAsync(Guid id, CancellationToken ct = default);
     Task<MediaItemDto>    ResolveMediaCandidateAsync(Guid id, ResolveCandidateRequest request, CancellationToken ct = default);
     Task<MediaItemDto>    RefreshMetadataAsync(Guid id, CancellationToken ct = default);
-    Task<string[]>        GetPosterAlternativesAsync(Guid id, CancellationToken ct = default);
-    Task<string[]>        GetBackdropAlternativesAsync(Guid id, CancellationToken ct = default);
-    Task<string[]>        GetBackdropRotationAsync(CancellationToken ct = default);
+    Task<ImageCandidateDto[]> GetPosterAlternativesAsync(Guid id, CancellationToken ct = default);
+    Task<ImageCandidateDto[]> GetBackdropAlternativesAsync(Guid id, CancellationToken ct = default);
+    Task<string[]>            GetBackdropRotationAsync(CancellationToken ct = default);
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
