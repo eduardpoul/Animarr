@@ -69,6 +69,15 @@ public static class ApiRoutes
     public const string MediaTagById         = "/api/media-tags/{id}";
     public const string MediaTagAssign       = "/api/media-tags/{tagId}/items/{mediaItemId}";
 
+    // ─── Categories ──────────────────────────────────────────────────────
+    public const string Categories      = "/api/categories";
+    public const string CategoryById    = "/api/categories/{id}";
+    public const string CategoryRescan  = "/api/categories/rescan";
+    public const string CategoryStats   = "/api/categories/stats";
+    /// <summary>PUT to overwrite a media item's manual category set
+    /// (Source="manual"). The classifier won't overwrite these on rescan.</summary>
+    public const string MediaCategories = "/api/media/{id}/categories";
+
     // ─── App config + hardware probe ─────────────────────────────────────
     public const string AppConfig          = "/api/app-config";
     public const string AppConfigByKey     = "/api/app-config/{key}";
@@ -103,9 +112,51 @@ public static class ApiRoutes
     public const string AuthLogout   = "/api/auth/logout";
     public const string AuthSetup    = "/api/auth/setup";
     public const string AuthStatus   = "/api/auth/status";
+    /// <summary>POST — swap the auth cookie to another local user. Requires
+    /// the target user's PIN when their <c>HasPin</c> is true. v5 per-user-
+    /// per-device fast switch.</summary>
+    public const string AuthSwitchUser = "/api/auth/switch-user";
     public const string Me           = "/api/me";
     public const string MePreferences = "/api/me/preferences";
     public const string MePassword   = "/api/me/password";
+    /// <summary>PATCH — current user edits their own Name / Email / AvatarHue
+    /// without the ManageUsers permission. v5.</summary>
+    public const string MeProfile    = "/api/me/profile";
+    /// <summary>POST sets/changes the current user's PIN, DELETE clears it.
+    /// Both require the current password as anti-CSRF. v5.</summary>
+    public const string MePin        = "/api/me/pin";
+
+    /// <summary>POST adds, DELETE removes the user's favorite star for the
+    /// given media item. v5 — was a global Set before.</summary>
+    public const string MeFavorite   = "/api/me/favorites/{mediaItemId}";
+    public const string MeFavorites  = "/api/me/favorites";
+
+    /// <summary>GET — recent in-progress watch states for the current user,
+    /// joined to their MediaItem rows. Drives the v5 Continue Watching
+    /// hero on Home.</summary>
+    public const string MeContinue   = "/api/me/continue";
+
+    // ─── Server identity (v5 multi-server) ───────────────────────────────
+    /// <summary>Anonymous probe — returns <c>ServerInfoDto</c>. Hit by the
+    /// Discovery page to populate server cards before login, and by the
+    /// registry to refresh stale entries (title count / version drift).</summary>
+    public const string ServerInfo   = "/api/server/info";
+
+    // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
+    /// <summary>POST anonymous — TV asks for a fresh 6-char pair code +
+    /// QR payload. Returns <c>PairInitDto</c>.</summary>
+    public const string PairInit     = "/api/auth/pair/init";
+    /// <summary>GET anonymous — TV polls every 2s with the code it got from
+    /// init. Returns <c>PairPollDto</c>. When status="confirmed" the response
+    /// also carries Set-Cookie so the next page navigation is authenticated.</summary>
+    public const string PairPoll     = "/api/auth/pair/poll";
+    /// <summary>POST authenticated — phone authorises the TV's pending code
+    /// with its own identity. 204 on success, 404 unknown code, 410 already
+    /// consumed / expired.</summary>
+    public const string PairConfirm  = "/api/auth/pair/confirm";
+    /// <summary>GET anonymous — server-rendered QR PNG for the given code.
+    /// Decodes back to the same animarr:// payload init returned.</summary>
+    public const string PairQr       = "/api/auth/pair/qr";
 
     // ─── User + Role admin (v4) ──────────────────────────────────────────
     public const string Users       = "/api/users";
@@ -156,6 +207,7 @@ public static class ApiRoutes
 
     public static string User(Guid id) => UserById.Replace("{id}", id.ToString());
     public static string Role(Guid id) => RoleById.Replace("{id}", id.ToString());
+    public static string Category(Guid id) => CategoryById.Replace("{id}", id.ToString());
 }
 
 /// <summary>

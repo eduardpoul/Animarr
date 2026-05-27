@@ -83,4 +83,11 @@ public interface ILlmService
         IReadOnlyList<string> fileNames,
         IReadOnlyList<(int Number, string Name)> episodes,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Send an arbitrary prompt and return the raw text response. Currently
+    /// used by <c>CategoryClassifierService</c> to ask for a JSON list of
+    /// categories. Returns null when the LLM is disabled or the call fails.
+    /// </summary>
+    Task<string?> GetCompletionAsync(string prompt, CancellationToken ct = default);
 }

@@ -1,75 +1,1128 @@
 @*
-    ProfilePanel (Phase 4 stub) — right-edge 480px drawer.
+    ProfilePanel — 480px right-edge drawer per-user settings.
+    Spec: screens-v4.jsx lines 453-637.
 
-    Currently shows a minimal "Identity" view with sign-out. Phase 4
-    fleshes out the 4 tabs (Identity / Appearance / Audio / Language)
-    with the full preferences UI.
+    4 tabs:
+      • Identity   — readonly key/value + change password + edit profile + SIGN OUT
+      • Appearance — 5 accent swatches + animated backdrop toggle + TV mode toggle
+      • Audio      — preferred audio/sub langs + sub size + default volume +
+                     audio passthrough + normalize loudness
+      • Language   — interface language dropdown
+
+    State: tab held locally; preferences edited locally for visual review,
+    Phase B will PATCH them through /api/me/preferences.
 *@
 
 @inject UserContextState UserCtx
 @inject NavigationManager Nav
+@inject IAnimarrApiClient Api
+@inject IJSRuntime JS
+@inject LocalizationService Loc
+@inject ServerRegistryState ServerReg
+@inject ToastService Toasts
+
+@if (_keypadOpen && _keypadTarget is { } kt)
+{
+    @* ── PIN keypad overlay (v5 fast switch) ──
+         Rendered above the drawer so it captures focus + obscures the user
+         strip while the dialog is open. Same backdrop tint as the drawer
+         itself, sits on z-index 32 (drawer is 31). *@
+    <div class="d-pin-overlay" @onclick="OnKeypadCancel" aria-hidden="true"></div>
+    <div class="d-pin-shell" role="dialog" aria-modal="true" aria-label="Enter PIN">
+        <PinKeypad UserName="@kt.Name"
+                   Error="@_keypadError"
+                   OnSubmit="OnKeypadSubmit"
+                   OnCancel="OnKeypadCancel" />
+    </div>
+}
 
 @if (IsOpen && UserCtx.Me is { } me)
 {
     <div class="d-profile__backdrop" @onclick="Close" aria-hidden="true"></div>
     <aside class="d-profile" role="dialog" aria-label="Profile">
+
+        @* ── Header ────────────────────────────────────── *@
         <header class="d-profile__head">
-            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="lg" />
+            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue"
+                    ImagePath="@me.User.AvatarPath" Size="lg" />
             <div class="d-profile__head-text">
                 <div class="d-profile__head-name">@me.User.Name</div>
-                <div class="d-profile__head-sub">@me.User.Username @(string.IsNullOrEmpty(me.User.Email) ? "" : "· " + me.User.Email)</div>
+                <div class="d-profile__head-sub">
+                    @me.User.Username@(string.IsNullOrEmpty(me.User.Email) ? "" : " · " + me.User.Email)
+                </div>
             </div>
             <button type="button" class="d-profile__close tv-focus" @onclick="Close" aria-label="Close">
                 <DIcon Name="x" Size="14" />
             </button>
         </header>
 
-        <section class="d-profile__body">
-            <div class="d-profile__rows">
-                <div class="d-profile__row">
-                    <span class="d-profile__row-key">USERNAME</span>
-                    <span class="d-profile__row-val">@me.User.Username</span>
-                </div>
-                <div class="d-profile__row">
-                    <span class="d-profile__row-key">ROLE</span>
-                    <span class="d-profile__row-val">@me.User.RoleName</span>
-                </div>
-                @if (!string.IsNullOrEmpty(me.User.Email))
-                {
-                    <div class="d-profile__row">
-                        <span class="d-profile__row-key">EMAIL</span>
-                        <span class="d-profile__row-val">@me.User.Email</span>
-                    </div>
-                }
-                <div class="d-profile__row">
-                    <span class="d-profile__row-key">CREATED</span>
-                    <span class="d-profile__row-val">@me.User.CreatedAt.ToString("yyyy-MM-dd")</span>
-                </div>
-            </div>
-
-            <div class="d-profile__placeholder">
-                Appearance / Audio / Language tabs land in Phase 4.
-            </div>
-
-            <div class="d-profile__actions">
-                <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
-                    <DIcon Name="x" Size="13" /> SIGN OUT
+        @* ── Tabs ──────────────────────────────────────── *@
+        <nav class="d-profile__tabs" aria-label="Profile sections">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                var active = _activeTab == key;
+                <button type="button"
+                        class="@($"d-profile__tab tv-focus {(active ? "is-active" : "")}")"
+                        @onclick="@(() => _activeTab = key)">
+                    <DIcon Name="@t.Icon" Size="12" />
+                    @t.Label
                 </button>
-            </div>
-        </section>
+            }
+        </nav>
+
+        @* ── Body ──────────────────────────────────────── *@
+        <div class="d-profile__body">
+            @switch (_activeTab)
+            {
+                case "identity":
+                    @RenderIdentity(me);
+                    break;
+                case "appearance":
+                    @RenderAppearance();
+                    break;
+                case "audio":
+                    @RenderAudio();
+                    break;
+                case "language":
+                    @RenderLanguage();
+                    break;
+            }
+        </div>
     </aside>
 }
 
 @code {
     [Parameter] public bool IsOpen { get; set; }
     [Parameter] public EventCallback OnCloseEvent { get; set; }
+    /// <summary>v5: hint from the caller for which tab to open initially.
+    /// Currently only "server" is recognised — opens the Identity tab where
+    /// the Server section sits. Pass null for the regular default.</summary>
+    [Parameter] public string? InitialTab { get; set; }
+
+    private record TabDef(string Key, string Label, string Icon);
+    private static readonly TabDef[] Tabs =
+    {
+        new("identity",   "Identity",   "user"),
+        new("appearance", "Appearance", "sparkle"),
+        new("audio",      "Audio",      "audio"),
+        new("language",   "Language",   "globe"),
+    };
+
+    private string _activeTab = "identity";
+
+    // Local edit state mirrors UserContextState.Preferences. On every change
+    // we PATCH /api/me/preferences and update the global state so any other
+    // subscriber (MainLayout's backdrop, accent hue applier) re-renders.
+    private int _accentHue => UserCtx.Preferences?.AccentHue ?? 25;
+    private bool _backdropEnabled = true;
+    private bool _tvMode          = false;
+    private string _audioPref     = "Japanese";
+    private string _subPref       = "Russian";
+    private int _subSize          = 18;
+    private int _volume           = 78;
+    private bool _passthrough     = false;
+    private bool _normalize       = true;
+    private string _language      = "en";
+    private string _theme         = "quietude";
+    /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "f"
+    /// matches the transparent named pager that ships with v5.</summary>
+    private string _heroPagerStyle = "f";
+
+    // ─── Edit-profile + Change-password inline form state ──────────────
+    private bool   _editProfileOpen;
+    private bool   _editProfileBusy;
+    private string _editProfileError = "";
+    private string _editName   = "";
+    private string _editEmail  = "";
+    private int    _editAvatarHue;
+
+    private bool   _changePwOpen;
+    private bool   _changePwBusy;
+    private string _changePwError = "";
+    private string _pwCurrent = "";
+    private string _pwNew     = "";
+    private string _pwRepeat  = "";
 
     private Task Close() => OnCloseEvent.InvokeAsync();
+
+    protected override void OnParametersSet()
+    {
+        // v5: caller may pre-focus a tab (server pill click → "server"). The
+        // server section lives inside the Identity tab; "server" is treated as
+        // a synonym so the user sees server cards immediately.
+        if (!string.IsNullOrEmpty(InitialTab))
+        {
+            _activeTab = InitialTab switch
+            {
+                "server" => "identity",
+                _        => Tabs.Any(t => t.Key == InitialTab) ? InitialTab : _activeTab,
+            };
+        }
+
+        var p = UserCtx.Preferences;
+        if (p is null) return;
+        _backdropEnabled = p.BackdropEnabled;
+        _tvMode          = p.TvMode;
+        _audioPref       = p.AudioPreferredLanguage;
+        _subPref         = p.SubtitlePreferredLanguage;
+        _subSize         = p.SubtitleSize;
+        _volume          = p.DefaultVolume;
+        _passthrough     = p.AudioPassthrough;
+        _normalize       = p.NormalizeVolume;
+        _language        = p.Language;
+        _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
+        _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "f" : p.HeroPagerStyle.ToLowerInvariant();
+    }
+
+    // ─── Edit profile / change password handlers ───────────────────────
+
+    private void ToggleEditProfile()
+    {
+        if (_editProfileOpen)
+        {
+            _editProfileOpen = false;
+            return;
+        }
+        // Reset form when opening so a previous abandoned edit doesn't leak in.
+        if (UserCtx.Me is { } me)
+        {
+            _editName       = me.User.Name;
+            _editEmail      = me.User.Email ?? "";
+            _editAvatarHue  = me.User.AvatarHue;
+        }
+        _editProfileError = "";
+        _editProfileOpen = true;
+        // Mutually exclusive with the password form to keep the drawer tidy.
+        _changePwOpen = false;
+    }
+
+    private void ToggleChangePassword()
+    {
+        _changePwOpen = !_changePwOpen;
+        if (_changePwOpen)
+        {
+            _pwCurrent = _pwNew = _pwRepeat = "";
+            _changePwError = "";
+            _editProfileOpen = false;
+        }
+    }
+
+    private async Task SubmitEditProfileAsync()
+    {
+        _editProfileError = "";
+        var trimmedName = _editName.Trim();
+        if (string.IsNullOrEmpty(trimmedName))
+        {
+            _editProfileError = "Name cannot be empty.";
+            return;
+        }
+        _editProfileBusy = true;
+        StateHasChanged();
+        try
+        {
+            var updated = await Api.UpdateMyProfileAsync(new UpdateMyProfileRequest(
+                Name:      trimmedName,
+                Email:     string.IsNullOrWhiteSpace(_editEmail) ? null : _editEmail.Trim(),
+                AvatarHue: _editAvatarHue));
+            // Refresh global Me cache so the topbar avatar chip + sidebar
+            // pick up the new values without a full reload. RefreshMeAsync
+            // re-pulls /api/me which carries the freshly-saved Name/Email/Hue.
+            await UserCtx.RefreshMeAsync();
+            _editProfileOpen = false;
+            Toasts.ShowSuccess("Profile updated");
+        }
+        catch (Exception ex)
+        {
+            _editProfileError = $"Save failed: {ex.Message}";
+        }
+        finally
+        {
+            _editProfileBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitChangePasswordAsync()
+    {
+        _changePwError = "";
+        if (string.IsNullOrEmpty(_pwCurrent))
+        {
+            _changePwError = "Current password is required.";
+            return;
+        }
+        if (_pwNew.Length < 6)
+        {
+            _changePwError = "New password must be at least 6 characters.";
+            return;
+        }
+        if (_pwNew != _pwRepeat)
+        {
+            _changePwError = "Passwords don't match.";
+            return;
+        }
+        _changePwBusy = true;
+        StateHasChanged();
+        try
+        {
+            await Api.ChangeMyPasswordAsync(new ChangePasswordRequest(_pwCurrent, _pwNew));
+            _changePwOpen = false;
+            _pwCurrent = _pwNew = _pwRepeat = "";
+            Toasts.ShowSuccess("Password changed");
+        }
+        catch (Exception ex)
+        {
+            // The server returns 400 with {error} JSON for the "current password is
+            // incorrect" + min-length cases. Surface the underlying message when we
+            // can, otherwise the generic message keeps the form open.
+            _changePwError = $"Update failed: {ex.Message}";
+        }
+        finally
+        {
+            _changePwBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>PATCH /api/me/preferences with the diff this tab cares about,
+    /// store the new payload in UserContextState so accent/backdrop/etc.
+    /// re-apply globally. Errors are swallowed — UI still reflects the local
+    /// change while the server retry happens; next LoadAsync converges.</summary>
+    private async Task PatchAsync(UpdatePreferencesRequest req)
+    {
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(req);
+            UserCtx.SetPreferences(updated);
+        }
+        catch { }
+    }
+
+    private async Task OnBackdropToggle(bool v)
+    {
+        _backdropEnabled = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, BackdropEnabled: v, null, null, null, null, null, null, null, null, null, null, null));
+    }
+
+    private async Task OnTvModeToggle(bool v)
+    {
+        _tvMode = v;
+        try
+        {
+            // Reflect the toggle in the DOM immediately so .tv-focus heavier
+            // rings and the larger base font-size kick in without a reload.
+            await JS.InvokeVoidAsync("eval",
+                v ? "document.documentElement.classList.add('tv-mode')"
+                  : "document.documentElement.classList.remove('tv-mode')");
+        }
+        catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, TvMode: v, null, null, null, null, null, null, null));
+    }
+
+    private async Task OnPassthroughToggle(bool v)
+    {
+        _passthrough = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, AudioPassthrough: v, null, null));
+    }
+
+    private async Task OnNormalizeToggle(bool v)
+    {
+        _normalize = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, NormalizeVolume: v, null));
+    }
+
+    private async Task OnAudioPrefChanged(ChangeEventArgs e)
+    {
+        _audioPref = e.Value?.ToString() ?? _audioPref;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, AudioPreferredLanguage: _audioPref, null, null, null, null, null, null));
+    }
+
+    private async Task OnSubPrefChanged(ChangeEventArgs e)
+    {
+        _subPref = e.Value?.ToString() ?? _subPref;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, SubtitlePreferredLanguage: _subPref, null, null, null, null, null));
+    }
+
+    private async Task OnSubSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _subSize = n;
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, SubtitleSize: n, null, null, null, null));
+        }
+    }
+
+    private async Task OnVolumeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _volume = n;
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, DefaultVolume: n, null, null, null));
+        }
+    }
+
+    private async Task OnLanguageChanged(ChangeEventArgs e)
+    {
+        _language = e.Value?.ToString() ?? _language;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, Language: _language));
+        // Hot-swap the active language pack so the rest of the app re-renders
+        // in the new locale immediately — no refresh required. LocalizationService
+        // falls back to en.json if the pack file is missing.
+        try { await Loc.LoadAsync(_language); } catch { /* fallback handled in Loc */ }
+    }
 
     private async Task SignOut()
     {
         await UserCtx.SignOutAsync();
         await Close();
         Nav.NavigateTo("/welcome", forceLoad: false);
+    }
+
+    // ─── Tab body renderers ────────────────────────────────────
+
+    private RenderFragment RenderIdentity(MeDto me) => __builder =>
+    {
+        <div class="d-profile__identity">
+            @* ── SERVER block (v5 multi-server) ──────────────
+                 Rendered above the user info so it's the first thing the
+                 user sees when opening from the TopBar pill. Hidden entirely
+                 if the registry holds zero servers (single-server install). *@
+            @if (ServerReg.Count > 0)
+            {
+                <div class="d-profile__server-block">
+                    <div class="d-profile__field-label">Server</div>
+
+                    @if (ServerReg.Current is { } current)
+                    {
+                        <div class="d-profile__server-row d-profile__server-row--current">
+                            <span class="d-profile__server-row__ic">
+                                <DIcon Name="server" Size="14" />
+                            </span>
+                            <span class="d-profile__server-row__body">
+                                <span class="d-profile__server-row__name">@current.Name</span>
+                                <span class="d-profile__server-row__meta">
+                                    @current.BaseUrl@(current.TitleCount is int c1 ? $" · {c1} titles" : "")
+                                </span>
+                            </span>
+                            <span class="d-profile__server-row__right">current</span>
+                        </div>
+                    }
+
+                    @foreach (var other in ServerReg.Servers.Where(s => ServerReg.Current is null || s.ServerId != ServerReg.Current.ServerId))
+                    {
+                        var o = other;
+                        <button type="button" class="d-profile__server-row tv-focus"
+                                @onclick="@(() => OnSwitchServer(o))">
+                            <span class="d-profile__server-row__ic d-profile__server-row__ic--dim">
+                                <DIcon Name="server" Size="14" />
+                            </span>
+                            <span class="d-profile__server-row__body">
+                                <span class="d-profile__server-row__name">@o.Name</span>
+                                <span class="d-profile__server-row__meta">
+                                    @o.BaseUrl@(o.TitleCount is int c2 ? $" · {c2} titles" : "")
+                                </span>
+                            </span>
+                            <span class="d-profile__server-row__right">switch</span>
+                        </button>
+                    }
+
+                    <button type="button" class="d-profile__server-row d-profile__server-row--add tv-focus"
+                            @onclick="@(() => _addServerOpen = !_addServerOpen)">
+                        <span class="d-profile__server-row__ic d-profile__server-row__ic--dashed">+</span>
+                        <span class="d-profile__server-row__body">
+                            <span class="d-profile__server-row__name d-profile__server-row__name--dim">Add server</span>
+                            <span class="d-profile__server-row__meta">manual IP / Tailscale</span>
+                        </span>
+                    </button>
+
+                    @if (_addServerOpen)
+                    {
+                        <div class="d-profile__server-add">
+                            <input type="text"
+                                   class="d-profile__server-add__input"
+                                   placeholder="http://192.168.1.50:8080"
+                                   value="@_addUrl"
+                                   @oninput="@((ChangeEventArgs e) => _addUrl = e.Value?.ToString() ?? "")"
+                                   @onkeypress="OnAddKeyPress" />
+                            @if (!string.IsNullOrEmpty(_addError))
+                            {
+                                <div class="d-profile__server-add__error">@_addError</div>
+                            }
+                            <div class="d-profile__server-add__row">
+                                <Btn Variant="primary" Size="sm" Loading="@_adding"
+                                     OnClick="OnAddServer"
+                                     Disabled="@(string.IsNullOrWhiteSpace(_addUrl))">
+                                    Probe
+                                </Btn>
+                                <Btn Variant="flat" Size="sm" OnClick="@(() => { _addServerOpen = false; _addError = ""; })">
+                                    Cancel
+                                </Btn>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* ── SWITCH USER block (v5 PIN per-user-per-device) ──
+                 Lists every user that exists on this server. Tapping a card:
+                   • current user → no-op
+                   • no PIN       → POST /api/auth/switch-user with null pin
+                   • has PIN      → opens the keypad dialog
+                 The strip is hidden entirely if GetUsersAsync fails (403 for
+                 non-admin viewers — only Master sees the roster).  *@
+            @if (_users.Length > 0)
+            {
+                <div class="d-profile__users-block">
+                    <div class="d-profile__field-label">
+                        @(string.Format(L["profile.switch_user_label"], ServerReg.Current?.Name ?? "this server"))
+                    </div>
+                    <div class="d-profile__users-strip" role="list">
+                        @foreach (var u in _users)
+                        {
+                            var user = u;
+                            var isMe = user.Id == me.User.Id;
+                            <button type="button"
+                                    class="@($"d-profile__user-card tv-focus {(isMe ? "is-me" : "")}")"
+                                    role="listitem"
+                                    title="@user.Name"
+                                    disabled="@(_switchBusy || isMe)"
+                                    @onclick="@(() => OnUserCardClick(user))">
+                                <span class="d-profile__user-card-avatar">
+                                    <Avatar Name="@user.Name" HueOverride="user.AvatarHue"
+                                            ImagePath="@user.AvatarPath" Size="md" />
+                                    @if (user.HasPin)
+                                    {
+                                        <span class="d-profile__user-card-pin-badge" aria-label="PIN required">
+                                            <DIcon Name="lock" Size="9" />
+                                        </span>
+                                    }
+                                </span>
+                                <span class="d-profile__user-card-name">@user.Name</span>
+                                <span class="d-profile__user-card-meta">
+                                    @if (isMe)
+                                    {
+                                        <span>you</span>
+                                    }
+                                    else
+                                    {
+                                        @user.RoleName
+                                    }
+                                </span>
+                            </button>
+                        }
+                        @if (UserCtx.Can(p => p.ManageUsers))
+                        {
+                            <button type="button"
+                                    class="d-profile__user-card d-profile__user-card--add tv-focus"
+                                    @onclick="OnAddUserClick">
+                                <span class="d-profile__user-card-avatar d-profile__user-card-avatar--dashed">+</span>
+                                <span class="d-profile__user-card-name d-profile__user-card-name--dim">
+                                    @L["profile.add_user"]
+                                </span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="d-profile__kv">
+                <span class="d-profile__kv-key">USERNAME</span>
+                <span class="d-profile__kv-val">@me.User.Username</span>
+                <span class="d-profile__kv-key">ROLE</span>
+                <span class="d-profile__kv-val d-profile__kv-val--accent">@me.User.RoleName.ToUpperInvariant()</span>
+                <span class="d-profile__kv-key">EMAIL</span>
+                <span class="d-profile__kv-val">@(string.IsNullOrEmpty(me.User.Email) ? "—" : me.User.Email)</span>
+                <span class="d-profile__kv-key">CREATED</span>
+                <span class="d-profile__kv-val d-profile__kv-val--dim">@me.User.CreatedAt.ToString("yyyy-MM-dd")</span>
+            </div>
+
+            @* ── Edit profile inline form ────────────────────────
+                 Toggles open below the button row. Empty Name is rejected
+                 server-side; Email is optional. AvatarHue is currently
+                 derived from name-hash on first sign-in — letting the user
+                 nudge it here means their card colour persists across
+                 device migrations (server stores the override). *@
+            <button type="button" class="d-profile__inline-btn tv-focus"
+                    @onclick="@(() => ToggleEditProfile())">
+                <DIcon Name="pencil" Size="13" /> @(_editProfileOpen ? "Cancel" : "Edit profile")
+            </button>
+            @if (_editProfileOpen)
+            {
+                <div class="d-profile__inline-form">
+                    @if (!string.IsNullOrEmpty(_editProfileError))
+                    {
+                        <div class="d-profile__inline-error">@_editProfileError</div>
+                    }
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">DISPLAY NAME</span>
+                        <input class="d-profile__inline-input" type="text"
+                               value="@_editName"
+                               @oninput="@((ChangeEventArgs e) => _editName = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">EMAIL (OPTIONAL)</span>
+                        <input class="d-profile__inline-input" type="email"
+                               value="@_editEmail"
+                               @oninput="@((ChangeEventArgs e) => _editEmail = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">AVATAR HUE · @_editAvatarHue°</span>
+                        <input class="d-profile__range" type="range" min="0" max="359" step="1"
+                               value="@_editAvatarHue"
+                               @oninput="@((ChangeEventArgs e) => { if (int.TryParse(e.Value?.ToString(), out var n)) _editAvatarHue = n; })" />
+                    </label>
+                    <div class="d-profile__inline-actions">
+                        <Btn Variant="primary" Size="sm" Loading="@_editProfileBusy"
+                             OnClick="SubmitEditProfileAsync">Save changes</Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _editProfileOpen = false)">Cancel</Btn>
+                    </div>
+                </div>
+            }
+
+            @* ── Change password inline form ─────────────────────
+                 Three inputs (current / new / repeat). Submits to
+                 POST /api/me/password — server validates the current
+                 password and enforces a 6-char minimum on the new value. *@
+            <button type="button" class="d-profile__inline-btn tv-focus"
+                    @onclick="@(() => ToggleChangePassword())">
+                <DIcon Name="key" Size="13" /> @(_changePwOpen ? "Cancel" : "Change password")
+            </button>
+            @if (_changePwOpen)
+            {
+                <div class="d-profile__inline-form">
+                    @if (!string.IsNullOrEmpty(_changePwError))
+                    {
+                        <div class="d-profile__inline-error">@_changePwError</div>
+                    }
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">CURRENT PASSWORD</span>
+                        <input class="d-profile__inline-input" type="password"
+                               value="@_pwCurrent"
+                               @oninput="@((ChangeEventArgs e) => _pwCurrent = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">NEW PASSWORD (min 6)</span>
+                        <input class="d-profile__inline-input" type="password"
+                               value="@_pwNew"
+                               @oninput="@((ChangeEventArgs e) => _pwNew = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">REPEAT NEW PASSWORD</span>
+                        <input class="d-profile__inline-input" type="password"
+                               value="@_pwRepeat"
+                               @oninput="@((ChangeEventArgs e) => _pwRepeat = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <div class="d-profile__inline-actions">
+                        <Btn Variant="primary" Size="sm" Loading="@_changePwBusy"
+                             OnClick="SubmitChangePasswordAsync">Update password</Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _changePwOpen = false)">Cancel</Btn>
+                    </div>
+                </div>
+            }
+
+            <div class="d-profile__spacer"></div>
+
+            <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
+                <DIcon Name="logout" Size="13" /> SIGN OUT
+            </button>
+        </div>
+    };
+
+    // ─── v5 multi-server: switch / add server helpers ─────────────────
+
+    private bool _addServerOpen;
+    private string _addUrl = "";
+    private string _addError = "";
+    private bool _adding;
+
+    /// <summary>Switch the active server. SetCurrentAsync already flipped the
+    /// shared HttpClient's BaseAddress to the new origin, so subsequent calls
+    /// resolve correctly. WASM still wants a hard navigate when origins differ
+    /// (cookies + bundle origin are domain-scoped); MAUI keeps a soft nav
+    /// because the WebView never reloads and forceLoad on an external host
+    /// gets bounced to the system browser.</summary>
+    private async Task OnSwitchServer(RegisteredServerDto target)
+    {
+        await ServerReg.SetCurrentAsync(target.ServerId);
+        await Close();
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var sameOrigin = string.Equals(
+                new Uri(target.BaseUrl).GetLeftPart(UriPartial.Authority),
+                new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase);
+
+            if (sameOrigin)
+                Nav.NavigateTo("/login", replace: true);
+            else
+                Nav.NavigateTo(target.BaseUrl.TrimEnd('/') + "/login", forceLoad: true);
+        }
+        else
+        {
+            // MAUI / native shell — HttpClient is already pointed at the new
+            // origin; stay inside the WebView and let /login mount fresh.
+            Nav.NavigateTo("/login", replace: true);
+        }
+    }
+
+    private async Task OnAddServer()
+    {
+        _addError = "";
+        var url = _addUrl.Trim();
+        if (string.IsNullOrEmpty(url)) { _addError = "Enter a URL."; return; }
+        if (!url.Contains("://", StringComparison.Ordinal)) url = "http://" + url;
+
+        _adding = true;
+        StateHasChanged();
+        try
+        {
+            var entry = await ServerReg.AddServerAsync(url);
+            if (entry is null)
+            {
+                _addError = "Couldn't reach an Animarr server at that URL.";
+                return;
+            }
+            _addUrl = "";
+            _addServerOpen = false;
+        }
+        catch (Exception ex)
+        {
+            _addError = $"Probe failed: {ex.Message}";
+        }
+        finally
+        {
+            _adding = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnAddKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_adding) await OnAddServer();
+    }
+
+    // ─── v5 PIN per-user-per-device: switch-user helpers ──────────────
+    //
+    // Lifecycle:
+    //   • drawer opens → OnAfterRender fetches /api/users (no-op if 403).
+    //   • user taps card →
+    //         current user → ignored (button is disabled but defence in depth)
+    //         no PIN       → SwitchUserAsync(target, null) directly
+    //         has PIN      → opens keypad dialog
+    //   • keypad submits → SwitchUserAsync(target, pin); null result = wrong
+    //                       PIN, set _keypadError and let the keypad shake.
+    //   • success → UserCtx.RefreshMeAsync + close drawer + reload root.
+    //
+    // We keep _users locally rather than calling GetUsersAsync each click —
+    // the roster doesn't churn while the drawer is open. Reloaded on every
+    // drawer open via OnParametersSet so a freshly-created user appears
+    // after the admin returns from /server.
+
+    private UserDto[] _users = Array.Empty<UserDto>();
+    private bool _usersLoaded;
+    private bool _switchBusy;
+
+    private bool _keypadOpen;
+    private UserDto? _keypadTarget;
+    private string? _keypadError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Refresh the roster every time the drawer opens (not just first
+        // render). The cheap branch — already loaded and drawer wasn't
+        // re-opened — is the common case.
+        if (IsOpen && !_usersLoaded)
+        {
+            _usersLoaded = true;
+            try
+            {
+                _users = await Api.GetUsersAsync();
+            }
+            catch
+            {
+                // 403 from non-admin viewers, or transport failure — hide
+                // the strip entirely rather than show a broken card. Stays
+                // empty until the drawer is closed and re-opened.
+                _users = Array.Empty<UserDto>();
+            }
+            StateHasChanged();
+        }
+        else if (!IsOpen && _usersLoaded)
+        {
+            // Reset so the next open re-fetches.
+            _usersLoaded = false;
+        }
+    }
+
+    private async Task OnUserCardClick(UserDto target)
+    {
+        if (UserCtx.Me is not { } me || target.Id == me.User.Id) return;
+        if (_switchBusy) return;
+
+        if (target.HasPin)
+        {
+            _keypadTarget = target;
+            _keypadError = null;
+            _keypadOpen  = true;
+            return;
+        }
+
+        // No PIN configured on the target — switch immediately.
+        await TrySwitchAsync(target, pin: null);
+    }
+
+    private async Task OnKeypadSubmit(string pin)
+    {
+        if (_keypadTarget is null) return;
+        await TrySwitchAsync(_keypadTarget, pin);
+    }
+
+    private void OnKeypadCancel()
+    {
+        _keypadOpen = false;
+        _keypadTarget = null;
+        _keypadError = null;
+    }
+
+    private async Task TrySwitchAsync(UserDto target, string? pin)
+    {
+        _switchBusy = true;
+        StateHasChanged();
+        try
+        {
+            var newMe = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, pin));
+            if (newMe is null)
+            {
+                // Wrong PIN — the keypad shakes via OnParametersSet reading
+                // a fresh Error value. Stay on the dialog so the user can
+                // retype without dismissing.
+                _keypadError = L["pin.invalid"];
+                _switchBusy = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Success: refresh the global me cache so the topbar + sidebar
+            // re-paint with the new identity. Drop the registered users
+            // cache so the next open reflects updated LastSeenAt etc.
+            await UserCtx.RefreshMeAsync();
+            _keypadOpen = false;
+            _keypadTarget = null;
+            _keypadError = null;
+            _users = Array.Empty<UserDto>();
+            _usersLoaded = false;
+            await Close();
+            // Force a hard nav to / so any page-scoped state (folder scope,
+            // hue, language pack) re-resolves against the new user's
+            // preferences. forceLoad:false keeps WASM happy.
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            _keypadError = L["pin.invalid"];
+        }
+        finally
+        {
+            _switchBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>v5 fix: previously this just routed to /server which landed
+    /// the admin on the Server Settings landing page (Users & Roles tab open
+    /// but in "list" view). To actually CREATE a user they had to click
+    /// "+ New user" again. The "+ Add user" affordance in the profile drawer
+    /// implies "I want to add a user right now" — so we deep-link with
+    /// ?panel=users&openForm=user and let ServerSettings + UsersRolesPanel
+    /// jump straight to the inline builder form. ServerSettings reads the
+    /// query string on first render to pick the active tab + forward
+    /// OpenCreateForm=true into UsersRolesPanel.</summary>
+    private async Task OnAddUserClick()
+    {
+        await Close();
+        Nav.NavigateTo("/server?panel=users&openForm=user");
+    }
+
+    private RenderFragment RenderAppearance() => __builder =>
+    {
+        <div class="d-profile__section">
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">THEME</span>
+                <div class="d-profile__theme-grid">
+                    @foreach (var th in Themes)
+                    {
+                        var t = th;
+                        var active = string.Equals(_theme, t.Slug, StringComparison.OrdinalIgnoreCase);
+                        <button type="button"
+                                class="@($"d-profile__theme-card tv-focus {(active ? "is-active" : "")}")"
+                                title="@t.Description"
+                                @onclick="@(() => OnSelectTheme(t.Slug))">
+                            <span class="d-profile__theme-card__preview"
+                                  style="@($"--th-bg: {t.PreviewBg}; --th-accent: {t.PreviewAccent}; --th-text: {t.PreviewText};")">
+                                <span class="d-profile__theme-card__sample">Aa</span>
+                            </span>
+                            <span class="d-profile__theme-card__name">@t.Name</span>
+                        </button>
+                    }
+                </div>
+            </label>
+
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">ACCENT COLOR</span>
+                <div class="d-profile__swatches">
+                    @foreach (var sw in AccentSwatches)
+                    {
+                        var s = sw;
+                        var active = _accentHue == s.Hue;
+                        <button type="button"
+                                class="@($"d-profile__swatch tv-focus {(active ? "is-active" : "")}")"
+                                style="@($"--swatch-color: oklch({s.L} {s.C} {s.Hue});")"
+                                title="@s.Label"
+                                @onclick="@(() => OnSelectAccent(s.Hue))"></button>
+                    }
+                </div>
+            </label>
+
+            <div class="d-profile__toggle-row">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">Animated backdrop</div>
+                    <div class="d-profile__toggle-hint">Fanart slideshow behind every page.</div>
+                </div>
+                <Toggle Checked="@_backdropEnabled" CheckedChanged="OnBackdropToggle" />
+            </div>
+
+            <div class="d-profile__toggle-row">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">TV mode</div>
+                    <div class="d-profile__toggle-hint">Larger focus rings + bigger hit targets for remote-control navigation.</div>
+                </div>
+                <Toggle Checked="@_tvMode" CheckedChanged="OnTvModeToggle" />
+            </div>
+
+            @* ── Hero pager style (v5 design board variants F/G/H) ──
+                 The Continue Watching hero on Home rotates through up to
+                 5 in-progress titles. Three pager styles ship; the user
+                 picks which fits their vibe. Preview swatches mimic the
+                 actual pager markup so a glance is enough to pick. *@
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">HERO PAGER STYLE</span>
+                <div class="d-profile__pager-grid">
+                    @foreach (var p in PagerOptions)
+                    {
+                        var opt = p;
+                        var active = string.Equals(_heroPagerStyle, opt.Key, StringComparison.OrdinalIgnoreCase);
+                        <button type="button"
+                                class="@($"d-profile__pager-card tv-focus {(active ? "is-active" : "")}")"
+                                title="@opt.Hint"
+                                @onclick="@(() => OnSelectPagerStyle(opt.Key))">
+                            <span class="d-profile__pager-card__preview">
+                                @switch (opt.Key)
+                                {
+                                    case "f":
+                                        @* F: 4 transparent strokes — all dim, one accent *@
+                                        <span class="d-profile__pager-card__strokes">
+                                            <span class="d-profile__pager-card__stroke is-active"></span>
+                                            <span class="d-profile__pager-card__stroke"></span>
+                                            <span class="d-profile__pager-card__stroke"></span>
+                                            <span class="d-profile__pager-card__stroke"></span>
+                                        </span>
+                                        break;
+                                    case "g":
+                                        @* G: 4 dashes flanked by hover chevrons *@
+                                        <span class="d-profile__pager-card__chevrows">
+                                            <span class="d-profile__pager-card__chev">&lsaquo;</span>
+                                            <span class="d-profile__pager-card__dashes">
+                                                <span class="d-profile__pager-card__dash is-active"></span>
+                                                <span class="d-profile__pager-card__dash"></span>
+                                                <span class="d-profile__pager-card__dash"></span>
+                                                <span class="d-profile__pager-card__dash"></span>
+                                            </span>
+                                            <span class="d-profile__pager-card__chev">&rsaquo;</span>
+                                        </span>
+                                        break;
+                                    case "h":
+                                        @* H: 4 numbered pills + chevrons *@
+                                        <span class="d-profile__pager-card__chevrows">
+                                            <span class="d-profile__pager-card__chev">&lsaquo;</span>
+                                            <span class="d-profile__pager-card__pills">
+                                                <span class="d-profile__pager-card__pill is-active">1</span>
+                                                <span class="d-profile__pager-card__pill">2</span>
+                                                <span class="d-profile__pager-card__pill">3</span>
+                                                <span class="d-profile__pager-card__pill">4</span>
+                                            </span>
+                                            <span class="d-profile__pager-card__chev">&rsaquo;</span>
+                                        </span>
+                                        break;
+                                }
+                            </span>
+                            <span class="d-profile__pager-card__name">@opt.Label</span>
+                        </button>
+                    }
+                </div>
+            </label>
+        </div>
+    };
+
+    /// <summary>F / G / H pager variants offered in the Appearance tab.
+    /// The Key matches what the server validates against in
+    /// <c>AuthEndpoints.ValidatePagerStyle</c>; <c>CatalogContinueHero</c>
+    /// reads the same string from <c>UserCtx.Preferences.HeroPagerStyle</c>
+    /// to pick which markup branch to render.</summary>
+    private sealed record PagerOption(string Key, string Label, string Hint);
+    private static readonly PagerOption[] PagerOptions = new[]
+    {
+        new PagerOption("f", "Transparent", "Long strokes with title underneath each slot."),
+        new PagerOption("g", "Chevrons",    "Hover-revealed prev/next chevrons + dash pager."),
+        new PagerOption("h", "Numbered",    "Numbered pills with chevrons — best for many slots."),
+    };
+
+    private async Task OnSelectPagerStyle(string key)
+    {
+        _heroPagerStyle = key;
+        // PATCH first, then mirror into UserCtx so CatalogContinueHero (which
+        // subscribes to OnChange via UserCtx) re-renders without an extra
+        // round-trip. Optimistic update: failing the PATCH leaves the local
+        // state slightly out of sync until the next load — acceptable.
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            Theme: null, HeroPagerStyle: key));
+        StateHasChanged();
+    }
+
+    // 10 personality themes. PreviewBg / PreviewAccent / PreviewText are tiny
+    // swatches rendered in the picker — they don't have to match the theme's
+    // CSS exactly, just convey the vibe.
+    private static readonly ThemeOption[] Themes = new[]
+    {
+        new ThemeOption("quietude",        "Quietude",           "Calm graphite + soft teal",        "#181c24", "#65b6c8", "#e9ecf2"),
+        new ThemeOption("cinematic",       "Cinematic",          "Warm leather + crimson",           "#15110e", "#e25a4d", "#f4eee6"),
+        new ThemeOption("terminal",        "Terminal",           "Pure black + neon green",          "#000000", "#5aff8c", "#c6ffd2"),
+        new ThemeOption("anime",           "Anime",              "Plum + pastel pink",               "#1c1320", "#f3a8c8", "#f8e8f0"),
+        new ThemeOption("ember-edge",      "Ember Edge",         "Indigo + checker pattern",         "#131826", "#8870ff", "#e6e9f5"),
+        new ThemeOption("mountain-sect",   "Mountain Sect",      "Warm black + gold/red CJK",        "#1a1410", "#c43a3a", "#f3e5c8"),
+        new ThemeOption("immortal-path",   "Immortal Path",      "Parchment + jade ink",             "#28231b", "#5aa57b", "#f5ecd8"),
+        new ThemeOption("heavens-defiance","Heaven's Defiance",  "Storm black + blood red",          "#0d1018", "#cc2a2a", "#f0e8e0"),
+        new ThemeOption("ink-and-paper",   "Ink & Paper",        "Washi paper + hanko red (light)",  "#f5f0e6", "#b03030", "#1a1612"),
+        new ThemeOption("cyberpunk",       "Cyberpunk",          "Black + neon yellow + glitch",     "#0d0d0d", "#fcd14d", "#e0fcff"),
+    };
+
+    private sealed record ThemeOption(
+        string Slug, string Name, string Description,
+        string PreviewBg, string PreviewAccent, string PreviewText);
+
+    private async Task OnSelectTheme(string slug)
+    {
+        _theme = slug;
+        // Live-apply via JS so the cascade swaps instantly — Razor doesn't
+        // need to re-render before the user sees the result.
+        try { await JS.InvokeVoidAsync("animarr_setTheme", slug); } catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            Theme: slug));
+    }
+
+    private RenderFragment RenderAudio() => __builder =>
+    {
+        <div class="d-profile__audio-grid">
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">PREFERRED AUDIO</span>
+                <select class="d-profile__select" value="@_audioPref" @onchange="OnAudioPrefChanged">
+                    <option>Japanese</option>
+                    <option>Mandarin</option>
+                    <option>English</option>
+                    <option>Russian</option>
+                    <option>Korean</option>
+                </select>
+            </label>
+
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">SUBTITLE LANGUAGE</span>
+                <select class="d-profile__select" value="@_subPref" @onchange="OnSubPrefChanged">
+                    <option>Russian</option>
+                    <option>English</option>
+                    <option>Off</option>
+                    <option>Japanese</option>
+                </select>
+            </label>
+
+            <label class="d-profile__field d-profile__field--full">
+                <span class="d-profile__field-label">SUBTITLE SIZE · @_subSize px</span>
+                <input type="range" min="12" max="32" step="1" class="d-profile__range"
+                       value="@_subSize" @onchange="OnSubSizeChanged" />
+            </label>
+
+            <label class="d-profile__field d-profile__field--full">
+                <span class="d-profile__field-label">DEFAULT VOLUME · @_volume %</span>
+                <input type="range" min="0" max="100" step="1" class="d-profile__range"
+                       value="@_volume" @onchange="OnVolumeChanged" />
+            </label>
+
+            <div class="d-profile__toggle-row d-profile__field--full">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">Audio passthrough</div>
+                    <div class="d-profile__toggle-hint">For AV receivers — sends raw bitstream.</div>
+                </div>
+                <Toggle Checked="@_passthrough" CheckedChanged="OnPassthroughToggle" />
+            </div>
+
+            <div class="d-profile__toggle-row d-profile__field--full">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">Normalize volume between titles</div>
+                    <div class="d-profile__toggle-hint">EBU R128 loudness normalization.</div>
+                </div>
+                <Toggle Checked="@_normalize" CheckedChanged="OnNormalizeToggle" />
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderLanguage() => __builder =>
+    {
+        <div class="d-profile__section">
+            <label class="d-profile__field">
+                <span class="d-profile__field-label">INTERFACE LANGUAGE</span>
+                <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
+                    <option value="en">English</option>
+                    <option value="ru">Русский</option>
+                    <option value="uk">Українська</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                </select>
+            </label>
+            <div class="d-profile__hint-card">
+                Changes apply instantly. Your preferred audio + subtitle languages
+                are configured in the <strong>Audio</strong> tab.
+            </div>
+        </div>
+    };
+
+    private record SwatchDef(int Hue, double L, double C, string Label);
+    private static readonly SwatchDef[] AccentSwatches =
+    {
+        new(25,  0.66, 0.20, "Crimson"),
+        new(60,  0.72, 0.17, "Amber"),
+        new(150, 0.74, 0.15, "Green"),
+        new(240, 0.66, 0.16, "Blue"),
+        new(290, 0.66, 0.20, "Violet"),
+    };
+
+    private async Task OnSelectAccent(int hue)
+    {
+        // Optimistic update — set local state + DOM accent variable, then
+        // PATCH. The DOM update is immediate so the user sees the new accent
+        // before the server confirms.
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            AccentHue: hue, null, null, null, null, null, null, null, null, null, null, null, null));
+        StateHasChanged();
     }
 }

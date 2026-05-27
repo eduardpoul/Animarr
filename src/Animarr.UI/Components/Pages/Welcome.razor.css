@@ -58,14 +58,18 @@
 }
 
 .d-welcome__brand-mark {
-    width: 64px; height: 64px;
-    border-radius: 14px;
-    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue, 25)));
+    width: 58px; height: 58px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hi));
     display: grid;
     place-items: center;
     color: #fff;
     font-family: var(--font-display);
-    font-size: 36px;
+    font-weight: 700;
+    font-size: 32px;
+    line-height: 1;
+    /* lowercase `a` reads as a Quietude mark — sentence case + soft form */
+    text-transform: lowercase;
     box-shadow: 0 12px 32px -10px var(--accent-soft);
 }
 
@@ -81,9 +85,11 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
+    letter-spacing: var(--label-tracking, 0.6px);
     margin-top: 6px;
-    text-transform: uppercase;
+    /* Driven by --label-casing token: Quietude=none (sentence case),
+       Cinematic/Terminal/etc=uppercase. */
+    text-transform: var(--label-casing, none);
 }
 
 /* Title */

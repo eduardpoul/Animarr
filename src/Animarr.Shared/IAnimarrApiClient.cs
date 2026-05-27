@@ -107,15 +107,58 @@ public interface IAnimarrApiClient
     Task<DlnaRendererDto[]> GetDlnaRenderersAsync(CancellationToken ct = default);
     Task                    DlnaPlayAsync(DlnaPlayRequest request, CancellationToken ct = default);
 
+    // ─── Server identity (v5 multi-server) ───────────────────────────────
+    /// <summary>Probe a candidate server URL for its <see cref="ServerInfoDto"/>.
+    /// Used by the Discovery page + the server registry before any auth flow.
+    /// The <paramref name="baseUrl"/> argument is mandatory because we're
+    /// probing arbitrary other servers — not the one this client is bound to.</summary>
+    Task<ServerInfoDto?>    GetServerInfoAsync(string baseUrl, CancellationToken ct = default);
+
     // ─── Auth + per-user (v4) ────────────────────────────────────────────
     Task<AuthStatusDto>     GetAuthStatusAsync(CancellationToken ct = default);
     Task<UserDto?>          LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task                    LogoutAsync(CancellationToken ct = default);
     Task<UserDto?>          SetupInitialMasterAsync(SetupRequest request, CancellationToken ct = default);
+
+    // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
+    /// <summary>TV mints a fresh 6-char code + QR payload. Anonymous —
+    /// the TV has no cookie yet.</summary>
+    Task<PairInitDto>       InitPairAsync(PairInitRequest request, CancellationToken ct = default);
+    /// <summary>TV polls every ~2s. Returns the current status; when it
+    /// flips to "confirmed", the same response carries Set-Cookie issuing
+    /// the TV's auth cookie for the user who authorised it.</summary>
+    Task<PairPollDto>       PollPairAsync(string code, CancellationToken ct = default);
+    /// <summary>Phone (signed in) authorises the TV's pending code. Returns
+    /// true on 204 NoContent, false on 404/410 (unknown / expired).</summary>
+    Task<bool>              ConfirmPairAsync(ConfirmPairRequest request, CancellationToken ct = default);
     Task<MeDto?>            GetMeAsync(CancellationToken ct = default);
     Task<UserPreferencesDto> GetMyPreferencesAsync(CancellationToken ct = default);
     Task<UserPreferencesDto> UpdateMyPreferencesAsync(UpdatePreferencesRequest request, CancellationToken ct = default);
     Task                    ChangeMyPasswordAsync(ChangePasswordRequest request, CancellationToken ct = default);
+    /// <summary>PATCH /api/me/profile — currently-signed-in user updates their
+    /// own Name / Email / AvatarHue. No ManageUsers permission required.
+    /// Returns the refreshed UserDto so the caller can re-paint the topbar chip
+    /// + avatar without an extra <c>GET /api/me</c> round-trip.</summary>
+    Task<UserDto>           UpdateMyProfileAsync(UpdateMyProfileRequest request, CancellationToken ct = default);
+
+    // ─── PIN (v5 per-user-per-device fast switch) ─────────────────────────
+    /// <summary>POST /api/me/pin. Set or change the PIN. The server validates
+    /// 4-digit format + re-verifies the current password as anti-CSRF.</summary>
+    Task                    SetMyPinAsync(SetPinRequest request, CancellationToken ct = default);
+    /// <summary>DELETE /api/me/pin. Clear the PIN entirely — subsequent
+    /// switch-user requests to this user no longer prompt for a keypad.</summary>
+    Task                    ClearMyPinAsync(ClearPinRequest request, CancellationToken ct = default);
+    /// <summary>POST /api/auth/switch-user. Swap the auth cookie to another
+    /// user on this server. Returns null when the target has a PIN configured
+    /// and the supplied PIN doesn't verify (401) so the UI can show an error
+    /// without try/catch.</summary>
+    Task<UserDto?>          SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default);
+
+    // ─── Per-user favorites + continue watching (v5) ─────────────────────
+    Task                    AddFavoriteAsync(Guid mediaItemId, CancellationToken ct = default);
+    Task                    RemoveFavoriteAsync(Guid mediaItemId, CancellationToken ct = default);
+    Task<Guid[]>            GetFavoriteIdsAsync(CancellationToken ct = default);
+    Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default);
 
     // ─── User + Role admin (v4, manageUsers permission required) ────────
     Task<UserDto[]>         GetUsersAsync(CancellationToken ct = default);
@@ -126,4 +169,14 @@ public interface IAnimarrApiClient
     Task<RoleDto>           CreateRoleAsync(CreateRoleRequest request, CancellationToken ct = default);
     Task<RoleDto>           UpdateRoleAsync(Guid id, UpdateRoleRequest request, CancellationToken ct = default);
     Task                    DeleteRoleAsync(Guid id, CancellationToken ct = default);
+
+    // ─── Categories ──────────────────────────────────────────────────────
+    Task<CategoryDto[]>     GetCategoriesAsync(CancellationToken ct = default);
+    Task<CategoryDto>       CreateCategoryAsync(CreateCategoryRequest request, CancellationToken ct = default);
+    Task<CategoryDto>       UpdateCategoryAsync(Guid id, UpdateCategoryRequest request, CancellationToken ct = default);
+    Task                    DeleteCategoryAsync(Guid id, CancellationToken ct = default);
+    Task                    RescanCategoriesAsync(CancellationToken ct = default);
+    /// <summary>Replace the item's manual category set. Manual rows survive
+    /// future LLM rescans (the classifier preserves Source="manual").</summary>
+    Task                    SetMediaCategoriesAsync(Guid mediaItemId, Guid[] categoryIds, CancellationToken ct = default);
 }

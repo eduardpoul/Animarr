@@ -201,6 +201,34 @@ public class IdentificationQueueProcessorService(
                 Log,
                 ct);
 
+            // Step 3: category classification (best-effort; failures don't block).
+            // Resolve the MediaItem owning this folder and run the classifier.
+            // Manual overrides are preserved by ClassifyAsync — re-identifications
+            // never trample user category edits.
+            try
+            {
+                await using var catDb = await dbFactory.CreateDbContextAsync(ct);
+                var itemId = await catDb.MediaItems
+                    .Where(m => m.FolderId == job.FolderId)
+                    .Select(m => (Guid?)m.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (itemId is Guid mid)
+                {
+                    var classifier = scope.ServiceProvider
+                        .GetRequiredService<CategoryClassifierService>();
+                    var picked = await classifier.ClassifyAsync(mid, ct);
+                    if (picked.Count > 0)
+                        Log($"[Categories] Classified into {picked.Count} categor{(picked.Count == 1 ? "y" : "ies")}.");
+                    else
+                        Log("[Categories] No categories matched.");
+                }
+            }
+            catch (Exception catEx)
+            {
+                logger.LogWarning(catEx, "Category classification failed for folder {FolderId} — continuing.", job.FolderId);
+                Log($"[Categories] Classification error: {catEx.Message}");
+            }
+
             job.Status      = IdentificationQueueStatus.Done;
             job.ProcessedAt = DateTime.UtcNow;
             job.ErrorMessage = null;

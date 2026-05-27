@@ -42,6 +42,14 @@ public static class AnimarrUiServiceCollectionExtensions
     {
         services.AddScoped<UserContextState>();
         services.AddScoped<FolderJumpService>();
+        // v5: category-strip selection state shared between TopBar (writer) and
+        // Home.razor (reader). Replaces FolderJumpService for the primary
+        // catalog filter; FolderJumpService stays for admin flows that still
+        // want folder-level navigation.
+        services.AddScoped<CategoryNavService>();
+        // v5 multi-server: registry of known Animarr servers. Scoped — same
+        // lifetime envelope as UserContextState; one per circuit/app instance.
+        services.AddScoped<ServerRegistryState>();
         return services;
     }
 }

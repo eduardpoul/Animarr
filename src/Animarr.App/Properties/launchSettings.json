@@ -2,7 +2,15 @@
   "profiles": {
     "Windows Machine": {
       "commandName": "Project",
-      "nativeDebugging": false
+      "nativeDebugging": false,
+      "targetFramework": "net10.0-windows10.0.19041.0"
+    },
+    "Animarr.Desktop": {
+      "commandName": "Project",
+      "nativeDebugging": false,
+      "targetFramework": "net10.0-windows10.0.19041.0",
+      "executablePath": "$(TargetPath)",
+      "workingDirectory": "$(TargetDir)"
     }
   }
 }

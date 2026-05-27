@@ -28,6 +28,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
 
+    // ─── Categories ────────────────────────────────────────────────────────────
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<MediaItemCategory> MediaItemCategories => Set<MediaItemCategory>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -244,6 +248,35 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.MediaItemId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.UserId);
+        });
+
+        // ─── Categories ────────────────────────────────────────────────────────
+        modelBuilder.Entity<Category>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Name).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(256);
+            e.Property(x => x.Hint).HasMaxLength(512);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<MediaItemCategory>(e =>
+        {
+            // Composite PK so the same (item, category) pair can't be inserted twice.
+            e.HasKey(x => new { x.MediaItemId, x.CategoryId });
+            e.Property(x => x.Source).HasMaxLength(16).IsRequired();
+            e.HasOne(x => x.MediaItem)
+             .WithMany(m => m.Categories)
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Category)
+             .WithMany(c => c.Items)
+             .HasForeignKey(x => x.CategoryId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.MediaItemId);
+            e.HasIndex(x => x.CategoryId);
+            e.HasIndex(x => new { x.CategoryId, x.MediaItemId });
         });
     }
 }

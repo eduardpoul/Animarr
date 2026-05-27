@@ -35,12 +35,24 @@ public class LocalizationService
 
     public async Task LoadAsync(string language, CancellationToken ct = default)
     {
+        // The packs ship as static web assets inside the RCL, so both
+        // standalone WASM (Animarr.Web.Client) and the MAUI hybrid
+        // (Animarr.App) find them at the same well-known URL relative
+        // to the host without any extra wiring.
+        //
+        // Fallback chain: requested language → "en" → keys-as-values. The
+        // SupportedLanguages list advertises a few packs (uk/de/es) that
+        // may not have JSON files shipped yet — when the user picks one
+        // we load it if available, otherwise we transparently load "en"
+        // so the UI shows English text instead of bare i18n keys.
+        if (await TryLoadAsync(language, ct)) return;
+        if (language != "en") await TryLoadAsync("en", ct);
+    }
+
+    private async Task<bool> TryLoadAsync(string language, CancellationToken ct)
+    {
         try
         {
-            // The packs ship as static web assets inside the RCL, so both
-            // standalone WASM (Animarr.Web.Client) and the MAUI hybrid
-            // (Animarr.App) find them at the same well-known URL relative
-            // to the host without any extra wiring.
             var dict = await _http.GetFromJsonAsync<Dictionary<string, string>>(
                 $"_content/Animarr.UI/lang/{language}.json", ct);
             if (dict is not null)
@@ -48,13 +60,14 @@ public class LocalizationService
                 _strings = dict;
                 _currentLanguage = language;
                 LanguageChanged?.Invoke();
+                return true;
             }
         }
         catch
         {
-            // Fall back to keys-as-values if the language pack is missing —
-            // mirrors what the server-side reader did when the file was absent.
+            // Network / parse failure — caller will try the fallback.
         }
+        return false;
     }
 
     public string this[string key] =>

@@ -57,12 +57,21 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    /* When placed in a grid cell (e.g. Setup.razor's 1fr 1fr row) the group
+       itself fills the cell, but the inner inline-flex .d-input doesn't —
+       force both to 100% so the inputs always have matching widths. */
+    width: 100%;
+    min-width: 0;
 }
+
+.d-input-group .d-input { width: 100%; }
 
 .d-input-group__label {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.4px;
+    letter-spacing: var(--label-tracking, 0.4px);
     color: var(--text-faint);
-    text-transform: uppercase;
+    /* v5 Quietude default — sentence case. Other themes (Cinematic /
+       Terminal / Mountain Sect) override --label-casing to uppercase. */
+    text-transform: var(--label-casing, none);
 }

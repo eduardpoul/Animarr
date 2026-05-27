@@ -596,6 +596,88 @@ select.emd-input option {
     color: var(--text);
 }
 
+/* ── Categories (manual override) ─────────────────────────── */
+/* Reuses the existing .emd-chips wrapper but stacks rows vertically so we
+   can show name + description + BUILT-IN badge per row. Each row is a
+   checkbox-as-label; selected rows get an accent outline + soft accent fill
+   so the user can scan picks at a glance. */
+.emd-chips--vertical {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.emd-cat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    cursor: pointer;
+    transition:
+        background var(--motion-base),
+        border-color var(--motion-base);
+}
+
+.emd-cat-row:hover {
+    border-color: var(--border-strong);
+    background: var(--surface);
+}
+
+.emd-cat-row.is-selected {
+    border-color: var(--accent-line);
+    background:
+        linear-gradient(135deg, var(--accent-soft), transparent 70%),
+        var(--bg-1);
+}
+
+.emd-cat-row input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.emd-cat-row__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.emd-cat-row__name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.emd-cat-row.is-selected .emd-cat-row__name {
+    color: var(--accent-hi);
+}
+
+.emd-cat-row__desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.35;
+}
+
+.emd-cat-row__builtin {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-badge);
+    padding: 3px 6px;
+}
+
 /* ── Manage ───────────────────────────────────────────────── */
 .emd-manage {
     display: flex;
@@ -647,6 +729,106 @@ select.emd-input option {
     font-size: 10.5px;
     color: var(--text);
 }
+
+/* Flat-style manage blocks used by the API-driven Manage tab (re-identify +
+   delete from catalog). Distinct from the BEM .emd-manage__block above —
+   these are larger flat panels with h4 heads, used because the new tab
+   has only two actions instead of the original 5-action layout. */
+.emd-manage-block {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 16px;
+}
+.emd-manage-block + .emd-manage-block { margin-top: 14px; }
+.emd-manage-block h4 {
+    margin: 0 0 6px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+.emd-manage-block p {
+    margin: 0 0 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-dim);
+}
+.emd-manage-block--danger {
+    border-color: oklch(0.55 0.18 25 / 0.4);
+    background: oklch(0.55 0.18 25 / 0.08);
+}
+.emd-manage-block--danger h4 { color: var(--accent-hi); }
+
+/* Custom confirm-checkbox row — hides the native input and renders a
+   24px square instead. Click anywhere on the label flips the box; the
+   ::after caret only appears when the input is :checked. */
+.emd-manage-block__confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    padding: 8px 0 14px;
+    font-size: 12.5px;
+    color: var(--text);
+    user-select: none;
+}
+.emd-manage-block__confirm input[type="checkbox"] {
+    /* Native input is moved off-screen but still focusable so :focus-visible
+       on the styled box still works for keyboard nav. */
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+.emd-manage-block__confirm-box {
+    width: 20px; height: 20px;
+    border-radius: 6px;
+    border: 1.5px solid oklch(0.55 0.18 25 / 0.55);
+    background: var(--bg-1);
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    transition:
+        background var(--motion-fast),
+        border-color var(--motion-fast);
+    position: relative;
+}
+.emd-manage-block__confirm input[type="checkbox"]:checked + .emd-manage-block__confirm-box {
+    background: oklch(0.55 0.18 25);
+    border-color: oklch(0.55 0.18 25);
+}
+.emd-manage-block__confirm input[type="checkbox"]:checked + .emd-manage-block__confirm-box::after {
+    content: "";
+    width: 6px; height: 11px;
+    border: 2px solid #fff;
+    border-top: 0;
+    border-left: 0;
+    transform: translateY(-1px) rotate(45deg);
+}
+.emd-manage-block__confirm input[type="checkbox"]:focus-visible + .emd-manage-block__confirm-box {
+    outline: 2px solid var(--accent-line);
+    outline-offset: 2px;
+}
+.emd-manage-block__confirm:hover .emd-manage-block__confirm-box {
+    border-color: oklch(0.55 0.18 25 / 0.85);
+}
+.emd-manage-block__confirm-label {
+    line-height: 1.2;
+    font-weight: 500;
+}
+
+.emd__btn--danger {
+    background: oklch(0.55 0.18 25);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 700;
+}
+.emd__btn--danger:hover:not(:disabled) { background: oklch(0.50 0.20 25); }
+.emd__btn--danger:disabled { opacity: 0.45; }
 
 /* ── Danger zone ──────────────────────────────────────────── */
 .emd-danger {

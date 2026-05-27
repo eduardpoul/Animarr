@@ -5,16 +5,17 @@
 @inject IJSRuntime JS
 
 @*
-    Media detail — full migration with player launch.
+    Media detail (v3 design — reused unchanged in v4 per CHANGELOG_3 §3).
 
-    Flow on Play / Continue:
-      1. Ask the server for the file map (/api/media/{id}/files).
-      2. Pick the file that matches the target (season, episode) — or the
-         first file for movies.
-      3. Set _playerPath + a fresh _playerElementId.
-      4. OnAfterRender calls animarrPlayer.attach via JS interop. The
-         player JS then drives Artplayer + hls.js, fetches /api/hls/start
-         and pushes progress back through OnPlayerProgress.
+    Composition:
+      • <MediaDetailHero> — full-bleed fanart, BACK + EDIT METADATA glass
+        chips, 260px poster + flex title block, CJK watermark, Continue CTA.
+      • 3-column body: Synopsis 2.2fr · Details 1fr · Identification 320px.
+      • Series / Anime: season tabs + episode grid (repeat(auto-fill,
+        minmax(260px, 1fr))) using <EpisodeCard>.
+      • Movies: <MovieFileCard> with 360px thumb panel + info panel.
+      • Player overlay mounts Artplayer.
+      • EditMetadataDrawer slides in from the right.
 *@
 
 <PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
@@ -40,40 +41,15 @@ else
 {
     var item = _item;
 
-    <header class="md-hero">
-        <div class="md-hero__poster">
-            @if (!string.IsNullOrEmpty(item.PosterPath))
-            {
-                <img src="@PosterUrl(item.PosterPath)" alt="@item.Title" />
-            }
-        </div>
-        <div class="md-hero__main">
-            <div class="md-hero__overline">@item.MediaType.ToString().ToUpperInvariant()</div>
-            <h1 class="md-hero__title">@item.Title</h1>
-            @if (!string.IsNullOrEmpty(item.OriginalTitle))
-            {
-                <div class="md-hero__sub">@item.OriginalTitle</div>
-            }
-            <div class="md-hero__meta">
-                @if (item.Year is not null) { <span>@item.Year</span> }
-                @if (item.Rating is not null) { <span>★ @item.Rating?.ToString("F1")</span> }
-                @if (!string.IsNullOrEmpty(item.Status)) { <span>@item.Status</span> }
-                @if (!string.IsNullOrEmpty(item.ContentRating)) { <span>@item.ContentRating</span> }
-            </div>
-            <div class="md-hero__cta">
-                @if (_continue is not null)
-                {
-                    <Btn Variant="primary" Size="lg" OnClick="HandleContinueClick">
-                        <DIcon Name="play" Size="14" /> @_continue.Label
-                    </Btn>
-                }
-                <Btn Variant="ghost" Size="lg" OnClick="OpenEditPanel">
-                    <DIcon Name="pencil" Size="14" /> Edit metadata
-                </Btn>
-            </div>
-        </div>
-    </header>
+    @* Hero with full-bleed fanart, BACK / EDIT chips, poster + title row. *@
+    <MediaDetailHero Item="@item"
+                     BackHref="/"
+                     Continue="@_continueAction"
+                     OnContinueClick="OnHeroContinue"
+                     OnEditClick="OpenEditPanel"
+                     OnFavoriteClick="ToggleFavoriteAsync" />
 
+    @* ── 3-column body — Synopsis · Details · Identification ────────────── *@
     <div class="md-body">
         <section class="md-body__col md-synopsis">
             <div class="md-overline">SYNOPSIS</div>
@@ -151,74 +127,143 @@ else
         </section>
     </div>
 
-    @if (item.Seasons.Length > 0)
+    @* ── Episodes (series/anime) ──────────────────────────
+         v5 fix: previously this branch only fired when Item.Seasons came back
+         non-empty AND active.EpisodeCount > 0. Two regressions fell out of
+         that:
+           1. Series/Anime items that hadn't been TMDB-identified yet (or
+              whose SeasonsJson was lost during a migration) had Seasons.Length
+              == 0 and the page rendered NOTHING — neither episode grid nor
+              movie card — so the user just saw the hero on its own.
+           2. When _files came back empty (cold load, brief API hiccup), every
+              card got Have=false → .d-ep--miss → 48% opacity. On the new
+              Quietude dark-navy bg that reads as "blank shimmery cards".
+
+         The new logic: render the episode grid whenever there are seasons
+         OR there are files but the type is a series/anime. The episode
+         count for the active season falls back to whichever of {seasons
+         metadata, max file episode, 1} is highest, so we always show at
+         least one row. *@
+    var isMultiEpisode = item.MediaType == MediaItemType.Series
+                      || item.MediaType == MediaItemType.Anime
+                      || item.MediaType == MediaItemType.Multserials;
+    var hasSeasonMeta  = item.Seasons.Length > 0;
+    // Fallback "synthetic" season list built from on-disk files when no
+    // metadata seasons are available (anime OVAs identified without TMDB).
+    var fileSeasons    = _files
+        .Where(f => f.Season is not null)
+        .Select(f => f.Season!.Value)
+        .Distinct()
+        .OrderBy(n => n)
+        .ToArray();
+    var showEpisodeGrid = hasSeasonMeta
+                      || (isMultiEpisode && fileSeasons.Length > 0);
+    if (showEpisodeGrid)
     {
-        <div class="md-seasons">
-            <nav class="md-season-tabs">
-                @foreach (var s in item.Seasons.OrderBy(s => s.Number))
+        <section class="md-seasons">
+            <nav class="md-season-tabs" aria-label="Seasons">
+                @if (hasSeasonMeta)
                 {
-                    var n = s.Number;
-                    <button type="button"
-                            class="@($"md-season-tab {(_activeSeason == n ? "md-season-tab--active" : "")}")"
-                            @onclick="@(() => _activeSeason = n)">
-                        @($"Season {n}") <span class="md-season-tab__count">@s.EpisodeCount</span>
-                    </button>
+                    @foreach (var s in item.Seasons.OrderBy(s => s.Number))
+                    {
+                        var n = s.Number;
+                        <button type="button"
+                                class="@($"md-season-tab tv-focus {(_activeSeason == n ? "md-season-tab--active" : "")}")"
+                                @onclick="@(() => _activeSeason = n)">
+                            @($"Season {n}") <span class="md-season-tab__count">@s.EpisodeCount</span>
+                        </button>
+                    }
+                }
+                else
+                {
+                    @foreach (var n in fileSeasons)
+                    {
+                        var nn = n;
+                        var epCount = _files.Count(f => f.Season == nn);
+                        <button type="button"
+                                class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
+                                @onclick="@(() => _activeSeason = nn)">
+                            @($"Season {nn}") <span class="md-season-tab__count">@epCount</span>
+                        </button>
+                    }
                 }
             </nav>
 
-            @{ var active = item.Seasons.FirstOrDefault(s => s.Number == _activeSeason); }
-            @if (active is not null)
+            @{
+                var active = hasSeasonMeta ? item.Seasons.FirstOrDefault(s => s.Number == _activeSeason) : null;
+                // Episode count for the loop. Prefer the metadata's count, but
+                // fall back to whichever is larger of (metadata count, max
+                // on-disk file episode for this season) so cards aren't lost
+                // when TMDB underreports the season length (common for ongoing
+                // donghua / continuing series).
+                var maxFileEp = _files.Where(f => f.Season == _activeSeason)
+                                       .Max(f => (int?)f.Episode) ?? 0;
+                var loopEpCount = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
+                if (loopEpCount == 0) loopEpCount = 1;
+                // Per-season poster URL (used as the per-episode thumb fallback
+                // so the grid isn't a wall of placeholder DIcons). Cache-buster
+                // ticks come from Item.LastMetadataRefreshedAt — rescans
+                // overwrite the same path. Falls back to the main FanartPath
+                // when no season-poster was downloaded.
+                var seasonPoster = active?.PosterPath ?? item.FanartPath ?? item.PosterPath;
+                var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
+                    ? $"/api/image?path={Uri.EscapeDataString(seasonPoster)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+                    : null;
+            }
+            @if (active is not null && !string.IsNullOrEmpty(active.Overview))
             {
-                if (!string.IsNullOrEmpty(active.Overview))
+                <p class="md-season-overview">@active.Overview</p>
+            }
+
+            <div class="md-episode-grid">
+                @for (int i = 1; i <= loopEpCount; i++)
                 {
-                    <p class="md-season-overview">@active.Overview</p>
+                    var ep        = i;
+                    var hasFile   = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
+                    var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
+                    var epTitle   = $"Episode {ep}";
+                    var epRuntime = item.Runtime is > 0 ? $"{item.Runtime}m" : "";
+
+                    <div class="md-episode-card"
+                         @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)">
+                        <EpisodeCard Number="ep"
+                                     Title="@epTitle"
+                                     ThumbUrl="@seasonThumb"
+                                     Meta="@epRuntime"
+                                     Have="hasFile"
+                                     WatchStateDto="@watchDto"
+                                     OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
+                    </div>
                 }
-                <div class="md-episode-list">
-                    @for (int i = 1; i <= active.EpisodeCount; i++)
-                    {
-                        var ep = i;
-                        var watched = _watchStates.Any(w =>
-                            w.Season == _activeSeason && w.Episode == ep && w.IsWatched);
-                        var hasFile = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
-                        <div class="md-episode-row">
-                            <span class="md-episode-num">EP @ep.ToString("D2")</span>
-                            <div class="md-episode-spacer"></div>
-                            @if (hasFile)
-                            {
-                                <Btn Variant="solid" Size="sm" OnClick="@(() => PlayEpisodeAsync(_activeSeason, ep))">
-                                    <DIcon Name="play" Size="12" /> Play
-                                </Btn>
-                            }
-                            else
-                            {
-                                <span class="md-episode-missing">no file</span>
-                            }
-                            <label class="md-episode-watch">
-                                <input type="checkbox" checked="@watched"
-                                       @onchange="@(e => ToggleEpisodeWatched(_activeSeason, ep, (bool)e.Value!))" />
-                                <span>Watched</span>
-                            </label>
-                        </div>
-                    }
-                </div>
-            }
-        </div>
+            </div>
+        </section>
     }
-    else if (item.MediaType == MediaItemType.Movie)
+    else if (item.MediaType == MediaItemType.Movie
+          || (item.Seasons.Length == 0 && _files.Length > 0))
     {
-        <div class="md-movie-row">
-            @if (_files.Length > 0)
-            {
-                <Btn Variant="primary" Size="md" OnClick="@(() => PlayPathAsync(_files[0].FilePath))">
-                    <DIcon Name="play" Size="14" /> Play movie
-                </Btn>
-            }
-            <label class="md-episode-watch">
-                <input type="checkbox" checked="@_movieWatched"
-                       @onchange="@(e => ToggleMovieWatched((bool)e.Value!))" />
-                <span>Mark watched</span>
-            </label>
-        </div>
+        @* Movie OR flat-folder anime (e.g. one-shot OVA) with no Seasons.
+           Renders the same MovieFileCard recipe. *@
+        var movieFile     = _files.FirstOrDefault();
+        var movieWatchDto = _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null);
+        var thumbUrl      = !string.IsNullOrEmpty(item.FanartPath)
+            ? $"/api/image?path={Uri.EscapeDataString(item.FanartPath!)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+            : (!string.IsNullOrEmpty(item.PosterPath)
+                ? $"/api/image?path={Uri.EscapeDataString(item.PosterPath!)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+                : null);
+        var runtimeLabel  = item.Runtime is > 0 ? $"{item.Runtime} min" : null;
+
+        <section class="md-movie-section">
+            <MovieFileCard Title="@item.Title"
+                           FileName="@(movieFile?.FileName)"
+                           ThumbUrl="@thumbUrl"
+                           Runtime="@runtimeLabel"
+                           Have="@(movieFile is not null)"
+                           WatchStateDto="@movieWatchDto"
+                           PlayLabel="@(MovieCtaLabel(movieWatchDto))"
+                           PlayIcon="@(MovieCtaIcon(movieWatchDto))"
+                           OnPlayClick="OnMoviePlayClick"
+                           OnToggleWatched="OnMovieToggleWatched" />
+        </section>
     }
 }
 
@@ -245,6 +290,7 @@ else
     private MediaFileDto[] _files = Array.Empty<MediaFileDto>();
     private bool _loading = true;
     private ContinueWatchDto? _continue;
+    private ContinueAction?   _continueAction;
     private List<WatchStateDto> _watchStates = new();
     private int _activeSeason = 1;
     private bool _movieWatched;
@@ -272,25 +318,36 @@ else
         {
             _item     = await Api.GetMediaItemAsync(Id);
             _continue = await Api.GetContinueAsync(Id);
+            _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
             var states = await Api.GetWatchStatesAsync(Id);
             _watchStates = states.ToList();
             _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
             _files = await Api.GetMediaFilesAsync(Id);
 
             if (_item is not null && _item.Seasons.Length > 0)
+            {
                 _activeSeason = _item.Seasons.OrderBy(s => s.Number).First().Number;
+            }
+            else if (_files.Length > 0 && _files.Any(f => f.Season is not null))
+            {
+                // No metadata seasons but we do have files with season numbers
+                // (anime OVA / un-identified series). Pick the lowest season
+                // number so the synthetic season tab focuses there. Pairs with
+                // the file-derived `fileSeasons` branch in the render block.
+                _activeSeason = _files.Where(f => f.Season is not null)
+                                       .Min(f => f.Season!.Value);
+            }
         }
         catch { _item = null; }
         _loading = false;
         StateHasChanged();
     }
 
+    private Task OnHeroContinue(ContinueAction action) => HandleContinueClick();
+
     private async Task HandleContinueClick()
     {
         if (_item is null || _continue is null) return;
-
-        // Resolve which file to play: explicit season/episode from the
-        // continue hint, otherwise first file (movies, or "play first ep").
         string? path = null;
         if (_continue.Season is int s && _continue.Episode is int ep)
         {
@@ -299,9 +356,16 @@ else
         }
         path ??= _files.FirstOrDefault()?.FilePath;
         if (path is null) return;
-
         await PlayPathAsync(path, _continue.Season, _continue.Episode);
     }
+
+    private Task OnMoviePlayClick()
+    {
+        var movieFile = _files.FirstOrDefault();
+        return movieFile is null ? Task.CompletedTask : PlayPathAsync(movieFile.FilePath);
+    }
+
+    private Task OnMovieToggleWatched() => ToggleMovieWatched(!_movieWatched);
 
     private async Task PlayEpisodeAsync(int season, int episode)
     {
@@ -312,9 +376,6 @@ else
 
     private async Task PlayPathAsync(string path, int? season = null, int? episode = null)
     {
-        // Tear down any previous Artplayer + HLS session before starting a new
-        // one — leaving the old WIRED entry up would leak the .NET ref and the
-        // server-side HLS keepalive timer.
         if (_playerSelfRef is not null)
         {
             try { await JS.InvokeVoidAsync("animarrPlayer.flush",  _playerElementId); } catch { }
@@ -333,8 +394,6 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Attach the player whenever a new _playerElementId has just hit the
-        // DOM and we don't already have a .NET ref wired up to JS.
         if (_playerPath is not null && _playerSelfRef is null)
         {
             _playerSelfRef = DotNetObjectReference.Create(this);
@@ -342,6 +401,43 @@ else
             {
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath);
+
+                // Push Now-Playing metadata so the OS lock screen / Control
+                // Centre / Bluetooth-stack media buttons show the right title
+                // + poster instead of the default WebView favicon. Pairs with
+                // [JSInvokable] InvokePrev/InvokeNext below for prev/next track.
+                if (_item is not null)
+                {
+                    var titleParts = new List<string>();
+                    if (_playerSeason is > 0) titleParts.Add($"S{_playerSeason:D2}");
+                    if (_playerEpisode is > 0) titleParts.Add($"E{_playerEpisode:D2}");
+                    var episodeLabel = string.Join(' ', titleParts);
+                    var title = string.IsNullOrEmpty(episodeLabel)
+                        ? _item.Title
+                        : $"{_item.Title} — {episodeLabel}";
+                    var artist = _item.Studio ?? _item.Language ?? string.Empty;
+                    var album  = _item.Title;
+                    // Poster path comes as a relative `/api/image/...` URL —
+                    // browser resolves it against the page origin which is
+                    // exactly what MediaSession's artwork field needs.
+                    var artwork = _item.PosterPath ?? _item.FanartPath ?? string.Empty;
+                    var hasNext = _playerEpisode is not null;  // best-effort flag
+                    var hasPrev = _playerEpisode is > 1;
+                    var meta = new {
+                        title,
+                        artist,
+                        album,
+                        artworkUrl    = artwork,
+                        prevAvailable = hasPrev,
+                        nextAvailable = hasNext,
+                    };
+                    try
+                    {
+                        await JS.InvokeVoidAsync("animarrPlayer.setMediaSession",
+                            _playerElementId, meta, new { dotnetRef = _playerSelfRef });
+                    }
+                    catch { /* metadata is decoration, not playback — never throw */ }
+                }
             }
             catch (Exception ex)
             {
@@ -350,6 +446,50 @@ else
                 Console.Error.WriteLine($"animarrPlayer.attach failed: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>Lock-screen / Bluetooth "Previous track" — try the previous
+    /// episode in the same season. No-op if we're already at E01 or this is
+    /// a movie.</summary>
+    [JSInvokable]
+    public Task InvokePrev()
+    {
+        if (_item is null || _playerEpisode is not > 1) return Task.CompletedTask;
+        var prev = _playerEpisode.Value - 1;
+        return PlayEpisodeAsync(_playerSeason, prev);
+    }
+
+    /// <summary>Lock-screen / Bluetooth "Next track" — try the next episode
+    /// in the same season. No-op if no episode after this one exists in the
+    /// loaded watch-state.</summary>
+    [JSInvokable]
+    public Task InvokeNext()
+    {
+        if (_item is null || _playerEpisode is null) return Task.CompletedTask;
+        var next = _playerEpisode.Value + 1;
+        return PlayEpisodeAsync(_playerSeason, next);
+    }
+
+    private async Task PlayEpisodeAsync(int? season, int? episode)
+    {
+        if (_item is null) return;
+        // Best-effort lookup of the matching file via /api/media/{id}/files.
+        // If the file doesn't exist (we passed the season finale) we silently
+        // stop — Artplayer keeps the current playback paused.
+        try
+        {
+            var files = await Api.GetMediaFilesAsync(_item.Id);
+            var match = files.FirstOrDefault(f =>
+                (season is null || f.Season == season) &&
+                (episode is null || f.Episode == episode));
+            if (match is null) return;
+            await ClosePlayer();
+            _playerSeason  = season;
+            _playerEpisode = episode;
+            _playerPath    = match.FilePath;
+            StateHasChanged();
+        }
+        catch { /* swallow — UI keeps current playback */ }
     }
 
     private async Task ClosePlayer()
@@ -364,16 +504,14 @@ else
         StateHasChanged();
     }
 
-    // ─── JS-invokable callbacks from animarr-player.js ────────────────────
-
     [JSInvokable]
-    public async Task<double?> GetResumePositionSec()
+    public Task<double?> GetResumePositionSec()
     {
-        if (_item is null) return null;
+        if (_item is null) return Task.FromResult<double?>(null);
         var match = _watchStates.FirstOrDefault(w =>
             w.Season == _playerSeason && w.Episode == _playerEpisode);
-        if (match?.ProgressMs is not > 0) return null;
-        return await Task.FromResult((double?)(match.ProgressMs.Value / 1000.0));
+        if (match?.ProgressMs is not > 0) return Task.FromResult<double?>(null);
+        return Task.FromResult<double?>(match.ProgressMs.Value / 1000.0);
     }
 
     [JSInvokable]
@@ -383,7 +521,6 @@ else
         var now = DateTime.UtcNow;
         if ((now - _lastProgressWrite).TotalSeconds < 2) return;
         _lastProgressWrite = now;
-
         try
         {
             await Api.RecordProgressAsync(new RecordProgressRequest(
@@ -394,40 +531,47 @@ else
                 ProgressMs:  (long)(positionSec * 1000),
                 RuntimeMs:   durationSec > 0 ? (long)(durationSec * 1000) : null));
         }
-        catch { /* network blip — next ping retries */ }
+        catch { }
     }
 
-    [JSInvokable]
-    public async Task ClosePlayerFromJs()
-    {
-        await InvokeAsync(ClosePlayer);
-    }
-
-    [JSInvokable]
-    public Task ToggleCastMenuFromJs() => Task.CompletedTask;
-
-    [JSInvokable]
-    public Task<string> GetMpvDeepLink() => Task.FromResult($"mpv://{ApiRoutes.File}?path={Uri.EscapeDataString(_playerPath ?? "")}");
-
-    [JSInvokable]
-    public Task ReceiveMediaInfo(System.Text.Json.JsonElement info)
-        => Task.CompletedTask;
-
-    // ─── Metadata ops ─────────────────────────────────────────────────────
+    [JSInvokable] public async Task ClosePlayerFromJs() => await InvokeAsync(ClosePlayer);
+    [JSInvokable] public Task ToggleCastMenuFromJs() => Task.CompletedTask;
+    [JSInvokable] public Task<string> GetMpvDeepLink() =>
+        Task.FromResult($"mpv://{ApiRoutes.File}?path={Uri.EscapeDataString(_playerPath ?? "")}");
+    [JSInvokable] public Task ReceiveMediaInfo(System.Text.Json.JsonElement info) => Task.CompletedTask;
 
     private async Task ReidentifyAsync()
     {
         if (_item is null) return;
         try { await Api.EnqueueIdentificationAsync(_item.FolderId, forceRefresh: true); }
-        catch { /* swallow */ }
+        catch { }
     }
 
     private void OpenEditPanel() => _editOpen = true;
+    private async Task OnEditSaved() { _editOpen = false; await LoadAsync(); }
 
-    private async Task OnEditSaved()
+    /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.
+    /// Re-fetches the item afterwards so any per-user fields derived from
+    /// favorites (e.g. category cards) stay in sync.</summary>
+    private async Task ToggleFavoriteAsync()
     {
-        _editOpen = false;
-        await LoadAsync();
+        if (_item is null) return;
+        var nextState = !_item.IsFavorite;
+        // Optimistic update — flip locally first so the star animates
+        // instantly while the network round-trip happens.
+        _item = _item with { IsFavorite = nextState };
+        StateHasChanged();
+        try
+        {
+            if (nextState) await Api.AddFavoriteAsync(_item.Id);
+            else           await Api.RemoveFavoriteAsync(_item.Id);
+        }
+        catch
+        {
+            // Rollback on failure so the UI matches server reality.
+            _item = _item with { IsFavorite = !nextState };
+            StateHasChanged();
+        }
     }
 
     private async Task ToggleEpisodeWatched(int season, int episode, bool watched)
@@ -444,9 +588,21 @@ else
             _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
             _watchStates.Add(updated);
         }
-        catch { /* swallow */ }
+        catch { }
         StateHasChanged();
     }
+
+    /// <summary>Primary-CTA label for the MovieFileCard.</summary>
+    private static string MovieCtaLabel(WatchStateDto? w)
+    {
+        if (w is null) return "Play movie";
+        if (w.IsWatched) return "Rewatch from start";
+        if (w.ProgressMs is > 0) return "Continue";
+        return "Play movie";
+    }
+
+    private static string MovieCtaIcon(WatchStateDto? w)
+        => w?.IsWatched == true ? "refresh" : "play";
 
     private async Task ToggleMovieWatched(bool watched)
     {
@@ -461,12 +617,9 @@ else
                 IsWatched:   watched));
             _movieWatched = watched;
         }
-        catch { /* swallow */ }
+        catch { }
         StateHasChanged();
     }
-
-    private static string PosterUrl(string path)
-        => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(path)}";
 
     public async ValueTask DisposeAsync()
     {

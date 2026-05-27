@@ -122,4 +122,5 @@ public class MediaItem
 
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];
+    public ICollection<MediaItemCategory> Categories { get; set; } = [];
 }

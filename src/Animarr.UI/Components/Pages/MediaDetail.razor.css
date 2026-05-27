@@ -100,6 +100,40 @@
     color: #a0a8b0;
 }
 
+/* Episode grid — design spec lines 481-515. Cards laid out in CSS-grid with
+   the auto-fill / minmax recipe so they reflow as the body shrinks below
+   the 3-column threshold. .md-episode-card is the click-target wrapper
+   around <EpisodeCard /> — the inner card is component-scoped. */
+.md-episode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-7);
+    margin-top: var(--space-7);
+}
+
+.md-episode-card { cursor: pointer; }
+
+@media (max-width: 959px) {
+    .md-episode-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-5);
+    }
+}
+@media (max-width: 639px) {
+    .md-episode-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+    }
+}
+
+/* Movie file card section — full-width, lives right under the 3-column body. */
+.md-movie-section {
+    margin: var(--space-9) 0 var(--space-12);
+}
+
+/* Legacy stub rules kept so the old .md-episode-row markup, if it ever
+   reappears (e.g. through a Razor cache miss), still has something to bind
+   against. New code goes through .md-episode-grid + <EpisodeCard />. */
 .md-episode-list {
     display: flex;
     flex-direction: column;
@@ -111,21 +145,21 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
-    background: #14171b;
-    border: 1px solid #21262d;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 6px;
 }
 
 .md-episode-num {
-    font-family: ui-monospace, monospace;
-    color: #a0a8b0;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
 }
 
 .md-episode-watch {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: #a0a8b0;
+    color: var(--text-dim);
 }
 
 .md-movie-row {

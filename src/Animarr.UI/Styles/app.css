@@ -28,17 +28,32 @@
    shadow-card, font-display, etc. work.
    ──────────────────────────────────────────────────────── */
 @theme {
-    /* Fonts → font-ui, font-display, font-mono, font-cjk.
-       NB: must be LITERAL values, not `var(--font-ui)` self-references.
-       Tailwind v4 @theme block emits these as :root,:host rules AFTER
-       tokens.css :root, so `--font-ui: var(--font-ui)` creates a circular
-       reference that CSS resolves to guaranteed-invalid → the original
-       declaration is wiped out and everything falls back to browser default
-       serif. Keep these stacks in sync with tokens.css. */
-    --font-ui:      'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-display: 'Archivo Black', 'Geist', system-ui, sans-serif;
-    --font-mono:    'Geist Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
-    --font-cjk:     'Noto Serif SC', serif;
+    /* Font tokens — Quietude (default) values.
+
+       Tailwind v4's @theme block emits these as a `:root, :host` rule
+       that lands in the compiled output AFTER tokens.css's `:root`
+       block AND AFTER `@import "tailwindcss/theme"`. The latter sets
+       Tailwind's own default --font-mono = ui-monospace, which would
+       otherwise wipe out our 'JetBrains Mono'. Keeping the literals
+       here ensures Quietude's typography survives the cascade.
+
+       Previously this block held Cinematic values ('Geist',
+       'Archivo Black'), which meant every theme — including Quietude
+       — rendered with Cinematic typography. The Welcome heading
+       "Your library, understood." came out in Archivo Black on
+       Android Chrome instead of Inter. Restored to Quietude
+       (Inter / JetBrains Mono / Noto Serif SC) as the design board's
+       declared default.
+
+       Theme overrides for non-Quietude palettes live in
+       Styles/themes/<name>.css. To beat this @theme's
+       :root,:host output (specificity 0,0,1,0) they must use
+       `html[data-theme="<name>"]` (specificity 0,0,1,1). Same trick
+       applied to the Cinematic block in tokens.css. */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
 
     /* Backgrounds → bg-page, bg-panel, bg-surface, bg-surface-2, bg-surface-3 */
     --color-page:      var(--bg-0);
@@ -107,6 +122,19 @@
    episode cards, etc.) plus mobile responsive breakpoints. ─── */
 @import "./components.css";
 
+/* ── Personality themes (v5). Each file overrides design tokens
+   via [data-theme="<name>"]. Order doesn't matter — only one block
+   is ever active because data-theme is a single attribute. The
+   default look (no data-theme) is Quietude from tokens.css. ─── */
+@import "./themes/terminal.css";
+@import "./themes/anime.css";
+@import "./themes/ember-edge.css";
+@import "./themes/mountain-sect.css";
+@import "./themes/immortal-path.css";
+@import "./themes/heavens-defiance.css";
+@import "./themes/ink-and-paper.css";
+@import "./themes/cyberpunk.css";
+
 /* ── Base resets ──────────────────────────────────────── */
 @layer base {
     *, ::before, ::after {
@@ -125,7 +153,10 @@
 
     html, body {
         height: 100%;
-        overflow: hidden;
+        /* v4: document body scrolls natively. The fixed-position TopBar +
+           backdrop stay in viewport via position:fixed, so removing
+           overflow:hidden here is what lets the catalog / media-detail /
+           settings pages scroll past the viewport. */
     }
 
     /* When backdrop slideshow is active, body lets the fixed-position

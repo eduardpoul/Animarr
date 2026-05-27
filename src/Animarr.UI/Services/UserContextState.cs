@@ -41,8 +41,10 @@ public sealed class UserContextState
     public bool Can(Func<PermissionsDto, bool> selector) =>
         Me is not null && selector(Me.Permissions);
 
-    /// <summary>Boot probe — calls <c>/api/auth/status</c> first (anonymous-safe),
-    /// then if authenticated also fetches <c>/api/me</c> + <c>/api/me/preferences</c>.</summary>
+    /// <summary>Boot probe — calls <c>/api/auth/status</c> (anonymous-safe),
+    /// then if authenticated fetches <c>/api/me</c> + <c>/api/me/preferences</c>.
+    /// When the request is anonymous, <see cref="Me"/> stays null and the
+    /// router redirects to /welcome (or /setup if SetupRequired).</summary>
     public async Task LoadAsync(CancellationToken ct = default)
     {
         try
@@ -65,8 +67,9 @@ public sealed class UserContextState
         }
         catch
         {
-            // Network error / server down — leave state untouched but mark loaded
-            // so the UI shows a fallback rather than hanging on a spinner forever.
+            // Server unreachable — keep state empty so the SPA falls back to
+            // the welcome route. Loaded=true means the boot probe finished
+            // (success or failure) so spinners can stop.
         }
         Loaded = true;
         OnChange?.Invoke();

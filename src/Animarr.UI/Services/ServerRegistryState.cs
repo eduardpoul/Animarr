@@ -1,0 +1,258 @@
+using System.Text.Json;
+using Animarr.Shared;
+using Animarr.Shared.Models;
+using Microsoft.JSInterop;
+
+namespace Animarr.UI.Services;
+
+/// <summary>
+/// Per-circuit / per-app cache of the client's known Animarr servers.
+///
+/// v5 introduces the multi-server flow: a single Animarr client (WASM in a
+/// browser, or MAUI Hybrid on phone/desktop) can talk to N servers and switch
+/// between them without re-installing. This service holds the registry and
+/// surfaces the "currently active" server to the rest of the UI.
+///
+/// Persistence:
+///   • Browser/WASM — serialised to <c>localStorage</c> under key
+///     <c>animarr.servers.v1</c>. Survives tab reloads and page navigations.
+///   • MAUI — same localStorage key via the embedded WebView's storage; the
+///     OS provides per-app sandboxing so the registry is private to Animarr.
+///
+/// When the active server changes (LoadAsync hydrates Current /
+/// AddServerAsync registers the first server / SetCurrentAsync switches), the
+/// shared <see cref="ServerAddressProvider"/> is updated so subsequent API
+/// calls land on the chosen origin. We deliberately route through the
+/// provider instead of mutating <see cref="HttpClient.BaseAddress"/> directly
+/// — once any request has been sent, HttpClient locks the setter and throws
+/// <see cref="InvalidOperationException"/>. The provider + DelegatingHandler
+/// pair sidesteps that completely.
+///
+/// Cookies stay in the shared <see cref="System.Net.CookieContainer"/>; the
+/// container filters them per origin so an old tower.one cookie is harmless
+/// against 192.168.x.
+///
+/// Concurrency: not thread-safe — Blazor circuits and WASM are single-threaded.
+/// </summary>
+public sealed class ServerRegistryState
+{
+    /// <summary>localStorage key. Bumped to v2/v3 if the entry shape changes
+    /// so old clients don't crash on a deserialise mismatch.</summary>
+    private const string StorageKey = "animarr.servers.v1";
+
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+
+    private readonly IJSRuntime             _js;
+    private readonly IAnimarrApiClient      _api;
+    private readonly ServerAddressProvider  _addr;
+
+    private readonly List<RegisteredServerDto> _servers = new();
+    private string? _currentServerId;
+    private bool _loaded;
+
+    public ServerRegistryState(IJSRuntime js, IAnimarrApiClient api, ServerAddressProvider addr)
+    {
+        _js   = js;
+        _api  = api;
+        _addr = addr;
+    }
+
+    /// <summary>All known servers, ordered by most-recently-seen first.
+    /// Components should subscribe to <see cref="OnChange"/> instead of caching
+    /// snapshots — the list mutates in place.</summary>
+    public IReadOnlyList<RegisteredServerDto> Servers => _servers;
+
+    /// <summary>The server we're currently authenticated against (or trying to
+    /// log into). Null while the registry is empty / before first probe.</summary>
+    public RegisteredServerDto? Current =>
+        _currentServerId is null
+            ? null
+            : _servers.FirstOrDefault(s => s.ServerId == _currentServerId);
+
+    public int Count => _servers.Count;
+
+    /// <summary>True once <see cref="LoadAsync"/> has run — components gate
+    /// their first paint on this so the empty state doesn't flash on boot.</summary>
+    public bool Loaded => _loaded;
+
+    public event Action? OnChange;
+
+    /// <summary>Hydrate from localStorage. Safe to call multiple times — only
+    /// the first call hits storage; subsequent calls no-op.</summary>
+    public async Task LoadAsync(CancellationToken ct = default)
+    {
+        if (_loaded) return;
+        try
+        {
+            var raw = await _js.InvokeAsync<string?>("localStorage.getItem", ct, StorageKey);
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                var blob = JsonSerializer.Deserialize<RegistryBlob>(raw!, JsonOpts);
+                if (blob is not null)
+                {
+                    _servers.Clear();
+                    if (blob.Servers is not null) _servers.AddRange(blob.Servers);
+                    _currentServerId = blob.CurrentServerId;
+                }
+            }
+        }
+        catch
+        {
+            // Storage unavailable (e.g. server-prerender pass, locked-down
+            // browser policy) — start empty. The user can add servers manually.
+        }
+        _loaded = true;
+        // Reapply Current to the shared HttpClient so cold-start API calls hit
+        // the user's chosen server, not whatever compile-time DefaultServerUrl
+        // MauiProgram pinned into HttpClient at boot.
+        ApplyCurrentToHttp();
+        OnChange?.Invoke();
+    }
+
+    /// <summary>Probe <paramref name="baseUrl"/> with /api/server/info and add
+    /// the result to the registry (or refresh an existing entry by ServerId).
+    /// Returns the registered entry on success, null if the probe failed.
+    /// If the registry was empty, the new server is set as Current.</summary>
+    public async Task<RegisteredServerDto?> AddServerAsync(string baseUrl, CancellationToken ct = default)
+    {
+        var info = await _api.GetServerInfoAsync(baseUrl, ct);
+        if (info is null) return null;
+
+        var normalised = NormaliseUrl(baseUrl);
+        var entry = new RegisteredServerDto(
+            ServerId:    info.ServerId,
+            Name:        info.Name,
+            BaseUrl:     normalised,
+            LastSeenUtc: DateTime.UtcNow,
+            Version:     info.Version,
+            TitleCount:  info.TitleCount);
+
+        var existingIdx = _servers.FindIndex(s => s.ServerId == info.ServerId);
+        if (existingIdx >= 0)
+        {
+            _servers[existingIdx] = entry;
+        }
+        else
+        {
+            _servers.Add(entry);
+        }
+
+        // First server in the registry — make it current automatically so the
+        // user lands on the right login screen.
+        var becameCurrent = _currentServerId is null;
+        _currentServerId ??= entry.ServerId;
+
+        await PersistAsync(ct);
+        if (becameCurrent) ApplyCurrentToHttp();
+        OnChange?.Invoke();
+        return entry;
+    }
+
+    /// <summary>Drop a server from the registry. If it was the current one,
+    /// the next-most-recent server (if any) takes its place.</summary>
+    public async Task RemoveServerAsync(string serverId, CancellationToken ct = default)
+    {
+        var idx = _servers.FindIndex(s => s.ServerId == serverId);
+        if (idx < 0) return;
+        _servers.RemoveAt(idx);
+
+        if (_currentServerId == serverId)
+        {
+            _currentServerId = _servers
+                .OrderByDescending(s => s.LastSeenUtc)
+                .Select(s => s.ServerId)
+                .FirstOrDefault();
+        }
+
+        await PersistAsync(ct);
+        OnChange?.Invoke();
+    }
+
+    /// <summary>Mark <paramref name="serverId"/> as the active server. Updates
+    /// the shared HttpClient's BaseAddress so the very next API call lands on
+    /// the chosen origin. In WASM the caller still wants a hard navigate to
+    /// pick up cookies for the new domain; in MAUI the WebView never reloads,
+    /// so a regular Nav.NavigateTo("/login") is enough once BaseAddress flipped.</summary>
+    public async Task SetCurrentAsync(string serverId, CancellationToken ct = default)
+    {
+        if (_servers.All(s => s.ServerId != serverId)) return;
+        if (_currentServerId == serverId) return;
+        _currentServerId = serverId;
+        await PersistAsync(ct);
+        ApplyCurrentToHttp();
+        OnChange?.Invoke();
+    }
+
+    /// <summary>Clear the registry. Used by the "remove all servers" path —
+    /// not exposed in the UI but useful for tests and debug.</summary>
+    public async Task ClearAsync(CancellationToken ct = default)
+    {
+        _servers.Clear();
+        _currentServerId = null;
+        await PersistAsync(ct);
+        OnChange?.Invoke();
+    }
+
+    // ─── Internals ──────────────────────────────────────────────────────
+
+    private async Task PersistAsync(CancellationToken ct)
+    {
+        try
+        {
+            var blob = new RegistryBlob(_servers.ToList(), _currentServerId);
+            var json = JsonSerializer.Serialize(blob, JsonOpts);
+            await _js.InvokeVoidAsync("localStorage.setItem", ct, StorageKey, json);
+        }
+        catch
+        {
+            // localStorage write can fail in prerender or Safari private mode.
+            // The registry stays correct in-memory; next reload may rehydrate
+            // from a stale blob, which is preferable to crashing the UI.
+        }
+    }
+
+    /// <summary>Trim trailing slash, force scheme. Used so two adds for
+    /// "http://x/" and "http://x" don't dedupe via string compare even though
+    /// ServerId already protects against that.</summary>
+    private static string NormaliseUrl(string raw)
+    {
+        var trimmed = raw.Trim().TrimEnd('/');
+        if (trimmed.Contains("://", StringComparison.Ordinal)) return trimmed;
+        // Bare hostname/IP entered manually — default to http://.
+        return "http://" + trimmed;
+    }
+
+    /// <summary>
+    /// Point <see cref="ServerAddressProvider"/> at <see cref="Current"/>'s
+    /// URL so subsequent API calls — composed against HttpClient's placeholder
+    /// BaseAddress and then rewritten by <see cref="ServerAddressHandler"/>
+    /// just before send — hit the chosen server. No-op when Current is null
+    /// or when the provider is already pointed at the right authority.
+    ///
+    /// Trailing slash matters: when Uri composes against a base, the segment
+    /// before the last `/` is treated as a directory and anything past it as
+    /// the file. Without the slash, "/api/me" gets resolved as a sibling of
+    /// the server URL's last path segment and the path drops on the floor.
+    /// </summary>
+    private void ApplyCurrentToHttp()
+    {
+        var cur = Current;
+        if (cur is null) return;
+
+        var target = new Uri(cur.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+
+        if (_addr.Current is not null &&
+            string.Equals(_addr.Current.GetLeftPart(UriPartial.Authority),
+                          target.GetLeftPart(UriPartial.Authority),
+                          StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _addr.Current = target;
+    }
+
+    /// <summary>Serialisable shape — owns both the list and the
+    /// currently-selected ID so localStorage carries everything we need.</summary>
+    private sealed record RegistryBlob(
+        List<RegisteredServerDto>? Servers,
+        string?                    CurrentServerId);
+}

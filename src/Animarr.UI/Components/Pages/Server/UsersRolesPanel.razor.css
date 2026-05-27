@@ -1,0 +1,371 @@
+/* ============================================================
+   Server Settings → Users & Roles tab.
+   Spec: screens-v4.jsx 709-907.
+   ============================================================ */
+
+.d-srv-users { display: flex; flex-direction: column; gap: 18px; }
+
+/* ── Segmented Users / Roles ─────────────────────────────── */
+.d-srv-users__segment {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: fit-content;
+}
+
+.d-srv-users__seg-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 7px 16px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    color: var(--text-dim);
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.d-srv-users__seg-item:hover { color: var(--text); }
+.d-srv-users__seg-item.is-active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+/* ── Card shell (shared by sub-views) ────────────────────── */
+.d-srv-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.d-srv-card__head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.d-srv-card__title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    letter-spacing: -0.3px;
+    color: var(--text);
+    margin: 0;
+}
+
+.d-srv-card__sub {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.55;
+}
+
+.d-srv-card__actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+}
+
+/* ── Users list rows ─────────────────────────────────────── */
+.d-srv-users__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.d-srv-users__row {
+    display: grid;
+    grid-template-columns: 44px 1fr 110px 90px auto;
+    gap: 14px;
+    align-items: center;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+
+.d-srv-users__row-text { min-width: 0; }
+
+.d-srv-users__row-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.d-srv-users__row-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.d-srv-users__row-seen {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    text-align: right;
+}
+
+.d-srv-users__row-actions {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.d-srv-users__icon-btn {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 6px;
+    color: var(--text-faint);
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.d-srv-users__icon-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+
+/* Initial-load spinner — replaces the users/roles list while the first
+   batch is in-flight so the segmented control doesn't sit on an empty card. */
+.d-srv-users__loading {
+    display: grid;
+    place-items: center;
+    padding: 60px 0;
+}
+
+/* ── Roles list rows ─────────────────────────────────────── */
+.d-srv-roles__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.d-srv-roles__row {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+}
+
+.d-srv-roles__row-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.d-srv-roles__icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+.d-srv-roles__icon.is-builtin {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--accent-hi);
+}
+
+.d-srv-roles__row-text { flex: 1; min-width: 0; }
+
+.d-srv-roles__row-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.d-srv-roles__row-builtin {
+    margin-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+}
+
+.d-srv-roles__row-desc {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+.d-srv-roles__row-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+
+.d-srv-roles__perms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.d-srv-roles__folders {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-left: auto;
+    letter-spacing: 0.4px;
+}
+
+/* ── User builder form ──────────────────────────────────── */
+.d-srv-users__form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 639px) {
+    .d-srv-users__form-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Role builder form ──────────────────────────────────── */
+.d-srv-form__col {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+.d-srv-form__block { display: flex; flex-direction: column; gap: 10px; }
+
+.d-srv-form__block-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+}
+
+.d-srv-form__perms {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.d-srv-form__perm {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.d-srv-form__perm-title {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.d-srv-form__perm-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    line-height: 1.45;
+}
+
+.d-srv-form__segment {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    width: fit-content;
+}
+
+.d-srv-form__seg-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.d-srv-form__seg-item.is-active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+.d-srv-form__folders {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.d-srv-form__folder {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text);
+    transition: border-color var(--motion-fast);
+}
+.d-srv-form__folder.is-active {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+}
+.d-srv-form__folder input[type="checkbox"] {
+    accent-color: var(--accent);
+}
+
+/* Shown when the user picks "Selected only" but no section folders exist
+   yet — points them to Settings → Folders to define some. */
+.d-srv-form__folder-empty {
+    grid-column: 1 / -1;
+    padding: 14px 12px;
+    background: var(--bg-1);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-card);
+    color: var(--text-faint);
+    font-size: 12.5px;
+    text-align: center;
+}
+
+/* ── Mobile collapse ─────────────────────────────────────── */
+@media (max-width: 639px) {
+    .d-srv-users__row {
+        grid-template-columns: 36px 1fr auto;
+        grid-template-areas:
+            "avatar  text   actions"
+            "pill    pill   seen";
+        gap: 10px;
+    }
+    .d-srv-users__row > :nth-child(1) { grid-area: avatar; }
+    .d-srv-users__row > :nth-child(2) { grid-area: text; }
+    .d-srv-users__row > :nth-child(3) { grid-area: pill; justify-self: start; }
+    .d-srv-users__row > :nth-child(4) { grid-area: seen; }
+    .d-srv-users__row > :nth-child(5) { grid-area: actions; }
+}

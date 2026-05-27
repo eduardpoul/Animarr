@@ -24,6 +24,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 @inject ThemeService ThemeService
+@inject LocalizationService Loc
 
 @using Microsoft.AspNetCore.SignalR.Client
 
@@ -47,7 +48,8 @@
         <TopBar ActiveDownloads="_activeDownloads"
                 LlmDone="_llmDone" LlmTotal="_llmTotal"
                 FolderNames="@_folderNames"
-                OnProfileClickEvent="@(() => _profileOpen = true)"
+                OnProfileClickEvent="@(() => OpenProfile(null))"
+                OnServerClickEvent="@(() => OpenProfile("server"))"
                 OnLlmClickEvent="@(() => _llmOpen = true)" />
 
         <MobileShell ActiveDownloads="_activeDownloads"
@@ -62,6 +64,7 @@
     @if (_profileOpen && UserCtx.Me is not null)
     {
         <ProfilePanel IsOpen="_profileOpen"
+                      InitialTab="@_profileInitialTab"
                       OnCloseEvent="@(() => _profileOpen = false)" />
     }
 
@@ -91,9 +94,20 @@
     private int _llmDone;
     private int _llmTotal;
     private bool _profileOpen;
+    /// <summary>v5 multi-server: when the TopBar server pill opens the
+    /// ProfilePanel we pre-focus the Identity tab (where the Server section
+    /// lives). null = default tab.</summary>
+    private string? _profileInitialTab;
+
+    private void OpenProfile(string? tab)
+    {
+        _profileInitialTab = tab;
+        _profileOpen = true;
+    }
     private bool _llmOpen;
     private bool _everywhereBackdropStarted;
     private HubConnection? _hub;
+    private HubConnection? _identHub;
     private string[] _folderNames = Array.Empty<string>();
     private readonly List<ToastInfo> _toasts = new();
     private const int ToastAutoDismissMs = 4000;
@@ -132,36 +146,83 @@
         }
         catch { }
 
-        // 2. Boot auth state. After this resolves, we know whether to redirect
-        //    or stay on the current route.
+        // 2. Boot auth probe — /api/auth/status (anonymous-safe) then /api/me
+        //    if the cookie is valid.
         await UserCtx.LoadAsync();
 
-        // 3. Route guard — anonymous users go to /welcome (or /setup on first run).
-        var current = new Uri(Nav.Uri).AbsolutePath;
-        var isAuthRoute = current.StartsWith("/welcome", StringComparison.OrdinalIgnoreCase)
-                       || current.StartsWith("/login",   StringComparison.OrdinalIgnoreCase)
-                       || current.StartsWith("/setup",   StringComparison.OrdinalIgnoreCase);
-
-        if (UserCtx.AuthStatus is { SetupRequired: true } && !current.StartsWith("/setup"))
+        // 2a. Apply user's saved interface language. Web.Client preloads "en"
+        //     at boot; once we know the user's actual preference, hot-swap it.
+        //     Loc.LoadAsync transparently falls back to en.json if the pack
+        //     file is missing, so unconfigured languages don't break the UI.
+        var prefLang = UserCtx.Preferences?.Language;
+        if (!string.IsNullOrEmpty(prefLang) && prefLang != "en")
         {
-            Nav.NavigateTo("/setup", replace: true);
-            return;
+            try { await Loc.LoadAsync(prefLang); } catch { /* keep English */ }
         }
-        if (!UserCtx.IsAuthenticated && !isAuthRoute)
+
+        // 2b. Apply user's chosen personality theme. index.html paints a
+        //     bootstrap data-theme from localStorage so first paint matches
+        //     last session; this call reconciles with the server-stored
+        //     preference in case the user switched theme on another device.
+        var prefTheme = UserCtx.Preferences?.Theme;
+        if (!string.IsNullOrEmpty(prefTheme))
+        {
+            try { await JS.InvokeVoidAsync("animarr_setTheme", prefTheme); } catch { }
+        }
+        // Same idea for accent hue — server is the truth.
+        var prefHue = UserCtx.Preferences?.AccentHue;
+        if (prefHue is int hue && hue >= 0 && hue < 360)
+        {
+            try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+        }
+
+        // 3. Route guard. Pages with @layout AuthLayout (Welcome / Login /
+        //    Setup) skip this whole block — they're rendered by the router
+        //    against AuthLayout, not MainLayout. Anyone hitting an
+        //    auth-required route while anonymous gets bounced to /welcome,
+        //    which acts as the public landing page. Welcome itself routes
+        //    the user onward to /setup (first-run) or /login (returning) via
+        //    its START button — we don't short-circuit straight to /setup
+        //    here so the marketing copy is always shown at least once.
+        if (!UserCtx.IsAuthenticated)
         {
             Nav.NavigateTo("/welcome", replace: true);
             return;
         }
 
-        // 4. Authenticated: apply preferences, start backdrop, fetch folder names, hub.
         if (UserCtx.IsAuthenticated)
         {
             await ApplyAccentHueToDomAsync();
             await StartBackdropAsync();
             await LoadFolderNamesAsync();
             await StartTorrentHubAsync();
+            await StartIdentificationHubAsync();
+            await RefreshIdentificationStatusAsync();
             StateHasChanged();
         }
+    }
+
+    /// <summary>Recompute LLM popup counters (_llmDone, _llmTotal, recent list)
+    /// from a single /api/identification-queue snapshot. Called on initial
+    /// mount and on every QueueChanged hub broadcast.</summary>
+    private async Task RefreshIdentificationStatusAsync()
+    {
+        try
+        {
+            var entries = await Api.GetIdentificationQueueAsync();
+            _llmTotal = entries.Length;
+            _llmDone  = entries.Count(e =>
+                e.Status == IdentificationQueueStatus.Done ||
+                e.Status == IdentificationQueueStatus.Failed);
+            _recentIdentifications = entries
+                .Where(e => e.Status == IdentificationQueueStatus.Done && e.ProcessedAt is not null)
+                .OrderByDescending(e => e.ProcessedAt!.Value)
+                .Take(5)
+                .Select(e => new LLMStatusPopup.RecentItem(e.FolderLabel, 0.92))
+                .ToList();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* offline — popup just shows 0/0 */ }
     }
 
     private async Task ApplyAccentHueToDomAsync()
@@ -225,6 +286,21 @@
         try { await _hub.StartAsync(); } catch { }
     }
 
+    /// <summary>Identification hub — broadcasts QueueChanged on every status
+    /// transition inside the LLM/metadata pipeline. We just refetch the snapshot
+    /// rather than diff-mutating local state; the popup re-render is cheap and
+    /// the queue rarely exceeds ~50 rows in practice.</summary>
+    private async Task StartIdentificationHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubIdentification);
+        _identHub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
+        {
+            InvokeAsync(RefreshIdentificationStatusAsync);
+        });
+        try { await _identHub.StartAsync(); } catch { }
+    }
+
     public async ValueTask DisposeAsync()
     {
         UserCtx.OnChange -= OnUserCtxChanged;
@@ -232,6 +308,7 @@
         L.LanguageChanged -= OnLanguageChanged;
         Toasts.OnShow -= OnToastShown;
         if (_hub is not null) await _hub.DisposeAsync();
+        if (_identHub is not null) await _identHub.DisposeAsync();
         if (_everywhereBackdropStarted)
             try { await JS.InvokeVoidAsync("stopBackdrop"); } catch { }
     }

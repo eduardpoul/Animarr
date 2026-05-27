@@ -1,0 +1,88 @@
+/* ============================================================
+   Anime — soft, dreamy, sparkly.
+
+   Dark plum background with a 135° gradient surface, pastel pink
+   accent, Quicksand everywhere (friendly rounded sans). Sparkles
+   layer dusts the page with tiny white radial dots. Radii bumped
+   to feel pillowy. Sentence case throughout — no shouting.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="anime"] {
+    /* ── Backgrounds — plum + gradient surface ────────────── */
+    --bg-0:        #1c1320;
+    --bg-1:        #221629;
+    --surface:     linear-gradient(135deg, #2a1830, #1c1320);
+    --surface-2:   linear-gradient(135deg, #311c38, #211528);
+    --surface-3:   linear-gradient(135deg, #3a2342, #261830);
+
+    /* ── Borders — faint pink ─────────────────────────────── */
+    --border:        rgba(255, 200, 230, 0.10);
+    --border-strong: rgba(255, 200, 230, 0.20);
+
+    /* ── Text — soft cream ────────────────────────────────── */
+    --text:       #f8e8f0;
+    --text-dim:   #c8b0c0;
+    --text-faint: #806878;
+
+    /* ── Accent — pastel pink ─────────────────────────────── */
+    --accent-hue:  350;
+    --accent:      oklch(0.80 0.13 var(--accent-hue));
+    --accent-hi:   oklch(0.86 0.14 var(--accent-hue));
+    --accent-soft: oklch(0.80 0.13 var(--accent-hue) / 0.20);
+    --accent-line: oklch(0.80 0.13 var(--accent-hue) / 0.45);
+
+    /* ── Semantic — keep them pastel too ──────────────────── */
+    --success: oklch(0.80 0.13 155);
+    --warn:    oklch(0.85 0.13  75);
+    --info:    oklch(0.80 0.10 250);
+
+    /* ── Typography — Quicksand everywhere ────────────────── */
+    --font-ui:      'Quicksand', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Quicksand', system-ui, sans-serif;
+
+    /* ── Labels — sentence case, no tracking ──────────────── */
+    --label-casing: none;
+    --label-tracking: 0;
+
+    /* ── Decoration flags ─────────────────────────────────── */
+    --decor-sparkles: block;
+
+    /* ── Radii — rounder cards, pill stays pill ───────────── */
+    --radius-badge:   8px;
+    --radius-ctrl:   12px;
+    --radius-chip:   14px;
+    --radius-card:   18px;
+    --radius-card-lg: 20px;
+    --radius-panel:  22px;
+    --radius-hero:   26px;
+    --radius-modal:  28px;
+    /* --radius-pill stays 9999 from :root */
+
+    /* ── Shadows — soft + pink-tinted ─────────────────────── */
+    --shadow-card:    0 12px 32px -18px rgba(255, 126, 182, 0.30),
+                      inset 0 0 0 1px rgba(255, 200, 230, 0.06);
+    --shadow-card-hi: 0 18px 40px -16px rgba(255, 126, 182, 0.42),
+                      inset 0 0 0 1px rgba(255, 200, 230, 0.10);
+}
+
+/* ── Sparkle dust layer (Anime-only decoration) ──────────
+   Six radial-gradient dots scattered across the viewport. Fixed
+   position, very low opacity, won't block clicks. */
+[data-theme="anime"] body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.55;
+    background-image:
+        radial-gradient(circle at  8% 15%, rgba(255, 230, 245, 0.50) 0, transparent 3px),
+        radial-gradient(circle at 22% 88%, rgba(255, 230, 245, 0.40) 0, transparent 4px),
+        radial-gradient(circle at 78% 22%, rgba(255, 230, 245, 0.50) 0, transparent 3px),
+        radial-gradient(circle at 92% 70%, rgba(255, 230, 245, 0.55) 0, transparent 4px),
+        radial-gradient(circle at 50% 50%, rgba(255, 230, 245, 0.30) 0, transparent 2px),
+        radial-gradient(circle at 35% 35%, rgba(255, 230, 245, 0.40) 0, transparent 3px),
+        radial-gradient(circle at 65% 78%, rgba(255, 230, 245, 0.35) 0, transparent 3px);
+    background-size: 100% 100%;
+}

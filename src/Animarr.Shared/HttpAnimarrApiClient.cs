@@ -441,6 +441,8 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         if (!string.IsNullOrEmpty(q.Search))   args.Add($"search={Uri.EscapeDataString(q.Search)}");
         if (q.Type is not null)                args.Add($"type={q.Type}");
         if (q.FolderId is not null)            args.Add($"folderId={q.FolderId}");
+        if (!string.IsNullOrEmpty(q.Category)) args.Add($"category={Uri.EscapeDataString(q.Category)}");
+        if (q.CategoryId is not null)          args.Add($"categoryId={q.CategoryId}");
         if (q.Skip is not null)                args.Add($"skip={q.Skip}");
         if (q.Take is not null)                args.Add($"take={q.Take}");
         if (!string.IsNullOrEmpty(q.Sort))     args.Add($"sort={Uri.EscapeDataString(q.Sort)}");
@@ -463,6 +465,37 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         using var resp = await _http.PostAsJsonAsync(url, body, JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<TResp>(JsonOpts, ct))!;
+    }
+
+    // ─── Server identity (v5 multi-server) ───────────────────────────────
+
+    /// <summary>Probe an arbitrary server URL for its ServerInfoDto. Builds a
+    /// throwaway <see cref="HttpClient"/> bound to <paramref name="baseUrl"/>
+    /// because the registry probes *other* servers, not this client's bound one.
+    /// 4-second timeout — a non-responding server should fall out of the
+    /// discovery list quickly, not block the UI.
+    /// Returns null on any failure (timeout / 4xx / non-JSON response) so the
+    /// UI can show "unreachable" without try/catch noise.</summary>
+    public async Task<ServerInfoDto?> GetServerInfoAsync(string baseUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return null;
+        Uri uri;
+        try { uri = new Uri(baseUrl, UriKind.Absolute); }
+        catch { return null; }
+
+        using var probeClient = new HttpClient
+        {
+            BaseAddress = uri,
+            Timeout     = TimeSpan.FromSeconds(4),
+        };
+        try
+        {
+            return await probeClient.GetFromJsonAsync<ServerInfoDto>(ApiRoutes.ServerInfo, JsonOpts, ct);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // ─── Auth + per-user (v4) ────────────────────────────────────────────
@@ -492,6 +525,34 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
     }
 
+    // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
+
+    public async Task<PairInitDto> InitPairAsync(PairInitRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.PairInit, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<PairInitDto>(JsonOpts, ct))!;
+    }
+
+    public async Task<PairPollDto> PollPairAsync(string code, CancellationToken ct = default)
+    {
+        var url = $"{ApiRoutes.PairPoll}?code={Uri.EscapeDataString(code)}";
+        // Cookie may arrive via Set-Cookie on the same response that flips
+        // status to "confirmed" — HttpClient's default cookie handling
+        // (or CookieContainer in MAUI) stores it transparently.
+        return (await _http.GetFromJsonAsync<PairPollDto>(url, JsonOpts, ct))
+            ?? new PairPollDto("expired", null);
+    }
+
+    public async Task<bool> ConfirmPairAsync(ConfirmPairRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.PairConfirm, request, JsonOpts, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
+            return false;
+        resp.EnsureSuccessStatusCode();
+        return true;
+    }
+
     public Task<MeDto?> GetMeAsync(CancellationToken ct = default)
         => GetOrNullAsync<MeDto>(ApiRoutes.Me, ct);
 
@@ -518,6 +579,80 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.MePassword, request, JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
     }
+
+    public async Task<UserDto> UpdateMyProfileAsync(UpdateMyProfileRequest request, CancellationToken ct = default)
+    {
+        // PATCH — same pattern as UpdateMyPreferencesAsync since HttpClient
+        // doesn't ship a PatchAsJsonAsync extension. JsonOpts skip null fields
+        // so "leave alone" semantics survive the wire trip.
+        using var msg = new HttpRequestMessage(HttpMethod.Patch, ApiRoutes.MeProfile)
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct))!;
+    }
+
+    // ─── PIN (v5 per-user-per-device fast switch) ─────────────────────────
+
+    public async Task SetMyPinAsync(SetPinRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MePin, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task ClearMyPinAsync(ClearPinRequest request, CancellationToken ct = default)
+    {
+        // DELETE with body — HttpClient lets us attach JsonContent on a custom
+        // HttpRequestMessage. The server reads the payload to re-verify the
+        // current password before clearing the hash.
+        using var msg = new HttpRequestMessage(HttpMethod.Delete, ApiRoutes.MePin)
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<UserDto?> SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthSwitchUser, request, JsonOpts, ct);
+        // 401 = "wrong PIN" — surface as null so the keypad UI shows its
+        // error state without try/catch. 404 = target user vanished
+        // (admin deleted them mid-flow) — same null treatment.
+        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
+            return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
+    }
+
+    // ─── Per-user favorites + continue watching (v5) ─────────────────────
+
+    public async Task AddFavoriteAsync(Guid mediaItemId, CancellationToken ct = default)
+    {
+        // POST is empty-body — server only needs the id from the route.
+        using var resp = await _http.PostAsync(
+            ApiRoutes.MeFavorite.Replace("{mediaItemId}", mediaItemId.ToString()),
+            content: null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task RemoveFavoriteAsync(Guid mediaItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(
+            ApiRoutes.MeFavorite.Replace("{mediaItemId}", mediaItemId.ToString()), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<Guid[]> GetFavoriteIdsAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<Guid[]>(ApiRoutes.MeFavorites, JsonOpts, ct))
+            ?? Array.Empty<Guid>();
+
+    public async Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<ContinueWatchItemDto[]>(
+                $"{ApiRoutes.MeContinue}?take={take}", JsonOpts, ct))
+            ?? Array.Empty<ContinueWatchItemDto>();
 
     // ─── User + Role admin ──────────────────────────────────────────────
 
@@ -566,6 +701,46 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task DeleteRoleAsync(Guid id, CancellationToken ct = default)
     {
         using var resp = await _http.DeleteAsync(ApiRoutes.Role(id), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    // ─── Categories ──────────────────────────────────────────────────────
+
+    public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<CategoryDto[]>(ApiRoutes.Categories, JsonOpts, ct))
+            ?? Array.Empty<CategoryDto>();
+
+    public Task<CategoryDto> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken ct = default)
+        => PostForJsonAsync<CreateCategoryRequest, CategoryDto>(ApiRoutes.Categories, request, ct);
+
+    public async Task<CategoryDto> UpdateCategoryAsync(Guid id, UpdateCategoryRequest request, CancellationToken ct = default)
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Patch, ApiRoutes.Category(id))
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        using var resp = await _http.SendAsync(msg, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<CategoryDto>(JsonOpts, ct))!;
+    }
+
+    public async Task DeleteCategoryAsync(Guid id, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.Category(id), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task RescanCategoriesAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.CategoryRescan, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task SetMediaCategoriesAsync(Guid mediaItemId, Guid[] categoryIds, CancellationToken ct = default)
+    {
+        var url = ApiRoutes.MediaCategories.Replace("{id}", mediaItemId.ToString());
+        using var resp = await _http.PutAsJsonAsync(url,
+            new SetMediaCategoriesRequest(categoryIds), JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
     }
 }

@@ -73,6 +73,20 @@ public sealed record MediaItemDto
 
     /// <summary>Tag IDs the item belongs to (matches <see cref="MediaTagDto.Id"/>).</summary>
     public Guid[] TagIds { get; init; } = Array.Empty<Guid>();
+
+    /// <summary>Category IDs the item belongs to (matches <see cref="CategoryDto.Id"/>).
+    /// Lets the Home chip filter match without a second round-trip.</summary>
+    public Guid[] CategoryIds { get; init; } = Array.Empty<Guid>();
+
+    /// <summary>Category display names — same order as <see cref="CategoryIds"/>.
+    /// Convenience for chip rendering without re-fetching the category list.</summary>
+    public string[] CategoryNames { get; init; } = Array.Empty<string>();
+
+    /// <summary>True when the current user has starred this title. Per-user
+    /// (v5) — the catalog projection joins <c>UserFavorite</c> on the request
+    /// IUserContext so each user sees their own ★ state. Anonymous requests
+    /// always see false.</summary>
+    public bool IsFavorite { get; init; }
 }
 
 public sealed record SeasonMetaDto(

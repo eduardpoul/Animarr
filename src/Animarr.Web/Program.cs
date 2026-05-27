@@ -41,6 +41,11 @@ builder.Services.AddSingleton<MediaCachePaths>();
 
 // App services
 builder.Services.AddScoped<SeedDataService>();
+builder.Services.AddScoped<CategorySeedService>();
+// Singleton OK — the classifier opens short-lived contexts via IDbContextFactory
+// and resolves scoped services (IAppConfigService, ILlmService) through
+// IServiceScopeFactory on each call.
+builder.Services.AddSingleton<CategoryClassifierService>();
 builder.Services.AddSingleton<IPatternMatchService, PatternMatchService>();
 builder.Services.AddScoped<IRenameService, RenameService>();
 builder.Services.AddScoped<IAppConfigService, AppConfigService>();
@@ -93,6 +98,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationQueu
 // (/hubs/torrents, /hubs/identification) are scoped under /hubs so they
 // don't collide with /api/* or the WASM SPA fallback.
 builder.Services.AddSignalR();
+
+// v5 Phase 7 TV pairing: holds pending pair codes (5min TTL) so a phone can
+// authorise a TV without the TV typing credentials. Single-server only.
+builder.Services.AddMemoryCache();
 
 // ─── v4 auth: cookie session + per-request user context ────────────────
 builder.Services.AddHttpContextAccessor();
@@ -148,6 +157,11 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcas
 builder.Services.AddSingleton<IdentificationHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationHubBroadcaster>());
 
+// v5 multi-server: publish _animarr._tcp on the LAN so the Discovery page
+// can find this install without manual URL entry. Hosted service — soft-fails
+// when multicast isn't available (Docker bridge, restricted NICs, etc.).
+builder.Services.AddHostedService<MdnsPublisherService>();
+
 var app = builder.Build();
 
 // Apply EF Core migrations on startup. Skipped only when the DB is already up-to-date
@@ -171,6 +185,11 @@ using (var scope = app.Services.CreateScope())
     // /setup wizard) references these by name.
     var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
     await auth.EnsureBuiltInRolesAsync();
+
+    // Seed built-in categories (Movies/Serials/Anime/Donghua/Dorama/Multi/Kids).
+    // Idempotent — only inserts categories whose names aren't already present.
+    var categories = scope.ServiceProvider.GetRequiredService<CategorySeedService>();
+    await categories.EnsureSeedAsync();
 }
 
 // Appearance settings (language, theme, accent) are loaded client-side now
@@ -213,7 +232,9 @@ app.UseAuthorization();
 // Each endpoint group backs one slice of the IAnimarrApiClient contract that
 // Animarr.UI / Animarr.Web.Client / Animarr.App all consume.
 app.MapAuthEndpoints();
+app.MapPairEndpoints();
 app.MapUsersEndpoints();
+app.MapCategoryEndpoints();
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();
@@ -223,6 +244,8 @@ app.MapMediaTagEndpoints();
 app.MapAppConfigEndpoints();
 app.MapSearchEndpoints();
 app.MapDlnaCastEndpoints();
+// v5 multi-server: anonymous /api/server/info probe used by Discovery.
+app.MapServerInfoEndpoints();
 
 // SignalR hubs — push-only telemetry for torrents + identification queue.
 app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents);

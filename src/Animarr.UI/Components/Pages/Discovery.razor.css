@@ -1,0 +1,376 @@
+/* ============================================================
+   Discovery — v5 multi-server picker. Shares card aesthetic with
+   Login/Setup (see Login.razor.css). Tokens only — no hard-coded colors.
+   ============================================================ */
+
+.d-discovery {
+    position: relative;
+    z-index: 2;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 60px 22px;
+}
+
+.d-discovery__back {
+    position: absolute;
+    top: 22px; left: 22px;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 7px 14px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    backdrop-filter: blur(10px);
+}
+.d-discovery__back:hover { color: var(--text); }
+
+.d-discovery__card {
+    width: 480px;
+    max-width: 100%;
+    padding: 28px 26px 24px;
+    background: linear-gradient(180deg, rgba(21, 17, 14, 0.85), rgba(15, 12, 10, 0.85));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+}
+
+/* ── Brand row ─────────────────────────────────────────────── */
+.d-discovery__brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.d-discovery__brand-mark {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue, 25)));
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 19px;
+}
+
+.d-discovery__brand-name {
+    font-family: var(--font-display);
+    font-size: 17px;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    color: var(--text);
+}
+
+.d-discovery__brand-sub {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 4px;
+    letter-spacing: 0.3px;
+    text-transform: var(--label-casing, none);
+}
+
+/* ── Scanning state ────────────────────────────────────────── */
+.d-discovery__scanning {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 26px 8px 12px;
+    color: var(--text-dim);
+    font-size: 13.5px;
+}
+
+.d-discovery__scanning-label { line-height: 1.45; }
+
+.d-discovery__dots {
+    display: inline-block;
+    min-width: 18px;
+    text-align: left;
+    color: var(--accent-hi);
+    font-family: var(--font-mono);
+}
+
+.d-discovery__scan-hint {
+    margin-top: 6px;
+    padding: 0 8px 4px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent-hi);
+    letter-spacing: 0.4px;
+    text-transform: var(--label-casing, none);
+}
+
+/* ── Found state ──────────────────────────────────────────── */
+.d-discovery__found-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    text-transform: var(--label-casing, none);
+}
+
+.d-discovery__server-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+/* Server card — 88px tall per spec, hover lifts background. */
+.d-discovery__server {
+    appearance: none;
+    cursor: pointer;
+    width: 100%;
+    min-height: 88px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    text-align: left;
+    background: rgba(20, 15, 12, 0.55);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: inherit;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-discovery__server:hover {
+    background: rgba(20, 15, 12, 0.85);
+    border-color: var(--border-strong);
+}
+
+.d-discovery__server-ic {
+    width: 36px; height: 36px;
+    border-radius: 9px;
+    background: var(--surface-3);
+    color: var(--accent-hi);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
+.d-discovery__server-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.d-discovery__server-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.d-discovery__server-meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+    word-break: break-all;
+}
+
+.d-discovery__server-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: oklch(0.74 0.16 145);
+    box-shadow: 0 0 8px oklch(0.74 0.16 145 / 0.7);
+    margin-right: 6px;
+    vertical-align: 1px;
+}
+
+.d-discovery__server-right {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    flex-shrink: 0;
+    text-transform: var(--label-casing, none);
+}
+
+/* ── Empty state ──────────────────────────────────────────── */
+.d-discovery__empty-ic {
+    width: 54px;
+    height: 54px;
+    margin: 22px auto 14px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--warn, oklch(0.75 0.10 70));
+    display: grid;
+    place-items: center;
+}
+
+.d-discovery__empty-title {
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 21px;
+    letter-spacing: -0.4px;
+    color: var(--text);
+}
+
+.d-discovery__empty-body {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 8px auto 16px;
+    max-width: 360px;
+}
+
+.d-discovery__gh {
+    display: block;
+    text-align: center;
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+    text-decoration: none;
+}
+.d-discovery__gh:hover { color: var(--text-dim); }
+
+/* ── Actions row ──────────────────────────────────────────── */
+.d-discovery__actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+}
+.d-discovery__actions--centered { justify-content: center; }
+
+/* ── Manual add form ──────────────────────────────────────── */
+.d-discovery__manual {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.d-discovery__manual-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.5px;
+    text-transform: var(--label-casing, none);
+}
+
+.d-discovery__manual-input {
+    /* Block-level field — fill the manual card's content box so the placeholder
+       (a 50-char URL) doesn't get clipped by the inline default sizing the
+       WebView falls back to when width isn't set. box-sizing keeps the
+       border + padding inside the 100% allotment so the input doesn't push
+       past the card edge. */
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    height: 38px;
+    padding: 0 12px;
+    transition: border-color var(--motion-fast);
+}
+.d-discovery__manual-input:focus {
+    outline: 0;
+    border-color: var(--accent-line);
+}
+.d-discovery__manual-input::placeholder {
+    color: var(--text-faint);
+    font-size: 12px;
+}
+
+.d-discovery__manual-error {
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 8px 10px;
+    background: oklch(0.78 0.16 75 / 0.08);
+    border: 1px solid oklch(0.78 0.16 75 / 0.25);
+    border-radius: 8px;
+}
+
+.d-discovery__manual-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+/* ── Footer ───────────────────────────────────────────────── */
+.d-discovery__footer {
+    position: absolute;
+    bottom: 22px; right: 22px;
+}
+.d-discovery__footer-link {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+    text-decoration: none;
+}
+.d-discovery__footer-link:hover { color: var(--text-dim); }
+
+/* ── Mobile (≤639px) ──────────────────────────────────────
+   Two layout fixes vs. desktop:
+
+   1. The card centres on both axes by default (`place-items: center`).
+      On a tall phone viewport that leaves a huge dead zone above the
+      card. Drop the vertical centring (`start center`) so the card
+      sits near the top, just below the BACK button.
+
+   2. The server card meta row (`hostname · N titles · vX.Y`) word-wraps
+      mid-segment on narrow widths. Switch to break-word so the URL
+      breaks at slash/dash boundaries, and tighten the right-side
+      "connect" label so the row collapses neatly. */
+@media (max-width: 639px) {
+    .d-discovery {
+        place-items: start center;
+        padding: 80px 16px 32px;
+    }
+    .d-discovery__card {
+        padding: 22px 18px 18px;
+    }
+    .d-discovery__back {
+        top: 16px; left: 16px;
+    }
+    .d-discovery__footer {
+        position: static;
+        text-align: center;
+        margin-top: 20px;
+    }
+    .d-discovery__server {
+        min-height: 76px;
+        padding: 12px 12px;
+        gap: 10px;
+    }
+    .d-discovery__server-meta {
+        word-break: break-word;
+    }
+    .d-discovery__server-right {
+        display: none;
+    }
+    .d-discovery__actions {
+        flex-wrap: wrap;
+    }
+}

@@ -19,6 +19,8 @@ namespace Animarr.Web.Endpoints;
 /// SQL level and returns lean projections that the catalog grid renders
 /// without further server round-trips.
 /// </summary>
+using Animarr.Web.Services.Auth;
+
 internal static class MediaEndpoints
 {
     public static IEndpointRouteBuilder MapMediaEndpoints(this IEndpointRouteBuilder app)
@@ -28,14 +30,26 @@ internal static class MediaEndpoints
             string? search,
             SharedEnums.MediaItemType? type,
             Guid? folderId,
+            string? category,
+            Guid? categoryId,
             int? skip,
             int? take,
             string? sort,
             IDbContextFactory<AppDbContext> dbFactory,
+            Animarr.Web.Services.Auth.IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var q = db.MediaItems.Include(m => m.Tags).AsQueryable();
+            var q = db.MediaItems
+                .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
+                .AsQueryable();
+
+            // v4 per-user filter — if the caller's role has a folder allowlist,
+            // hide every MediaItem whose FolderId isn't in it. Built-in roles
+            // (Master, User) leave FoldersJson empty → no filter.
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            q = q.ApplyRoleFolderFilter(me?.Role);
 
             if (type is not null)
                 q = q.Where(m => (int)m.MediaType == (int)type.Value);
@@ -53,6 +67,14 @@ internal static class MediaEndpoints
             {
                 q = q.Where(m => m.Tags.Any(t => t.MediaTag.Name == tag));
             }
+            if (categoryId is not null)
+            {
+                q = q.Where(m => m.Categories.Any(c => c.CategoryId == categoryId.Value));
+            }
+            else if (!string.IsNullOrWhiteSpace(category))
+            {
+                q = q.Where(m => m.Categories.Any(c => c.Category!.Name == category));
+            }
 
             q = sort switch
             {
@@ -66,19 +88,39 @@ internal static class MediaEndpoints
             if (take is not null) q = q.Take(take.Value);
 
             var rows = await q.ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+            // Per-user IsFavorite — one query for the whole list, then
+            // O(1) HashSet lookups during projection.
+            HashSet<Guid>? favIds = null;
+            if (userCtx.CurrentUserId is Guid uid)
+            {
+                favIds = (await db.UserFavorites
+                    .Where(f => f.UserId == uid)
+                    .Select(f => f.MediaItemId)
+                    .ToListAsync(ct)).ToHashSet();
+            }
+            return Results.Ok(rows.Select(r => r.ToDto(favIds)).ToArray());
         });
 
         app.MapGet(ApiRoutes.MediaById, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var row = await db.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
-            return row is null ? Results.NotFound() : Results.Ok(row.ToDto());
+            if (row is null) return Results.NotFound();
+            HashSet<Guid>? favIds = null;
+            if (userCtx.CurrentUserId is Guid uid)
+            {
+                var isFav = await db.UserFavorites
+                    .AnyAsync(f => f.UserId == uid && f.MediaItemId == id, ct);
+                if (isFav) favIds = new HashSet<Guid> { id };
+            }
+            return Results.Ok(row.ToDto(favIds));
         });
 
         app.MapPut(ApiRoutes.MediaById, async (
@@ -90,6 +132,7 @@ internal static class MediaEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var entity = await db.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
@@ -150,6 +193,7 @@ internal static class MediaEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var entity = await db.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
             return Results.Ok(entity.ToDto().Candidates);
@@ -167,6 +211,7 @@ internal static class MediaEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var entity = await db.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
@@ -177,6 +222,7 @@ internal static class MediaEndpoints
             await using var fresh = await dbFactory.CreateDbContextAsync(ct);
             var updated = await fresh.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             return updated is null ? Results.NoContent() : Results.Ok(updated.ToDto());
         });
@@ -252,6 +298,7 @@ internal static class MediaEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var rows = await db.MediaItems
                 .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .Where(m => (int)m.IdentificationStatus == (int)SharedEnums.IdentificationStatus.NeedsReview)
                 .OrderByDescending(m => m.CreatedAt)
                 .ToListAsync(ct);

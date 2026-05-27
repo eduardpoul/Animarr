@@ -33,6 +33,15 @@ COPY . .
 # are resolved by running `npm install` from inside the Linux container.
 WORKDIR "/src/src/Animarr.UI"
 RUN npm install
+# Explicitly recompile Tailwind. The MSBuild BuildTailwindCSS target has
+# Inputs="Styles/*.css" Outputs="wwwroot/app.css" — when COPY brings both
+# Styles/ source and an already-tracked wwwroot/app.css output into the
+# image at the same layer timestamp, MSBuild's incremental check decides
+# the output is up-to-date and skips the rebuild. Result: a stale compiled
+# CSS overrides any changes the developer made to Styles/. Running the
+# build explicitly here closes that hole — every Docker build emits fresh
+# CSS regardless of what wwwroot/app.css the dev committed (or didn't).
+RUN npm run css:build
 
 WORKDIR "/src/src/Animarr.Web"
 RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build

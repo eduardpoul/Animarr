@@ -17,4 +17,8 @@ public sealed record UserDto(
     Guid    RoleId,
     string  RoleName,
     DateTime CreatedAt,
-    DateTime? LastSeenAt);
+    DateTime? LastSeenAt,
+    /// <summary>True iff the user has opted-in to PIN-gated switching from
+    /// other devices. Derived server-side from <c>User.PinHash != null</c>;
+    /// the keypad-or-not decision in ProfilePanel reads this flag. v5.</summary>
+    bool    HasPin = false);

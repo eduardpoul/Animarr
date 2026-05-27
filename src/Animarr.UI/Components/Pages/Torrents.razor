@@ -21,7 +21,11 @@
         <h1 class="d-page-header__title">TORRENTS</h1>
         <div class="d-page-header__sub">Live status pulled every 500ms via SignalR.</div>
     </div>
-    <div class="d-page-header__actions">
+    @* v5 fix: was .d-page-header__actions which doesn't exist (the page-header
+       partial in components.css defines .d-page-header__right + flex helpers).
+       The old class collapsed to display:block, stacking the buttons under the
+       header instead of pinning them top-right. *@
+    <div class="d-page-header__right">
         <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
             <DIcon Name="archive" Size="13" /> History
         </Btn>
@@ -31,43 +35,47 @@
     </div>
 </header>
 
+@*  v5 fix: the inline add-form below previously used a `.torrent-add*` BEM
+    family that has zero matching rules anywhere in the project. Switched to
+    `.tor-add-*` so the styles live next to the rest of the page-scoped
+    Torrents.razor.css (new rules added there). *@
 @if (_addOpen)
 {
-    <div class="torrent-add">
-        <div class="torrent-add__src">
+    <div class="tor-add">
+        <div class="tor-add__source">
             <button type="button"
-                    class="@($"torrent-add__src-btn {(_addSource == "magnet" ? "torrent-add__src-btn--active" : "")}")"
+                    class="@($"tor-add__source-btn {(_addSource == "magnet" ? "is-active" : "")}")"
                     @onclick="@(() => _addSource = "magnet")">Magnet</button>
             <button type="button"
-                    class="@($"torrent-add__src-btn {(_addSource == "file" ? "torrent-add__src-btn--active" : "")}")"
+                    class="@($"tor-add__source-btn {(_addSource == "file" ? "is-active" : "")}")"
                     @onclick="@(() => _addSource = "file")">.torrent file</button>
         </div>
 
         @if (_addSource == "magnet")
         {
-            <label class="settings-field">
-                <span class="settings-field__label">Magnet URI</span>
-                <input class="settings-field__input" placeholder="magnet:?xt=urn:btih:…"
+            <label class="tor-add__field">
+                <span class="tor-add__label">Magnet URI</span>
+                <input class="tor-add__input" placeholder="magnet:?xt=urn:btih:…"
                        value="@_addMagnet"
                        @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
             </label>
         }
         else
         {
-            <label class="settings-field">
-                <span class="settings-field__label">.torrent file</span>
+            <label class="tor-add__field">
+                <span class="tor-add__label">.torrent file</span>
                 <InputFile OnChange="OnTorrentFilePicked" accept=".torrent" />
                 @if (_addFileName is not null)
                 {
-                    <div class="torrent-add__filehint">
+                    <div class="tor-add__filehint">
                         <DIcon Name="paperclip" Size="12" /> @_addFileName (@FormatBytesShort(_addFileSize))
                     </div>
                 }
             </label>
         }
-        <label class="settings-field">
-            <span class="settings-field__label">Save to folder</span>
-            <select class="settings-field__select"
+        <label class="tor-add__field">
+            <span class="tor-add__label">Save to folder</span>
+            <select class="tor-add__select"
                     value="@(_addFolderId?.ToString() ?? "")"
                     @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
                 <option value="">— default —</option>
@@ -77,19 +85,19 @@
                 }
             </select>
         </label>
-        <div class="torrent-add__row">
-            <label class="torrent-add__toggle">
+        <div class="tor-add__row">
+            <label class="tor-add__check">
                 <input type="checkbox" checked="@_addAutoRename"
                        @onchange="@(e => _addAutoRename = (bool)e.Value!)" />
                 <span>Auto-rename when finished</span>
             </label>
-            <label class="torrent-add__toggle">
+            <label class="tor-add__check">
                 <input type="checkbox" checked="@_addStopAfter"
                        @onchange="@(e => _addStopAfter = (bool)e.Value!)" />
                 <span>Stop after download</span>
             </label>
         </div>
-        <div class="torrent-add__actions">
+        <div class="tor-add__actions">
             <Btn Variant="primary" Size="md" Loading="@_adding"
                  Disabled="@(!CanAdd || _adding)"
                  OnClick="AddTorrentAsync">
@@ -102,64 +110,82 @@
 
 @if (_records is null)
 {
-    <p>Loading…</p>
+    <div class="torrents-loading"><InlineDots /></div>
 }
 else if (_records.Length == 0)
 {
-    <div class="torrent-empty">No torrents yet — paste a magnet above to start one.</div>
+    @* v5 fix: was .torrent-empty (no matching rule); .torrents-empty already
+       exists in Torrents.razor.css with the right token-based styling. *@
+    <div class="torrents-empty">No torrents yet — paste a magnet above to start one.</div>
 }
 else
 {
-    <table class="torrent-table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th style="width:140px">Progress</th>
-                <th style="width:110px;text-align:right">Down</th>
-                <th style="width:110px;text-align:right">Up</th>
-                <th style="width:80px"></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var t in _records.OrderByDescending(r => r.AddedAt))
-            {
-                _live.TryGetValue(t.InfoHash, out var live);
-                var progress = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
-                var state = live?.State ?? t.State.ToString();
-                var paused = t.State == TorrentRecordState.Paused;
+    @* v5 fix: was <table class="torrent-table">. The scoped CSS defines
+       .tor-table with full row/cell styles + responsive grid layout for
+       mobile — rename to pick that up. .bar/.bar-fill/.bar-pct were
+       page-local ad-hoc helpers; switched to the global .animarr-progress
+       primitive so the bar tracks the accent token instead of staying
+       Cinematic-era crimson. *@
+    <div class="torrents-grid-wrap">
+        <table class="tor-table">
+            <thead>
                 <tr>
-                    <td>
-                        <a href="@($"/torrents/{t.InfoHash}/edit")">@t.Name</a>
-                    </td>
-                    <td>@state</td>
-                    <td>
-                        <div class="bar"><div class="bar-fill" style="width:@(progress*100)%"></div></div>
-                        <span class="bar-pct">@($"{progress * 100:F1}%")</span>
-                    </td>
-                    <td style="text-align:right">@FormatRate(live?.DownloadRate ?? 0)</td>
-                    <td style="text-align:right">@FormatRate(live?.UploadRate ?? 0)</td>
-                    <td class="torrent-actions">
-                        @if (paused)
-                        {
-                            <button class="t-icon" title="Resume" @onclick="@(() => ResumeAsync(t.Id))">
-                                <DIcon Name="play" Size="13" />
-                            </button>
-                        }
-                        else
-                        {
-                            <button class="t-icon" title="Pause" @onclick="@(() => PauseAsync(t.Id))">
-                                <DIcon Name="pause" Size="13" />
-                            </button>
-                        }
-                        <button class="t-icon t-icon--danger" title="Remove" @onclick="@(() => DeleteAsync(t.Id))">
-                            <DIcon Name="trash" Size="13" />
-                        </button>
-                    </td>
+                    <th>Name</th>
+                    <th>State</th>
+                    <th style="width:140px">Progress</th>
+                    <th style="width:110px;text-align:right">Down</th>
+                    <th style="width:110px;text-align:right">Up</th>
+                    <th class="tor-col-actions"></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var t in _records.OrderByDescending(r => r.AddedAt))
+                {
+                    _live.TryGetValue(t.InfoHash, out var live);
+                    var progress = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
+                    var state = live?.State ?? t.State.ToString();
+                    var paused = t.State == TorrentRecordState.Paused;
+                    <tr>
+                        <td class="tor-name">
+                            <a class="tor-name__text" href="@($"/torrents/{t.InfoHash}/edit")">@t.Name</a>
+                        </td>
+                        <td class="tor-cell tor-cell--dim">@state</td>
+                        <td>
+                            <div class="tor-progress tor-progress--info">
+                                <div class="animarr-progress">
+                                    <div class="animarr-progress__track">
+                                        <div class="animarr-progress__fill" style="width:@(progress*100)%"></div>
+                                    </div>
+                                </div>
+                                <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
+                            </div>
+                        </td>
+                        <td class="tor-cell tor-cell--mono" style="text-align:right">@FormatRate(live?.DownloadRate ?? 0)</td>
+                        <td class="tor-cell tor-cell--mono" style="text-align:right">@FormatRate(live?.UploadRate ?? 0)</td>
+                        <td class="tor-col-actions">
+                            <div class="tor-actions">
+                                @if (paused)
+                                {
+                                    <button class="tor-iconbtn" title="Resume" @onclick="@(() => ResumeAsync(t.Id))">
+                                        <DIcon Name="play" Size="13" />
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="tor-iconbtn" title="Pause" @onclick="@(() => PauseAsync(t.Id))">
+                                        <DIcon Name="pause" Size="13" />
+                                    </button>
+                                }
+                                <button class="tor-iconbtn tor-iconbtn--danger" title="Remove" @onclick="@(() => DeleteAsync(t.Id))">
+                                    <DIcon Name="trash" Size="13" />
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {

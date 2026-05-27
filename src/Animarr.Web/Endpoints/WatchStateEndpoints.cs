@@ -1,18 +1,21 @@
 using Animarr.Shared;
 using Animarr.Shared.Requests;
 using Animarr.Web.Data;
+using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
 
 /// <summary>
-/// REST surface for per-episode / per-file watch state. Adapter over
-/// <see cref="IWatchStateService"/> — its method names are tuned for
-/// internal callers (MarkMovieAsync / MarkEpisodeAsync) so the HTTP layer
-/// translates to/from the request DTOs and reads the row back to return
-/// a populated WatchStateDto.
+/// REST surface for per-episode / per-file watch state.
+///
+/// v4 scoping: every read filters by <c>UserId == currentUser.Id</c> and every
+/// write stamps the current user's id on the row. Orphan rows (created by
+/// pre-v4 migrations or the external mpv tracker, which is anonymous) carry
+/// <c>UserId == null</c> and are invisible to all authenticated users.
 /// </summary>
 internal static class WatchStateEndpoints
 {
@@ -21,93 +24,130 @@ internal static class WatchStateEndpoints
         app.MapGet(ApiRoutes.WatchStatesForMedia, async (
             Guid mediaItemId,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
+
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var rows = await db.WatchStates
-                .Where(w => w.MediaItemId == mediaItemId)
+                .Where(w => w.MediaItemId == mediaItemId && w.UserId == uid)
                 .OrderByDescending(w => w.LastSeenAt)
                 .ToListAsync(ct);
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
-        });
+        }).RequireAuthorization();
 
         app.MapPost(ApiRoutes.WatchStateProgress, async (
             RecordProgressRequest request,
-            IWatchStateService watchStates,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
-            // playedDeltaSec=0 — the API consumer doesn't track delta; the
-            // server-side row's TotalWatchTimeSec stays in sync via the
-            // player's "seekend" event-driven pings, not pure-positional ones.
-            await watchStates.RecordProgressAsync(
-                request.MediaItemId,
-                request.Season,
-                request.Episode,
-                request.FilePath,
-                request.ProgressMs,
-                request.RuntimeMs,
-                playedDeltaSec: 0,
-                ct);
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
 
-            var dto = await LookupAsync(dbFactory, request.MediaItemId, request.Season, request.Episode, ct);
-            return dto is null ? Results.NoContent() : Results.Ok(dto);
-        });
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var row = await db.WatchStates.FirstOrDefaultAsync(w =>
+                w.UserId      == uid &&
+                w.MediaItemId == request.MediaItemId &&
+                w.Season      == request.Season &&
+                w.Episode     == request.Episode, ct);
+            if (row is null)
+            {
+                row = new WatchState
+                {
+                    Id          = Guid.NewGuid(),
+                    UserId      = uid,
+                    MediaItemId = request.MediaItemId,
+                    Season      = request.Season,
+                    Episode     = request.Episode,
+                    FilePath    = request.FilePath,
+                    CreatedAt   = DateTime.UtcNow,
+                    PlayCount   = 1,
+                };
+                db.WatchStates.Add(row);
+            }
+            row.ProgressMs = request.ProgressMs;
+            if (request.RuntimeMs is > 0) row.RuntimeMs = request.RuntimeMs;
+            if (!string.IsNullOrEmpty(request.FilePath)) row.FilePath = request.FilePath;
+            row.LastSeenAt = DateTime.UtcNow;
+
+            // Auto-flip IsWatched at ≥90% of runtime per CHANGELOG §1.
+            if (row.ProgressMs is > 0 && row.RuntimeMs is > 0 &&
+                (double)row.ProgressMs.Value / row.RuntimeMs.Value >= 0.9)
+            {
+                row.IsWatched = true;
+            }
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(row.ToDto());
+        }).RequireAuthorization();
 
         app.MapPost(ApiRoutes.WatchStateToggle, async (
             ToggleWatchedRequest request,
-            IWatchStateService watchStates,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
-            if (request.Season is null || request.Episode is null)
-                await watchStates.MarkMovieAsync(request.MediaItemId, request.IsWatched, ct);
-            else
-                await watchStates.MarkEpisodeAsync(
-                    request.MediaItemId,
-                    request.Season.Value,
-                    request.Episode.Value,
-                    request.IsWatched,
-                    request.FilePath,
-                    ct);
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
 
-            var dto = await LookupAsync(dbFactory, request.MediaItemId, request.Season, request.Episode, ct);
-            return dto is null ? Results.NoContent() : Results.Ok(dto);
-        });
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var row = await db.WatchStates.FirstOrDefaultAsync(w =>
+                w.UserId      == uid &&
+                w.MediaItemId == request.MediaItemId &&
+                w.Season      == request.Season &&
+                w.Episode     == request.Episode, ct);
+            if (row is null)
+            {
+                row = new WatchState
+                {
+                    Id          = Guid.NewGuid(),
+                    UserId      = uid,
+                    MediaItemId = request.MediaItemId,
+                    Season      = request.Season,
+                    Episode     = request.Episode,
+                    FilePath    = request.FilePath,
+                    CreatedAt   = DateTime.UtcNow,
+                };
+                db.WatchStates.Add(row);
+            }
+            row.IsWatched  = request.IsWatched;
+            row.LastSeenAt = DateTime.UtcNow;
+            // Marking as watched pins progress to runtime so the bar matches the chip.
+            if (request.IsWatched && row.RuntimeMs is > 0) row.ProgressMs = row.RuntimeMs;
+            // Marking unwatched clears progress so the next play starts fresh.
+            else if (!request.IsWatched) row.ProgressMs = null;
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(row.ToDto());
+        }).RequireAuthorization();
 
         app.MapPost(ApiRoutes.WatchStateReset, async (
             ResetProgressRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
+
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var row = await db.WatchStates.FirstOrDefaultAsync(w =>
+                w.UserId      == uid &&
                 w.MediaItemId == request.MediaItemId &&
-                w.Season      == request.Season      &&
+                w.Season      == request.Season &&
                 w.Episode     == request.Episode, ct);
             if (row is null) return Results.NoContent();
 
             row.ProgressMs = 0;
+            row.IsWatched  = false;
             row.LastSeenAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization();
 
         return app;
-
-        static async Task<Animarr.Shared.Models.WatchStateDto?> LookupAsync(
-            IDbContextFactory<AppDbContext> dbFactory,
-            Guid mediaItemId,
-            int? season,
-            int? episode,
-            CancellationToken ct)
-        {
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var row = await db.WatchStates.FirstOrDefaultAsync(w =>
-                w.MediaItemId == mediaItemId &&
-                w.Season      == season      &&
-                w.Episode     == episode, ct);
-            return row?.ToDto();
-        }
     }
 }

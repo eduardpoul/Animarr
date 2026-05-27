@@ -17,6 +17,54 @@
     padding: 0 24px;
 }
 
+/* ── Server pill (v5 multi-server) ───────────────────────
+   Sits leftmost when ServerRegistryState.Current is set.
+   Click opens ProfilePanel pre-focused on the Server section. */
+.d-topbar__server-pill {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 10px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-topbar__server-pill:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: var(--border-strong);
+}
+
+.d-topbar__server-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-hi);
+    box-shadow: 0 0 6px var(--accent-soft);
+    flex-shrink: 0;
+}
+
+.d-topbar__server-name {
+    line-height: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    max-width: 140px;
+}
+
+/* On narrow viewports collapse the label, keeping only the dot. */
+@media (max-width: 720px) {
+    .d-topbar__server-name { display: none; }
+    .d-topbar__server-pill { padding: 0 8px; }
+}
+
 /* ── Brand ──────────────────────────────────────────────── */
 .d-topbar__brand {
     appearance: none;
@@ -34,8 +82,8 @@
 .d-topbar__brand-mark {
     width: 30px;
     height: 30px;
-    border-radius: 7px;
-    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue, 25)));
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hi));
     display: grid;
     place-items: center;
     color: #fff;
@@ -43,6 +91,9 @@
     font-size: 17px;
     box-shadow: 0 4px 16px -4px var(--accent-soft);
     line-height: 1;
+    /* v5: brand mark is "a" lowercase. Force lowercase in case a theme's
+       --label-casing tries to flip it to uppercase. */
+    text-transform: lowercase;
 }
 
 .d-topbar__brand-name {
@@ -51,6 +102,7 @@
     letter-spacing: -0.3px;
     line-height: 1;
     color: var(--text);
+    text-transform: var(--label-casing, none);
 }
 
 /* ── Folder nav (replaces v3 sidebar folder chips) ───────── */

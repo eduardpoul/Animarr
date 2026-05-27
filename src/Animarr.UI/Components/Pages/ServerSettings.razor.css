@@ -1,0 +1,149 @@
+/* ============================================================
+   ServerSettingsScreen — /server admin page. Spec: screens-v4.jsx
+   lines 651-704. 240px vertical tab rail + content card.
+   ============================================================ */
+
+.d-server {
+    max-width: 1480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.d-server__body {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 28px;
+    align-items: start;
+}
+
+/* ── Vertical tab rail ───────────────────────────────────── */
+.d-server__rail {
+    position: sticky;
+    top: 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 8px;
+}
+
+.d-server__rail-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+    display: inline-grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.d-server__rail-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text);
+}
+
+.d-server__rail-item.is-active {
+    background: var(--surface-3);
+    color: var(--text);
+    padding-left: 12px;
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.d-server__rail-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+.d-server__rail-item.is-active .d-server__rail-icon { color: var(--accent-hi); }
+
+.d-server__rail-label { line-height: 1.2; }
+
+.d-server__rail-new {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    padding: 2px 6px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+}
+
+/* ── Content card ────────────────────────────────────────── */
+.d-server__content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    min-height: 480px;
+}
+
+.d-server__placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 64px 24px;
+    color: var(--text-dim);
+}
+
+.d-server__placeholder > :first-child {
+    color: var(--text-faint);
+    margin-bottom: 18px;
+}
+
+.d-server__placeholder-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: -0.4px;
+    color: var(--text);
+    margin: 0 0 10px;
+}
+
+.d-server__placeholder-body {
+    max-width: 420px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    margin: 0;
+}
+
+.d-server__placeholder-coming {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+}
+
+/* ── Mobile collapse ─────────────────────────────────────── */
+@media (max-width: 959px) {
+    .d-server__body {
+        grid-template-columns: 1fr;
+    }
+    .d-server__rail {
+        position: static;
+        overflow-x: auto;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        padding: 8px;
+    }
+    .d-server__rail-item {
+        flex-shrink: 0;
+        grid-template-columns: 18px auto auto;
+    }
+}

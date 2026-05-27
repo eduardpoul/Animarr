@@ -19,6 +19,15 @@
     <!-- v4 auth: BCrypt for password hashing (work factor 12, ~250ms verify).
          BCrypt.Net-Next is the canonical .NET fork — actively maintained. -->
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <!-- v5 multi-server: advertise the install over mDNS as _animarr._tcp.local.
+         Tmds.MDns is browse-only (no Advertise method); Makaretu.Dns.Multicast
+         provides ServiceProfile + ServiceDiscovery.Advertise, which is what we
+         need. Compatible with net10.0 via netstandard2.0. -->
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+    <!-- v5 Phase 7 TV pairing: server-side QR generation. PngByteQRCode is
+         a pure-managed PNG encoder (no System.Drawing native deps) so it
+         runs cleanly under the Debian-slim runtime image. -->
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
 
   <ItemGroup>

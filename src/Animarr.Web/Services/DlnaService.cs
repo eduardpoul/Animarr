@@ -305,7 +305,7 @@ public sealed class DlnaService : IHostedService, IDisposable
             <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
             <friendlyName>{Xml(FriendlyName)}</friendlyName>
             <manufacturer>Animarr</manufacturer>
-            <manufacturerURL>https://github.com/eduardpoul/animarr</manufacturerURL>
+            <manufacturerURL>https://github.com/eduardpoul/Animarr</manufacturerURL>
             <modelDescription>Animarr self-hosted media library</modelDescription>
             <modelName>Animarr</modelName>
             <modelNumber>0.3</modelNumber>

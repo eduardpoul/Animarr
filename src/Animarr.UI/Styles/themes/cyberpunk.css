@@ -1,0 +1,117 @@
+/* ============================================================
+   Cyberpunk — neon signal yellow + magenta-cyan glitch.
+
+   Almost-black canvas, neon yellow accent, cyan-tinted text, Inter
+   everywhere (the design board pairs Inter display with mono body
+   but we keep Inter throughout for legibility). Buttons get
+   chamfered (clipped) corners. Display titles get a 2-color text
+   shadow for the glitch fringe. Radii = 0 for sharp edges.
+   Uppercase labels with very wide tracking.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="cyberpunk"] {
+    /* ── Backgrounds — deep black ─────────────────────────── */
+    --bg-0:        #050505;
+    --bg-1:        #080808;
+    --surface:     #0d0d0d;
+    --surface-2:   #111111;
+    --surface-3:   #161616;
+
+    /* ── Borders — cyan signal ────────────────────────────── */
+    --border:        rgba(0, 255, 240, 0.15);
+    --border-strong: rgba(0, 255, 240, 0.30);
+
+    /* ── Text — cyan-tinted near-white ────────────────────── */
+    --text:       #e0fcff;
+    --text-dim:   #a0c8cc;
+    --text-faint: #506468;
+
+    /* ── Accent — neon yellow ─────────────────────────────── */
+    --accent-hue:  100;
+    --accent:      oklch(0.92 0.20 var(--accent-hue));
+    --accent-hi:   oklch(0.96 0.22 var(--accent-hue));
+    --accent-soft: oklch(0.92 0.20 var(--accent-hue) / 0.20);
+    --accent-line: oklch(0.92 0.20 var(--accent-hue) / 0.55);
+
+    /* ── Semantic — keep cyber neon ───────────────────────── */
+    --success: oklch(0.88 0.22 145);
+    --warn:    oklch(0.92 0.20 100);
+    --info:    oklch(0.85 0.20 200);
+
+    /* ── Typography — Inter everywhere ────────────────────── */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Inter', system-ui, sans-serif;
+
+    /* ── Labels — uppercase, very wide tracking ───────────── */
+    --label-casing: uppercase;
+    --label-tracking: 0.18em;
+
+    /* ── Decoration flags ─────────────────────────────────── */
+    --decor-glitch: block;
+
+    /* ── Radii — sharp edges ──────────────────────────────── */
+    --radius-badge:   0;
+    --radius-ctrl:    0;
+    --radius-chip:    0;
+    --radius-card:    0;
+    --radius-card-lg: 0;
+    --radius-panel:   0;
+    --radius-hero:    0;
+    --radius-modal:   0;
+    --radius-pill:    0;
+
+    /* ── Shadows — cyan glow on cards ─────────────────────── */
+    --shadow-card:    0 0 0 1px rgba(0, 255, 240, 0.10),
+                      0 12px 30px -16px rgba(0, 255, 240, 0.30);
+    --shadow-card-hi: 0 0 0 1px rgba(0, 255, 240, 0.22),
+                      0 18px 38px -14px rgba(0, 255, 240, 0.46);
+}
+
+/* ── Glitch text-shadow on display titles ─────────────────
+   2px cyan offset right + 2px magenta offset left = chromatic
+   aberration fringe. Only applied to h1/h2/.d-display so body
+   text stays readable. */
+[data-theme="cyberpunk"] h1,
+[data-theme="cyberpunk"] h2,
+[data-theme="cyberpunk"] .d-display {
+    text-shadow:
+         2px 0 oklch(0.88 0.20 200),
+        -2px 0 oklch(0.70 0.30 350);
+    letter-spacing: -0.5px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+/* ── Buttons get chamfered corners via clip-path ──────────
+   8px chamfer on top-right and bottom-left only (matches the
+   asymmetric cyberpunk aesthetic from the design board). */
+[data-theme="cyberpunk"] .d-btn,
+[data-theme="cyberpunk"] button.d-pill {
+    border-radius: 0;
+    clip-path: polygon(
+        0 0,
+        calc(100% - 8px) 0,
+        100% 8px,
+        100% 100%,
+        8px 100%,
+        0 calc(100% - 8px)
+    );
+}
+
+/* ── Subtle scanline overlay (less aggressive than Terminal) */
+[data-theme="cyberpunk"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image: repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 3px,
+        rgba(0, 0, 0, 0.18) 3px,
+        rgba(0, 0, 0, 0.18) 4px
+    );
+}

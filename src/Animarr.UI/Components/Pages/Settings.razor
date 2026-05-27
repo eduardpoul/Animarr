@@ -1,4 +1,9 @@
-@page "/settings"
+@*
+    Settings — component-only after v4 cleanup. The standalone /settings route
+    is gone; this body is embedded inside ServerSettings.razor's admin shell
+    via <Settings EmbeddedTab="..." />. Setting EmbeddedTab forces a single
+    tab body to render without the page header / tab bar.
+*@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 
@@ -11,27 +16,30 @@
     or interop. Everything users edit on a day-to-day basis is here.
 *@
 
-<PageTitle>Animarr — Settings</PageTitle>
+@if (string.IsNullOrEmpty(EmbeddedTab))
+{
+    <PageTitle>Animarr — Settings</PageTitle>
 
-<header class="d-page-header">
-    <div class="d-page-header__main">
-        <div class="d-page-header__overline">CONFIG</div>
-        <h1 class="d-page-header__title">SETTINGS</h1>
-        <div class="d-page-header__sub">Persisted in SQLite — survives restarts.</div>
-    </div>
-</header>
+    <header class="d-page-header">
+        <div class="d-page-header__main">
+            <div class="d-page-header__overline">CONFIG</div>
+            <h1 class="d-page-header__title">SETTINGS</h1>
+            <div class="d-page-header__sub">Persisted in SQLite — survives restarts.</div>
+        </div>
+    </header>
 
-<nav class="settings-tabs">
-    @foreach (var (key, label) in _settingsTabs)
-    {
-        var k = key;
-        <button type="button"
-                class="@($"settings-tab {(_activeTab == k ? "settings-tab--active" : "")}")"
-                @onclick="@(() => SwitchTabAsync(k))">
-            @label
-        </button>
-    }
-</nav>
+    <nav class="settings-tabs">
+        @foreach (var (key, label) in _settingsTabs)
+        {
+            var k = key;
+            <button type="button"
+                    class="@($"settings-tab {(_activeTab == k ? "settings-tab--active" : "")}")"
+                    @onclick="@(() => SwitchTabAsync(k))">
+                @label
+            </button>
+        }
+    </nav>
+}
 
 @if      (_activeTab == "general")        { @GeneralTab()       }
 else if  (_activeTab == "root_folders")   { @RootFoldersTab()   }
@@ -59,7 +67,35 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 }
 
 @code {
+    /// <summary>When set, the component renders as a single tab body without
+    /// its own page header / tab bar. Used by ServerSettings to embed each
+    /// v3 tab inside the v4 admin shell. Allowed values mirror the
+    /// <c>_settingsTabs</c> keys (e.g. "root_folders", "ai", "patterns").</summary>
+    [Parameter] public string? EmbeddedTab { get; set; }
+
     private string _activeTab = "general";
+    /// <summary>Tracks the tab we last loaded data for so flipping
+    /// <see cref="EmbeddedTab"/> from "rules" to "torrent" (which Blazor
+    /// services by reusing the Settings instance, not re-mounting) still
+    /// kicks off the per-tab fetch. Previously this only ran inside
+    /// OnInitializedAsync and embedded panels stayed stuck on "Loading…". </summary>
+    private string? _lastLoadedTab;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(EmbeddedTab))
+            _activeTab = EmbeddedTab;
+        // When the parent re-renders us with a different EmbeddedTab the
+        // OnInitializedAsync hook has long since run, so the per-tab fetch
+        // is skipped. Re-fire EnsureTabDataAsync here whenever the tab
+        // identity differs from what we last loaded. Cheap branch (no
+        // fetch) for tabs that read straight from the _config dict.
+        if (_activeTab != _lastLoadedTab)
+        {
+            _lastLoadedTab = _activeTab;
+            await EnsureTabDataAsync(_activeTab);
+        }
+    }
 
     private static readonly (string Key, string Label)[] _settingsTabs =
     [
@@ -99,13 +135,20 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         }
         catch { /* offline — config dict stays empty */ }
 
-        // Deep-link via ?tab= — e.g. /settings?tab=patterns (legacy Patterns redirect).
-        var uri = new Uri(Nav.Uri);
-        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-        var requestedTab = query["tab"];
-        if (!string.IsNullOrEmpty(requestedTab) && _settingsTabs.Any(t => t.Key == requestedTab))
-            _activeTab = requestedTab;
+        // Deep-link via ?tab= — e.g. /settings?tab=patterns (legacy Patterns
+        // redirect). Skip when we're embedded inside ServerSettings so a
+        // ?panel=… query string for that page doesn't accidentally clobber
+        // the EmbeddedTab the parent picked for us.
+        if (string.IsNullOrEmpty(EmbeddedTab))
+        {
+            var uri = new Uri(Nav.Uri);
+            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+            var requestedTab = query["tab"];
+            if (!string.IsNullOrEmpty(requestedTab) && _settingsTabs.Any(t => t.Key == requestedTab))
+                _activeTab = requestedTab;
+        }
 
+        _lastLoadedTab = _activeTab;
         await EnsureTabDataAsync(_activeTab);
     }
 

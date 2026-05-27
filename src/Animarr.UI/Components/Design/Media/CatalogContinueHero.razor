@@ -1,0 +1,250 @@
+@*
+    Continue Watching hero (v5) — drives the top of Home.razor when the
+    user has in-progress titles. Renders 5 slots with auto-rotation and an
+    F-variant transparent named pager underneath (hero-nav-variants.html).
+
+    Each slot shows fanart + title + S/E label + progress bar + "Resume"
+    CTA. Click on a slot navigates to MediaDetail where playback resumes
+    from the stored ProgressMs.
+*@
+
+@implements IDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+
+@if (_active is not null)
+{
+    var item = _active;
+    var pager = PagerStyle; // f | g | h (computed below)
+    <section class="@($"d-chero d-chero--pager-{pager}")">
+        <div class="d-chero__bg">
+            @if (!string.IsNullOrEmpty(item.FanartPath))
+            {
+                <img src="@($"/api/image?path={Uri.EscapeDataString(item.FanartPath)}")"
+                     alt="@item.Title" class="d-chero__bg-img" />
+            }
+            else if (!string.IsNullOrEmpty(item.PosterPath))
+            {
+                <img src="@($"/api/image?path={Uri.EscapeDataString(item.PosterPath)}")"
+                     alt="@item.Title" class="d-chero__bg-img d-chero__bg-img--poster" />
+            }
+            <div class="d-chero__wash"></div>
+        </div>
+
+        <div class="d-chero__content">
+            <div class="d-chero__eyebrow">Continue watching</div>
+            <h1 class="d-chero__title">@item.Title</h1>
+
+            <div class="d-chero__meta">
+                @if (item.Year is not null) { <span>@item.Year</span> }
+                @if (item.Season is not null) { <span>@($"S{item.Season:D2}")</span> }
+                @if (item.Episode is not null) { <span>@($"E{item.Episode:D2}")</span> }
+                <span class="d-chero__meta-pct">@($"{item.Progress:P0}")</span>
+            </div>
+
+            <div class="d-chero__progress" aria-hidden="true">
+                <div class="d-chero__progress-fill" style="@($"width: {item.Progress * 100:F1}%")"></div>
+            </div>
+
+            <div class="d-chero__actions">
+                <Btn Variant="primary" Size="lg"
+                     OnClick="@(() => Nav.NavigateTo($"/catalog/{item.MediaItemId}"))">
+                    <DIcon Name="play" Size="16" /> Resume
+                </Btn>
+            </div>
+        </div>
+
+        @* Pager — three variants from the v5 design board.
+             F: long horizontal strokes + slot name below each (default)
+             G: dash pager flanked by hover-revealed ‹ / › chevrons
+             H: numbered pills (1/2/3/…) + chevrons
+           CSS for each variant lives in CatalogContinueHero.razor.css and
+           swaps in via the `.d-chero--pager-{f|g|h}` modifier on the
+           section. *@
+        @if (Items.Length > 1)
+        {
+            @if (pager == "f")
+            {
+                <nav class="d-chero__pager" role="tablist" aria-label="Continue watching slots">
+                    @for (int i = 0; i < Items.Length; i++)
+                    {
+                        var idx = i;
+                        var it  = Items[idx];
+                        var active = idx == _index;
+                        <button type="button"
+                                class="@($"d-chero__pager-slot tv-focus {(active ? "is-active" : "")}")"
+                                @onclick="@(() => SetActive(idx))"
+                                role="tab" aria-selected="@active.ToString().ToLower()"
+                                title="@it.Title">
+                            <span class="d-chero__pager-stroke"></span>
+                            <span class="d-chero__pager-name">@it.Title</span>
+                        </button>
+                    }
+                </nav>
+            }
+            else if (pager == "g")
+            {
+                <nav class="d-chero__pager-g" role="tablist" aria-label="Continue watching slots">
+                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
+                            @onclick="PrevSlide" aria-label="Previous slot">
+                        <DIcon Name="chevron-left" Size="20" />
+                    </button>
+                    <div class="d-chero__pager-dashes">
+                        @for (int i = 0; i < Items.Length; i++)
+                        {
+                            var idx = i;
+                            var active = idx == _index;
+                            <button type="button"
+                                    class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
+                                    @onclick="@(() => SetActive(idx))"
+                                    role="tab" aria-selected="@active.ToString().ToLower()"
+                                    aria-label="@($"Slot {idx + 1}")"></button>
+                        }
+                    </div>
+                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
+                            @onclick="NextSlideManual" aria-label="Next slot">
+                        <DIcon Name="chevron-right" Size="20" />
+                    </button>
+                </nav>
+            }
+            else // pager == "h"
+            {
+                <nav class="d-chero__pager-h" role="tablist" aria-label="Continue watching slots">
+                    <button type="button" class="d-chero__pager-chev tv-focus"
+                            @onclick="PrevSlide" aria-label="Previous slot">
+                        <DIcon Name="chevron-left" Size="20" />
+                    </button>
+                    <div class="d-chero__pager-pills">
+                        @for (int i = 0; i < Items.Length; i++)
+                        {
+                            var idx = i;
+                            var active = idx == _index;
+                            <button type="button"
+                                    class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
+                                    @onclick="@(() => SetActive(idx))"
+                                    role="tab" aria-selected="@active.ToString().ToLower()"
+                                    aria-label="@($"Slot {idx + 1}")">@(idx + 1)</button>
+                        }
+                    </div>
+                    <button type="button" class="d-chero__pager-chev tv-focus"
+                            @onclick="NextSlideManual" aria-label="Next slot">
+                        <DIcon Name="chevron-right" Size="20" />
+                    </button>
+                </nav>
+            }
+        }
+    </section>
+}
+
+@code {
+    /// <summary>Up to 5 ContinueWatchItemDto rows ordered by LastSeenAt desc.</summary>
+    [Parameter, EditorRequired] public ContinueWatchItemDto[] Items { get; set; } = Array.Empty<ContinueWatchItemDto>();
+
+    /// <summary>Auto-rotate cadence in seconds. 0 → no rotation.</summary>
+    [Parameter] public int IntervalSec { get; set; } = 12;
+
+    private int _index;
+    private ContinueWatchItemDto? _active;
+    private System.Threading.Timer? _timer;
+
+    /// <summary>Lower-cased pager style: "f" (default) / "g" / "h". Read on every
+    /// render so a change to <c>UserCtx.Preferences.HeroPagerStyle</c> from
+    /// ProfilePanel takes effect without re-mounting the hero. Unknown values
+    /// fall back to "f" so a stale client can't render a missing markup branch.</summary>
+    private string PagerStyle
+    {
+        get
+        {
+            var s = UserCtx.Preferences?.HeroPagerStyle;
+            if (string.IsNullOrWhiteSpace(s)) return "f";
+            return s.ToLowerInvariant() switch
+            {
+                "g" => "g",
+                "h" => "h",
+                _   => "f",
+            };
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        // Re-render whenever the user picks a different pager / theme / etc.
+        // in ProfilePanel — UserContextState.OnChange fires after every PATCH.
+        UserCtx.OnChange += OnPrefsChanged;
+    }
+
+    private void OnPrefsChanged() => InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet()
+    {
+        if (Items.Length == 0) { _active = null; return; }
+        if (_index >= Items.Length) _index = 0;
+        _active = Items[_index];
+        PushBackdrop();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (IntervalSec > 0 && Items.Length > 1)
+        {
+            _timer = new System.Threading.Timer(_ => InvokeAsync(NextSlide),
+                null, TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+        }
+    }
+
+    private void NextSlide()
+    {
+        if (Items.Length == 0) return;
+        _index = (_index + 1) % Items.Length;
+        _active = Items[_index];
+        PushBackdrop();
+        StateHasChanged();
+    }
+
+    /// <summary>Variant for the G/H pagers' next-chevron click — resets the
+    /// auto-rotate timer so a manual press doesn't immediately jump again.</summary>
+    private void NextSlideManual()
+    {
+        NextSlide();
+        _timer?.Change(TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+    }
+
+    /// <summary>Step backwards (with wrap-around). Used by the prev-chevron in
+    /// the G and H pager variants.</summary>
+    private void PrevSlide()
+    {
+        if (Items.Length == 0) return;
+        _index = (_index - 1 + Items.Length) % Items.Length;
+        _active = Items[_index];
+        PushBackdrop();
+        _timer?.Change(TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+        StateHasChanged();
+    }
+
+    private void SetActive(int idx)
+    {
+        if (idx < 0 || idx >= Items.Length) return;
+        _index = idx;
+        _active = Items[idx];
+        PushBackdrop();
+        // Reset timer so manual click doesn't jump again immediately.
+        _timer?.Change(TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+    }
+
+    private async void PushBackdrop()
+    {
+        if (_active is null) return;
+        var path = _active.FanartPath ?? _active.PosterPath;
+        if (string.IsNullOrEmpty(path)) return;
+        var url = $"/api/image?path={Uri.EscapeDataString(path)}";
+        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 14, 38); } catch { }
+    }
+
+    public void Dispose()
+    {
+        UserCtx.OnChange -= OnPrefsChanged;
+        _timer?.Dispose();
+    }
+}
