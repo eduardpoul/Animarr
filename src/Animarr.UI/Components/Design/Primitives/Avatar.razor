@@ -8,7 +8,7 @@
 
 @if (!string.IsNullOrEmpty(ImagePath))
 {
-    <img src="@($"/api/image?path={Uri.EscapeDataString(ImagePath)}")"
+    <img src="@Animarr.UI.Services.MediaUrl.Image(ImagePath)"
          alt="@AltText"
          class="@($"d-avatar {SizeClass}")"
          style="--hue: @Hue" />

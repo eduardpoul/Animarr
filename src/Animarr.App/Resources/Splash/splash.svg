@@ -1,40 +1,27 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Animarr splash — path-only mark. The previous version used <text> for
-     the "a" glyph but MAUI's Android splash generator can't always render
-     text reliably (depends on which font shipped with the device's system
-     image), so on some phones the splash collapsed to just the background
-     colour. Rewriting as a flat path-based shape guarantees the brand mark
-     paints regardless of OS font availability. -->
+<!-- Animarr splash — v6 mark from design-system/scratch-mark4.html.
+     Hard-edged geometric "A" + sparkle. The path-based glyph means the
+     splash renders identically across Android / iOS / Mac / Windows
+     without depending on system fonts (the earlier <text> version
+     collapsed to a blank tile on Android when the chosen font wasn't
+     bundled with the device). Sparkle stays static at boot — MAUI's
+     splash drawable doesn't run CSS animations. -->
 <svg width="456" height="456" viewBox="0 0 456 456" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%"  stop-color="#5a9fb0"/>
-            <stop offset="100%" stop-color="#7cc1d2"/>
-        </linearGradient>
-    </defs>
-    <!-- Rounded teal tile, centred in 456×456 with a 50px gutter on each side. -->
-    <rect x="50" y="50" width="356" height="356" rx="80" ry="80" fill="url(#g)"/>
-    <!-- "a" mark as a path — hand-built lowercase glyph that reads at any
-         splash size. Two filled shapes: the bowl (outer arc with a counter)
-         and the stem (right-side vertical bar). Tuned to match the brand
-         tile's optical centre. -->
-    <g fill="#ffffff" transform="translate(126 116)">
-        <!-- Outer bowl as a rounded near-circle, then the counter (hole)
-             punched out via fill-rule:evenodd. -->
-        <path fill-rule="evenodd" d="M 110 0
-                 C 49 0 0 49 0 110
-                 C 0 171 49 220 110 220
-                 C 141 220 169 207 188 187
-                 L 188 220
-                 L 220 220
-                 L 220 0
-                 L 188 0
-                 L 188 33
-                 C 169 13 141 0 110 0 Z
-                 M 110 56
-                 C 80 56 56 80 56 110
-                 C 56 140 80 164 110 164
-                 C 140 164 164 140 164 110
-                 C 164 80 140 56 110 56 Z"/>
+    <!-- Dark rounded tile, sized to the splash safe area. Sits over the
+         platform splash background colour (set via MauiSplashScreen Color
+         in Animarr.App.csproj — kept at #181c24 so the tile reads as a
+         softer inset against it). -->
+    <rect x="28" y="28" width="400" height="400" rx="112" fill="#0a0c10"/>
+
+    <!-- Mark — coordinate system scaled 1:6.333 from the 72×72 design
+         (mark fills 388×388 inside the 400 tile with 6px breathing room).
+         Original path: M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46
+         L24 58 Z M31 39 L41 39 L36 24 Z (evenodd cuts the counter). -->
+    <g transform="translate(60 60) scale(4.667)">
+        <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+              fill="#84c0d2"
+              fill-rule="evenodd"/>
+        <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+              fill="#ffffff"/>
     </g>
 </svg>

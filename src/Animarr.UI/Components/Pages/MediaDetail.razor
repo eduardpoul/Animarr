@@ -207,7 +207,7 @@ else
                 // when no season-poster was downloaded.
                 var seasonPoster = active?.PosterPath ?? item.FanartPath ?? item.PosterPath;
                 var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
-                    ? $"/api/image?path={Uri.EscapeDataString(seasonPoster)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+                    ? Animarr.UI.Services.MediaUrl.Image(seasonPoster, item.LastMetadataRefreshedAt?.Ticks ?? 0)
                     : null;
             }
             @if (active is not null && !string.IsNullOrEmpty(active.Overview))
@@ -254,9 +254,9 @@ else
         var movieFile     = _files.FirstOrDefault();
         var movieWatchDto = _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null);
         var thumbUrl      = !string.IsNullOrEmpty(item.FanartPath)
-            ? $"/api/image?path={Uri.EscapeDataString(item.FanartPath!)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+            ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
             : (!string.IsNullOrEmpty(item.PosterPath)
-                ? $"/api/image?path={Uri.EscapeDataString(item.PosterPath!)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}"
+                ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
                 : null);
         var runtimeLabel  = item.Runtime is > 0 ? $"{item.Runtime} min" : null;
 

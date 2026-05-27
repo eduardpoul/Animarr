@@ -25,6 +25,8 @@
 @inject NavigationManager Nav
 @inject ThemeService ThemeService
 @inject LocalizationService Loc
+@inject ServerAddressProvider ServerAddr
+@inject ServerRegistryState ServerReg
 
 @using Microsoft.AspNetCore.SignalR.Client
 
@@ -138,17 +140,18 @@
     {
         if (!firstRender) return;
 
-        // 1. Bridge HttpClient base address to JS so it can build absolute URLs.
+        // 1. Bridge active server URL to JS + MediaUrl helper.
+        //    HttpClient.BaseAddress is a placeholder (set once at boot for
+        //    PrepareRequestMessage's relative-URI check); the *real* server is
+        //    in ServerAddressProvider.Current — that's what gets swapped when
+        //    the user picks a server in Discovery / ProfilePanel. Reading from
+        //    there means a server switch immediately rebases <img src>'s too.
         try
         {
-            var apiBase = Http.BaseAddress?.ToString().TrimEnd('/') ?? "";
-            await JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';");
-            // Also seed the C# side MediaUrl helper so <img src> in components
-            // builds absolute URLs. Required for MAUI Hybrid on Windows where
-            // the WebView2 virtual host (0.0.0.1) doesn't proxy /api/* — images
-            // 404'd silently. WASM passes its origin here and keeps URLs
-            // effectively relative (same host).
-            Animarr.UI.Services.MediaUrl.SetBase(apiBase);
+            // Hook server-pick + login flows so MediaUrl/JS pick up the new
+            // base address without a full reload.
+            ServerReg.OnChange += ApplyServerBase;
+            ApplyServerBase();
         }
         catch { }
 
@@ -307,12 +310,32 @@
         try { await _identHub.StartAsync(); } catch { }
     }
 
+    /// <summary>Push the active server's authority into MediaUrl + JS shim so
+    /// every &lt;img src&gt; and url(…) in the page resolves against the
+    /// real Animarr host (not the WebView2 virtual host 0.0.0.1 that
+    /// MAUI mounts the bundle under). Called once on first render and again
+    /// every time ServerRegistryState fires OnChange (Discovery pick,
+    /// ProfilePanel switch).</summary>
+    private void ApplyServerBase()
+    {
+        var apiBase = ServerAddr.Current?.GetLeftPart(UriPartial.Authority) ?? "";
+        Animarr.UI.Services.MediaUrl.SetBase(apiBase);
+        // Also publish to JS; backdrop.js + animarr-player.js use this when
+        // they construct absolute fetch URLs outside the HttpClient pipeline.
+        try { _ = JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';"); }
+        catch { /* JS not ready on first call — next render will succeed */ }
+        // Force a re-render so any image whose src was cached at the wrong
+        // base re-evaluates against the new one.
+        InvokeAsync(StateHasChanged);
+    }
+
     public async ValueTask DisposeAsync()
     {
         UserCtx.OnChange -= OnUserCtxChanged;
         ThemeService.OnChange -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;
         Toasts.OnShow -= OnToastShown;
+        ServerReg.OnChange -= ApplyServerBase;
         if (_hub is not null) await _hub.DisposeAsync();
         if (_identHub is not null) await _identHub.DisposeAsync();
         if (_everywhereBackdropStarted)

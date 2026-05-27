@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Hero navigation — TV-friendly variants</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Archivo+Black&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg-0:#0a0807; --bg-1:#100d0b; --surface:#15110e; --surface-2:#1c1814; --surface-3:#25201b;
+  --border:rgba(255,240,220,0.07); --border-strong:rgba(255,240,220,0.14);
+  --text:#f4eee6; --text-dim:#a8a097; --text-faint:#5d564f;
+  --accent:oklch(0.66 0.20 25); --accent-hi:oklch(0.74 0.21 25);
+  --accent-soft:oklch(0.66 0.20 25 / 0.16); --accent-line:oklch(0.66 0.20 25 / 0.40);
+  --success:oklch(0.74 0.15 150); --warn:oklch(0.80 0.17 75);
+  --font-ui:'Geist',system-ui,sans-serif; --font-display:'Archivo Black','Geist',sans-serif;
+  --font-mono:'Geist Mono',ui-monospace,monospace; --font-cjk:'Noto Serif SC',serif;
+}
+*{box-sizing:border-box;} html,body{margin:0;padding:0;}
+body{background:#050403;color:var(--text);font-family:var(--font-ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;}
+.wrap{max-width:1840px;margin:0 auto;padding:40px 32px 80px;}
+h1{font-family:var(--font-display);font-size:48px;letter-spacing:-1.2px;margin:0 0 6px;}
+.sub{color:var(--text-dim);max-width:760px;margin-bottom:30px;}
+.frame{background:var(--surface);border:1px solid var(--border-strong);border-radius:16px;overflow:hidden;box-shadow:0 30px 60px -30px rgba(0,0,0,0.7);margin-bottom:50px;}
+.frame-head{padding:14px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;background:rgba(15,12,10,0.6);}
+.frame-head .badge{background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);padding:3px 9px;border-radius:6px;font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:0.6px;}
+.frame-head .title{font-family:var(--font-display);font-size:16px;letter-spacing:-0.3px;}
+.frame-head .desc{color:var(--text-dim);font-size:12.5px;margin-left:auto;max-width:560px;text-align:right;}
+.canvas{position:relative;height:600px;background:var(--bg-0);overflow:hidden;}
+.bg{position:absolute;inset:0;background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2000&q=70');background-size:cover;background-position:center;}
+.glass{background:linear-gradient(180deg, rgba(10,8,7,0.78), rgba(10,8,7,0.55));backdrop-filter:blur(20px);border-bottom:1px solid var(--border);}
+.topbar{position:absolute;top:0;left:0;right:0;height:60px;z-index:5;display:flex;align-items:center;gap:16px;padding:0 24px;}
+.brand{display:flex;align-items:center;gap:11px;flex-shrink:0;}
+.brand .mark{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg, var(--accent), oklch(0.42 0.18 25));display:grid;place-items:center;font-family:var(--font-display);color:#fff;font-size:17px;}
+.brand .name{font-family:var(--font-display);font-size:14px;letter-spacing:-0.3px;}
+.tabs{display:flex;gap:4px;margin-left:16px;}
+.tab{padding:7px 14px;border-radius:8px;height:36px;display:inline-flex;align-items:center;font-size:13px;font-weight:600;color:var(--text-dim);}
+.tab.on{color:var(--text);background:var(--surface-3);box-shadow:0 1px 0 var(--accent) inset;}
+.spacer{flex:1;}
+.pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10px;letter-spacing:0.6px;padding:3px 7px;border-radius:4px;text-transform:uppercase;background:rgba(255,255,255,0.05);color:var(--text-dim);border:1px solid var(--border);}
+.pill.accent{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line);}
+.grad-left{position:absolute;inset:0;background:linear-gradient(90deg, oklch(0.10 0.04 25 / 0.82) 0%, oklch(0.10 0.04 25 / 0.30) 42%, transparent 75%);}
+.grad-bottom{position:absolute;inset:0;background:linear-gradient(0deg, rgba(0,0,0,0.65), transparent 55%);}
+.cjk{position:absolute;right:5%;top:6%;font-family:var(--font-cjk);font-size:340px;line-height:0.85;color:oklch(0.95 0.10 25 / 0.07);writing-mode:vertical-rl;text-orientation:upright;letter-spacing:6px;pointer-events:none;user-select:none;}
+.content{position:absolute;left:48px;right:48px;bottom:64px;}
+.over{font-family:var(--font-mono);font-size:11px;color:var(--accent-hi);letter-spacing:1.4px;text-transform:uppercase;margin-bottom:10px;display:inline-flex;align-items:center;gap:8px;}
+.over .dot{width:7px;height:7px;border-radius:7px;background:var(--accent);box-shadow:0 0 10px var(--accent-soft);}
+.title{margin:0;font-family:var(--font-display);font-size:88px;line-height:0.88;letter-spacing:-2.8px;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.6);}
+.meta{display:flex;gap:18px;margin-top:14px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);letter-spacing:1px;}
+.meta .star{color:var(--accent-hi);font-weight:700;}
+.over p{color:#e7dfd7;margin:12px 0 0;font-size:14.5px;line-height:1.55;max-width:580px;text-shadow:0 2px 10px rgba(0,0,0,0.55);}
+.actions{display:flex;gap:10px;margin-top:18px;}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;font-size:12.5px;font-weight:600;border-radius:7px;cursor:pointer;border:1px solid transparent;font-family:inherit;}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+.btn.ghost{background:rgba(10,8,7,0.45);backdrop-filter:blur(8px);color:var(--text);border:1px solid rgba(255,255,255,0.10);}
+
+/* --- Edge chevrons (A) --- */
+.A .chev{position:absolute;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:60px;background:rgba(10,8,7,0.55);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.16);color:#fff;display:grid;place-items:center;cursor:pointer;transition:all .15s ease;}
+.A .chev:hover, .A .chev:focus{background:var(--accent);border-color:var(--accent);transform:translateY(-50%) scale(1.06);outline:none;box-shadow:0 0 0 4px var(--accent-soft);}
+.A .chev.l{left:24px;}
+.A .chev.r{right:24px;}
+.A .kb-hint{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:0.6px;}
+.A .kb-hint .key{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(20,15,12,0.7);border:1px solid var(--border-strong);color:var(--text);}
+
+/* --- Bottom progress + pager (B) --- */
+.B .progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,0.08);}
+.B .progress > div{height:100%;width:62%;background:linear-gradient(90deg, var(--accent), var(--accent-hi));box-shadow:0 0 8px var(--accent-soft);transition:width .2s linear;animation: bprog 8s linear infinite;}
+@keyframes bprog{0%{width:0;} 100%{width:100%;}}
+.B .strip{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;gap:10px;}
+.B .strip button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:rgba(10,8,7,0.45);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.08);min-width:90px;}
+.B .strip button.on{background:var(--accent-soft);border-color:var(--accent-line);}
+.B .strip .ix{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:0.8px;}
+.B .strip .lbl{font-size:11.5px;font-weight:600;color:var(--text-dim);}
+.B .strip button.on .lbl{color:var(--accent-hi);}
+.B .strip button.on .ix{color:var(--accent-hi);}
+
+/* --- Side-rail thumbnails (C) --- */
+.C .rail{position:absolute;right:24px;top:80px;bottom:24px;width:170px;display:flex;flex-direction:column;gap:10px;}
+.C .rail button{all:unset;cursor:pointer;flex:1;position:relative;border-radius:10px;overflow:hidden;border:2px solid transparent;background-size:cover;background-position:center;transition:all .15s ease;}
+.C .rail button:hover, .C .rail button:focus{transform:translateX(-4px);outline:none;}
+.C .rail button.on{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);}
+.C .rail button .g{position:absolute;inset:0;background:linear-gradient(0deg, rgba(0,0,0,0.85), transparent 60%);}
+.C .rail button .t{position:absolute;left:10px;right:8px;bottom:8px;font-family:var(--font-display);font-size:11.5px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.7);line-height:1.15;}
+.C .rail button .b{position:absolute;left:8px;top:8px;font-family:var(--font-mono);font-size:9px;letter-spacing:0.6px;padding:2px 5px;background:rgba(0,0,0,0.55);color:var(--accent-hi);border-radius:3px;border:1px solid rgba(255,255,255,0.1);}
+.C .content{right:218px;}
+
+/* --- Mini-carousel below (D) --- */
+.D .carousel{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg, transparent, rgba(8,6,5,0.78) 40%, rgba(8,6,5,0.92));padding:16px 24px 16px;}
+.D .carousel .label{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:1.4px;margin-bottom:10px;}
+.D .carousel .row{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;}
+.D .carousel .row::-webkit-scrollbar{display:none;}
+.D .carousel .card{flex-shrink:0;width:188px;height:108px;border-radius:8px;overflow:hidden;position:relative;cursor:pointer;background-size:cover;background-position:center;border:2px solid transparent;transition:all .15s ease;}
+.D .carousel .card:hover, .D .carousel .card:focus{outline:none;transform:translateY(-3px);}
+.D .carousel .card.on{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);}
+.D .carousel .card .g{position:absolute;inset:0;background:linear-gradient(0deg, rgba(0,0,0,0.8), transparent 60%);}
+.D .carousel .card .p{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.1);}
+.D .carousel .card .p > div{height:100%;background:linear-gradient(90deg, var(--accent), var(--accent-hi));}
+.D .carousel .card .t{position:absolute;left:8px;right:8px;bottom:7px;font-family:var(--font-display);font-size:11px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.7);line-height:1.1;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;}
+.D .carousel .card .e{position:absolute;left:8px;top:6px;font-family:var(--font-mono);font-size:9.5px;color:var(--accent-hi);text-shadow:0 1px 3px rgba(0,0,0,0.7);}
+.D .canvas{height:680px;}
+.D .content{bottom:180px;}
+
+/* --- Hybrid (E) — edge chevrons + bottom progress + pager dots --- */
+.E .chev{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:120px;border-radius:14px;background:rgba(10,8,7,0.5);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.12);color:var(--text-dim);display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .2s ease, background .15s, color .15s, transform .15s;}
+.E .canvas:hover .chev{opacity:1;}
+.E .chev:hover, .E .chev:focus{background:var(--accent);border-color:var(--accent);color:#fff;outline:none;}
+.E .chev.l{left:14px;}
+.E .chev.r{right:14px;}
+.E .dots{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;}
+.E .dots button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;padding:4px 6px;}
+.E .dots .bar{height:3px;background:rgba(255,255,255,0.2);border-radius:3px;transition:width .25s ease, background .15s;width:24px;}
+.E .dots button.on .bar{width:60px;background:linear-gradient(90deg, var(--accent), var(--accent-hi));box-shadow:0 0 6px var(--accent-soft);}
+.E .dots .ix{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);letter-spacing:0.6px;}
+.E .dots button.on .ix{color:var(--accent-hi);}
+.E .progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.05);}
+.E .progress > div{height:100%;background:var(--accent);width:62%;box-shadow:0 0 8px var(--accent-soft);}
+
+.tv-note{margin-top:14px;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:13px;color:var(--text-dim);line-height:1.55;}
+.tv-note strong{color:var(--text);}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:5px;background:var(--surface-3);border:1px solid var(--border-strong);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:0 6px;margin:0 3px;}
+<style>
+:root{
+  --bg-0:#0a0807; --bg-1:#100d0b; --surface:#15110e; --surface-2:#1c1814; --surface-3:#25201b;
+  --border:rgba(255,240,220,0.07); --border-strong:rgba(255,240,220,0.14);
+  --text:#f4eee6; --text-dim:#a8a097; --text-faint:#5d564f;
+  --accent:oklch(0.66 0.20 25); --accent-hi:oklch(0.74 0.21 25);
+  --accent-soft:oklch(0.66 0.20 25 / 0.16); --accent-line:oklch(0.66 0.20 25 / 0.40);
+  --success:oklch(0.74 0.15 150); --warn:oklch(0.80 0.17 75);
+  --font-ui:'Geist',system-ui,sans-serif; --font-display:'Archivo Black','Geist',sans-serif;
+  --font-mono:'Geist Mono',ui-monospace,monospace; --font-cjk:'Noto Serif SC',serif;
+}
+
+/* --- F: B but transparent / ghost --- */
+.F .strip{position:absolute;left:0;right:0;bottom:18px;display:flex;justify-content:center;gap:12px;}
+.F .strip button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;padding:7px 14px;border-radius:10px;background:transparent;border:1px solid transparent;min-width:96px;transition:all .15s ease;}
+.F .strip button:hover, .F .strip button:focus{background:rgba(20,15,12,0.4);border-color:rgba(255,255,255,0.08);outline:none;}
+.F .strip button.on{background:rgba(20,15,12,0.55);border-color:var(--accent-line);}
+.F .strip button.on .lbl{color:var(--accent-hi);}
+.F .strip button.on .ix{color:var(--accent-hi);}
+.F .strip .ix{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);letter-spacing:0.8px;opacity:0.6;}
+.F .strip .lbl{font-size:11px;font-weight:600;color:rgba(232,224,210,0.55);}
+.F .progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.05);}
+.F .progress > div{height:100%;width:62%;background:linear-gradient(90deg, var(--accent), var(--accent-hi));box-shadow:0 0 8px var(--accent-soft);}
+
+/* --- G: E but with names --- */
+.G .chev{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:120px;border-radius:14px;background:rgba(10,8,7,0.5);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.12);color:var(--text-dim);display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .2s ease, background .15s, color .15s;}
+.G .canvas:hover .chev{opacity:1;}
+.G .chev:hover, .G .chev:focus{background:var(--accent);border-color:var(--accent);color:#fff;outline:none;}
+.G .chev.l{left:14px;} .G .chev.r{right:14px;}
+.G .dots{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;}
+.G .dots button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;padding:5px 8px;min-width:80px;border-radius:8px;transition:background .15s ease;}
+.G .dots button:hover, .G .dots button:focus{background:rgba(20,15,12,0.4);outline:none;}
+.G .dots .bar{height:3px;background:rgba(255,255,255,0.22);border-radius:3px;transition:width .25s ease, background .15s;width:32px;}
+.G .dots button.on .bar{width:70px;background:linear-gradient(90deg, var(--accent), var(--accent-hi));box-shadow:0 0 6px var(--accent-soft);}
+.G .dots .lbl{font-size:10.5px;font-weight:600;color:rgba(232,224,210,0.4);letter-spacing:0.2px;text-shadow:0 1px 4px rgba(0,0,0,0.6);}
+.G .dots button.on .lbl{color:var(--accent-hi);}
+.G .progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.05);}
+.G .progress > div{height:100%;background:var(--accent);width:62%;box-shadow:0 0 8px var(--accent-soft);}
+
+/* --- H: ghost numbered pills + edge chevrons (compromise) --- */
+.H .chev{position:absolute;top:50%;transform:translateY(-50%);width:54px;height:54px;border-radius:54px;background:rgba(10,8,7,0.45);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);display:grid;place-items:center;cursor:pointer;transition:all .15s ease;}
+.H .chev:hover, .H .chev:focus{background:var(--accent);border-color:var(--accent);color:#fff;outline:none;box-shadow:0 0 0 4px var(--accent-soft);}
+.H .chev.l{left:20px;} .H .chev.r{right:20px;}
+.H .strip{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:10px;}
+.H .strip button{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border-radius:999px;background:rgba(20,15,12,0.35);border:1px solid rgba(255,255,255,0.06);transition:all .15s ease;}
+.H .strip button:hover, .H .strip button:focus{background:rgba(20,15,12,0.6);border-color:rgba(255,255,255,0.14);outline:none;}
+.H .strip button.on{background:rgba(20,15,12,0.7);border-color:var(--accent-line);}
+.H .strip .ix{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:22px;font-family:var(--font-mono);font-size:9.5px;font-weight:700;background:rgba(0,0,0,0.5);color:var(--text-dim);letter-spacing:0;}
+.H .strip button.on .ix{background:var(--accent);color:#fff;}
+.H .strip .lbl{font-size:11px;font-weight:600;color:rgba(232,224,210,0.55);}
+.H .strip button.on .lbl{color:var(--accent-hi);}
+.H .progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.05);}
+.H .progress > div{height:100%;background:var(--accent);width:62%;box-shadow:0 0 8px var(--accent-soft);}
+
+/* --- I: minimal dots that expand to names on focus --- */
+.I .dots{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);display:flex;gap:6px;align-items:center;background:rgba(10,8,7,0.45);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:999px;}
+.I .dots button{all:unset;cursor:pointer;display:inline-flex;align-items:center;height:24px;border-radius:999px;background:rgba(255,255,255,0.08);color:transparent;font-size:11px;font-weight:600;letter-spacing:0;padding:0;width:8px;overflow:hidden;transition:all .3s cubic-bezier(.4,0,.2,1);white-space:nowrap;}
+.I .dots button:hover, .I .dots button:focus{width:auto;padding:0 12px;background:rgba(255,255,255,0.12);color:var(--text);outline:none;}
+.I .dots button.on{width:auto;padding:0 14px;background:linear-gradient(90deg, var(--accent), var(--accent-hi));color:#fff;box-shadow:0 0 12px var(--accent-soft);}
+.I .progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.05);}
+.I .progress > div{height:100%;background:var(--accent);width:62%;box-shadow:0 0 8px var(--accent-soft);}
+
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>HERO NAVIGATION — TV variants</h1>
+  <p class="sub">Five takes on making the 5-slot Continue Watching hero navigable from a TV remote (and a keyboard). All keep the auto-rotation; the difference is how the user takes manual control.</p>
+
+  <!-- ============================== A ============================== -->
+  <div class="frame A">
+    <div class="frame-head">
+      <span class="badge">A</span>
+      <span class="title">Edge chevrons + arrow keys</span>
+      <span class="desc">Big 60×60 round buttons on the left and right edges. ← → on remote/keyboard switch slots. Always visible. Most discoverable.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span><span class="tab">Series</span><span class="tab">Donghua</span></div>
+      </div>
+
+      <button class="chev l" tabindex="0">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button class="chev r" tabindex="0">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+
+      <div class="kb-hint">
+        <span class="key">←</span><span class="key">→</span>
+        <span>Switch slot</span>
+        <span style="margin-left:14px;" class="key">Enter</span>
+        <span>Open</span>
+      </div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> immediate, читаемо, нативный TV-паттерн. <strong>Minus:</strong> chevrons всегда видны — могут отвлекать на красивом hero.</div>
+  </div>
+
+  <!-- ============================== B ============================== -->
+  <div class="frame B">
+    <div class="frame-head">
+      <span class="badge">B</span>
+      <span class="title">Bottom progress bar + named pager</span>
+      <span class="desc">Slot labels with thumb chips along the bottom edge. Active slot has accent fill. Top-edge progress bar shows auto-rotate timer.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span><span class="tab">Series</span></div>
+      </div>
+      <div class="content" style="bottom:96px;">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="strip">
+        <button class="on"><span class="ix">01</span><span class="lbl">Perfect World</span></button>
+        <button><span class="ix">02</span><span class="lbl">Swallowed Star</span></button>
+        <button><span class="ix">03</span><span class="lbl">Xian Ni</span></button>
+        <button><span class="ix">04</span><span class="lbl">Arcane</span></button>
+        <button><span class="ix">05</span><span class="lbl">Featured</span></button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> названия слотов читаемы с дивана, видно прогресс автосмены. <strong>Minus:</strong> занимает место внизу.</div>
+  </div>
+
+  <!-- ============================== C ============================== -->
+  <div class="frame C">
+    <div class="frame-head">
+      <span class="badge">C</span>
+      <span class="title">Side-rail thumbnail stack</span>
+      <span class="desc">Правая полоса с 5 миниатюрами 160×~96px одна над другой. Каждая показывает кадр + название. Активная обведена accent border.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="rail">
+        <button class="on" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="b">38%</div><div class="t">PERFECT WORLD</div></button>
+        <button style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="b">72%</div><div class="t">SWALLOWED STAR</div></button>
+        <button style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="b">NEW</div><div class="t">XIAN NI</div></button>
+        <button style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="b">88%</div><div class="t">ARCANE</div></button>
+        <button style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="b">★</div><div class="t">THRONE OF SEAL</div></button>
+      </div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> сразу видно все 5 вариантов с превью. Идеально для пульта — вверх/вниз. <strong>Minus:</strong> съедает 170-220px по правому краю, hero меньше.</div>
+  </div>
+
+  <!-- ============================== D ============================== -->
+  <div class="frame D">
+    <div class="frame-head">
+      <span class="badge">D</span>
+      <span class="title">Mini-carousel under hero</span>
+      <span class="desc">Hero стандартный сверху, под ним лента из 5 wide-cards 188×108px. Активная карточка обведена accent.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="carousel">
+        <div class="label">CONTINUE WATCHING · 5 SLOTS</div>
+        <div class="row">
+          <div class="card on" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="e">EP 05</div><div class="t">PERFECT WORLD</div><div class="p"><div style="width:38%"></div></div></div>
+          <div class="card" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="e">EP 142</div><div class="t">SWALLOWED STAR</div><div class="p"><div style="width:72%"></div></div></div>
+          <div class="card" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="e">★ NEXT</div><div class="t">XIAN NI</div></div>
+          <div class="card" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="e">EP 03</div><div class="t">ARCANE</div><div class="p"><div style="width:88%"></div></div></div>
+          <div class="card" style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"><div class="g"></div><div class="e">★ FEAT</div><div class="t">THRONE OF SEAL</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> hero не меньше, все варианты видны как карточки с прогрессом. Самое Netflix-like. <strong>Minus:</strong> +100px высоты для hero, на ТВ это ок, на десктопе чуть длиннее.</div>
+  </div>
+
+  <!-- ============================== E ============================== -->
+  <div class="frame E">
+    <div class="frame-head">
+      <span class="badge">E</span>
+      <span class="title">Hybrid — chevrons on hover + длинные тире-pager + progress</span>
+      <span class="desc">Стрелки появляются только при наведении (компактный hero). Снизу — горизонтальная полоса из 5 длинных линий, активная превращается в длинный accent-бар. Тонкая полоска прогресса автоповорота.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <button class="chev l" tabindex="0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button class="chev r" tabindex="0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="dots">
+        <button class="on"><span class="bar"></span><span class="ix">01</span></button>
+        <button><span class="bar"></span><span class="ix">02</span></button>
+        <button><span class="bar"></span><span class="ix">03</span></button>
+        <button><span class="bar"></span><span class="ix">04</span></button>
+        <button><span class="bar"></span><span class="ix">05</span></button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> минимальное вмешательство в hero, но добавляет два сильных affordance. Стрелки не отвлекают (только на hover/focus). <strong>Minus:</strong> на ТВ без курсора стрелки видны только при фокусе на hero области.</div>
+  </div>
+
+  <!-- ============================== F ============================== -->
+  <div class="frame F">
+    <div class="frame-head">
+      <span class="badge">F</span>
+      <span class="title">B but transparent — ghost named pager</span>
+      <span class="desc">Те же названия как в B, но карточки прозрачные (без фона). Активная подсвечивается только тонким border и accent-цветом текста.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span><span class="tab">Series</span></div>
+      </div>
+      <div class="content" style="bottom:96px;">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="strip">
+        <button class="on"><span class="ix">01</span><span class="lbl">Perfect World</span></button>
+        <button><span class="ix">02</span><span class="lbl">Swallowed Star</span></button>
+        <button><span class="ix">03</span><span class="lbl">Xian Ni</span></button>
+        <button><span class="ix">04</span><span class="lbl">Arcane</span></button>
+        <button><span class="ix">05</span><span class="lbl">Throne of Seal</span></button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> hero почти не теряет в драматизме, названия видно. <strong>Minus:</strong> на очень светлых кадрах буквы могут пропадать — нужен text-shadow.</div>
+  </div>
+
+  <!-- ============================== G ============================== -->
+  <div class="frame G">
+    <div class="frame-head">
+      <span class="badge">G</span>
+      <span class="title">E + названия под полосками</span>
+      <span class="desc">Длинные тире-pager как в E, но под каждой полоской — мелкое название слота. Активный — accent.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <button class="chev l" tabindex="0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <button class="chev r" tabindex="0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="dots">
+        <button class="on"><span class="bar"></span><span class="lbl">Perfect World</span></button>
+        <button><span class="bar"></span><span class="lbl">Swallowed Star</span></button>
+        <button><span class="bar"></span><span class="lbl">Xian Ni</span></button>
+        <button><span class="bar"></span><span class="lbl">Arcane</span></button>
+        <button><span class="bar"></span><span class="lbl">Throne of Seal</span></button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> минимально воздействует на hero, accent-полоса + название читается чётко. <strong>Minus:</strong> на узких экранах названия могут наезжать друг на друга.</div>
+  </div>
+
+  <!-- ============================== H ============================== -->
+  <div class="frame H">
+    <div class="frame-head">
+      <span class="badge">H</span>
+      <span class="title">Numbered pills + edge chevrons</span>
+      <span class="desc">Снизу — компактные pill-кнопки с круглым номером слева и названием справа, полупрозрачные. По бокам — мягкие chevron'ы. Активный pill имеет accent-кружок номера.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <button class="chev l" tabindex="0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <button class="chev r" tabindex="0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+      <div class="content" style="bottom:92px;">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="strip">
+        <button class="on"><span class="ix">01</span><span class="lbl">Perfect World</span></button>
+        <button><span class="ix">02</span><span class="lbl">Swallowed Star</span></button>
+        <button><span class="ix">03</span><span class="lbl">Xian Ni</span></button>
+        <button><span class="ix">04</span><span class="lbl">Arcane</span></button>
+        <button><span class="ix">05</span><span class="lbl">Throne of Seal</span></button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> двойной affordance — chevrons + named pills. <strong>Minus:</strong> элементов больше, чем в E/F.</div>
+  </div>
+
+  <!-- ============================== I ============================== -->
+  <div class="frame I">
+    <div class="frame-head">
+      <span class="badge">I</span>
+      <span class="title">Expanding capsule pager</span>
+      <span class="desc">Контейнер-пилюля по центру внизу. Каждый слот — крошечная точка, которая на focus/hover раскрывается в полное название. Активный всегда раскрыт.</span>
+    </div>
+    <div class="canvas">
+      <div class="bg"></div>
+      <div class="grad-left"></div>
+      <div class="grad-bottom"></div>
+      <div class="cjk">完美</div>
+      <div class="topbar glass">
+        <div class="brand"><div class="mark">A</div><div class="name">ANIMARR</div></div>
+        <div class="tabs"><span class="tab on">All</span><span class="tab">Anime</span><span class="tab">Movies</span></div>
+      </div>
+      <div class="content">
+        <div class="over"><span class="dot"></span>CONTINUE · EPISODE 05</div>
+        <h2 class="title">PERFECT WORLD</h2>
+        <div class="meta"><span class="star">★ 8.5</span><span>2018</span><span>270 EP</span><span>YUEWEN</span></div>
+        <p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation.</p>
+        <div class="actions">
+          <button class="btn primary">▶ Continue · 38%</button>
+          <button class="btn ghost">↻ Restart</button>
+        </div>
+      </div>
+      <div class="dots">
+        <button class="on">Perfect World</button>
+        <button>Swallowed Star</button>
+        <button>Xian Ni</button>
+        <button>Arcane</button>
+        <button>Throne of Seal</button>
+      </div>
+      <div class="progress"><div></div></div>
+    </div>
+    <div class="tv-note"><strong>Plus:</strong> очень компактно, активный слот сам по себе читается. <strong>Minus:</strong> неактивные слоты в свёрнутом виде выглядят как просто точки.</div>
+  </div>
+
+  <div style="margin-top:30px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px 26px;">
+    <h2 style="margin:0 0 8px;font-family:var(--font-display);font-size:20px;letter-spacing:-0.3px;">Что я бы выбрал</h2>
+    <p style="margin:0;color:var(--text-dim);line-height:1.6;font-size:14px;">
+      <strong style="color:var(--text);">Вариант C (side-rail thumbnails)</strong> — лучший именно для ТВ-режима: одно нажатие вверх/вниз на пульте перемещает фокус по 5 миниатюрам, видно превью каждого, активный обведён. На десктопе тоже работает (мышью по миниатюре). Минус — hero становится примерно на 200px уже.
+      <br/><br/>
+      Если хочется не "ломать" hero — <strong style="color:var(--text);">A или E</strong>. A — самый понятный (всегда видимые стрелки). E — тише и красивее, но требует hover/focus.
+      <br/><br/>
+      Можно скомбинировать: <strong style="color:var(--text);">A + B</strong> = большие edge-chevrons + bottom progress bar для авторотации.
+    </p>
+  </div>
+</div>
+
+</body>
+</html>
