@@ -2,11 +2,13 @@
    ProfilePanel — 480px right-edge drawer. Spec: screens-v4.jsx 453-637.
    ============================================================ */
 
+/* Backdrop + drawer go all the way to the top — TopBar is glass-pills only
+   now, no opaque strip to clear. Earlier `top: 60px` left a gap of bare
+   page background between the fixed TopBar and the drawer header. */
 .d-profile__backdrop {
     position: fixed;
     inset: 0;
-    top: 60px;
-    z-index: 30;
+    z-index: 70;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
@@ -19,13 +21,12 @@
 
 .d-profile {
     position: fixed;
-    top: 60px; right: 0; bottom: 0;
+    top: 0; right: 0; bottom: 0;
     width: 480px;
     max-width: 100vw;
-    z-index: 31;
+    z-index: 71;
     background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
     border-left: 1px solid var(--border-strong);
-    border-top: 1px solid var(--border);
     box-shadow: -30px 0 60px -20px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -38,8 +39,7 @@
 }
 
 @media (max-width: 959px) {
-    .d-profile { top: 56px; width: 100vw; }
-    .d-profile__backdrop { top: 56px; }
+    .d-profile { width: 100vw; }
 }
 
 /* ── Header ──────────────────────────────────────────────── */
@@ -174,6 +174,11 @@
     font-family: var(--font-ui);
     font-size: 13px;
     height: 36px;
+    /* Fill its grid cell — without width:100% the inline-flex parent leaves
+       the select sitting at its natural shrink-wrapped size next to the
+       label, which read as "broken" alignment in the Create-user form. */
+    width: 100%;
+    box-sizing: border-box;
     padding: 0 30px 0 12px;
     cursor: pointer;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23a8a097' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
