@@ -470,6 +470,59 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private bool _llmTesting;
     private LlmTestResponse? _llmTestResult;
 
+    // ─── Metadata providers ───────────────────────────────────────────────
+    /// <summary>Static definition of every provider Settings exposes — name,
+    /// AppConfig key (where the API token lives), placeholder for the input,
+    /// hint shown next to the name. Source IDs are short stable strings
+    /// stored in <see cref="AppConfigKeys.SearchSourceOrder"/> as a CSV.</summary>
+    private sealed record ProviderDef(string Id, string Name, string ConfigKey, string Placeholder, string Hint);
+
+    private static readonly Dictionary<string, ProviderDef> SourceDefs = new()
+    {
+        ["tmdb"]    = new("tmdb",    "TMDb",    AppConfigKeys.TmdbApiKey,     "v3 key or v4 read-token",       "Movies + TV (primary)"),
+        ["mal"]     = new("mal",     "MAL",     AppConfigKeys.MalClientId,    "Client ID from MAL API portal", "Anime fallback"),
+        ["anilist"] = new("anilist", "AniList", AppConfigKeys.AniListClientId,"OAuth client ID (optional)",    "Anime — higher rate limit when keyed"),
+        ["anidb"]   = new("anidb",   "AniDB",   AppConfigKeys.AniDbClient,    "Registered client name",        "Anime — UDP API"),
+        ["fanart"]  = new("fanart",  "FanArt",  AppConfigKeys.FanArtApiKey,   "Personal API key",              "High-res posters + clearlogos"),
+    };
+
+    /// <summary>Default left-to-right probe order. Used when the user hasn't
+    /// set a custom order yet, or when the CSV from AppConfig is missing
+    /// some sources (new install vs. old install, etc.).</summary>
+    private static readonly string[] DefaultOrder = { "tmdb", "mal", "anilist", "anidb", "fanart" };
+
+    /// <summary>Resolved order — parsed from SearchSourceOrder, then any
+    /// unlisted providers from DefaultOrder appended so a partial CSV
+    /// doesn't hide providers. Re-resolved every render so a save → reload
+    /// sequence picks up the new value without a manual refresh.</summary>
+    private string[] _providerOrder
+    {
+        get
+        {
+            var raw = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder) ?? "";
+            var fromCsv = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                              .Where(SourceDefs.ContainsKey)
+                              .ToList();
+            foreach (var d in DefaultOrder)
+                if (!fromCsv.Contains(d, StringComparer.OrdinalIgnoreCase))
+                    fromCsv.Add(d);
+            return fromCsv.ToArray();
+        }
+    }
+
+    /// <summary>Shift <paramref name="id"/> up (delta=-1) or down (delta=+1)
+    /// in the order and persist the new CSV. Out-of-bounds shifts are clamped.</summary>
+    private async Task MoveProvider(string id, int delta)
+    {
+        var list = _providerOrder.ToList();
+        var i = list.IndexOf(id);
+        if (i < 0) return;
+        var j = i + delta;
+        if (j < 0 || j >= list.Count) return;
+        (list[i], list[j]) = (list[j], list[i]);
+        await SetConfigAsync(AppConfigKeys.SearchSourceOrder, string.Join(",", list));
+    }
+
     private async Task TestLlmAsync()
     {
         if (_llmTesting) return;
@@ -635,8 +688,6 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     // ── Metadata tab ──
     private RenderFragment MetadataTab()
     {
-        var tmdb    = _config.GetValueOrDefault(AppConfigKeys.TmdbApiKey) ?? "";
-        var mal     = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
         var auto    = (_config.GetValueOrDefault(AppConfigKeys.AutoIdentifyEnabled) ?? "true") != "false";
         var thumbs  = (_config.GetValueOrDefault(AppConfigKeys.DownloadEpisodeThumbs) ?? "false") == "true";
         var ep      = (_config.GetValueOrDefault(AppConfigKeys.IncludeEpisodeNameInFile) ?? "true") != "false";
@@ -646,18 +697,46 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var extCust = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayerCustom) ?? "";
         return @<section class="settings-section">
             <h2>Metadata sources</h2>
-            <label class="settings-field">
-                <span class="settings-field__label">TMDB API key (v3 or read-token)</span>
-                <input class="settings-field__input" type="password"
-                       value="@tmdb"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.TmdbApiKey, e.Value?.ToString()))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">MAL client ID</span>
-                <input class="settings-field__input" type="password"
-                       value="@mal"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.MalClientId, e.Value?.ToString()))" />
-            </label>
+            <p class="settings-hint">
+                Identification probes these providers left-to-right. Drag the arrows
+                to reorder. Empty API-key fields skip that source.
+            </p>
+            <div class="settings-providers">
+                @foreach (var src in _providerOrder)
+                {
+                    var s = src;
+                    var idx = Array.IndexOf(_providerOrder, s);
+                    var canUp   = idx > 0;
+                    var canDown = idx < _providerOrder.Length - 1;
+                    var def     = SourceDefs[s];
+                    var key     = _config.GetValueOrDefault(def.ConfigKey) ?? "";
+                    <div class="settings-provider">
+                        <div class="settings-provider__head">
+                            <div class="settings-provider__rank">@(idx + 1)</div>
+                            <div class="settings-provider__name">
+                                @def.Name
+                                <span class="settings-provider__hint">@def.Hint</span>
+                            </div>
+                            <div class="settings-provider__nav">
+                                <button type="button" class="settings-provider__btn tv-focus"
+                                        disabled="@(!canUp)"
+                                        @onclick="@(() => MoveProvider(s, -1))" title="Move up">
+                                    <DIcon Name="chev-l" Size="13" />
+                                </button>
+                                <button type="button" class="settings-provider__btn tv-focus"
+                                        disabled="@(!canDown)"
+                                        @onclick="@(() => MoveProvider(s, +1))" title="Move down">
+                                    <DIcon Name="chev-r" Size="13" />
+                                </button>
+                            </div>
+                        </div>
+                        <input class="settings-field__input" type="password"
+                               placeholder="@def.Placeholder"
+                               value="@key"
+                               @onchange="@(e => SetConfigAsync(def.ConfigKey, e.Value?.ToString()))" />
+                    </div>
+                }
+            </div>
 
             <h3>Auto-identification</h3>
             <label class="settings-field settings-field--inline">

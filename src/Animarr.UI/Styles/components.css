@@ -2570,6 +2570,79 @@ button.d-pill:focus-visible {
     opacity: 0.6;
 }
 
+/* ============================================================
+   .d-srv-card — global shell shared by every Server Settings panel
+   (Users/Roles, Categories, About, Folders embed, …). Lives in
+   components.css instead of any panel's scoped razor.css because
+   Blazor scoped CSS doesn't cross component boundaries — previously
+   only UsersRolesPanel saw these styles and About / Categories
+   rendered card content with zero gaps.
+   ============================================================ */
+.d-srv-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);          /* 18px — generous breathing between
+                                     header → list → footer rows */
+}
+
+.d-srv-card__head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);          /* 8px between title + subtitle */
+    margin-bottom: var(--space-5);
+}
+
+.d-srv-card__title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    letter-spacing: -0.3px;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.2;
+}
+
+.d-srv-card__sub {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.55;
+}
+
+/* Bottom-of-card actions row — used when actions can't fit in the
+   header (e.g. multiple CTAs that would crowd the heading). Most v5
+   panels hoist their primary CTA into the header via
+   .d-srv-card__head--with-cta below. */
+.d-srv-card__actions {
+    display: flex;
+    gap: 10px;
+    margin-top: var(--space-6);
+    flex-wrap: wrap;
+}
+
+/* Header variant: hoist a "+ New …" CTA cluster to the right of the
+   title + subtitle column instead of stacking it under the description.
+   Used by Categories, future panels that want the same pattern. */
+.d-srv-card__head--with-cta {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-7);
+    flex-wrap: wrap;
+}
+
+.d-srv-card__head-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);          /* same 8px as base header */
+    flex: 1;
+    min-width: 220px;
+}
+
+.d-srv-card__head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 /* ── AI / LLM "Test connection" result card ─────────────────────
    Inline status surface under the LLM config form. Green tint on
    success, red tint on failure. The button itself reuses
@@ -2582,6 +2655,11 @@ button.d-pill:focus-visible {
     margin-top: var(--space-6);
     padding-top: var(--space-6);
     border-top: 1px solid var(--border);
+    /* Keep the Test button compact instead of stretching to row width.
+       Flex-column descendants default to "stretch" cross-axis, which
+       made the inline-flex button render full-width. Pin start-aligned
+       so it sits naturally next to the result card below. */
+    align-items: flex-start;
 }
 
 .settings-llm-test__result {
