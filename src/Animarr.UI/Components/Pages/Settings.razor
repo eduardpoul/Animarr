@@ -470,58 +470,63 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private bool _llmTesting;
     private LlmTestResponse? _llmTestResult;
 
-    // ─── Metadata providers ───────────────────────────────────────────────
-    /// <summary>Static definition of every provider Settings exposes — name,
-    /// AppConfig key (where the API token lives), placeholder for the input,
-    /// hint shown next to the name. Source IDs are short stable strings
-    /// stored in <see cref="AppConfigKeys.SearchSourceOrder"/> as a CSV.</summary>
-    private sealed record ProviderDef(string Id, string Name, string ConfigKey, string Placeholder, string Hint);
+    // ─── Metadata sources — enable flags ─────────────────────────────
+    // Backend MetadataService.GatherCandidatesAsync reads
+    // metadata.search_source_order as a JSON array of {Id, Enabled}.
+    // We mirror that schema here verbatim instead of inventing parallel
+    // boolean keys so the UI and server stay in lockstep.
+    private sealed record SourceFlag(string Id, bool Enabled);
 
-    private static readonly Dictionary<string, ProviderDef> SourceDefs = new()
+    /// <summary>Default flags applied when the AppConfig value is missing or
+    /// malformed — kept in sync with MetadataService.ParseSourceOrder's
+    /// defaults so a fresh install behaves identically with or without
+    /// the row.</summary>
+    private static readonly SourceFlag[] DefaultSourceFlags =
     {
-        ["tmdb"]    = new("tmdb",    "TMDb",    AppConfigKeys.TmdbApiKey,     "v3 key or v4 read-token",       "Movies + TV (primary)"),
-        ["mal"]     = new("mal",     "MAL",     AppConfigKeys.MalClientId,    "Client ID from MAL API portal", "Anime fallback"),
-        ["anilist"] = new("anilist", "AniList", AppConfigKeys.AniListClientId,"OAuth client ID (optional)",    "Anime — higher rate limit when keyed"),
-        ["anidb"]   = new("anidb",   "AniDB",   AppConfigKeys.AniDbClient,    "Registered client name",        "Anime — UDP API"),
-        ["fanart"]  = new("fanart",  "FanArt",  AppConfigKeys.FanArtApiKey,   "Personal API key",              "High-res posters + clearlogos"),
+        new("tmdb_tv",     true),
+        new("tmdb_movie",  true),
+        new("mal",         false),
+        new("imdb_search", true),
     };
 
-    /// <summary>Default left-to-right probe order. Used when the user hasn't
-    /// set a custom order yet, or when the CSV from AppConfig is missing
-    /// some sources (new install vs. old install, etc.).</summary>
-    private static readonly string[] DefaultOrder = { "tmdb", "mal", "anilist", "anidb", "fanart" };
-
-    /// <summary>Resolved order — parsed from SearchSourceOrder, then any
-    /// unlisted providers from DefaultOrder appended so a partial CSV
-    /// doesn't hide providers. Re-resolved every render so a save → reload
-    /// sequence picks up the new value without a manual refresh.</summary>
-    private string[] _providerOrder
+    private List<SourceFlag> ReadSourceFlags()
     {
-        get
+        var json = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder);
+        if (string.IsNullOrWhiteSpace(json)) return DefaultSourceFlags.ToList();
+        try
         {
-            var raw = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder) ?? "";
-            var fromCsv = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                              .Where(SourceDefs.ContainsKey)
-                              .ToList();
-            foreach (var d in DefaultOrder)
-                if (!fromCsv.Contains(d, StringComparer.OrdinalIgnoreCase))
-                    fromCsv.Add(d);
-            return fromCsv.ToArray();
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<SourceFlag>>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return parsed is { Count: > 0 } ? parsed : DefaultSourceFlags.ToList();
         }
+        catch { return DefaultSourceFlags.ToList(); }
     }
 
-    /// <summary>Shift <paramref name="id"/> up (delta=-1) or down (delta=+1)
-    /// in the order and persist the new CSV. Out-of-bounds shifts are clamped.</summary>
-    private async Task MoveProvider(string id, int delta)
+    private bool _sourceEnabled(string id)
+        => ReadSourceFlags().FirstOrDefault(f =>
+            string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase))?.Enabled ?? false;
+
+    private async Task SetSourceEnabledAsync(string id, bool enabled)
     {
-        var list = _providerOrder.ToList();
-        var i = list.IndexOf(id);
-        if (i < 0) return;
-        var j = i + delta;
-        if (j < 0 || j >= list.Count) return;
-        (list[i], list[j]) = (list[j], list[i]);
-        await SetConfigAsync(AppConfigKeys.SearchSourceOrder, string.Join(",", list));
+        var flags = ReadSourceFlags();
+        var idx = flags.FindIndex(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0) flags[idx] = flags[idx] with { Enabled = enabled };
+        else          flags.Add(new SourceFlag(id, enabled));
+        var json = System.Text.Json.JsonSerializer.Serialize(flags);
+        await SetConfigAsync(AppConfigKeys.SearchSourceOrder, json);
     }
+
+    /// <summary>TMDb is stored as two separate source IDs on the server
+    /// (tmdb_tv + tmdb_movie). The Settings UI hides that under one toggle
+    /// for clarity — flipping it touches both flags at once.</summary>
+    private async Task ToggleTmdbAsync(bool enabled)
+    {
+        await SetSourceEnabledAsync("tmdb_tv", enabled);
+        await SetSourceEnabledAsync("tmdb_movie", enabled);
+    }
+
+    private Task ToggleMalAsync(bool enabled)  => SetSourceEnabledAsync("mal",         enabled);
+    private Task ToggleImdbAsync(bool enabled) => SetSourceEnabledAsync("imdb_search", enabled);
 
     private async Task TestLlmAsync()
     {
@@ -695,47 +700,65 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var nrThr   = _config.GetValueOrDefault(AppConfigKeys.NeedsReviewConfidence) ?? "0.50";
         var extPlay = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayer) ?? "mpv";
         var extCust = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayerCustom) ?? "";
+        // Source enable flags live in metadata.search_source_order as a JSON
+        // array — MetadataService.GatherCandidatesAsync already reads that
+        // format. _sourceEnabled parses it once per render; SetSourceEnabledAsync
+        // mutates one flag and re-serialises.
+        var tmdbOn = _sourceEnabled("tmdb_tv") || _sourceEnabled("tmdb_movie");
+        var malOn  = _sourceEnabled("mal");
+        var imdbOn = _sourceEnabled("imdb_search");
+        var tmdbKey = _config.GetValueOrDefault(AppConfigKeys.TmdbApiKey) ?? "";
+        var malKey  = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
         return @<section class="settings-section">
             <h2>Metadata sources</h2>
             <p class="settings-hint">
-                Identification probes these providers left-to-right. Drag the arrows
-                to reorder. Empty API-key fields skip that source.
+                Identification asks each enabled source for candidates, then the
+                LLM picks the best match. Toggle a source off to mute it without
+                erasing the saved key.
             </p>
             <div class="settings-providers">
-                @foreach (var src in _providerOrder)
-                {
-                    var s = src;
-                    var idx = Array.IndexOf(_providerOrder, s);
-                    var canUp   = idx > 0;
-                    var canDown = idx < _providerOrder.Length - 1;
-                    var def     = SourceDefs[s];
-                    var key     = _config.GetValueOrDefault(def.ConfigKey) ?? "";
-                    <div class="settings-provider">
-                        <div class="settings-provider__head">
-                            <div class="settings-provider__rank">@(idx + 1)</div>
-                            <div class="settings-provider__name">
-                                @def.Name
-                                <span class="settings-provider__hint">@def.Hint</span>
-                            </div>
-                            <div class="settings-provider__nav">
-                                <button type="button" class="settings-provider__btn tv-focus"
-                                        disabled="@(!canUp)"
-                                        @onclick="@(() => MoveProvider(s, -1))" title="Move up">
-                                    <DIcon Name="chev-l" Size="13" />
-                                </button>
-                                <button type="button" class="settings-provider__btn tv-focus"
-                                        disabled="@(!canDown)"
-                                        @onclick="@(() => MoveProvider(s, +1))" title="Move down">
-                                    <DIcon Name="chev-r" Size="13" />
-                                </button>
-                            </div>
+
+                <div class="settings-provider">
+                    <div class="settings-provider__head">
+                        <Toggle Checked="@tmdbOn"
+                                CheckedChanged="@((bool v) => ToggleTmdbAsync(v))" />
+                        <div class="settings-provider__name">
+                            TMDb
+                            <span class="settings-provider__hint">Movies + TV — primary source</span>
                         </div>
-                        <input class="settings-field__input" type="password"
-                               placeholder="@def.Placeholder"
-                               value="@key"
-                               @onchange="@(e => SetConfigAsync(def.ConfigKey, e.Value?.ToString()))" />
                     </div>
-                }
+                    <input class="settings-field__input" type="password"
+                           placeholder="v3 key or v4 read-token"
+                           value="@tmdbKey"
+                           @onchange="@(e => SetConfigAsync(AppConfigKeys.TmdbApiKey, e.Value?.ToString()))" />
+                </div>
+
+                <div class="settings-provider">
+                    <div class="settings-provider__head">
+                        <Toggle Checked="@malOn"
+                                CheckedChanged="@((bool v) => ToggleMalAsync(v))" />
+                        <div class="settings-provider__name">
+                            MAL
+                            <span class="settings-provider__hint">MyAnimeList — anime fallback</span>
+                        </div>
+                    </div>
+                    <input class="settings-field__input" type="password"
+                           placeholder="Client ID from MAL API portal"
+                           value="@malKey"
+                           @onchange="@(e => SetConfigAsync(AppConfigKeys.MalClientId, e.Value?.ToString()))" />
+                </div>
+
+                <div class="settings-provider">
+                    <div class="settings-provider__head">
+                        <Toggle Checked="@imdbOn"
+                                CheckedChanged="@((bool v) => ToggleImdbAsync(v))" />
+                        <div class="settings-provider__name">
+                            IMDb
+                            <span class="settings-provider__hint">imdbapi.dev — no key required, free</span>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <h3>Auto-identification</h3>
