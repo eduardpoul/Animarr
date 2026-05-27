@@ -1,0 +1,76 @@
+@*
+    SettingsEditDrawer — reusable 560px right-edge slide-in scaffold used by
+    every Server Settings panel that edits a single record (users, roles,
+    categories). Mirrors the aesthetic of <see cref="EditMetadataDrawer"/>
+    so the admin gets one consistent edit experience.
+
+    Slots:
+      • Title         — header headline, e.g. "Edit user"
+      • Overline      — small uppercase eyebrow above the title
+      • Hint          — single-line muted description under the title
+      • Icon          — icon name string for the head badge (e.g. "user")
+      • Body          — RenderFragment for the form fields
+      • Footer        — sticky footer row (Save + Cancel buttons), supplied by the caller
+      • OnClose       — invoked when the backdrop / × is clicked
+
+    The drawer is open whenever <see cref="IsOpen"/> is true. We render
+    nothing otherwise so there's no DOM cost when closed. The drawer doesn't
+    own form state — the caller manages it and supplies Save/Cancel callbacks
+    through the Footer slot so the existing Api.Create*/Update* code paths
+    stay untouched.
+*@
+
+@namespace Animarr.UI.Components.Design.Layout
+
+@if (IsOpen)
+{
+    <div class="d-srv-drawer__backdrop" @onclick="HandleClose" aria-hidden="true"></div>
+    <aside class="d-srv-drawer" role="dialog" aria-modal="true" aria-label="@Title">
+        <header class="d-srv-drawer__head">
+            <div class="d-srv-drawer__head-ic">
+                <DIcon Name="@Icon" Size="18" />
+            </div>
+            <div class="d-srv-drawer__head-text">
+                @if (!string.IsNullOrEmpty(Overline))
+                {
+                    <div class="d-srv-drawer__overline">@Overline</div>
+                }
+                <div class="d-srv-drawer__title">@Title</div>
+                @if (!string.IsNullOrEmpty(Hint))
+                {
+                    <div class="d-srv-drawer__hint">@Hint</div>
+                }
+            </div>
+            <button type="button" class="d-srv-drawer__close tv-focus"
+                    @onclick="HandleClose" aria-label="Close">
+                <DIcon Name="x" Size="18" />
+            </button>
+        </header>
+
+        <div class="d-srv-drawer__body">
+            @Body
+        </div>
+
+        <footer class="d-srv-drawer__footer">
+            @Footer
+        </footer>
+    </aside>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Overline { get; set; }
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public string Icon { get; set; } = "pencil";
+
+    [Parameter, EditorRequired] public RenderFragment Body { get; set; } = default!;
+    /// <summary>Sticky footer fragment — typically the Save + Cancel buttons
+    /// the caller wants. Kept open as a fragment so callers can vary content
+    /// (Save for create vs Save changes for edit, danger Delete on roles, etc.).</summary>
+    [Parameter, EditorRequired] public RenderFragment Footer { get; set; } = default!;
+
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task HandleClose() => OnClose.InvokeAsync();
+}

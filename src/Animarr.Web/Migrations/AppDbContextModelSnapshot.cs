@@ -31,6 +31,47 @@ namespace Animarr.Web.Migrations
                     b.ToTable("AppConfigs");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.Category", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Hint")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Categories");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -290,6 +331,33 @@ namespace Animarr.Web.Migrations
                     b.HasIndex("TmdbId");
 
                     b.ToTable("MediaItems");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.MediaItemCategory", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("MediaItemId", "CategoryId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("CategoryId", "MediaItemId");
+
+                    b.ToTable("MediaItemCategories");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.MediaItemTag", b =>
@@ -682,6 +750,9 @@ namespace Animarr.Web.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PinHash")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("RoleId")
                         .HasColumnType("TEXT");
 
@@ -751,6 +822,10 @@ namespace Animarr.Web.Migrations
                     b.Property<int>("DefaultVolume")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("HeroPagerStyle")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Language")
                         .IsRequired()
                         .HasMaxLength(8)
@@ -766,6 +841,10 @@ namespace Animarr.Web.Migrations
 
                     b.Property<int>("SubtitleSize")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Theme")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("TvMode")
                         .HasColumnType("INTEGER");
@@ -864,6 +943,25 @@ namespace Animarr.Web.Migrations
                         .IsRequired();
 
                     b.Navigation("Folder");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.MediaItemCategory", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.Category", "Category")
+                        .WithMany("Items")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany("Categories")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.MediaItemTag", b =>
@@ -997,6 +1095,11 @@ namespace Animarr.Web.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.Category", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
                     b.Navigation("History");
@@ -1008,6 +1111,8 @@ namespace Animarr.Web.Migrations
 
             modelBuilder.Entity("Animarr.Web.Data.Models.MediaItem", b =>
                 {
+                    b.Navigation("Categories");
+
                     b.Navigation("Tags");
                 });
 

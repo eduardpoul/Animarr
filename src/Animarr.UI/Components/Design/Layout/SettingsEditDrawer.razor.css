@@ -1,0 +1,151 @@
+/* SettingsEditDrawer — 560px right-edge slide-in. Aesthetic mirrors
+   EditMetadataDrawer.razor.css (.emd*) so the admin experience is
+   consistent: same surface gradient, same animation curve, same header
+   layout, same footer placement.
+
+   Used by UsersRolesPanel + CategoriesPanel for Add/Edit affordances —
+   the inline form pattern they used to render replaced the entire panel
+   body. This drawer slides over the list so the admin keeps context. */
+
+.d-srv-drawer__backdrop {
+    position: fixed;
+    inset: 0;
+    /* TopBar lives at z-index: 50, MobileShell tabbar at 49. The drawer
+       overlays the entire shell (mimics EditMetadataDrawer which uses
+       z-index 30/31 but predates the v4 TopBar). Anything ≥ 60 wins. */
+    z-index: 60;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    animation: d-srv-drawer-fade 0.2s ease;
+}
+@keyframes d-srv-drawer-fade {
+    from { opacity: 0; } to { opacity: 1; }
+}
+
+.d-srv-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 560px;
+    max-width: 95vw;
+    z-index: 61;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+    border-left: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-drawer, -30px 0 60px -20px rgba(0, 0, 0, 0.6));
+    animation: d-srv-drawer-in 0.3s ease;
+}
+
+@keyframes d-srv-drawer-in {
+    from { transform: translateX(40px); opacity: 0; }
+    to   { transform: translateX(0);     opacity: 1; }
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.d-srv-drawer__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 22px 26px 18px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.d-srv-drawer__head-ic {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-chip);
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    border: 1px solid var(--accent-line);
+    flex-shrink: 0;
+}
+
+.d-srv-drawer__head-text { flex: 1; min-width: 0; }
+
+.d-srv-drawer__overline {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent-hi);
+    letter-spacing: 0.14em;
+}
+
+.d-srv-drawer__title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: -0.4px;
+    margin-top: 4px;
+    line-height: 1.1;
+    color: var(--text);
+}
+
+.d-srv-drawer__hint {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 4px;
+}
+
+.d-srv-drawer__close {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    padding: 4px;
+    flex-shrink: 0;
+}
+.d-srv-drawer__close:hover { color: var(--text); }
+
+/* ── Body (scrollable form area) ────────────────────────── */
+.d-srv-drawer__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 22px 26px 24px;
+    /* The sticky footer at the bottom needs breathing room above its border
+       — the body's last child shouldn't touch the divider. */
+}
+
+/* ── Footer (sticky action row) ─────────────────────────── */
+.d-srv-drawer__footer {
+    padding: 16px 26px;
+    background: linear-gradient(180deg, transparent, var(--surface-2) 30%);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ── Phone — slide-up bottom sheet ──────────────────────── */
+@media (max-width: 639px) {
+    .d-srv-drawer {
+        top: auto;
+        right: 0;
+        left: 0;
+        bottom: 0;
+        height: 92%;
+        width: 100%;
+        max-width: 100%;
+        border-left: 0;
+        border-top: 1px solid var(--border-strong);
+        border-top-left-radius: var(--radius-modal);
+        border-top-right-radius: var(--radius-modal);
+        animation: d-srv-drawer-sheet-in 0.3s cubic-bezier(.16, 1, .3, 1);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    @keyframes d-srv-drawer-sheet-in {
+        from { transform: translateY(100%); }
+        to   { transform: translateY(0); }
+    }
+    .d-srv-drawer__head   { padding: 14px 18px 12px; }
+    .d-srv-drawer__title  { font-size: 18px; }
+    .d-srv-drawer__head-ic { width: 36px; height: 36px; }
+    .d-srv-drawer__body   { padding: 14px 18px 24px; }
+    .d-srv-drawer__footer { padding: 14px 18px calc(22px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+}

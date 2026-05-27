@@ -19,21 +19,58 @@
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
 @inject FolderJumpService FolderJump
+@inject CategoryNavService CategoryNav
+@inject ServerRegistryState ServerReg
+@inject IAnimarrApiClient Api
+@implements IDisposable
 
 <header class="d-topbar @ExtraClass">
+    @* v5: server pill leftmost when multi-server registry has a current server.
+       Single-server installs leave this hidden so the brand stays leftmost.
+       Click opens ProfilePanel and hints "focus the Server section". *@
+    @if (ServerReg.Current is { } srv)
+    {
+        <button type="button" class="d-topbar__server-pill tv-focus"
+                @onclick="OnServerPillClick" title="@srv.BaseUrl"
+                aria-label="@($"Current server: {srv.Name}")">
+            <span class="d-topbar__server-dot"></span>
+            <span class="d-topbar__server-name">@srv.Name.ToUpperInvariant()</span>
+        </button>
+    }
+
     <button type="button" class="d-topbar__brand tv-focus" @onclick="GoHome" aria-label="Animarr — go to catalog">
-        <span class="d-topbar__brand-mark">A</span>
-        <span class="d-topbar__brand-name">ANIMARR</span>
+        <span class="d-topbar__brand-mark">a</span>
+        <span class="d-topbar__brand-name">Animarr</span>
     </button>
 
-    <nav class="d-topbar__nav d-scroll-x" aria-label="Folder navigation">
-        @foreach (var name in _folderNames)
+    <nav class="d-topbar__nav d-scroll-x" aria-label="Category navigation">
+        @* v5: category tabs (was folder pills). "All" always pinned first.
+           If no categories are loaded yet (cold start), fall back to the
+           folder strip via FolderJump so the bar isn't empty. *@
+        @if (_categories.Length > 0)
         {
-            var n = name;
-            var active = IsFolderActive(n);
             <button type="button"
-                    class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
-                    @onclick="@(() => OnPickFolder(n))">@n</button>
+                    class="@($"d-topbar__pill tv-focus {(IsCategoryActive(null) ? "d-topbar__pill--active" : "")}")"
+                    @onclick="@(() => OnPickCategory(null))">All</button>
+            @foreach (var cat in _categories)
+            {
+                var name = cat.Name;
+                var active = IsCategoryActive(name);
+                <button type="button"
+                        class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
+                        @onclick="@(() => OnPickCategory(name))">@name</button>
+            }
+        }
+        else
+        {
+            @foreach (var name in _folderNames)
+            {
+                var n = name;
+                var active = IsFolderActive(n);
+                <button type="button"
+                        class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
+                        @onclick="@(() => OnPickFolder(n))">@n</button>
+            }
         }
     </nav>
 
@@ -87,6 +124,10 @@
     [Parameter] public int LlmTotal { get; set; }
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }
     [Parameter] public EventCallback OnLlmClickEvent { get; set; }
+    /// <summary>v5: server pill click. Distinguished from a normal profile
+    /// click so MainLayout can pre-focus the Server section in ProfilePanel.
+    /// Optional — falls back to <see cref="OnProfileClickEvent"/> when unset.</summary>
+    [Parameter] public EventCallback OnServerClickEvent { get; set; }
     /// <summary>Folder section labels — passed in from MainLayout because the
     /// fetch lives there to dedupe with the catalog's own folder fetch.</summary>
     [Parameter] public IReadOnlyList<string>? FolderNames { get; set; }
@@ -99,10 +140,56 @@
             ? list.Prepend("All").ToArray()
             : new[] { "All" };
 
+    // v5: category strip data. Fetched once on first render — categories
+    // change rarely so we don't need a SignalR push.
+    private CategoryDto[] _categories = Array.Empty<CategoryDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Subscribe to nav-state change events so the active-pill highlight
+        // reflects clicks from anywhere (Home chip strip, deep links, etc.).
+        CategoryNav.OnChange += StateHasChanged;
+        FolderJump.OnChange  += StateHasChanged;
+        ServerReg.OnChange   += StateHasChanged;
+
+        try
+        {
+            var all = await Api.GetCategoriesAsync();
+            _categories = all
+                .Where(c => c.Enabled && c.ItemCount > 0)
+                .OrderBy(c => c.SortOrder)
+                .ThenBy(c => c.Name)
+                .ToArray();
+        }
+        catch { _categories = Array.Empty<CategoryDto>(); }
+    }
+
+    public void Dispose()
+    {
+        CategoryNav.OnChange -= StateHasChanged;
+        FolderJump.OnChange  -= StateHasChanged;
+        ServerReg.OnChange   -= StateHasChanged;
+    }
+
     private void GoHome()
     {
         FolderJump.SetActiveFolder(null);
+        CategoryNav.SetActiveCategory(null);
         Nav.NavigateTo("/");
+    }
+
+    private bool IsCategoryActive(string? name)
+    {
+        if (!IsCatalogRoute()) return false;
+        return name is null
+            ? CategoryNav.ActiveCategoryName is null
+            : string.Equals(CategoryNav.ActiveCategoryName, name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnPickCategory(string? name)
+    {
+        CategoryNav.SetActiveCategory(name);
+        if (!IsCatalogRoute()) Nav.NavigateTo("/");
     }
 
     private bool IsFolderActive(string name)
@@ -135,4 +222,12 @@
 
     private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
     private Task ToggleLlm()      => OnLlmClickEvent.InvokeAsync();
+
+    /// <summary>Server pill click — route through OnServerClickEvent if the
+    /// caller subscribed (so MainLayout can focus the Server tab), else fall
+    /// back to the regular profile-open path.</summary>
+    private Task OnServerPillClick()
+        => OnServerClickEvent.HasDelegate
+            ? OnServerClickEvent.InvokeAsync()
+            : OnProfileClickEvent.InvokeAsync();
 }

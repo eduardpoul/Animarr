@@ -28,11 +28,12 @@
                <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
 
-        <!-- Display name -->
-        <ApplicationTitle>Animarr.App</ApplicationTitle>
+        <!-- Display name shown in launcher / app switcher / Settings list.
+             Bundle identifier stays com.animarr.app for store stability. -->
+        <ApplicationTitle>Animarr</ApplicationTitle>
 
         <!-- App Identifier -->
-        <ApplicationId>com.companyname.animarr.app</ApplicationId>
+        <ApplicationId>com.animarr.app</ApplicationId>
 
         <!-- Versions -->
         <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
@@ -46,14 +47,41 @@
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+        <Company>Animarr</Company>
+        <Product>Animarr</Product>
+    </PropertyGroup>
+
+    <!-- Android Release-mode tuning.
+         Scoped to the android target so iOS / Mac / Windows builds don't see
+         `android-*` RIDs and choke. Includes 32-bit `android-arm` because
+         some Android TV boxes (cheap budget hardware sold with newer Android
+         versions) ship armeabi-v7a only, no arm64. Modern devices land on
+         android-arm64. android-x64 covers Android emulator.
+
+         AOT + trim are disabled on Release because the .NET 10 MAUI AOT
+         cross-compiler currently drops the Java-side MainActivity stub
+         from the merged DEX for armeabi-v7a — manifests as
+         `ClassNotFoundException: com.animarr.app.MainActivity` at first
+         launch on 32-bit TV boxes. With AOT off the app uses Mono
+         interpreter — a touch slower at cold start, but the WebView
+         hosts all the heavy code anyway so the runtime difference is
+         negligible for our use case. Trim off keeps the same Java
+         stub classes that AOT would otherwise rewrite. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Release' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <RuntimeIdentifiers>android-arm64;android-arm;android-x64</RuntimeIdentifiers>
+        <RunAOTCompilation>false</RunAOTCompilation>
+        <PublishTrimmed>false</PublishTrimmed>
+        <AndroidLinkMode>None</AndroidLinkMode>
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- App Icon -->
-        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+        <!-- App Icon — background fill matches Quietude surface (#181c24);
+             foreground SVG paints the teal-gradient brand tile + 'a' glyph. -->
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#181c24" />
 
-        <!-- Splash Screen -->
-        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+        <!-- Splash Screen — same charcoal background as the icon so the
+             hand-off into the WASM boot-splash feels continuous. -->
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#181c24" BaseSize="128,128" />
 
         <!-- Images -->
         <MauiImage Include="Resources\Images\*" />
@@ -70,6 +98,12 @@
         <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+        <!-- v5 multi-server: browse-side mDNS so MAUI can discover Animarr
+             servers publishing _animarr._tcp.local. Pure WASM in a browser
+             can't open a UDP socket on 5353, but the MAUI host's native
+             process can — Makaretu binds the same set of NICs on every
+             platform (Windows / macOS / Android / iOS / Mac Catalyst). -->
+        <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
     </ItemGroup>
 
     <ItemGroup>

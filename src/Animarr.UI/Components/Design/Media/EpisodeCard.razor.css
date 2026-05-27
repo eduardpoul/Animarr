@@ -42,8 +42,14 @@
 }
 
 /* ── MISSING ─────────────────────────────────────────────── */
+/* v5 fix: bumped from 0.48 → 0.72. The old value rendered as effectively
+   invisible on Quietude's dark-navy surface (#181c24) because the .d-ep
+   surface only ever read 4-6% lighter than --bg-0; on Cinematic's warmer
+   brown surface the same opacity was readable. Keep the dashed border +
+   warn-tinted strip as the "missing" semantic — opacity is purely there
+   to dim the title bar, not to make the whole card vanish. */
 .d-ep--miss {
-    opacity: 0.48;
+    opacity: 0.72;
     border-style: dashed;
     border-color: oklch(0.80 0.17 75 / 0.30);
 }
@@ -95,11 +101,13 @@
 
 .d-ep--miss .d-ep__img { filter: grayscale(1) brightness(0.55); }
 
-/* Vignette gradient on thumb so the white episode number stays legible. */
+/* Vignette gradient on thumb so the white episode number stays legible.
+   z-index 0 keeps the vignette under the chips/overlays/play button. */
 .d-ep__art::after {
     content: "";
     position: absolute;
     inset: 0;
+    z-index: 0;
     background: linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.78) 100%);
     pointer-events: none;
 }

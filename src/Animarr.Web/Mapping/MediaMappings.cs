@@ -20,10 +20,12 @@ internal static class MediaMappings
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    public static MediaItemDto ToDto(this EntityMediaItem entity)
+    public static MediaItemDto ToDto(this EntityMediaItem entity,
+        HashSet<Guid>? favoriteIds = null)
     {
         return new MediaItemDto
         {
+            IsFavorite      = favoriteIds is not null && favoriteIds.Contains(entity.Id),
             Id              = entity.Id,
             FolderId        = entity.FolderId,
             Title           = entity.Title,
@@ -65,6 +67,12 @@ internal static class MediaMappings
             CreatedAt        = entity.CreatedAt,
             LastMetadataRefreshedAt = entity.LastMetadataRefreshedAt,
             TagIds          = entity.Tags.Select(t => t.MediaTagId).ToArray(),
+            CategoryIds     = entity.Categories.Select(c => c.CategoryId).ToArray(),
+            CategoryNames   = entity.Categories
+                                .Where(c => c.Category is not null)
+                                .OrderBy(c => c.Category!.SortOrder)
+                                .Select(c => c.Category!.Name)
+                                .ToArray(),
         };
     }
 

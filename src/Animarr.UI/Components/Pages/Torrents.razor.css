@@ -652,6 +652,131 @@
     margin-top: var(--space-2);
 }
 
+/* ── Inline "Add magnet" form (rendered above the active table).
+   v5 added — the markup used to reach for a `.torrent-add*` BEM family
+   that had no matching rules anywhere in the codebase (a regression from
+   the Cinematic→Quietude rewrite). This block re-establishes the inline
+   card look using design tokens so it tracks the active theme + accent. */
+.tor-add {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card-lg);
+    padding: var(--space-7) var(--space-8);
+    margin-bottom: var(--space-7);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+
+.tor-add__source {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-chip);
+    width: fit-content;
+}
+
+.tor-add__source-btn {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    padding: 6px 14px;
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.tor-add__source-btn:hover { color: var(--text); }
+.tor-add__source-btn.is-active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+.tor-add__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.tor-add__label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: var(--label-tracking, 0.1em);
+    text-transform: var(--label-casing, uppercase);
+}
+
+.tor-add__input,
+.tor-add__select {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-ctrl);
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+    font-family: var(--font-ui);
+    transition: border-color var(--motion-base);
+}
+.tor-add__input:focus,
+.tor-add__select:focus { border-color: var(--accent-line); }
+
+.tor-add__select {
+    appearance: none;
+    cursor: pointer;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239aa3b2' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+
+.tor-add__filehint {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--success);
+    margin-top: var(--space-2);
+}
+
+.tor-add__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-5) var(--space-7);
+}
+
+.tor-add__check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 12.5px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.tor-add__check input[type="checkbox"] { accent-color: var(--accent); }
+
+.tor-add__actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* The inline progress slot inside each .tor-table row. Wraps the global
+   .animarr-progress primitive + the percentage label so they sit on one row. */
+.tor-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
 /* ── HTML table replacing FluentDataGrid (active & history) ────────────── */
 .tor-table {
     width: 100%;

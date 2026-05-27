@@ -274,6 +274,16 @@ public class MicrosoftAiLlmService(
         }
     }
 
+    public async Task<string?> GetCompletionAsync(string prompt, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var raw = await CallAsync(prompt, ct);
+        sw.Stop();
+        RecordLatency((int)sw.ElapsedMilliseconds);
+        return raw;
+    }
+
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         try

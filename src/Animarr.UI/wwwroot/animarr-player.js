@@ -566,6 +566,73 @@
 
         entry.art = art;
 
+        // ── 5b) MediaSession + Picture-in-Picture wiring ───────────────────
+        // Exposes play/pause/seek to:
+        //   • iOS Now Playing centre (Control Centre + lock screen)
+        //   • Android system media notification (collapsed + expanded)
+        //   • macOS Now Playing (Touch Bar + lock-screen widget)
+        //   • Chromium Global Media Controls bubble
+        //   • Bluetooth-remote / car-stereo media buttons
+        //
+        // Metadata (title/poster) gets pushed in via setMediaSession() once
+        // the .NET side knows what's playing — see below. Action handlers
+        // are wired here so they take effect even before metadata arrives.
+        try {
+            if ('mediaSession' in navigator) {
+                const ms = navigator.mediaSession;
+                ms.setActionHandler('play',     () => { try { art.play();  } catch {} });
+                ms.setActionHandler('pause',    () => { try { art.pause(); } catch {} });
+                ms.setActionHandler('seekto', d => {
+                    if (typeof d.seekTime === 'number') {
+                        try { art.currentTime = d.seekTime; } catch {}
+                    }
+                });
+                ms.setActionHandler('seekbackward', d => {
+                    const step = (d && d.seekOffset) || 10;
+                    try { art.currentTime = Math.max(0, (art.currentTime || 0) - step); } catch {}
+                });
+                ms.setActionHandler('seekforward', d => {
+                    const step = (d && d.seekOffset) || 10;
+                    try { art.currentTime = (art.currentTime || 0) + step; } catch {}
+                });
+                ms.setActionHandler('stop', () => { try { art.pause(); } catch {} });
+                // Position state — lets the lock-screen scrubber show real progress.
+                art.on('video:timeupdate', () => {
+                    if (!('setPositionState' in ms)) return;
+                    const dur = entry.totalDuration || art.duration || 0;
+                    if (!Number.isFinite(dur) || dur <= 0) return;
+                    try {
+                        ms.setPositionState({
+                            duration:     dur,
+                            playbackRate: art.playbackRate || 1,
+                            position:     Math.min(art.currentTime || 0, dur),
+                        });
+                    } catch { /* setPositionState throws on bad numbers — bail */ }
+                });
+                art.on('video:play',  () => { ms.playbackState = 'playing'; });
+                art.on('video:pause', () => { ms.playbackState = 'paused';  });
+            }
+        } catch (e) { console.warn('mediaSession wire-up failed', e); }
+
+        // Picture-in-Picture — attempt automatic enter on visibility change
+        // (user switched tabs / received a call) so playback floats over the
+        // OS. The browser may decline if the document is fully hidden or PiP
+        // isn't allowed; we swallow that.
+        try {
+            const video = art.video;
+            if (video && document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+                const onVisibility = () => {
+                    if (document.visibilityState === 'hidden' &&
+                        !video.paused &&
+                        document.pictureInPictureElement !== video) {
+                        video.requestPictureInPicture().catch(() => { /* user denied */ });
+                    }
+                };
+                document.addEventListener('visibilitychange', onVisibility);
+                entry._pipVisibilityHandler = onVisibility;
+            }
+        } catch { /* PiP unsupported — fine */ }
+
         // Chip strip stays visible throughout playback — previous attempt to
         // sync with Artplayer's chrome auto-hide via mouse-activity timer
         // either didn't get mouse events (Artplayer eats them on inner DOM)
@@ -643,6 +710,22 @@
                     { method: 'DELETE', keepalive: true });
             } catch { }
         }
+        // 4) Tear down PiP visibility listener + media session metadata.
+        if (entry._pipVisibilityHandler) {
+            document.removeEventListener('visibilitychange', entry._pipVisibilityHandler);
+            entry._pipVisibilityHandler = null;
+        }
+        try {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = null;
+                navigator.mediaSession.playbackState = 'none';
+                // Clear handlers so a future detach->reattach doesn't double-fire.
+                ['play','pause','seekto','seekbackward','seekforward','stop',
+                 'previoustrack','nexttrack'].forEach(a => {
+                    try { navigator.mediaSession.setActionHandler(a, null); } catch {}
+                });
+            }
+        } catch {}
         // 5) Destroy Artplayer (which destroys its hls.js too via on('destroy')).
         if (entry.art) {
             try { entry.art.destroy(true); } catch {}
@@ -651,5 +734,77 @@
         WIRED.delete(elementId);
     }
 
-    window.animarrPlayer = { attach, flush, detach };
+    /**
+     * Push metadata to the OS-level Now Playing surfaces (lock screen,
+     * Control Centre, system media notification). Called from MediaDetail
+     * after the title is known. Safe to call multiple times — replaces
+     * existing metadata.
+     *
+     * @param {string} elementId - player container ID
+     * @param {object} meta - { title, artist, album, artworkUrl, prevAvailable, nextAvailable }
+     * @param {object} handlers - { prev, next } optional .NET DotNetObjectReference
+     *                             with InvokePrev/InvokeNext methods
+     */
+    function setMediaSession(elementId, meta, handlers) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.art) return;
+        try {
+            if (!('mediaSession' in navigator)) return;
+            const ms = navigator.mediaSession;
+            const artwork = [];
+            if (meta && meta.artworkUrl) {
+                // Provide a few size hints — OS picks the closest match.
+                artwork.push({ src: meta.artworkUrl, sizes: '512x512', type: 'image/jpeg' });
+                artwork.push({ src: meta.artworkUrl, sizes: '256x256', type: 'image/jpeg' });
+                artwork.push({ src: meta.artworkUrl, sizes: '96x96',   type: 'image/jpeg' });
+            }
+            ms.metadata = new MediaMetadata({
+                title:  (meta && meta.title)  || 'Animarr',
+                artist: (meta && meta.artist) || '',
+                album:  (meta && meta.album)  || '',
+                artwork,
+            });
+            // Wire prev/next only if .NET says the episode list permits it,
+            // otherwise the lock-screen buttons appear dead.
+            if (handlers && handlers.dotnetRef) {
+                if (meta && meta.prevAvailable) {
+                    ms.setActionHandler('previoustrack', () => {
+                        try { handlers.dotnetRef.invokeMethodAsync('InvokePrev'); } catch {}
+                    });
+                } else {
+                    try { ms.setActionHandler('previoustrack', null); } catch {}
+                }
+                if (meta && meta.nextAvailable) {
+                    ms.setActionHandler('nexttrack', () => {
+                        try { handlers.dotnetRef.invokeMethodAsync('InvokeNext'); } catch {}
+                    });
+                } else {
+                    try { ms.setActionHandler('nexttrack', null); } catch {}
+                }
+            }
+        } catch (e) { console.warn('setMediaSession failed', e); }
+    }
+
+    /**
+     * Toggle Picture-in-Picture on the active player video. Returns a promise
+     * that resolves true if we entered PiP, false otherwise.
+     */
+    async function togglePictureInPicture(elementId) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.art || !entry.art.video) return false;
+        const video = entry.art.video;
+        try {
+            if (document.pictureInPictureElement === video) {
+                await document.exitPictureInPicture();
+                return false;
+            }
+            if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+                await video.requestPictureInPicture();
+                return true;
+            }
+        } catch (e) { console.warn('PiP toggle failed', e); }
+        return false;
+    }
+
+    window.animarrPlayer = { attach, flush, detach, setMediaSession, togglePictureInPicture };
 })();

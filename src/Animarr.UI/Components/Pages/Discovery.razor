@@ -1,0 +1,415 @@
+@*
+    Discovery — v5 multi-server "find your library" screen. Three UI states:
+
+      • Scanning            (8s auto-timeout)
+      • Found N servers     (list of cards → click → Switch + go to /login)
+      • No servers / Manual (URL field + Add → probe → register)
+
+    mDNS broadcast is server-side (Animarr.Web publishes _animarr._tcp.local
+    via MdnsPublisherService). Discovery on the CLIENT depends on platform:
+
+      • WASM in a browser:  no LAN socket access. We skip the scan UI and
+                            land directly on the manual-add form.
+      • MAUI Hybrid:        best-effort scan via window.animarrMdnsScan() if
+                            the host exposes it; otherwise manual only.
+
+    Either way the manual add path is always available so the user can paste
+    an IP or Tailscale magic-DNS hostname when broadcast can't reach them.
+
+    Layout: AuthLayout (no TopBar, no sidebar). Matches Login / Welcome
+    aesthetic — backdrop + film grain + centered card.
+*@
+
+@page "/discovery"
+@layout AuthLayout
+@implements IDisposable
+@inject NavigationManager Nav
+@inject ServerRegistryState ServerReg
+@inject UserContextState UserCtx
+@inject IJSRuntime JS
+
+<PageTitle>Animarr — Find your library</PageTitle>
+
+<div class="d-discovery">
+    <button type="button" class="d-discovery__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
+        <DIcon Name="arrow-l" Size="13" /> BACK
+    </button>
+
+    <div class="d-discovery__card" role="dialog" aria-label="Find your library">
+        <header class="d-discovery__brand">
+            <span class="d-discovery__brand-mark">a</span>
+            <div>
+                <div class="d-discovery__brand-name">Animarr</div>
+                <div class="d-discovery__brand-sub">Find your library</div>
+            </div>
+        </header>
+
+        @if (_state == State.Scanning)
+        {
+            <div class="d-discovery__scanning">
+                <Spinner Size="sm" />
+                <span class="d-discovery__scanning-label">
+                    Looking for Animarr servers on your network<span class="d-discovery__dots">@_dots</span>
+                </span>
+            </div>
+            <div class="d-discovery__scan-hint">SCANNING · @_elapsedSec s</div>
+        }
+        else if (_state == State.Found)
+        {
+            <div class="d-discovery__found-label">@_found.Count server@(_found.Count == 1 ? "" : "s") found · pick one to sign in</div>
+            <div class="d-discovery__server-list">
+                @foreach (var s in _found)
+                {
+                    var server = s;
+                    <button type="button" class="d-discovery__server tv-focus"
+                            @onclick="@(() => OnPickServer(server))">
+                        <span class="d-discovery__server-ic">
+                            <DIcon Name="server" Size="16" />
+                        </span>
+                        <span class="d-discovery__server-body">
+                            <span class="d-discovery__server-name">@server.Name</span>
+                            <span class="d-discovery__server-meta">
+                                <span class="d-discovery__server-dot"></span>
+                                @server.BaseUrl · @server.TitleCount title@(server.TitleCount == 1 ? "" : "s") · v@(server.Version)
+                            </span>
+                        </span>
+                        <span class="d-discovery__server-right">connect</span>
+                    </button>
+                }
+            </div>
+            <div class="d-discovery__actions">
+                <Btn Variant="ghost" Size="md" OnClick="OpenManualAdd">
+                    <DIcon Name="plus" Size="13" /> Add manually
+                </Btn>
+                <Btn Variant="ghost" Size="md" OnClick="Rescan">
+                    <DIcon Name="refresh" Size="13" /> Rescan
+                </Btn>
+            </div>
+        }
+        else if (_state == State.Empty)
+        {
+            <div class="d-discovery__empty-ic">
+                <DIcon Name="globe" Size="22" />
+            </div>
+            <div class="d-discovery__empty-title">No servers found</div>
+            <p class="d-discovery__empty-body">
+                Make sure your Animarr server is running on the same network. You
+                can also enter the URL manually if you know it (IP, hostname, or
+                Tailscale magic DNS).
+            </p>
+            <div class="d-discovery__actions d-discovery__actions--centered">
+                <Btn Variant="primary" Size="md" OnClick="OpenManualAdd">
+                    <DIcon Name="plus" Size="13" /> Add manually
+                </Btn>
+                @if (_canScan)
+                {
+                    <Btn Variant="ghost" Size="md" OnClick="Rescan">
+                        <DIcon Name="refresh" Size="13" /> Scan again
+                    </Btn>
+                }
+            </div>
+            <a href="https://github.com/eduardpoul/Animarr/issues" target="_blank" rel="noopener" class="d-discovery__gh">
+                github.com / eduardpoul / animarr · issues
+            </a>
+        }
+
+        @if (_manualOpen)
+        {
+            <div class="d-discovery__manual">
+                <div class="d-discovery__manual-label">Server URL</div>
+                <input type="text"
+                       class="d-discovery__manual-input"
+                       placeholder="http://192.168.1.50:8080 or https://animarr.tailnet.ts.net"
+                       value="@_manualUrl"
+                       @oninput="@((ChangeEventArgs e) => _manualUrl = e.Value?.ToString() ?? "")"
+                       @onkeypress="OnManualKeyPress" />
+                @if (!string.IsNullOrEmpty(_manualError))
+                {
+                    <div class="d-discovery__manual-error">@_manualError</div>
+                }
+                <div class="d-discovery__manual-row">
+                    <Btn Variant="primary" Size="md" Loading="@_manualProbing"
+                         OnClick="OnManualProbe"
+                         Disabled="@(string.IsNullOrWhiteSpace(_manualUrl))">
+                        <DIcon Name="link" Size="13" /> Probe & add
+                    </Btn>
+                    <Btn Variant="flat" Size="md" OnClick="@(() => _manualOpen = false)">
+                        Cancel
+                    </Btn>
+                </div>
+            </div>
+        }
+    </div>
+
+    <footer class="d-discovery__footer">
+        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-discovery__footer-link tv-focus">
+            github.com / eduardpoul / animarr
+        </a>
+    </footer>
+</div>
+
+@code {
+    private enum State { Scanning, Found, Empty }
+    private State _state = State.Empty;
+
+    private List<RegisteredServerDto> _found = new();
+    private int _elapsedSec;
+    private string _dots = "";
+    private System.Threading.Timer? _scanTimer;
+    private CancellationTokenSource? _scanCts;
+    /// <summary>True if this host can attempt an mDNS-style scan via JS. Pure
+    /// WASM in a browser is false (no socket access); MAUI Hybrid is true
+    /// when window.animarrMdnsScan is defined.</summary>
+    private bool _canScan;
+
+    private bool _manualOpen;
+    private string _manualUrl = "";
+    private string _manualError = "";
+    private bool _manualProbing;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        await ServerReg.LoadAsync();
+
+        // If the user is already signed into a server and the registry has
+        // entries, skip Discovery entirely — they've been here before.
+        if (UserCtx.Loaded && UserCtx.IsAuthenticated)
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        // Auto-discovery shortcut: the WASM page itself is loaded FROM an
+        // Animarr server (otherwise the bundle wouldn't be running). If
+        // /api/server/info on the current origin answers cleanly, treat that
+        // as a discovered server and skip the manual scan UI. Always runs —
+        // even on MAUI — because the user explicitly opened this URL.
+        try
+        {
+            var currentOrigin = await JS.InvokeAsync<string>("eval", "window.location.origin");
+            if (!string.IsNullOrEmpty(currentOrigin))
+            {
+                var probed = await ServerReg.AddServerAsync(currentOrigin);
+                if (probed is not null)
+                {
+                    _found = ServerReg.Servers.OrderByDescending(s => s.LastSeenUtc).ToList();
+                    _state = State.Found;
+                    StateHasChanged();
+                    return;
+                }
+            }
+        }
+        catch { /* fall through to the regular scan flow */ }
+
+        // Detect whether mDNS scan is available. window.animarrMdnsScan is a
+        // platform hook the MAUI host registers (returns a list of servers as
+        // {name, baseUrl} pairs). When missing — pure browser context — go
+        // straight to the manual-add empty state.
+        try
+        {
+            _canScan = await JS.InvokeAsync<bool>("eval",
+                "typeof window.animarrMdnsScan === 'function'");
+        }
+        catch { _canScan = false; }
+
+        if (_canScan)
+        {
+            await StartScanAsync();
+        }
+        else
+        {
+            // Manual-only path. If the registry already holds servers, render
+            // them as "Found" rather than showing the empty state.
+            if (ServerReg.Count > 0)
+            {
+                _found = ServerReg.Servers.OrderByDescending(s => s.LastSeenUtc).ToList();
+                _state = State.Found;
+            }
+            else
+            {
+                _state = State.Empty;
+                _manualOpen = true;
+            }
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartScanAsync()
+    {
+        _scanCts?.Cancel();
+        _scanCts = new CancellationTokenSource();
+        var ct = _scanCts.Token;
+
+        _state = State.Scanning;
+        _elapsedSec = 0;
+        _dots = "";
+        _found.Clear();
+        StateHasChanged();
+
+        // Animate the elapsed counter + dot loader every 250ms so the user
+        // sees the scan is actively doing something.
+        _scanTimer?.Dispose();
+        _scanTimer = new System.Threading.Timer(_ =>
+        {
+            if (ct.IsCancellationRequested) return;
+            _elapsedSec++;
+            _dots = (_elapsedSec % 4) switch { 0 => "", 1 => ".", 2 => "..", _ => "..." };
+            InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+
+        // Run the JS-side scan. The host implementation returns when it's
+        // done (or after its own timeout); we cap at 8s on our side.
+        try
+        {
+            var task = JS.InvokeAsync<JsServer[]?>("animarrMdnsScan").AsTask();
+            var timeout = Task.Delay(TimeSpan.FromSeconds(8), ct);
+            var first = await Task.WhenAny(task, timeout);
+            JsServer[]? results = null;
+            if (first == task) results = await task;
+
+            // Probe each discovered candidate over /api/server/info so we get
+            // the same DTO shape we'd get from manual add. Probes in parallel
+            // — slowest one caps the whole scan at ~4s (HttpClient timeout).
+            if (results is { Length: > 0 })
+            {
+                var probes = results
+                    .Select(async r => await ServerReg.AddServerAsync(r.BaseUrl, ct))
+                    .ToArray();
+                await Task.WhenAll(probes);
+                _found = probes
+                    .Select(p => p.Result)
+                    .Where(p => p is not null)
+                    .Cast<RegisteredServerDto>()
+                    .ToList();
+            }
+        }
+        catch (OperationCanceledException) { /* user navigated away */ }
+        catch { /* JS hook errored — fall through to empty */ }
+
+        _scanTimer?.Dispose();
+        _scanTimer = null;
+
+        // Also surface any pre-existing registry entries — re-finding the
+        // same server twice is fine, the dedupe on ServerId handles it.
+        foreach (var s in ServerReg.Servers)
+            if (_found.All(f => f.ServerId != s.ServerId))
+                _found.Add(s);
+
+        _state = _found.Count > 0 ? State.Found : State.Empty;
+        if (_state == State.Empty) _manualOpen = true;
+        StateHasChanged();
+    }
+
+    private Task Rescan() => StartScanAsync();
+
+    private void OpenManualAdd()
+    {
+        _manualOpen = true;
+        _manualError = "";
+        StateHasChanged();
+    }
+
+    private async Task OnManualProbe()
+    {
+        _manualError = "";
+        var url = _manualUrl.Trim();
+        if (string.IsNullOrEmpty(url))
+        {
+            _manualError = "Enter a URL.";
+            return;
+        }
+        // Default to http:// when the user types a bare host. They can paste a
+        // full URL with scheme if they want HTTPS.
+        if (!url.Contains("://", StringComparison.Ordinal))
+            url = "http://" + url;
+
+        _manualProbing = true;
+        StateHasChanged();
+        try
+        {
+            var entry = await ServerReg.AddServerAsync(url);
+            if (entry is null)
+            {
+                _manualError = "Couldn't reach an Animarr server at that URL.";
+                return;
+            }
+            _manualUrl  = "";
+            _manualOpen = false;
+            _found = ServerReg.Servers.OrderByDescending(s => s.LastSeenUtc).ToList();
+            _state = State.Found;
+        }
+        catch (Exception ex)
+        {
+            _manualError = $"Probe failed: {ex.Message}";
+        }
+        finally
+        {
+            _manualProbing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnManualKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_manualProbing) await OnManualProbe();
+    }
+
+    private async Task OnPickServer(RegisteredServerDto server)
+    {
+        // SetCurrentAsync now also swaps HttpClient.BaseAddress to the chosen
+        // server, so all subsequent /api/* calls land on the right origin.
+        await ServerReg.SetCurrentAsync(server.ServerId);
+
+        // Routing strategy differs by host:
+        //
+        //   • MAUI Hybrid (BlazorWebView): the WebView never reloads — it owns
+        //     a single in-memory Blazor app for the process lifetime. Using
+        //     `forceLoad: true` against an external origin triggers the native
+        //     shell's URL-loading handler, which kicks the URL out to the
+        //     system browser (Edge/Chrome). That's exactly the bug we just
+        //     hit: clicking a discovered server opened http://192.168.x:8080
+        //     in Edge instead of staying inside Animarr. Internal navigation
+        //     to "/login" is correct here; HttpClient is already pointed at
+        //     the new origin.
+        //
+        //   • WASM in a browser: each Animarr server origin serves its own
+        //     bundle and cookies are domain-scoped, so switching servers
+        //     means we genuinely want a hard page load on the new origin.
+        //     Same-origin case stays a soft route to /login.
+        //
+        // Detection: OperatingSystem.IsBrowser() is true *only* in the WASM
+        // runtime — false in MAUI, server-side rendering, console hosts, etc.
+        if (OperatingSystem.IsBrowser())
+        {
+            var sameOrigin = string.Equals(
+                new Uri(server.BaseUrl).GetLeftPart(UriPartial.Authority),
+                new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase);
+
+            if (sameOrigin)
+                Nav.NavigateTo("/login", replace: true);
+            else
+                Nav.NavigateTo(server.BaseUrl.TrimEnd('/') + "/login", forceLoad: true);
+        }
+        else
+        {
+            // MAUI / native shell — stay inside the WebView. HttpClient
+            // BaseAddress was already swapped by SetCurrentAsync.
+            Nav.NavigateTo("/login", replace: true);
+        }
+    }
+
+    public void Dispose()
+    {
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanTimer?.Dispose();
+    }
+
+    /// <summary>Shape returned by window.animarrMdnsScan(). Only the BaseUrl
+    /// field is required; everything else gets re-fetched via /api/server/info
+    /// so the Discovery card matches what the manual-add path produces.</summary>
+    private sealed record JsServer(string Name, string BaseUrl);
+}

@@ -1,0 +1,25 @@
+/* About panel — Server Settings → About tab. Spec: screens-v4.jsx 911-934. */
+
+.d-srv-about__kv {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 10px 24px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+}
+
+.d-srv-about__key { color: var(--text-faint); }
+.d-srv-about__val { color: var(--text-dim); }
+
+.d-srv-about__cta { text-decoration: none; }
+
+.d-srv-about__footer {
+    margin-top: 22px;
+    padding: 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.65;
+}

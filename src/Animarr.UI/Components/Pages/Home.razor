@@ -2,25 +2,27 @@
 @implements IDisposable
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject CategoryNavService CategoryNav
 
 <PageTitle>Animarr — @L["catalog.title"]</PageTitle>
 
 <div class="catalog-page">
 
-    @* ── Featured hero (top 5 by rating, rotates) ────────────────────────── *@
-    @if (_featured.Count > 0)
+    @* ── Hero — Continue Watching takes priority over Featured. v5
+       design board ships this as the default top-of-page experience; if
+       the user has nothing in progress, the older Featured-by-rating
+       carousel takes over so the slot doesn't go blank. *@
+    @if (_continueItems.Length > 0)
+    {
+        <CatalogContinueHero Items="@_continueItems" IntervalSec="@_heroInterval" />
+    }
+    else if (_featured.Count > 0)
     {
         <CatalogHero Items="@_featured" IntervalSec="@_heroInterval" />
     }
 
     @* ── Filter bar ──────────────────────────────────────────────────────── *@
     <div class="catalog-filter">
-        <Tabs T="MediaItemType?"
-              Items="@_typeTabs"
-              SelectedValue="@_typeFilter"
-              SelectedValueChanged="@OnTypeFilterChanged"
-              Mode="segmented" />
-
         <Input Value="@_searchFilter"
                ValueChanged="@OnSearchChanged"
                Placeholder="@(L["catalog.search_placeholder"])"
@@ -35,11 +37,36 @@
         </div>
     </div>
 
-    @* ── Folder chip strip (sections) ─────────────────────────────────── *@
-    @if (_sections.Count > 0)
+    @* ── Category chip strip (replaces v3 type tabs + folder chips) ────── *@
+    @* Categories come from /api/categories (admin manages them in
+       Server Settings → Categories). Items are auto-classified by the LLM
+       at identification time. Hide chips that have zero matching items
+       so the strip doesn't accumulate empty filters as the library
+       evolves. *@
+    @if (_categories.Count > 0)
     {
         <div class="catalog-folders">
-            <span class="catalog-folders__label">FOLDER</span>
+            <button type="button"
+                    class="@($"catalog-chip {(_activeCategory is null ? "catalog-chip--active" : "")}")"
+                    @onclick="@(() => SetActiveCategory(null))">All</button>
+            @foreach (var cat in _categories.Where(c => c.Enabled && c.ItemCount > 0).OrderBy(c => c.SortOrder))
+            {
+                var name = cat.Name;
+                <button type="button"
+                        class="@($"catalog-chip {(_activeCategory == name ? "catalog-chip--active" : "")}")"
+                        @onclick="@(() => SetActiveCategory(name))">
+                    @name
+                    <span class="catalog-chip__count">@cat.ItemCount</span>
+                </button>
+            }
+        </div>
+    }
+    else if (_sections.Count > 0)
+    {
+        @* Fallback: until categories exist (fresh install before the
+           first identification batch lands), keep the v3 folder strip so
+           the catalog isn't a flat list. *@
+        <div class="catalog-folders">
             <button type="button"
                     class="@($"catalog-chip {(_activeSection is null ? "catalog-chip--active" : "")}")"
                     @onclick="@(() => SetActiveSection(null))">@L["catalog.tab_all"]</button>
@@ -89,29 +116,44 @@
 </div>
 
 @code {
-    private List<MediaItemDto>      _allItems = new();
-    private List<MediaItemDto>      _filtered = new();
-    private List<MediaItemDto>      _featured = new();
-    private List<FolderWatcherDto>  _sections = new();
+    private List<MediaItemDto>      _allItems   = new();
+    private List<MediaItemDto>      _filtered   = new();
+    private List<MediaItemDto>      _featured   = new();
+    private List<FolderWatcherDto>  _sections   = new();
+    private List<CategoryDto>       _categories = new();
+    private ContinueWatchItemDto[]  _continueItems = Array.Empty<ContinueWatchItemDto>();
     private bool   _loading = true;
-    private Guid?  _activeSection;
-    private MediaItemType? _typeFilter;
+    private Guid?  _activeSection;     // legacy v3 folder filter (fallback)
+    // v5: source of truth for catalog filter is CategoryNavService.ActiveCategoryName
+    // (TopBar tabs write to it; Home reads it via the property below). Computed
+    // straight off the shared service so a TopBar click → ApplyFilter loop sees
+    // the freshly-set value without an intermediate local field.
+    private string? _activeCategory => CategoryNav.ActiveCategoryName;
     private string _searchFilter = "";
     private int    _heroInterval = 30;
 
-    private static readonly IReadOnlyList<Tabs<MediaItemType?>.TabItem> _typeTabs =
-    [
-        new(null,                          "All"),
-        new(MediaItemType.Anime,           "Anime"),
-        new(MediaItemType.Movie,           "Movie"),
-        new(MediaItemType.Series,          "Series"),
-        new(MediaItemType.Multserials,     "Multi"),
-    ];
-
     protected override async Task OnInitializedAsync()
     {
+        // Re-render whenever TopBar (or anyone) changes the active category.
+        CategoryNav.OnChange += OnCategoryChanged;
         try
         {
+            // Categories — drive the chip strip. Admin manages them in
+            // Server Settings → Categories; the LLM classifier auto-tags
+            // items on identification.
+            try
+            {
+                var cats = await Api.GetCategoriesAsync();
+                _categories = cats.ToList();
+            }
+            catch { _categories.Clear(); }
+
+            // Continue Watching — v5 hero source of truth. Returns at most 5
+            // in-progress titles for the current user; empty array if the
+            // user hasn't started anything (Home falls back to Featured).
+            try { _continueItems = await Api.GetContinueWatchingAsync(take: 5); }
+            catch { _continueItems = Array.Empty<ContinueWatchItemDto>(); }
+
             // One wide fetch — server query is a single SELECT with eager
             // Tags include; client-side filtering is cheap on the resulting
             // DTOs since they're already projections.
@@ -122,7 +164,19 @@
             // Hide rows whose Folder is itself a section (those are containers,
             // not catalog entries). The /api/media endpoint already filters out
             // section-roots; this is belt-and-braces.
-            _allItems = items.ToList();
+            //
+            // De-duplication: two MediaItems can legitimately share the same
+            // Title/Year if the same movie lives in two folders (e.g. user
+            // moved a file but the old folder still has it). For visual
+            // catalog purposes that's a duplicate — collapse by Id first
+            // (defensive), then by (lowercased trimmed Title, Year) so the
+            // grid never shows the same logical title twice.
+            _allItems = items
+                .GroupBy(m => m.Id)
+                .Select(g => g.First())
+                .GroupBy(m => (m.Title?.Trim().ToLowerInvariant() ?? "", m.Year))
+                .Select(g => g.First())
+                .ToList();
 
             // Featured hero: top 5 rated ≥ 8.0 with a fanart path.
             _featured = _allItems
@@ -148,10 +202,18 @@
         ApplyFilter();
     }
 
-    private void OnTypeFilterChanged(MediaItemType? v)
+    private void SetActiveCategory(string? name)
     {
-        _typeFilter = v;
+        // Delegates to the shared service so TopBar and the page chip strip
+        // stay in lockstep — clicking either updates both displays.
+        CategoryNav.SetActiveCategory(name);
+        // No explicit ApplyFilter() here: OnCategoryChanged handles it.
+    }
+
+    private void OnCategoryChanged()
+    {
         ApplyFilter();
+        StateHasChanged();
     }
 
     private void SetActiveSection(Guid? sectionId)
@@ -164,8 +226,17 @@
     {
         IEnumerable<MediaItemDto> src = _allItems;
 
-        if (_typeFilter.HasValue)
-            src = src.Where(m => m.MediaType == _typeFilter.Value);
+        // Category chip — match by CategoryNames on the DTO (server-projected
+        // from MediaItemCategory join). Read straight from the shared
+        // CategoryNavService so a TopBar click is reflected here without
+        // depending on Blazor re-rendering Home first. Case-insensitive so
+        // chip clicks match category names regardless of capitalisation.
+        var activeCat = CategoryNav.ActiveCategoryName;
+        if (!string.IsNullOrWhiteSpace(activeCat))
+        {
+            src = src.Where(m => m.CategoryNames is { Length: > 0 }
+                              && m.CategoryNames.Any(n => string.Equals(n, activeCat, StringComparison.OrdinalIgnoreCase)));
+        }
 
         // Section filter — match items whose Folder is under the chosen
         // section. The DTO carries FolderId; we resolve the parent section
@@ -197,7 +268,26 @@
                 (m.CjkTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)      ?? false));
         }
 
-        _filtered = src.ToList();
+        // Hide items that are currently rotating in the CatalogHero — they're
+        // big and visible at the top, no need to duplicate them in the grid
+        // below. When the user starts filtering (category / section / search)
+        // we SHOW them again because the filter changes the meaning of "featured".
+        var hasActiveFilter = !string.IsNullOrWhiteSpace(activeCat)
+                          || _activeSection.HasValue
+                          || !string.IsNullOrWhiteSpace(_searchFilter);
+        if (!hasActiveFilter && _featured.Count > 0)
+        {
+            var featuredIds = _featured.Select(f => f.Id).ToHashSet();
+            src = src.Where(m => !featuredIds.Contains(m.Id));
+        }
+
+        // Belt-and-braces dedup: if the API ever returns the same MediaItem
+        // twice (rare, but folder rescans during the request can race), keep
+        // the first occurrence so the grid doesn't show visible duplicates.
+        _filtered = src
+            .GroupBy(m => m.Id)
+            .Select(g => g.First())
+            .ToList();
     }
 
     // Section → set of child FolderWatcher Ids. Populated lazily when the
@@ -222,5 +312,8 @@
         catch { /* section filter degrades to no-op */ }
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        CategoryNav.OnChange -= OnCategoryChanged;
+    }
 }

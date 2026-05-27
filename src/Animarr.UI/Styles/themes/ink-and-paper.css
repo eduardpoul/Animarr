@@ -1,0 +1,82 @@
+/* ============================================================
+   Ink & Paper — the LIGHT theme (sole one).
+
+   Washi paper background (warm cream, very lightly textured via a
+   SVG noise data-URI mixed multiply), ink-black text, hanko red
+   accent, Noto Serif JP everywhere. This is editorial Japanese
+   print — quiet, considered, sentence case. Shadows are light and
+   short so cards feel like sheets of paper, not floating chrome.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="ink-and-paper"] {
+    /* ── Backgrounds — warm washi cream ───────────────────── */
+    --bg-0:        #f5f0e6;
+    --bg-1:        #f0eadd;
+    --surface:     #faf6ed;
+    --surface-2:   #f0eadd;
+    --surface-3:   #e6dfd0;
+
+    /* ── Borders — ink-on-paper alpha black ───────────────── */
+    --border:        rgba(0, 0, 0, 0.10);
+    --border-strong: rgba(0, 0, 0, 0.18);
+
+    /* ── Text — ink black, graphite, soft pencil ──────────── */
+    --text:       #1a1612;
+    --text-dim:   #5a544a;
+    --text-faint: #9a9388;
+
+    /* ── Accent — hanko red ───────────────────────────────── */
+    --accent-hue:  25;
+    --accent:      oklch(0.55 0.20 var(--accent-hue));
+    --accent-hi:   oklch(0.62 0.20 var(--accent-hue));
+    --accent-soft: oklch(0.55 0.20 var(--accent-hue) / 0.14);
+    --accent-line: oklch(0.55 0.20 var(--accent-hue) / 0.40);
+
+    /* ── Semantic — slightly desaturated for light theme ──── */
+    --success: oklch(0.56 0.14 145);
+    --warn:    oklch(0.65 0.16  70);
+    --info:    oklch(0.54 0.12 230);
+
+    /* ── Typography — Noto Serif JP everywhere ────────────── */
+    --font-ui:      'Noto Serif JP', 'Inter', serif;
+    --font-display: 'Noto Serif JP', serif;
+
+    /* ── Labels — sentence case ───────────────────────────── */
+    --label-casing: none;
+    --label-tracking: 0;
+
+    /* ── Decoration flags ─────────────────────────────────── */
+    --decor-washi: block;
+
+    /* ── Shadows — light, short, paper-like ───────────────── */
+    --shadow-card:    0 4px 14px -6px rgba(0, 0, 0, 0.12),
+                      0 0 0 1px rgba(0, 0, 0, 0.05);
+    --shadow-card-hi: 0 8px 22px -8px rgba(0, 0, 0, 0.18),
+                      0 0 0 1px rgba(0, 0, 0, 0.08);
+    --shadow-modal:   0 24px 60px -20px rgba(0, 0, 0, 0.20);
+    --shadow-drawer:  -20px 0 50px -16px rgba(0, 0, 0, 0.16);
+}
+
+/* ── Washi paper texture (Ink & Paper-only decoration) ────
+   Inline SVG turbulence noise mixed multiply at very low opacity.
+   Gives the page a subtle fibrous quality without using an image. */
+[data-theme="ink-and-paper"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.06;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.05  0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 240px 240px;
+}
+
+/* ── Display titles get strong serif weight 700 ───────── */
+[data-theme="ink-and-paper"] h1,
+[data-theme="ink-and-paper"] h2,
+[data-theme="ink-and-paper"] .d-display {
+    font-weight: 700;
+    letter-spacing: -0.4px;
+}

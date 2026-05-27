@@ -36,6 +36,11 @@ public sealed record MediaListQuery
     public string? Search { get; init; }
     public MediaItemType? Type { get; init; }
     public Guid? FolderId { get; init; }
+    /// <summary>Category filter by name — e.g. "Anime". Matches <see cref="Models.CategoryDto.Name"/>.</summary>
+    public string? Category { get; init; }
+    /// <summary>Category filter by id — alternative to <see cref="Category"/> when the
+    /// client already has the Guid handy (chip-strip click).</summary>
+    public Guid? CategoryId { get; init; }
     public int? Skip   { get; init; }
     public int? Take   { get; init; }
     /// <summary>"recent" (default), "title", "rating", "year".</summary>

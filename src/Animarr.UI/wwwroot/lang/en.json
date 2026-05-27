@@ -962,5 +962,16 @@
   "reconnect.title_resume_failed": "Resume failed",
   "reconnect.sub_resume_failed": "Could not resume the session.",
   "reconnect.btn_retry": "Retry connection",
-  "reconnect.btn_resume": "Resume session"
+  "reconnect.btn_resume": "Resume session",
+
+  "pair.title": "Sign in on TV",
+  "pair.scan_hint": "Scan this code on a phone that's already signed in",
+  "pair.or_visit": "or visit",
+  "login.scan_qr": "Scan QR from TV",
+
+  "profile.switch_user_label": "Switch user · on {0}",
+  "profile.add_user": "Add user",
+  "pin.title_for_user": "Sign in as {0}",
+  "pin.subtitle": "Enter 4-digit PIN",
+  "pin.invalid": "Wrong PIN — try again"
 }

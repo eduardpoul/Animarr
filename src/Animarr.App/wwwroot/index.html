@@ -5,13 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Animarr</title>
     <base href="/" />
+    <!-- v5 multi-theme CDN fonts.
+
+         Tailwind CLI v4 strips @import url() declarations from tokens.css
+         during minification, so the Inter / JetBrains Mono / Quicksand /
+         Noto Serif SC / Noto Serif JP families never load through the
+         compiled app.css alone. Explicit <link rel="stylesheet"> here in
+         <head> guarantees var(--font-ui), var(--font-display) and the rest
+         get real glyphs (not the system-ui fallback that renders Welcome
+         and Server Settings titles in Roboto-serif). Loaded upfront so
+         theme swap is FOUT-free. The MAUI WebView still has internet
+         (same WebView shell as a regular browser) so the CDN hit works
+         on all targets. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Quicksand:wght@500;600;700&family=Noto+Serif+SC:wght@500;700;900&family=Noto+Serif+JP:wght@500;700&display=swap" />
+
+    <!-- Global design tokens + Tailwind output. Lives in Animarr.UI's wwwroot
+         and gets exposed as a static web asset under _content/Animarr.UI/.
+         Owns :root design tokens, all 10 personality themes ([data-theme=...]),
+         and every `.d-*` global class (Btn, Pill, hero, Input, Select, ...).
+         The Web.Client index.html has the same link — MAUI's was missing
+         which is why theme tokens, fonts and global button/select styles all
+         fell back to browser defaults in the native shell. -->
+    <link rel="stylesheet" href="_content/Animarr.UI/app.css" />
+
     <!-- Animarr.App.styles.css is the merged scoped-CSS bundle Blazor
          aggregates from every referenced RCL — Animarr.UI's [b-xxx] rules
-         land here without a separate link. -->
+         land here. Must come AFTER app.css so scoped rules can override
+         global ones when a component needs to. -->
     <link href="Animarr.App.styles.css" rel="stylesheet" />
     <style>
         html, body { margin: 0; padding: 0; background: #0b0d10; color: #f0f1f3;
-                     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+                     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
         .status-bar-safe-area { height: env(safe-area-inset-top); background: #14171b; }
     </style>
 
@@ -20,6 +46,102 @@
          native app just like in a browser. -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
+
+    <!-- v5 Phase 7: html5-qrcode for TV-pairing QR scan. Same CDN as WASM. -->
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+    <script>
+        // ── Android TV viewport fix ───────────────────────────────────
+        // Cheap Android TVs (Mi TV, Realme TV, generic boxes) ship with
+        // density=320dpi, which makes a 1920×1080 panel report ~540 CSS
+        // pixels wide to the WebView. Our responsive CSS triggers
+        // mobile-layout at <960px, so without this the TV renders the
+        // phone shell on a 55" screen — Welcome text full-width, content
+        // overflows vertically.
+        //
+        // Detection heuristic: any of —
+        //   • User agent contains "Leanback" / "Google TV" / "Android TV"
+        //   • No touch input + landscape orientation + viewport ≤ 1280
+        //   • UI mode flag (window.matchMedia for "TV")
+        // When detected: override the viewport meta to fix CSS width at
+        // 1280, so all `max-width: 959px` media queries evaluate false and
+        // the desktop layout kicks in. initial-scale is chosen so the
+        // 1280-CSS-px page fits the physical screen width.
+        (function () {
+            var ua = navigator.userAgent || '';
+            var uaLooksTv = /Leanback|Google TV|Android TV|; TV[^a-z]|BRAVIA|AFT[A-Z]/i.test(ua);
+            var noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
+            var landscape = window.innerWidth > window.innerHeight;
+            var smallCssLandscape = landscape && window.innerWidth <= 1280;
+            // matchMedia('(tv)') doesn't exist in browsers, but matchMedia
+            // for "pointer: none" + "hover: none" approximates a TV remote.
+            var remoteOnly = window.matchMedia && window.matchMedia('(pointer: none)').matches;
+
+            var isTv = uaLooksTv || (noTouch && smallCssLandscape) || remoteOnly;
+            if (!isTv) return;
+
+            var meta = document.querySelector('meta[name=viewport]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.setAttribute('name', 'viewport');
+                document.head.appendChild(meta);
+            }
+            // Fix CSS width to 1280; the initial-scale lets the browser
+            // shrink (or in our case stretch) that to fill the physical
+            // panel. The result: same UI as a 1280px desktop browser.
+            var scale = window.innerWidth / 1280;
+            meta.setAttribute('content',
+                'width=1280, initial-scale=' + scale.toFixed(3) +
+                ', maximum-scale=' + scale.toFixed(3) +
+                ', user-scalable=no');
+
+            // Mark <html> so anything else that wants TV-specific behaviour
+            // (focus rings, hero variants) can opt in.
+            document.documentElement.classList.add('animarr-tv-host');
+            document.documentElement.classList.add('tv-mode');
+        })();
+
+        // Accent-hue setter (mirrors WASM host).
+        window.animarr_setAccentHue = function (hue) {
+            if (typeof hue !== 'number') hue = parseInt(hue, 10);
+            if (Number.isFinite(hue))
+                document.documentElement.style.setProperty('--accent-hue', hue);
+        };
+        // Personality theme setter (v5).
+        window.animarr_setTheme = function (slug) {
+            if (typeof slug !== 'string' || slug.length === 0) slug = 'quietude';
+            document.documentElement.setAttribute('data-theme', slug);
+            try { localStorage.setItem('animarr-theme', slug); } catch (_) {}
+        };
+        (function () {
+            var storedHue = localStorage.getItem('animarr-accent');
+            if (storedHue && /^\d+$/.test(storedHue))
+                window.animarr_setAccentHue(parseInt(storedHue, 10));
+            var storedTheme = localStorage.getItem('animarr-theme');
+            document.documentElement.setAttribute('data-theme', storedTheme || 'quietude');
+        })();
+
+        // Cross-platform MAUI mDNS browse. Calls into the MAUI process via
+        // a static [JSInvokable] in Animarr.App.JsInterop.MdnsBridge, which
+        // delegates to the singleton MdnsBrowserService (Makaretu.Dns
+        // listener). Works on Windows / macOS / Android / iOS / Catalyst —
+        // every MAUI target binds a UDP 5353 socket for us. Pure browser
+        // WASM never reaches this script so the Discovery page's
+        // feature-detect (`typeof window.animarrMdnsScan === 'function'`)
+        // is the gate that hides the scanning UI in non-MAUI contexts.
+        window.animarrMdnsScan = async function () {
+            try {
+                var rows = await DotNet.invokeMethodAsync('Animarr.App', 'AnimarrMdnsBrowse');
+                // Discovery.razor's JsServer record only consumes Name +
+                // BaseUrl; the bridge returns the same shape (plus extras
+                // ServerId / Version) so .NET deserialization is a no-op.
+                return rows || [];
+            } catch (e) {
+                console.warn('animarrMdnsScan failed', e);
+                return [];
+            }
+        };
+    </script>
 </head>
 <body>
     <div class="status-bar-safe-area"></div>
@@ -32,5 +154,7 @@
     <script src="_framework/blazor.webview.js" autostart="false"></script>
     <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
     <script src="_content/Animarr.UI/animarr-player.js"></script>
+    <script src="_content/Animarr.UI/tv-nav.js"></script>
+    <script src="_content/Animarr.UI/qr-scan.js"></script>
 </body>
 </html>

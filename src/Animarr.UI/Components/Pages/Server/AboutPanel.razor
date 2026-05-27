@@ -1,0 +1,98 @@
+@*
+    Server Settings → About tab. Spec: screens-v4.jsx 911-934.
+
+    v5 update: Version / Build / Mode now come from /api/server/info on the
+    bound server, not from hardcoded constants — admins moving between
+    builds shouldn't have to grep the source to know what's running.
+*@
+
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+<div class="d-srv-card">
+    <header class="d-srv-card__head">
+        <h2 class="d-srv-card__title">About Animarr</h2>
+        <div class="d-srv-card__sub">
+            Single-binary self-hosted media server with an LLM-driven identification pipeline.
+        </div>
+    </header>
+
+    <div class="d-srv-about__kv">
+        <span class="d-srv-about__key">Version</span> <span class="d-srv-about__val">@VersionLabel</span>
+        <span class="d-srv-about__key">Build</span>   <span class="d-srv-about__val">@BuildLabel</span>
+        <span class="d-srv-about__key">Runtime</span> <span class="d-srv-about__val">@RuntimeLabel</span>
+        <span class="d-srv-about__key">Mode</span>    <span class="d-srv-about__val">@ModeLabel</span>
+        <span class="d-srv-about__key">License</span> <span class="d-srv-about__val">MIT</span>
+    </div>
+
+    <div class="d-srv-card__actions">
+        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
+            <Btn Variant="solid" Size="md"><DIcon Name="github" Size="14" /> View on GitHub</Btn>
+        </a>
+        <a href="https://github.com/eduardpoul/Animarr#readme" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
+            <Btn Variant="ghost" Size="md"><DIcon Name="external" Size="13" /> Documentation</Btn>
+        </a>
+        <a href="https://github.com/eduardpoul/Animarr/issues" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
+            <Btn Variant="ghost" Size="md"><DIcon Name="info" Size="13" /> Report issue</Btn>
+        </a>
+    </div>
+
+    <div class="d-srv-about__footer">
+        Animarr is built and maintained by the open-source community. Contributions,
+        issue reports and pull requests are welcome — see the GitHub repo.
+    </div>
+</div>
+
+@code {
+    private ServerInfoDto? _info;
+
+    /// <summary>Version label.
+
+    /// Shows the assembly InformationalVersion the server reports
+    /// (e.g. "5.0.0+abc123"), falling back to a dash while in-flight or
+    /// on a probe failure so the row never collapses to empty.</summary>
+    private string VersionLabel => _info?.Version is { Length: > 0 } v ? $"v{v}" : "—";
+
+    /// <summary>Build label. We don't ship a separate build-date field over
+    /// the wire; surface the bound server's display name + ServerId prefix
+    /// instead so admins managing several servers can tell which one this
+    /// panel is talking to.</summary>
+    private string BuildLabel
+    {
+        get
+        {
+            if (_info is null) return "—";
+            var idShort = string.IsNullOrEmpty(_info.ServerId)
+                ? ""
+                : " · " + _info.ServerId.Replace("-", "").AsSpan(0, Math.Min(8, _info.ServerId.Replace("-", "").Length)).ToString();
+            return $"{_info.Name}{idShort}";
+        }
+    }
+
+    /// <summary>Runtime hint — fixed string ".NET 10" plus a host
+    /// detector. WASM and MAUI both run identical Razor code, so the
+    /// component itself can't tell them apart with `RuntimeInformation`.
+    /// We probe `OperatingSystem.IsBrowser()` (true only in WASM) to
+    /// label the actual host.</summary>
+    private static string RuntimeLabel =>
+        OperatingSystem.IsBrowser() ? ".NET 10 · WASM" : ".NET 10 · Native";
+
+    private string ModeLabel => _info?.Mode is { Length: > 0 } m ? m : "—";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Probe the bound server. Origin defaults to the NavigationManager
+        // base URI (the same host the WASM bundle came from). If the
+        // request fails we keep the dash placeholders rather than throwing
+        // — the About panel stays renderable when offline.
+        try
+        {
+            var origin = Nav.BaseUri.TrimEnd('/');
+            _info = await Api.GetServerInfoAsync(origin);
+        }
+        catch
+        {
+            _info = null;
+        }
+    }
+}

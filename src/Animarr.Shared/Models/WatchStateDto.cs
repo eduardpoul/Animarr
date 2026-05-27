@@ -38,3 +38,23 @@ public sealed record ContinueWatchDto(
     string? FilePath,
     long?  ProgressMs,
     long?  RuntimeMs);
+
+/// <summary>
+/// Continue-watching row enriched with poster + title metadata so the v5
+/// Home hero can render 5-slot cards without an extra round-trip per item.
+/// One row per (user, mediaItemId) — the latest WatchState in that group.
+/// </summary>
+public sealed record ContinueWatchItemDto(
+    Guid    MediaItemId,
+    string  Title,
+    string? PosterPath,
+    string? FanartPath,
+    int?    Year,
+    int?    Season,
+    int?    Episode,
+    long?   ProgressMs,
+    long?   RuntimeMs,
+    /// <summary>0..1 progress fraction. Convenience so the hero renders the
+    /// progress bar without dividing in Razor.</summary>
+    double  Progress,
+    DateTime LastSeenAt);

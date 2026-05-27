@@ -7,26 +7,23 @@
 @layout AuthLayout
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
+@inject ServerRegistryState ServerReg
 
 <PageTitle>Animarr — Your library, understood.</PageTitle>
 
 <div class="d-welcome">
-    <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__gh-chip tv-focus">
-        <DIcon Name="github" Size="14" /> GITHUB
-    </a>
-
     <div class="d-welcome__cjk" aria-hidden="true">动画</div>
 
     <div class="d-welcome__content">
         <header class="d-welcome__brand">
-            <span class="d-welcome__brand-mark">A</span>
+            <span class="d-welcome__brand-mark">a</span>
             <div>
-                <h2 class="d-welcome__brand-name">ANIMARR</h2>
-                <div class="d-welcome__brand-sub">v4 · LOCAL · LLM-DRIVEN</div>
+                <h2 class="d-welcome__brand-name">Animarr</h2>
+                <div class="d-welcome__brand-sub">v5 · local · llm-driven</div>
             </div>
         </header>
 
-        <h1 class="d-welcome__title">YOUR LIBRARY, UNDERSTOOD.</h1>
+        <h1 class="d-welcome__title">Your library, understood.</h1>
 
         <p class="d-welcome__lede">
             Self-hosted anime and movie organiser. LLM-driven identification,
@@ -36,11 +33,8 @@
 
         <div class="d-welcome__cta">
             <Btn Variant="primary" Size="lg" OnClick="StartFlow">
-                START <DIcon Name="arrow-r" Size="13" />
+                Get started <DIcon Name="arrow-r" Size="13" />
             </Btn>
-            <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__view-src tv-focus">
-                View source
-            </a>
         </div>
 
         <div class="d-welcome__features">
@@ -75,31 +69,50 @@
 
         <footer class="d-welcome__footer">
             <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__footer-link tv-focus">
-                github.com / animarr
+                github.com / eduardpoul / animarr
             </a>
         </footer>
     </div>
 </div>
 
 @code {
-    private const string GithubUrl = "https://github.com";
+    private const string GithubUrl = "https://github.com/eduardpoul/Animarr";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        // Probe auth state. If a cookie's already valid, skip ahead.
+        // Probe auth state. If the user is already signed in, jump straight
+        // to the catalog — there's no point staring at the marketing copy.
+        // For anonymous + SetupRequired we stay here on purpose so the user
+        // sees the brand, features and START button before being asked to
+        // create the master account.
         if (!UserCtx.Loaded) await UserCtx.LoadAsync();
-        if (UserCtx.AuthStatus is { SetupRequired: true })
-            Nav.NavigateTo("/setup", replace: true);
-        else if (UserCtx.IsAuthenticated)
+        // v5: hydrate the server registry so StartFlow can decide between
+        // /discovery (first-run, no known servers) and /login (returning).
+        if (!ServerReg.Loaded) await ServerReg.LoadAsync();
+        if (UserCtx.IsAuthenticated)
             Nav.NavigateTo("/", replace: true);
     }
 
     private void StartFlow()
     {
+        // v5 routing matrix:
+        //   • Setup required on this server → /setup (first-run wizard;
+        //     server-side state beats anything client-side).
+        //   • Otherwise → /discovery. The discovery page itself handles both
+        //     cases:
+        //       — empty registry: shows the scan / manual-add UI
+        //       — populated:      lists known servers with a "connect"
+        //         button each so the user can pick one (or rescan).
+        //     Routing straight to /login when the registry already has an
+        //     entry used to feel "smart" but breaks the back-from-Discovery
+        //     loop: the user clicks Back from /discovery (intending to
+        //     reconsider), hits Get Started again, and we'd skip past the
+        //     screen they just left. Letting Discovery be the single
+        //     entrypoint keeps that interaction symmetric.
         if (UserCtx.AuthStatus is { SetupRequired: true })
             Nav.NavigateTo("/setup");
         else
-            Nav.NavigateTo("/login");
+            Nav.NavigateTo("/discovery");
     }
 }

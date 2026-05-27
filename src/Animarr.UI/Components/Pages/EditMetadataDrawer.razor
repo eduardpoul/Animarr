@@ -20,6 +20,7 @@
 
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject ToastService Toasts
 
 @if (Item is not null)
 {
@@ -51,12 +52,13 @@
         </nav>
 
         <div class="emd__body">
-            @if      (_tab == "ids")      { @SourceIdsTab()  }
-            else if  (_tab == "basics")   { @BasicsTab()     }
-            else if  (_tab == "poster")   { @PosterTab()     }
-            else if  (_tab == "backdrop") { @BackdropTab()   }
-            else if  (_tab == "tags")     { @TagsTab()       }
-            else if  (_tab == "manage")   { @ManageTab()     }
+            @if      (_tab == "ids")        { @SourceIdsTab()   }
+            else if  (_tab == "basics")     { @BasicsTab()      }
+            else if  (_tab == "poster")     { @PosterTab()      }
+            else if  (_tab == "backdrop")   { @BackdropTab()    }
+            else if  (_tab == "tags")       { @TagsTab()        }
+            else if  (_tab == "categories") { @CategoriesTab()  }
+            else if  (_tab == "manage")     { @ManageTab()      }
         </div>
 
         <footer class="emd__footer">
@@ -85,12 +87,13 @@
 
     private static readonly KeyValuePair<string, string>[] _tabDefs =
     [
-        new("ids",      "Source IDs"),
-        new("basics",   "Basics"),
-        new("poster",   "Poster"),
-        new("backdrop", "Backdrop"),
-        new("tags",     "Tags"),
-        new("manage",   "Manage"),
+        new("ids",        "Source IDs"),
+        new("basics",     "Basics"),
+        new("poster",     "Poster"),
+        new("backdrop",   "Backdrop"),
+        new("tags",       "Tags"),
+        new("categories", "Categories"),
+        new("manage",     "Manage"),
     ];
 
     // ── Image gallery state (Poster / Backdrop tabs) ──
@@ -116,6 +119,14 @@
     // ── Tags ──
     private List<string> _tags = new();
     private string _newTag = "";
+
+    // ── Categories (manual override) ──
+    // _allCategories — fetched once on first visit to the Categories tab.
+    // _selectedCategoryIds — drawer-local set; PUT'd to /api/media/{id}/categories on Save.
+    private CategoryDto[]? _allCategories;
+    private bool _categoriesLoading;
+    private bool _categoriesDirty;
+    private readonly HashSet<Guid> _selectedCategoryIds = new();
 
     // ── Source IDs ──
     private string? _tmdbIdInput;
@@ -150,6 +161,15 @@
         _imdbIdInput = Item.ImdbId;
         _tmdbIsTv    = Item.MediaType != MediaItemType.Movie;
         _tags        = Item.Tags?.ToList() ?? new();
+
+        // Seed selected categories from the DTO's current set so the checkbox
+        // state mirrors what's actually persisted. _categoriesDirty stays
+        // false until the user toggles something — keeps Save from PUT'ing
+        // an unchanged set every time.
+        _selectedCategoryIds.Clear();
+        if (Item.CategoryIds is { Length: > 0 } ids)
+            foreach (var id in ids) _selectedCategoryIds.Add(id);
+        _categoriesDirty = false;
     }
 
     private async Task OnCloseAsync() => await OnClose.InvokeAsync();
@@ -164,7 +184,26 @@
             _ = LoadPosterCandidatesAsync();
         else if (key == "backdrop" && _backdropCandidates is null && !_backdropsLoading)
             _ = LoadBackdropCandidatesAsync();
+        else if (key == "categories" && _allCategories is null && !_categoriesLoading)
+            _ = LoadCategoriesAsync();
         await Task.CompletedTask;
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        _categoriesLoading = true;
+        StateHasChanged();
+        try { _allCategories = await Api.GetCategoriesAsync(); }
+        catch { _allCategories = Array.Empty<CategoryDto>(); }
+        _categoriesLoading = false;
+        StateHasChanged();
+    }
+
+    private void ToggleCategory(Guid id, bool on)
+    {
+        if (on) _selectedCategoryIds.Add(id);
+        else    _selectedCategoryIds.Remove(id);
+        _categoriesDirty = true;
     }
 
     private async Task LoadPosterCandidatesAsync()
@@ -235,10 +274,23 @@
                 LogoPath:      null);
 
             await Api.UpdateMediaItemAsync(Item.Id, request);
+
+            // Categories — only PUT if user actually toggled something in this
+            // session. Avoids stomping LLM/heuristic rows with manual=[] when
+            // user never visited the Categories tab.
+            if (_categoriesDirty)
+            {
+                try
+                {
+                    await Api.SetMediaCategoriesAsync(Item.Id, _selectedCategoryIds.ToArray());
+                }
+                catch { /* swallow — main metadata save already succeeded */ }
+            }
+
             await OnSaved.InvokeAsync();
             await OnClose.InvokeAsync();
         }
-        catch { /* TODO: surface via toast */ }
+        catch (Exception ex) { Toasts.ShowError($"Save failed: {ex.Message}"); }
         finally { _saving = false; StateHasChanged(); }
     }
 
@@ -446,6 +498,50 @@
         </div>
     </div>;
 
+    private RenderFragment CategoriesTab() => @<div class="emd-form">
+        <div class="emd-field__label">CATEGORIES — manual override</div>
+        <p class="emd__hint" style="margin: 2px 0 12px;">
+            Ticked categories pin this item to those chips on Home regardless of
+            what the LLM classifier decides. Untick all to let the auto-classifier
+            decide. Changes save with the rest of the metadata.
+        </p>
+        @if (_categoriesLoading)
+        {
+            <div class="emd-gallery-loading"><InlineDots Label="Loading categories" /></div>
+        }
+        else if (_allCategories is null || _allCategories.Length == 0)
+        {
+            <div class="emd-gallery-empty">
+                No categories defined. Admin can create them in Server Settings → Categories.
+            </div>
+        }
+        else
+        {
+            <div class="emd-chips emd-chips--vertical">
+                @foreach (var cat in _allCategories.Where(c => c.Enabled).OrderBy(c => c.SortOrder).ThenBy(c => c.Name))
+                {
+                    var c = cat;
+                    var selected = _selectedCategoryIds.Contains(c.Id);
+                    <label class="@($"emd-cat-row {(selected ? "is-selected" : "")}")">
+                        <input type="checkbox" checked="@selected"
+                               @onchange="@(e => ToggleCategory(c.Id, (bool)e.Value!))" />
+                        <span class="emd-cat-row__text">
+                            <span class="emd-cat-row__name">@c.Name</span>
+                            @if (!string.IsNullOrEmpty(c.Description))
+                            {
+                                <span class="emd-cat-row__desc">@c.Description</span>
+                            }
+                        </span>
+                        @if (c.BuiltIn)
+                        {
+                            <span class="emd-cat-row__builtin">BUILT-IN</span>
+                        }
+                    </label>
+                }
+            </div>
+        }
+    </div>;
+
     private RenderFragment TagsTab() => @<div class="emd-form">
         <div class="emd-chips">
             @foreach (var t in _tags)
@@ -543,10 +639,11 @@
             <h4>Delete from catalog</h4>
             <p>Removes the item from Animarr's SQLite catalog. Files on disk are
                <strong>preserved</strong>. This action cannot be undone from the UI.</p>
-            <label class="emd-field" style="flex-direction:row;align-items:center;gap:8px">
+            <label class="emd-manage-block__confirm">
                 <input type="checkbox" checked="@_confirmDelete"
                        @onchange="@(e => _confirmDelete = e.Value is bool b && b)" />
-                <span>I understand</span>
+                <span class="emd-manage-block__confirm-box" aria-hidden="true"></span>
+                <span class="emd-manage-block__confirm-label">I understand</span>
             </label>
             <button class="emd__btn emd__btn--danger" disabled="@(!_confirmDelete)" @onclick="DeleteAsync">
                 <DIcon Name="trash" Size="13" /> Delete from catalog

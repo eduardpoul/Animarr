@@ -9,6 +9,7 @@
 *@
 
 @inject IAnimarrApiClient Api
+@inject ToastService Toasts
 
 <div class="sfd-overlay" @onclick="CancelAsync"></div>
 <div class="sfd" role="dialog" aria-modal="true" @onclick:stopPropagation>
@@ -262,7 +263,7 @@
             }
             await OnSaved.InvokeAsync();
         }
-        catch { /* TODO: surface via toast once that's wired up */ }
+        catch (Exception ex) { Toasts.ShowError($"Save failed: {ex.Message}"); }
         finally
         {
             _saving = false;

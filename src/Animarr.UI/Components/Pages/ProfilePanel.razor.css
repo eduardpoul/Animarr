@@ -1,14 +1,15 @@
-/* ProfilePanel — 480px right-edge drawer.
-   Phase 4 will expand the body with 4 tabs; CSS here covers the shell
-   so the markup transition is just inside the body. */
+/* ============================================================
+   ProfilePanel — 480px right-edge drawer. Spec: screens-v4.jsx 453-637.
+   ============================================================ */
 
 .d-profile__backdrop {
     position: fixed;
     inset: 0;
+    top: 60px;
     z-index: 30;
     background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     animation: d-profile-fade 0.2s ease;
 }
 
@@ -24,6 +25,7 @@
     z-index: 31;
     background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
     border-left: 1px solid var(--border-strong);
+    border-top: 1px solid var(--border);
     box-shadow: -30px 0 60px -20px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -37,20 +39,19 @@
 
 @media (max-width: 959px) {
     .d-profile { top: 56px; width: 100vw; }
+    .d-profile__backdrop { top: 56px; }
 }
 
+/* ── Header ──────────────────────────────────────────────── */
 .d-profile__head {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 20px 22px;
+    padding: 22px 24px 16px;
     border-bottom: 1px solid var(--border);
 }
 
-.d-profile__head-text {
-    flex: 1;
-    min-width: 0;
-}
+.d-profile__head-text { flex: 1; min-width: 0; }
 
 .d-profile__head-name {
     font-family: var(--font-display);
@@ -62,10 +63,13 @@
 
 .d-profile__head-sub {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-faint);
-    margin-top: 4px;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.8px;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .d-profile__close {
@@ -79,63 +83,139 @@
     color: var(--text-dim);
     display: grid;
     place-items: center;
+    flex-shrink: 0;
 }
 .d-profile__close:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
 
+/* ── Tab strip ───────────────────────────────────────────── */
+.d-profile__tabs {
+    display: flex;
+    padding: 10px 24px 0;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+}
+
+.d-profile__tab {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 10px 13px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    color: var(--text-dim);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+.d-profile__tab:hover { color: var(--text); }
+.d-profile__tab.is-active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+/* ── Body (scrollable area) ─────────────────────────────── */
 .d-profile__body {
-    padding: 20px 22px;
     flex: 1;
     overflow-y: auto;
+    padding: 22px;
+}
+
+/* ── Section / grid layouts ─────────────────────────────── */
+.d-profile__section {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 22px;
 }
 
-.d-profile__rows {
+.d-profile__identity {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    height: 100%;
+}
+
+.d-profile__spacer { flex: 1; min-height: 12px; }
+
+.d-profile__audio-grid {
     display: grid;
-    grid-template-columns: 110px 1fr;
-    row-gap: 10px;
-    column-gap: 14px;
-    font-family: var(--font-mono);
-    font-size: 11.5px;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
 }
 
-.d-profile__row { display: contents; }
-.d-profile__row-key {
+/* ── Field wrapper ──────────────────────────────────────── */
+.d-profile__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.d-profile__field--full { grid-column: 1 / -1; }
+
+.d-profile__field-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     color: var(--text-faint);
-    letter-spacing: 0.4px;
+    letter-spacing: 0.6px;
     text-transform: uppercase;
 }
-.d-profile__row-val {
+
+.d-profile__select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
     color: var(--text);
-    word-break: break-word;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    height: 36px;
+    padding: 0 30px 0 12px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23a8a097' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    transition: border-color var(--motion-fast);
+}
+.d-profile__select:focus { outline: 0; border-color: var(--accent-line); }
+
+.d-profile__range {
+    accent-color: var(--accent);
+    width: 100%;
+    height: 24px;
 }
 
-.d-profile__placeholder {
-    padding: 14px 16px;
+/* ── KV table (Identity) ────────────────────────────────── */
+.d-profile__kv {
     background: var(--bg-1);
-    border: 1px dashed var(--border);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    color: var(--text-faint);
-    font-size: 12.5px;
-    font-style: italic;
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
 }
+.d-profile__kv-key { color: var(--text-faint); letter-spacing: 0.4px; }
+.d-profile__kv-val { color: var(--text); word-break: break-word; }
+.d-profile__kv-val--accent { color: var(--accent-hi); letter-spacing: 0.4px; }
+.d-profile__kv-val--dim    { color: var(--text-dim); }
 
-.d-profile__actions {
-    margin-top: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
+/* ── Sign-out button — destructive crimson outline ──────── */
 .d-profile__signout {
     appearance: none;
     cursor: pointer;
-    height: 44px;
-    border-radius: 10px;
     background: transparent;
-    border: 1px solid oklch(0.74 0.20 25);
     color: oklch(0.74 0.20 25);
+    border: 1px solid oklch(0.55 0.15 25 / 0.5);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
     font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 600;
@@ -146,4 +226,610 @@
     gap: 8px;
     transition: background var(--motion-fast);
 }
-.d-profile__signout:hover { background: oklch(0.74 0.20 25 / 0.12); }
+.d-profile__signout:hover { background: oklch(0.74 0.20 25 / 0.10); }
+
+/* ── Accent swatches ────────────────────────────────────── */
+/* ── Theme picker grid (v5) ─────────────────────────────
+   10 personality themes laid out 2 per row with a preview
+   swatch + label. Click swaps instantly via JS interop. */
+.d-profile__theme-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.d-profile__theme-card {
+    appearance: none;
+    cursor: pointer;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition:
+        border-color var(--motion-fast),
+        background   var(--motion-fast);
+}
+.d-profile__theme-card:hover {
+    border-color: var(--border-strong);
+    background: var(--surface);
+}
+.d-profile__theme-card.is-active {
+    border-color: var(--accent-line);
+    background: linear-gradient(135deg, var(--accent-soft), transparent 60%), var(--bg-1);
+}
+
+.d-profile__theme-card__preview {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--th-bg, #181c24);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    position: relative;
+}
+.d-profile__theme-card__preview::after {
+    /* tiny accent stripe in the corner — at a glance signals the theme's
+       accent without dominating the preview */
+    content: "";
+    position: absolute;
+    right: 0; bottom: 0;
+    width: 14px; height: 14px;
+    background: var(--th-accent, #65b6c8);
+    border-top-left-radius: 6px;
+}
+
+.d-profile__theme-card__sample {
+    font-family: var(--font-display, var(--font-ui));
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--th-text, #e9ecf2);
+    line-height: 1;
+}
+
+.d-profile__theme-card__name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    text-align: left;
+}
+
+.d-profile__swatches {
+    display: flex;
+    gap: 12px;
+    margin-top: 6px;
+}
+
+.d-profile__swatch {
+    appearance: none;
+    cursor: pointer;
+    width: 36px;
+    height: 36px;
+    border-radius: 36px;
+    border: 0;
+    background: var(--swatch-color);
+    transition: box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+.d-profile__swatch:hover { transform: scale(1.06); }
+.d-profile__swatch.is-active {
+    box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--swatch-color);
+}
+
+/* ── Toggle row ─────────────────────────────────────────── */
+.d-profile__toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 4px 0;
+}
+
+.d-profile__toggle-text { min-width: 0; }
+
+.d-profile__toggle-title {
+    font-size: 13.5px;
+    color: var(--text);
+}
+
+.d-profile__toggle-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    line-height: 1.5;
+}
+
+/* ── Hint card (Language tab) ───────────────────────────── */
+.d-profile__hint-card {
+    margin-top: 22px;
+    padding: 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+}
+.d-profile__hint-card strong { color: var(--text); }
+
+/* ── v5 multi-server: SERVER block inside Identity tab ─────
+   Shown above the user info when ServerRegistryState has at least
+   one server. Card layout matches the design board's pp-row aesthetic. */
+.d-profile__server-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.d-profile__server-block .d-profile__field-label {
+    margin-bottom: 4px;
+}
+
+.d-profile__server-row {
+    appearance: none;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: inherit;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-profile__server-row:hover { background: var(--surface-2); }
+.d-profile__server-row--current {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    cursor: default;
+}
+.d-profile__server-row--add {
+    background: transparent;
+    border-style: dashed;
+}
+
+.d-profile__server-row__ic {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    color: var(--accent-hi);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+.d-profile__server-row__ic--dim {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border);
+    color: var(--text-dim);
+}
+.d-profile__server-row__ic--dashed {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    line-height: 1;
+}
+
+.d-profile__server-row__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.d-profile__server-row__name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+.d-profile__server-row__name--dim { color: var(--text-dim); }
+
+.d-profile__server-row__meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+    word-break: break-all;
+}
+
+.d-profile__server-row__right {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    flex-shrink: 0;
+    text-transform: var(--label-casing, none);
+}
+.d-profile__server-row--current .d-profile__server-row__right {
+    color: var(--accent-hi);
+}
+
+/* Manual add form — inline below the "+ Add server" row. */
+.d-profile__server-add {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 0 4px;
+}
+
+.d-profile__server-add__input {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    height: 32px;
+    padding: 0 10px;
+}
+.d-profile__server-add__input:focus {
+    outline: 0;
+    border-color: var(--accent-line);
+}
+
+.d-profile__server-add__error {
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 6px 8px;
+    background: oklch(0.78 0.16 75 / 0.08);
+    border: 1px solid oklch(0.78 0.16 75 / 0.25);
+    border-radius: 6px;
+}
+
+.d-profile__server-add__row {
+    display: flex;
+    gap: 6px;
+}
+
+/* ── v5 PIN per-user-per-device: SWITCH USER strip ──────────
+   Horizontal scroller of user avatars below the SERVER block.
+   Each card is ~84px wide so 5-6 fit before scrolling kicks in
+   (drawer is 480px, padding 22 left-right). */
+.d-profile__users-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.d-profile__users-strip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 2px 8px;
+    /* Hide scrollbar on most browsers — show on hover via webkit hack. */
+    scrollbar-width: thin;
+    scroll-snap-type: x proximity;
+}
+.d-profile__users-strip::-webkit-scrollbar {
+    height: 4px;
+}
+.d-profile__users-strip::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+}
+
+.d-profile__user-card {
+    appearance: none;
+    cursor: pointer;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 10px 8px 8px;
+    min-width: 84px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: inherit;
+    text-align: center;
+    scroll-snap-align: start;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.d-profile__user-card:hover:not([disabled]) {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+}
+.d-profile__user-card[disabled] {
+    cursor: default;
+}
+.d-profile__user-card.is-me {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+}
+
+/* Avatar wrapper holds the disc + the PIN-lock badge in the corner. */
+.d-profile__user-card-avatar {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
+/* "+" card avatar uses a dashed empty disc. */
+.d-profile__user-card-avatar--dashed {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 22px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    background: transparent;
+}
+
+.d-profile__user-card-pin-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -4px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--bg-0);
+    border: 1px solid var(--accent-line);
+    color: var(--accent-hi);
+    display: grid;
+    place-items: center;
+}
+
+.d-profile__user-card-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.d-profile__user-card-name--dim { color: var(--text-dim); }
+
+.d-profile__user-card-meta {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    line-height: 1.2;
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.d-profile__user-card.is-me .d-profile__user-card-meta {
+    color: var(--accent-hi);
+}
+
+.d-profile__user-card--add {
+    border-style: dashed;
+    background: transparent;
+}
+
+/* ── PIN keypad overlay ─────────────────────────────────────
+   Sits above the drawer (z 32 vs 31). Same backdrop tint as the
+   drawer's backdrop so the layers compose visually. The card is
+   centered on the viewport, not anchored to the drawer. */
+.d-pin-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 32;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: d-profile-fade 0.2s ease;
+}
+
+.d-pin-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 33;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    animation: d-profile-fade 0.2s ease;
+}
+.d-pin-shell > * { pointer-events: auto; }
+
+/* ── Inline forms: Edit profile + Change password ─────────────
+   Both forms sit directly inside the Identity tab below the KV
+   table. The buttons toggle the form open; the form has its own
+   labeled inputs + error banner + sticky-feeling actions row. */
+.d-profile__inline-btn {
+    appearance: none;
+    cursor: pointer;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-ctrl);
+    padding: 10px 14px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.d-profile__inline-btn:hover { border-color: var(--border-strong); background: var(--surface); }
+
+.d-profile__inline-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    margin-top: 2px;
+}
+
+.d-profile__inline-input {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    height: 36px;
+    padding: 0 12px;
+    transition: border-color var(--motion-fast);
+}
+.d-profile__inline-input:focus { outline: 0; border-color: var(--accent-line); }
+
+.d-profile__inline-error {
+    color: var(--warn);
+    background: oklch(0.78 0.16 75 / 0.08);
+    border: 1px solid oklch(0.78 0.16 75 / 0.25);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.d-profile__inline-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+/* ── Hero pager style picker (Appearance tab) ──────────────
+   Three small cards (F / G / H) with a miniature preview of the
+   pager markup so the user picks visually. Active card gets the
+   same accent treatment as theme/swatch cards. */
+.d-profile__pager-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.d-profile__pager-card {
+    appearance: none;
+    cursor: pointer;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.d-profile__pager-card:hover { border-color: var(--border-strong); background: var(--surface); }
+.d-profile__pager-card.is-active {
+    border-color: var(--accent-line);
+    background: linear-gradient(135deg, var(--accent-soft), transparent 60%), var(--bg-1);
+}
+
+.d-profile__pager-card__preview {
+    width: 100%;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 0;
+}
+
+.d-profile__pager-card__name {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* F variant — long horizontal strokes. Active one inherits accent. */
+.d-profile__pager-card__strokes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    width: 100%;
+}
+.d-profile__pager-card__stroke {
+    display: block;
+    height: 2px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 2px;
+}
+.d-profile__pager-card__stroke.is-active { background: var(--accent); }
+
+/* G + H share the chevron flanks. */
+.d-profile__pager-card__chevrows {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    justify-content: center;
+}
+.d-profile__pager-card__chev {
+    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* G — dashes between chevrons. */
+.d-profile__pager-card__dashes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    flex: 1;
+    max-width: 80px;
+}
+.d-profile__pager-card__dash {
+    display: block;
+    height: 2px;
+    background: rgba(255,255,255,0.22);
+    border-radius: 2px;
+}
+.d-profile__pager-card__dash.is-active { background: var(--accent); }
+
+/* H — numbered pills (small circles). */
+.d-profile__pager-card__pills {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+.d-profile__pager-card__pill {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    display: grid;
+    place-items: center;
+    line-height: 1;
+}
+.d-profile__pager-card__pill.is-active {
+    background: var(--accent);
+    color: #fff;
+}

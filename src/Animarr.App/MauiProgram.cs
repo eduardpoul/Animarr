@@ -1,3 +1,5 @@
+using System.Net;
+using Animarr.App.Services;
 using Animarr.Shared;
 using Animarr.UI;
 using Animarr.UI.Services;
@@ -30,15 +32,55 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
 
         // Resolve the Animarr server URL — env var wins, otherwise the
-        // compile-time default lands on the developer's box.
+        // compile-time default lands on the developer's box. This seeds the
+        // ServerAddressProvider; if ServerRegistryState later hydrates a
+        // Current entry from localStorage it overwrites the provider before
+        // the first API call lands.
         var serverUrl = Environment.GetEnvironmentVariable("ANIMARR_SERVER_URL") ?? DefaultServerUrl;
 
-        // Single HttpClient with the server's BaseAddress so every
-        // IAnimarrApiClient call resolves to /api/* on the right host.
-        builder.Services.AddSingleton(sp => new HttpClient
+        // Shared mutable holder for the active server URL — see
+        // ServerAddressProvider's class docs for the "why a separate provider
+        // instead of HttpClient.BaseAddress" rationale. Seeded with the
+        // compile-time/env default so first-run users still get a sensible
+        // probe target before they pick their actual server.
+        var addr = new ServerAddressProvider { Current = new Uri(serverUrl) };
+        builder.Services.AddSingleton(addr);
+
+        // CookieContainer is required so the v4 auth cookie (AnimarrCookie,
+        // issued by /api/auth/login) survives across requests inside the
+        // BlazorWebView. Without it the AddCookie handler issues Set-Cookie
+        // but HttpClient never echoes it back, so /api/me returns 401 and the
+        // user gets bounced to /login on every page load. UseCookies=true on
+        // a shared singleton CookieContainer means all IAnimarrApiClient
+        // calls share the same auth state for the lifetime of the app.
+        var cookieJar = new CookieContainer();
+        builder.Services.AddSingleton(cookieJar);
+        builder.Services.AddSingleton(sp =>
         {
-            BaseAddress = new Uri(serverUrl),
-            Timeout     = TimeSpan.FromSeconds(30),
+            // Outermost handler is ServerAddressHandler — it rewrites the
+            // host of each outgoing request to whatever ServerAddressProvider
+            // is pointing at right now (so switching servers takes effect
+            // without HttpClient.BaseAddress' "started" lock).
+            //
+            // Inner handler is HttpClientHandler with the shared CookieContainer.
+            var inner = new HttpClientHandler
+            {
+                UseCookies      = true,
+                CookieContainer = cookieJar,
+            };
+            var pipeline = new ServerAddressHandler(addr) { InnerHandler = inner };
+
+            // BaseAddress is a placeholder that exists ONLY to keep
+            // HttpClient.PrepareRequestMessage happy for relative URIs like
+            // "api/me" — the handler rewrites the authority to the provider's
+            // Current before the request hits the socket. We still seed it
+            // with the same serverUrl so any pre-handler diagnostic logging
+            // shows a sane host instead of "placeholder.local".
+            return new HttpClient(pipeline)
+            {
+                BaseAddress = new Uri(serverUrl),
+                Timeout     = TimeSpan.FromSeconds(30),
+            };
         });
         builder.Services.AddAnimarrApiClient();
         builder.Services.AddAnimarrUiState();
@@ -46,11 +88,28 @@ public static class MauiProgram
         builder.Services.AddSingleton<ThemeService>();
         builder.Services.AddSingleton<ToastService>();
 
+        // mDNS browser singleton — listens for _animarr._tcp.local
+        // announcements on every NIC. JS reaches it through the static
+        // [JSInvokable] in JsInterop.MdnsBridge, which needs the service to
+        // be process-wide reachable; we set MdnsBrowserService.Instance once
+        // the container is built (just below) so the dispatch works no matter
+        // which Blazor page made the call.
+        builder.Services.AddSingleton<MdnsBrowserService>();
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
 #endif
 
-        return builder.Build();
+        var app = builder.Build();
+
+        // Eagerly resolve the browser so its MulticastService starts binding
+        // sockets while the splash screen is still up — by the time the user
+        // navigates to /discovery there's already a populated cache to show.
+        // Also publishes the static accessor used by MdnsBridge.
+        var browser = app.Services.GetRequiredService<MdnsBrowserService>();
+        MdnsBrowserService.RegisterStaticInstance(browser);
+
+        return app;
     }
 }

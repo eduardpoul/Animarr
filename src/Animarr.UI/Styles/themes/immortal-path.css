@@ -1,0 +1,83 @@
+/* ============================================================
+   Immortal Path — donghua / cultivation, calm side.
+
+   Parchment-dark canvas (warmer than Mountain Sect, lighter too),
+   jade-green accent, cream text, Noto Serif SC throughout. The
+   ink-wash decoration is softly blurred dark blobs in the corners
+   suggesting sumi-e on aged paper. Sentence case for a contemplative
+   feel — this is the meditative cultivator, not the warrior.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="immortal-path"] {
+    /* ── Backgrounds — parchment-dark, warm but lighter ───── */
+    --bg-0:        #1e1a14;
+    --bg-1:        #24201a;
+    --surface:     #28231b;
+    --surface-2:   #2f2a22;
+    --surface-3:   #38322a;
+
+    /* ── Borders — green tint ─────────────────────────────── */
+    --border:        rgba(180, 220, 180, 0.10);
+    --border-strong: rgba(180, 220, 180, 0.22);
+
+    /* ── Text — cream ─────────────────────────────────────── */
+    --text:       #f5ecd8;
+    --text-dim:   #b8b09c;
+    --text-faint: #6e6754;
+
+    /* ── Accent — jade green ──────────────────────────────── */
+    --accent-hue:  155;
+    --accent:      oklch(0.62 0.14 var(--accent-hue));
+    --accent-hi:   oklch(0.72 0.14 var(--accent-hue));
+    --accent-soft: oklch(0.62 0.14 var(--accent-hue) / 0.20);
+    --accent-line: oklch(0.62 0.14 var(--accent-hue) / 0.45);
+
+    /* ── Semantic — keep them naturalistic ────────────────── */
+    --success: oklch(0.70 0.14 145);
+    --warn:    oklch(0.76 0.14  80);
+    --info:    oklch(0.68 0.10 230);
+
+    /* ── Typography — Noto Serif SC everywhere ────────────── */
+    --font-ui:      'Noto Serif SC', 'Inter', serif;
+    --font-display: 'Noto Serif SC', serif;
+
+    /* ── Labels — sentence case, contemplative ────────────── */
+    --label-casing: none;
+    --label-tracking: 0.04em;
+
+    /* ── Radii — softer, more rounded than default ────────── */
+    --radius-badge:   8px;
+    --radius-ctrl:   10px;
+    --radius-chip:   12px;
+    --radius-card:   16px;
+    --radius-card-lg: 18px;
+    --radius-panel:  20px;
+    --radius-hero:   24px;
+    --radius-modal:  28px;
+
+    /* ── Shadows — soft, warm ─────────────────────────────── */
+    --shadow-card:    0 14px 34px -18px rgba(60, 80, 50, 0.35),
+                      inset 0 0 0 1px rgba(200, 180, 120, 0.05);
+    --shadow-card-hi: 0 20px 44px -16px rgba(60, 80, 50, 0.45),
+                      inset 0 0 0 1px rgba(200, 180, 120, 0.10);
+}
+
+/* ── Ink-wash decoration (Immortal-Path-only) ─────────────
+   Four blurred dark radial-gradient blobs at the canvas corners
+   plus one mid-low — like brush splats on aged parchment. */
+[data-theme="immortal-path"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.7;
+    background-image:
+        radial-gradient(40% 32% at  8% 12%, rgba(20, 28, 18, 0.55) 0, transparent 70%),
+        radial-gradient(34% 38% at 92% 16%, rgba(20, 28, 18, 0.45) 0, transparent 70%),
+        radial-gradient(45% 40% at 12% 88%, rgba(20, 28, 18, 0.50) 0, transparent 70%),
+        radial-gradient(40% 35% at 88% 84%, rgba(20, 28, 18, 0.50) 0, transparent 70%),
+        radial-gradient(55% 30% at 50% 65%, rgba(127, 169, 127, 0.06) 0, transparent 75%);
+    filter: blur(2px);
+}

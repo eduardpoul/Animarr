@@ -194,6 +194,46 @@ public sealed class AuthService
     public static string HashPassword(string raw) =>
         BCrypt.Net.BCrypt.HashPassword(raw, workFactor: 12);
 
+    // ─── PIN helpers (v5 per-user-per-device fast switch) ──────────────────
+    //
+    // PINs share the same hash algorithm + cost as passwords on purpose — even
+    // though a 4-digit PIN has only 10k possible values, the bottleneck for an
+    // attacker is online (the server) where rate-limiting + the auth cookie
+    // requirement already gate brute force. If the SQLite file leaks the BCrypt
+    // work factor of 12 buys roughly the same ~250 ms/attempt offline cost as
+    // PasswordHash, which is more than enough for a stolen-laptop scenario.
+
+    /// <summary>Hash a 4-digit PIN for storage. Caller MUST run
+    /// <see cref="ValidatePinFormat"/> first so non-numeric / wrong-length input
+    /// never reaches BCrypt.</summary>
+    public static string HashPin(string pin) =>
+        BCrypt.Net.BCrypt.HashPassword(pin, workFactor: 12);
+
+    /// <summary>Constant-time verify of a candidate PIN against the stored hash.
+    /// Returns false on any BCrypt parse failure (corrupted hash, empty input).</summary>
+    public static bool VerifyPin(string pin, string pinHash)
+    {
+        if (string.IsNullOrEmpty(pin) || string.IsNullOrEmpty(pinHash)) return false;
+        try { return BCrypt.Net.BCrypt.Verify(pin, pinHash); }
+        catch { return false; }
+    }
+
+    /// <summary>Throw <see cref="ArgumentException"/> unless the PIN is exactly
+    /// 4 ASCII digits (0-9). Endpoint handlers catch the exception and surface
+    /// it as 400 Bad Request — the keypad UI should already enforce this on
+    /// the client so a real user never trips it.</summary>
+    public static void ValidatePinFormat(string pin)
+    {
+        if (string.IsNullOrEmpty(pin) || pin.Length != 4)
+            throw new ArgumentException("PIN must be exactly 4 digits.", nameof(pin));
+        for (int i = 0; i < pin.Length; i++)
+        {
+            var c = pin[i];
+            if (c < '0' || c > '9')
+                throw new ArgumentException("PIN must contain only digits 0-9.", nameof(pin));
+        }
+    }
+
     /// <summary>Map User → UserDto. Centralised so password hash never leaks.</summary>
     public static UserDto ToDto(User u) => new(
         u.Id,
@@ -205,7 +245,8 @@ public sealed class AuthService
         u.RoleId,
         u.Role?.Name ?? "",
         u.CreatedAt,
-        u.LastSeenAt);
+        u.LastSeenAt,
+        HasPin: !string.IsNullOrEmpty(u.PinHash));
 
     /// <summary>Map Role → RoleDto.</summary>
     public static RoleDto ToDto(Role r, int userCount) => new(

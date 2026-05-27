@@ -1,0 +1,278 @@
+@*
+    Server Settings → Categories tab.
+
+    User-curated taxonomy for the catalog chip strip. Seven built-in
+    categories ship by default (Movies / Serials / Anime / Donghua / Dorama /
+    Multi / Kids). Built-in entries cannot have their Name changed and cannot
+    be deleted, but the Enabled flag and SortOrder can be toggled.
+
+    Custom categories: admin enters a Name + Description + Hint, the LLM
+    classifier uses the Hint at identification time to decide which items
+    belong to the category. After adding a new category the admin should
+    click "Rescan all items" to back-fill existing media.
+*@
+
+@inject IAnimarrApiClient Api
+@inject ToastService Toasts
+
+<div class="d-srv-card">
+    <header class="d-srv-card__head">
+        <h2 class="d-srv-card__title">Categories</h2>
+        <div class="d-srv-card__sub">
+            Chip strip above the catalog grid. Each item can belong to multiple
+            categories. The LLM classifier reads the Hint at identification time;
+            manual overrides per item win over auto-classification.
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <Spinner Size="md" />
+    }
+    else
+    {
+        <div class="d-srv-cat__rows">
+            @foreach (var c in _categories.OrderBy(x => x.SortOrder).ThenBy(x => x.Name))
+            {
+                var cat = c;
+                <div class="@($"d-srv-cat__row {(cat.Enabled ? "" : "is-disabled")}")">
+                    <Toggle Checked="cat.Enabled"
+                            CheckedChanged="@(v => ToggleEnabledAsync(cat, v))" />
+                    <div class="d-srv-cat__row-text">
+                        <div class="d-srv-cat__row-name">
+                            @cat.Name
+                            @if (cat.BuiltIn)
+                            {
+                                <span class="d-srv-cat__row-builtin">· BUILT-IN</span>
+                            }
+                            <span class="d-srv-cat__row-count">@cat.ItemCount items</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(cat.Description))
+                        {
+                            <div class="d-srv-cat__row-desc">@cat.Description</div>
+                        }
+                        @if (!string.IsNullOrEmpty(cat.Hint))
+                        {
+                            <div class="d-srv-cat__row-hint" title="LLM classifier hint">
+                                <DIcon Name="magic" Size="11" /> @cat.Hint
+                            </div>
+                        }
+                    </div>
+                    <div class="d-srv-cat__row-actions">
+                        <button type="button" class="d-srv-users__icon-btn tv-focus"
+                                title="Edit"
+                                @onclick="@(() => StartEdit(cat))">
+                            <DIcon Name="pencil" Size="14" />
+                        </button>
+                        @if (!cat.BuiltIn)
+                        {
+                            <button type="button" class="d-srv-users__icon-btn tv-focus"
+                                    title="Delete"
+                                    @onclick="@(() => DeleteAsync(cat.Id))">
+                                <DIcon Name="trash" Size="14" />
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* v5 drawer refactor: New / Edit no longer replace the row list with
+           an inline form. The list stays visible behind a SettingsEditDrawer
+           that slides in from the right (560px), backed by a dimmed
+           backdrop. Same Save/Cancel callbacks, same Api.Create*/Update*
+           calls — only the chrome changed. *@
+        <div class="d-srv-card__actions">
+            <Btn Variant="primary" Size="md" OnClick="StartAdd">
+                <DIcon Name="plus" Size="13" /> New category
+            </Btn>
+            <Btn Variant="ghost" Size="md" OnClick="RescanAsync" Loading="@_rescanning">
+                <DIcon Name="refresh" Size="13" /> Rescan all items
+            </Btn>
+        </div>
+        <div class="d-srv-cat__rescan-hint">
+            Rescan reclassifies every media item against current categories.
+            Manual overrides are preserved. Cost: ~1 LLM call per item.
+        </div>
+    }
+</div>
+
+<SettingsEditDrawer IsOpen="@_drawerOpen"
+                    Title="@(_editingId is null ? "Create category" : $"Edit: {_editName}")"
+                    Overline="CATEGORIES"
+                    Hint="@(_editingId is null
+                            ? "Add a new user-curated category. The LLM uses Hint at identification time."
+                            : "Update name, description and LLM hint. Built-in names cannot be changed.")"
+                    Icon="sparkle"
+                    OnClose="CancelEdit">
+    <Body>
+        <div class="d-srv-cat__drawer-form">
+            <div class="d-srv-cat__form-grid">
+                <Input Value="@_editName" ValueChanged="@(v => _editName = v ?? "")"
+                       Label="NAME" Placeholder="e.g. K-Pop documentaries"
+                       Disabled="@(_editingId is not null && _categories.FirstOrDefault(c => c.Id == _editingId)?.BuiltIn == true)" />
+                <Input Value="@_editSortOrder.ToString()"
+                       ValueChanged="@(v => int.TryParse(v, out _editSortOrder))"
+                       Label="SORT ORDER" Type="number" />
+            </div>
+            <Input Value="@_editDescription" ValueChanged="@(v => _editDescription = v ?? "")"
+                   Label="DESCRIPTION" Placeholder="Short label for admins" />
+            <label class="d-input-group">
+                <span class="d-input-group__label">HINT (LLM classifier)</span>
+                <textarea class="d-srv-cat__hint-input" rows="6"
+                          @bind="_editHint"
+                          placeholder="Tell the LLM how to recognise this category. Example: 'Korean variety shows and reality TV — NOT Korean dramas (those go to Dorama).'"></textarea>
+            </label>
+        </div>
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" OnClick="SaveAsync">
+            <DIcon Name="check" Size="13" />
+            @(_editingId is null ? "Create category" : "Save changes")
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CancelEdit">Cancel</Btn>
+    </Footer>
+</SettingsEditDrawer>
+
+@code {
+    private CategoryDto[] _categories = Array.Empty<CategoryDto>();
+    private bool _loading = true;
+    private bool _rescanning;
+
+    private Guid? _editingId;
+    private string _editName = "";
+    private string _editDescription = "";
+    private string _editHint = "";
+    private int    _editSortOrder = 100;
+    /// <summary>True while the SettingsEditDrawer is visible. Decoupled from
+    /// <c>_adding</c> so a closed-drawer-but-half-typed state can't accidentally
+    /// show stale form values when the user clicks New again.</summary>
+    private bool   _drawerOpen;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _categories = await Api.GetCategoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Failed to load categories: {ex.Message}");
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ToggleEnabledAsync(CategoryDto cat, bool enabled)
+    {
+        try
+        {
+            await Api.UpdateCategoryAsync(cat.Id, new UpdateCategoryRequest(
+                null, null, null, null, Enabled: enabled));
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Toggle failed: {ex.Message}");
+        }
+    }
+
+    private void StartAdd()
+    {
+        _editingId = null;
+        _editName = "";
+        _editDescription = "";
+        _editHint = "";
+        _editSortOrder = (_categories.Length + 1) * 10;
+        _drawerOpen = true;
+    }
+
+    private void StartEdit(CategoryDto cat)
+    {
+        _editingId = cat.Id;
+        _editName = cat.Name;
+        _editDescription = cat.Description ?? "";
+        _editHint = cat.Hint ?? "";
+        _editSortOrder = cat.SortOrder;
+        _drawerOpen = true;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _drawerOpen = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_editName))
+        {
+            Toasts.ShowWarning("Name is required");
+            return;
+        }
+        try
+        {
+            if (_editingId is Guid id)
+            {
+                await Api.UpdateCategoryAsync(id, new UpdateCategoryRequest(
+                    Name: _editName.Trim(),
+                    Description: _editDescription,
+                    Hint: _editHint,
+                    SortOrder: _editSortOrder,
+                    Enabled: null));
+                Toasts.ShowSuccess("Category updated");
+            }
+            else
+            {
+                await Api.CreateCategoryAsync(new CreateCategoryRequest(
+                    Name: _editName.Trim(),
+                    Description: _editDescription,
+                    Hint: _editHint,
+                    SortOrder: _editSortOrder));
+                Toasts.ShowSuccess("Category created");
+            }
+            CancelEdit();
+            _drawerOpen = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Save failed: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try
+        {
+            await Api.DeleteCategoryAsync(id);
+            Toasts.ShowSuccess("Category deleted");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Delete failed: {ex.Message}");
+        }
+    }
+
+    private async Task RescanAsync()
+    {
+        if (_rescanning) return;
+        _rescanning = true;
+        StateHasChanged();
+        try
+        {
+            await Api.RescanCategoriesAsync();
+            Toasts.ShowSuccess("Rescan started — will run in the background");
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Rescan failed: {ex.Message}");
+        }
+        _rescanning = false;
+        StateHasChanged();
+    }
+}

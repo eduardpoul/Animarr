@@ -1,6 +1,9 @@
 .d-mdhero {
     position: relative;
-    height: clamp(480px, 68vh, 720px);
+    /* v5: was clamp(480px, 68vh, 720px) — design board calls for a 380px
+       compact hero so the catalog scrolls into view sooner. Kept the
+       margin-overflow trick so the hero still bleeds to the page edges. */
+    height: clamp(340px, 48vh, 460px);
     margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-9)) var(--space-9);
     overflow: hidden;
     border-radius: 0 0 var(--radius-hero) var(--radius-hero);
@@ -35,10 +38,8 @@
 }
 
 .d-mdhero__back,
-.d-mdhero__edit {
-    position: absolute;
-    top: var(--space-7);
-    z-index: 3;
+.d-mdhero__edit,
+.d-mdhero__fav {
     appearance: none;
     cursor: pointer;
     height: 32px;
@@ -46,20 +47,51 @@
     border-radius: var(--radius-ctrl);
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.1em;
+    letter-spacing: var(--label-tracking, 0.1em);
+    text-transform: var(--label-casing, none);
     color: var(--text);
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    transition: background var(--motion-base);
+    transition: background var(--motion-base), color var(--motion-base);
+    z-index: 3;
 }
 
-.d-mdhero__back { left:  var(--space-9); }
-.d-mdhero__edit { right: var(--space-9); }
+.d-mdhero__back {
+    position: absolute;
+    top: var(--space-7);
+    left: var(--space-9);
+}
+
+/* v5: a row of action buttons (favorite + edit) is anchored top-right
+   instead of just the edit button — favorite gets its own pill. */
+.d-mdhero__top-actions {
+    position: absolute;
+    top: var(--space-7);
+    right: var(--space-9);
+    z-index: 3;
+    display: inline-flex;
+    gap: var(--space-3);
+}
 
 .d-mdhero__back:hover,
-.d-mdhero__edit:hover {
+.d-mdhero__edit:hover,
+.d-mdhero__fav:hover {
     background: rgba(20, 15, 12, 0.75);
+}
+
+.d-mdhero__fav.is-active {
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+}
+
+.d-mdhero__fav-star {
+    font-size: 14px;
+    line-height: 1;
+}
+.d-mdhero__fav-star--filled {
+    color: var(--accent-hi);
 }
 
 .d-mdhero__content {
@@ -149,7 +181,7 @@
 /* ── Mobile / tablet — shrink hero, tighten poster, stack content. */
 @media (max-width: 959px) {
     .d-mdhero {
-        height: clamp(420px, 60vh, 580px);
+        height: clamp(300px, 42vh, 420px);
         margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-7);
     }
     .d-mdhero__content {
@@ -157,8 +189,11 @@
         gap: var(--space-5);
     }
     .d-mdhero__poster { width: 160px; }
-    .d-mdhero__back  { left:  var(--space-6); top: var(--space-5); }
-    .d-mdhero__edit  { right: var(--space-6); top: var(--space-5); }
+    .d-mdhero__back        { left:  var(--space-6); top: var(--space-5); }
+    .d-mdhero__top-actions { right: var(--space-6); top: var(--space-5); gap: var(--space-2); }
+    /* On tablets the Favorite chip drops its label and shows only the star
+       so the action row stays compact. */
+    .d-mdhero__fav span:not(.d-mdhero__fav-star) { display: none; }
 }
 
 /* ── Phone — stack poster above title, shrink everything. */
@@ -180,6 +215,8 @@
         right: 0;
         opacity: 0.7;
     }
-    .d-mdhero__back  { left:  var(--space-4); top: var(--space-4); height: 28px; padding: 0 var(--space-3); }
-    .d-mdhero__edit  { right: var(--space-4); top: var(--space-4); height: 28px; padding: 0 var(--space-3); }
+    .d-mdhero__back        { left:  var(--space-4); top: var(--space-4); height: 28px; padding: 0 var(--space-3); }
+    .d-mdhero__top-actions { right: var(--space-4); top: var(--space-4); gap: var(--space-2); }
+    .d-mdhero__fav,
+    .d-mdhero__edit { height: 28px; padding: 0 var(--space-3); }
 }

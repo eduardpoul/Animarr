@@ -18,4 +18,6 @@ public sealed record UserPreferencesDto(
     int    DefaultVolume,
     bool   AudioPassthrough,
     bool   NormalizeVolume,
-    string Language);
+    string Language,
+    string Theme,
+    string HeroPagerStyle);
