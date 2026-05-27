@@ -2571,6 +2571,53 @@ button.d-pill:focus-visible {
 }
 
 /* ============================================================
+   .catalog-grid / .catalog-empty / .catalog-more — poster grid
+   primitives. Originally scoped to Home.razor.css, hoisted to
+   global so /search and any future poster-grid page (e.g. /favorites,
+   /history) renders the same column-grid layout instead of falling
+   back to block-flow (which makes posters stretch full-width).
+   ============================================================ */
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-9);
+}
+
+.catalog-empty {
+    text-align: center;
+    padding: var(--space-12) 0;
+    color: var(--text-dim);
+}
+
+.catalog-empty__text {
+    margin-top: var(--space-5);
+    font-size: 15px;
+}
+
+.catalog-more {
+    text-align: center;
+    padding: var(--space-9) 0;
+    color: var(--text-faint);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+}
+
+@media (max-width: 959px) {
+    .catalog-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: var(--space-6);
+    }
+}
+
+@media (max-width: 639px) {
+    .catalog-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-5);
+    }
+}
+
+/* ============================================================
    .d-input-group — global label-over-input wrapper. Originally
    scoped to the <Input> primitive's razor.css, but UsersRolesPanel
    uses it directly around a raw <select> (ROLE picker) — scoped
