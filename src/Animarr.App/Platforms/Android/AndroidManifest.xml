@@ -33,6 +33,16 @@
     <!-- Local network / DLNA discovery — multicast for SSDP. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- Camera — html5-qrcode in /pair-confirm uses getUserMedia to scan the
+         pairing QR code shown on the TV. android.permission.CAMERA is the
+         runtime grant; the <uses-feature> with required="false" stops the
+         Play Store + Android-TV install filters from refusing devices that
+         don't have a camera (so the same APK still installs on a wired TV
+         box where the user can fall back to "Enter code" instead). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <!-- Declare Leanback support so the app shows in Android-TV launchers.
          required="false" so it still installs on phones. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

@@ -3,45 +3,27 @@
     Android Network Security Config — relaxes the strict defaults so the
     BlazorWebView can reach a self-hosted Animarr server on the LAN.
 
-    Default Android policy (since API 28):
-      • cleartext HTTP blocked everywhere
-      • user-added CAs not trusted by app traffic
-      • WebView inherits the same restrictions
+    Animarr is a self-hosted media app whose servers, by design, live on
+    arbitrary LAN IPs the user picks at install time (192.168.x.x,
+    10.x.x.x, 172.16.x.x, Tailscale magic-DNS hosts, .local mDNS names,
+    custom hostnames, etc.). The old config tried to enumerate those with
+    CIDR ranges in <domain> tags — but Android's NSC does NOT support
+    CIDR; those entries were silently ignored, so cleartext HTTP to
+    192.168.11.200 was actually BLOCKED and login failed with the
+    misleading "Connection failure" error.
 
-    For a self-hosted setup we typically want:
-      • HTTP allowed on RFC1918 / .local / .lan / explicit LAN IPs
-      • System CAs trusted for everything else (HTTPS to public)
-      • User-added CAs trusted *only* for debug builds (lets you import a
-        self-signed Caddy cert via Settings → Security → Trusted Credentials)
+    Policy: cleartext on EVERYWHERE. We accept the (small) downside that a
+    misconfigured client could fall back to HTTP against a public server
+    in exchange for not having to maintain an unknowable IP allowlist for
+    every user's home LAN. Production deploys behind Caddy use HTTPS
+    anyway; the cleartext path is purely for direct LAN access.
 
-    Drop your tower's hostname (or LAN IP range) into the cleartext domain
-    list. The wildcards cover the common private ranges.
+    User certs are still trusted in debug-overrides so self-signed Caddy
+    certs work for testing.
 -->
 <network-security-config>
 
-    <!-- Allow cleartext + invalid certs to typical LAN destinations. Tighten
-         this if your tower is reachable over HTTPS — leave only the entries
-         you actually need. -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">tower.one</domain>
-        <domain includeSubdomains="true">animarr.tower.one</domain>
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="false">10.0.2.2</domain>       <!-- Android emulator → host -->
-        <domain includeSubdomains="false">192.168.0.0/16</domain>
-        <domain includeSubdomains="false">10.0.0.0/8</domain>
-        <domain includeSubdomains="false">172.16.0.0/12</domain>
-        <domain includeSubdomains="true">local</domain>            <!-- .local mDNS -->
-        <domain includeSubdomains="true">lan</domain>
-        <trust-anchors>
-            <certificates src="system"/>
-            <certificates src="user"/>
-        </trust-anchors>
-    </domain-config>
-
-    <!-- Everywhere else: strict HTTPS, system CAs only. Debug builds also
-         trust user-added CAs so you can drop a self-signed cert in Settings
-         and have it Just Work for testing. -->
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system"/>
         </trust-anchors>

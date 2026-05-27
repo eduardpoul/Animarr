@@ -127,25 +127,43 @@ public sealed class ServerRegistryState
             Version:     info.Version,
             TitleCount:  info.TitleCount);
 
-        var existingIdx = _servers.FindIndex(s => s.ServerId == info.ServerId);
+        await UpsertAsync(entry, ct);
+        return entry;
+    }
+
+    /// <summary>Add or refresh a pre-built registry entry without re-probing
+    /// /api/server/info. Used when an upstream layer already knows enough
+    /// about the server (mDNS / NSD resolved the SRV+TXT records, subnet
+    /// probe parsed the JSON itself) and forcing another HTTP round trip
+    /// would lose the entry if Android's HttpClient happens to fail. Dedupes
+    /// by ServerId. If the registry was empty, the new entry becomes Current
+    /// so the user lands on the right login screen.</summary>
+    public async Task UpsertAsync(RegisteredServerDto entry, CancellationToken ct = default)
+    {
+        var existingIdx = _servers.FindIndex(s => s.ServerId == entry.ServerId);
         if (existingIdx >= 0)
         {
-            _servers[existingIdx] = entry;
+            // Preserve the existing TitleCount if the new entry doesn't have
+            // one — the scan-time path doesn't know it without an HTTP probe.
+            var prev = _servers[existingIdx];
+            var merged = entry with
+            {
+                TitleCount = entry.TitleCount ?? prev.TitleCount,
+                Version    = entry.Version    ?? prev.Version,
+            };
+            _servers[existingIdx] = merged;
         }
         else
         {
             _servers.Add(entry);
         }
 
-        // First server in the registry — make it current automatically so the
-        // user lands on the right login screen.
         var becameCurrent = _currentServerId is null;
         _currentServerId ??= entry.ServerId;
 
         await PersistAsync(ct);
         if (becameCurrent) ApplyCurrentToHttp();
         OnChange?.Invoke();
-        return entry;
     }
 
     /// <summary>Drop a server from the registry. If it was the current one,
@@ -180,6 +198,26 @@ public sealed class ServerRegistryState
         _currentServerId = serverId;
         await PersistAsync(ct);
         ApplyCurrentToHttp();
+        OnChange?.Invoke();
+    }
+
+    /// <summary>Set a friendly client-side name for an existing server entry.
+    /// Pure local rename — does NOT call the server, so two different clients
+    /// can pick different names for the same install (the server's own name
+    /// stays whatever AppConfig "server.name" holds and shows up only on a
+    /// re-probe via <see cref="AddServerAsync"/>). Empty/whitespace falls back
+    /// to the last probed name; we never persist an unnamed entry because the
+    /// picker UI would render blank rows.</summary>
+    public async Task RenameAsync(string serverId, string newName, CancellationToken ct = default)
+    {
+        var idx = _servers.FindIndex(s => s.ServerId == serverId);
+        if (idx < 0) return;
+        var trimmed = (newName ?? "").Trim();
+        if (string.IsNullOrEmpty(trimmed)) return;
+        var existing = _servers[idx];
+        if (string.Equals(existing.Name, trimmed, StringComparison.Ordinal)) return;
+        _servers[idx] = existing with { Name = trimmed };
+        await PersistAsync(ct);
         OnChange?.Invoke();
     }
 

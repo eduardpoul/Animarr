@@ -74,6 +74,16 @@
         <AndroidLinkMode>None</AndroidLinkMode>
     </PropertyGroup>
 
+    <!-- Debug also ships both ABIs so installs on cheap armeabi-v7a TV boxes
+         (Mi TV, generic Android TV sticks) work straight from `dotnet build
+         -t:Install`. Without 32-bit support the installer fails with
+         IncompatibleCpuAbiException. The extra build time is negligible
+         compared to the friction of having to flip to Release just to push
+         a Debug build to a TV. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+    </PropertyGroup>
+
     <ItemGroup>
         <!-- App Icon — background fill matches Quietude surface (#181c24);
              foreground SVG paints the teal-gradient brand tile + 'a' glyph. -->
@@ -104,6 +114,19 @@
              process can — Makaretu binds the same set of NICs on every
              platform (Windows / macOS / Android / iOS / Mac Catalyst). -->
         <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+    </ItemGroup>
+
+    <!-- Phase 2 (2026-05-27): Native ExoPlayer-backed playback path on
+         Android TV so HDR / Dolby Vision / DTS-HD passthrough works
+         (BlazorWebView + hls.js loses HDR metadata). The WebView still
+         hosts the HUD overlay; ExoPlayer sits behind it in a SurfaceView.
+         Pulled in only for the android target — other platforms keep
+         the Artplayer-on-<video> path. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <PackageReference Include="Xamarin.AndroidX.Media3.Common"          Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer"       Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer.Hls"   Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.UI"              Version="1.4.1.1" />
     </ItemGroup>
 
     <ItemGroup>

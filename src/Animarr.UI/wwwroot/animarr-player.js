@@ -1,126 +1,579 @@
-// Artplayer-based player bridge.
+// Artplayer-based player bridge — variant B (full custom HUD).
 //
-// What attach() does, in order:
-//   1. Ask .NET for the resume position (so we can seek straight there).
-//   2. Calibrate the audio offset (HW channel only — SW is manual-via-settings).
-//   3. POST /api/hls/start — server decides Direct Play vs HLS plan and
-//      returns either a directPlayUrl OR (token, manifestUrl).
-//   4. Probe /api/probe — extract subtitle tracks + push media-info to .NET
-//      for the chip strip.
-//   5. Instantiate Artplayer in the container div with:
-//        • our HLS source (via customType handler that drives hls.js)
-//        • the subtitle list as Artplayer's subtitle config
-//        • custom controls (Cast, mpv, Close) in the bottom chrome —
-//          alongside Artplayer's built-in play/scrub/settings/fullscreen
-//   6. Wire video:timeupdate → .NET RecordProgressAsync (every ~5s).
-//   7. Keepalive ping every 30s (HLS only — Direct Play has no server session).
+// Artplayer's built-in chrome is hidden via CSS (.art-bottom, .art-progress,
+// .art-state). We render our own HUD as an Artplayer `layer`, which keeps it
+// inside the player DOM tree so it survives browser fullscreen and doesn't
+// fight Artplayer's chrome for z-index.
 //
-// detach() destroys the Artplayer instance, kills the hls.js attached to it,
-// stops keepalive, and DELETEs the HLS session.
+// HUD layout matches design_handoff_animarr/design-system/04-tv.html § T-03
+// plus the additions from the iteration on 2026-05-27:
+//   • Bottom row buttons share the same height (Play not enlarged).
+//   • Audio / Subtitles buttons show only the label, no current selection.
+//   • Extra controls: Aspect ratio, Audio sync (offset slider), Cast.
+//   • Top-right meta line carries every video tag we can detect.
+//   • Two styles via localStorage `animarr_player_style`:
+//       - "full"  (default) — glass chip with icon + text
+//       - "icons" — just the icon, no background, no label
+//   • Arrow keys ±10s. Media-key + TV-remote bindings handled directly so
+//     standard remote keys (play/pause, prev/next, FF/REW, back) "just work".
 
 (function () {
-    // elementId → { art, abort, refRef, sessionToken, keepaliveTimer, totalDuration, resumeOffset }
+    // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
 
-    // Hosts that don't share an origin with the API (MAUI's BlazorWebView is
-    // the only one currently — its WebView serves index.html from a local
-    // virtual host while the API lives on a remote tower) prepend a base URL
-    // to every /api/ path. WASM / Blazor-Server hosts leave it as '' so the
-    // page-origin behaviour stays unchanged.
     const apiBase = () => (typeof window !== 'undefined' && window.animarrApiBase) || '';
     const apiUrl  = (path) => apiBase() + path;
 
-    // SVG icons used by custom controls. Stroked-line style to match the
-    // rest of the app (DIcon set in C#).
-    const ICONS = {
-        cast:     '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17a3 3 0 0 1 3 3"/><path d="M2 13a7 7 0 0 1 7 7"/><path d="M2 9a11 11 0 0 1 11 11"/><path d="M2 5h17a2 2 0 0 1 2 2v9"/></svg>',
-        external: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>',
-        close:    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6l-12 12"/></svg>',
-        // "Sliders horizontal" — three knobs on tracks. Universally readable
-        // as "tune / adjust". Previous headphones icon had an r=0 circle
-        // which doesn't render and a confusing path that read as nothing.
-        audioSync: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6" x2="14" y2="6"/><line x1="10" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="18" x2="16" y2="18"/><line x1="12" y1="18" x2="3" y2="18"/><circle cx="12" cy="6" r="2" fill="currentColor"/><circle cx="10" cy="12" r="2" fill="currentColor"/><circle cx="14" cy="18" r="2" fill="currentColor"/></svg>',
+    // ── formatting helpers ────────────────────────────────────────────
+    function formatTime(sec) {
+        if (!Number.isFinite(sec) || sec < 0) sec = 0;
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.floor(sec % 60);
+        const pad = (n) => String(n).padStart(2, '0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+    }
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Player adapter abstraction (Phase 1, 2026-05-27)
+    // ─────────────────────────────────────────────────────────────────
+    //
+    // The HUD (attachHud, button callbacks, autoCropIfUltrawide, progress
+    // reporter) talks to an abstract player surface so Phase 2 can swap in
+    // a native ExoPlayer-backed adapter on Android TV without rewriting any
+    // UI code. There's no formal abstract base in JS — adapters duck-type
+    // the following contract:
+    //
+    //   Properties (gettable):
+    //     playing      : boolean
+    //     currentTime  : number (seconds, settable)
+    //     duration     : number (seconds)
+    //     volume       : number (0..1, settable)
+    //     muted        : boolean (settable)
+    //     fullscreen   : boolean (settable — toggles browser fullscreen)
+    //
+    //   Methods:
+    //     play()                          → Promise|void
+    //     pause()                         → void
+    //     on(event, fn)                   → void   (events: play, pause,
+    //                                              ended, timeupdate,
+    //                                              loadedmetadata, loadeddata,
+    //                                              durationchange,
+    //                                              volumechange, progress)
+    //     off(event, fn)                  → void
+    //     once(event, fn)                 → void
+    //     setSubtitle({url, name, type})  → void   (url=null disables)
+    //     setSubtitleVisible(bool)        → void
+    //     setAspectRatio(value)           → void   ('default' | '16:9' | …)
+    //     rawVideoElement()               → HTMLVideoElement|null
+    //                                              (only for canvas sampling
+    //                                               in letterbox detect; null
+    //                                               on native adapter)
+    //     destroy()                       → void
+    //
+    // Adapters store any underlying handles (Artplayer instance, hls.js,
+    // ExoPlayer bridge) privately; the HUD never touches them.
+
+    /** Wraps an Artplayer 5 instance to expose the abstract surface above.
+     *  Maps Artplayer's prefixed event names (`video:timeupdate`) onto the
+     *  un-prefixed ones the HUD code subscribes to. */
+    class ArtplayerAdapter {
+        constructor(art) {
+            this.art = art;
+        }
+
+        // Bridge map between abstract event names and Artplayer's. Anything
+        // not in this map is forwarded as-is (lets Artplayer-specific code,
+        // e.g. customType wiring, still subscribe to raw events via art.on).
+        static EVENT_MAP = {
+            play:           'video:play',
+            pause:          'video:pause',
+            ended:          'video:ended',
+            timeupdate:     'video:timeupdate',
+            loadedmetadata: 'video:loadedmetadata',
+            loadeddata:     'video:loadeddata',
+            durationchange: 'video:durationchange',
+            volumechange:   'video:volumechange',
+            progress:       'video:progress',
+        };
+
+        // ── Properties ────────────────────────────────────────────────
+        get playing()      { return !!this.art.playing; }
+        get currentTime()  { return this.art.currentTime || 0; }
+        set currentTime(t) { try { this.art.currentTime = t; } catch {} }
+        get duration()     { return this.art.duration || 0; }
+        get volume()       { return this.art.volume ?? 1; }
+        set volume(v)      { try { this.art.volume = v; } catch {} }
+        get muted()        { return !!this.art.muted; }
+        set muted(m)       { try { this.art.muted = m; } catch {} }
+        get fullscreen()   { return !!document.fullscreenElement; }
+        set fullscreen(b)  { try { this.art.fullscreen = b; } catch {} }
+
+        // ── Playback ──────────────────────────────────────────────────
+        play()  { try { return this.art.play();  } catch {} }
+        pause() { try { this.art.pause(); } catch {} }
+
+        // ── Events ────────────────────────────────────────────────────
+        on(event, fn) {
+            const e = ArtplayerAdapter.EVENT_MAP[event] || event;
+            this.art.on(e, fn);
+        }
+        off(event, fn) {
+            const e = ArtplayerAdapter.EVENT_MAP[event] || event;
+            try { this.art.off(e, fn); } catch {}
+        }
+        once(event, fn) {
+            const e = ArtplayerAdapter.EVENT_MAP[event] || event;
+            this.art.once(e, fn);
+        }
+
+        // ── Subtitle ──────────────────────────────────────────────────
+        setSubtitle(opts) {
+            if (!opts || !opts.url) {
+                try { this.art.subtitle.show = false; } catch {}
+                return;
+            }
+            try {
+                this.art.subtitle.switch(opts.url, {
+                    type:  opts.type || 'vtt',
+                    name:  opts.name || '',
+                    escape: false,
+                });
+                this.art.subtitle.show = true;
+            } catch (e) { console.warn('subtitle switch failed', e); }
+        }
+        setSubtitleVisible(b) {
+            try { this.art.subtitle.show = !!b; } catch {}
+        }
+
+        // ── Aspect ratio ──────────────────────────────────────────────
+        // object-fit:cover is what makes baked-in letterbox bars crop off;
+        // 'default' restores Artplayer's contain behaviour.
+        setAspectRatio(value) {
+            try {
+                this.art.aspectRatio = value;
+                const video = this.art.video || this.art.template?.$video;
+                if (!video) return;
+                if (value === 'default') {
+                    video.style.objectFit = '';
+                    video.style.aspectRatio = '';
+                } else {
+                    video.style.objectFit = 'cover';
+                    video.style.aspectRatio = value.replace(':', ' / ');
+                }
+            } catch (e) { console.warn('aspectRatio set failed', e); }
+        }
+
+        // ── Raw video element (canvas sampling only) ──────────────────
+        rawVideoElement() { return this.art.video || null; }
+
+        destroy() {
+            try { this.art.destroy(true); } catch {}
+        }
+    }
+
+    /** Native (ExoPlayer/AVPlayer) adapter. Used on Android TV where
+     *  HDR / Dolby Vision passthrough through the WebView is unreliable;
+     *  the MAUI host (Animarr.App) draws video into a TextureView behind
+     *  the WebView, and the HUD floats on top inside the (now-transparent)
+     *  body. Bridge proxy: window.animarrNativePlayer (see MAUI index.html).
+     *
+     *  No <video> element exists on this path — `rawVideoElement()`
+     *  intentionally returns null so consumers (letterbox detection,
+     *  picture-in-picture) skip over the native adapter.
+     *
+     *  Play position + state come from polling the C# bridge every 250ms;
+     *  changes diff against the previous tick and fire 'timeupdate' /
+     *  'play' / 'pause' / 'ended' / 'durationchange' events to match the
+     *  ArtplayerAdapter contract that attachHud() consumes. */
+    class NativeAdapter {
+        constructor(bridge, opts) {
+            this.bridge = bridge;
+            this.container = opts.container;
+            this._listeners = new Map();
+            // Seed duration from the start-session response so the HUD's
+            // dur label paints right away (before the first poll lands).
+            this._state = {
+                positionMs:  Math.round((opts.resumeSec || 0) * 1000),
+                durationMs:  Math.round((opts.durationSec || 0) * 1000),
+                playing:     false,
+                ended:       false,
+                buffering:   false,
+            };
+            this._poll = null;
+        }
+
+        // Start the bridge playback then begin polling. Async so attach()
+        // can await both calls in sequence.
+        async _start(url, resumeSec) {
+            try { await this.bridge.play(url, { resumeSec }); }
+            catch (e) { console.warn('NativeAdapter: bridge.play failed', e); }
+            this._startPoll();
+        }
+
+        _startPoll() {
+            if (this._poll) return;
+            this._poll = setInterval(async () => {
+                let s;
+                try { s = await this.bridge.getState(); }
+                catch { return; }   // single tick failure — try again next time
+                if (!s) return;
+                const prev = this._state;
+                // The C# bridge sends camelCased keys via System.Text.Json's
+                // default policy: PositionMs → positionMs, Playing → playing.
+                this._state = {
+                    positionMs:    s.positionMs    ?? prev.positionMs,
+                    durationMs:    s.durationMs    ?? prev.durationMs,
+                    playing:       !!s.playing,
+                    ended:         !!s.ended,
+                    buffering:     !!s.buffering,
+                    errorMessage:  s.errorMessage  || null,
+                    actualCodec:   s.actualCodec   || '',
+                    actualBitDepth:s.actualBitDepth|| 0,
+                    actualWidth:   s.actualWidth   || 0,
+                    actualHeight:  s.actualHeight  || 0,
+                };
+                if (this._state.durationMs !== prev.durationMs) this._emit('durationchange');
+                if (this._state.positionMs !== prev.positionMs) this._emit('timeupdate');
+                if ( this._state.playing && !prev.playing)      this._emit('play');
+                if (!this._state.playing &&  prev.playing)      this._emit('pause');
+                if ( this._state.ended   && !prev.ended)        this._emit('ended');
+                // Fatal error transition — non-null Message means the native
+                // player won't recover on its own. We surface it once (diff
+                // against prev) so the HUD can toast / log without spam.
+                if (this._state.errorMessage && this._state.errorMessage !== prev.errorMessage) {
+                    console.error('NativePlayer error:', this._state.errorMessage);
+                    this._emit('error');
+                }
+            }, 250);
+        }
+        _emit(event) {
+            const list = this._listeners.get(event);
+            if (!list) return;
+            for (const fn of list) {
+                try { fn(); } catch (e) { console.warn('native adapter listener threw', e); }
+            }
+        }
+
+        // ── Properties (PlayerAdapter contract) ──────────────────────
+        get playing()       { return this._state.playing; }
+        get currentTime()   { return this._state.positionMs / 1000; }
+        set currentTime(t)  {
+            const ms = Math.max(0, Math.round((t || 0) * 1000));
+            this._state.positionMs = ms;
+            try { this.bridge.seek(ms); } catch {}
+        }
+        get duration()      { return this._state.durationMs / 1000; }
+        // Volume / mute cached locally because ExoPlayer doesn't push a
+        // change event back through our polling path. setter dispatches to
+        // bridge → ExoPlayer.Volume = v. Mute is modelled as volume 0 with
+        // the prev value remembered so un-mute restores.
+        get volume()        { return this._volume ?? 1; }
+        set volume(v)       {
+            const f = Math.max(0, Math.min(1, +v || 0));
+            this._volume = f;
+            try { this.bridge.setVolume(f); } catch {}
+        }
+        get muted()         { return !!this._muted; }
+        set muted(m)        {
+            const mute = !!m;
+            if (mute === this._muted) return;
+            if (mute) {
+                this._volumeBeforeMute = this.volume;
+                this._muted = true;
+                try { this.bridge.setVolume(0); } catch {}
+            } else {
+                this._muted = false;
+                const restore = this._volumeBeforeMute ?? 1;
+                this._volume = restore;
+                try { this.bridge.setVolume(restore); } catch {}
+            }
+        }
+        // Native player is intrinsically fullscreen (TextureView fills
+        // the activity), and Android's window IS fullscreen on TV — so
+        // the FS button is a no-op. We still expose `false` so the icon
+        // doesn't read as "Exit FS" on the HUD.
+        get fullscreen()    { return false; }
+        set fullscreen(_)   { /* no-op — already fullscreen on TV */ }
+
+        // ── Methods (PlayerAdapter contract) ─────────────────────────
+        async play()  { try { await this.bridge.resume(); } catch {} }
+        async pause() { try { await this.bridge.pause();  } catch {} }
+
+        on(event, fn) {
+            if (!this._listeners.has(event)) this._listeners.set(event, []);
+            this._listeners.get(event).push(fn);
+        }
+        off(event, fn) {
+            const list = this._listeners.get(event);
+            if (!list) return;
+            const i = list.indexOf(fn);
+            if (i >= 0) list.splice(i, 1);
+        }
+        once(event, fn) {
+            const wrap = () => { this.off(event, wrap); fn(); };
+            this.on(event, wrap);
+        }
+
+        // Subtitle (sideloaded WebVTT URL from /api/subtitle). Native player
+        // rebuilds the MediaItem on switch — a ~50ms gap, position carries
+        // over. Pass {url: null} to disable.
+        setSubtitle(opts) {
+            try {
+                this.bridge.setSubtitle(opts?.url || null, opts?.lang || null);
+            } catch (e) { console.warn('native setSubtitle failed', e); }
+        }
+        setSubtitleVisible(b) {
+            // ExoPlayer doesn't have a "hide subtitle" toggle separate from
+            // unloading — flipping visible=false means "no subtitle". If the
+            // caller has the URL in mind, calling setSubtitle({url:null})
+            // is the canonical "off". This is here for contract parity.
+            if (!b) { try { this.bridge.setSubtitle(null, null); } catch {} }
+        }
+        setAspectRatio(value) {
+            try { this.bridge.setAspect(value || 'default'); }
+            catch (e) { console.warn('native setAspect failed', e); }
+        }
+
+        rawVideoElement()    { return null; }
+
+        destroy() {
+            if (this._poll) { clearInterval(this._poll); this._poll = null; }
+            try { this.bridge.detach(); } catch {}
+        }
+    }
+
+    /** Availability gate for the future native (ExoPlayer/AVPlayer) adapter.
+     *  Phase 2 publishes `window.animarrNativePlayer` from the MAUI host on
+     *  platforms where a native player makes sense (Android TV initially).
+     *  Phase 1 has no such global, so this always returns false. */
+    // eslint-disable-next-line no-unused-vars
+    function isNativeAdapterAvailable() {
+        const np = (typeof window !== 'undefined') ? window.animarrNativePlayer : null;
+        return !!(np && typeof np.isAvailable === 'function' && np.isAvailable());
+    }
+
+    /** Picks which audio-offset channel applies. Returns 'hw' / 'sw' / null.
+     *  Server-side `output.plan` is authoritative — it tells us exactly which
+     *  ffmpeg path was picked. Falls back to a probe-derived guess only if
+     *  the start response didn't include an output block (older server). */
+    function determineOffsetChannel(output, probeInfo) {
+        if (output && output.plan) {
+            switch (output.plan) {
+                case 'directplay':     return null;     // no transcode
+                case 'ts-copy':        return null;     // PCR-sync, no -itsoffset
+                case 'vaapi-reencode':
+                case 'nvenc-reencode': return 'hw';     // -bf 0 + browser chain latency
+                case 'fmp4-copy':      return 'sw';     // B-frames preserved, fMP4 TFDT residual
+                default:               return null;
+            }
+        }
+        // Legacy fallback (probe-based heuristic).
+        if (!probeInfo) return null;
+        if (probeInfo.playbackTier === 'directplay') return null;
+        const codec = (probeInfo.videoCodec || '').toLowerCase();
+        if (codec === 'h264') return null;
+        if (codec === 'hevc') return probeInfo.bitDepth >= 10 ? 'sw' : 'hw';
+        return 'hw';
+    }
+
+    /** Read the user's HUD style preference. Defaults to "icons" (the
+     *  minimal naked-icons variant) per user spec on 2026-05-27. */
+    function readStylePref() {
+        try {
+            const v = localStorage.getItem('animarr_player_style');
+            if (v === 'icons' || v === 'full') return v;
+        } catch {}
+        return 'icons';
+    }
+
+    /** Read the saved playback volume (0..1). Defaults to 1.0. */
+    function readVolumePref() {
+        try {
+            const v = parseFloat(localStorage.getItem('animarr_player_volume'));
+            if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
+        } catch {}
+        return 1.0;
+    }
+    function saveVolumePref(v) {
+        try { localStorage.setItem('animarr_player_volume', String(v)); } catch {}
+    }
+
+    // ── SVG icons (feather-style, 18px, stroke-based) ─────────────────
+    // Kept as one big map so the icons-only mode renders crisply and both
+    // modes look consistent. Each is a 24x24 viewBox so we can re-size
+    // uniformly with `width=18`.
+    const I = {
+        back:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>',
+        prev:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>',
+        next:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
+        play:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
+        pause:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>',
+        fwd10:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 4 21 10 15 10"/><text x="12" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="currentColor" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
+        audio:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
+        cc:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9.5 10.5a2 2 0 1 0 0 3"/><path d="M16 10.5a2 2 0 1 0 0 3"/></svg>',
+        aspect: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 10v4M11 10v4M15 10v4"/></svg>',
+        offset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6"  x2="14" y2="6"/><line x1="10" y1="6"  x2="3"  y2="6"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8"  y1="12" x2="3"  y2="12"/><line x1="21" y1="18" x2="16" y2="18"/><line x1="12" y1="18" x2="3"  y2="18"/><circle cx="12" cy="6"  r="2" fill="currentColor"/><circle cx="10" cy="12" r="2" fill="currentColor"/><circle cx="14" cy="18" r="2" fill="currentColor"/></svg>',
+        cast:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17a3 3 0 0 1 3 3"/><path d="M2 13a7 7 0 0 1 7 7"/><path d="M2 9 a11 11 0 0 1 11 11"/><path d="M2 5h17a2 2 0 0 1 2 2v9"/></svg>',
+        volume: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>',
+        mute:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>',
+        fsEnter:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V5a2 2 0 0 1 2-2h4"/><path d="M15 3h4a2 2 0 0 1 2 2v4"/><path d="M21 15v4a2 2 0 0 1-2 2h-4"/><path d="M9 21H5a2 2 0 0 1-2-2v-4"/></svg>',
+        fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
     };
 
-    /** Build the media-info chip strip HTML from a probe-derived info object.
-     *  Rendered inside Artplayer as a layer (see attach), so the chips live
-     *  in the player DOM tree and survive fullscreen + z-index battles with
-     *  Artplayer chrome. Previously rendered by Razor as a sibling of the
-     *  Artplayer container, which had visibility issues we couldn't pin down. */
-    function buildChipStripHtml(info) {
-        if (!info) return '';
-        const chipStyle = 'display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:rgba(0,0,0,0.65);color:rgba(255,255,255,0.92);font-size:11px;font-weight:500;letter-spacing:0.02em;white-space:nowrap;backdrop-filter:blur(4px);';
-        const hdrStyle = chipStyle + 'background:linear-gradient(180deg,#c89c4a,#8e6a26);color:#fff;';
-        const tierStyle = chipStyle + 'background:rgba(120,200,255,0.28);color:#9bd6ff;';
-        const directplayStyle = chipStyle + 'background:rgba(120,255,180,0.28);color:#8be5b2;';
-        const chips = [];
-        if (info.width > 0 && info.height > 0) {
-            chips.push(`<span style="${chipStyle}">${info.width}×${info.height}</span>`);
+    // ── HUD HTML ──────────────────────────────────────────────────────
+    function buildHudHtml(style) {
+        // Outer .vp-hud is pointer-events:none so the centre passes clicks
+        // through to the video; .vp-hud__top / __bottom set pointer-events:auto
+        // so buttons remain interactive.
+        // `title` attributes give native browser tooltips on hover — required
+        // by the icons-only style where the visual label is hidden and the
+        // user wouldn't otherwise know what an icon does.
+        // The fwd10 button has a sibling `.vp-icon-text` span containing
+        // literal "+10"; CSS hides the SVG and shows the text only in icons
+        // mode so the action remains readable without a tooltip.
+        return `
+<div class="vp-hud vp-hud--hidden" data-visible="false" data-style="${escapeHtml(style)}">
+  <div class="vp-hud__top">
+    <button type="button" class="vp-btn vp-btn--g vp-btn--back" data-act="back"
+            aria-label="Back" title="Back (Esc)">
+      <span class="vp-glyph">${I.back}</span><span class="vp-label">Back</span>
+    </button>
+    <div class="vp-hud__title">
+      <div class="vp-hud__kicker" data-bind="kicker"></div>
+      <div class="vp-hud__name"   data-bind="name"></div>
+    </div>
+    <div class="vp-hud__meta" data-bind="meta"></div>
+  </div>
+
+  <div class="vp-hud__bottom">
+    <div class="vp-hud__progress">
+      <span class="vp-hud__time" data-bind="cur">0:00</span>
+      <div class="vp-hud__track" data-act="seek">
+        <div class="vp-hud__track-buffer" data-bind="buffer"></div>
+        <div class="vp-hud__track-fill"   data-bind="fill"></div>
+        <div class="vp-hud__thumb"        data-bind="thumb"></div>
+      </div>
+      <span class="vp-hud__time" data-bind="dur">0:00</span>
+    </div>
+    <div class="vp-hud__controls">
+      <div class="vp-hud__cluster vp-hud__cluster--l">
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="prev"
+                aria-label="Previous episode" title="Previous episode (←|◄◄)">
+          <span class="vp-glyph">${I.prev}</span><span class="vp-label">Prev</span>
+        </button>
+        <button class="vp-btn vp-btn--p vp-btn--tv" data-act="play"
+                aria-label="Play / pause" title="Play / pause (Space)">
+          <span class="vp-glyph" data-bind="play-icon">${I.play}</span>
+          <span class="vp-label" data-bind="play-label">Play</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="next"
+                aria-label="Next episode" title="Next episode (►►|)">
+          <span class="vp-glyph">${I.next}</span><span class="vp-label">Next</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="fwd10"
+                aria-label="Forward 10 seconds" title="Forward 10s (→)">
+          <span class="vp-glyph">${I.fwd10}</span>
+          <span class="vp-icon-text" aria-hidden="true">+10</span>
+          <span class="vp-label">+10s</span>
+        </button>
+      </div>
+      <div class="vp-hud__cluster vp-hud__cluster--r">
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="volume"
+                aria-label="Volume" title="Volume" data-bind="volume-btn">
+          <span class="vp-glyph" data-bind="volume-icon">${I.volume}</span>
+          <span class="vp-label">Volume</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="aspect"
+                aria-label="Aspect ratio" title="Aspect ratio">
+          <span class="vp-glyph">${I.aspect}</span><span class="vp-label">Aspect</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="offset"
+                aria-label="Audio sync" title="Audio sync offset"
+                data-bind="offset-btn">
+          <span class="vp-glyph">${I.offset}</span><span class="vp-label">Sync</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cast"
+                aria-label="Cast to TV" title="Send video to TV (DLNA)"
+                data-bind="cast-btn">
+          <span class="vp-glyph">${I.cast}</span><span class="vp-label">Cast</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="audio"
+                aria-label="Audio tracks" title="Audio tracks">
+          <span class="vp-glyph">${I.audio}</span><span class="vp-label">Audio</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cc"
+                aria-label="Subtitles" title="Subtitles">
+          <span class="vp-glyph">${I.cc}</span><span class="vp-label">CC</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="fullscreen"
+                aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
+          <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
+          <span class="vp-label" data-bind="fs-label">Fullscreen</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>`.trim();
+    }
+
+    // ── popup picker (CC / Audio / Aspect) ────────────────────────────
+    function openPickerPopup(root, anchor, title, items, currentIdx, onPick) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;
         }
-        if (info.videoCodec) {
-            chips.push(`<span style="${chipStyle}">${info.videoCodec.toUpperCase()}</span>`);
-        }
-        if (info.bitDepth >= 10) {
-            chips.push(`<span style="${chipStyle}">10-bit</span>`);
-        }
-        (info.hdrFormats || []).forEach(fmt => {
-            const label = fmt === 'dolbyvision' ? 'Dolby Vision'
-                       : fmt === 'hdr10' ? 'HDR10'
-                       : fmt === 'hlg' ? 'HLG'
-                       : fmt.toUpperCase();
-            chips.push(`<span style="${hdrStyle}">${label}</span>`);
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup';
+        popup.setAttribute('data-anchor', anchor);
+        popup.innerHTML = `
+            <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
+            <div class="vp-hud-popup__list">
+                ${items.map((it, i) => `
+                    <button class="vp-hud-popup__item${i === currentIdx ? ' is-active' : ''}"
+                            data-i="${i}">${escapeHtml(it)}</button>
+                `).join('')}
+            </div>`;
+        popup.addEventListener('click', (e) => {
+            const it = e.target.closest('[data-i]');
+            if (!it) return;
+            const i = parseInt(it.dataset.i, 10);
+            onPick(i);
+            popup.remove();
         });
-        if (info.audioCodec) {
-            const ch = info.audioChannels || 0;
-            const chLabel = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
-                          : ch === 6 ? '5.1' : ch === 7 ? '6.1' : ch === 8 ? '7.1'
-                          : ch > 0 ? `${ch}ch` : '';
-            chips.push(`<span style="${chipStyle}">${info.audioCodec.toUpperCase()}${chLabel ? ' ' + chLabel : ''}</span>`);
-        }
-        const tier = info.playbackTier === 'directplay' ? 'Direct Play' : 'HLS';
-        const tierFlavor = info.playbackTier === 'directplay' ? directplayStyle : tierStyle;
-        chips.push(`<span style="${tierFlavor}">${tier}</span>`);
-        return chips.join('');
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) {
+                    document.removeEventListener('click', onDoc, true);
+                    return;
+                }
+                if (!popup.contains(e.target) &&
+                    !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
     }
 
-    /** Picks which audio-offset channel the slider should tune for the
-     *  current playback. Returns 'hw' / 'sw' / null. */
-    function determineOffsetChannel(info) {
-        if (!info) return null;
-        if (info.playbackTier === 'directplay') return null;  // no transcode → no offset path
-        const codec = (info.videoCodec || '').toLowerCase();
-        if (codec === 'h264') return null;  // TS MPEG path uses PCR, no -itsoffset
-        if (codec === 'hevc') {
-            // HEVC 10-bit / HDR / DV goes through fMP4 stream-copy (SW slider)
-            // HEVC 8-bit on a VAAPI-capable host goes through h264 re-encode (HW slider)
-            return info.bitDepth >= 10 ? 'sw' : 'hw';
+    // ── audio-offset slider popup ─────────────────────────────────────
+    function openOffsetPopup(root, anchor, channel) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;
         }
-        return 'hw';  // unknown codec — assume HW path
-    }
-
-    /** Show / hide a small slider popup anchored to the Artplayer chrome.
-     *  All styles inlined because Blazor scoped CSS (the .razor.css system)
-     *  appends a [b-xxxxxx] attribute selector to every rule, which won't
-     *  match JS-injected DOM — without inline styles the popup renders
-     *  unstyled (transparent, zero-sized) and looks like nothing happened. */
-    function toggleAudioOffsetPopup(art, channel) {
-        console.info('animarr offset popup: toggle', { channel, artHas: !!art });
-        if (!window.animarrCalibrate) {
-            console.warn('animarr offset popup: animarrCalibrate missing');
-            return;
-        }
-        // Artplayer 5 exposes the container at `art.template.$player` (the
-        // inner wrapper that goes fullscreen) and `art.container` (the original
-        // mount div). Use the player wrapper if available so the popup survives
-        // browser fullscreen.
-        const root = art?.template?.$player || art?.container;
-        if (!root) {
-            console.warn('animarr offset popup: no Artplayer root found');
-            return;
-        }
-        let popup = root.querySelector('.vp-offset-popup');
-        if (popup) { popup.remove(); return; }
-
+        if (!window.animarrCalibrate) return;
         const current = window.animarrCalibrate.getCached(channel)
             ?? (channel === 'hw' ? 70 : 0);
         const min = -200;
@@ -129,71 +582,529 @@
             ? 'HDR / 10-bit (stream-copy)'
             : 'Standard (re-encode)';
 
-        popup = document.createElement('div');
-        popup.className = 'vp-offset-popup';
-        popup.style.cssText = [
-            'position:absolute',
-            'right:12px',
-            'bottom:72px',
-            'z-index:9999',
-            'width:280px',
-            'padding:12px 14px',
-            'background:rgba(24,24,24,0.98)',
-            'border:1px solid rgba(255,255,255,0.12)',
-            'border-radius:8px',
-            'box-shadow:0 10px 32px rgba(0,0,0,0.5)',
-            'color:rgba(255,255,255,0.92)',
-            'font-size:12px',
-            'font-family:inherit',
-            'pointer-events:auto',
-        ].join(';');
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--slider';
+        popup.setAttribute('data-anchor', anchor);
         popup.innerHTML = `
-            <div style="font-weight:500;margin-bottom:8px;color:rgba(255,255,255,0.95);">
-                Audio sync · ${label}
+            <div class="vp-hud-popup__title">Audio sync · ${escapeHtml(label)}</div>
+            <div class="vp-hud-popup__slider-row">
+                <input type="range" min="${min}" max="${max}" step="5" value="${current}">
+                <span class="vp-hud-popup__slider-value">${current} ms</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                <input type="range" min="${min}" max="${max}" step="5" value="${current}"
-                       style="flex:1;accent-color:#ff6b00;">
-                <span class="vp-offset-popup__value"
-                      style="min-width:60px;text-align:right;font-variant-numeric:tabular-nums;color:rgba(255,255,255,0.7);">
-                    ${current} ms
-                </span>
-            </div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:6px;">
-                Reopen the video to apply (saves immediately)
-            </div>
+            <div class="vp-hud-popup__hint">Reopen the video to apply (saves immediately)</div>
         `;
-        // Stop chrome-hide events while user interacts with the popup.
-        popup.addEventListener('mousedown', e => e.stopPropagation());
-        popup.addEventListener('click', e => e.stopPropagation());
-        root.appendChild(popup);
-        console.info('animarr offset popup: rendered into', root);
-
         const range = popup.querySelector('input[type=range]');
-        const valueEl = popup.querySelector('.vp-offset-popup__value');
+        const valueEl = popup.querySelector('.vp-hud-popup__slider-value');
         range.addEventListener('input', () => {
             const v = parseInt(range.value, 10);
             valueEl.textContent = v + ' ms';
             window.animarrCalibrate.setManual(channel, v);
         });
-
-        // Click outside → close.
-        const onDocClick = (e) => {
-            if (!popup.contains(e.target)) {
-                popup.remove();
-                document.removeEventListener('click', onDocClick, true);
-            }
-        };
-        // Defer to avoid catching the click that opened us.
-        setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+        popup.addEventListener('mousedown', e => e.stopPropagation());
+        popup.addEventListener('click',     e => e.stopPropagation());
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) {
+                    document.removeEventListener('click', onDoc, true);
+                    return;
+                }
+                if (!popup.contains(e.target) &&
+                    !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
     }
 
+    // ── volume slider popup ───────────────────────────────────────────
+    function openVolumePopup(root, anchor, adapter, onChange) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;
+        }
+        const cur = Math.round((adapter.volume ?? readVolumePref()) * 100);
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--slider';
+        popup.setAttribute('data-anchor', anchor);
+        popup.innerHTML = `
+            <div class="vp-hud-popup__title">Volume</div>
+            <div class="vp-hud-popup__slider-row">
+                <input type="range" min="0" max="100" step="1" value="${cur}">
+                <span class="vp-hud-popup__slider-value">${cur}%</span>
+            </div>`;
+        const range   = popup.querySelector('input[type=range]');
+        const valueEl = popup.querySelector('.vp-hud-popup__slider-value');
+        range.addEventListener('input', () => {
+            const v = parseInt(range.value, 10);
+            valueEl.textContent = v + '%';
+            const f = v / 100;
+            adapter.volume = f;
+            adapter.muted  = (f === 0);
+            saveVolumePref(f);
+            onChange(f);
+        });
+        popup.addEventListener('mousedown', e => e.stopPropagation());
+        popup.addEventListener('click',     e => e.stopPropagation());
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) {
+                    document.removeEventListener('click', onDoc, true);
+                    return;
+                }
+                if (!popup.contains(e.target) &&
+                    !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
+    }
+
+    // ── cast (DLNA) popup ─────────────────────────────────────────────
+    // Lists renderers discovered via SSDP on the LAN. Clicking a renderer
+    // POSTs /api/dlna/play with the current file + position so playback
+    // resumes on the TV side. We pause local playback after a successful
+    // hand-off so the user isn't watching the same scene twice.
+    async function openCastPopup(root, anchor, mediaPath, adapter) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;
+        }
+        let renderers = [];
+        try {
+            const res = await fetch(apiUrl('/api/dlna/renderers'));
+            if (res.ok) renderers = await res.json();
+        } catch (e) { console.warn('cast: renderer fetch failed', e); }
+
+        const labels = (renderers && renderers.length > 0)
+            ? renderers.map(r => r.friendlyName || r.modelName || r.udn)
+            : ['(No DLNA devices found on the network)'];
+        openPickerPopup(root, anchor, 'Send to TV', labels,
+            -1, async (i) => {
+                if (!renderers[i]) return;
+                try {
+                    await fetch(apiUrl('/api/dlna/play'), {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({
+                            rendererUdn: renderers[i].udn,
+                            filePath:    mediaPath,
+                            startTimeMs: Math.round((adapter.currentTime || 0) * 1000),
+                        }),
+                    });
+                    adapter.pause();
+                } catch (e) { console.warn('cast: play failed', e); }
+            });
+    }
+
+    // ── auto-detect letterbox + ultrawide → 21:9/2.35 crop ────────────
+    // Triggered once on the first decoded frame. Samples a 240-wide canvas
+    // of the video, counts black rows at top + bottom, infers the "real"
+    // content aspect ratio inside the source frame, and — IF the viewport
+    // is at least 21:9 — applies the closest standard aspect (21:9 or
+    // 2.35:1) via object-fit:cover so the baked-in bars get cropped off.
+    //
+    // Skips when:
+    //   • viewport is narrower than 21:9 (would crop a normal 16:9 movie
+    //     just because the user has a tall window),
+    //   • user already manually picked an aspect this session,
+    //   • first frame is too dark to meaningfully measure,
+    //   • the source frame doesn't have detectable letterbox bars.
+    //
+    // Caveats:
+    //   • The first decoded frame may be a black intro card — in that case
+    //     no letterbox is detected and we leave aspect alone (the user can
+    //     trigger the Aspect picker manually). Re-sampling several seconds
+    //     in would be more robust but adds latency to playback start.
+    //   • Requires the <video> to be CORS-clean (we set crossorigin on
+    //     moreVideoAttr); getImageData throws SecurityError otherwise and
+    //     we silently swallow it.
+    function detectLetterbox(adapter) {
+        const video = adapter && adapter.rawVideoElement();
+        if (!video || !video.videoWidth || !video.videoHeight) return null;
+        try {
+            const canvas = document.createElement('canvas');
+            const w = canvas.width = 240;
+            const h = canvas.height = Math.max(8,
+                Math.round(video.videoHeight * (w / video.videoWidth)));
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(video, 0, 0, w, h);
+            const data = ctx.getImageData(0, 0, w, h).data;
+
+            // Average row brightness on the 0..255 scale (RGB averaged).
+            const rowBrightness = (y) => {
+                let sum = 0;
+                for (let x = 0; x < w; x++) {
+                    const i = (y * w + x) * 4;
+                    sum += data[i] + data[i + 1] + data[i + 2];
+                }
+                return sum / (w * 3);
+            };
+            // Frame-wide brightness — used to detect "this is a fully black
+            // intro frame, retry later" cases.
+            let totalBrightness = 0;
+            for (let y = 0; y < h; y++) totalBrightness += rowBrightness(y);
+            totalBrightness /= h;
+            if (totalBrightness < 6) return { tooDark: true };
+
+            const THRESHOLD = 12;  // tolerate slight noise above pure black
+            let topBlack = 0;
+            while (topBlack < h / 3 && rowBrightness(topBlack) < THRESHOLD) topBlack++;
+            let botBlack = 0;
+            while (botBlack < h / 3 && rowBrightness(h - 1 - botBlack) < THRESHOLD) botBlack++;
+
+            const totalBlack = topBlack + botBlack;
+            // Need ≥6% of frame height to be black — anything less is noise
+            // or padding from incorrect scaling.
+            if (totalBlack < h * 0.06) return { topBlack, botBlack, innerRatio: null };
+
+            const innerH = h - totalBlack;
+            const innerRatio = video.videoWidth / (video.videoHeight * innerH / h);
+            return { topBlack, botBlack, innerRatio };
+        } catch (e) {
+            console.warn('letterbox detect: getImageData threw', e);
+            return null;
+        }
+    }
+
+    /** Map a measured inner-content aspect ratio onto our preset aspect
+     *  list. Returns the index into the aspect popup's items array, or
+     *  null if no preset is a good fit. */
+    function bestAspectIdxFor(innerRatio) {
+        if (!Number.isFinite(innerRatio)) return null;
+        if (innerRatio >= 2.30) return 4;  // "2.35:1 (cinema)"
+        if (innerRatio >= 2.15) return 1;  // "21:9 (ultrawide)"
+        return null;                       // not cinema/ultrawide content
+    }
+
+    /** Try the letterbox detection, apply best-matching aspect if the
+     *  viewport is at least 21:9 wide AND content has clear letterbox.
+     *  Idempotent — calling twice when aspect is already set won't re-apply. */
+    function autoCropIfUltrawide(adapter, entry) {
+        const aspect = entry.currentAspect;
+        if (aspect != null && aspect !== 0) return;  // user already picked
+        const screenRatio = window.innerWidth / Math.max(1, window.innerHeight);
+        if (screenRatio < 2.15) return;  // not ultrawide → don't crop 16:9
+
+        const sample = detectLetterbox(adapter);
+        if (!sample || sample.tooDark || sample.innerRatio == null) return;
+        const idx = bestAspectIdxFor(sample.innerRatio);
+        if (idx == null) return;
+
+        const values = ['default', '21:9', '16:9', '4:3', '2.35:1'];
+        const target = values[idx];
+        entry.currentAspect = idx;
+        adapter.setAspectRatio(target);
+        console.info('animarr: auto-aspect →', target, {
+            innerRatio: sample.innerRatio.toFixed(3),
+            screenRatio: screenRatio.toFixed(3),
+        });
+    }
+
+    // ── HUD controller — owns event wiring + DOM updates ──────────────
+    // Takes the abstract `adapter` (PlayerAdapter contract). Phase 1 made
+    // this swap-friendly: the previous version of this function depended on
+    // raw Artplayer API (`art.currentTime`, `art.on('video:…')`); now every
+    // playback interaction goes through the adapter so a future native
+    // ExoPlayer adapter can substitute Artplayer transparently.
+    function attachHud(adapter, root, entry, callbacks) {
+        const hud = root.querySelector('.vp-hud');
+        if (!hud) {
+            console.warn('animarrPlayer: HUD root not found');
+            return null;
+        }
+        const $ = (sel) => hud.querySelector(sel);
+        const refs = {
+            kicker:     $('[data-bind="kicker"]'),
+            name:       $('[data-bind="name"]'),
+            meta:       $('[data-bind="meta"]'),
+            cur:        $('[data-bind="cur"]'),
+            dur:        $('[data-bind="dur"]'),
+            fill:       $('[data-bind="fill"]'),
+            buffer:     $('[data-bind="buffer"]'),
+            thumb:      $('[data-bind="thumb"]'),
+            playIcon:   $('[data-bind="play-icon"]'),
+            playLabel:  $('[data-bind="play-label"]'),
+            offsetBtn:  $('[data-bind="offset-btn"]'),
+            castBtn:    $('[data-bind="cast-btn"]'),
+            volumeIcon: $('[data-bind="volume-icon"]'),
+            fsIcon:     $('[data-bind="fs-icon"]'),
+            fsLabel:    $('[data-bind="fs-label"]'),
+            track:      $('[data-act="seek"]'),
+        };
+
+        // ── auto-hide ─────────────────────────────────────────────────
+        const HIDE_MS = 3500;
+        let hideTimer = null;
+        let hovering = false;
+        let dragging = false;
+        function show() {
+            hud.classList.remove('vp-hud--hidden');
+            hud.setAttribute('data-visible', 'true');
+            root.style.cursor = '';
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            if (!adapter.playing || hovering || dragging) return;
+            hideTimer = setTimeout(() => {
+                if (hovering || dragging || !adapter.playing) return;
+                if (root.querySelector('.vp-hud-popup')) return;  // popup open
+                hud.classList.add('vp-hud--hidden');
+                hud.setAttribute('data-visible', 'false');
+                root.style.cursor = 'none';
+            }, HIDE_MS);
+        }
+        hud.addEventListener('mouseenter', () => { hovering = true;  show(); });
+        hud.addEventListener('mouseleave', () => { hovering = false; show(); });
+        const onActivity = () => show();
+        root.addEventListener('mousemove',  onActivity);
+        root.addEventListener('pointermove', onActivity);
+        root.addEventListener('touchstart', onActivity, { passive: true });
+
+        // ── keyboard / TV remote handling ─────────────────────────────
+        // We do this ourselves (rather than letting Artplayer's `hotkey: true`
+        // do it) so the seek step is 10s instead of Artplayer's 5s, and so
+        // media-key + Android-TV-remote codes all route here.
+        function seekBy(delta) {
+            const dur = adapter.duration || entry.totalDuration || 0;
+            const cur = adapter.currentTime || 0;
+            const next = Math.max(0, dur > 0 ? Math.min(dur, cur + delta) : cur + delta);
+            adapter.currentTime = next;
+            show();
+        }
+        function togglePlay() {
+            if (adapter.playing) adapter.pause(); else adapter.play();
+            show();
+        }
+        function onKey(e) {
+            // Only intercept when the body is in player-open state.
+            if (!document.body.classList.contains('player-open')) return;
+            // Don't fight text inputs.
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            switch (e.key) {
+                case 'ArrowLeft':  seekBy(-10); e.preventDefault(); break;
+                case 'ArrowRight': seekBy(+10); e.preventDefault(); break;
+                case 'ArrowUp':
+                case 'ArrowDown':
+                    // Don't grab vertical arrows — D-pad nav between buttons
+                    // is useful when HUD is visible.
+                    return;
+                case ' ':
+                case 'Enter':
+                case 'MediaPlayPause':
+                case 'Play':
+                case 'Pause':
+                    togglePlay();
+                    e.preventDefault();
+                    break;
+                case 'MediaFastForward':
+                    seekBy(+30);
+                    e.preventDefault();
+                    break;
+                case 'MediaRewind':
+                    seekBy(-30);
+                    e.preventDefault();
+                    break;
+                case 'MediaTrackNext':
+                    callbacks.next();
+                    e.preventDefault();
+                    break;
+                case 'MediaTrackPrevious':
+                    callbacks.prev();
+                    e.preventDefault();
+                    break;
+                case 'MediaStop':
+                case 'Escape':
+                case 'BrowserBack':
+                case 'GoBack':
+                    callbacks.back();
+                    e.preventDefault();
+                    break;
+                case 'f':
+                case 'F':
+                    adapter.fullscreen = !adapter.fullscreen;
+                    e.preventDefault();
+                    break;
+                case 'm':
+                case 'M':
+                    adapter.muted = !adapter.muted;
+                    e.preventDefault();
+                    break;
+                default:
+                    return;  // don't show HUD for unrelated keys
+            }
+            show();
+        }
+        document.addEventListener('keydown', onKey, { capture: true });
+
+        // ── button clicks ─────────────────────────────────────────────
+        hud.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-act]');
+            if (!btn) return;
+            const act = btn.dataset.act;
+            if (act === 'seek') return;
+            e.stopPropagation();
+            switch (act) {
+                case 'back':   callbacks.back(); break;
+                case 'prev':   callbacks.prev(); break;
+                case 'next':   callbacks.next(); break;
+                case 'play':   togglePlay(); break;
+                case 'fwd10':  seekBy(+10); break;
+                case 'aspect': callbacks.aspect(); break;
+                case 'offset': callbacks.offset(); break;
+                case 'cast':   callbacks.cast(); break;
+                case 'volume': callbacks.volume(); break;
+                case 'audio':  callbacks.audio(); break;
+                case 'cc':     callbacks.cc(); break;
+                case 'fullscreen':
+                    adapter.fullscreen = !adapter.fullscreen;
+                    break;
+            }
+            show();
+        });
+
+        // ── progress bar drag/click ───────────────────────────────────
+        function pctFromEvent(e) {
+            const rect = refs.track.getBoundingClientRect();
+            const cx = e.clientX != null ? e.clientX
+                     : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+            return Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+        }
+        function seekToPct(pct) {
+            const dur = adapter.duration || entry.totalDuration || 0;
+            if (dur <= 0) return;
+            const t = dur * pct;
+            adapter.currentTime = t;
+            refs.fill.style.width = (pct * 100) + '%';
+            refs.thumb.style.left = (pct * 100) + '%';
+            refs.cur.textContent  = formatTime(t);
+        }
+        refs.track.addEventListener('pointerdown', (e) => {
+            dragging = true;
+            try { refs.track.setPointerCapture(e.pointerId); } catch {}
+            seekToPct(pctFromEvent(e));
+            show();
+        });
+        refs.track.addEventListener('pointermove', (e) => {
+            if (!dragging) return;
+            seekToPct(pctFromEvent(e));
+            show();
+        });
+        const endDrag = (e) => {
+            if (!dragging) return;
+            dragging = false;
+            try { refs.track.releasePointerCapture(e.pointerId); } catch {}
+            show();
+        };
+        refs.track.addEventListener('pointerup',     endDrag);
+        refs.track.addEventListener('pointercancel', endDrag);
+
+        // ── adapter events ────────────────────────────────────────────
+        function updateProgress() {
+            const cTime = adapter.currentTime || 0;
+            const dTime = adapter.duration || entry.totalDuration || 0;
+            const pct = dTime > 0 ? (cTime / dTime) * 100 : 0;
+            if (!dragging) {
+                refs.fill.style.width  = pct + '%';
+                refs.thumb.style.left  = pct + '%';
+                refs.cur.textContent   = formatTime(cTime);
+            }
+            refs.dur.textContent = formatTime(dTime);
+            // Buffered range — only meaningful on the web adapter (raw <video>
+            // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
+            // rawVideoElement so we just skip the buffer paint.
+            const video = adapter.rawVideoElement();
+            if (video && video.buffered && video.buffered.length > 0) {
+                const end = video.buffered.end(video.buffered.length - 1);
+                const bp = dTime > 0 ? (end / dTime) * 100 : 0;
+                refs.buffer.style.width = bp + '%';
+            }
+        }
+        adapter.on('timeupdate',     updateProgress);
+        adapter.on('loadedmetadata', updateProgress);
+        adapter.on('progress',       updateProgress);
+        adapter.on('durationchange', updateProgress);
+        adapter.on('play',  () => {
+            refs.playIcon.innerHTML    = I.pause;
+            refs.playLabel.textContent = 'Pause';
+            show();
+        });
+        adapter.on('pause', () => {
+            refs.playIcon.innerHTML    = I.play;
+            refs.playLabel.textContent = 'Play';
+            // Paused → keep HUD visible.
+            hud.classList.remove('vp-hud--hidden');
+            hud.setAttribute('data-visible', 'true');
+            root.style.cursor = '';
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        });
+
+        // Sync the fullscreen icon with the document's actual fullscreen
+        // state. Listening on document covers Esc-to-exit (which doesn't
+        // fire Artplayer's own 'fullscreen' event) as well as button + hotkey.
+        function syncFsIcon() {
+            const fs = !!document.fullscreenElement;
+            if (refs.fsIcon)  refs.fsIcon.innerHTML    = fs ? I.fsExit  : I.fsEnter;
+            if (refs.fsLabel) refs.fsLabel.textContent = fs ? 'Exit FS' : 'Fullscreen';
+        }
+        document.addEventListener('fullscreenchange', syncFsIcon);
+        syncFsIcon();
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', onKey, { capture: true });
+            document.removeEventListener('fullscreenchange', syncFsIcon);
+            if (hideTimer) clearTimeout(hideTimer);
+        };
+
+        updateProgress();
+        show();
+
+        return {
+            hud,
+            cleanup,
+            setTitle(kicker, name) {
+                refs.kicker.textContent = kicker || '';
+                refs.name.textContent   = name   || '';
+            },
+            setMeta(text) { refs.meta.textContent = text || ''; },
+            setOffsetEnabled(on) {
+                refs.offsetBtn.style.display = on ? '' : 'none';
+            },
+            setCastVisible(on) {
+                refs.castBtn.style.display = on ? '' : 'none';
+            },
+            setVolumeIcon(volume, muted) {
+                refs.volumeIcon.innerHTML = (muted || volume === 0) ? I.mute : I.volume;
+            },
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  attach
+    // ─────────────────────────────────────────────────────────────────
     /**
-     * @param {string} elementId  DOM id of the container div Artplayer mounts into
-     * @param {DotNetObjectReference} dotnetRef
-     * @param {string} mediaPath  Absolute file path (server-side)
+     * @param {string} elementId
+     * @param {object} dotnetRef
+     * @param {string} mediaPath
+     * @param {object} [opts]
+     * @param {number} [opts.audioTrackIndex]  Index of audio stream in the source
+     *                                          (0=first). Used by switchAudio to
+     *                                          restart the session with a
+     *                                          different audio map.
+     * @param {number} [opts.forceResumeSec]   Override .NET-supplied resume
+     *                                          position. Set by switchAudio so
+     *                                          the new session resumes exactly
+     *                                          where the old one stopped.
      */
-    async function attach(elementId, dotnetRef, mediaPath) {
+    async function attach(elementId, dotnetRef, mediaPath, opts) {
         const el = document.getElementById(elementId);
         if (!el) {
             console.warn('animarrPlayer.attach: container not found', elementId);
@@ -203,43 +1114,73 @@
             console.warn('animarrPlayer: re-attaching without detach, cleaning up first');
             detach(elementId);
         }
+        const audioTrackIndex = (opts && Number.isFinite(opts.audioTrackIndex))
+            ? Math.max(0, opts.audioTrackIndex) : 0;
+        const forceResumeSec  = (opts && Number.isFinite(opts.forceResumeSec))
+            ? Math.max(0, opts.forceResumeSec)  : null;
         if (typeof window.Artplayer !== 'function') {
             console.error('animarrPlayer: Artplayer not loaded from CDN');
             return;
         }
 
+        // Tell tv-nav.js to suspend its spatial-nav handler while we own the
+        // arrow keys for seek. Mirror class removal in detach().
+        document.body.classList.add('player-open');
+
         const abort = new AbortController();
         const refRef = { current: dotnetRef };
-        const entry = { abort, refRef, art: null, sessionToken: null, keepaliveTimer: null,
-                        totalDuration: 0, resumeOffset: 0 };
+        const entry = {
+            abort, refRef, art: null, sessionToken: null, keepaliveTimer: null,
+            totalDuration: 0, resumeOffset: 0, hud: null, clockTimer: null,
+            mediaInfo: null, subtitleList: [], audioList: [],
+            currentSubIdx: null, currentAudIdx: audioTrackIndex,
+            // Captured so switchAudio() can re-attach with a new audio index
+            // without needing the .NET-side parameters again.
+            mediaPath, dotnetRef,
+        };
         WIRED.set(elementId, entry);
 
-        // ── 1) Resume position from .NET ───────────────────────────────────
+        // ── 1) Resume position ────────────────────────────────────────
+        // When the caller forced a resume position (switchAudio carries over
+        // current playback time), use it without round-tripping to .NET.
         let resumeSec = 0;
-        try {
-            const sec = await dotnetRef.invokeMethodAsync('GetResumePositionSec');
-            if (typeof sec === 'number' && sec > 5) resumeSec = sec;
-        } catch (e) { /* no resume info, start at 0 */ }
+        if (forceResumeSec != null) {
+            resumeSec = forceResumeSec;
+        } else {
+            try {
+                const sec = await dotnetRef.invokeMethodAsync('GetResumePositionSec');
+                if (typeof sec === 'number' && sec > 5) resumeSec = sec;
+            } catch (e) { /* no resume info */ }
+        }
         if (abort.signal.aborted) return;
 
-        // ── 2) Audio-sync calibration (HW channel only) + SW from settings ─
-        let audioOffsetMsHw = 70;  // matches DEFAULT_OFFSET_MS
+        // ── 2) Audio-sync offsets ─────────────────────────────────────
+        // Auto-calibration disabled 2026-05-27 — the WebAudio analyser-based
+        // measure() is producing nonsense values (0 or 40ms when reality is
+        // 400ms+) so it makes audio sync WORSE than the static default. The
+        // helper module stays around for getCached/setManual used by the Sync
+        // popup; only the calibrate() call is bypassed.
+        // Defaults: HW 70ms (empirical baseline for VAAPI/NVENC re-encode),
+        // SW 0ms (HEVC 10-bit stream-copy has no sensible default — user must
+        // dial in via Sync slider).
+        let audioOffsetMsHw = 70;
         let audioOffsetMsSw = 0;
         if (window.animarrCalibrate) {
-            try { audioOffsetMsHw = await window.animarrCalibrate.calibrate(); }
-            catch (e) { console.warn('animarr: calibrate threw', e); }
+            const hw = window.animarrCalibrate.getCached('hw');
+            if (hw !== null) audioOffsetMsHw = hw;
             const sw = window.animarrCalibrate.getCached('sw');
             if (sw !== null) audioOffsetMsSw = sw;
         }
         if (abort.signal.aborted) return;
 
-        // ── 3) Start session (Direct Play OR HLS, server decides) ──────────
+        // ── 3) Start session ──────────────────────────────────────────
         let manifestUrl = null;
         let directPlayUrl = null;
         const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + audioOffsetMsHw
-            + '&audioOffsetSwMs=' + audioOffsetMsSw);
+            + '&audioOffsetSwMs=' + audioOffsetMsSw
+            + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : ''));
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
@@ -253,6 +1194,12 @@
                 const data = await res.json();
                 entry.totalDuration = data.totalDuration || 0;
                 entry.resumeOffset  = data.resumeSec    || 0;
+                // Server-authoritative output info (Phase 0) — describes what
+                // the player ACTUALLY receives, including post-transcode
+                // codec/HDR state. Drives the right-side meta plashka so
+                // re-encoded streams correctly report e.g. "H.264 SDR" even
+                // when the source was HEVC HDR.
+                entry.output = data.output || null;
                 if (data.directPlayUrl) {
                     directPlayUrl = data.directPlayUrl;
                 } else {
@@ -272,9 +1219,10 @@
         if (!manifestUrl && !directPlayUrl) return;
         if (abort.signal.aborted) return;
 
-        // ── 4) Probe for subtitles + push media-info to .NET ───────────────
+        // ── 4) Probe ──────────────────────────────────────────────────
         let subtitleList = [];
-        let mediaInfo = null;  // captured so we can decide offset-channel below
+        let audioList = [];
+        let mediaInfo = null;
         if (mediaPath) {
             try {
                 const probeRes = await fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)),
@@ -282,12 +1230,16 @@
                 if (abort.signal.aborted) return;
                 if (probeRes.ok) {
                     const data = await probeRes.json();
-                    const subs = (data.streams || []).filter(s => s.codec_type === 'subtitle');
+                    const streams = data.streams || [];
+
+                    // Subtitles
+                    const subs = streams.filter(s => s.codec_type === 'subtitle');
                     subtitleList = subs.map((s, idx) => {
                         const lang  = (s.tags && (s.tags.language || s.tags.LANGUAGE)) || 'und';
                         const label = (s.tags && (s.tags.title    || s.tags.TITLE))    || `Track ${idx + 1}`;
                         return {
                             name: label + (lang !== 'und' ? ` (${lang})` : ''),
+                            lang,
                             url:  apiUrl('/api/subtitle?path=' + encodeURIComponent(mediaPath))
                                 + '&track=' + idx + '&format=webvtt',
                             default: !!(s.disposition && s.disposition.default)
@@ -295,23 +1247,37 @@
                         };
                     });
 
-                    // Media-info push to .NET — same as before, drives the chip strip.
-                    const v = (data.streams || []).find(s => s.codec_type === 'video');
-                    const a = (data.streams || []).find(s => s.codec_type === 'audio');
-                    console.info('animarr probe streams:',
-                        { hasVideo: !!v, hasAudio: !!a, totalStreams: (data.streams || []).length });
+                    // Audio
+                    const auds = streams.filter(s => s.codec_type === 'audio');
+                    audioList = auds.map((s, idx) => {
+                        const lang  = (s.tags && (s.tags.language || s.tags.LANGUAGE)) || '';
+                        const title = (s.tags && (s.tags.title    || s.tags.TITLE))    || '';
+                        const codec = (s.codec_name || '').toUpperCase();
+                        const ch    = s.channels || 0;
+                        const chLab = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
+                                    : ch === 6 ? '5.1' : ch === 8 ? '7.1'
+                                    : ch > 0 ? `${ch}ch` : '';
+                        const parts = [];
+                        if (lang)  parts.push(lang.toUpperCase());
+                        if (codec) parts.push(codec);
+                        if (chLab) parts.push(chLab);
+                        if (title) parts.push(title);
+                        return {
+                            index: idx,
+                            lang, codec, channels: ch,
+                            label: parts.join(' · ') || `Track ${idx + 1}`,
+                        };
+                    });
+
+                    // Video / audio media-info
+                    const v = streams.find(s => s.codec_type === 'video');
+                    const a = auds[0] || null;
                     if (v) {
                         const pix = (v.pix_fmt || '').toLowerCase();
                         const is10bit = pix.includes('10le') || pix.includes('10be')
                                      || (v.profile || '').toLowerCase().includes('main 10');
                         const hasDv = (v.side_data_list || []).some(sd =>
                             (sd.side_data_type || '').toUpperCase().includes('DOVI'));
-                        // Collect ALL detected HDR formats — a UHD BluRay DV
-                        // title typically carries an HDR10 base layer under
-                        // the DV metadata, so both chips are accurate. Previous
-                        // else-if chain skipped HDR10 detection once DV was
-                        // found, which made the chip strip look incomplete
-                        // (just "DV", no "HDR10" — user noticed).
                         const xfer = (v.color_transfer || '').toLowerCase();
                         const hdrFormats = [];
                         if (hasDv) hdrFormats.push('dolbyvision');
@@ -319,58 +1285,100 @@
                         else if (xfer === 'arib-std-b67') hdrFormats.push('hlg');
                         mediaInfo = {
                             videoCodec: v.codec_name || '',
-                            width: v.width || 0,
-                            height: v.height || 0,
-                            bitDepth: is10bit ? 10 : 8,
-                            // Legacy single field for back-compat with any older
-                            // C#-side code that still reads `Hdr`.
-                            hdr: hdrFormats[0] || 'sdr',
-                            // The new authoritative list — Razor renders one
-                            // chip per entry.
+                            width:      v.width || 0,
+                            height:     v.height || 0,
+                            bitDepth:   is10bit ? 10 : 8,
+                            hdr:        hdrFormats[0] || 'sdr',
                             hdrFormats,
-                            audioCodec: a ? (a.codec_name || '') : '',
+                            audioCodec:    a ? (a.codec_name || '') : '',
                             audioChannels: a ? (a.channels || 0) : 0,
-                            playbackTier: directPlayUrl ? 'directplay' : 'hls',
+                            audioLang:     audioList[0]?.lang || '',
+                            playbackTier:  directPlayUrl ? 'directplay' : 'hls',
                         };
                         dotnetRef.invokeMethodAsync('OnPlayerMediaInfo', mediaInfo)
-                            .catch(e => console.warn('animarr: OnPlayerMediaInfo failed', e));
+                            .catch(() => {});
                     }
                 }
             } catch (err) {
                 if (err.name !== 'AbortError') console.warn('probe failed', err);
             }
         }
+        entry.mediaInfo    = mediaInfo;
+        entry.subtitleList = subtitleList;
+        entry.audioList    = audioList;
 
-        // Get mpv:// link from .NET so the mpv button has the right href.
-        let mpvHref = '#';
-        try { mpvHref = await dotnetRef.invokeMethodAsync('GetMpvDeepLink'); } catch {}
+        const offsetChannel = determineOffsetChannel(entry.output, mediaInfo);
 
-        // Decide whether to show the audio-offset button — only meaningful
-        // when there's actually a transcode path that applies -itsoffset.
-        const offsetChannel = determineOffsetChannel(mediaInfo);
-
-        // ── 5) Instantiate Artplayer ───────────────────────────────────────
-        // For cross-origin hosts (MAUI BlazorWebView pointing at a remote
-        // server) we re-anchor the server-supplied URLs against the API
-        // base — server returns them as page-relative paths and the
-        // WebView's local origin would resolve them to nowhere.
+        // ── 5) Instantiate player + adapter ───────────────────────────
         const playUrl = directPlayUrl
             ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
             : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
         const isHls   = !directPlayUrl;
         const fileExt = mediaPath.toLowerCase().split('.').pop();
+        const stylePref = readStylePref();
 
-        const art = new window.Artplayer({
+        let art = null;
+        let adapter;
+
+        // Codec capability gate: ask Android's MediaCodecList whether the
+        // device can decode whatever the server's output describes. If not,
+        // fall through to Artplayer (which might still fail, but at least
+        // gives us softare decode fallback through the WebView). Skipped
+        // entirely on hosts where the native bridge isn't published.
+        let nativeAllowed = isNativeAdapterAvailable() && !opts?.forceWebPlayer;
+        if (nativeAllowed && entry.output && typeof window.animarrNativePlayer.canDecode === 'function') {
+            try {
+                const o = entry.output;
+                const ok = await window.animarrNativePlayer.canDecode(
+                    o.videoCodec || '', o.bitDepth || 0, o.hdr || '',
+                    o.width || 0, o.height || 0);
+                if (!ok) {
+                    console.warn('animarr: device cannot decode', o.videoCodec,
+                        o.bitDepth + '-bit', o.hdr, '— falling back to Artplayer');
+                    nativeAllowed = false;
+                }
+            } catch (e) { console.warn('canDecode probe threw', e); }
+        }
+
+        if (nativeAllowed) {
+            // ── Native (ExoPlayer / Android TV) path ──────────────────
+            // No Artplayer: ExoPlayer renders into the TextureView the MAUI
+            // host inserted at the bottom of DecorView. We inject the HUD
+            // straight into the existing `vp-art` container and flip the
+            // body's `data-animarr-native` attribute so the CSS in
+            // animarr-player.css drops the WebView's painted background —
+            // exposing the TextureView underneath.
+            document.body.dataset.animarrNative = '1';
+            el.innerHTML = buildHudHtml(stylePref);
+            const native = new NativeAdapter(window.animarrNativePlayer, {
+                container:   el,
+                resumeSec:   resumeSec,
+                durationSec: entry.totalDuration,
+            });
+            // Native runtime error → fall back to Artplayer at the same
+            // position. Without this, an ExoPlayer crash mid-stream leaves
+            // the user with a black screen and no recovery.
+            native.on('error', () => {
+                const pos = native.currentTime;
+                console.warn('animarr: native error — re-attaching as web at', pos, 's');
+                detach(elementId);
+                setTimeout(() => attach(elementId, dotnetRef, mediaPath, {
+                    audioTrackIndex: audioTrackIndex,
+                    forceResumeSec:  pos,
+                    forceWebPlayer:  true,
+                }), 200);
+            });
+            await native._start(playUrl, resumeSec);
+            adapter = native;
+        } else {
+            // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
+            art = new window.Artplayer({
             container: el,
             url: playUrl,
             type: isHls ? 'm3u8' : (fileExt || 'mp4'),
-            // hls.js wiring as Artplayer custom type handler. This is where
-            // we apply all the buffer/timeout tuning that was previously
-            // injected via Vidstack provider-events.
             customType: isHls ? {
                 m3u8: (video, url) => {
                     if (!window.Hls || !window.Hls.isSupported()) {
-                        // Safari has native HLS — just set src.
                         video.src = url;
                         return;
                     }
@@ -390,8 +1398,6 @@
                     hls.attachMedia(video);
                     art.hls = hls;
                     art.on('destroy', () => { try { hls.destroy(); } catch {} });
-                    console.info('animarr: Artplayer + hls.js wired (frag=60s, holeTol=4s)');
-
                     hls.on(window.Hls.Events.ERROR, (evt, data) => {
                         if (data.fatal) {
                             console.error('animarr hls fatal:', data.type, data.details);
@@ -402,276 +1408,268 @@
             title: mediaPath.split(/[\/\\]/).pop(),
             autoplay: true,
             playsInline: true,
-            volume: 1,
-            // ── Built-in features that replace our old custom buttons ──
-            // aspectRatio: false — Artplayer's built-in only ships
-            // Default/4:3/16:9. We provide our own selector below with 21:9
-            // for ultrawide monitors and 2.35:1 / 2.39:1 for Cinemascope.
+            // Restore the user's last-set volume across sessions. Saved by the
+            // volume popup; defaults to 1.0 on first run.
+            volume: readVolumePref(),
+            setting: false,
+            playbackRate: false,
             aspectRatio: false,
-            screenshot: true,     // screenshot button (bonus)
-            setting: true,        // unified settings menu
-            playbackRate: true,   // speed picker
+            screenshot: false,
             fullscreen: true,
-            fullscreenWeb: false, // we want native fullscreen, not CSS-only
-            pip: true,
-            airplay: false,       // we use DLNA via our own Cast button
-            miniProgressBar: true, // tiny progress bar visible when chrome hidden
+            fullscreenWeb: false,
+            pip: false,
+            airplay: false,
+            miniProgressBar: false,
             mutex: true,
-            backdrop: true,
-            hotkey: true,
-            theme: '#ff6b00',
+            backdrop: false,
+            // We do hotkeys ourselves so arrows = 10s (not Artplayer's 5s)
+            // and TV-remote media keys all route through one handler.
+            hotkey: false,
+            theme: 'oklch(0.72 0.18 245)',
             lang: 'en',
             moreVideoAttr: { crossorigin: 'anonymous' },
-            // Subtitles — Artplayer accepts ONE active subtitle at a time;
-            // multiple options go through `selector` in settings (see below).
             subtitle: subtitleList.length > 0 ? {
                 url: (subtitleList.find(s => s.default) || subtitleList[0]).url,
-                type: 'webvtt',
+                // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
+                // a recognised value and silently dropped on the loader path
+                // — fix landed 2026-05-27 after subtitle.switch() reported
+                // no-op effect on every track change.
+                type: 'vtt',
                 encoding: 'utf-8',
                 escape: false,
             } : undefined,
-            // Media-info chip strip — rendered INSIDE Artplayer as a layer
-            // (not as a sibling overlay), so it sits cleanly in the player
-            // DOM, survives browser fullscreen, and isn't fighting Artplayer's
-            // own chrome for z-index.
-            layers: mediaInfo ? [{
-                name: 'media-info',
-                html: buildChipStripHtml(mediaInfo),
-                style: {
-                    position: 'absolute',
-                    top: '10px',
-                    left: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    flexWrap: 'wrap',
-                    pointerEvents: 'none',
-                    zIndex: '20',
-                    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-                },
-            }] : [],
-            // ── Custom buttons in the bottom chrome ──
-            // position:'right' puts them in the right cluster next to
-            // Artplayer's built-in fullscreen/settings buttons. They live
-            // in the SAME control bar — no more separate top header.
-            controls: [
-                // Audio-offset slider — only shown when current playback has
-                // an -itsoffset transcoding path that actually uses the value
-                // (i.e. HEVC via HLS). H.264/MPEG-TS uses native PCR sync,
-                // Direct Play doesn't transcode at all → no slider in those
-                // cases. The popup writes the new value to localStorage
-                // immediately; it takes effect on next reopen of the file.
-                ...(offsetChannel ? [{
-                    name: 'audio-offset',
-                    position: 'right',
-                    html: ICONS.audioSync,
-                    tooltip: `Audio sync (${offsetChannel === 'sw' ? 'HDR / 10-bit' : 'standard'})`,
-                    click() { toggleAudioOffsetPopup(art, offsetChannel); },
-                }] : []),
-                {
-                    name: 'cast',
-                    position: 'right',
-                    html: ICONS.cast,
-                    tooltip: 'Cast to TV (DLNA)',
-                    click() {
-                        refRef.current?.invokeMethodAsync('ToggleCastMenuFromJs').catch(() => {});
-                    },
-                },
-                {
-                    name: 'mpv',
-                    position: 'right',
-                    html: `<a href="${mpvHref.replace(/"/g, '&quot;')}" title="Open in mpv" style="display:inline-flex;align-items:center;color:inherit;text-decoration:none;">${ICONS.external}</a>`,
-                    tooltip: 'Open in mpv (native HDR/DV/Atmos)',
-                    // No click — let the <a> handle navigation natively.
-                },
-                {
-                    name: 'close',
-                    position: 'right',
-                    html: ICONS.close,
-                    tooltip: 'Close',
-                    click() {
-                        refRef.current?.invokeMethodAsync('ClosePlayerFromJs').catch(() => {});
-                    },
-                },
-            ],
-            // Settings menu entries — always include our custom aspect-ratio
-            // picker (Artplayer's built-in only had Default/4:3/16:9, no 21:9
-            // for ultrawide displays). Subtitle picker added when source has
-            // multiple subtitle tracks.
-            settings: (() => {
-                const items = [];
-                items.push({
-                    width: 220,
-                    html: 'Aspect Ratio',
-                    tooltip: 'Default',
-                    selector: [
-                        { html: 'Default',          value: 'default', default: true },
-                        { html: '21:9 (ultrawide)', value: '21:9' },
-                        { html: '16:9',             value: '16:9' },
-                        { html: '4:3',              value: '4:3' },
-                    ],
-                    onSelect(item) {
-                        try {
-                            // Forcing an aspect ratio just resizes the video
-                            // element's BOX. Without object-fit:cover the
-                            // source content keeps its natural ratio and is
-                            // letterboxed inside the new box, defeating the
-                            // purpose of forcing an aspect. Picking 21:9 on a
-                            // 16:9 source-with-baked-cinemascope-bars works
-                            // ONLY when we also crop via object-fit:cover —
-                            // the baked black bars get cropped off the top
-                            // and bottom first because cropping happens at
-                            // the edges.
-                            art.aspectRatio = item.value;
-                            const video = art.video || art.template?.$video;
-                            if (video) {
-                                if (item.value === 'default') {
-                                    video.style.objectFit = '';
-                                    video.style.aspectRatio = '';
-                                } else {
-                                    video.style.objectFit = 'cover';
-                                    // Defensive: also set CSS aspect-ratio in
-                                    // case Artplayer didn't apply it for some
-                                    // reason (versions differ on the setter).
-                                    video.style.aspectRatio = item.value.replace(':', ' / ');
-                                }
-                            }
-                            console.info('animarr: aspectRatio →', item.value, 'objectFit →',
-                                item.value === 'default' ? 'contain' : 'cover');
-                        } catch (e) { console.warn('aspectRatio set failed', e); }
-                        return item.html;
-                    },
-                });
-                if (subtitleList.length > 1) {
-                    items.push({
-                        width: 240,
-                        html: 'Subtitle',
-                        tooltip: subtitleList.find(s => s.default)?.name || subtitleList[0].name,
-                        icon: '<i style="font-style:normal;">CC</i>',
-                        selector: subtitleList.map(s => ({
-                            html: s.name,
-                            url: s.url,
-                            default: !!s.default,
-                        })),
-                        onSelect(item) {
-                            try { art.subtitle.switch(item.url, { name: item.html, escape: false }); }
-                            catch (e) { console.warn('subtitle switch failed', e); }
-                            return item.html;
-                        },
-                    });
-                }
-                return items;
-            })(),
-        });
+            layers: [{
+                name: 'animarr-hud',
+                html: buildHudHtml(stylePref),
+                style: { position: 'absolute', inset: '0', zIndex: '30',
+                         pointerEvents: 'none' },
+            }],
+            });
+            adapter = new ArtplayerAdapter(art);
+        }
 
         entry.art = art;
+        entry.adapter = adapter;
+        entry.currentSubIdx = subtitleList.findIndex(s => s.default);
+        if (entry.currentSubIdx < 0 && subtitleList.length > 0) entry.currentSubIdx = 0;
 
-        // ── 5b) MediaSession + Picture-in-Picture wiring ───────────────────
-        // Exposes play/pause/seek to:
-        //   • iOS Now Playing centre (Control Centre + lock screen)
-        //   • Android system media notification (collapsed + expanded)
-        //   • macOS Now Playing (Touch Bar + lock-screen widget)
-        //   • Chromium Global Media Controls bubble
-        //   • Bluetooth-remote / car-stereo media buttons
-        //
-        // Metadata (title/poster) gets pushed in via setMediaSession() once
-        // the .NET side knows what's playing — see below. Action handlers
-        // are wired here so they take effect even before metadata arrives.
+        // ── 5b) Wire HUD ──────────────────────────────────────────────
+        // Root element for HUD events: Artplayer's player wrapper on the web
+        // path, the bare `vp-art` container on the native path (where the
+        // HUD HTML was injected directly above).
+        const hudRoot = art ? (art.template.$player || art.container) : el;
+        const hudCtl = attachHud(adapter, hudRoot, entry, {
+            back:  () => refRef.current?.invokeMethodAsync('ClosePlayerFromJs').catch(() => {}),
+            prev:  () => refRef.current?.invokeMethodAsync('InvokePrev').catch(() => {}),
+            next:  () => refRef.current?.invokeMethodAsync('InvokeNext').catch(() => {}),
+            cast:  () => openCastPopup(hudRoot, 'cast', mediaPath, adapter),
+            volume: () => openVolumePopup(hudRoot, 'volume', adapter, (v) => {
+                hudCtl?.setVolumeIcon(v, adapter.muted);
+            }),
+            aspect: () => {
+                const items   = ['Default', '21:9 (ultrawide)', '16:9', '4:3', '2.35:1 (cinema)'];
+                const values  = ['default',  '21:9',             '16:9', '4:3', '2.35:1'];
+                const cur     = entry.currentAspect ?? 0;
+                openPickerPopup(hudRoot, 'aspect', 'Aspect ratio', items, cur, (i) => {
+                    entry.currentAspect = i;
+                    adapter.setAspectRatio(values[i]);
+                });
+            },
+            offset: () => {
+                if (!offsetChannel || !window.animarrCalibrate) return;
+                openOffsetPopup(hudRoot, 'offset', offsetChannel);
+            },
+            audio: () => {
+                if (entry.audioList.length === 0) return;
+                openPickerPopup(hudRoot, 'audio', 'Audio tracks',
+                    entry.audioList.map(a => a.label),
+                    entry.currentAudIdx,
+                    (i) => {
+                        if (i === entry.currentAudIdx) return;
+                        // HLS sessions transcode a single audio stream, so live
+                        // switching via hls.js / video.audioTracks is a no-op.
+                        // We tear down the session and start a fresh one with
+                        // `-map 0:a:{i}?` baked into ffmpeg, carrying current
+                        // position over as the resume seek.
+                        switchAudioTrack(elementId, i);
+                    });
+            },
+            cc: () => {
+                const items = ['Off', ...entry.subtitleList.map(s => s.name)];
+                const cur = entry.currentSubIdx == null ? 0 : entry.currentSubIdx + 1;
+                openPickerPopup(hudRoot, 'cc', 'Subtitles', items, cur, (i) => {
+                    if (i === 0) {
+                        adapter.setSubtitle(null);
+                        entry.currentSubIdx = null;
+                    } else {
+                        const s = entry.subtitleList[i - 1];
+                        adapter.setSubtitle({ url: s.url, name: s.name, type: 'vtt' });
+                        entry.currentSubIdx = i - 1;
+                    }
+                });
+            },
+        });
+        entry.hud = hudCtl;
+
+        // Hide buttons that don't apply to current playback.
+        hudCtl.setOffsetEnabled(!!offsetChannel);
+        // Initial volume icon + wire the mute toggle (hotkey 'm' or external
+        // changes) to keep the icon in sync.
+        hudCtl.setVolumeIcon(adapter.volume, adapter.muted);
+        adapter.on('volumechange', () => {
+            hudCtl.setVolumeIcon(adapter.volume, adapter.muted);
+            saveVolumePref(adapter.volume);
+        });
+        // Cast: hide when running inside MAUI on a TV (the user is already
+        // ON the TV). MAUI index.html adds `.animarr-tv-host` to <html> when
+        // its UA/viewport heuristic triggers. Browser/phone keep the button.
+        const isTv = document.documentElement.classList.contains('animarr-tv-host');
+        hudCtl.setCastVisible(!isTv);
+
+        // Initial title (overwritten by setMediaSession from .NET).
+        hudCtl.setTitle('', mediaPath.split(/[\/\\]/).pop());
+
+        // Top-right meta line — describes what the PLAYER receives, not what's
+        // on disk. Sourced from `data.output` returned by /api/hls/start
+        // (Phase 0). For Direct Play and stream-copy paths it mirrors the
+        // source; for re-encode it reports the post-transcode state (e.g. a
+        // HEVC HDR DV source served via VAAPI reads "H.264 8-bit SDR" here).
+        // Refreshed every 30s so the wall-clock stays current.
+        function updateMeta() {
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, '0');
+            const mm = String(now.getMinutes()).padStart(2, '0');
+            const bits = [`${hh}:${mm}`];
+            const o = entry.output;
+            if (o) {
+                if (o.height) bits.push(`${o.height}p`);
+                if (o.videoCodec) bits.push(o.videoCodec.toUpperCase());
+                if (o.bitDepth >= 10) bits.push('10-bit');
+                (o.hdrFormats || []).forEach(fmt => {
+                    bits.push(fmt === 'dolbyvision' ? 'DV'
+                            : fmt === 'hdr10' ? 'HDR10'
+                            : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
+                });
+                if (o.audioCodec) {
+                    const ch = o.audioChannels || 0;
+                    const chLabel = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
+                                  : ch === 6 ? '5.1' : ch === 8 ? '7.1'
+                                  : ch > 0 ? `${ch}ch` : '';
+                    bits.push(o.audioCodec.toUpperCase()
+                        + (chLabel ? ' ' + chLabel : ''));
+                }
+                if (o.audioLanguage) bits.push(o.audioLanguage.toUpperCase());
+                // Playback path tag — what the server actually did with the
+                // source. "Direct" is best, the rest indicate transcoding.
+                const planTag = {
+                    'directplay':     'Direct',
+                    'ts-copy':        'TS-copy',
+                    'vaapi-reencode': 'VAAPI→H.264',
+                    'nvenc-reencode': 'NVENC→H.264',
+                    'fmp4-copy':      'fMP4-copy',
+                }[o.plan] || 'HLS';
+                bits.push(planTag);
+            }
+            hudCtl.setMeta(bits.join(' · '));
+            // Hover tooltip with the server-supplied transcode reason — only
+            // when we actually transcoded. For Direct Play / unknown the
+            // attribute is cleared so no stale tooltip lingers.
+            const root2 = art?.template?.$player || art?.container;
+            const metaEl = root2 && root2.querySelector('[data-bind="meta"]');
+            if (metaEl) {
+                metaEl.title = (o && o.transcoded && o.transcodeReason) ? o.transcodeReason : '';
+            }
+        }
+        updateMeta();
+        entry.clockTimer = setInterval(updateMeta, 30000);
+
+        // ── 5c) MediaSession + PiP ────────────────────────────────────
         try {
             if ('mediaSession' in navigator) {
                 const ms = navigator.mediaSession;
-                ms.setActionHandler('play',     () => { try { art.play();  } catch {} });
-                ms.setActionHandler('pause',    () => { try { art.pause(); } catch {} });
+                ms.setActionHandler('play',     () => adapter.play());
+                ms.setActionHandler('pause',    () => adapter.pause());
                 ms.setActionHandler('seekto', d => {
-                    if (typeof d.seekTime === 'number') {
-                        try { art.currentTime = d.seekTime; } catch {}
-                    }
+                    if (typeof d.seekTime === 'number') adapter.currentTime = d.seekTime;
                 });
                 ms.setActionHandler('seekbackward', d => {
                     const step = (d && d.seekOffset) || 10;
-                    try { art.currentTime = Math.max(0, (art.currentTime || 0) - step); } catch {}
+                    adapter.currentTime = Math.max(0, adapter.currentTime - step);
                 });
                 ms.setActionHandler('seekforward', d => {
                     const step = (d && d.seekOffset) || 10;
-                    try { art.currentTime = (art.currentTime || 0) + step; } catch {}
+                    adapter.currentTime = adapter.currentTime + step;
                 });
-                ms.setActionHandler('stop', () => { try { art.pause(); } catch {} });
-                // Position state — lets the lock-screen scrubber show real progress.
-                art.on('video:timeupdate', () => {
+                ms.setActionHandler('stop', () => adapter.pause());
+                adapter.on('timeupdate', () => {
                     if (!('setPositionState' in ms)) return;
-                    const dur = entry.totalDuration || art.duration || 0;
+                    const dur = entry.totalDuration || adapter.duration || 0;
                     if (!Number.isFinite(dur) || dur <= 0) return;
                     try {
                         ms.setPositionState({
                             duration:     dur,
-                            playbackRate: art.playbackRate || 1,
-                            position:     Math.min(art.currentTime || 0, dur),
+                            // No playbackRate getter on the adapter (we don't
+                            // expose rate control) — default to 1.0.
+                            playbackRate: 1,
+                            position:     Math.min(adapter.currentTime, dur),
                         });
-                    } catch { /* setPositionState throws on bad numbers — bail */ }
+                    } catch {}
                 });
-                art.on('video:play',  () => { ms.playbackState = 'playing'; });
-                art.on('video:pause', () => { ms.playbackState = 'paused';  });
+                adapter.on('play',  () => { ms.playbackState = 'playing'; });
+                adapter.on('pause', () => { ms.playbackState = 'paused';  });
             }
         } catch (e) { console.warn('mediaSession wire-up failed', e); }
 
-        // Picture-in-Picture — attempt automatic enter on visibility change
-        // (user switched tabs / received a call) so playback floats over the
-        // OS. The browser may decline if the document is fully hidden or PiP
-        // isn't allowed; we swallow that.
         try {
-            const video = art.video;
+            const video = adapter.rawVideoElement();
             if (video && document.pictureInPictureEnabled && !video.disablePictureInPicture) {
                 const onVisibility = () => {
                     if (document.visibilityState === 'hidden' &&
                         !video.paused &&
                         document.pictureInPictureElement !== video) {
-                        video.requestPictureInPicture().catch(() => { /* user denied */ });
+                        video.requestPictureInPicture().catch(() => {});
                     }
                 };
                 document.addEventListener('visibilitychange', onVisibility);
                 entry._pipVisibilityHandler = onVisibility;
             }
-        } catch { /* PiP unsupported — fine */ }
+        } catch {}
 
-        // Chip strip stays visible throughout playback — previous attempt to
-        // sync with Artplayer's chrome auto-hide via mouse-activity timer
-        // either didn't get mouse events (Artplayer eats them on inner DOM)
-        // or fired with wrong cadence. The chips are small and tucked in the
-        // top-left corner; keeping them visible is the predictable behaviour
-        // and what the user explicitly wants (they're there to surface what's
-        // playing).
-
-        // ── 6) Resume seek + progress reporting ─────────────────────────────
+        // ── 6) Resume seek + progress reporting ───────────────────────
         if (resumeSec > 0) {
-            const seekOnce = () => {
-                try { art.currentTime = resumeSec; }
-                catch (e) { console.warn('resume seek failed', e); }
-            };
-            // Wait for video metadata before seeking, otherwise Artplayer
-            // ignores currentTime sets that arrive before the video element
-            // knows its duration.
-            art.once('video:loadedmetadata', seekOnce);
+            adapter.once('loadedmetadata', () => {
+                adapter.currentTime = resumeSec;
+            });
         }
+
+        // Auto-aspect on ultrawide screens. Runs ~600ms after the first
+        // decoded frame to give the decoder time to render real content
+        // (some files start on a few black frames). If that frame is
+        // also too dark to measure, retry once at ~3s for movies with
+        // a long black studio-logo intro.
+        adapter.once('loadeddata', () => {
+            setTimeout(() => {
+                autoCropIfUltrawide(adapter, entry);
+                if (entry.currentAspect == null) {
+                    setTimeout(() => autoCropIfUltrawide(adapter, entry), 4000);
+                }
+            }, 600);
+        });
 
         let lastTick = 0;
         let lastPosForDelta = resumeSec;
         const sendProgress = () => {
             const r = refRef.current;
             if (!r) return;
-            const pos = art.currentTime || 0;
-            const dur = entry.totalDuration || art.duration || 0;
+            const pos = adapter.currentTime || 0;
+            const dur = entry.totalDuration || adapter.duration || 0;
             let delta = 0;
-            if (art.playing && pos > lastPosForDelta && (pos - lastPosForDelta) < 30) {
+            if (adapter.playing && pos > lastPosForDelta && (pos - lastPosForDelta) < 30) {
                 delta = Math.round(pos - lastPosForDelta);
             }
             lastPosForDelta = pos;
             r.invokeMethodAsync('OnPlayerProgress', pos, dur, delta).catch(() => {});
 
-            // Mirror the same progress to the Android-TV "Continue watching"
-            // row via the MAUI-side bridge (no-op when the host doesn't expose
-            // it — i.e. browser WASM, or MAUI on a phone / Windows / iOS where
-            // FEATURE_LEANBACK is false). The metadata was attached by
-            // MediaDetail.razor right after attach() resolved.
             const wn = entry.watchNext;
             if (wn && typeof window.animarrWatchNextUpsert === 'function') {
                 const posMs = Math.round(pos * 1000);
@@ -679,50 +1677,46 @@
                 window.animarrWatchNextUpsert(wn.mediaId, wn.title, wn.posterUrl, posMs, durMs);
             }
         };
-        art.on('video:timeupdate', () => {
+        adapter.on('timeupdate', () => {
             const now = Date.now();
             if (now - lastTick < 5000) return;
             lastTick = now;
             sendProgress();
         });
-        art.on('video:pause', sendProgress);
-        art.on('video:ended', sendProgress);
+        adapter.on('pause', sendProgress);
+        adapter.on('ended', sendProgress);
 
-        // ── 7) Keepalive for HLS sessions (Direct Play has no token) ───────
+        // ── 7) Keepalive (HLS only) ───────────────────────────────────
         if (entry.sessionToken) {
             entry.keepaliveTimer = setInterval(() => {
                 if (!entry.sessionToken) return;
                 fetch(apiUrl('/api/hls/keepalive?token=' + encodeURIComponent(entry.sessionToken)),
                     { method: 'POST', signal: abort.signal })
-                    .catch(() => { /* tick will retry */ });
+                    .catch(() => {});
             }, 30000);
         }
     }
 
     function flush(elementId) {
         const entry = WIRED.get(elementId);
-        if (!entry || !entry.art) return;
-        // Fire a pause-equivalent so .NET gets a final progress write before
-        // teardown. video:pause listener does the actual call.
-        try { entry.art.pause(); } catch {}
+        if (!entry || !entry.adapter) return;
+        entry.adapter.pause();
     }
 
     function detach(elementId) {
         const entry = WIRED.get(elementId);
         if (!entry) return;
-        // 1) Drop .NET ref so late callbacks bail.
         entry.refRef.current = null;
-        // 2) Stop keepalive + abort in-flight fetches.
         if (entry.keepaliveTimer) { clearInterval(entry.keepaliveTimer); entry.keepaliveTimer = null; }
+        if (entry.clockTimer)     { clearInterval(entry.clockTimer);     entry.clockTimer     = null; }
+        if (entry.hud && entry.hud.cleanup) { try { entry.hud.cleanup(); } catch {} }
         entry.abort.abort();
-        // 3) Tell server to free ffmpeg + tmp dir.
         if (entry.sessionToken) {
             try {
                 fetch(apiUrl('/api/hls/' + encodeURIComponent(entry.sessionToken)),
                     { method: 'DELETE', keepalive: true });
-            } catch { }
+            } catch {}
         }
-        // 4) Tear down PiP visibility listener + media session metadata.
         if (entry._pipVisibilityHandler) {
             document.removeEventListener('visibilitychange', entry._pipVisibilityHandler);
             entry._pipVisibilityHandler = null;
@@ -731,41 +1725,69 @@
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = null;
                 navigator.mediaSession.playbackState = 'none';
-                // Clear handlers so a future detach->reattach doesn't double-fire.
                 ['play','pause','seekto','seekbackward','seekforward','stop',
                  'previoustrack','nexttrack'].forEach(a => {
                     try { navigator.mediaSession.setActionHandler(a, null); } catch {}
                 });
             }
         } catch {}
-        // 5) Destroy Artplayer (which destroys its hls.js too via on('destroy')).
-        if (entry.art) {
-            try { entry.art.destroy(true); } catch {}
-            entry.art = null;
+        if (entry.adapter) {
+            entry.adapter.destroy();
+            entry.adapter = null;
         }
+        entry.art = null;
+        document.body.classList.remove('player-open');
+        // Native-playback attribute drives the CSS rule that wipes body bg
+        // so the TextureView shows through. Clear it on detach so other
+        // routes (non-player pages) paint their normal dark chrome.
+        try { delete document.body.dataset.animarrNative; } catch {}
         WIRED.delete(elementId);
     }
 
     /**
-     * Push metadata to the OS-level Now Playing surfaces (lock screen,
-     * Control Centre, system media notification). Called from MediaDetail
-     * after the title is known. Safe to call multiple times — replaces
-     * existing metadata.
+     * Switch to a different audio track in the source. Tears down the current
+     * HLS session and starts a fresh one with the new `audioTrackIndex` baked
+     * into ffmpeg's -map. The current playback position is carried over as
+     * the resume point so playback continues from the same instant — albeit
+     * with a 1-3s gap while the new session warms up.
      *
-     * @param {string} elementId - player container ID
-     * @param {object} meta - { title, artist, album, artworkUrl, prevAvailable, nextAvailable }
-     * @param {object} handlers - { prev, next } optional .NET DotNetObjectReference
-     *                             with InvokePrev/InvokeNext methods
+     * For Direct Play sessions (no sessionToken) the same dance applies — the
+     * URL doesn't change but the HUD's currentAudIdx state and any future
+     * audio-track-based logic should reflect the new selection.
      */
+    async function switchAudioTrack(elementId, audioTrackIndex) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.adapter) return;
+        const pos       = entry.adapter.currentTime || 0;
+        const dotnetRef = entry.dotnetRef;
+        const mediaPath = entry.mediaPath;
+        if (!dotnetRef || !mediaPath) return;
+        // Tear down the old session synchronously — detach() handles HLS
+        // DELETE + Artplayer destroy + WIRED cleanup.
+        detach(elementId);
+        // Brief delay so the server has a tick to clean up the old ffmpeg
+        // process / tmp dir before we ask for a new one (avoids racing the
+        // dedup-by-source-path step inside StartAsync).
+        await new Promise(r => setTimeout(r, 100));
+        await attach(elementId, dotnetRef, mediaPath, {
+            audioTrackIndex,
+            forceResumeSec: pos,
+        });
+    }
+
     function setMediaSession(elementId, meta, handlers) {
         const entry = WIRED.get(elementId);
-        if (!entry || !entry.art) return;
+        if (!entry || !entry.adapter) return;
+        if (entry.hud) {
+            const kicker = meta?.hudKicker || '';
+            const name   = meta?.hudName   || meta?.title || '';
+            entry.hud.setTitle(kicker, name);
+        }
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;
             const artwork = [];
             if (meta && meta.artworkUrl) {
-                // Provide a few size hints — OS picks the closest match.
                 artwork.push({ src: meta.artworkUrl, sizes: '512x512', type: 'image/jpeg' });
                 artwork.push({ src: meta.artworkUrl, sizes: '256x256', type: 'image/jpeg' });
                 artwork.push({ src: meta.artworkUrl, sizes: '96x96',   type: 'image/jpeg' });
@@ -776,8 +1798,6 @@
                 album:  (meta && meta.album)  || '',
                 artwork,
             });
-            // Wire prev/next only if .NET says the episode list permits it,
-            // otherwise the lock-screen buttons appear dead.
             if (handlers && handlers.dotnetRef) {
                 if (meta && meta.prevAvailable) {
                     ms.setActionHandler('previoustrack', () => {
@@ -797,39 +1817,22 @@
         } catch (e) { console.warn('setMediaSession failed', e); }
     }
 
-    /**
-     * Attach Watch Next / "Continue watching" metadata to this player session.
-     * Called once from MediaDetail.razor after attach() succeeds. The metadata
-     * stays on the WIRED entry, and sendProgress() pushes upserts every ~5s
-     * (timeupdate tick), on pause, and on ended. Idempotent — calling this
-     * twice replaces the previous metadata.
-     *
-     * On non-MAUI hosts window.animarrWatchNextUpsert is undefined, so the
-     * shim guard inside sendProgress() bails silently. WatchNextService on
-     * the MAUI side further short-circuits when the device isn't a TV.
-     *
-     * @param {string} elementId - player container ID
-     * @param {object} meta - { mediaId, title, posterUrl } — all required
-     */
     function setWatchNextMeta(elementId, meta) {
         const entry = WIRED.get(elementId);
         if (!entry) return;
         if (!meta || !meta.mediaId || !meta.title) return;
         entry.watchNext = {
-            mediaId:    String(meta.mediaId),
-            title:      String(meta.title),
-            posterUrl:  meta.posterUrl ? String(meta.posterUrl) : '',
+            mediaId:   String(meta.mediaId),
+            title:     String(meta.title),
+            posterUrl: meta.posterUrl ? String(meta.posterUrl) : '',
         };
     }
 
-    /**
-     * Toggle Picture-in-Picture on the active player video. Returns a promise
-     * that resolves true if we entered PiP, false otherwise.
-     */
     async function togglePictureInPicture(elementId) {
         const entry = WIRED.get(elementId);
-        if (!entry || !entry.art || !entry.art.video) return false;
-        const video = entry.art.video;
+        if (!entry || !entry.adapter) return false;
+        const video = entry.adapter.rawVideoElement();
+        if (!video) return false;
         try {
             if (document.pictureInPictureElement === video) {
                 await document.exitPictureInPicture();
@@ -843,5 +1846,25 @@
         return false;
     }
 
-    window.animarrPlayer = { attach, flush, detach, setMediaSession, setWatchNextMeta, togglePictureInPicture };
+    /**
+     * Update the HUD style live (called from ProfilePanel when the user
+     * flips the "icons only" toggle while the player is open). If no player
+     * is currently mounted, this is a no-op — next attach() picks up the
+     * new preference via readStylePref().
+     */
+    function setStyle(style) {
+        if (style !== 'icons' && style !== 'full') return;
+        try { localStorage.setItem('animarr_player_style', style); } catch {}
+        // Update any live HUDs.
+        WIRED.forEach(entry => {
+            const hud = entry.hud && entry.hud.hud;
+            if (hud) hud.setAttribute('data-style', style);
+        });
+    }
+
+    window.animarrPlayer = {
+        attach, flush, detach,
+        setMediaSession, setWatchNextMeta, togglePictureInPicture,
+        setStyle, switchAudioTrack,
+    };
 })();

@@ -52,6 +52,7 @@
     </div>
 </a>
 
+@implements IDisposable
 @code {
     [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
 
@@ -68,6 +69,15 @@
             return Animarr.UI.Services.MediaUrl.Image(path, v);
         }
     }
+
+    // Re-render whenever the active server URL flips so the <img src> picks up
+    // the new authority. Without this, the very first render of a cookie-
+    // restored MAUI boot bakes the wrong host into src and never updates.
+    protected override void OnInitialized()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    public void Dispose()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
 
     private static string TypeLabel(MediaItemType t) => t switch
     {

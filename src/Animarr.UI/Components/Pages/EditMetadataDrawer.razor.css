@@ -188,7 +188,39 @@
     flex: 1;
     overflow-y: auto;
     padding: 22px 26px 130px;
+    /* Prevent scroll-chaining to the page behind the drawer — without this,
+       reaching the top or bottom of the drawer body kept scrolling the
+       catalog underneath, which is what the user reported as "scrolls the
+       background instead of the modal". `contain` keeps the gesture inside
+       the drawer; `touch-action` makes the gesture engine treat the drawer
+       as a self-contained scroller. */
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
+.emd-overlay {
+    /* Same scroll-isolation on the backdrop — taps on the backdrop never
+       reach the underlying page. */
+    overscroll-behavior: contain;
+    touch-action: none;
+}
+
+/* ── Mobile drilldown — vertical list of section cards. Hidden on
+   desktop (and on phone when the user has drilled into a section). */
+.emd__mlist { display: none; }
+.emd__back {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.emd__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 
 .emd-form {
     display: flex;
@@ -1044,32 +1076,36 @@ select.emd-input option {
     .emd__tabs { padding: 10px 22px 0; }
 }
 
-/* ── Phone — slide-up bottom sheet. */
+/* ── Phone — full-screen drawer with the drilldown pattern.
+   Earlier this was a 92%-tall bottom sheet, but the slim peek of the
+   page behind only made the backdrop look like content while the user
+   tried to scroll inside the drawer. Going edge-to-edge (100dvh) plus
+   the drilldown list replaces what used to be a cramped 7-tab strip
+   with a clean vertical list, exactly like Settings on mobile. */
 @media (max-width: 639px) {
     .emd {
-        top: auto;
+        top: 0;
         right: 0;
         left: 0;
         bottom: 0;
-        height: 92%;
+        height: 100dvh;
         width: 100%;
         max-width: 100%;
         border-left: 0;
-        border-top: 1px solid var(--border-strong);
-        border-top-left-radius: var(--radius-modal);
-        border-top-right-radius: var(--radius-modal);
-        box-shadow: 0 -30px 60px -20px rgba(0, 0, 0, 0.7);
-        animation: emd-sheet-in 0.3s cubic-bezier(.16, 1, .3, 1);
+        border-radius: 0;
+        box-shadow: none;
+        animation: emd-sheet-in 0.25s ease-out;
         padding-bottom: env(safe-area-inset-bottom);
     }
     @keyframes emd-sheet-in {
-        from { transform: translateY(100%); }
-        to   { transform: translateY(0); }
+        from { transform: translateY(20px); opacity: 0; }
+        to   { transform: translateY(0);    opacity: 1; }
     }
-    .emd__header { padding: 14px 18px 12px; }
+    /* Stack the system-bar inset on top of the base header padding so the
+       brand row sits below the notch / status indicator. */
+    .emd__header { padding: calc(20px + env(safe-area-inset-top, 0px)) 18px 12px; }
     .emd__title  { font-size: 18px; }
     .emd__header-icon { width: 36px; height: 36px; }
-    .emd__tabs   { padding: 8px 18px 0; }
     .emd__body   { padding: 14px 18px 130px; }
     .emd__footer { padding: 14px 18px calc(22px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
     .emd-gallery--posters {
@@ -1083,4 +1119,61 @@ select.emd-input option {
     .emd-segmented__btn { flex: 1; }
     .emd-manage__actions { flex-wrap: wrap; }
     .emd-danger__confirm { flex-wrap: wrap; }
+
+    /* Hide the horizontal tab strip on phone. The vertical drilldown list
+       takes its place. */
+    .emd__tabs--desktop { display: none; }
+
+    /* Mobile list (visible when not in detail), body (visible when in detail),
+       toggled by data-mobile-detail set in Razor. */
+    .emd__mlist {
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px 18px 24px;
+    }
+    .emd[data-mobile-detail="false"] .emd__mlist { display: flex; }
+    .emd[data-mobile-detail="false"] .emd__body  { display: none; }
+    .emd[data-mobile-detail="false"] .emd__footer { display: none; }
+    .emd[data-mobile-detail="true"]  .emd__mlist { display: none; }
+
+    .emd__mlist-row {
+        appearance: none;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        text-align: left;
+        transition: background var(--motion-fast), border-color var(--motion-fast);
+    }
+    .emd__mlist-row:hover,
+    .emd__mlist-row:focus-visible {
+        background: rgba(255, 255, 255, 0.07);
+        border-color: var(--border-strong);
+    }
+    .emd__mlist-ic {
+        display: inline-grid;
+        place-items: center;
+        width: 32px; height: 32px;
+        border-radius: 9px;
+        background: var(--accent-soft);
+        color: var(--accent-hi);
+        flex-shrink: 0;
+    }
+    .emd__mlist-label { flex: 1; }
 }
+
+/* TV: keep the horizontal tabs even if the viewport falls under the mobile
+   breakpoint (cheap TVs that report 540px CSS pixels). */
+html.tv-mode .emd__tabs--desktop { display: flex; }
+html.tv-mode .emd__mlist         { display: none; }
+html.tv-mode .emd__body          { display: block; }
+html.tv-mode .emd__footer        { display: flex; }

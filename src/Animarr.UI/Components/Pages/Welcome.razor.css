@@ -49,19 +49,11 @@
     margin: auto 0;
 }
 
+/* v6: SVG BrandMark replaces the old text-rendered "a" tile. The SVG
+   paints its own dark surface + accent A; this rule just adds the soft
+   glow shadow that lifted the chip off the page. */
 .d-welcome__mark {
-    width: 84px;
-    height: 84px;
     border-radius: 22px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hi));
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 46px;
-    line-height: 1;
-    text-transform: lowercase;
     box-shadow: 0 16px 40px -12px var(--accent-soft);
 }
 
@@ -103,12 +95,10 @@
 @media (max-width: 639px) {
     .d-welcome { padding: 20px 18px; }
     .d-welcome__stack { gap: 18px; }
-    .d-welcome__mark {
-        width: 72px;
-        height: 72px;
-        border-radius: 18px;
-        font-size: 40px;
-    }
+    /* SVG width/height are set via the BrandMark Size parameter, not
+       here. This rule kept for mobile-specific border-radius / shadow
+       adjustments only. */
+    .d-welcome__mark { border-radius: 18px; }
     .d-welcome__name { font-size: 36px; letter-spacing: -1.2px; }
     .d-welcome__tagline { font-size: 14px; }
     .d-welcome__cjk { font-size: clamp(240px, 50vw, 320px); right: -8%; }

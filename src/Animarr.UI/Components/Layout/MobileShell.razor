@@ -7,10 +7,12 @@
 
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
+@inject LocalizationService Loc
+@implements IDisposable
 
 <nav class="d-mobile-nav" aria-label="Top navigation">
     <a href="/" class="d-mobile-nav__brand tv-focus">
-        <span class="animarr-brand-mark">A</span>
+        <BrandMark Size="28" ExtraClass="animarr-brand-mark" />
         <span class="animarr-brand-name">ANIMARR</span>
     </a>
     <span class="d-mobile-nav__spacer"></span>
@@ -59,4 +61,14 @@
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }
     private Task OnProfileClick()  => OnProfileClickEvent.InvokeAsync();
     private Task OnSettingsClick() => OnProfileClickEvent.InvokeAsync();
+
+    // Re-render when the language pack finishes loading — on MAUI the tabbar
+    // mounts before MainLayout.OnAfterRenderAsync hydrates the dict, so the
+    // first paint sees "nav.catalog" / "nav.torrents" / "nav.settings" raw.
+    // L.LanguageChanged fires once Loc.LoadAsync resolves.
+    protected override void OnInitialized()
+        => Loc.LanguageChanged += OnLangChanged;
+    public void Dispose()
+        => Loc.LanguageChanged -= OnLangChanged;
+    private void OnLangChanged() => InvokeAsync(StateHasChanged);
 }

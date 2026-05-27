@@ -229,6 +229,37 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return (await resp.Content.ReadFromJsonAsync<TorrentConfigDto>(JsonOpts, ct))!;
     }
 
+    public async Task<ParsedTorrentDto?> ParseTorrentAsync(ParseTorrentRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.TorrentParse, request, JsonOpts, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<ParsedTorrentDto>(JsonOpts, ct);
+    }
+
+    public async Task<int> UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, CancellationToken ct = default)
+    {
+        // multipart/form-data — each file becomes one part. The server reads
+        // `files` parts and writes each to disk under the chosen watcher's
+        // Path. ByteArrayContent is enough; we already have the bytes in
+        // memory (Blazor InputFile streams them client-side before this).
+        using var form = new System.Net.Http.MultipartFormDataContent();
+        foreach (var f in files)
+        {
+            var part = new System.Net.Http.ByteArrayContent(f.Content);
+            part.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            form.Add(part, "files", f.FileName);
+        }
+        var url = ApiRoutes.FolderUpload.Replace("{watcherId}", watcherId.ToString());
+        using var resp = await _http.PostAsync(url, form, ct);
+        resp.EnsureSuccessStatusCode();
+        // Endpoint returns the count as a plain int (or { written: N }).
+        var body = await resp.Content.ReadFromJsonAsync<UploadFolderResponse>(JsonOpts, ct);
+        return body?.Written ?? 0;
+    }
+
+    private sealed record UploadFolderResponse(int Written);
+
     // ─── Watch state ──────────────────────────────────────────────────────
 
     public async Task<WatchStateDto[]> GetWatchStatesAsync(Guid mediaItemId, CancellationToken ct = default)

@@ -10,6 +10,12 @@
     - Admin button → /server (visible only if systemSettings)
     - Profile chip → opens ProfilePanel drawer
 
+    v5 update: server pill removed from the bar — server switching lives in
+    ProfilePanel → Server tab. The pill duplicated the brand name on
+    single-server installs (default server name is "Animarr"), and a proper
+    multi-server picker belongs in the profile drawer alongside identity /
+    devices / pairing.
+
     Spec: screens-v4.jsx lines 237-366.
 
     Wired to UserContextState for current user + permissions, and to
@@ -20,26 +26,12 @@
 @inject UserContextState UserCtx
 @inject FolderJumpService FolderJump
 @inject CategoryNavService CategoryNav
-@inject ServerRegistryState ServerReg
 @inject IAnimarrApiClient Api
 @implements IDisposable
 
 <header class="d-topbar @ExtraClass">
-    @* v5: server pill leftmost when multi-server registry has a current server.
-       Single-server installs leave this hidden so the brand stays leftmost.
-       Click opens ProfilePanel and hints "focus the Server section". *@
-    @if (ServerReg.Current is { } srv)
-    {
-        <button type="button" class="d-topbar__server-pill tv-focus"
-                @onclick="OnServerPillClick" title="@srv.BaseUrl"
-                aria-label="@($"Current server: {srv.Name}")">
-            <span class="d-topbar__server-dot"></span>
-            <span class="d-topbar__server-name">@srv.Name.ToUpperInvariant()</span>
-        </button>
-    }
-
     <button type="button" class="d-topbar__brand tv-focus" @onclick="GoHome" aria-label="Animarr — go to catalog">
-        <span class="d-topbar__brand-mark">a</span>
+        <BrandMark Size="30" ExtraClass="d-topbar__brand-mark" />
         <span class="d-topbar__brand-name">Animarr</span>
     </button>
 
@@ -124,10 +116,6 @@
     [Parameter] public int LlmTotal { get; set; }
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }
     [Parameter] public EventCallback OnLlmClickEvent { get; set; }
-    /// <summary>v5: server pill click. Distinguished from a normal profile
-    /// click so MainLayout can pre-focus the Server section in ProfilePanel.
-    /// Optional — falls back to <see cref="OnProfileClickEvent"/> when unset.</summary>
-    [Parameter] public EventCallback OnServerClickEvent { get; set; }
     /// <summary>Folder section labels — passed in from MainLayout because the
     /// fetch lives there to dedupe with the catalog's own folder fetch.</summary>
     [Parameter] public IReadOnlyList<string>? FolderNames { get; set; }
@@ -150,7 +138,6 @@
         // reflects clicks from anywhere (Home chip strip, deep links, etc.).
         CategoryNav.OnChange += StateHasChanged;
         FolderJump.OnChange  += StateHasChanged;
-        ServerReg.OnChange   += StateHasChanged;
 
         try
         {
@@ -168,7 +155,6 @@
     {
         CategoryNav.OnChange -= StateHasChanged;
         FolderJump.OnChange  -= StateHasChanged;
-        ServerReg.OnChange   -= StateHasChanged;
     }
 
     private void GoHome()
@@ -222,12 +208,4 @@
 
     private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
     private Task ToggleLlm()      => OnLlmClickEvent.InvokeAsync();
-
-    /// <summary>Server pill click — route through OnServerClickEvent if the
-    /// caller subscribed (so MainLayout can focus the Server tab), else fall
-    /// back to the regular profile-open path.</summary>
-    private Task OnServerPillClick()
-        => OnServerClickEvent.HasDelegate
-            ? OnServerClickEvent.InvokeAsync()
-            : OnProfileClickEvent.InvokeAsync();
 }

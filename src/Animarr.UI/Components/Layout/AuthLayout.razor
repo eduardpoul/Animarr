@@ -1,15 +1,71 @@
 @*
-    AuthLayout — full-bleed shell for /welcome, /login, /setup.
-    No TopBar, no sidebar, no nav. Just the global backdrop layers
-    + a film-grain overlay + @Body centered.
+    AuthLayout — full-bleed shell for /welcome, /login, /pair, /pair-confirm,
+    /discovery, /setup. No TopBar, no sidebar, no nav. Just the global
+    backdrop layers + a film-grain overlay + @Body centered.
+
+    Loads the localisation pack on first render so pages here render real
+    strings instead of bare i18n keys like "pair.title". MainLayout already
+    does this for the rest of the app — the auth shell was the missing
+    half-and the reason /pair was showing raw "pair.scan_hint" on the TV.
 
     Used by setting `@layout AuthLayout` at the top of the page.
 *@
 
 @inherits LayoutComponentBase
+@inject LocalizationService Loc
+@inject IJSRuntime JS
+@inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 
 <div class="d-auth-shell">
     <div class="d-auth-shell__backdrop" aria-hidden="true"></div>
     <div class="d-auth-shell__grain film-grain" aria-hidden="true"></div>
     @Body
 </div>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // FIRE-AND-FORGET both async setups. The earlier `await Loc.LoadAsync`
+        // here used to hang the auth shell for ~30s on a fresh install: the
+        // HttpClient pipeline is rewritten by ServerAddressHandler to the
+        // active server, which on Welcome/Discovery is the placeholder
+        // `https://animarr.tower.one` seed → DNS hang → no Welcome render
+        // until the timeout fired. Spawning the load as a detached task
+        // lets the layout paint immediately; the i18n strings fill in once
+        // the response (eventually) lands, and StateHasChanged in
+        // LocalizationService's LanguageChanged handler refreshes the UI.
+        _ = SetupAsync();
+    }
+
+    private async Task SetupAsync()
+    {
+        // MediaUrl base — needed BEFORE any <img src> renders so the brand
+        // mark + QR endpoint resolve absolute against the active server,
+        // not the BlazorWebView virtual host (https://0.0.0.x/).
+        try
+        {
+            var current = ServerAddr.Current;
+            if (current is not null)
+                Animarr.UI.Services.MediaUrl.SetBase(current.GetLeftPart(UriPartial.Authority));
+        }
+        catch { }
+
+        // Localisation pack — try the user's stored language first, fall
+        // back to English. Both are wrapped in try/catch so a slow / dead
+        // server doesn't throw out of the detached task and crash the
+        // process. Worst case the UI shows i18n keys verbatim — readable.
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>(
+                "eval", "localStorage.getItem('animarr-lang')");
+            var lang = string.IsNullOrWhiteSpace(stored) ? "en" : stored!;
+            await Loc.LoadAsync(lang);
+        }
+        catch
+        {
+            try { await Loc.LoadAsync("en"); } catch { /* keys-as-values fallback */ }
+        }
+    }
+}

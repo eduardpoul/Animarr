@@ -62,6 +62,13 @@ public interface IAnimarrApiClient
     Task                     UpdateTorrentFileSelectionsAsync(Guid id, UpdateFileSelectionsRequest request, CancellationToken ct = default);
     Task<TorrentConfigDto>   GetTorrentConfigAsync(CancellationToken ct = default);
     Task<TorrentConfigDto>   UpdateTorrentConfigAsync(TorrentConfigDto config, CancellationToken ct = default);
+    /// <summary>Parse a .torrent file without touching the engine — used by
+    /// the Add drawer to preview file list before the user commits.</summary>
+    Task<ParsedTorrentDto?>  ParseTorrentAsync(ParseTorrentRequest request, CancellationToken ct = default);
+    /// <summary>Drop arbitrary files into <paramref name="watcherId"/>'s folder
+    /// (third tab of the Add download drawer — local files, no torrent).
+    /// Returns the count of files actually written.</summary>
+    Task<int>                UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, CancellationToken ct = default);
 
     // ─── Watch state ──────────────────────────────────────────────────────
     Task<WatchStateDto[]> GetWatchStatesAsync(Guid mediaItemId, CancellationToken ct = default);

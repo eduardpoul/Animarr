@@ -43,6 +43,13 @@ public static class ApiRoutes
     public const string TorrentFileTree        = "/api/torrents/{id}/file-tree";
     public const string TorrentFileSelections  = "/api/torrents/{id}/file-selections";
     public const string TorrentConfig          = "/api/torrent-config";
+    /// <summary>POST a Base64-encoded .torrent and get back its parsed file
+    /// list — used by the Add drawer to preview contents before committing.</summary>
+    public const string TorrentParse           = "/api/torrents/parse";
+    /// <summary>POST multipart files + a destination folder id. Drops the
+    /// files into the folder as a plain copy (no torrent / magnet involved).
+    /// Used by the "Upload files" tab of the Add download drawer.</summary>
+    public const string FolderUpload           = "/api/folders/{watcherId}/upload";
 
     // ─── Watch state ──────────────────────────────────────────────────────
     public const string WatchStatesForMedia = "/api/watch-states/{mediaItemId}";

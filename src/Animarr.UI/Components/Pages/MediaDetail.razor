@@ -316,8 +316,14 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Rebase any <img src> built off MediaUrl when the active server URL
+        // flips (cookie-restored MAUI boot resolves the registry after the
+        // page first renders).
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
         await LoadAsync();
     }
+
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
 
     private async Task LoadAsync()
     {
@@ -431,6 +437,13 @@ else
                     var artwork = _item.PosterPath ?? _item.FanartPath ?? string.Empty;
                     var hasNext = _playerEpisode is not null;  // best-effort flag
                     var hasPrev = _playerEpisode is > 1;
+                    // HUD-specific kicker. Design (§T-03 in 04-tv.html) shows
+                    // "Now playing · S1 · EP 5" — no zero-pad, space before
+                    // the episode number. Plain "Now playing" for movies.
+                    var hudKickerBits = new List<string> { "Now playing" };
+                    if (_playerSeason is > 0)  hudKickerBits.Add($"S{_playerSeason}");
+                    if (_playerEpisode is > 0) hudKickerBits.Add($"EP {_playerEpisode}");
+                    var hudKicker = string.Join(" · ", hudKickerBits);
                     var meta = new {
                         title,
                         artist,
@@ -438,6 +451,10 @@ else
                         artworkUrl    = artwork,
                         prevAvailable = hasPrev,
                         nextAvailable = hasNext,
+                        // HUD overlay (variant B) reads these to render the
+                        // top-bar title block. Falls back to `title` if absent.
+                        hudKicker,
+                        hudName       = _item.Title,
                     };
                     try
                     {
@@ -652,6 +669,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
         if (_playerSelfRef is not null)
         {
             try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }

@@ -60,8 +60,11 @@ internal static class TorrentEndpoints
                 request.MagnetLink.Trim(),
                 savePath,
                 request.FolderWatcherId,
-                dlLimit: 0,
-                ulLimit: 0,
+                // v5: clients can now cap the per-torrent rate from the Add
+                // drawer. MonoTorrent treats 0 as "no limit". The engine
+                // stores these on the record so they survive restart.
+                dlLimit: Math.Max(0, request.DownloadLimitKBps) * 1024,
+                ulLimit: Math.Max(0, request.UploadLimitKBps)   * 1024,
                 autoRename: request.AutoRename,
                 startPaused: false,
                 stopAfterDownload: request.StopAfterDownload,
@@ -94,8 +97,9 @@ internal static class TorrentEndpoints
                 bytes,
                 savePath,
                 request.FolderWatcherId,
-                dlLimit: 0,
-                ulLimit: 0,
+                // Same rate-limit plumbing as add-magnet (v5).
+                dlLimit: Math.Max(0, request.DownloadLimitKBps) * 1024,
+                ulLimit: Math.Max(0, request.UploadLimitKBps)   * 1024,
                 autoRename: request.AutoRename,
                 startPaused: false,
                 stopAfterDownload: request.StopAfterDownload,
@@ -271,6 +275,37 @@ internal static class TorrentEndpoints
 
             await engine.UpdateGlobalSettingsAsync(entity);
             return Results.Ok(entity.ToDto());
+        });
+
+        // v5: parse-only endpoint. Lets the Add drawer preview the file list
+        // inside a .torrent before the user commits, without spinning up a
+        // TorrentManager. Uses the static helper TorrentEngineService.
+        // ParseTorrentFilesAsync so the engine doesn't get touched.
+        app.MapPost(ApiRoutes.TorrentParse, async (
+            ParseTorrentRequest request,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Base64Content))
+                return Results.BadRequest("Base64Content is required.");
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(request.Base64Content); }
+            catch { return Results.BadRequest("Invalid Base64."); }
+
+            try
+            {
+                var torrent = await MonoTorrent.Torrent.LoadAsync(bytes);
+                var files = torrent.Files
+                    .Select(f => new ParsedTorrentFileDto(f.Path, f.Length))
+                    .ToArray();
+                return Results.Ok(new ParsedTorrentDto(
+                    Name:      torrent.Name,
+                    TotalSize: torrent.Size,
+                    Files:     files));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest($"Could not parse .torrent: {ex.Message}");
+            }
         });
 
         return app;

@@ -15,6 +15,7 @@
 @layout AuthLayout
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 @implements IDisposable
 
 <PageTitle>Animarr — Sign in on TV</PageTitle>
@@ -26,7 +27,7 @@
 
     <div class="d-pair__card" role="dialog" aria-label="TV pairing">
         <header class="d-pair__brand">
-            <span class="d-pair__brand-mark">A</span>
+            <BrandMark Size="38" ExtraClass="d-pair__brand-mark" />
             <div>
                 <div class="d-pair__brand-name">ANIMARR</div>
                 <div class="d-pair__brand-sub">@L["pair.title"]</div>
@@ -52,15 +53,25 @@
         {
             <div class="d-pair__hint">@L["pair.scan_hint"]</div>
 
-            <div class="d-pair__qr">
-                <img src="@($"{ApiRoutes.PairQr}?code={Uri.EscapeDataString(_init.Code)}")"
-                     alt="Pairing QR code"
-                     width="300" height="300" />
+            @* Side-by-side QR + digits so the whole pairing UI fits inside a
+               TV viewport without scrolling. The 6-digit code is large and
+               legible from across the room — readable as a manual fallback
+               for any phone that fails to scan. *@
+            <div class="d-pair__split">
+                <div class="d-pair__qr">
+                    @* Absolute URL via MediaUrl.Base — under MAUI the
+                       BlazorWebView's origin is https://0.0.0.0/ which the
+                       virtual host doesn't route to the real Animarr API.
+                       MediaUrl.Base is seeded from ServerAddressProvider in
+                       AuthLayout. WASM falls back to a relative path because
+                       Base stays empty when same-origin. *@
+                    <img src="@QrImageUrl" alt="Pairing QR code" />
+                </div>
+                <div class="d-pair__digits">
+                    <div class="d-pair__code" aria-label="Pairing code">@PrettyCode</div>
+                    <div class="d-pair__url">on your phone: <span class="d-pair__url-mono">Profile → Pair a TV</span></div>
+                </div>
             </div>
-
-            <div class="d-pair__code" aria-label="Pairing code">@_init.Code</div>
-
-            <div class="d-pair__url">@L["pair.or_visit"] <span class="d-pair__url-mono">@HostUrl/pair-confirm</span></div>
         }
 
         <button type="button" class="d-pair__cancel tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
@@ -79,9 +90,38 @@
     private bool _expired;
     private CancellationTokenSource? _pollCts;
     private string _deviceName = "TV";
-    // Captured at OnInitialized so the template doesn't recompute it every
-    // render. NavigationManager.BaseUri ends in "/", strip it for display.
-    private string HostUrl => Nav.BaseUri.TrimEnd('/').Replace("https://", "").Replace("http://", "");
+    /// <summary>Absolute URL for the QR image. Under MAUI the BlazorWebView
+    /// hosts at <c>https://0.0.0.0/</c> (Android) or <c>https://0.0.0.1/</c>
+    /// (Windows) — those virtual hosts don't proxy <c>/api/...</c> to the
+    /// Animarr server, so a relative <c>&lt;img src&gt;</c> renders broken.
+    /// We read the authority directly from <see cref="ServerAddressProvider"/>
+    /// so this never races with AuthLayout's MediaUrl seeding (which only
+    /// fires on first render of the FIRST auth page in a session — by the
+    /// time we get to /pair the layout's OnAfterRender may have already
+    /// run with a stale or null current). When the provider has no current
+    /// (e.g. WASM same-origin) we fall back to a relative URL.</summary>
+    private string QrImageUrl
+    {
+        get
+        {
+            var path = $"{ApiRoutes.PairQr}?code={Uri.EscapeDataString(_init!.Code)}";
+            var authority = ServerAddr.Current?.GetLeftPart(UriPartial.Authority);
+            return string.IsNullOrEmpty(authority) ? path : $"{authority}{path}";
+        }
+    }
+
+    /// <summary>"123456" → "123 456" purely for legibility on the TV. Server
+    /// stores the canonical un-spaced form; the phone strips separators
+    /// before submit so either format round-trips.</summary>
+    private string PrettyCode
+    {
+        get
+        {
+            var code = _init?.Code ?? "";
+            if (code.Length != 6) return code;
+            return $"{code[..3]} {code[3..]}";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

@@ -15,18 +15,31 @@
 
 <PageTitle>Animarr — Server settings</PageTitle>
 
-<div class="d-server">
+<div class="d-server" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
     <header class="d-page-header">
+        @if (_mobileShowingDetail)
+        {
+            <button type="button" class="d-server__mback tv-focus"
+                    @onclick="@(() => _mobileShowingDetail = false)"
+                    aria-label="Back to server settings list">
+                <DIcon Name="arrow-l" Size="14" /> BACK
+            </button>
+        }
         <div class="d-page-header__main">
             <div class="d-page-header__overline">ADMIN</div>
-            <h1 class="d-page-header__title">SERVER SETTINGS</h1>
-            <div class="d-page-header__sub">
-                Visible only to users with the systemSettings permission. Changes apply live.
-            </div>
+            <h1 class="d-page-header__title">@(_mobileShowingDetail ? CurrentTab.Label : "SERVER SETTINGS")</h1>
+            @if (!_mobileShowingDetail)
+            {
+                <div class="d-page-header__sub">
+                    Visible only to users with the systemSettings permission. Changes apply live.
+                </div>
+            }
         </div>
     </header>
 
     <div class="d-server__body">
+        @* Desktop rail — vertical list pinned next to the content. Hidden
+           on phone in favour of the drilldown list below. *@
         <nav class="d-server__rail" aria-label="Server settings sections">
             @foreach (var t in Tabs)
             {
@@ -41,6 +54,31 @@
                     {
                         <span class="d-server__rail-new">NEW</span>
                     }
+                </button>
+            }
+        </nav>
+
+        @* Mobile drilldown list — full-width vertical cards. Click → set
+           the active tab + flip to detail mode. CSS toggles list ⇄ body
+           via the parent's data-mobile-detail attribute. *@
+        <nav class="d-server__mlist" aria-label="Server settings categories">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                <button type="button" class="d-server__mlist-row tv-focus"
+                        @onclick="@(() => { _active = key; _mobileShowingDetail = true; })">
+                    <span class="d-server__mlist-ic">
+                        <DIcon Name="@t.Icon" Size="14" />
+                    </span>
+                    <span class="d-server__mlist-body">
+                        <span class="d-server__mlist-label">@t.Label</span>
+                        <span class="d-server__mlist-meta">@t.Description</span>
+                    </span>
+                    @if (t.New)
+                    {
+                        <span class="d-server__mlist-new">NEW</span>
+                    }
+                    <DIcon Name="chev-r" Size="13" />
                 </button>
             }
         </nav>
@@ -117,6 +155,12 @@
     };
 
     private string _active = "users";
+
+    /// <summary>Mobile drilldown state. False = show vertical list of
+    /// categories (default for phones), true = show the selected panel
+    /// with a back button. Desktop ignores this — the rail is always
+    /// visible there.</summary>
+    private bool _mobileShowingDetail;
 
     /// <summary>v5 deep-link: set true when the query string says
     /// ?openForm=user (ProfilePanel's "+ Add user" path). Forwarded into

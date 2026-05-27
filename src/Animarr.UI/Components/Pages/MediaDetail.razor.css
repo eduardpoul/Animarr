@@ -176,29 +176,10 @@
 .md-episode-spacer { flex: 1; }
 .md-episode-missing { color: #5b6470; font-size: 12px; }
 
-/* ── Player overlay ───────────────────────────────────────── */
-.vp-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.92);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.vp-shell {
-    width: min(96vw, 1600px);
-    aspect-ratio: 16 / 9;
-    background: #000;
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.vp-art {
-    width: 100%;
-    height: 100%;
-}
+/* Player overlay rules live near the bottom of this file (.vp-backdrop /
+   .vp-shell / .vp-art), where they were re-written for variant B
+   (full-viewport HUD) on 2026-05-27. The earlier 16:9-letterbox-card
+   variants used to live here — removed to avoid confusing CSS cascade. */
 
 
 /* ── Not-found state ───────────────────────────────────────── */
@@ -651,21 +632,28 @@
     place-items: center;
 }
 
-/* Shell wraps the Artplayer container. Sizing only — no transforms /
+/* Shell wraps the Artplayer container. Fills the entire viewport — the
+   custom HUD (variant B) is designed to overlay full-screen video, not
+   sit inside a centred 16:9 letterbox card. The video element inside
+   uses object-fit:contain so its native aspect ratio is preserved
+   regardless of viewport shape. Sizing only — no transforms /
    backdrop-filters that could block NVIDIA RTX VSR from engaging on
-   the inner <video>. Artplayer builds its own chrome inside .vp-art
-   and handles its own idle-fade. */
+   the inner <video>. */
 .vp-shell {
-    position: relative;          /* anchor for floating chips/cast menu */
+    position: relative;
     background: #000;
-    border-radius: var(--radius-card);
+    border-radius: 0;
     overflow: hidden;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
-    width: min(96vw, 1800px);
-    aspect-ratio: 16 / 9;        /* placeholder until Artplayer sizes itself */
+    box-shadow: none;
+    width: 100vw;
+    height: 100vh;
+    aspect-ratio: auto;
 }
 
-/* Artplayer mount point — fills the shell. */
+/* Artplayer mount point — fills the shell, video uses object-fit:contain
+   by default (Artplayer's own CSS), so 16:9 content gets letterboxed on
+   ultrawide screens until the user picks an aspect or the auto-crop
+   detector forces one. */
 .vp-art {
     width: 100%;
     height: 100%;

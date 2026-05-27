@@ -46,6 +46,9 @@
     <link rel="stylesheet" href="_content/Animarr.UI/app.css" />
     <!-- Merged scoped-CSS bundle (every RCL's [b-xxx] rules). -->
     <link href="Animarr.Web.Client.styles.css" rel="stylesheet" />
+    <!-- Custom HUD overlay for animarr-player.js. Not scoped-CSS because the
+         HUD DOM is injected by JS and wouldn't match [b-xxx] selectors. -->
+    <link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css" />
 
     <!-- Artplayer + hls.js. -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
@@ -82,56 +85,60 @@
 </head>
 
 <body>
-    <!-- Boot splash: brand mark + thin spinner ring + label, inlined so it
-         paints before app.css arrives. Replaces the Blazor template's
-         default SVG (unstyled circles rendered as opaque black on dark
-         backgrounds because the template CSS was never linked). -->
+    <!-- Boot splash — v6 mark (sharp geo A + sparkle) paints before
+         Blazor mounts. Inlined so it shows up before app.css arrives;
+         matches MAUI's wwwroot/index.html splash for a consistent
+         hand-off across platforms. -->
     <style>
         #app:has(.animarr-boot) {
             position: fixed; inset: 0;
-            background: #0f1115;
+            background: #0b0d10;
             display: grid; place-items: center;
             z-index: 9999;
         }
         .animarr-boot {
             display: flex; flex-direction: column;
-            align-items: center; gap: 16px;
+            align-items: center; gap: 18px;
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            color: rgba(233, 236, 242, 0.85);
         }
         .animarr-boot__mark {
-            width: 58px; height: 58px;
-            border-radius: 16px;
-            background: linear-gradient(135deg, oklch(0.62 0.06 200), oklch(0.72 0.07 200));
-            color: #fff;
-            font-weight: 700;
-            font-size: 32px;
-            line-height: 1;
-            display: grid; place-items: center;
-            box-shadow: 0 12px 32px -10px oklch(0.62 0.06 200 / 0.4);
+            width: 84px; height: 84px;
+            display: block;
+            border-radius: 22px;
+            box-shadow: 0 16px 40px -12px oklch(0.62 0.06 200 / 0.35);
         }
         .animarr-boot__ring {
-            width: 24px; height: 24px;
+            width: 22px; height: 22px;
             border-radius: 50%;
             border: 2px solid rgba(255, 255, 255, 0.10);
-            border-top-color: oklch(0.72 0.07 200);
+            border-top-color: #84c0d2;
             animation: animarr-boot-spin 0.9s linear infinite;
+            margin-top: 8px;
         }
         .animarr-boot__label {
+            font-family: 'JetBrains Mono', ui-monospace, "SF Mono", monospace;
             font-size: 11px;
-            letter-spacing: 0.12em;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
             color: rgba(154, 163, 178, 0.7);
         }
-        @keyframes animarr-boot-spin {
-            to { transform: rotate(360deg); }
-        }
+        @@keyframes animarr-boot-spin { to { transform: rotate(360deg); } }
     </style>
 
     <div id="app">
         <div class="animarr-boot">
-            <div class="animarr-boot__mark">a</div>
+            <svg class="animarr-boot__mark" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+                <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+                      fill="#84c0d2"
+                      fill-rule="evenodd"/>
+                <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+                      fill="#ffffff">
+                    <animate attributeName="opacity" values="0.6;1;0.6" dur="2.4s" repeatCount="indefinite"/>
+                </path>
+            </svg>
             <div class="animarr-boot__ring" aria-hidden="true"></div>
-            <div class="animarr-boot__label">Loading</div>
+            <div class="animarr-boot__label">Loading library</div>
         </div>
     </div>
 

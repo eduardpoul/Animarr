@@ -5,10 +5,17 @@
 /* Backdrop + drawer go all the way to the top — TopBar is glass-pills only
    now, no opaque strip to clear. Earlier `top: 60px` left a gap of bare
    page background between the fixed TopBar and the drawer header. */
+/* v5: drawer z-index lifted to 200/201. On MediaDetail the hero section
+   uses `isolation: isolate` to clip its own absolutely-positioned
+   back/edit/fav chips — that creates a separate stacking context which,
+   combined with the chips' own z-index: 3, was floating them ABOVE the
+   old z-71 drawer in some browsers (notably WebView2 on Windows MAUI).
+   Anchoring the drawer at a deliberately-high number above any plausible
+   page-content z-index removes the ambiguity. */
 .d-profile__backdrop {
     position: fixed;
     inset: 0;
-    z-index: 70;
+    z-index: 200;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
@@ -24,7 +31,7 @@
     top: 0; right: 0; bottom: 0;
     width: 480px;
     max-width: 100vw;
-    z-index: 71;
+    z-index: 201;
     background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
     border-left: 1px solid var(--border-strong);
     box-shadow: -30px 0 60px -20px rgba(0, 0, 0, 0.6);
@@ -47,8 +54,19 @@
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 22px 24px 16px;
+    /* Top padding stacks the status-bar safe-area inset on top of the base
+       22px so the avatar/name sit comfortably below the notch / dynamic
+       island. On desktop and TV the inset is 0 so the bar stays at 22px. */
+    padding: calc(22px + env(safe-area-inset-top, 0px)) 24px 16px;
     border-bottom: 1px solid var(--border);
+}
+/* Phone: bump the top padding so the header doesn't sit right under the
+   status bar. The status-bar inset is already added above; this stacks an
+   extra ~6px breathing room which only kicks in on narrow viewports. */
+@media (max-width: 720px) {
+    .d-profile__head {
+        padding-top: calc(28px + env(safe-area-inset-top, 0px));
+    }
 }
 
 .d-profile__head-text { flex: 1; min-width: 0; }
@@ -88,12 +106,20 @@
 .d-profile__close:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
 
 /* ── Tab strip ───────────────────────────────────────────── */
+/* v5: now FIVE tabs (Identity / Servers / Appearance / Audio / Language)
+   instead of four. On a 360-380px Android phone the row ran out of room
+   and the last tab (Language) clipped past the right edge. The strip is
+   now a horizontal scroller — desktop still fits everything in one row
+   thanks to the wider 480px drawer. */
 .d-profile__tabs {
     display: flex;
     padding: 10px 24px 0;
     gap: 2px;
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
 }
+.d-profile__tabs::-webkit-scrollbar { display: none; }
 
 .d-profile__tab {
     appearance: none;
@@ -110,6 +136,8 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
+    flex-shrink: 0;
+    white-space: nowrap;
     transition: color var(--motion-fast), border-color var(--motion-fast);
 }
 .d-profile__tab:hover { color: var(--text); }
@@ -124,6 +152,102 @@
     overflow-y: auto;
     padding: 22px;
 }
+
+/* ── Mobile drilldown list — vertical row of category cards. Hidden on
+   desktop and when we're already drilled into a detail view. Replaces the
+   horizontal tab scroll that felt fiddly on phones. ──────────────────── */
+.d-profile__mlist {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 20px 20px;
+}
+
+.d-profile__mlist-row {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-profile__mlist-row:hover,
+.d-profile__mlist-row:focus-visible {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: var(--border-strong);
+}
+.d-profile__mlist-ic {
+    display: inline-grid;
+    place-items: center;
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    flex-shrink: 0;
+}
+.d-profile__mlist-label { flex: 1; text-align: left; }
+
+/* Sign-out variant — danger accent so the destructive action reads
+   immediately at the bottom of the list. */
+.d-profile__mlist-row--danger {
+    background: transparent;
+    border-color: rgba(232, 88, 88, 0.32);
+    color: rgb(232, 88, 88);
+    margin-top: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+.d-profile__mlist-row--danger:hover {
+    background: rgba(232, 88, 88, 0.06);
+    border-color: rgba(232, 88, 88, 0.5);
+}
+.d-profile__mlist-ic--danger {
+    background: rgba(232, 88, 88, 0.12);
+    color: rgb(232, 88, 88);
+}
+
+/* ── Mobile-only back arrow that swaps in place of the avatar when the
+   user drilled into a detail. ──────────────────────────────────────────── */
+.d-profile__back {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: inline-grid;
+    place-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.d-profile__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+
+/* Phone (≤720px): swap horizontal tabs for the drilldown list, then toggle
+   list ⇄ body via the data-mobile-detail attribute set in Razor. TV stays
+   in landscape so the horizontal strip continues to work — html.tv-mode
+   below counteracts the mobile rules for it. */
+@media (max-width: 720px) {
+    .d-profile__tabs--desktop { display: none; }
+    .d-profile[data-mobile-detail="false"] .d-profile__mlist { display: flex; }
+    .d-profile[data-mobile-detail="false"] .d-profile__body  { display: none; }
+    .d-profile[data-mobile-detail="true"]  .d-profile__mlist { display: none; }
+    /* Hide the Identity-tab's Pair-a-TV / Server-settings / Sign-out trio
+       on phone — they already live at the root of the drilldown list, so
+       showing them again inside the tab body is just clutter. */
+    .d-profile__desktop-actions             { display: none !important; }
+}
+html.tv-mode .d-profile__tabs--desktop  { display: flex; }
+html.tv-mode .d-profile__mlist          { display: none; }
+html.tv-mode .d-profile__body           { display: block; }
+html.tv-mode .d-profile__desktop-actions { display: block; }
 
 /* ── Section / grid layouts ─────────────────────────────── */
 .d-profile__section {
@@ -598,6 +722,75 @@
     gap: 6px;
 }
 
+/* v5 Servers tab additions: rename inline edit + per-row action cluster +
+   empty state. The pencil / switch / commit / cancel buttons all share
+   .d-profile__server-row__btn — a ghost-flat 28×28 round square; switch
+   is a slightly wider pill since it carries a text label rather than an
+   icon. The rename input replaces .d-profile__server-row__name in place
+   so the row keeps its 60px height (no jump when entering edit mode). */
+.d-profile__server-empty {
+    padding: 14px 14px 4px;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.d-profile__server-row__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.d-profile__server-row__btn {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0;
+    transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
+}
+.d-profile__server-row__btn:hover {
+    background: var(--surface-3);
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+.d-profile__server-row__btn--switch {
+    width: auto;
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.d-profile__server-rename {
+    appearance: none;
+    background: var(--surface-2);
+    border: 1px solid var(--accent-line);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 8px;
+    width: 100%;
+    max-width: 240px;
+    margin-bottom: 4px;
+    outline: none;
+}
+.d-profile__server-rename:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 /* ── v5 PIN per-user-per-device: SWITCH USER strip ──────────
    Horizontal scroller of user avatars below the SERVER block.
    Each card is ~84px wide so 5-6 fit before scrolling kicks in
@@ -615,17 +808,14 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding: 2px 2px 8px;
-    /* Hide scrollbar on most browsers — show on hover via webkit hack. */
-    scrollbar-width: thin;
+    /* Hide the native scrollbar — the strip already conveys scrollability via
+       partial-card peek on the right edge. Showing a hairline track at the
+       bottom of a single-user setup just reads as a stray line under the
+       cards. */
+    scrollbar-width: none;
     scroll-snap-type: x proximity;
 }
-.d-profile__users-strip::-webkit-scrollbar {
-    height: 4px;
-}
-.d-profile__users-strip::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 2px;
-}
+.d-profile__users-strip::-webkit-scrollbar { display: none; }
 
 .d-profile__user-card {
     appearance: none;
@@ -932,4 +1122,49 @@
 .d-profile__pager-card__pill.is-active {
     background: var(--accent);
     color: #fff;
+}
+
+/* ── Player-style preview cards ───────────────────────────────────
+   Tiny mockup of the in-player control row used in the two
+   "Full" / "Icons only" picker cards. The chips mimic the actual
+   button styling so a glance is enough to tell the variants
+   apart without launching the player. */
+.d-profile__player-style-preview {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+}
+.d-profile__player-style-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    line-height: 1;
+}
+.d-profile__player-style-chip.is-primary {
+    background: var(--accent);
+    color: #0f1115;
+    border-color: transparent;
+    font-weight: 700;
+}
+.d-profile__player-style-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1;
+}
+.d-profile__player-style-icon.is-primary {
+    color: var(--accent-hi);
 }

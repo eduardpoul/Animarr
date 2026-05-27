@@ -154,19 +154,30 @@
 
 /* Progress bar tone variants — design uses accent gradient when active,
    success when seeding. Existing .animarr-progress provides the base
-   geometry; we just override the fill. */
-.tor-progress .animarr-progress__track { height: 4px; }
+   geometry; we override the fill colour and bump the track height so
+   the bar reads as more than a one-pixel pinstripe.
+   v5: track was 4px and the .tor-progress wrapper had no width hint, so
+   on narrow Progress columns the bar looked like a barely-there sliver.
+   Lifted to 8px and the column lifted to 320px in the .tor-col-progress
+   rule below. The pct label gets a min-width so the bar doesn't reflow
+   while percentages tick up. */
+.tor-progress .animarr-progress__track {
+    height: 8px;
+    border-radius: 4px;
+}
 .tor-progress--info .animarr-progress__fill {
     background: linear-gradient(90deg, var(--accent), var(--accent-hi));
-    box-shadow: 0 0 6px var(--accent-soft);
 }
 .tor-progress--success .animarr-progress__fill {
     background: linear-gradient(90deg, var(--success), oklch(0.85 0.15 150));
 }
 .tor-progress__pct {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-faint);
+    min-width: 50px;
+    text-align: right;
+    flex-shrink: 0;
 }
 
 /* ── Inline action icon buttons inside the torrents grid ─────────────── */
@@ -736,14 +747,20 @@
     color: var(--text);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-ctrl);
-    padding: 8px 12px;
+    padding: 10px 12px;
     font-size: 13px;
     outline: none;
     font-family: var(--font-ui);
+    width: 100%;
+    box-sizing: border-box;
     transition: border-color var(--motion-base);
 }
+.tor-add__input--mono { font-family: var(--font-mono); font-size: 12.5px; }
 .tor-add__input:focus,
 .tor-add__select:focus { border-color: var(--accent-line); }
+.tor-add__input::placeholder {
+    color: var(--text-faint);
+}
 
 .tor-add__select {
     appearance: none;
@@ -787,6 +804,185 @@
     flex-wrap: wrap;
 }
 
+/* ============================================================
+   Add Torrent drawer (inside SettingsEditDrawer body).
+   Self-contained classes — earlier the form borrowed .d-srv-users__
+   segment + .d-input-group across component boundaries; scoped-CSS
+   doesn't cross those, so the segment toggle rendered as bare
+   buttons + the form had no spacing. Everything below is local. */
+.tor-add__segment {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-chip);
+    margin-bottom: 18px;
+}
+
+.tor-add__seg-item {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    padding: 9px 12px;
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.tor-add__seg-item:hover { color: var(--text); }
+.tor-add__seg-item.is-active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+/* When the parent isn't a <label> we need a label-styled <span> so the
+   form rhythm matches the magnet/folder rows. */
+.tor-add__field-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: var(--label-tracking, 0.06em);
+    text-transform: var(--label-casing, uppercase);
+    margin-bottom: 8px;
+}
+
+/* Spacing between successive form rows in the drawer body. */
+.tor-add__field { margin-bottom: 14px; }
+
+/* ── Drop-zone for the .torrent file picker ────────────────────
+   Dashed border + centred prompt; the InputFile sits over the whole
+   thing at opacity:0 so clicking anywhere opens the picker. Loaded
+   state swaps the prompt for filename + size. */
+.tor-add__dropzone {
+    position: relative;
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-card);
+    background: var(--bg-1);
+    padding: 22px 16px;
+    text-align: center;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.tor-add__dropzone:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+}
+.tor-add__dropzone--loaded {
+    border-style: solid;
+    border-color: oklch(0.55 0.15 150 / 0.45);
+    background: oklch(0.55 0.15 150 / 0.08);
+}
+.tor-add__dropzone--loaded:hover {
+    border-color: oklch(0.55 0.15 150 / 0.65);
+}
+
+/* InputFile (Blazor's <input type="file"> wrapper) renders its own <input>
+   which does NOT carry our scoped-CSS [b-…] attribute. Without ::deep the
+   `opacity: 0` rule never matches and Chrome's native "Choose File" pill
+   floats inside the dropzone, breaking the whole "drop a file here" visual.
+   ::deep tells the Blazor CSS isolation compiler to strip the scope so the
+   selector reaches into child component markup. */
+.tor-add__dropzone ::deep .tor-add__dropzone-input,
+.tor-add__dropzone-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 2;
+}
+/* Some browsers ignore opacity on <input type="file"> contents — collapse
+   the native upload button too so a stray rendering doesn't sneak through. */
+.tor-add__dropzone ::deep .tor-add__dropzone-input::-webkit-file-upload-button,
+.tor-add__dropzone-input::-webkit-file-upload-button {
+    visibility: hidden;
+    width: 0;
+}
+
+.tor-add__dropzone-content {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+}
+.tor-add__dropzone--loaded .tor-add__dropzone-content {
+    color: var(--success);
+}
+
+.tor-add__dropzone-prompt {
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.4;
+}
+.tor-add__dropzone--loaded .tor-add__dropzone-prompt {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-all;
+}
+
+.tor-add__dropzone-browse {
+    color: var(--accent-hi);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.tor-add__dropzone-hint {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+}
+
+/* ── Toggle stack (auto-rename / stop / flatten / strip-root) ────
+   Same shape as the toggle-row pattern in ProfilePanel.Appearance —
+   title + hint on the left, Toggle component on the right. */
+.tor-add__toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.tor-add__toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.tor-add__toggle-text { min-width: 0; flex: 1; }
+
+.tor-add__toggle-title {
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.tor-add__toggle-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 3px;
+    line-height: 1.5;
+}
+
 /* The inline progress slot inside each .tor-table row. Wraps the global
    .animarr-progress primitive + the percentage label so they sit on one row. */
 .tor-progress {
@@ -816,26 +1012,42 @@
 }
 
 .tor-table tbody td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border);
+    padding: var(--space-4) var(--space-4);
+    /* v5: the previous 1px on --border was so soft against the table body
+       that the row separator read as a fuzzy gradient when the progress
+       bar's gradient bled near it ("кривая линия"). Bumped to a clean
+       solid 1px on a deliberately-flat token + isolation so progress fill
+       glow can't shimmer over the join. */
+    border-bottom: 1px solid var(--border-strong);
     vertical-align: middle;
+    isolation: isolate;
 }
 
 .tor-table tbody tr:last-child td { border-bottom: 0; }
 .tor-table tbody tr:hover { background: var(--bg-1); }
 
-/* Column widths — keep them close to the old FluentDataGrid layout. */
+/* Column widths — keep them close to the old FluentDataGrid layout. v5:
+   Progress lifted from 220px to 320px (the percentage label eats 50px on
+   its own, so the bar needs at least 220px of its own room to feel real).
+   Speed columns drop to 90px since 160 was excessive for a "12.4 MB/s".
+   Status column trims to 90 so the State pill doesn't waste horizontal
+   space. */
 .tor-col-dot      { width: 18px; }
 .tor-col-folder   { width: 180px; }
-.tor-col-progress { width: 220px; }
+.tor-col-progress { width: 320px; }
 .tor-col-speed    { width: 160px; }
 .tor-col-size     { width: 160px; }
 .tor-col-peers    { width: 60px; }
 .tor-col-eta      { width: 80px; }
-.tor-col-actions  { width: 155px; text-align: right; }
-.tor-col-mono     { width: 110px; }
+.tor-col-actions  { width: 110px; text-align: right; }
+.tor-col-mono     { width: 100px; }
 .tor-col-date     { width: 140px; }
-.tor-col-status   { width: 110px; }
+.tor-col-status   { width: 90px; }
+
+/* Generic right-align modifier for numeric / monospace columns. Replaces
+   the inline style="text-align:right" we used to sprinkle on Down / Up
+   so the markup stays declarative. */
+.tor-col--right { text-align: right; }
 
 /* Paginator under history table */
 .tor-paginator {
@@ -1211,14 +1423,22 @@
     .tor-table thead { display: none; }
     .tor-table tbody { display: block; }
 
+    /* v5: the actual active-torrents table has 6 <td>'s (name, state,
+       progress, down, up, actions). The previous mobile grid assumed a
+       9-column history-style table and mapped name → "dot" (16 px wide),
+       which is why every torrent title rendered one character per line on
+       Android. Mobile layout now matches the real markup:
+           [name             ][actions]
+           [state · down/up           ]
+           [progress bar              ]
+       */
     .tor-table tbody tr {
         display: grid;
-        grid-template-columns: 16px 1fr auto;
+        grid-template-columns: 1fr auto;
         grid-template-areas:
-            "dot name actions"
-            ".   folder folder"
-            ".   progress progress"
-            ".   speed size";
+            "name     actions"
+            "meta     meta"
+            "progress progress";
         gap: 6px var(--space-4);
         align-items: center;
         background: var(--surface);
@@ -1237,17 +1457,21 @@
         min-width: 0;
     }
 
-    /* Assign each td to its grid area by column index. The table has 9
-       <td> cells per row; the order is fixed by Torrents.razor. */
-    .tor-table tbody tr td:nth-child(1) { grid-area: dot; }      /* status dot */
-    .tor-table tbody tr td:nth-child(2) { grid-area: name; min-width: 0; }     /* name */
-    .tor-table tbody tr td:nth-child(3) { grid-area: folder; }   /* folder */
-    .tor-table tbody tr td:nth-child(4) { grid-area: progress; } /* progress bar */
-    .tor-table tbody tr td:nth-child(5) { grid-area: speed; }    /* down/up */
-    .tor-table tbody tr td:nth-child(6) { grid-area: size; text-align: right; } /* size */
-    .tor-table tbody tr td:nth-child(7) { display: none; }       /* peers — hide */
-    .tor-table tbody tr td:nth-child(8) { display: none; }       /* eta — hide */
-    .tor-table tbody tr td:nth-child(9) { grid-area: actions; }  /* actions */
+    /* 6-cell active table: name / state / progress / down / up / actions. */
+    .tor-table tbody tr td:nth-child(1) { grid-area: name; min-width: 0; }
+    .tor-table tbody tr td:nth-child(2) { grid-area: meta; font-size: 11px; color: var(--text-dim); }
+    .tor-table tbody tr td:nth-child(3) { grid-area: progress; }
+    .tor-table tbody tr td:nth-child(4),
+    .tor-table tbody tr td:nth-child(5) {
+        /* Inline the down + up rates onto the same meta line. */
+        display: inline-block;
+        grid-area: meta;
+        text-align: left;
+        margin-left: var(--space-3);
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+    .tor-table tbody tr td:nth-child(6) { grid-area: actions; text-align: right; }
 
     /* On the active table the last column is actions, but on history
        it's the status column. Use the markup-specific selectors below
@@ -1371,3 +1595,48 @@
     }
     .tor-table tbody tr td:nth-child(3) { display: none; } /* folder */
 }
+
+
+/* ── Mobile floating Add button — pinned bottom-right.
+   Matches design_handoff_animarr/05-mobile.html Downloads spec:
+   a single FAB lives above the safe-area gesture bar, replacing the
+   inline header "+ Add" + History buttons which were too tight on
+   a phone-width page header. Desktop hides this so the header buttons
+   stay the primary entry. TV also hides it — DPad nav already lands
+   on the header buttons cleanly. */
+.tor-fab {
+    display: none;
+}
+@media (max-width: 959px) {
+    /* Hide the header right-side action group (History + Add) — on phone
+       both the FAB below and (in a follow-up) a 3-dot menu replace them. */
+    .d-page-header__right { display: none; }
+
+    .tor-fab {
+        position: fixed;
+        right: 18px;
+        bottom: calc(22px + env(safe-area-inset-bottom));
+        z-index: 30;
+        display: inline-grid;
+        place-items: center;
+        width: 56px; height: 56px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #0b0d10;
+        border: 0;
+        cursor: pointer;
+        box-shadow:
+            0 12px 24px -8px var(--accent-soft),
+            0 4px 12px -2px rgba(0, 0, 0, 0.55);
+        transition: transform var(--motion-base), box-shadow var(--motion-base);
+    }
+    .tor-fab:hover,
+    .tor-fab:focus-visible {
+        transform: translateY(-1px);
+        box-shadow:
+            0 16px 28px -8px var(--accent-hi),
+            0 6px 14px -2px rgba(0, 0, 0, 0.6);
+    }
+}
+html.tv-mode .tor-fab { display: none; }
+html.tv-mode .d-page-header__right { display: flex; }

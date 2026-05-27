@@ -130,20 +130,111 @@
     letter-spacing: 0.4px;
 }
 
+/* ── Mobile drilldown list — replaces the rail on phones. ─────────── */
+.d-server__mlist { display: none; }
+
+.d-server__mback {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    margin-bottom: 8px;
+}
+.d-server__mback:hover { background: rgba(255, 255, 255, 0.07); }
+
 /* ── Mobile collapse ─────────────────────────────────────── */
 @media (max-width: 959px) {
     .d-server__body {
         grid-template-columns: 1fr;
     }
-    .d-server__rail {
-        position: static;
-        overflow-x: auto;
-        flex-direction: row;
-        flex-wrap: nowrap;
-        padding: 8px;
+    /* Hide the desktop rail entirely on phones — the drilldown list below
+       takes over. */
+    .d-server__rail { display: none; }
+
+    .d-server__mlist {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
     }
-    .d-server__rail-item {
-        flex-shrink: 0;
-        grid-template-columns: 18px auto auto;
+    .d-server__mlist-row {
+        appearance: none;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-size: 14px;
+        text-align: left;
+        cursor: pointer;
+        display: grid;
+        grid-template-columns: 32px 1fr auto auto;
+        align-items: center;
+        gap: 12px;
+        transition: background var(--motion-fast), border-color var(--motion-fast);
     }
+    .d-server__mlist-row:hover,
+    .d-server__mlist-row:focus-visible {
+        background: var(--surface-2);
+        border-color: var(--border-strong);
+    }
+    .d-server__mlist-ic {
+        display: inline-grid;
+        place-items: center;
+        width: 32px; height: 32px;
+        border-radius: 9px;
+        background: var(--accent-soft);
+        color: var(--accent-hi);
+    }
+    .d-server__mlist-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .d-server__mlist-label { font-weight: 600; }
+    .d-server__mlist-meta {
+        font-size: 11px;
+        color: var(--text-faint);
+        font-family: var(--font-mono);
+        letter-spacing: 0.2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .d-server__mlist-new {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--accent-hi);
+        background: var(--accent-soft);
+        padding: 2px 6px;
+        border-radius: 999px;
+        letter-spacing: 0.4px;
+    }
+
+    /* Toggle list ⇄ content via the parent's data attribute. List mode
+       shows .d-server__mlist + hides .d-server__content; detail mode does
+       the inverse + reveals the back button. */
+    .d-server[data-mobile-detail="false"] .d-server__mlist { display: flex; }
+    .d-server[data-mobile-detail="false"] .d-server__content { display: none; }
+    .d-server[data-mobile-detail="true"]  .d-server__mlist   { display: none; }
+    .d-server[data-mobile-detail="true"]  .d-server__mback   { display: inline-flex; }
+
+    /* Tighter content padding on phones — the body already has a margin
+       from the parent shell, no need for the extra 28-32px the desktop
+       card uses. */
+    .d-server__content { padding: 18px; min-height: 0; }
 }
+
+/* TV reverts to the desktop rail even though it may match the mobile media
+   query (1280px viewport). The rail is fine on a remote because focus
+   moves item-by-item with DPad up/down. */
+html.tv-mode .d-server__rail  { display: flex; }
+html.tv-mode .d-server__mlist { display: none; }
+html.tv-mode .d-server__mback { display: none; }
+html.tv-mode .d-server__content { display: block; }

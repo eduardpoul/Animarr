@@ -51,7 +51,6 @@
                 LlmDone="_llmDone" LlmTotal="_llmTotal"
                 FolderNames="@_folderNames"
                 OnProfileClickEvent="@(() => OpenProfile(null))"
-                OnServerClickEvent="@(() => OpenProfile("server"))"
                 OnLlmClickEvent="@(() => _llmOpen = true)" />
 
         <MobileShell ActiveDownloads="_activeDownloads"
@@ -151,6 +150,17 @@
             // Hook server-pick + login flows so MediaUrl/JS pick up the new
             // base address without a full reload.
             ServerReg.OnChange += ApplyServerBase;
+
+            // CRITICAL: hydrate the persisted registry FIRST. Without this,
+            // a cookie-restored boot that lands straight on /home (skipping
+            // Welcome + Discovery, which are the only other call sites for
+            // LoadAsync) leaves ServerAddressProvider on the compile-time
+            // DefaultServerUrl. Every <img src> then resolves against
+            // tower.one and DNS-fails on LAN-only deployments. LoadAsync
+            // calls ApplyCurrentToHttp() internally, which writes
+            // ServerAddr.Current and fires OnChange — that triggers our
+            // ApplyServerBase via the subscription above.
+            await ServerReg.LoadAsync();
             ApplyServerBase();
         }
         catch { }
@@ -160,9 +170,13 @@
         await UserCtx.LoadAsync();
 
         // 2a. Apply user's saved interface language. Web.Client preloads "en"
-        //     at boot; once we know the user's actual preference, hot-swap it.
-        //     Loc.LoadAsync transparently falls back to en.json if the pack
-        //     file is missing, so unconfigured languages don't break the UI.
+        //     at boot in its own Program.cs; Animarr.App (MAUI) does NOT,
+        //     so on MAUI the dict is empty for the first render and any
+        //     L["nav.catalog"] returns the raw key. Always seed with "en"
+        //     here so MAUI gets readable labels even when the user's pref
+        //     is null/"en". Loc.LoadAsync transparently falls back to
+        //     en.json if a non-English pack file is missing.
+        try { await Loc.LoadAsync("en"); } catch { /* keys-as-values fallback */ }
         var prefLang = UserCtx.Preferences?.Language;
         if (!string.IsNullOrEmpty(prefLang) && prefLang != "en")
         {
@@ -255,8 +269,12 @@
             var paths = await Api.GetBackdropRotationAsync();
             if (paths.Length > 0)
             {
+                // Route through MediaUrl so the backdrop slideshow uses the
+                // user's chosen server authority. Raw "/api/image?…" URLs
+                // resolve against the WebView2 virtual host on MAUI Windows
+                // (https://0.0.0.1) and 404.
                 var urls = paths
-                    .Select(p => $"{ApiRoutes.Image}?path={Uri.EscapeDataString(p)}")
+                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p))
                     .ToArray();
                 _everywhereBackdropStarted = true;
                 await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
