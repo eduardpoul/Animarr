@@ -2571,6 +2571,31 @@ button.d-pill:focus-visible {
 }
 
 /* ============================================================
+   .d-input-group — global label-over-input wrapper. Originally
+   scoped to the <Input> primitive's razor.css, but UsersRolesPanel
+   uses it directly around a raw <select> (ROLE picker) — scoped
+   CSS doesn't reach there, which is why that select rendered
+   inline-shrunk against the label instead of stacking + filling
+   its grid cell. Hoisting the rule globally fixes the layout
+   without changing the Input primitive's contract.
+   ============================================================ */
+.d-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+
+.d-input-group__label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: var(--label-tracking, 0.4px);
+    color: var(--text-faint);
+    text-transform: var(--label-casing, uppercase);
+}
+
+/* ============================================================
    .d-srv-card — global shell shared by every Server Settings panel
    (Users/Roles, Categories, About, Folders embed, …). Lives in
    components.css instead of any panel's scoped razor.css because
