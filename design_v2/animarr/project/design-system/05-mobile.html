@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>05 · Mobile flow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  .phones{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(360px,1fr));
+    gap:36px 28px;
+    justify-items:center;
+  }
+  .phone-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;}
+  .phone-label{
+    text-align:center;font-size:11px;color:var(--text-faint);
+    letter-spacing:0.5px;text-transform:uppercase;font-weight:600;
+    display:flex;flex-direction:column;align-items:center;gap:6px;
+  }
+  .phone-label .ti{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-0.01em;text-transform:none;}
+  .phone-label .nt{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:0;text-transform:none;}
+
+  /* Mobile screen-specific helpers */
+  .mhero{position:absolute;top:0;left:0;right:0;height:340px;background-size:cover;background-position:center;}
+  .mhero::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,var(--bg-0) 0%,transparent 55%),linear-gradient(90deg,rgba(15,17,21,0.5),transparent 70%);}
+  .mhero-content{position:absolute;left:16px;right:16px;top:200px;z-index:3;}
+  .mhero-content .ov{font-size:10px;color:var(--accent-hi);font-weight:600;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;}
+  .mhero-content h2{margin:0;font-size:26px;font-weight:700;letter-spacing:-0.7px;line-height:1.05;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,0.6);}
+  .mhero-content .meta{display:flex;gap:10px;margin-top:6px;font-size:10.5px;color:var(--text-dim);}
+  .mhero-content .meta .s{color:var(--accent-hi);font-weight:600;}
+  .mhero-content .actions{display:flex;gap:6px;margin-top:10px;}
+
+  .mchips{position:absolute;top:350px;left:16px;right:16px;display:flex;gap:6px;overflow-x:auto;z-index:4;}
+  .mchip{flex-shrink:0;padding:5px 11px;border-radius:999px;background:var(--surface);border:1px solid var(--border);font-size:11px;color:var(--text-dim);font-weight:500;}
+  .mchip.on{background:var(--accent);color:#0f1115;border-color:var(--accent);font-weight:600;}
+
+  .mgrid{position:absolute;top:390px;left:16px;right:16px;bottom:80px;display:grid;grid-template-columns:1fr 1fr;gap:10px;overflow:hidden;}
+  .mpost{height:185px;border-radius:8px;background-size:cover;background-position:center;position:relative;}
+  .mpost::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(15,17,21,0.85));border-radius:8px;}
+  .mpost .t{position:absolute;left:8px;right:8px;bottom:7px;color:#fff;font-size:11px;font-weight:600;z-index:2;}
+
+  .mlist-row{display:flex;align-items:center;gap:12px;padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
+  .mlist-row .av-sq{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:13px;flex-shrink:0;}
+  .mlist-row .body{flex:1;min-width:0;}
+  .mlist-row .nm{font-size:12.5px;font-weight:600;letter-spacing:-0.01em;}
+  .mlist-row .mt{font-size:10.5px;color:var(--text-dim);margin-top:2px;}
+  .mlist-row .rt{color:var(--text-faint);font-size:11px;}
+
+  .tabset-m{display:flex;gap:4px;padding:6px 18px 0;border-bottom:1px solid var(--border);overflow-x:auto;}
+  .tabset-m button{all:unset;cursor:pointer;padding:8px 9px;font-size:10.5px;font-weight:600;color:var(--text-dim);white-space:nowrap;}
+  .tabset-m button.on{color:var(--text);border-bottom:2px solid var(--accent);margin-bottom:-1px;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Section 05</div>
+  <h1 class="page">Mobile flow</h1>
+  <p class="lede">Animarr on iPhone, 375 × 812. Topbar floats over the hero; primary nav is a 3-tab bottom bar. Drawers become bottom sheets. Some admin-heavy settings are intentionally hidden — they live on the web.</p>
+
+  <nav class="ds-nav">
+    <a href="index.html"><span class="n">00</span>Cover</a>
+    <a href="01-foundations.html"><span class="n">01</span>Foundations</a>
+    <a href="02-components.html"><span class="n">02</span>Components</a>
+    <a href="03-browser.html"><span class="n">03</span>Browser</a>
+    <a href="04-tv.html"><span class="n">04</span>TV</a>
+    <a href="05-mobile.html" class="cur"><span class="n">05</span>Mobile</a>
+    <a href="06-themes.html"><span class="n">06</span>Themes</a>
+    <a href="07-onboarding.html"><span class="n">07</span>Onboarding</a>
+    <a href="08-hero-variants.html"><span class="n">08</span>Hero variants</a>
+  </nav>
+
+  <!-- ────────── M-01 LOGIN ────────── -->
+  <h2 class="sec" id="login"><span class="n">M-01</span><span class="t">Login + Catalog</span><span class="d">Auth → 3-tab catalog. Hero overflows behind the topbar and chips strip.</span></h2>
+
+  <div class="phones">
+
+    <!-- LOGIN -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;filter:blur(28px) brightness(0.4) saturate(0.7);transform:scale(1.06);"></div>
+        <div style="position:absolute;left:24px;right:24px;top:120px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;"><div style="width:34px;height:34px;border-radius:9px;background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:18px;font-weight:700;">a</div><div><div style="font-size:17px;font-weight:700;letter-spacing:-0.3px;">Animarr</div><div style="font-size:10px;color:var(--text-faint);">Donghua · Anime · Movies</div></div></div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;margin-bottom:4px;">Welcome back</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:22px;">Sign in to continue.</div>
+          <div class="fld"><span class="lb">Username</span><input class="in" value="yuri" /></div>
+          <div class="fld"><span class="lb">Password</span><input class="in" type="password" value="••••••••" /></div>
+          <button class="btn p" style="width:100%;justify-content:center;margin-top:8px;">Sign in →</button>
+          <div style="text-align:center;font-size:10.5px;color:var(--text-faint);margin-top:18px;">Or <a style="color:var(--accent-hi);">request invite</a> — invite only</div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Login</span><span class="nt">/login</span></div>
+    </div>
+
+    <!-- CATALOG -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="mhero" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70');"></div>
+        <div class="mtb"><div class="brand"><div class="mark">a</div><div class="br">Animarr</div></div><div class="ib">🔎</div></div>
+        <div class="mhero-content"><div class="ov">Continue · EP 5 · 38%</div><h2>Perfect World</h2><div class="meta"><span class="s">★ 8.5</span><span>2018</span><span>270 EP</span></div><div class="actions"><button class="btn p s">▶ Continue · 38%</button></div></div>
+        <div class="mchips"><span class="mchip on">All</span><span class="mchip">Anime</span><span class="mchip">Movies</span><span class="mchip">Donghua</span><span class="mchip">Series</span></div>
+        <div class="mgrid">
+          <div class="mpost" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=300&q=70');"><div class="t">Perfect World</div></div>
+          <div class="mpost" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=300&q=70');"><div class="t">Swallowed Star</div></div>
+          <div class="mpost" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=300&q=70');"><div class="t">Xian Ni</div></div>
+          <div class="mpost" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=300&q=70');"><div class="t">Arcane</div></div>
+        </div>
+        <div class="mtab"><div class="it on"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Catalog · default</span><span class="nt">/catalog</span></div>
+    </div>
+
+    <!-- NEEDS REVIEW SHEET -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="mhero" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70');filter:brightness(0.4);"></div>
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);"></div>
+        <div class="sht" style="top:18%;">
+          <div class="grab"><span></span></div>
+          <div class="dh"><div class="dh-i" style="color:var(--warn);background:var(--warn-soft);border-color:oklch(0.6 0.10 70 / 0.4);">!</div><div><div class="dh-s" style="color:var(--warn);">Needs review</div><div class="dh-n">3 unmatched</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="db">
+            <div class="alert warn" style="margin-bottom:12px;font-size:10.5px;"><span>!</span><div><b>3 episodes couldn't be matched</b></div></div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="padding:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+                <div style="font-size:11.5px;font-weight:600;">[Perfect.World][270][1080p].mkv</div>
+                <div style="font-size:9.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">/movies/incoming · 1.4 GB</div>
+                <div style="display:flex;gap:6px;margin-top:8px;"><button class="btn p s" style="font-size:10px;padding:5px 9px;">✦ Suggest</button><button class="btn g s" style="font-size:10px;padding:5px 9px;">Match</button><button class="btn d s" style="font-size:10px;padding:5px 9px;">Ignore</button></div>
+              </div>
+              <div style="padding:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+                <div style="font-size:11.5px;font-weight:600;">Xian_Ni_E141_FINAL.mp4</div>
+                <div style="font-size:9.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">/series/donghua · 820 MB</div>
+                <div style="display:flex;gap:6px;margin-top:8px;"><button class="btn p s" style="font-size:10px;padding:5px 9px;">✦ Suggest</button><button class="btn g s" style="font-size:10px;padding:5px 9px;">Match</button><button class="btn d s" style="font-size:10px;padding:5px 9px;">Ignore</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="df"><button class="btn p s" style="flex:1;justify-content:center;">✦ Match all</button><button class="btn g s" style="flex:1;justify-content:center;">Done</button></div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Catalog · NR sheet</span><span class="nt">/catalog?nr=open</span></div>
+    </div>
+  </div>
+
+  <!-- ────────── M-02 MEDIA DETAIL ────────── -->
+  <h2 class="sec" id="detail"><span class="n">M-02</span><span class="t">Media detail · Edit sheet</span><span class="d">Scrollable detail page. Edit metadata pops a bottom sheet that reuses the desktop drawer's tab set.</span></h2>
+
+  <div class="phones">
+
+    <!-- DETAIL -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:0;left:0;right:0;height:260px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:260px;background:linear-gradient(0deg,var(--bg-0),transparent 60%);"></div>
+        <div class="ib" style="position:absolute;top:48px;left:16px;">←</div>
+        <div style="position:absolute;top:48px;right:16px;display:flex;gap:6px;"><div class="ib">★</div><div class="ib">✎</div></div>
+        <div style="position:absolute;top:180px;left:16px;right:16px;display:flex;gap:12px;">
+          <div style="width:84px;height:118px;border-radius:7px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;flex-shrink:0;"></div>
+          <div style="padding-top:30px;"><div style="font-size:9.5px;color:var(--accent-hi);font-weight:600;text-transform:uppercase;">Continue · EP 5</div><div style="font-size:21px;font-weight:700;letter-spacing:-0.5px;line-height:1.05;margin-top:3px;">Perfect World</div><div style="display:flex;gap:8px;margin-top:5px;font-size:10px;color:var(--text-dim);"><span style="color:var(--accent-hi);">★ 8.5</span><span>270 EP</span></div></div>
+        </div>
+        <div style="position:absolute;top:330px;left:16px;right:16px;display:flex;gap:6px;">
+          <button class="btn p s" style="flex:1;justify-content:center;">▶ Continue · 38%</button>
+          <button class="btn g s" style="padding:6px 10px;">↻</button>
+        </div>
+        <div style="position:absolute;top:380px;left:16px;right:16px;font-size:10.5px;color:var(--text-dim);line-height:1.6;">Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world soaked in war.</div>
+        <div style="position:absolute;top:460px;left:16px;right:16px;">
+          <div class="seas-m" style="margin-bottom:10px;">
+            <div class="s">S1 · 24/24 ✓</div>
+            <div class="s on">S2 · 4/24</div>
+            <div class="s">S3 · 0/24</div>
+            <div class="s">Specials</div>
+            <div class="s">Movies</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;gap:8px;align-items:center;padding:5px;background:var(--surface);border:1px solid var(--border);border-radius:8px;opacity:0.7;">
+              <div style="width:54px;height:36px;border-radius:5px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;"></div>
+              <div style="flex:1;font-size:11px;font-weight:600;">EP 04 · Episode 4</div>
+              <span style="color:var(--success);font-size:11px;">●</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;padding:5px;background:var(--surface);border:1px solid var(--border);border-radius:8px;position:relative;">
+              <div style="width:54px;height:36px;border-radius:5px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;background-position:20%;"></div>
+              <div style="flex:1;font-size:11px;font-weight:600;">EP 05 · Episode 5</div>
+              <span style="font-size:10px;color:var(--accent-hi);font-weight:600;">38%</span>
+              <div style="position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,0.06);"><div style="width:38%;height:100%;background:var(--accent);"></div></div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;padding:5px;background:var(--surface);border:1px solid var(--border);border-radius:8px;">
+              <div style="width:54px;height:36px;border-radius:5px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;background-position:60%;"></div>
+              <div style="flex:1;font-size:11px;font-weight:600;">EP 06 · Episode 6</div>
+              <span style="color:var(--text-faint);font-size:10px;">20m</span>
+            </div>
+          </div>
+        </div>
+        <div class="mtab"><div class="it on"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Media detail · TV series</span><span class="nt">/media/perfect-world</span></div>
+    </div>
+
+    <!-- DETAIL · MOVIE -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:0;left:0;right:0;height:260px;background:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=900&q=70') center/cover;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:260px;background:linear-gradient(0deg,var(--bg-0),transparent 60%);"></div>
+        <div class="ib" style="position:absolute;top:48px;left:16px;">←</div>
+        <div style="position:absolute;top:48px;right:16px;display:flex;gap:6px;"><div class="ib">★</div><div class="ib">✎</div></div>
+        <div style="position:absolute;top:180px;left:16px;right:16px;display:flex;gap:12px;">
+          <div style="width:84px;height:118px;border-radius:7px;background:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=200&q=70') center/cover;flex-shrink:0;"></div>
+          <div style="padding-top:18px;">
+            <div style="display:flex;gap:5px;"><span class="pl" style="font-size:9px;padding:2px 5px;">Movie</span><span class="pl s" style="font-size:9px;padding:2px 5px;">✓ 2×</span></div>
+            <div style="font-size:21px;font-weight:700;letter-spacing:-0.5px;line-height:1.05;margin-top:5px;">Mortal's Journey</div>
+            <div style="display:flex;gap:8px;margin-top:5px;font-size:10px;color:var(--text-dim);"><span style="color:var(--accent-hi);">★ 8.2</span><span>2024</span><span>2h 14m</span></div>
+          </div>
+        </div>
+        <div style="position:absolute;top:330px;left:16px;right:16px;display:flex;gap:6px;">
+          <button class="btn p s" style="flex:1;justify-content:center;">▶ Play movie</button>
+        </div>
+        <div style="position:absolute;top:380px;left:16px;right:16px;font-size:10.5px;color:var(--text-dim);line-height:1.6;">Han Li, an unremarkable boy from a mountain village, stumbles into the cultivation world and must outwit immortals.</div>
+        <div style="position:absolute;top:480px;left:16px;right:16px;">
+          <div style="font-size:10px;color:var(--accent-hi);font-weight:600;text-transform:uppercase;margin-bottom:8px;">You might also like</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div style="aspect-ratio:2/3;border-radius:6px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;"></div>
+            <div style="aspect-ratio:2/3;border-radius:6px;background:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=200&q=70') center/cover;"></div>
+            <div style="aspect-ratio:2/3;border-radius:6px;background:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=200&q=70') center/cover;"></div>
+          </div>
+        </div>
+        <div class="mtab"><div class="it on"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Media detail · Movie</span><span class="nt">/media/mortals-journey</span></div>
+    </div>
+
+    <!-- EDIT SHEET -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;filter:blur(2px) brightness(0.4);"></div>
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);"></div>
+        <div class="sht" style="top:18%;">
+          <div class="grab"><span></span></div>
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit metadata</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset-m"><button class="on">IDs</button><button>Basics</button><button>Poster</button><button>Backdrop</button><button>Tags</button></div>
+          <div class="db">
+            <div class="alert info" style="margin-bottom:12px;font-size:10.5px;"><span>✦</span><div><b>Auto-match · 98%</b><br/>qwen2.5:1.5b OK</div></div>
+            <div class="fld"><span class="lb">TMDB ID</span><input class="in" value="perfect-world-tmdb" style="font-size:12px;" /></div>
+            <div class="fld"><span class="lb">MAL ID</span><input class="in" value="perfect-world-mal" style="font-size:12px;" /></div>
+            <div class="fld"><span class="lb">IMDb ID</span><input class="in" placeholder="(not linked)" style="font-size:12px;" /></div>
+          </div>
+          <div class="df"><button class="btn g s" style="flex:1;justify-content:center;">Cancel</button><button class="btn p s" style="flex:1;justify-content:center;">Save</button></div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Detail · Edit sheet</span><span class="nt">/media/x?edit=ids</span></div>
+    </div>
+  </div>
+
+  <!-- ────────── M-03 DOWNLOADS ────────── -->
+  <h2 class="sec" id="downloads"><span class="n">M-03</span><span class="t">Downloads</span><span class="d">Read + minimal write. Add download is a sheet with .torrent / Magnet / Upload tabs.</span></h2>
+
+  <div class="phones">
+
+    <!-- DOWNLOADS LIST -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">Downloads</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">3 active · ↓ 33 MB/s</div>
+        </div>
+        <div style="position:absolute;top:120px;left:16px;right:16px;display:flex;gap:6px;">
+          <span class="mchip on">All</span><span class="mchip">Active</span><span class="mchip">Done</span><span class="mchip">Stalled</span>
+        </div>
+        <div style="position:absolute;top:160px;left:16px;right:16px;bottom:80px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;">
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;"><div style="font-size:12px;font-weight:600;">Perfect World — 270 [1080p]</div><div style="font-size:10px;color:var(--text-faint);margin-top:2px;font-family:var(--font-mono);">→ Perfect World (2018)</div><div style="display:flex;align-items:center;gap:8px;margin-top:8px;"><div style="flex:1;height:2px;background:rgba(255,255,255,0.06);"><div style="width:62%;height:100%;background:var(--accent);"></div></div><span style="font-size:9.5px;color:var(--accent-hi);font-weight:600;">62% · ↓ 14.2 MB/s</span></div></div>
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;"><div style="font-size:12px;font-weight:600;">Xian Ni — 141</div><div style="font-size:10px;color:var(--text-faint);margin-top:2px;font-family:var(--font-mono);">→ Xian Ni</div><div style="display:flex;align-items:center;gap:8px;margin-top:8px;"><div style="flex:1;height:2px;background:rgba(255,255,255,0.06);"><div style="width:34%;height:100%;background:var(--accent);"></div></div><span style="font-size:9.5px;color:var(--accent-hi);font-weight:600;">34% · ↓ 18.7 MB/s</span></div></div>
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;"><div style="font-size:12px;font-weight:600;">Throne of Seal — 200</div><div style="font-size:10px;color:var(--text-faint);margin-top:2px;font-family:var(--font-mono);">→ Throne of Seal · stalled</div><div style="display:flex;align-items:center;gap:8px;margin-top:8px;"><div style="flex:1;height:2px;background:rgba(255,255,255,0.06);"><div style="width:8%;height:100%;background:var(--warn);"></div></div><span style="font-size:9.5px;color:var(--warn);font-weight:600;">8% · 0 peers</span></div></div>
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;opacity:0.6;"><div style="font-size:12px;font-weight:600;">Mortal's Journey [BluRay]</div><div style="font-size:10px;color:var(--text-faint);margin-top:2px;font-family:var(--font-mono);">→ Mortal's Journey · done</div><div style="display:flex;align-items:center;gap:8px;margin-top:8px;"><div style="flex:1;height:2px;background:rgba(255,255,255,0.06);"><div style="width:100%;height:100%;background:var(--success);"></div></div><span style="font-size:9.5px;color:var(--success);font-weight:600;">100%</span></div></div>
+        </div>
+        <button class="btn p" style="position:absolute;right:16px;bottom:90px;border-radius:999px;padding:12px 18px;box-shadow:var(--sh-drawer);">+ Add</button>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it on"><span class="ic">↓</span>Downloads</div><div class="it"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Downloads · list</span><span class="nt">/downloads</span></div>
+    </div>
+
+    <!-- ADD DOWNLOAD SHEET -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;opacity:0.4;">Downloads</div>
+        </div>
+        <div style="position:absolute;top:120px;left:16px;right:16px;opacity:0.4;display:flex;flex-direction:column;gap:8px;">
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:12px;font-weight:600;">Perfect World — 270</div>
+          <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:12px;font-weight:600;">Xian Ni — 141</div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
+        <div class="sht" style="top:25%;">
+          <div class="grab"><span></span></div>
+          <div class="dh"><div class="dh-i">+</div><div><div class="dh-s">Downloads</div><div class="dh-n">Add download</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="db">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:3px;margin-bottom:12px;font-size:10.5px;">
+              <button class="btn g s" style="padding:7px 0;background:var(--surface-3);border:0;justify-content:center;font-size:10.5px;">.torrent</button>
+              <button style="all:unset;cursor:pointer;padding:7px 0;text-align:center;color:var(--text-dim);font-weight:600;">Magnet</button>
+              <button style="all:unset;cursor:pointer;padding:7px 0;text-align:center;color:var(--text-dim);font-weight:600;">Upload</button>
+            </div>
+            <div class="drop" style="margin-bottom:12px;"><div class="ic">↥</div><div class="l">Drop file or <a>browse</a></div></div>
+            <div class="fld"><span class="lb">Destination</span><input class="in" value="Perfect World" style="font-size:12px;" /></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;"><span style="font-size:11px;">Start immediately</span><span class="tg on"></span></div>
+          </div>
+          <div class="df"><button class="btn g s" style="flex:1;justify-content:center;">Cancel</button><button class="btn p s" style="flex:1;justify-content:center;">▶ Start</button></div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Downloads · Add sheet</span><span class="nt">/downloads?add=open</span></div>
+    </div>
+
+    <!-- PLAYER -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,17,21,0.55),transparent 25%,transparent 70%,rgba(15,17,21,0.92));"></div>
+        <div style="position:absolute;top:40px;left:16px;right:16px;display:flex;align-items:center;justify-content:space-between;">
+          <div class="ib" style="background:rgba(15,17,21,0.55);backdrop-filter:blur(8px);">←</div>
+          <div style="text-align:center;"><div style="font-size:9.5px;color:var(--accent-hi);font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">EP 5 · S1</div><div style="font-size:13px;font-weight:600;margin-top:2px;">Perfect World</div></div>
+          <div class="ib" style="background:rgba(15,17,21,0.55);backdrop-filter:blur(8px);">⋯</div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:24px 16px 36px;">
+          <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:10px;">
+            <span>07:32</span>
+            <div style="flex:1;height:3px;background:rgba(255,255,255,0.15);border-radius:3px;position:relative;">
+              <div style="width:38%;height:100%;background:var(--accent);border-radius:3px;"></div>
+              <div style="position:absolute;left:38%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:14px;background:var(--accent-hi);box-shadow:0 0 0 3px var(--accent-soft);"></div>
+            </div>
+            <span>20:00</span>
+          </div>
+          <div style="display:flex;justify-content:center;align-items:center;gap:24px;margin-top:14px;">
+            <button class="ib" style="background:transparent;border:0;font-size:18px;width:auto;">⏴ 10</button>
+            <button class="btn p" style="width:64px;height:64px;border-radius:64px;justify-content:center;padding:0;font-size:24px;">⏸</button>
+            <button class="ib" style="background:transparent;border:0;font-size:18px;width:auto;">10 ⏵</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-dim);margin-top:18px;">
+            <span>🅰 CN</span><span>CC Off</span><span>1080p</span><span>📺 Cast</span>
+          </div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Player</span><span class="nt">/play/.../s1e5</span></div>
+    </div>
+  </div>
+
+  <!-- ────────── M-04 SETTINGS ────────── -->
+  <h2 class="sec" id="settings"><span class="n">M-04</span><span class="t">Settings · Profile + Server</span><span class="d">Default view is profile / this device. Master users get a "Server settings" card that drills into 11 admin tabs.</span></h2>
+
+  <div class="phones">
+
+    <!-- SETTINGS ROOT — User / Profile (default) -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="mss-h">
+          <div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+            <div style="width:36px;height:36px;border-radius:36px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:15px;font-weight:700;">Y</div>
+            <div><div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Yuri</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);">master · Living Room</div></div>
+          </div>
+        </div>
+        <div class="mss-list" style="top:130px;">
+          <div style="font-size:9.5px;color:var(--text-faint);font-weight:600;letter-spacing:0.5px;text-transform:uppercase;padding:0 4px;margin-bottom:6px;">This device · profile</div>
+          <div class="mlist-row"><div class="av-sq">🎨</div><div class="body"><div class="nm">Appearance</div><div class="mt">Calm dark · blue-green</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">▦</div><div class="body"><div class="nm">Hero navigation</div><div class="mt">I · Expanding capsule</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">🔒</div><div class="body"><div class="nm">PIN · Account</div><div class="mt">PIN set · email yuri@medsol…</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">⊞</div><div class="body"><div class="nm">Sign in other device</div><div class="mt">Pair a TV or browser · QR / code</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">🖥</div><div class="body"><div class="nm">Active devices</div><div class="mt">3 signed-in · revoke any</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">ℹ</div><div class="body"><div class="nm">About this app</div><div class="mt">Animarr 2.0.1 · iOS · build 3429</div></div><span class="rt">▸</span></div>
+
+          <div style="font-size:9.5px;color:var(--text-faint);font-weight:600;letter-spacing:0.5px;text-transform:uppercase;padding:0 4px;margin:14px 0 6px;">Server · master</div>
+          <div class="mlist-row" style="border-color:var(--accent-line);background:var(--accent-soft);"><div class="av-sq">⚙</div><div class="body"><div class="nm">Server settings</div><div class="mt">12 admin tabs · users, folders, AI, hardware…</div></div><span class="rt" style="color:var(--accent-hi);">▸</span></div>
+
+          <div class="mlist-row" style="margin-top:14px;border:1px solid oklch(0.55 0.16 25 / 0.4);background:oklch(0.68 0.18 25 / 0.05);"><div class="av-sq" style="background:var(--danger-soft);border-color:oklch(0.55 0.16 25 / 0.4);color:var(--danger);">⎋</div><div class="body"><div class="nm" style="color:var(--danger);">Sign out</div><div class="mt">yuri@medsolutions.dev</div></div><span class="rt">▸</span></div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · default (profile)</span><span class="nt">/settings</span></div>
+    </div>
+
+    <!-- SETTINGS · Server (drill-in, master only) -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div style="font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Server settings</div>
+        </div>
+        <div style="position:absolute;top:90px;left:16px;right:16px;font-size:10.5px;color:var(--text-dim);">Living Room Server · v2.0 · master</div>
+        <div class="mss-list" style="top:120px;">
+          <div class="mlist-row"><div class="av-sq">⚙</div><div class="body"><div class="nm">General</div><div class="mt">Server name · timezone · telemetry</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">👥</div><div class="body"><div class="nm">Users & Roles</div><div class="mt">4 accounts · 1 master</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">🗁</div><div class="body"><div class="nm">Root folders</div><div class="mt">2 paths · 14.2 TB · 1 offline</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">↺</div><div class="body"><div class="nm">Rename history</div><div class="mt">200 ops · 14:22 today</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">⚡</div><div class="body"><div class="nm">Hardware</div><div class="mt">NVENC · 2/3 sessions · RTX 3060</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">✦</div><div class="body"><div class="nm">AI / LLM</div><div class="mt">qwen2.5:1.5b · 17/25 today</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">↓</div><div class="body"><div class="nm">Torrent</div><div class="mt">qBittorrent · connected · 4.6.7</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">⊕</div><div class="body"><div class="nm">Metadata sources</div><div class="mt">TMDB · MAL · 3 enabled</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">⊟</div><div class="body"><div class="nm">Patterns</div><div class="mt">3 active · {title} S{s:02}E{e:02}</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">∅</div><div class="body"><div class="nm">Ignore rules</div><div class="mt">5 globs · last 14:08 today</div></div><span class="rt">▸</span></div>
+          <div class="mlist-row"><div class="av-sq">▢</div><div class="body"><div class="nm">Categories</div><div class="mt">4 · All / Anime / Movies / Donghua</div></div><span class="rt">▸</span></div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · Server (drill-in)</span><span class="nt">/settings/server</span></div>
+    </div>
+
+    <!-- SETTINGS · FOLDERS -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div class="ib" style="background:transparent;border:none;width:auto;height:auto;font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Root folders</div>
+        </div>
+        <div style="position:absolute;top:110px;left:16px;right:16px;font-size:11px;color:var(--text-dim);">Paths Animarr scans for media.</div>
+        <div class="mss-list" style="top:140px;">
+          <div class="mlist-row" style="align-items:flex-start;padding:12px;"><div class="av-sq">🗁</div><div class="body"><div class="nm" style="font-family:var(--font-mono);font-size:11.5px;">/mnt/storage/anime</div><div class="mt">1284 files · 8.4 TB · 12m ago</div><div style="display:flex;gap:5px;margin-top:6px;"><span class="pl a">Anime</span><span class="pl s">online</span></div></div></div>
+          <div class="mlist-row" style="align-items:flex-start;padding:12px;"><div class="av-sq">🗁</div><div class="body"><div class="nm" style="font-family:var(--font-mono);font-size:11.5px;">/mnt/storage/movies</div><div class="mt">412 files · 5.8 TB · 12m ago</div><div style="display:flex;gap:5px;margin-top:6px;"><span class="pl a">Movies</span><span class="pl s">online</span></div></div></div>
+          <div class="mlist-row" style="align-items:flex-start;padding:12px;border-color:oklch(0.6 0.10 70 / 0.4);"><div class="av-sq" style="color:var(--warn);background:var(--warn-soft);border-color:oklch(0.6 0.10 70 / 0.4);">!</div><div class="body"><div class="nm" style="font-family:var(--font-mono);font-size:11.5px;">/mnt/external/donghua</div><div class="mt" style="color:var(--warn);">unreachable · /dev/sdb not mounted</div><div style="display:flex;gap:5px;margin-top:6px;"><span class="pl">Donghua</span><span class="pl w">offline</span></div></div></div>
+        </div>
+        <button class="btn p" style="position:absolute;left:16px;right:16px;bottom:90px;justify-content:center;">+ Add folder</button>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · Root folders</span><span class="nt">/settings/folders</span></div>
+    </div>
+
+    <!-- SETTINGS · HISTORY -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div class="ib" style="background:transparent;border:none;width:auto;height:auto;font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Rename history</div>
+        </div>
+        <div style="position:absolute;top:110px;left:16px;right:16px;font-size:11px;color:var(--text-dim);">Last 200 operations · swipe row to revert.</div>
+        <div class="mss-list" style="top:140px;font-family:var(--font-mono);font-size:11px;">
+          <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="color:var(--text-faint);font-size:9.5px;margin-bottom:4px;">14:22 TODAY</div><div style="color:var(--text-dim);">Perfect.World.E270.1080p.mkv</div><div style="color:var(--accent-hi);margin-top:2px;">→ Perfect World · S01E270.mkv</div></div>
+          <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="color:var(--text-faint);font-size:9.5px;margin-bottom:4px;">14:22 TODAY</div><div style="color:var(--text-dim);">Perfect.World.E269.1080p.mkv</div><div style="color:var(--accent-hi);margin-top:2px;">→ Perfect World · S01E269.mkv</div></div>
+          <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="color:var(--text-faint);font-size:9.5px;margin-bottom:4px;">12:08 TODAY</div><div style="color:var(--text-dim);">Xian_Ni_E141_FINAL.mp4</div><div style="color:var(--accent-hi);margin-top:2px;">→ Xian Ni · S01E141.mp4</div></div>
+          <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;opacity:0.6;"><div style="color:var(--text-faint);font-size:9.5px;margin-bottom:4px;">YESTERDAY</div><div style="color:var(--text-dim);">ARCANE_S02E03.mkv</div><div style="color:var(--accent-hi);margin-top:2px;">→ Arcane · S02E03.mkv</div></div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · Rename history</span><span class="nt">/settings/history</span></div>
+    </div>
+
+    <!-- SETTINGS · APPEARANCE -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div class="ib" style="background:transparent;border:none;width:auto;height:auto;font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Appearance</div>
+        </div>
+        <div style="position:absolute;top:110px;left:16px;right:16px;font-size:11px;color:var(--text-dim);">Theme & accent.</div>
+        <div style="position:absolute;top:150px;left:16px;right:16px;">
+          <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Theme</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">
+            <div style="background:var(--surface);border:2px solid var(--accent);border-radius:8px;padding:10px;"><div style="height:54px;border-radius:5px;background:linear-gradient(135deg,#0f1115,#181c24);border:1px solid var(--border);"></div><div style="font-size:12px;font-weight:600;margin-top:8px;">Calm dark</div></div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;"><div style="height:54px;border-radius:5px;background:linear-gradient(135deg,#0a0807,#25201b);border:1px solid var(--border);"></div><div style="font-size:12px;font-weight:600;margin-top:8px;">Warm dark</div></div>
+          </div>
+          <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Accent</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:18px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.72 0.18 245);"></div><div style="font-size:9px;font-weight:600;">Azure</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.74 0.17 232);"></div><div style="font-size:9px;font-weight:600;">Sky</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.66 0.22 262);"></div><div style="font-size:9px;font-weight:600;">Indigo</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.72 0.14 195);"></div><div style="font-size:9px;font-weight:600;">Teal</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.72 0.16 150);"></div><div style="font-size:9px;font-weight:600;">Emerald</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.78 0.16 80);"></div><div style="font-size:9px;font-weight:600;">Amber</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.72 0.18 30);"></div><div style="font-size:9px;font-weight:600;">Coral</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.66 0.20 25);"></div><div style="font-size:9px;font-weight:600;">Crimson</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.66 0.22 340);"></div><div style="font-size:9px;font-weight:600;">Magenta</div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div style="width:26px;height:26px;border-radius:26px;background:oklch(0.66 0.20 295);"></div><div style="font-size:9px;font-weight:600;">Violet</div></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:12.5px;font-weight:600;">Reduce motion</div><div style="font-size:10.5px;color:var(--text-dim);">Disable sheet springs.</div></div><span class="tg"></span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:12.5px;font-weight:600;">Tabular numerals</div></div><span class="tg on"></span></div>
+
+          <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin:18px 0 8px;">Hero navigation</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;"><span style="color:var(--accent-hi);">●</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">I · Expanding capsule</div><div style="font-size:10px;color:var(--text-faint);">Mobile default · compact</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><span style="color:var(--text-faint);">○</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">B · Named pager</div><div style="font-size:10px;color:var(--text-faint);">Bottom slot chips</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><span style="color:var(--text-faint);">○</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">D · Mini-carousel</div><div style="font-size:10px;color:var(--text-faint);">Cards under hero</div></div></div>
+            <div style="font-size:10.5px;color:var(--accent-hi);text-align:center;padding:6px;">See all 9 variants in Settings on browser →</div>
+          </div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · Appearance</span><span class="nt">/settings/appearance</span></div>
+    </div>
+
+    <!-- SETTINGS · LLM -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div class="ib" style="background:transparent;border:none;width:auto;height:auto;font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">AI / LLM</div>
+        </div>
+        <div style="position:absolute;top:110px;left:16px;right:16px;">
+          <div class="alert info" style="font-size:10.5px;margin-bottom:14px;"><span>✦</span><div><b>17 of 25 daily</b><br/>Resets at 00:00 UTC.</div></div>
+          <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Provider</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+            <div style="padding:10px 12px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;display:flex;align-items:center;gap:10px;"><span style="color:var(--accent-hi);">●</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">Local · Ollama</div><div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">qwen2.5:1.5b</div></div></div>
+            <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;gap:10px;"><span style="color:var(--text-faint);">○</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">OpenAI</div><div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">gpt-4o-mini</div></div></div>
+            <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;gap:10px;"><span style="color:var(--text-faint);">○</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;">Anthropic</div><div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">claude-haiku</div></div></div>
+          </div>
+          <div class="fld"><span class="lb">Endpoint</span><input class="in" value="http://localhost:11434" style="font-size:11px;font-family:var(--font-mono);" /></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:12px;font-weight:600;">Run on every scan</div></div><span class="tg on"></span></div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · AI / LLM</span><span class="nt">/settings/llm</span></div>
+    </div>
+
+    <!-- SETTINGS · TORRENT -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;top:54px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+          <div class="ib" style="background:transparent;border:none;width:auto;height:auto;font-size:18px;color:var(--text-dim);">←</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Torrent</div>
+        </div>
+        <div style="position:absolute;top:110px;left:16px;right:16px;">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px;">qBittorrent integration.</div>
+          <div class="fld"><span class="lb">URL</span><input class="in" value="http://localhost:8080" style="font-size:11px;font-family:var(--font-mono);" /></div>
+          <div class="fld"><span class="lb">Username</span><input class="in" value="admin" style="font-size:12px;" /></div>
+          <div class="fld"><span class="lb">Password</span><input class="in" type="password" value="••••••••" style="font-size:12px;" /></div>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--success-soft);border:1px solid oklch(0.55 0.08 150 / 0.35);border-radius:6px;font-size:11px;color:var(--success);"><span>●</span>Connected · 4.6.7</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px;">
+            <div class="fld"><span class="lb">↓ limit</span><input class="in" value="∞" style="font-size:12px;" /></div>
+            <div class="fld"><span class="lb">↑ limit</span><input class="in" value="50 Mbps" style="font-size:12px;" /></div>
+          </div>
+        </div>
+        <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Settings · Torrent</span><span class="nt">/settings/torrent</span></div>
+    </div>
+
+  </div>
+
+  <!-- ────────── M-05 PROFILE SHEET ────────── -->
+  <h2 class="sec" id="profile"><span class="n">M-05</span><span class="t">Profile sheet · Switch user</span><span class="d">Tap the avatar in any top-right corner to slide this up.</span></h2>
+
+  <div class="phones">
+
+    <!-- PROFILE SHEET -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;filter:brightness(0.35);"></div>
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
+        <div class="sht" style="top:32%;">
+          <div class="grab"><span></span></div>
+          <div style="padding:12px 18px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);">
+            <div style="width:44px;height:44px;border-radius:44px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:18px;font-weight:700;">Y</div>
+            <div><div style="font-size:14px;font-weight:700;">Yuri Kraskov</div><div style="font-size:10.5px;color:var(--text-faint);">yuri@medsolutions.dev · master</div></div>
+          </div>
+          <div class="db" style="padding:14px 18px;">
+            <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Watching</div>
+            <div style="display:flex;align-items:center;gap:10px;padding:9px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+              <div style="width:46px;height:30px;border-radius:5px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=200&q=70') center/cover;"></div>
+              <div style="flex:1;"><div style="font-size:12px;font-weight:600;">Perfect World</div><div style="font-size:10px;color:var(--text-faint);">EP 5 · 38%</div></div>
+              <span style="color:var(--accent-hi);">▶</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.4px;margin:18px 0 8px;">Switch user</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;"><div style="width:30px;height:30px;border-radius:30px;background:var(--av-grn);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">A</div><span style="font-size:12px;">Anna · user</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;"><div style="width:30px;height:30px;border-radius:30px;background:var(--av-blu);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">P</div><span style="font-size:12px;">Pavel · uploader</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;"><div style="width:30px;height:30px;border-radius:30px;background:var(--av-pur);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">K</div><span style="font-size:12px;">Kira · viewer</span></div>
+            </div>
+          </div>
+          <div class="df"><button class="btn d s" style="flex:1;justify-content:center;">⎋ Sign out</button></div>
+        </div>
+      </div></div>
+      <div class="phone-label"><span class="ti">Profile · sheet</span><span class="nt">topbar.profile</span></div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:80px;padding-top:32px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+    <a href="04-tv.html" style="color:var(--text-dim);text-decoration:none;font-size:13px;">← TV</a>
+    <a href="index.html" style="color:var(--accent-hi);text-decoration:none;font-size:13px;font-weight:600;">Back to cover ↺</a>
+  </div>
+
+</div>
+</body>
+</html>

@@ -38,6 +38,8 @@ const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
     case "file":      return <svg {...props}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>;
     case "link":      return <svg {...props}><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>;
     case "external":  return <svg {...props}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>;
+    case "star":      return <svg {...props}><polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3 12 2"/></svg>;
+    case "star-fill": return <svg {...props} fill="currentColor"><polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3 12 2"/></svg>;
     case "filter":    return <svg {...props}><path d="M3 5h18l-7 9v6l-4-2v-4z"/></svg>;
     case "sparkle":   return <svg {...props}><path d="M12 3v6m0 6v6m9-9h-6m-6 0H3"/><path d="m18 6-3 3M6 18l3-3m9 3-3-3M6 6l3 3"/></svg>;
     default:          return null;
@@ -61,7 +63,7 @@ const SIDEBAR_W = 230;
 const Sidebar = ({ route, onRoute }) => {
   const items = [
     { id: "catalog",  label: "Catalog",        icon: "catalog",  count: window.LIBRARY.length },
-    { id: "torrents", label: "Torrents",       icon: "torrent",  count: window.TORRENTS.filter(t=>t.state!=="seeding").length, badge: "live" },
+    { id: "torrents", label: "Downloads",      icon: "torrent",  count: window.TORRENTS.filter(t=>t.state!=="seeding").length, badge: "live" },
     { id: "settings", label: "Settings",       icon: "settings" },
   ];
   return (

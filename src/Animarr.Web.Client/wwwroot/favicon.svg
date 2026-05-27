@@ -1,19 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Background -->
-  <rect width="32" height="32" rx="6" fill="#0078d4"/>
-  <!-- Letter A -->
-  <text x="16" y="24" font-family="Arial, sans-serif" font-size="26" font-weight="900"
-        text-anchor="middle" fill="white" letter-spacing="-1">A</text>
-  <!-- Download arrow: shaft -->
-  <line x1="22" y1="10" x2="22" y2="18" stroke="#0078d4" stroke-width="3" stroke-linecap="round"/>
-  <!-- Download arrow: head -->
-  <polyline points="19,15 22,19 25,15" stroke="#0078d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- Download arrow: base line -->
-  <line x1="19" y1="21" x2="25" y2="21" stroke="#0078d4" stroke-width="2.5" stroke-linecap="round"/>
-  <!-- White download arrow: shaft -->
-  <line x1="22" y1="9" x2="22" y2="16" stroke="white" stroke-width="2" stroke-linecap="round"/>
-  <!-- White download arrow: head -->
-  <polyline points="19.5,14 22,17.5 24.5,14" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- White download arrow: base line -->
-  <line x1="19.5" y1="19.5" x2="24.5" y2="19.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
+<!-- Animarr favicon — v6 mark from design-system/scratch-mark4.html.
+     Sharp geometric A in teal + white sparkle on a dark rounded tile.
+     Sized so the mark stays legible at 16×16 in a browser tab. -->
+<svg width="32" height="32" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">
+    <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+    <!-- A path with evenodd cut for the counter (triangle hole). -->
+    <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+          fill="#84c0d2"
+          fill-rule="evenodd"/>
+    <!-- Sparkle (✦) in the top-right — survives even at 16px as a flicker of white. -->
+    <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+          fill="#ffffff"/>
 </svg>

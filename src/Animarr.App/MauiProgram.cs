@@ -53,22 +53,34 @@ public static class MauiProgram
         // user gets bounced to /login on every page load. UseCookies=true on
         // a shared singleton CookieContainer means all IAnimarrApiClient
         // calls share the same auth state for the lifetime of the app.
+        //
+        // Persistence: in a MAUI Hybrid the in-memory container dies at process
+        // exit, so a relaunch logs the user out even though the server-side
+        // session is still valid. We re-hydrate from a JSON file on disk
+        // BEFORE registering the container, then the CookiePersistHandler
+        // (added to the HttpClient pipeline below) snapshots back to disk
+        // whenever a response carries Set-Cookie.
         var cookieJar = new CookieContainer();
+        CookiePersistence.Load(cookieJar);
         builder.Services.AddSingleton(cookieJar);
         builder.Services.AddSingleton(sp =>
         {
-            // Outermost handler is ServerAddressHandler — it rewrites the
-            // host of each outgoing request to whatever ServerAddressProvider
-            // is pointing at right now (so switching servers takes effect
-            // without HttpClient.BaseAddress' "started" lock).
-            //
-            // Inner handler is HttpClientHandler with the shared CookieContainer.
+            // Pipeline (outermost → innermost):
+            //   ServerAddressHandler — rewrite request authority to the
+            //     active server (sidesteps HttpClient.BaseAddress' "started"
+            //     lock so switching servers takes effect immediately).
+            //   CookiePersistHandler — save the container to disk after any
+            //     response that carried Set-Cookie. Keeps the user signed in
+            //     across app restarts.
+            //   HttpClientHandler — the actual transport, with the shared
+            //     CookieContainer driving UseCookies=true.
             var inner = new HttpClientHandler
             {
                 UseCookies      = true,
                 CookieContainer = cookieJar,
             };
-            var pipeline = new ServerAddressHandler(addr) { InnerHandler = inner };
+            var persist  = new CookiePersistHandler(cookieJar) { InnerHandler = inner };
+            var pipeline = new ServerAddressHandler(addr)      { InnerHandler = persist };
 
             // BaseAddress is a placeholder that exists ONLY to keep
             // HttpClient.PrepareRequestMessage happy for relative URIs like

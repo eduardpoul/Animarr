@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr · splash · favicon · animated mark</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  /* Two-card row */
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:36px;}
+  @media (max-width:980px){.pair{grid-template-columns:1fr;}}
+
+  /* Splash screen frame */
+  .splash{
+    position:relative;height:520px;border-radius:14px;overflow:hidden;
+    background:radial-gradient(60% 60% at 50% 50%,#15181f,#08090c);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;
+  }
+  .splash::before{
+    content:"";position:absolute;inset:0;
+    background-image:radial-gradient(circle at 30% 70%,var(--accent-soft) 0,transparent 50%),radial-gradient(circle at 70% 30%,oklch(0.50 0.18 245 / 0.18) 0,transparent 50%);
+    pointer-events:none;
+  }
+  .splash .name{position:relative;font-size:28px;font-weight:700;letter-spacing:-0.6px;color:#fff;}
+  .splash .status{position:relative;display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;}
+  .splash .ring{
+    width:14px;height:14px;border-radius:14px;
+    border:2px solid rgba(255,255,255,0.1);border-top-color:var(--accent-hi);
+    animation:rotsp 0.9s linear infinite;
+  }
+  @keyframes rotsp{to{transform:rotate(360deg);}}
+
+  /* Mark SVG · animated */
+  .markSvg{position:relative;width:120px;height:120px;}
+  .markSvg svg{width:100%;height:100%;display:block;}
+  .markSvg.lg{width:160px;height:160px;}
+
+  /* Sparkle spin in place */
+  .sp-spin{transform-origin:58px 19px;animation:spinSparkle 4.5s linear infinite;}
+  @keyframes spinSparkle{
+    0%{transform:rotate(0) scale(1);}
+    20%{transform:rotate(120deg) scale(1.15);}
+    50%{transform:rotate(180deg) scale(0.85);}
+    80%{transform:rotate(280deg) scale(1.1);}
+    100%{transform:rotate(360deg) scale(1);}
+  }
+
+  /* Sparkle orbiting around the A */
+  .sp-orbit-wrap{transform-origin:36px 36px;animation:orbitSparkle 7s linear infinite;}
+  .sp-orbit-wrap .sp{transform-origin:58px 19px;animation:counterRotate 7s linear infinite;}
+  @keyframes orbitSparkle{to{transform:rotate(360deg);}}
+  @keyframes counterRotate{to{transform:rotate(-360deg);}}
+
+  /* Sparkle pulse */
+  .sp-pulse{transform-origin:58px 19px;animation:pulseSp 2.6s ease-in-out infinite;}
+  @keyframes pulseSp{0%,100%{transform:scale(1);opacity:0.95;}50%{transform:scale(1.35);opacity:1;filter:drop-shadow(0 0 6px #fff);}}
+
+  /* Browser-tab favicon row */
+  .tabs{display:flex;flex-direction:column;gap:8px;}
+  .tabrow{
+    display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:9px 9px 0 0;
+    max-width:340px;border-bottom:0;
+    position:relative;
+  }
+  .tabrow.active{background:var(--bg-0);border-color:var(--border-strong);box-shadow:0 -2px 0 var(--accent) inset;}
+  .tabrow .title{flex:1;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tabrow .x{color:var(--text-faint);font-size:13px;}
+
+  /* Favicon size matrix */
+  .sizes{display:flex;align-items:center;gap:24px;padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px;}
+  .sizes .col{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .sizes .lbl{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);}
+
+  /* Section frames reuse */
+  h2.sec .t{font-size:24px;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Brand mark · ship + animation</div>
+  <h1 class="page">Splash · favicon · animated sparkle</h1>
+  <p class="lede">Финальный mark (04 sharp geo A + ✦) теперь со splash-скрином, превью браузерной табы на 16/32 px и тремя вариантами анимации: sparkle крутится, орбитит, пульсирует.</p>
+
+  <!-- Static SVG block (sym) used everywhere -->
+  <svg width="0" height="0" style="position:absolute" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="aMark" viewBox="0 0 72 72">
+      <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+      <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z" fill="var(--accent-hi)" fill-rule="evenodd"/>
+      <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z" fill="#fff"/>
+    </symbol>
+  </defs></svg>
+
+  <!-- 01 · Splash ──────────────────── -->
+  <h2 class="sec"><span class="n">01</span><span class="t">Splash screen</span><span class="d">Cold boot. Pulsing mark + ring spinner + status line.</span></h2>
+
+  <div class="splash">
+    <div class="markSvg lg">
+      <svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">
+        <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+        <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z" fill="var(--accent-hi)" fill-rule="evenodd"/>
+        <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z" fill="#fff" class="sp-pulse"/>
+      </svg>
+    </div>
+    <div class="name">Animarr</div>
+    <div class="status"><span class="ring"></span> Loading library · 1284 titles</div>
+  </div>
+
+  <!-- 02 · Browser tab ──────────────── -->
+  <h2 class="sec"><span class="n">02</span><span class="t">Browser tab · favicon</span><span class="d">Mark at 16 / 32 px next to the page title. Sparkle survives — at 16 px it reads as a hint of light.</span></h2>
+
+  <div class="pair">
+    <div>
+      <div style="font-size:11px;color:var(--text-faint);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-mono);">Light tab strip</div>
+      <div class="tabs" style="background:linear-gradient(180deg,#ddd,#bcbcbc);padding:8px 8px 0;border-radius:10px 10px 0 0;">
+        <div class="tabrow" style="background:#f4f4f5;border-color:#d4d4d8;color:#222;border-bottom-color:#f4f4f5;">
+          <svg width="16" height="16" viewBox="0 0 72 72"><use href="#aMark"/></svg>
+          <span class="title" style="color:#222;">Animarr — Catalog</span>
+          <span class="x" style="color:#999;">×</span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--text-faint);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-mono);">Dark tab strip (browser dark mode)</div>
+      <div class="tabs" style="background:#1f1f24;padding:8px 8px 0;border-radius:10px 10px 0 0;">
+        <div class="tabrow active">
+          <svg width="16" height="16" viewBox="0 0 72 72"><use href="#aMark"/></svg>
+          <span class="title">Animarr — Perfect World</span>
+          <span class="x">×</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sizes">
+    <div class="col"><svg width="16" height="16" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">16 px · favicon</span></div>
+    <div class="col"><svg width="20" height="20" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">20 px</span></div>
+    <div class="col"><svg width="32" height="32" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">32 px · retina</span></div>
+    <div class="col"><svg width="48" height="48" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">48 px · PWA</span></div>
+    <div class="col"><svg width="64" height="64" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">64 px</span></div>
+    <div class="col"><svg width="120" height="120" viewBox="0 0 72 72"><use href="#aMark"/></svg><span class="lbl">120 px · apple-touch</span></div>
+  </div>
+
+  <!-- 03 · Animation variants ──────── -->
+  <h2 class="sec" style="margin-top:60px;"><span class="n">03</span><span class="t">Sparkle animation · 3 takes</span><span class="d">Поиграть с тем как живёт ✦ — в hover, boot или splash.</span></h2>
+
+  <div class="pair" style="grid-template-columns:repeat(3,1fr);">
+
+    <!-- A: spin in place -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="markSvg lg">
+        <svg viewBox="0 0 72 72">
+          <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+          <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z" fill="var(--accent-hi)" fill-rule="evenodd"/>
+          <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z" fill="#fff" class="sp-spin"/>
+        </svg>
+      </div>
+      <div style="font-size:13px;font-weight:600;">A · spin in place</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-align:center;line-height:1.5;">Sparkle вращается ± scale-bounce · 4.5s loop · subtle</div>
+    </div>
+
+    <!-- B: orbit around A -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="markSvg lg">
+        <svg viewBox="0 0 72 72">
+          <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+          <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z" fill="var(--accent-hi)" fill-rule="evenodd"/>
+          <g class="sp-orbit-wrap">
+            <path class="sp" d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z" fill="#fff"/>
+          </g>
+        </svg>
+      </div>
+      <div style="font-size:13px;font-weight:600;">B · orbit around A</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-align:center;line-height:1.5;">Sparkle летает вокруг буквы · 7s loop · most playful</div>
+    </div>
+
+    <!-- C: pulse / breathe -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="markSvg lg">
+        <svg viewBox="0 0 72 72">
+          <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+          <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z" fill="var(--accent-hi)" fill-rule="evenodd"/>
+          <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z" fill="#fff" class="sp-pulse"/>
+        </svg>
+      </div>
+      <div style="font-size:13px;font-weight:600;">C · pulse / breathe</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-align:center;line-height:1.5;">Scale + glow · 2.6s loop · subtle, для splash</div>
+    </div>
+  </div>
+
+  <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:22px 26px;margin-bottom:60px;font-size:13px;color:var(--text-dim);line-height:1.65;">
+    <b style="color:var(--text);">Recommendation:</b>
+    <ul style="margin:8px 0 0;padding-left:18px;line-height:1.85;">
+      <li><b style="color:var(--accent-hi);">C · pulse</b> — для splash screen (тихо, не отвлекает)</li>
+      <li><b style="color:var(--accent-hi);">B · orbit</b> — на hover / при заходе с welcome → catalog (один раз, не зацикленно)</li>
+      <li><b style="color:var(--accent-hi);">A · spin</b> — лишний, не использовать</li>
+    </ul>
+    Скажи финал — пропишу анимацию через CSS variable, отключу по prefers-reduced-motion.
+  </div>
+
+</div>
+</body>
+</html>

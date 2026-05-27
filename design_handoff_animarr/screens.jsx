@@ -885,7 +885,7 @@ const TorrentsScreen = () => {
   const init = window.__init || {};
   const [adding, setAdding] = useStateS(!!init.openAddTorrentDrawer);
   const [tab, setTab] = useStateS("active");
-  const [addMode, setAddMode] = useStateS("file");
+  const [addMode, setAddMode] = useStateS("torrent");
   const [destIdx, setDestIdx] = useStateS(0);
   const [tickT, setTickT] = useStateS(Date.now());
 
@@ -915,10 +915,11 @@ const TorrentsScreen = () => {
     <div>
       <PageHeader
         overline={`LIVE · ${torrents.filter(t=>t.state==="downloading").length} ACTIVE`}
-        title="TORRENTS"
-        sub="Per-file priority, per-torrent speed caps in Mbps, auto-rename after download via global patterns. Updates over SignalR — no refresh."
+        title="DOWNLOADS"
+        sub="Torrents, magnet links and direct file uploads. Per-file priority, per-item speed caps in Mbps, auto-rename after download via global patterns. Updates over SignalR — no refresh."
         right={
           <>
+            <Btn kind="primary" icon="plus" onClick={() => setAdding(true)}>Add download</Btn>
             <div style={{
               display:"flex", gap: 18,
               background:"var(--surface)", border:"1px solid var(--border)", borderRadius: 10,
@@ -933,7 +934,6 @@ const TorrentsScreen = () => {
                 <div style={{ fontFamily:"var(--font-display)", fontSize: 18, color:"var(--success)" }}>{totalUp.toFixed(1)} <span style={{ fontSize: 10, color:"var(--text-faint)" }}>MB/s</span></div>
               </div>
             </div>
-            <Btn kind="primary" icon="plus" onClick={() => setAdding(true)}>Add torrent</Btn>
           </>
         }
       />
@@ -1061,7 +1061,7 @@ const AddTorrentDrawer = ({ onClose, mode, setMode, destIdx, setDestIdx }) => {
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom: 22 }}>
           <div>
             <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, color:"var(--accent-hi)", letterSpacing: 1.4 }}>NEW</div>
-            <h2 style={{ margin: "6px 0 0", fontFamily:"var(--font-display)", fontSize: 32, letterSpacing: -0.6 }}>ADD TORRENT</h2>
+            <h2 style={{ margin: "6px 0 0", fontFamily:"var(--font-display)", fontSize: 32, letterSpacing: -0.6 }}>ADD DOWNLOAD</h2>
           </div>
           <button onClick={onClose} style={{ all:"unset", cursor:"pointer", color:"var(--text-dim)", padding: 4 }}>
             <Icon name="x" size={18} />
@@ -1070,26 +1070,26 @@ const AddTorrentDrawer = ({ onClose, mode, setMode, destIdx, setDestIdx }) => {
 
         {/* source toggle */}
         <div style={{
-          display:"grid", gridTemplateColumns:"1fr 1fr", gap: 0,
+          display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap: 0,
           background:"var(--bg-1)", border:"1px solid var(--border)", borderRadius: 8,
           marginBottom: 20, padding: 4,
         }}>
-          {["file","magnet"].map(m => (
+          {[["torrent",".torrent file","file"],["magnet","Magnet link","link"],["files","Upload files","upload"]].map(([m, l, ic]) => (
             <button key={m} onClick={() => setMode(m)} style={{
               all:"unset", cursor:"pointer", padding: "9px 0", textAlign:"center",
-              fontSize: 12.5, fontWeight: 600,
+              fontSize: 12, fontWeight: 600,
               color: mode === m ? "var(--text)" : "var(--text-dim)",
               background: mode === m ? "var(--surface-3)" : "transparent",
               borderRadius: 6,
-              display:"flex", alignItems:"center", justifyContent:"center", gap: 8,
+              display:"flex", alignItems:"center", justifyContent:"center", gap: 7,
             }}>
-              <Icon name={m === "file" ? "file" : "link"} size={13} />
-              {m === "file" ? ".torrent file" : "Magnet link"}
+              <Icon name={ic} size={13} />
+              {l}
             </button>
           ))}
         </div>
 
-        {mode === "file" ? (
+        {mode === "torrent" ? (
           <div style={{ marginBottom: 20 }}>
             <div style={{
               border:"1.5px dashed var(--border-strong)", borderRadius: 10,
@@ -1103,10 +1103,12 @@ const AddTorrentDrawer = ({ onClose, mode, setMode, destIdx, setDestIdx }) => {
               </div>
             </div>
           </div>
-        ) : (
+        ) : mode === "magnet" ? (
           <Field label="Magnet URI">
             <Input mono placeholder="magnet:?xt=urn:btih:…" defaultValue="magnet:?xt=urn:btih:1a3b…" />
           </Field>
+        ) : (
+          <FilesUploadZone />
         )}
 
         {/* file selection */}
@@ -1156,7 +1158,7 @@ const AddTorrentDrawer = ({ onClose, mode, setMode, destIdx, setDestIdx }) => {
         </div>
 
         <div style={{ display:"flex", gap: 10, marginTop: 26 }}>
-          <Btn kind="primary" icon="download">Add torrent</Btn>
+          <Btn kind="primary" icon="download">Start download</Btn>
           <Btn kind="ghost" onClick={onClose}>Cancel</Btn>
         </div>
       </div>
@@ -1170,6 +1172,75 @@ const ToggleRow = ({ label, on: initial = false }) => {
     <div style={{ display:"flex", alignItems:"center", gap: 10, fontSize: 13 }}>
       <Toggle on={on} onChange={setOn} />
       <span style={{ color:"var(--text-dim)" }}>{label}</span>
+    </div>
+  );
+};
+
+// FilesUploadZone — third source type. Large drag-drop area + selected
+// files list. On submit, files are uploaded directly (no torrent metadata)
+// and the destination handles them like a download: per-file progress.
+const FilesUploadZone = () => {
+  const [files, setFiles] = useStateS([
+    { name: "Animation_Reel_2025.mp4", size: "1.8 GB" },
+    { name: "Concept_Frames.zip",     size: "412 MB" },
+    { name: "Soundtrack_FLAC.zip",    size: "780 MB" },
+  ]);
+  const [hover, setHover] = useStateS(false);
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div
+        onDragOver={e => { e.preventDefault(); setHover(true); }}
+        onDragLeave={() => setHover(false)}
+        onDrop={e => { e.preventDefault(); setHover(false); }}
+        style={{
+          border:`1.5px dashed ${hover ? "var(--accent)" : "var(--border-strong)"}`,
+          borderRadius: 12,
+          padding: "30px 18px", textAlign:"center",
+          background: hover ? "var(--accent-soft)" : "var(--bg-1)",
+          transition:"all .15s ease",
+        }}
+      >
+        <div style={{
+          width: 52, height: 52, borderRadius: 14, margin:"0 auto 12px",
+          background:"var(--surface-2)", border:"1px solid var(--border-strong)",
+          display:"grid", placeItems:"center",
+          color: hover ? "var(--accent-hi)" : "var(--text-dim)",
+        }}>
+          <Icon name="upload" size={22} stroke={1.8} />
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+          Drop files here
+        </div>
+        <div style={{ fontSize: 12.5, color:"var(--text-dim)", marginTop: 4 }}>
+          or <span style={{ color:"var(--accent-hi)", textDecoration:"underline", cursor:"pointer" }}>browse</span> to select multiple
+        </div>
+        <div style={{ fontFamily:"var(--font-mono)", fontSize: 10, color:"var(--text-faint)", marginTop: 10, letterSpacing: 0.6 }}>
+          MP4 · MKV · AVI · ZIP · ANY — no size limit
+        </div>
+      </div>
+
+      {files.length > 0 && (
+        <div style={{ marginTop: 12, background:"var(--bg-1)", border:"1px solid var(--border)", borderRadius: 8 }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize: 10, color:"var(--text-faint)", letterSpacing: 1, padding:"10px 12px 6px" }}>
+            FILES ({files.length}) · {files.reduce((s,f) => s + parseFloat(f.size), 0).toFixed(1)} GB est.
+          </div>
+          {files.map((f, i) => (
+            <div key={f.name} style={{
+              display:"flex", alignItems:"center", gap: 10, padding:"9px 12px",
+              borderTop:"1px solid var(--border)",
+            }}>
+              <Icon name="video" size={14} style={{ color:"var(--accent-hi)", flexShrink: 0 }} />
+              <span style={{ flex: 1, fontFamily:"var(--font-mono)", fontSize: 11.5, color:"var(--text)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth: 0 }}>
+                {f.name}
+              </span>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, color:"var(--text-faint)", flexShrink: 0 }}>{f.size}</span>
+              <button onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{
+                all:"unset", cursor:"pointer", padding: 4, color:"var(--text-faint)",
+              }}><Icon name="x" size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -1685,4 +1756,7 @@ const SettingsMeta = () => (
 Object.assign(window, {
   CatalogScreen, MediaDetailScreen, ExplorerScreen, TorrentsScreen, HistoryScreen, SettingsScreen,
   NRModal, NRBadge,
+  SettingsCard, SettingsGeneral, SettingsFolders, SettingsHistory,
+  SettingsAppearance, SettingsLLM, SettingsPatterns, SettingsIgnore,
+  SettingsTorrent, SettingsMeta,
 });

@@ -22,23 +22,259 @@ const WidePage = ({ children, top = false }) => (
   }}>{children}</div>
 );
 
+// Shared rounded-chip button — used for the dynamic Tags / Folders filter row.
+const ChipV3 = ({ label, active, onClick }) => (
+  <button onClick={onClick} style={{
+    all:"unset", cursor:"pointer",
+    padding:"5px 11px", borderRadius: 999,
+    fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+    color: active ? "#fff" : "var(--text-dim)",
+    background: active ? "var(--accent)" : "var(--surface)",
+    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+  }}>{label}</button>
+);
+
+// Search input shared between Catalog and any other filterable surface.
+const SearchInputV = ({ value, onChange, placeholder = "Filter by title…" }) => (
+  <div style={{
+    display:"flex", alignItems:"center", gap: 8,
+    background:"var(--surface)", border:"1px solid var(--border)", borderRadius: 10,
+    padding:"0 14px", width: 280, height: CTRL_H, boxSizing:"border-box",
+  }}>
+    <IconV name="search" size={14} />
+    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      style={{ all:"unset", flex: 1, color:"var(--text)", fontSize: 13 }} />
+    {value && (
+      <button onClick={() => onChange("")} style={{ all:"unset", cursor:"pointer", color:"var(--text-faint)" }}>
+        <IconV name="x" size={12} />
+      </button>
+    )}
+  </div>
+);
+
+// Hero pager — three styles user can pick in Profile → Appearance:
+//
+//   F — Transparent named pager (no chip background)
+//   G — Hover chevrons + dash bars with labels under each
+//   H — Numbered pill buttons + permanent edge chevrons
+//
+// All three live at the bottom of the hero, share the same setHeroIdx contract,
+// and render with a thin auto-rotate progress bar pinned to the bottom edge.
+const HeroPagerSwitch = ({ style, slots, heroIdx, setHeroIdx }) => {
+  const prev = () => setHeroIdx((heroIdx - 1 + slots.length) % slots.length);
+  const next = () => setHeroIdx((heroIdx + 1) % slots.length);
+
+  if (style === "F") {
+    return (
+      <>
+        <div style={{
+          position:"absolute", left: 0, right: 0, bottom: 22, zIndex: 4,
+          display:"flex", justifyContent:"center", gap: 12, padding:"0 24px",
+        }}>
+          {slots.map((s, i) => {
+            const active = i === heroIdx;
+            return (
+              <button key={s.id} onClick={() => setHeroIdx(i)} className="tv-focus" style={{
+                all:"unset", cursor:"pointer",
+                display:"flex", flexDirection:"column", alignItems:"center", gap: 5,
+                padding:"7px 14px", borderRadius: 10,
+                background: active ? "rgba(20,15,12,0.55)" : "transparent",
+                border: `1px solid ${active ? "var(--accent-line)" : "transparent"}`,
+                minWidth: 96,
+                transition:"all .15s ease",
+              }}>
+                <span style={{
+                  fontFamily:"var(--font-mono)", fontSize: 9.5, letterSpacing: 0.8,
+                  color: active ? "var(--accent-hi)" : "var(--text-faint)", opacity: 0.7,
+                }}>{String(i+1).padStart(2,"0")}</span>
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: active ? "var(--accent-hi)" : "rgba(232,224,210,0.55)",
+                  textShadow:"0 1px 4px rgba(0,0,0,0.6)",
+                  maxWidth: 120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                }}>{s.title}</span>
+              </button>
+            );
+          })}
+        </div>
+        <HeroProgressBar />
+      </>
+    );
+  }
+
+  if (style === "G") {
+    return (
+      <>
+        <HeroEdgeChev side="l" onClick={prev} hoverOnly />
+        <HeroEdgeChev side="r" onClick={next} hoverOnly />
+        <div style={{
+          position:"absolute", left: "50%", bottom: 24, transform:"translateX(-50%)", zIndex: 4,
+          display:"flex", gap: 12, alignItems:"center",
+        }}>
+          {slots.map((s, i) => {
+            const active = i === heroIdx;
+            return (
+              <button key={s.id} onClick={() => setHeroIdx(i)} className="tv-focus" style={{
+                all:"unset", cursor:"pointer",
+                display:"flex", flexDirection:"column", alignItems:"center", gap: 6,
+                padding:"5px 8px", minWidth: 80, borderRadius: 8,
+              }}>
+                <span style={{
+                  height: 3, borderRadius: 3,
+                  width: active ? 70 : 32,
+                  background: active
+                    ? "linear-gradient(90deg, var(--accent), var(--accent-hi))"
+                    : "rgba(255,255,255,0.22)",
+                  boxShadow: active ? "0 0 6px var(--accent-soft)" : "none",
+                  transition:"width .25s ease, background .15s",
+                }} />
+                <span style={{
+                  fontSize: 10.5, fontWeight: 600, letterSpacing: 0.2,
+                  color: active ? "var(--accent-hi)" : "rgba(232,224,210,0.4)",
+                  textShadow:"0 1px 4px rgba(0,0,0,0.6)",
+                  maxWidth: 110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                }}>{s.title}</span>
+              </button>
+            );
+          })}
+        </div>
+        <HeroProgressBar />
+      </>
+    );
+  }
+
+  // H — numbered pills + edge chevrons
+  return (
+    <>
+      <HeroEdgeChev side="l" onClick={prev} />
+      <HeroEdgeChev side="r" onClick={next} />
+      <div style={{
+        position:"absolute", left: "50%", bottom: 24, transform:"translateX(-50%)", zIndex: 4,
+        display:"flex", gap: 10,
+      }}>
+        {slots.map((s, i) => {
+          const active = i === heroIdx;
+          return (
+            <button key={s.id} onClick={() => setHeroIdx(i)} className="tv-focus" style={{
+              all:"unset", cursor:"pointer",
+              display:"flex", alignItems:"center", gap: 8,
+              padding:"6px 12px 6px 6px", borderRadius: 999,
+              background: active ? "rgba(20,15,12,0.7)" : "rgba(20,15,12,0.35)",
+              border:`1px solid ${active ? "var(--accent-line)" : "rgba(255,255,255,0.06)"}`,
+              transition:"all .15s ease",
+            }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: 22,
+                background: active ? "var(--accent)" : "rgba(0,0,0,0.5)",
+                color: active ? "#fff" : "var(--text-dim)",
+                fontFamily:"var(--font-mono)", fontSize: 9.5, fontWeight: 700,
+                display:"grid", placeItems:"center",
+              }}>{String(i+1).padStart(2,"0")}</span>
+              <span style={{
+                fontSize: 11, fontWeight: 600,
+                color: active ? "var(--accent-hi)" : "rgba(232,224,210,0.55)",
+                maxWidth: 130, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+              }}>{s.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <HeroProgressBar />
+    </>
+  );
+};
+
+const HeroEdgeChev = ({ side, onClick, hoverOnly = false }) => (
+  <button onClick={onClick} className={hoverOnly ? "hero-chev hover" : "hero-chev"} style={{
+    position:"absolute", top:"50%", transform:"translateY(-50%)", zIndex: 5,
+    [side === "l" ? "left" : "right"]: 20,
+    width: 54, height: 54, borderRadius: 54,
+    background:"rgba(10,8,7,0.45)", backdropFilter:"blur(10px)",
+    border:"1px solid rgba(255,255,255,0.12)",
+    color:"rgba(255,255,255,0.65)",
+    display:"grid", placeItems:"center", cursor:"pointer",
+    transition:"all .15s ease",
+  }} aria-label={side === "l" ? "Previous slot" : "Next slot"}>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points={side === "l" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
+    </svg>
+    <style>{`
+      .hero-chev:hover, .hero-chev:focus-visible {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+        color: #fff !important;
+        outline: none;
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      .hero-chev.hover { opacity: 0; }
+      *:hover > .hero-chev.hover,
+      .hero-chev.hover:focus-visible { opacity: 1; }
+    `}</style>
+  </button>
+);
+
+const HeroProgressBar = () => (
+  <div style={{
+    position:"absolute", left: 0, right: 0, bottom: 0, height: 2,
+    background:"rgba(255,255,255,0.05)", zIndex: 3,
+  }}>
+    <div style={{
+      height:"100%", background:"var(--accent)", width:"62%",
+      boxShadow:"0 0 8px var(--accent-soft)",
+    }} />
+  </div>
+);
+
 // ============================================================
 // CATALOG (v3) — wide grid, hero full-bleed
 // ============================================================
 const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
   const init = window.__init || {};
-  const [filter, setFilter] = useStateV3("All");
-  const [folderFilter, setFolderFilter] = useStateV3("All");
+  // Folder selection can be pushed in from the topbar (window.__folderJump).
+  const [folderFilter, setFolderFilter] = useStateV3(init.folderFilter || window.__folderJump || "All");
+  // Keep folder in sync with topbar nav clicks during the session.
+  useEffectV3(() => {
+    const t = setInterval(() => {
+      if (window.__folderJump && window.__folderJump !== folderFilter) {
+        setFolderFilter(window.__folderJump);
+      }
+    }, 200);
+    return () => clearInterval(t);
+  }, [folderFilter]);
+  const [tagFilter, setTagFilter]   = useStateV3("All");
+  const [filterMode, setFilterMode] = useStateV3("tags"); // "tags" | "folders"
   const [query, setQuery]   = useStateV3("");
   const [heroIdx, setHeroIdx] = useStateV3(0);
   const [nrOpen, setNrOpen] = useStateV3(!!init.openNRModal);
 
-  const featured = useMemoV3(() => window.LIBRARY.filter(i => i.rating >= 8.0).slice(0, 5), []);
+  // ── Continue Watching hero — always 5 slots ────────────────────
+  // 1) entries from WATCHING (mid-watch + next-up)
+  // 2) fill with featured (rating ≥ 8.0) not already in CW
+  // 3) fill remainder with random library items not yet shown
+  const heroSlots = useMemoV3(() => {
+    const seen = new Set();
+    const slots = [];
+    const push = (item, extras = {}) => {
+      if (!item || seen.has(item.id) || slots.length >= 5) return;
+      seen.add(item.id);
+      slots.push({ ...item, ...extras });
+    };
+    (window.WATCHING || []).forEach(w => {
+      const it = window.LIBRARY.find(x => x.id === w.id);
+      if (it) push(it, { cwEp: w.ep, cwProgress: w.progress, cwKind: w.kind, slotKind: "cw" });
+    });
+    window.LIBRARY.filter(i => i.rating >= 8.0)
+      .forEach(it => push(it, { slotKind: "featured" }));
+    window.LIBRARY.forEach(it => push(it, { slotKind: "random" }));
+    return slots.slice(0, 5);
+  }, []);
+
   useEffectV3(() => {
-    const t = setInterval(() => setHeroIdx(i => (i + 1) % featured.length), (rotateSec || 18) * 1000);
+    if (heroSlots.length <= 1) return;
+    const t = setInterval(() => setHeroIdx(i => (i + 1) % heroSlots.length), (rotateSec || 18) * 1000);
     return () => clearInterval(t);
-  }, [featured.length, rotateSec]);
-  const hero = featured[heroIdx] || window.LIBRARY[0];
+  }, [heroSlots.length, rotateSec]);
+  const hero = heroSlots[heroIdx] || heroSlots[0] || window.LIBRARY[0];
 
   // Hero cross-fade
   const [bgLayers, setBgLayers] = useStateV3([{ url: hero.bd, key: 0, on: true }]);
@@ -57,21 +293,44 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
     setBdImage?.(hero.bd, hero.hue);
   }, [hero.bd, hero.hue, setBdImage]);
 
+  // Other featured (not in hero slots) for the row below
+  const otherFeatured = useMemoV3(() => {
+    const heroIds = new Set(heroSlots.map(h => h.id));
+    return window.LIBRARY.filter(i => i.rating >= 8.0 && !heroIds.has(i.id));
+  }, [heroSlots]);
+
+  // Dynamic tag list — collected from library, ranked by frequency
+  const allTags = useMemoV3(() => {
+    const freq = {};
+    window.LIBRARY.forEach(i => (i.tags || []).forEach(t => { freq[t] = (freq[t] || 0) + 1; }));
+    return Object.entries(freq).sort((a,b) => b[1]-a[1]).map(([t]) => t);
+  }, []);
+
   const items = window.LIBRARY.filter(i => {
-    if (filter !== "All" && i.type !== filter && !(filter === "Donghua" && i.tags?.includes("Donghua"))) return false;
-    if (folderFilter !== "All") {
+    if (filterMode === "folders" && folderFilter !== "All") {
       if (folderFilter === "Donghua" && !i.tags?.includes("Donghua")) return false;
       else if (folderFilter !== "Donghua" && i.type !== folderFilter) return false;
+    }
+    if (filterMode === "tags" && tagFilter !== "All") {
+      if (!i.tags?.includes(tagFilter)) return false;
     }
     if (query && !i.title.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
 
+  // Hero label & primary action depend on slot type
+  const heroLabel = hero.slotKind === "cw"
+    ? (hero.cwKind === "next" ? `NEXT UP · EPISODE ${String(hero.cwEp).padStart(2,"0")}` : `CONTINUE · EPISODE ${String(hero.cwEp).padStart(2,"0")}`)
+    : (hero.slotKind === "featured" ? "FEATURED" : "FROM YOUR LIBRARY");
+  const primaryLabel = hero.slotKind === "cw"
+    ? (hero.cwKind === "next" ? `Play episode ${String(hero.cwEp).padStart(2,"0")}` : `Continue · ${Math.round((hero.cwProgress||0)*100)}%`)
+    : "Open detail";
+
   return (
     <div>
-      {/* HERO — full-bleed, 70vh */}
+      {/* HERO — Continue Watching, 5 slots, rotating */}
       <div style={{
-        position:"relative", height: "70vh", minHeight: 620, overflow:"hidden",
+        position:"relative", height: "72vh", minHeight: 640, overflow:"hidden",
       }}>
         {bgLayers.map(l => (
           <div key={l.key} style={{
@@ -86,10 +345,10 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
         {/* gradients */}
         <div style={{
           position:"absolute", inset: 0,
-          background:`linear-gradient(90deg, oklch(0.10 0.04 ${hero.hue} / 0.78) 0%, oklch(0.10 0.04 ${hero.hue} / 0.30) 38%, transparent 70%)`,
+          background:`linear-gradient(90deg, oklch(0.10 0.04 ${hero.hue} / 0.82) 0%, oklch(0.10 0.04 ${hero.hue} / 0.30) 42%, transparent 75%)`,
           transition:"background 1.4s ease",
         }} />
-        <div style={{ position:"absolute", inset: 0, background:"linear-gradient(0deg, rgba(0,0,0,0.55), transparent 50%)" }} />
+        <div style={{ position:"absolute", inset: 0, background:"linear-gradient(0deg, rgba(0,0,0,0.65), transparent 55%)" }} />
         <div style={{
           position:"absolute", inset: 0,
           background:`radial-gradient(70% 100% at 0% 100%, oklch(0.45 0.18 ${hero.hue} / 0.28), transparent 70%)`,
@@ -108,22 +367,28 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
 
         {/* content */}
         <div style={{
-          position:"absolute", left: SIDE_PAD, right: SIDE_PAD, bottom: 60,
+          position:"absolute", left: SIDE_PAD, right: SIDE_PAD, bottom: 64,
           display:"flex", alignItems:"flex-end", gap: 40,
         }}>
           <div key={hero.id+"-content"} style={{ flex: 1, maxWidth: 900, animation:"hero-content-in-v3 .8s ease" }}>
-            <div style={{ display:"flex", alignItems:"center", gap: 10, marginBottom: 16 }}>
-              <PillV tone="accent">FEATURED</PillV>
-              <PillV>{hero.type.toUpperCase()}</PillV>
-              {hero.tags?.slice(0,2).map(t => <PillV key={t}>{t}</PillV>)}
+            <div style={{
+              fontFamily:"var(--font-mono)", fontSize: 11.5, color:"var(--accent-hi)",
+              letterSpacing: 1.6, textTransform:"uppercase", marginBottom: 14,
+              display:"inline-flex", alignItems:"center", gap: 9,
+            }}>
+              {hero.slotKind === "cw" && (
+                <span style={{ width: 7, height: 7, borderRadius: 7, background:"var(--accent)", boxShadow:"0 0 10px var(--accent-soft)" }} />
+              )}
+              {heroLabel}
+              <span style={{ color:"var(--text-faint)", letterSpacing: 1 }}>· {hero.title.toUpperCase()}</span>
             </div>
             <h2 style={{
               margin: 0, fontFamily:"var(--font-display)",
-              fontSize: 120, lineHeight: 0.86, letterSpacing: -3.8,
+              fontSize: 108, lineHeight: 0.86, letterSpacing: -3.4,
               color:"#fff", textShadow:"0 4px 30px rgba(0,0,0,0.6)",
             }}>{hero.title.toUpperCase()}</h2>
             <div style={{
-              display:"flex", alignItems:"center", gap: 22, marginTop: 20,
+              display:"flex", alignItems:"center", gap: 22, marginTop: 18,
               fontFamily:"var(--font-mono)", fontSize: 12, letterSpacing: 1, color:"var(--text-dim)",
             }}>
               <span style={{ color:"var(--accent-hi)", fontWeight: 700 }}>★ {hero.rating.toFixed(1)}</span>
@@ -132,63 +397,147 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
               <span>{hero.studio}</span>
               <span>{hero.lang}</span>
             </div>
+
+            {/* Progress bar (only for in-progress watch state) */}
+            {hero.slotKind === "cw" && hero.cwKind === "progress" && (
+              <div style={{ maxWidth: 520, marginTop: 22 }}>
+                <div style={{
+                  display:"flex", justifyContent:"space-between",
+                  fontFamily:"var(--font-mono)", fontSize: 10, color:"var(--text-dim)",
+                  letterSpacing: 0.8, textTransform:"uppercase", marginBottom: 7,
+                }}>
+                  <span>~{Math.round((1 - hero.cwProgress) * parseInt(hero.runtime))}m remaining</span>
+                  <span>{Math.round(hero.cwProgress * 100)}%</span>
+                </div>
+                <div style={{ height: 4, background:"rgba(255,255,255,0.08)", borderRadius: 4, overflow:"hidden" }}>
+                  <div style={{
+                    width: `${hero.cwProgress * 100}%`, height:"100%",
+                    background:"linear-gradient(90deg, var(--accent), var(--accent-hi))",
+                    boxShadow:"0 0 10px var(--accent-soft)",
+                  }} />
+                </div>
+              </div>
+            )}
+
             <p style={{
-              color:"#e7dfd7", marginTop: 18, fontSize: 16, lineHeight: 1.55,
-              textWrap:"pretty", maxWidth: 720,
+              color:"#e7dfd7", marginTop: 20, fontSize: 15, lineHeight: 1.55,
+              textWrap:"pretty", maxWidth: 700,
               textShadow:"0 2px 10px rgba(0,0,0,0.55)",
+              display:"-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient:"vertical", overflow:"hidden",
             }}>{hero.overview}</p>
-            <div style={{ display:"flex", gap: 10, marginTop: 24 }}>
-              <BtnV kind="primary" icon="play" onClick={() => onOpen(hero.id)}>Open detail</BtnV>
-              <BtnV kind="solid" icon="external">TMDB</BtnV>
-              <BtnV kind="solid" icon="external">MAL</BtnV>
+
+            <div style={{ display:"flex", gap: 10, marginTop: 24, alignItems:"center" }}>
+              <BtnV kind="primary" icon="play" onClick={() => onOpen(hero.id)}>{primaryLabel}</BtnV>
+              {hero.slotKind === "cw" && hero.cwKind === "progress" && (
+                <BtnV kind="ghost" icon="refresh">Restart episode</BtnV>
+              )}
+              <BtnV kind="ghost" onClick={() => onOpen(hero.id)}>Open detail</BtnV>
             </div>
           </div>
 
-          {/* featured pager - right side */}
-          <div style={{ display:"flex", flexDirection:"column", gap: 6, paddingBottom: 12 }}>
-            {featured.map((f, i) => (
-              <button key={f.id} onClick={() => setHeroIdx(i)} style={{
+          {/* slot pager — bottom variants render outside this column;
+              this side column only renders for the legacy E fallback. */}
+          {(window.__heroPager === "E" || !window.__heroPager) && (
+          <div style={{ display:"flex", flexDirection:"column", gap: 7, paddingBottom: 12 }}>
+            {heroSlots.map((f, i) => (
+              <button key={f.id} onClick={() => setHeroIdx(i)} className="tv-focus" style={{
                 all:"unset", cursor:"pointer",
                 fontFamily:"var(--font-mono)", fontSize: 10,
                 color: i === heroIdx ? "var(--accent-hi)" : "var(--text-faint)",
-                padding:"6px 0", display:"flex", alignItems:"center", gap:8,
+                padding:"5px 0", display:"flex", alignItems:"center", gap:8,
+                whiteSpace:"nowrap",
               }}>
                 <span style={{
                   width: i === heroIdx ? 28 : 14, height: 2,
                   background: i === heroIdx ? "var(--accent)" : "rgba(255,255,255,0.18)",
                   transition:"width .25s ease",
                 }} />
-                {String(i+1).padStart(2,"0")}
+                <span style={{ width: 18 }}>{String(i+1).padStart(2,"0")}</span>
+                <span style={{
+                  fontFamily:"var(--font-mono)", fontSize: 9, letterSpacing: 0.6,
+                  color: i === heroIdx ? "var(--accent-hi)" : "var(--text-faint)",
+                  opacity: 0.7, textTransform:"uppercase",
+                }}>
+                  {f.slotKind === "cw" ? (f.cwKind === "next" ? "Next up" : `${Math.round(f.cwProgress*100)}%`) : f.slotKind === "featured" ? "★" : "Lib"}
+                </span>
               </button>
             ))}
           </div>
+          )}
         </div>
+
+        {/* Bottom hero pagers — F / G / H variants picked in Profile → Appearance */}
+        <HeroPagerSwitch
+          style={window.__heroPager || "F"}
+          slots={heroSlots}
+          heroIdx={heroIdx}
+          setHeroIdx={setHeroIdx}
+        />
       </div>
 
+      {/* FEATURED row — items not already in hero */}
+      {otherFeatured.length > 0 && (
+        <div style={{ padding: `38px ${SIDE_PAD}px 8px` }}>
+          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)" }}>EDITOR'S PICKS</div>
+              <h2 style={{ margin:"6px 0 0", fontFamily:"var(--font-display)", fontSize: 26, letterSpacing:-0.4 }}>FEATURED · ★ 8.0+</h2>
+            </div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize: 11, color:"var(--text-faint)", letterSpacing: 0.6 }}>{otherFeatured.length} TITLES</div>
+          </div>
+          <div style={{ display:"flex", gap: 14, overflowX:"auto", paddingBottom: 14, scrollbarWidth:"none" }}>
+            {otherFeatured.map(i => (
+              <div key={i.id} style={{ width: 184, flexShrink: 0 }}>
+                <PosterV item={i} w={184} h={268} onClick={() => onOpen(i.id)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* FILTER BAR + GRID */}
-      <div style={{ padding: `36px ${SIDE_PAD}px 80px` }}>
-        <div style={{ display:"flex", alignItems:"center", gap: 12, flexWrap:"wrap", marginBottom: 14 }}>
-          <FilterBar tab={filter} setTab={setFilter} query={query} setQuery={setQuery} count={items.length} total={window.LIBRARY.length} />
+      <div style={{ padding: `28px ${SIDE_PAD}px 80px` }}>
+        <div style={{ display:"flex", alignItems:"center", gap: 12, flexWrap:"wrap", marginBottom: 16 }}>
+          <SearchInputV value={query} onChange={setQuery} />
+
+          {/* Filter mode toggle: tags vs folders */}
+          <div style={{
+            display:"flex", gap: 3, padding: 3,
+            background:"var(--surface)", border:"1px solid var(--border)", borderRadius: 9,
+            height: CTRL_H, boxSizing:"border-box",
+          }}>
+            {[["tags","Tags"],["folders","Folders"]].map(([k, l]) => (
+              <button key={k} onClick={() => setFilterMode(k)} style={{
+                all:"unset", cursor:"pointer", padding: "0 14px",
+                fontSize: 12, fontWeight: 600, borderRadius: 6,
+                color: filterMode === k ? "var(--text)" : "var(--text-dim)",
+                background: filterMode === k ? "var(--surface-3)" : "transparent",
+                boxShadow: filterMode === k ? "0 1px 0 var(--accent) inset" : "none",
+                display:"inline-flex", alignItems:"center",
+              }}>{l}</button>
+            ))}
+          </div>
+
           <BtnV kind="ghost" icon="refresh">Rescan all</BtnV>
           <NRBadgeV3 count={window.NEEDS_REVIEW.length} onClick={() => setNrOpen(true)} />
+          <div style={{ marginLeft:"auto", fontFamily:"var(--font-mono)", fontSize: 11, color:"var(--text-faint)", letterSpacing: 0.6 }}>
+            {items.length} / {window.LIBRARY.length} TITLES
+          </div>
         </div>
 
-        {/* folder chips */}
+        {/* dynamic chip strip */}
         <div style={{ display:"flex", gap: 8, marginBottom: 30, flexWrap:"wrap", alignItems:"center" }}>
-          <span style={{ fontFamily:"var(--font-mono)", fontSize: 10, color:"var(--text-faint)", letterSpacing: 1, marginRight: 4 }}>FOLDER</span>
-          {["All", ...window.FOLDERS.map(f => f.title)].map(name => {
-            const active = folderFilter === name;
-            return (
-              <button key={name} onClick={() => setFolderFilter(name)} style={{
-                all:"unset", cursor:"pointer",
-                padding:"5px 11px", borderRadius: 999,
-                fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
-                color: active ? "#fff" : "var(--text-dim)",
-                background: active ? "var(--accent)" : "var(--surface)",
-                border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-              }}>{name}</button>
-            );
-          })}
+          <span style={{ fontFamily:"var(--font-mono)", fontSize: 10, color:"var(--text-faint)", letterSpacing: 1, marginRight: 4 }}>
+            {filterMode === "tags" ? "TAG" : "FOLDER"}
+          </span>
+          {filterMode === "tags"
+            ? ["All", ...allTags].map(name => (
+                <ChipV3 key={name} label={name} active={tagFilter === name} onClick={() => setTagFilter(name)} />
+              ))
+            : ["All", ...window.FOLDERS.map(f => f.title)].map(name => (
+                <ChipV3 key={name} label={name} active={folderFilter === name} onClick={() => setFolderFilter(name)} />
+              ))
+          }
         </div>
 
         <div style={{
@@ -309,12 +658,57 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
   const [editing, setEditing] = useStateV3(!!init.openEditDrawer);
   const seasons = item.type === "Anime" || item.type === "Series" ? [1, 2] : [];
   const totalEps = item.episodes || 12;
-  const eps = useMemoV3(() => Array.from({ length: Math.min(totalEps, 24) }, (_, i) => ({
-    n: i + 1,
-    title: `Episode ${i+1}`,
-    have: Math.random() > 0.18 || i < 12,
+
+  // Per-episode state: have (file on disk), watched (fully done), progress
+  // (0..1 if mid-watch). For demo we mark the first 4 as watched, ep 5 as
+  // in-progress (~38%), the rest unwatched. Toggling lifts to local state.
+  const initEps = useMemoV3(() => Array.from({ length: Math.min(totalEps, 24) }, (_, i) => {
+    const n = i + 1;
+    const have = n < 13 || ((n * 7) % 11) > 2;
+    let watched = false, progress = 0;
+    if (n <= 4) { watched = true; progress = 1; }
+    else if (n === 5) { watched = false; progress = 0.38; }
+    return { n, title: `Episode ${n}`, have, watched, progress, runtime: item.runtime };
+  }), [item.id, totalEps]);
+
+  const [eps, setEps] = useStateV3(initEps);
+  useEffectV3(() => { setEps(initEps); }, [initEps]);
+
+  const toggleWatched = (n) => setEps(prev => prev.map(e =>
+    e.n === n ? { ...e, watched: !e.watched, progress: e.watched ? 0 : 1 } : e
+  ));
+
+  // For movies the single file is just episode 1; render a dedicated card.
+  const isMovie = item.type === "Movie" || item.type === "Multserials" && totalEps <= 1;
+  const movieFile = useMemoV3(() => ({
+    n: 1,
+    title: `${item.title} (${item.year})`,
+    have: true,
+    watched: false,
+    progress: 0.62, // mid-watch demo
     runtime: item.runtime,
-  })), [item.id]);
+    filename: `${item.title} (${item.year}) - 1080p.mkv`,
+    size: "6.1 GB",
+  }), [item.id, item.title, item.year, item.runtime]);
+
+  const [mFile, setMFile] = useStateV3(movieFile);
+  useEffectV3(() => { setMFile(movieFile); }, [movieFile]);
+  const toggleMovieWatched = () => setMFile(p => ({ ...p, watched: !p.watched, progress: p.watched ? 0 : 1 }));
+
+  // Continue action: pick first in-progress episode → else next-after-last-watched → else "Play first".
+  const cont = useMemoV3(() => {
+    if (isMovie) {
+      if (mFile.watched) return { kind: "rewatch", n: 1, progress: 0, label: "Rewatch from start" };
+      if (mFile.progress > 0) return { kind: "continue", n: 1, progress: mFile.progress, label: `Continue · ${Math.round(mFile.progress * 100)}%` };
+      return { kind: "play", n: 1, progress: 0, label: "Play movie" };
+    }
+    const ip = eps.find(e => e.have && !e.watched && e.progress > 0);
+    if (ip) return { kind: "continue", n: ip.n, progress: ip.progress, label: `Continue · EP ${String(ip.n).padStart(2,"0")}` };
+    const nextUp = eps.find(e => e.have && !e.watched);
+    if (nextUp && eps.some(e => e.watched)) return { kind: "next", n: nextUp.n, progress: 0, label: `Continue · EP ${String(nextUp.n).padStart(2,"0")}` };
+    if (nextUp) return { kind: "play", n: nextUp.n, progress: 0, label: "Play first episode" };
+    return { kind: "done", n: 0, progress: 1, label: "Watched · Replay" };
+  }, [eps, mFile, isMovie]);
 
   useEffectV3(() => { setBdImage?.(item.bd, item.hue); }, [item.bd, item.hue, setBdImage]);
 
@@ -355,22 +749,24 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
           <IconV name="chev-l" size={14} /> BACK
         </button>
 
-        {/* EDIT icon button — top right of hero */}
-        <button onClick={() => setEditing(true)} title="Edit metadata" style={{
-          all:"unset", cursor:"pointer", position:"absolute",
-          top: 24, right: SIDE_PAD, zIndex: 5,
-          display:"inline-flex", alignItems:"center", gap: 8,
-          padding:"9px 14px", borderRadius: 8,
-          background:"rgba(10,8,7,0.55)", backdropFilter:"blur(10px)",
-          border:"1px solid rgba(255,255,255,0.12)",
-          color:"var(--text)", fontSize: 12.5, fontWeight: 600,
-          fontFamily:"var(--font-mono)", letterSpacing: 0.6,
-          transition:"background .15s ease, border-color .15s ease",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-        onMouseLeave={e => { e.currentTarget.style.background = "rgba(10,8,7,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}>
-          <IconV name="pencil" size={13} /> EDIT METADATA
-        </button>
+        {/* FAVORITE star + EDIT — top right of hero */}
+        <div style={{ position:"absolute", top: 24, right: SIDE_PAD, zIndex: 5, display:"flex", gap: 8 }}>
+          <FavoriteButtonV3 id={item.id} />
+          <button onClick={() => setEditing(true)} title="Edit metadata" style={{
+            all:"unset", cursor:"pointer",
+            display:"inline-flex", alignItems:"center", gap: 8,
+            padding:"9px 14px", borderRadius: 8,
+            background:"rgba(10,8,7,0.55)", backdropFilter:"blur(10px)",
+            border:"1px solid rgba(255,255,255,0.12)",
+            color:"var(--text)", fontSize: 12.5, fontWeight: 600,
+            fontFamily:"var(--font-mono)", letterSpacing: 0.6,
+            transition:"background .15s ease, border-color .15s ease",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "rgba(10,8,7,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}>
+            <IconV name="pencil" size={13} /> EDIT METADATA
+          </button>
+        </div>
 
         {/* hero bottom row */}
         <div style={{
@@ -422,7 +818,7 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
           <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)", marginBottom: 12 }}>SYNOPSIS</div>
           <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65, color:"var(--text)", textWrap:"pretty" }}>{item.overview}</p>
           <div style={{ display:"flex", gap: 10, marginTop: 26, flexWrap:"wrap" }}>
-            <BtnV kind="primary" icon="play">Play first episode</BtnV>
+            <BtnV kind="primary" icon="play">{cont.label}</BtnV>
             <BtnV kind="solid" icon="pencil" onClick={() => setEditing(true)}>Edit metadata</BtnV>
             <BtnV kind="ghost" icon="magic">Re-identify</BtnV>
           </div>
@@ -477,6 +873,27 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
         </div>
       </div>
 
+      {/* MOVIE FILE — same status language as episode cards, single row */}
+      {isMovie && (
+        <div style={{ padding: `0 ${SIDE_PAD}px 60px` }}>
+          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom: 18 }}>
+            <div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)" }}>FILE</div>
+              <h2 style={{ margin: "6px 0 0", fontFamily:"var(--font-display)", fontSize: 32, letterSpacing:-0.7 }}>
+                ON DISK
+                {mFile.watched && <span style={{ fontSize: 13, color:"var(--success)", marginLeft: 12, letterSpacing: 0.6, fontFamily:"var(--font-mono)" }}>· WATCHED</span>}
+                {!mFile.watched && mFile.progress > 0 && (
+                  <span style={{ fontSize: 13, color:"var(--accent-hi)", marginLeft: 12, letterSpacing: 0.6, fontFamily:"var(--font-mono)" }}>
+                    · {Math.round(mFile.progress * 100)}% WATCHED
+                  </span>
+                )}
+              </h2>
+            </div>
+          </div>
+          <MovieFileCardV3 file={mFile} item={item} onToggleWatched={toggleMovieWatched} />
+        </div>
+      )}
+
       {/* EPISODES — full-width with redesigned cards */}
       {seasons.length > 0 && (
         <div style={{ padding: `30px ${SIDE_PAD}px 60px` }}>
@@ -509,7 +926,7 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
             gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))",
             gap: 16,
           }}>
-            {eps.map(ep => <EpisodeCardV3 key={ep.n} ep={ep} item={item} />)}
+            {eps.map(ep => <EpisodeCardV3 key={ep.n} ep={ep} item={item} onToggleWatched={() => toggleWatched(ep.n)} />)}
           </div>
         </div>
       )}
@@ -530,9 +947,158 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
 // Episode card — status edge strip + icon chip. Missing episodes are
 // visually muted (lower opacity, grayscale, dotted border) and on hover
 // show an "empty / not downloaded" indicator rather than the play button.
-const EpisodeCardV3 = ({ ep, item }) => {
+// Inline eye-toggle icon — switches between "watched" (open eye) and
+// "unwatched" (eye-off). Used on every episode/file card.
+const EyeIconV3 = ({ closed, size = 15 }) => closed ? (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.88 4.24A10.1 10.1 0 0 1 12 4c7 0 10 8 10 8a17.7 17.7 0 0 1-2.16 3.19" />
+    <path d="M6.61 6.61A17.6 17.6 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    <path d="M1 1l22 22" />
+  </svg>
+) : (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+// Single-file card for movies. Mirrors the episode card status language
+// (left edge strip + corner watch toggle + progress bar) but in a wider
+// 16:7 row, with the file's path + size + codec inline.
+const MovieFileCardV3 = ({ file, item, onToggleWatched }) => {
+  const watched = file.watched;
+  const inProg = !watched && file.progress > 0;
+  const stripColor = watched ? "var(--text-faint)" : "var(--success)";
+  const [hover, setHover] = useStateV3(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        position:"relative", display:"grid", gridTemplateColumns:"360px 1fr",
+        background:"var(--surface)", border:"1px solid var(--border)",
+        borderRadius: 14, overflow:"hidden", opacity: watched ? 0.78 : 1,
+        transition:"transform .2s ease, border-color .2s ease",
+        transform: hover ? "translateY(-2px)" : "none",
+        borderColor: hover ? "var(--accent-line)" : "var(--border)",
+      }}
+    >
+      <div style={{
+        position:"absolute", left: 0, top: 0, bottom: 0, width: 3,
+        background: stripColor,
+        boxShadow: !watched ? "0 0 12px var(--success)" : "none",
+        zIndex: 2,
+      }} />
+
+      {/* thumbnail panel */}
+      <div style={{
+        position:"relative", aspectRatio: "16 / 9",
+        backgroundImage:`url("${item.bd}")`, backgroundSize:"cover", backgroundPosition:"center",
+        filter: watched ? "saturate(0.6) brightness(0.7)" : "none",
+      }}>
+        <div style={{
+          position:"absolute", inset: 0,
+          background:"linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.78) 100%)",
+        }} />
+        <div style={{
+          position:"absolute", top: 14, left: 18,
+          fontFamily:"var(--font-display)", fontSize: 28,
+          color: "#fff", textShadow:"0 2px 8px rgba(0,0,0,0.7)",
+        }}>MOVIE</div>
+
+        {/* Disk-status icon — TOP-RIGHT (immutable) */}
+        <div title="On disk" style={{
+          position:"absolute", top: 12, right: 12,
+          width: 30, height: 30, borderRadius: 8,
+          background: "oklch(0.74 0.15 150 / 0.18)",
+          border: "1px solid var(--success)",
+          display:"grid", placeItems:"center", color: "var(--success)",
+          backdropFilter:"blur(6px)", zIndex: 3,
+        }}>
+          <IconV name="check" size={14} stroke={2.4} />
+        </div>
+
+        {/* Watched-toggle eye — BOTTOM-RIGHT (user-controlled) */}
+        <button onClick={(e) => { e.stopPropagation(); onToggleWatched?.(); }}
+          title={watched ? "Mark as unwatched" : "Mark as watched"} style={{
+          all:"unset", cursor:"pointer", position:"absolute", bottom: 14, right: 12,
+          width: 30, height: 30, borderRadius: 8,
+          background: watched ? "oklch(0.74 0.15 150 / 0.25)" : "rgba(0,0,0,0.45)",
+          border: `1px solid ${watched ? "var(--success)" : "rgba(255,255,255,0.18)"}`,
+          display:"grid", placeItems:"center",
+          color: watched ? "var(--success)" : "#fff",
+          backdropFilter:"blur(6px)", zIndex: 4,
+        }}>
+          <EyeIconV3 closed={!watched} size={14} />
+        </button>
+
+        {/* progress bar at the very bottom of the thumb */}
+        {(watched || inProg) && (
+          <div style={{
+            position:"absolute", left: 0, right: 0, bottom: 0, height: 4,
+            background:"rgba(255,255,255,0.08)",
+          }}>
+            <div style={{
+              width: `${(watched ? 1 : file.progress) * 100}%`, height:"100%",
+              background: watched ? "var(--text-faint)" : "linear-gradient(90deg, var(--accent), var(--accent-hi))",
+              boxShadow: watched ? "none" : "0 0 8px var(--accent-soft)",
+            }} />
+          </div>
+        )}
+
+        {hover && (
+          <div style={{
+            position:"absolute", left:"50%", top:"50%", transform:"translate(-50%, -50%)",
+            width: 64, height: 64, borderRadius: 64,
+            background:"rgba(0,0,0,0.5)", backdropFilter:"blur(8px)",
+            display:"grid", placeItems:"center",
+            border:"1px solid rgba(255,255,255,0.3)",
+          }}>
+            <IconV name="play" size={24} style={{ color:"#fff", marginLeft: 3 }} />
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: "22px 26px", display:"flex", flexDirection:"column", gap: 14, minWidth: 0 }}>
+        <div style={{ fontSize: 17, fontWeight: 600, color: watched ? "var(--text-dim)" : "var(--text)", letterSpacing: -0.2 }}>
+          {file.title}
+        </div>
+        <div style={{ fontFamily:"var(--font-mono)", fontSize: 12, color:"var(--text-faint)", wordBreak:"break-all" }}>
+          {file.filename}
+        </div>
+
+        <div style={{
+          display:"grid", gridTemplateColumns:"repeat(4, auto)", gap:"8px 22px",
+          fontFamily:"var(--font-mono)", fontSize: 12, color:"var(--text-dim)",
+          letterSpacing: 0.4, marginTop: 2,
+        }}>
+          <span><span style={{ color:"var(--text-faint)" }}>RUNTIME</span> {file.runtime}</span>
+          <span><span style={{ color:"var(--text-faint)" }}>RES</span> 1080p</span>
+          <span><span style={{ color:"var(--text-faint)" }}>CODEC</span> H.265</span>
+          <span><span style={{ color:"var(--text-faint)" }}>SIZE</span> {file.size}</span>
+        </div>
+
+        <div style={{ display:"flex", gap: 8, marginTop: "auto", paddingTop: 6, flexWrap:"wrap" }}>
+          <BtnV kind="primary" icon="play">
+            {watched ? "Rewatch from start" : inProg ? `Continue · ${Math.round(file.progress*100)}%` : "Play movie"}
+          </BtnV>
+          <BtnV kind="solid" icon={watched ? "x" : "check"} onClick={onToggleWatched}>
+            {watched ? "Mark as unwatched" : "Mark as watched"}
+          </BtnV>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EpisodeCardV3 = ({ ep, item, onToggleWatched }) => {
   const have = ep.have;
-  const stripColor = have ? "var(--success)" : "var(--warn)";
+  const watched = ep.watched;
+  const inProg = !watched && ep.progress > 0;
+  // Left edge: green if on disk, amber if missing. Once watched, dim it.
+  const stripColor = have ? (watched ? "var(--text-faint)" : "var(--success)") : "var(--warn)";
   const [hover, setHover] = useStateV3(false);
   return (
     <div
@@ -543,28 +1109,26 @@ const EpisodeCardV3 = ({ ep, item }) => {
         border: have ? "1px solid var(--border)" : "1px dashed rgba(255,240,220,0.12)",
         borderRadius: 10,
         overflow:"hidden",
-        opacity: have ? 1 : 0.50,
+        opacity: have ? (watched ? 0.72 : 1) : 0.50,
         cursor: have ? "pointer" : "default",
         transform: hover && have ? "translateY(-2px)" : "none",
         borderColor: hover && have ? "var(--accent-line)" : (have ? "var(--border)" : "rgba(255,240,220,0.12)"),
         transition:"transform .2s ease, border-color .2s ease, opacity .2s ease",
       }}
     >
-      {/* status edge strip */}
       <div style={{
         position:"absolute", left: 0, top: 0, bottom: 0, width: 3,
         background: stripColor,
-        boxShadow: have ? "0 0 12px var(--success)" : "none",
+        boxShadow: (have && !watched) ? "0 0 12px var(--success)" : "none",
         zIndex: 2,
       }} />
 
-      {/* thumbnail */}
       <div style={{
         height: 150, position:"relative",
         backgroundImage:`url("${item.bd}")`,
         backgroundSize:"cover",
         backgroundPosition: `${(ep.n * 19) % 100}% center`,
-        filter: have ? "none" : "grayscale(1) brightness(0.55)",
+        filter: have ? (watched ? "saturate(0.6) brightness(0.7)" : "none") : "grayscale(1) brightness(0.55)",
       }}>
         <div style={{
           position:"absolute", inset: 0,
@@ -576,20 +1140,53 @@ const EpisodeCardV3 = ({ ep, item }) => {
           textShadow: "0 2px 8px rgba(0,0,0,0.7)", lineHeight: 1,
         }}>{String(ep.n).padStart(2,"0")}</div>
 
-        {/* status icon chip */}
+        {/* Disk status — TOP-RIGHT. Immutable system fact: is the file on disk? */}
         <div title={have ? "On disk" : "Missing — not downloaded"} style={{
           position:"absolute", top: 10, right: 10,
           width: 26, height: 26, borderRadius: 6,
           background: have ? "oklch(0.74 0.15 150 / 0.18)" : "oklch(0.80 0.17 75 / 0.20)",
-          border: `1px solid ${stripColor}`,
+          border: `1px solid ${have ? "var(--success)" : "var(--warn)"}`,
           display:"grid", placeItems:"center",
-          color: stripColor,
+          color: have ? "var(--success)" : "var(--warn)",
           backdropFilter:"blur(6px)",
+          zIndex: 3,
         }}>
           <IconV name={have ? "check" : "warn"} size={13} stroke={2.4} />
         </div>
 
-        {/* hover overlay — play if on disk, empty/download hint if missing */}
+        {/* Watched-toggle eye — BOTTOM-RIGHT. User-controlled state. */}
+        {have && (
+          <button onClick={(e) => { e.stopPropagation(); onToggleWatched?.(); }}
+            title={watched ? "Mark as unwatched" : "Mark as watched"} style={{
+            all:"unset", cursor:"pointer", position:"absolute", bottom: 10, right: 10,
+            width: 26, height: 26, borderRadius: 6,
+            background: watched ? "oklch(0.74 0.15 150 / 0.25)" : "rgba(0,0,0,0.45)",
+            border: `1px solid ${watched ? "var(--success)" : "rgba(255,255,255,0.18)"}`,
+            display:"grid", placeItems:"center",
+            color: watched ? "var(--success)" : "#fff",
+            backdropFilter:"blur(6px)",
+            transition:"transform .15s ease",
+            zIndex: 4,
+          }}>
+            <EyeIconV3 closed={!watched} size={13} />
+          </button>
+        )}
+
+        {/* Progress bar — bottom edge of thumbnail */}
+        {have && (watched || inProg) && (
+          <div style={{
+            position:"absolute", left: 0, right: 0, bottom: 0, height: 3,
+            background:"rgba(255,255,255,0.08)",
+          }}>
+            <div style={{
+              width: `${(watched ? 1 : ep.progress) * 100}%`, height: "100%",
+              background: watched ? "var(--text-faint)" : "linear-gradient(90deg, var(--accent), var(--accent-hi))",
+              boxShadow: watched ? "none" : "0 0 8px var(--accent-soft)",
+            }} />
+          </div>
+        )}
+
+        {/* hover overlay */}
         {hover && (
           have ? (
             <div style={{
@@ -634,17 +1231,48 @@ const EpisodeCardV3 = ({ ep, item }) => {
               <span>·</span>
               <span>H.265</span>
               <span style={{ marginLeft:"auto" }} />
-              <span style={{ color: "var(--text-dim)" }}>{(Math.random()*0.4 + 0.5).toFixed(2)} GB</span>
+              <span style={{ color: "var(--text-dim)" }}>{(0.5 + ((ep.n * 13) % 41) / 100).toFixed(2)} GB</span>
             </>
           ) : (
             <>
               <span>·</span>
-              <span style={{ color:"var(--warn)" }}>Not downloaded</span>
+              <span style={{ color:"var(--warn)" }}>Missing</span>
             </>
           )}
         </div>
       </div>
     </div>
+  );
+};
+
+// FavoriteButtonV3 — star toggle. Reads from window.FAVORITES Set,
+// mutates locally; in production this hits PATCH /api/library/{id}.
+const FavoriteButtonV3 = ({ id }) => {
+  const [fav, setFav] = useStateV3((window.FAVORITES || new Set()).has(id));
+  const toggle = (e) => {
+    e?.stopPropagation();
+    setFav(v => {
+      const next = !v;
+      if (next) window.FAVORITES?.add(id);
+      else window.FAVORITES?.delete(id);
+      return next;
+    });
+  };
+  return (
+    <button onClick={toggle} title={fav ? "Remove from favorites" : "Add to favorites"} style={{
+      all:"unset", cursor:"pointer",
+      display:"inline-flex", alignItems:"center", gap: 8,
+      padding:"9px 14px", borderRadius: 8,
+      background: fav ? "oklch(0.80 0.17 60 / 0.22)" : "rgba(10,8,7,0.55)",
+      backdropFilter:"blur(10px)",
+      border:`1px solid ${fav ? "oklch(0.85 0.17 60)" : "rgba(255,255,255,0.12)"}`,
+      color: fav ? "oklch(0.92 0.17 80)" : "var(--text)",
+      fontSize: 12.5, fontWeight: 600, fontFamily:"var(--font-mono)", letterSpacing: 0.6,
+      transition:"background .15s ease, border-color .15s ease, color .15s ease",
+    }}>
+      <IconV name={fav ? "star-fill" : "star"} size={14} stroke={fav ? 1 : 1.8} />
+      {fav ? "FAVORITED" : "FAVORITE"}
+    </button>
   );
 };
 
@@ -1118,6 +1746,6 @@ const SettingsV3  = () => <WidePage top><window.SettingsScreen /></WidePage>;
 
 Object.assign(window, {
   CatalogV3, MediaDetailV3, ExplorerV3, TorrentsV3, HistoryV3, SettingsV3,
-  FilterBar, EpisodeCardV3, WidePage, SIDE_PAD,
+  FilterBar, EpisodeCardV3, MovieFileCardV3, EyeIconV3, WidePage, SIDE_PAD,
   EditMetadataDrawer,
 });

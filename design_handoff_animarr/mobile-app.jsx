@@ -30,7 +30,7 @@ const STATUS_H = 62; // status bar height inside IOSDevice
 const TabBar = ({ route, onRoute }) => {
   const tabs = [
     { id: "catalog",  label: "Catalog",  icon: "catalog"  },
-    { id: "torrents", label: "Torrents", icon: "torrent", badge: 2 },
+    { id: "torrents", label: "Downloads", icon: "torrent", badge: 2 },
     { id: "more",     label: "Settings", icon: "settings" },
   ];
   return (
@@ -422,11 +422,50 @@ const MediaDetailMobile = ({ id, onBack, setBdImage }) => {
   const [editing, setEditing] = useS(!!init.openEditDrawer);
   const seasons = item.type === "Anime" || item.type === "Series" ? [1, 2] : [];
   const totalEps = item.episodes || 12;
-  const eps = useM(() => Array.from({ length: Math.min(totalEps, 16) }, (_, i) => ({
-    n: i + 1, title: `Episode ${i+1}`,
-    have: Math.random() > 0.18 || i < 12,
+  const isMovie = item.type === "Movie";
+
+  // Episodes: have / watched / progress — same shape as desktop v3.
+  const initEps = useM(() => Array.from({ length: Math.min(totalEps, 16) }, (_, i) => {
+    const n = i + 1;
+    const have = n < 13 || ((n * 7) % 11) > 2;
+    let watched = false, progress = 0;
+    if (n <= 4) { watched = true; progress = 1; }
+    else if (n === 5) { progress = 0.38; }
+    return { n, title: `Episode ${n}`, have, watched, progress, runtime: item.runtime };
+  }), [item.id, totalEps]);
+
+  const [eps, setEps] = useS(initEps);
+  useE(() => { setEps(initEps); }, [initEps]);
+  const toggleWatched = (n) => setEps(prev => prev.map(e =>
+    e.n === n ? { ...e, watched: !e.watched, progress: e.watched ? 0 : 1 } : e
+  ));
+
+  // Single movie file.
+  const initMovieFile = useM(() => ({
+    n: 1, title: `${item.title} (${item.year})`,
+    have: true, watched: false, progress: 0.62,
     runtime: item.runtime,
-  })), [item.id]);
+    filename: `${item.title} (${item.year}) - 1080p.mkv`,
+    size: "6.1 GB",
+  }), [item.id, item.title, item.year, item.runtime]);
+  const [mFile, setMFile] = useS(initMovieFile);
+  useE(() => { setMFile(initMovieFile); }, [initMovieFile]);
+  const toggleMovieWatched = () => setMFile(p => ({ ...p, watched: !p.watched, progress: p.watched ? 0 : 1 }));
+
+  // Continue action.
+  const cont = useM(() => {
+    if (isMovie) {
+      if (mFile.watched) return { label: "Rewatch" };
+      if (mFile.progress > 0) return { label: `Continue · ${Math.round(mFile.progress*100)}%` };
+      return { label: "Play movie" };
+    }
+    const ip = eps.find(e => e.have && !e.watched && e.progress > 0);
+    if (ip) return { label: `Continue · EP ${String(ip.n).padStart(2,"0")}` };
+    const nextUp = eps.find(e => e.have && !e.watched);
+    if (nextUp && eps.some(e => e.watched)) return { label: `Continue · EP ${String(nextUp.n).padStart(2,"0")}` };
+    if (nextUp) return { label: "Play first episode" };
+    return { label: "Replay" };
+  }, [eps, mFile, isMovie]);
 
   useE(() => { setBdImage?.(item.bd, item.hue); }, [item.bd, item.hue, setBdImage]);
 
@@ -524,7 +563,7 @@ const MediaDetailMobile = ({ id, onBack, setBdImage }) => {
           fontSize: 14, fontWeight: 700, letterSpacing: 0.3,
           display:"flex", alignItems:"center", justifyContent:"center", gap: 8,
         }}>
-          <window.Icon name="play" size={15} stroke={2.2} /> Play first episode
+          <window.Icon name="play" size={15} stroke={2.2} /> {cont.label}
         </button>
         <button style={{
           all:"unset", cursor:"pointer",
@@ -578,6 +617,27 @@ const MediaDetailMobile = ({ id, onBack, setBdImage }) => {
         ))}
       </div>
 
+      {/* MOVIE FILE — same status language as episode row */}
+      {isMovie && (
+        <div style={{ padding: "18px 16px 8px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontFamily: M.mono, fontSize: 10, letterSpacing: 1.2, color: M.accentHi }}>FILE</div>
+              <div style={{ fontFamily: M.display, fontSize: 20, letterSpacing: -0.3, marginTop: 2 }}>
+                ON DISK
+                {mFile.watched && <span style={{ fontSize: 11, color: M.success, marginLeft: 8, letterSpacing: 0.6, fontFamily: M.mono }}>· WATCHED</span>}
+                {!mFile.watched && mFile.progress > 0 && (
+                  <span style={{ fontSize: 11, color: M.accentHi, marginLeft: 8, letterSpacing: 0.6, fontFamily: M.mono }}>
+                    · {Math.round(mFile.progress*100)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <MovieFileRowM file={mFile} item={item} onToggleWatched={toggleMovieWatched} />
+        </div>
+      )}
+
       {/* EPISODES */}
       {seasons.length > 0 && (
         <div style={{ padding: "18px 16px 8px" }}>
@@ -604,7 +664,7 @@ const MediaDetailMobile = ({ id, onBack, setBdImage }) => {
           </div>
 
           <div style={{ display:"flex", flexDirection:"column", gap: 8 }}>
-            {eps.map(ep => <EpisodeRowM key={ep.n} ep={ep} item={item} />)}
+            {eps.map(ep => <EpisodeRowM key={ep.n} ep={ep} item={item} onToggleWatched={() => toggleWatched(ep.n)} />)}
           </div>
         </div>
       )}
@@ -616,7 +676,163 @@ const MediaDetailMobile = ({ id, onBack, setBdImage }) => {
   );
 };
 
-const EpisodeRowM = ({ ep, item }) => (
+const EpisodeRowM = ({ ep, item, onToggleWatched }) => (
+  <div style={{
+    position:"relative",
+    display:"flex", gap: 12,
+    background: ep.have ? (ep.watched ? "rgba(21,17,14,0.7)" : M.surface) : "rgba(21,17,14,0.55)",
+    border: ep.have ? `1px solid ${M.border}` : "1px dashed rgba(255,240,220,0.12)",
+    borderRadius: 12, overflow:"hidden",
+    opacity: ep.have ? (ep.watched ? 0.7 : 1) : 0.45,
+  }}>
+    <div style={{
+      width: 4, alignSelf:"stretch",
+      background: ep.have ? (ep.watched ? M.faint : M.success) : M.warn,
+      boxShadow: (ep.have && !ep.watched) ? "0 0 8px var(--success)" : "none",
+    }} />
+    <div style={{
+      width: 90, height: 64, flexShrink: 0,
+      backgroundImage:`url("${item.bd}")`, backgroundSize:"cover",
+      backgroundPosition: `${(ep.n * 19) % 100}% center`,
+      position:"relative", margin: 8,
+      borderRadius: 8, overflow:"hidden",
+      filter: ep.have ? (ep.watched ? "saturate(0.6) brightness(0.7)" : "none") : "grayscale(1) brightness(0.55)",
+    }}>
+      <div style={{ position:"absolute", inset: 0, background:"linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.7))" }} />
+      <div style={{
+        position:"absolute", top: 4, left: 6,
+        fontFamily: M.display, fontSize: 16, color: ep.have ? "#fff" : "rgba(255,255,255,0.55)",
+        textShadow:"0 1px 4px rgba(0,0,0,0.6)",
+      }}>{String(ep.n).padStart(2,"0")}</div>
+      {!ep.have && (
+        <div style={{
+          position:"absolute", inset: 0, display:"grid", placeItems:"center",
+          color: M.warn, opacity: 0.7,
+        }}><window.Icon name="download" size={14} stroke={1.8} /></div>
+      )}
+      {/* progress bar */}
+      {ep.have && (ep.watched || ep.progress > 0) && (
+        <div style={{ position:"absolute", left: 0, right: 0, bottom: 0, height: 3, background:"rgba(255,255,255,0.1)" }}>
+          <div style={{
+            width: `${(ep.watched ? 1 : ep.progress) * 100}%`, height: "100%",
+            background: ep.watched ? M.faint : `linear-gradient(90deg, ${M.accent}, ${M.accentHi})`,
+          }} />
+        </div>
+      )}
+    </div>
+    <div style={{ flex: 1, minWidth: 0, padding: "10px 4px 10px 0", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: ep.have ? (ep.watched ? M.dim : M.text) : M.dim }}>{ep.title}</div>
+      <div style={{ fontFamily: M.mono, fontSize: 9.5, color: M.faint, marginTop: 3, display:"flex", gap: 6 }}>
+        <span>{ep.runtime}</span>
+        {ep.have ? (
+          <><span>·</span><span>1080p</span><span>·</span><span>H.265</span></>
+        ) : (
+          <><span>·</span><span style={{ color: M.warn }}>Missing</span></>
+        )}
+      </div>
+    </div>
+    {/* Disk-status icon — immutable */}
+    <div title={ep.have ? "On disk" : "Missing"} style={{
+      width: 24, height: 24, borderRadius: 6, margin:"auto 6px auto 0", flexShrink: 0,
+      background: ep.have ? "oklch(0.74 0.15 150 / 0.18)" : "oklch(0.80 0.17 75 / 0.20)",
+      border: `1px solid ${ep.have ? M.success : M.warn}`,
+      display:"grid", placeItems:"center",
+      color: ep.have ? M.success : M.warn,
+    }}>
+      <window.Icon name={ep.have ? "check" : "warn"} size={11} stroke={2.4} />
+    </div>
+    {/* Watched-eye toggle — user-controlled */}
+    {ep.have && (
+      <button onClick={(e) => { e.stopPropagation(); onToggleWatched?.(); }}
+        title={ep.watched ? "Mark as unwatched" : "Mark as watched"} style={{
+        all:"unset", cursor:"pointer", margin: "auto 10px auto 0", flexShrink: 0,
+        width: 24, height: 24, borderRadius: 6,
+        background: ep.watched ? "oklch(0.74 0.15 150 / 0.20)" : "transparent",
+        border: `1px solid ${ep.watched ? M.success : M.border}`,
+        display:"grid", placeItems:"center",
+        color: ep.watched ? M.success : M.dim,
+      }}>
+        <EyeIconM closed={!ep.watched} size={11} />
+      </button>
+    )}
+  </div>
+);
+
+const EyeIconM = ({ closed, size = 15 }) => closed ? (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.88 4.24A10.1 10.1 0 0 1 12 4c7 0 10 8 10 8a17.7 17.7 0 0 1-2.16 3.19" />
+    <path d="M6.61 6.61A17.6 17.6 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    <path d="M1 1l22 22" />
+  </svg>
+) : (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+// Movie file row — same status language as episode row, vertical layout
+// suited for narrow mobile width.
+const MovieFileRowM = ({ file, onToggleWatched, item }) => {
+  const watched = file.watched;
+  const inProg = !watched && file.progress > 0;
+  return (
+    <div style={{
+      position:"relative", borderRadius: 14, overflow:"hidden",
+      background: M.surface, border:`1px solid ${M.border}`,
+      opacity: watched ? 0.8 : 1,
+    }}>
+      <div style={{
+        position:"absolute", left: 0, top: 0, bottom: 0, width: 3,
+        background: watched ? M.faint : M.success,
+        boxShadow: !watched ? "0 0 12px var(--success)" : "none",
+        zIndex: 2,
+      }} />
+      <div style={{
+        position:"relative", aspectRatio: "16 / 9",
+        backgroundImage:`url("${item.bd}")`, backgroundSize:"cover", backgroundPosition:"center",
+        filter: watched ? "saturate(0.6) brightness(0.7)" : "none",
+      }}>
+        <div style={{ position:"absolute", inset: 0, background:"linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.78) 100%)" }} />
+        <div style={{
+          position:"absolute", top: 14, left: 16,
+          fontFamily: M.display, fontSize: 22, color:"#fff", textShadow:"0 2px 8px rgba(0,0,0,0.7)",
+        }}>MOVIE</div>
+        <button onClick={(e) => { e.stopPropagation(); onToggleWatched?.(); }} style={{
+          all:"unset", cursor:"pointer", position:"absolute", top: 12, right: 12,
+          width: 30, height: 30, borderRadius: 8,
+          background: watched ? "oklch(0.74 0.15 150 / 0.22)" : "rgba(0,0,0,0.45)",
+          border: `1px solid ${watched ? M.success : "rgba(255,255,255,0.18)"}`,
+          color: watched ? M.success : "#fff",
+          display:"grid", placeItems:"center", backdropFilter:"blur(6px)",
+        }}>
+          <EyeIconM closed={!watched} size={14} />
+        </button>
+        {(watched || inProg) && (
+          <div style={{ position:"absolute", left: 0, right: 0, bottom: 0, height: 4, background:"rgba(255,255,255,0.08)" }}>
+            <div style={{
+              width: `${(watched ? 1 : file.progress) * 100}%`, height:"100%",
+              background: watched ? M.faint : `linear-gradient(90deg, ${M.accent}, ${M.accentHi})`,
+            }} />
+          </div>
+        )}
+      </div>
+      <div style={{ padding:"14px 14px 16px", paddingLeft: 18, display:"flex", flexDirection:"column", gap: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: watched ? M.dim : M.text }}>{file.title}</div>
+        <div style={{ fontFamily: M.mono, fontSize: 10.5, color: M.faint, wordBreak:"break-all" }}>{file.filename}</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap: "4px 14px", fontFamily: M.mono, fontSize: 10.5, color: M.dim }}>
+          <span><span style={{ color: M.faint }}>RUNTIME</span> {file.runtime}</span>
+          <span><span style={{ color: M.faint }}>RES</span> 1080p</span>
+          <span><span style={{ color: M.faint }}>CODEC</span> H.265</span>
+          <span><span style={{ color: M.faint }}>SIZE</span> {file.size}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
   <div style={{
     position:"relative",
     display:"flex", gap: 12,

@@ -118,4 +118,16 @@ const IGNORES = [
   { id:"i5", glob:"*_thumb.jpg", scope:"Anime",  on:false },
 ];
 
-Object.assign(window, { LIBRARY, NEEDS_REVIEW, TORRENTS, HISTORY, FOLDERS, PATTERNS, IGNORES, BD });
+// Mock "currently watching" state. Drives the Continue Watching hero.
+// Each entry refers to a LIBRARY item by id, with optional ep / progress.
+const WATCHING = [
+  { id: "perfect-world",  ep: 5,   progress: 0.38, kind: "progress" }, // mid-watch
+  { id: "swallowed-star", ep: 142, progress: 0.72, kind: "progress" }, // mid-watch
+  { id: "xian-ni",        ep: 9,   progress: 0,    kind: "next" },     // next ep ready
+  { id: "arcane",         ep: 3,   progress: 0.88, kind: "progress" }, // mid-watch
+];
+
+// Mock favorites — ids of LIBRARY items the user starred.
+const FAVORITES = new Set(["perfect-world","mortals","arcane","ne-zha"]);
+
+Object.assign(window, { LIBRARY, NEEDS_REVIEW, TORRENTS, HISTORY, FOLDERS, PATTERNS, IGNORES, BD, WATCHING, FAVORITES });
