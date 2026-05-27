@@ -39,25 +39,44 @@
 @if (IsOpen && UserCtx.Me is { } me)
 {
     <div class="d-profile__backdrop" @onclick="Close" aria-hidden="true"></div>
-    <aside class="d-profile" role="dialog" aria-label="Profile">
+    <aside class="d-profile" role="dialog" aria-label="Profile" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
 
-        @* ── Header ────────────────────────────────────── *@
+        @* ── Header — on mobile + detail mode the close icon turns into a
+             back arrow so the user can return to the category list without
+             closing the whole drawer. ────────────────────────────────── *@>
         <header class="d-profile__head">
-            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue"
-                    ImagePath="@me.User.AvatarPath" Size="lg" />
+            @if (_mobileShowingDetail)
+            {
+                <button type="button" class="d-profile__back tv-focus"
+                        @onclick="@(() => _mobileShowingDetail = false)"
+                        aria-label="Back to settings list">
+                    <DIcon Name="arrow-l" Size="14" />
+                </button>
+            }
+            else
+            {
+                <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue"
+                        ImagePath="@me.User.AvatarPath" Size="lg" />
+            }
             <div class="d-profile__head-text">
-                <div class="d-profile__head-name">@me.User.Name</div>
-                <div class="d-profile__head-sub">
-                    @me.User.Username@(string.IsNullOrEmpty(me.User.Email) ? "" : " · " + me.User.Email)
+                <div class="d-profile__head-name">
+                    @(_mobileShowingDetail ? CurrentTabLabel : me.User.Name)
                 </div>
+                @if (!_mobileShowingDetail)
+                {
+                    <div class="d-profile__head-sub">
+                        @me.User.Username@(string.IsNullOrEmpty(me.User.Email) ? "" : " · " + me.User.Email)
+                    </div>
+                }
             </div>
             <button type="button" class="d-profile__close tv-focus" @onclick="Close" aria-label="Close">
                 <DIcon Name="x" Size="14" />
             </button>
         </header>
 
-        @* ── Tabs ──────────────────────────────────────── *@
-        <nav class="d-profile__tabs" aria-label="Profile sections">
+        @* ── Desktop tabs — hidden on mobile via .d-profile__tabs--desktop
+             media query. Mobile users see the drilldown list below instead. *@
+        <nav class="d-profile__tabs d-profile__tabs--desktop" aria-label="Profile sections">
             @foreach (var t in Tabs)
             {
                 var key = t.Key;
@@ -71,12 +90,91 @@
             }
         </nav>
 
-        @* ── Body ──────────────────────────────────────── *@
+        @* ── Mobile drilldown list — vertical list of category rows.
+             Click → set _activeTab + flip to detail mode. CSS hides this on
+             desktop and when already drilled into a detail. Two flat-nav
+             entries (Pair a TV, Server settings) are hoisted out of the
+             Identity tab and live alongside the tab categories on phone —
+             on a small screen those two actions deserve top-level surface
+             instead of being buried two screens deep. ────────────────── *@
+        <nav class="d-profile__mlist" aria-label="Settings categories">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                <button type="button" class="d-profile__mlist-row tv-focus"
+                        @onclick="@(() => { _activeTab = key; _mobileShowingDetail = true; })">
+                    <span class="d-profile__mlist-ic">
+                        <DIcon Name="@t.Icon" Size="14" />
+                    </span>
+                    <span class="d-profile__mlist-label">@t.Label</span>
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
+
+            @* Hoisted "Downloads" — the bottom-tabbar that used to host
+               the Torrents tab is gone on phone, so the entry point moves
+               into the root settings list. Gated by uploadContent so
+               viewer-only users don't see a button they can't open. *@
+            @if (UserCtx.Can(p => p.UploadContent))
+            {
+                <button type="button" class="d-profile__mlist-row tv-focus"
+                        @onclick="OnDownloadsClick">
+                    <span class="d-profile__mlist-ic">
+                        <DIcon Name="torrent" Size="14" />
+                    </span>
+                    <span class="d-profile__mlist-label">Downloads</span>
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
+
+            @* Hoisted "Pair a TV" — runs the same handler the Identity tab's
+               in-body button uses. Lives in the root list on phone so it's
+               one tap away (not three). *@
+            <button type="button" class="d-profile__mlist-row tv-focus"
+                    @onclick="OnPairTvClick">
+                <span class="d-profile__mlist-ic">
+                    <DIcon Name="qr-code" Size="14" />
+                </span>
+                <span class="d-profile__mlist-label">Pair a TV</span>
+                <DIcon Name="chev-r" Size="13" />
+            </button>
+
+            @* Server settings — same hoist, gated by the systemSettings
+               permission so non-admin users don't see a row they can't open. *@
+            @if (UserCtx.Can(p => p.SystemSettings))
+            {
+                <button type="button" class="d-profile__mlist-row tv-focus"
+                        @onclick="OnServerSettingsClick">
+                    <span class="d-profile__mlist-ic">
+                        <DIcon Name="settings" Size="14" />
+                    </span>
+                    <span class="d-profile__mlist-label">@L["profile.server_settings_title"]</span>
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
+
+            @* Sign out lives at the bottom of the root list — last item, danger
+               accent — so the destructive action stays last-touchable on
+               every screen size. *@
+            <button type="button" class="d-profile__mlist-row d-profile__mlist-row--danger tv-focus"
+                    @onclick="SignOut">
+                <span class="d-profile__mlist-ic d-profile__mlist-ic--danger">
+                    <DIcon Name="logout" Size="14" />
+                </span>
+                <span class="d-profile__mlist-label">SIGN OUT</span>
+            </button>
+        </nav>
+
+        @* ── Body — visible when desktop OR mobile-detail mode. Hidden when
+             mobile + list mode (the .d-profile__mlist takes its place). *@
         <div class="d-profile__body">
             @switch (_activeTab)
             {
                 case "identity":
                     @RenderIdentity(me);
+                    break;
+                case "servers":
+                    @RenderServers();
                     break;
                 case "appearance":
                     @RenderAppearance();
@@ -104,12 +202,31 @@
     private static readonly TabDef[] Tabs =
     {
         new("identity",   "Identity",   "user"),
+        new("servers",    "Servers",    "server"),
         new("appearance", "Appearance", "sparkle"),
         new("audio",      "Audio",      "audio"),
         new("language",   "Language",   "globe"),
     };
 
     private string _activeTab = "identity";
+
+    /// <summary>Mobile drilldown state. False = show vertical list of
+    /// categories (default for phones), true = show the selected tab's
+    /// body with a back arrow. Desktop ignores this — the horizontal tab
+    /// strip is always visible there.</summary>
+    private bool _mobileShowingDetail;
+
+    /// <summary>Human-readable label of the currently-active tab — shown
+    /// in the mobile detail header so the user knows where they are.</summary>
+    private string CurrentTabLabel
+    {
+        get
+        {
+            foreach (var t in Tabs)
+                if (t.Key == _activeTab) return t.Label;
+            return "Settings";
+        }
+    }
 
     // Local edit state mirrors UserContextState.Preferences. On every change
     // we PATCH /api/me/preferences and update the global state so any other
@@ -128,6 +245,12 @@
     /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "f"
     /// matches the transparent named pager that ships with v5.</summary>
     private string _heroPagerStyle = "f";
+
+    /// <summary>Player HUD style: "full" (icons + text + glass background)
+    /// or "icons" (just icons, no background, no labels). Device-local only —
+    /// stored in localStorage by animarr-player.js, not persisted server-side.
+    /// Set in OnAfterRenderAsync once JS is available.</summary>
+    private string _playerStyle = "full";
 
     // ─── Edit-profile + Change-password inline form state ──────────────
     private bool   _editProfileOpen;
@@ -155,8 +278,11 @@
         {
             _activeTab = InitialTab switch
             {
-                "server" => "identity",
-                _        => Tabs.Any(t => t.Key == InitialTab) ? InitialTab : _activeTab,
+                // Caller may pass legacy "server" (singular) — route to the
+                // new dedicated Servers tab. v5 moved server management out
+                // of the Identity tab to its own pane.
+                "server"  => "servers",
+                _         => Tabs.Any(t => t.Key == InitialTab) ? InitialTab : _activeTab,
             };
         }
 
@@ -284,6 +410,42 @@
         }
     }
 
+    /// <summary>Read the device-local player-style preference from localStorage
+    /// once JS is available. localStorage holds the source of truth — there
+    /// is no server-side mirror because the choice (icons-only vs full) is
+    /// often per-device (e.g. icons-only on living-room TV, full on phone).
+    /// Merged with the user-roster fetch (second pre-merge block had a
+    /// duplicate OnAfterRenderAsync override that broke the build).</summary>
+    private async Task LoadPlayerStyleAsync()
+    {
+        try
+        {
+            var v = await JS.InvokeAsync<string?>(
+                "eval", "localStorage.getItem('animarr_player_style')");
+            if (v == "icons" || v == "full")
+            {
+                _playerStyle = v;
+                StateHasChanged();
+            }
+        }
+        catch { /* localStorage unavailable — keep default */ }
+    }
+
+    private async Task OnPlayerStyleSelect(string style)
+    {
+        if (style != "full" && style != "icons") return;
+        _playerStyle = style;
+        try
+        {
+            // animarrPlayer.setStyle writes to localStorage AND updates any
+            // live HUD via data-style attribute swap, so the change is live
+            // even when the user toggles while the player is open.
+            await JS.InvokeVoidAsync("animarrPlayer.setStyle", style);
+        }
+        catch { /* JS unavailable — preference is still set in _playerStyle */ }
+        StateHasChanged();
+    }
+
     /// <summary>PATCH /api/me/preferences with the diff this tab cares about,
     /// store the new payload in UserContextState so accent/backdrop/etc.
     /// re-apply globally. Errors are swallowed — UI still reflects the local
@@ -374,10 +536,17 @@
         _language = e.Value?.ToString() ?? _language;
         await PatchAsync(new UpdatePreferencesRequest(
             null, null, null, null, null, null, null, null, null, null, null, null, Language: _language));
-        // Hot-swap the active language pack so the rest of the app re-renders
-        // in the new locale immediately — no refresh required. LocalizationService
-        // falls back to en.json if the pack file is missing.
+        // Hot-swap the pack so subscribers (MainLayout) see the new dict
+        // immediately — but most page-level components don't subscribe to
+        // L.LanguageChanged and would keep rendering English strings.
+        // The honest fix: a hard reload of the current URL. UserCtx.Loaded
+        // re-runs, prefs come back from the server with the new language,
+        // and MainLayout calls Loc.LoadAsync(prefLang) at boot. Every L[...]
+        // lookup across the app now resolves against the new dict. Losing
+        // current-page state (filter chip, scroll position) is acceptable —
+        // language changes are rare and the user just asked for one.
         try { await Loc.LoadAsync(_language); } catch { /* fallback handled in Loc */ }
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
     }
 
     private async Task SignOut()
@@ -392,85 +561,9 @@
     private RenderFragment RenderIdentity(MeDto me) => __builder =>
     {
         <div class="d-profile__identity">
-            @* ── SERVER block (v5 multi-server) ──────────────
-                 Rendered above the user info so it's the first thing the
-                 user sees when opening from the TopBar pill. Hidden entirely
-                 if the registry holds zero servers (single-server install). *@
-            @if (ServerReg.Count > 0)
-            {
-                <div class="d-profile__server-block">
-                    <div class="d-profile__field-label">Server</div>
-
-                    @if (ServerReg.Current is { } current)
-                    {
-                        <div class="d-profile__server-row d-profile__server-row--current">
-                            <span class="d-profile__server-row__ic">
-                                <DIcon Name="server" Size="14" />
-                            </span>
-                            <span class="d-profile__server-row__body">
-                                <span class="d-profile__server-row__name">@current.Name</span>
-                                <span class="d-profile__server-row__meta">
-                                    @current.BaseUrl@(current.TitleCount is int c1 ? $" · {c1} titles" : "")
-                                </span>
-                            </span>
-                            <span class="d-profile__server-row__right">current</span>
-                        </div>
-                    }
-
-                    @foreach (var other in ServerReg.Servers.Where(s => ServerReg.Current is null || s.ServerId != ServerReg.Current.ServerId))
-                    {
-                        var o = other;
-                        <button type="button" class="d-profile__server-row tv-focus"
-                                @onclick="@(() => OnSwitchServer(o))">
-                            <span class="d-profile__server-row__ic d-profile__server-row__ic--dim">
-                                <DIcon Name="server" Size="14" />
-                            </span>
-                            <span class="d-profile__server-row__body">
-                                <span class="d-profile__server-row__name">@o.Name</span>
-                                <span class="d-profile__server-row__meta">
-                                    @o.BaseUrl@(o.TitleCount is int c2 ? $" · {c2} titles" : "")
-                                </span>
-                            </span>
-                            <span class="d-profile__server-row__right">switch</span>
-                        </button>
-                    }
-
-                    <button type="button" class="d-profile__server-row d-profile__server-row--add tv-focus"
-                            @onclick="@(() => _addServerOpen = !_addServerOpen)">
-                        <span class="d-profile__server-row__ic d-profile__server-row__ic--dashed">+</span>
-                        <span class="d-profile__server-row__body">
-                            <span class="d-profile__server-row__name d-profile__server-row__name--dim">Add server</span>
-                            <span class="d-profile__server-row__meta">manual IP / Tailscale</span>
-                        </span>
-                    </button>
-
-                    @if (_addServerOpen)
-                    {
-                        <div class="d-profile__server-add">
-                            <input type="text"
-                                   class="d-profile__server-add__input"
-                                   placeholder="http://192.168.1.50:8080"
-                                   value="@_addUrl"
-                                   @oninput="@((ChangeEventArgs e) => _addUrl = e.Value?.ToString() ?? "")"
-                                   @onkeypress="OnAddKeyPress" />
-                            @if (!string.IsNullOrEmpty(_addError))
-                            {
-                                <div class="d-profile__server-add__error">@_addError</div>
-                            }
-                            <div class="d-profile__server-add__row">
-                                <Btn Variant="primary" Size="sm" Loading="@_adding"
-                                     OnClick="OnAddServer"
-                                     Disabled="@(string.IsNullOrWhiteSpace(_addUrl))">
-                                    Probe
-                                </Btn>
-                                <Btn Variant="flat" Size="sm" OnClick="@(() => { _addServerOpen = false; _addError = ""; })">
-                                    Cancel
-                                </Btn>
-                            </div>
-                        </div>
-                    }
-                </div>
-            }
+            @* v5: server management moved to its own "Servers" tab so the
+               Identity tab is purely user-focused (current user header +
+               switch-user roster + edit profile / change password). *@
 
             @* ── SWITCH USER block (v5 PIN per-user-per-device) ──
                  Lists every user that exists on this server. Tapping a card:
@@ -631,32 +724,71 @@
 
             <div class="d-profile__spacer"></div>
 
-            @* ── Server settings deep-link (gated by systemSettings).
-                 Sits directly above SIGN OUT so admins can reach
-                 LLM / patterns / folders / downloads config without
-                 hunting for a separate route on mobile (where the
-                 bottom tabbar's old /server NavLink was replaced by
-                 the Settings tab that opens this very panel). *@
-            @if (UserCtx.Can(p => p.SystemSettings))
-            {
+            @* ── Desktop-only nav rows — these duplicate the entries that
+                 sit at the root of the mobile drilldown list (Pair a TV,
+                 Server settings, Sign out), so on phone we hide this whole
+                 block via CSS and let the root list be the single source of
+                 truth. On desktop there's no root list (horizontal tabs
+                 instead), so the rows stay visible inside the Identity tab. *@
+            <div class="d-profile__desktop-actions">
+                @* ── Pair a TV — opens /login (the host page for the QR scanner
+                     modal). The button has nothing to do with admin
+                     capabilities; any signed-in user can pair their own TV. *@
                 <button type="button" class="d-profile__nav-row tv-focus"
-                        @onclick="OnServerSettingsClick">
+                        @onclick="OnPairTvClick">
                     <span class="d-profile__nav-row__ic">
-                        <DIcon Name="settings" Size="14" />
+                        <DIcon Name="qr-code" Size="14" />
                     </span>
                     <span class="d-profile__nav-row__body">
-                        <span class="d-profile__nav-row__name">@L["profile.server_settings_title"]</span>
-                        <span class="d-profile__nav-row__meta">@L["profile.server_settings_sub"]</span>
+                        <span class="d-profile__nav-row__name">Pair a TV</span>
+                        <span class="d-profile__nav-row__meta">Scan the QR shown on your TV's pairing screen.</span>
                     </span>
                     <DIcon Name="chev-r" Size="13" />
                 </button>
-            }
 
-            <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
-                <DIcon Name="logout" Size="13" /> SIGN OUT
-            </button>
+                @* ── Server settings deep-link (gated by systemSettings).
+                     Sits directly above SIGN OUT so admins can reach
+                     LLM / patterns / folders / downloads config without
+                     hunting for a separate route. *@
+                @if (UserCtx.Can(p => p.SystemSettings))
+                {
+                    <button type="button" class="d-profile__nav-row tv-focus"
+                            @onclick="OnServerSettingsClick">
+                        <span class="d-profile__nav-row__ic">
+                            <DIcon Name="settings" Size="14" />
+                        </span>
+                        <span class="d-profile__nav-row__body">
+                            <span class="d-profile__nav-row__name">@L["profile.server_settings_title"]</span>
+                            <span class="d-profile__nav-row__meta">@L["profile.server_settings_sub"]</span>
+                        </span>
+                        <DIcon Name="chev-r" Size="13" />
+                    </button>
+                }
+
+                <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
+                    <DIcon Name="logout" Size="13" /> SIGN OUT
+                </button>
+            </div>
         </div>
     };
+
+    private async Task OnPairTvClick()
+    {
+        // Close the drawer first so the user lands on a dedicated pairing
+        // screen — /pair-confirm offers tabs for QR scan and manual 6-digit
+        // code entry, both wired to POST /api/auth/pair/confirm.
+        await Close();
+        Nav.NavigateTo("/pair-confirm");
+    }
+
+    private async Task OnDownloadsClick()
+    {
+        // Phone replaces the bottom tabbar with this drilldown list, so the
+        // Downloads tab moved here. /downloads is the v4 alias that renders
+        // the same Torrents page — easier-to-read URL for the user.
+        await Close();
+        Nav.NavigateTo("/downloads");
+    }
 
     private async Task OnServerSettingsClick()
     {
@@ -765,6 +897,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // On first render: pull device-local player-style from localStorage
+        // so the Appearance tab's preview reflects the saved choice.
+        if (firstRender) await LoadPlayerStyleAsync();
+
         // Refresh the roster every time the drawer opens (not just first
         // render). The cheap branch — already loaded and drawer wasn't
         // re-opened — is the common case.
@@ -880,6 +1016,191 @@
         Nav.NavigateTo("/server?panel=users&openForm=user");
     }
 
+    // ─── Servers tab ────────────────────────────────────────────────
+    //
+    // v5: server management lives in its own tab (was tucked at the top of
+    // the Identity tab and crowded the user info). Beyond switch / add, the
+    // tab also lets the user rename a registered server in the local
+    // registry — useful when two boxes both call themselves "Animarr" or
+    // when a Tailscale alias is more memorable than the LAN IP. Pure
+    // client-side rename — see ServerRegistryState.RenameAsync for the
+    // "why we don't push it to the server" rationale.
+
+    /// <summary>ServerId of the row currently in rename mode (null = none).
+    /// We allow only one active edit at a time to keep keyboard focus sane.</summary>
+    private string? _renameServerId;
+    /// <summary>Working buffer for the rename field.</summary>
+    private string  _renameDraft = "";
+
+    private void StartRename(RegisteredServerDto s)
+    {
+        _renameServerId = s.ServerId;
+        _renameDraft    = s.Name;
+    }
+
+    private async Task CommitRename()
+    {
+        if (_renameServerId is null) return;
+        var id = _renameServerId;
+        var name = _renameDraft;
+        _renameServerId = null;
+        _renameDraft    = "";
+        await ServerReg.RenameAsync(id, name);
+    }
+
+    private void CancelRename()
+    {
+        _renameServerId = null;
+        _renameDraft    = "";
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")      await CommitRename();
+        else if (e.Key == "Escape") CancelRename();
+    }
+
+    private RenderFragment RenderServers() => __builder =>
+    {
+        <div class="d-profile__section">
+            <div class="d-profile__server-block">
+                <div class="d-profile__field-label">Servers</div>
+
+                @if (ServerReg.Count == 0)
+                {
+                    <div class="d-profile__server-empty">
+                        No servers registered yet. Add one below — manual IP, hostname or Tailscale name all work.
+                    </div>
+                }
+
+                @if (ServerReg.Current is { } current)
+                {
+                    @ServerRow(current, isCurrent: true)
+                }
+
+                @foreach (var other in ServerReg.Servers.Where(s =>
+                    ServerReg.Current is null || s.ServerId != ServerReg.Current.ServerId))
+                {
+                    @ServerRow(other, isCurrent: false)
+                }
+
+                <button type="button" class="d-profile__server-row d-profile__server-row--add tv-focus"
+                        @onclick="@(() => _addServerOpen = !_addServerOpen)">
+                    <span class="d-profile__server-row__ic d-profile__server-row__ic--dashed">+</span>
+                    <span class="d-profile__server-row__body">
+                        <span class="d-profile__server-row__name d-profile__server-row__name--dim">Add server</span>
+                        <span class="d-profile__server-row__meta">manual IP / Tailscale</span>
+                    </span>
+                </button>
+
+                @if (_addServerOpen)
+                {
+                    <div class="d-profile__server-add">
+                        <input type="text"
+                               class="d-profile__server-add__input"
+                               placeholder="http://192.168.1.50:8080"
+                               value="@_addUrl"
+                               @oninput="@((ChangeEventArgs e) => _addUrl = e.Value?.ToString() ?? "")"
+                               @onkeypress="OnAddKeyPress" />
+                        @if (!string.IsNullOrEmpty(_addError))
+                        {
+                            <div class="d-profile__server-add__error">@_addError</div>
+                        }
+                        <div class="d-profile__server-add__row">
+                            <Btn Variant="primary" Size="sm" Loading="@_adding"
+                                 OnClick="OnAddServer"
+                                 Disabled="@(string.IsNullOrWhiteSpace(_addUrl))">
+                                Probe
+                            </Btn>
+                            <Btn Variant="flat" Size="sm" OnClick="@(() => { _addServerOpen = false; _addError = ""; })">
+                                Cancel
+                            </Btn>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    };
+
+    /// <summary>One row in the servers list. Renders either the static
+    /// name + meta, OR the inline rename input when the user clicked the
+    /// pencil. Current row also gets the "current" right-side label;
+    /// other rows get a "switch" action button.</summary>
+    private RenderFragment ServerRow(RegisteredServerDto s, bool isCurrent) => __builder =>
+    {
+        var srv = s;
+        var editing = _renameServerId == srv.ServerId;
+        var rowClass = isCurrent
+            ? "d-profile__server-row d-profile__server-row--current"
+            : "d-profile__server-row";
+
+        <div class="@rowClass">
+            <span class="d-profile__server-row__ic @(isCurrent ? "" : "d-profile__server-row__ic--dim")">
+                <DIcon Name="server" Size="14" />
+            </span>
+
+            <span class="d-profile__server-row__body">
+                @if (editing)
+                {
+                    <input type="text"
+                           class="d-profile__server-rename"
+                           value="@_renameDraft"
+                           @oninput="@((ChangeEventArgs e) => _renameDraft = e.Value?.ToString() ?? "")"
+                           @onkeydown="OnRenameKey"
+                           @onblur="CommitRename"
+                           autofocus />
+                    <span class="d-profile__server-row__meta">
+                        Enter to save · Esc to cancel
+                    </span>
+                }
+                else
+                {
+                    <span class="d-profile__server-row__name">@srv.Name</span>
+                    <span class="d-profile__server-row__meta">
+                        @srv.BaseUrl@(srv.TitleCount is int c ? $" · {c} titles" : "")
+                    </span>
+                }
+            </span>
+
+            @* Right cluster. Editing shows only ✓ + ✕; otherwise a pencil +
+               the current-label or switch-button. Pencil is always
+               available so non-current servers can be renamed without
+               switching to them first. *@
+            <span class="d-profile__server-row__actions">
+                @if (editing)
+                {
+                    <button type="button" class="d-profile__server-row__btn tv-focus"
+                            @onclick="CommitRename" aria-label="Save name">
+                        <DIcon Name="check" Size="13" />
+                    </button>
+                    <button type="button" class="d-profile__server-row__btn tv-focus"
+                            @onclick="CancelRename" aria-label="Cancel rename">
+                        <DIcon Name="x" Size="13" />
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="d-profile__server-row__btn tv-focus"
+                            @onclick="@(() => StartRename(srv))"
+                            aria-label="Rename server">
+                        <DIcon Name="pencil" Size="13" />
+                    </button>
+                    @if (isCurrent)
+                    {
+                        <span class="d-profile__server-row__right">current</span>
+                    }
+                    else
+                    {
+                        <button type="button" class="d-profile__server-row__btn d-profile__server-row__btn--switch tv-focus"
+                                @onclick="@(() => OnSwitchServer(srv))">
+                            switch
+                        </button>
+                    }
+                }
+            </span>
+        </div>
+    };
+
     private RenderFragment RenderAppearance() => __builder =>
     {
         <div class="d-profile__section">
@@ -947,6 +1268,53 @@
                     <div class="d-profile__toggle-hint">Larger focus rings + bigger hit targets for remote-control navigation.</div>
                 </div>
                 <Toggle Checked="@_tvMode" CheckedChanged="OnTvModeToggle" />
+            </div>
+
+            @* ── Player HUD style ─────────────────────────────────────
+                 Device-local preference (localStorage) for how the
+                 in-player HUD renders: "full" with text labels + glass
+                 chip background, or "icons" — naked icon hit-targets,
+                 no background, no labels. *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Player style</div>
+                    <div class="d-profile__section-hint">
+                        How the in-player controls render. Saved per device — set
+                        this differently on a TV vs phone if you like.
+                    </div>
+                </div>
+                <div class="d-profile__pager-grid">
+                    @{
+                        var fullActive  = string.Equals(_playerStyle, "full",  StringComparison.OrdinalIgnoreCase);
+                        var iconsActive = string.Equals(_playerStyle, "icons", StringComparison.OrdinalIgnoreCase);
+                    }
+                    <button type="button"
+                            class="@($"d-profile__pager-card tv-focus {(fullActive ? "is-active" : "")}")"
+                            title="Glass buttons with icons and labels"
+                            @onclick="@(() => OnPlayerStyleSelect("full"))">
+                        <span class="d-profile__pager-card__preview">
+                            <span class="d-profile__player-style-preview d-profile__player-style-preview--full">
+                                <span class="d-profile__player-style-chip is-primary">▶ Play</span>
+                                <span class="d-profile__player-style-chip">Next</span>
+                                <span class="d-profile__player-style-chip">CC</span>
+                            </span>
+                        </span>
+                        <span class="d-profile__pager-card__name">Full</span>
+                    </button>
+                    <button type="button"
+                            class="@($"d-profile__pager-card tv-focus {(iconsActive ? "is-active" : "")}")"
+                            title="Just the icons, no labels, no background"
+                            @onclick="@(() => OnPlayerStyleSelect("icons"))">
+                        <span class="d-profile__pager-card__preview">
+                            <span class="d-profile__player-style-preview d-profile__player-style-preview--icons">
+                                <span class="d-profile__player-style-icon is-primary">▶</span>
+                                <span class="d-profile__player-style-icon">⏵</span>
+                                <span class="d-profile__player-style-icon">CC</span>
+                            </span>
+                        </span>
+                        <span class="d-profile__pager-card__name">Icons only</span>
+                    </button>
+                </div>
             </div>
 
             @* ── Hero pager style (v5 design board variants F/G/H) ──
@@ -1135,8 +1503,19 @@
     private RenderFragment RenderLanguage() => __builder =>
     {
         <div class="d-profile__section">
-            <label class="d-profile__field">
-                <span class="d-profile__field-label">INTERFACE LANGUAGE</span>
+            @* Match the Theme / Accent / Hero pager section pattern — regular
+               title + hint above, control below. Was a tiny mono "INTERFACE
+               LANGUAGE" eyebrow before, which read as a different control
+               type than the rest of the Appearance settings. *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Interface language</div>
+                    <div class="d-profile__section-hint">
+                        Picking a different language reloads the app so every screen
+                        re-renders in the new locale. Your preferred audio + subtitle
+                        languages live in the <strong>Audio</strong> tab.
+                    </div>
+                </div>
                 <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
                     <option value="en">English</option>
                     <option value="ru">Русский</option>
@@ -1144,10 +1523,6 @@
                     <option value="de">Deutsch</option>
                     <option value="es">Español</option>
                 </select>
-            </label>
-            <div class="d-profile__hint-card">
-                Changes apply instantly. Your preferred audio + subtitle languages
-                are configured in the <strong>Audio</strong> tab.
             </div>
         </div>
     };

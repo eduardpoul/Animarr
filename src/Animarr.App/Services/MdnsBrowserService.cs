@@ -10,29 +10,41 @@ namespace Animarr.App.Services;
 ///
 /// Listens for <c>_animarr._tcp.local.</c> instance announcements on the LAN
 /// and surfaces them to the Blazor UI through <see cref="BrowseAsync"/>.
-/// Same Makaretu library as the server publishes with, so the wire format and
-/// TXT-record keys match exactly (serverId / version / name / mode).
 ///
-/// Cross-platform: Makaretu.Dns.Multicast targets netstandard2.0 and binds
-/// sockets via <c>System.Net.NetworkInformation.NetworkInterface</c> which is
-/// available on every MAUI head (Windows / macOS / Android / iOS / Catalyst).
-/// Pure browser WASM can't open a UDP 5353 socket and never lands here —
-/// the Discovery page falls back to manual URL entry in that case.
+/// Platform back-ends:
 ///
-/// Lifecycle: registered as a singleton in MauiProgram.cs and the
-/// MulticastService instance lives for the whole app process. We also stash
-/// the instance in a static field (<see cref="Instance"/>) so the
-/// [JSInvokable] static dispatch in <c>MdnsBridge</c> can find us without
-/// having to round-trip a DotNetObjectReference through every JS call.
+///   • Android — uses the system <c>NsdManager</c> (Network Service Discovery)
+///     via <c>NsdAndroidBrowser</c>. Going through the OS daemon is the only
+///     reliable path on Android; userspace UDP 5353 listeners (Makaretu) often
+///     never receive multicast packets even with the multicast lock held
+///     because <c>mdnsd</c> owns the kernel-side socket.
+///   • Windows / macOS / iOS / Catalyst — uses Makaretu.Dns.Multicast directly.
+///     These platforms either don't have an OS-level mDNS daemon claiming
+///     port 5353 (Windows) or expose APIs that don't reach raw TXT/SRV records
+///     (iOS NetService), so Makaretu's userspace listener is the better fit.
+///
+/// Pure browser WASM can't open a UDP 5353 socket and never lands here — the
+/// Discovery page falls back to manual URL entry in that case.
+///
+/// Lifecycle: singleton in MauiProgram.cs. The underlying transport
+/// (NsdManager listener or MulticastService) lives for the whole process. We
+/// also stash the instance in a static field (<see cref="Instance"/>) so the
+/// [JSInvokable] dispatch in <c>MdnsBridge</c> can find us without juggling a
+/// DotNetObjectReference per page nav.
 /// </summary>
 public sealed class MdnsBrowserService : IAsyncDisposable
 {
     private const string ServiceType = "_animarr._tcp";
 
     private readonly ILogger<MdnsBrowserService> _log;
-    private readonly MulticastService              _mdns;
-    private readonly ServiceDiscovery              _sd;
     private readonly ConcurrentDictionary<string, DiscoveredServer> _seen = new();
+
+#if ANDROID
+    private readonly NsdAndroidBrowser? _nsd;
+#else
+    private readonly MulticastService _mdns;
+    private readonly ServiceDiscovery _sd;
+#endif
 
     /// <summary>Process-wide accessor for the singleton instance — set by
     /// MauiProgram once the service container is built so the static
@@ -45,7 +57,22 @@ public sealed class MdnsBrowserService : IAsyncDisposable
     public MdnsBrowserService(ILogger<MdnsBrowserService> log)
     {
         _log = log;
+        DiagLog("ctor: starting MdnsBrowserService.");
 
+#if ANDROID
+        try
+        {
+            var ctx = Android.App.Application.Context;
+            _nsd = new NsdAndroidBrowser(ctx, OnNsdFound, DiagLog);
+            _nsd.Start();
+            DiagLog("Android NSD browse started.");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "NSD browse start failed.");
+            DiagLog($"NSD start FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+#else
         _mdns = new MulticastService();
         _sd   = new ServiceDiscovery(_mdns);
         _sd.ServiceInstanceDiscovered += OnInstance;
@@ -64,6 +91,19 @@ public sealed class MdnsBrowserService : IAsyncDisposable
             // The UI manual-add path still works in any of those cases.
             _log.LogWarning(ex, "mDNS browse start failed.");
         }
+#endif
+    }
+
+    /// <summary>Writes to logcat under tag "Animarr.mDNS" on Android, no-op
+    /// elsewhere. Plain ILogger output doesn't always surface in <c>adb logcat</c>
+    /// on a release-mode MAUI build, which masks startup failures of the
+    /// multicast service. This goes through <c>Android.Util.Log</c> directly so
+    /// the trail is visible from a phone connected via ADB.</summary>
+    private static void DiagLog(string msg)
+    {
+#if ANDROID
+        try { Android.Util.Log.Info("Animarr.mDNS", msg); } catch { }
+#endif
     }
 
     /// <summary>Static initializer — call from MauiProgram after the
@@ -75,8 +115,19 @@ public sealed class MdnsBrowserService : IAsyncDisposable
     /// everything we've seen — including stale entries from earlier in the
     /// session, since the publisher's reannounce TTL might leave them
     /// unrefreshed even when they're still reachable.</summary>
-    public async Task<DiscoveredServer[]> BrowseAsync(int timeoutMs = 4000)
+    public async Task<DiscoveredServer[]> BrowseAsync(int timeoutMs = 8000)
     {
+        DiagLog($"BrowseAsync: snapshotting {ServiceType}.local (seen so far: {_seen.Count}, waiting up to {timeoutMs}ms).");
+#if ANDROID
+        // Don't restart NSD here — the system NsdManager is event-driven and
+        // has been actively querying since process start. Calling Restart()
+        // causes StopServiceDiscovery → DiscoverServices in quick succession,
+        // and Stop is asynchronous: Start fires before Stop has freed the
+        // listener slot, then fails with "listener already in use" and tears
+        // down the entire browse. That used to make the first scan after a
+        // Discovery-page mount return empty even though the server was
+        // visible to NSD a few seconds later. Just wait + poll the cache.
+#else
         try
         {
             _sd.QueryServiceInstances(ServiceType);
@@ -85,13 +136,36 @@ public sealed class MdnsBrowserService : IAsyncDisposable
         {
             _log.LogDebug(ex, "mDNS re-query failed.");
         }
+#endif
 
-        // Wait for late responders. The event handler stuffs new servers into
-        // _seen on the multicast listener thread, so by the time the delay
-        // ends the snapshot we return reflects them.
-        await Task.Delay(timeoutMs).ConfigureAwait(false);
+        // Poll the cache so we can short-circuit as soon as the first server
+        // shows up — no point waiting the full 8s when a name was resolved
+        // after 200ms. We still cap at timeoutMs so a network with zero
+        // mDNS reachability falls through to the subnet probe quickly.
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_seen.Count > 0)
+            {
+                // Give late responders a 400ms grace window so two adjacent
+                // servers both make it into the UI in the same scan.
+                await Task.Delay(400).ConfigureAwait(false);
+                break;
+            }
+            await Task.Delay(200).ConfigureAwait(false);
+        }
+        DiagLog($"BrowseAsync: returning {_seen.Count} server(s).");
         return _seen.Values.ToArray();
     }
+
+#if ANDROID
+    private void OnNsdFound(DiscoveredServer server)
+    {
+        var key = !string.IsNullOrWhiteSpace(server.ServerId) ? server.ServerId : server.BaseUrl;
+        _seen[key] = server;
+        _log.LogDebug("NSD discovered: {Name} {BaseUrl}", server.Name, server.BaseUrl);
+    }
+#else
 
     private void OnInstance(object? sender, ServiceInstanceDiscoveryEventArgs e)
     {
@@ -187,11 +261,16 @@ public sealed class MdnsBrowserService : IAsyncDisposable
         var firstDot = instanceLabel.IndexOf('.');
         return firstDot > 0 ? instanceLabel[..firstDot] : instanceLabel;
     }
+#endif
 
     public ValueTask DisposeAsync()
     {
+#if ANDROID
+        try { _nsd?.Dispose(); } catch { }
+#else
         try { _sd.Dispose(); } catch { }
         try { _mdns.Dispose(); } catch { }
+#endif
         return ValueTask.CompletedTask;
     }
 }

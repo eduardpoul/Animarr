@@ -88,7 +88,7 @@
                 <nav class="d-chero__pager-g" role="tablist" aria-label="Continue watching slots">
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
                             @onclick="PrevSlide" aria-label="Previous slot">
-                        <DIcon Name="chevron-left" Size="20" />
+                        <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-dashes">
                         @for (int i = 0; i < Items.Length; i++)
@@ -104,7 +104,7 @@
                     </div>
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
                             @onclick="NextSlideManual" aria-label="Next slot">
-                        <DIcon Name="chevron-right" Size="20" />
+                        <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>
             }
@@ -113,7 +113,7 @@
                 <nav class="d-chero__pager-h" role="tablist" aria-label="Continue watching slots">
                     <button type="button" class="d-chero__pager-chev tv-focus"
                             @onclick="PrevSlide" aria-label="Previous slot">
-                        <DIcon Name="chevron-left" Size="20" />
+                        <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-pills">
                         @for (int i = 0; i < Items.Length; i++)
@@ -129,7 +129,7 @@
                     </div>
                     <button type="button" class="d-chero__pager-chev tv-focus"
                             @onclick="NextSlideManual" aria-label="Next slot">
-                        <DIcon Name="chevron-right" Size="20" />
+                        <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>
             }
@@ -172,6 +172,9 @@
         // Re-render whenever the user picks a different pager / theme / etc.
         // in ProfilePanel — UserContextState.OnChange fires after every PATCH.
         UserCtx.OnChange += OnPrefsChanged;
+        // Also rebase <img src> when the active server URL flips (cookie-
+        // restored MAUI boot hydrates ServerRegistry after first render).
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnPrefsChanged;
     }
 
     private void OnPrefsChanged() => InvokeAsync(StateHasChanged);
@@ -245,6 +248,7 @@
     public void Dispose()
     {
         UserCtx.OnChange -= OnPrefsChanged;
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnPrefsChanged;
         _timer?.Dispose();
     }
 }

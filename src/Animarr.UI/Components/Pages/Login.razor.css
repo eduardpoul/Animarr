@@ -57,16 +57,14 @@
     margin-bottom: 22px;
 }
 
+/* v6: BrandMark SVG renders its own dark tile + accent A. CSS keeps just
+   the soft accent shadow under the chip — matches the welcome / topbar
+   chip glow so the brand reads as one continuous surface across screens. */
 .d-login__brand-mark,
 .d-setup__brand-mark {
-    width: 40px; height: 40px;
     border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent), oklch(0.42 0.18 var(--accent-hue, 25)));
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font-family: var(--font-display);
-    font-size: 21px;
+    box-shadow: 0 6px 20px -6px var(--accent-soft);
+    flex-shrink: 0;
 }
 
 .d-login__brand-name,

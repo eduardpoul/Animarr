@@ -135,57 +135,12 @@
     margin-top: var(--space-3);
 }
 
-/* Featured pager — vertical numbered side rail per CatalogV3 lines 148-164.
-   Sits bottom-right of the hero, aligned to the content baseline. */
-.d-hero__pager {
-    position: absolute;
-    right: var(--space-11);
-    bottom: var(--space-12);
-    z-index: 2;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding-bottom: 12px;
-}
+/* v5: pager moved to global components.css and now uses the same F/G/H
+   variants as CatalogContinueHero (driven by UserPreferences.HeroPagerStyle).
+   The old vertical numbered side rail (.d-hero__pager*) was removed when the
+   markup switched to .d-chero__pager*. */
 
-.d-hero__pager-item {
-    appearance: none;
-    cursor: pointer;
-    background: transparent;
-    border: 0;
-    padding: 6px 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    color: var(--text-faint);
-    transition: color var(--motion-base);
-}
-
-.d-hero__pager-line {
-    display: inline-block;
-    width: 14px;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.18);
-    transition: width var(--motion-base), background var(--motion-base);
-}
-
-.d-hero__pager-num { line-height: 1; }
-
-.d-hero__pager-item:hover { color: var(--text-dim); }
-
-.d-hero__pager-item--active {
-    color: var(--accent-hi);
-}
-
-.d-hero__pager-item--active .d-hero__pager-line {
-    width: 28px;
-    background: var(--accent);
-}
-
-/* ── Mobile / tablet — shrink hero, tuck pager into bottom row. */
+/* ── Mobile / tablet — shrink hero. */
 @media (max-width: 959px) {
     .d-hero {
         height: clamp(360px, 56vh, 520px);
@@ -199,12 +154,6 @@
     }
     .d-hero__overview {
         -webkit-line-clamp: 2;
-    }
-    .d-hero__pager {
-        position: static;
-        flex-direction: row;
-        margin-top: var(--space-3);
-        padding-bottom: 0;
     }
 }
 

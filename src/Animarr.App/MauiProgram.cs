@@ -31,6 +31,83 @@ public static class MauiProgram
         // BlazorWebView host plumbing.
         builder.Services.AddMauiBlazorWebView();
 
+#if ANDROID
+        // Apply Android WebView tweaks (chrome client for camera permission +
+        // MixedContentMode for HTTP-on-HTTPS subresources). We hook into both
+        // the property-mapper AND the `BlazorWebViewInitialized` event because
+        // the timing of when handler.PlatformView is the bound WebView differs
+        // between architectures:
+        //   • arm64 (Mi TV / Pixel): mapper runs after CreatePlatformView, so
+        //     handler.PlatformView is already the live WebView.
+        //   • armeabi-v7a phones: under certain Fast Deploy paths the mapper
+        //     fires before the BlazorWebViewHandler completes its setup, and
+        //     the MixedContentMode we set gets overwritten by MAUI's own
+        //     post-create configuration. The Initialized event is the
+        //     framework's "we're done, you may now poke at the WebView"
+        //     signal — guaranteed to land last.
+        // Both code paths call the same Configure() so they're idempotent.
+        static void ConfigureAndroidWebView(global::Android.Webkit.WebView? webView)
+        {
+            if (webView is null) return;
+            try
+            {
+                webView.SetWebChromeClient(
+                    new Platforms.Android.AnimarrWebChromeClient(inner: null));
+
+                // NOTE: We tried installing a custom WebViewClient here to
+                // proxy http:// subresources around Chromium's mixed-content
+                // gate, but that broke the BlazorWebView bundle entirely —
+                // MAUI's internal WebViewClient is the only thing wiring the
+                // https://0.0.0.x/ virtual host to the WebViewAssetLoader,
+                // and replacing it stops Blazor from loading. Until we find
+                // a way to chain to the framework client we rely on
+                // MixedContentMode below + the in-page JS image-URL rewriter
+                // (animarr-img-proxy.js) for the http-on-https case.
+                if (webView.Settings is not null)
+                {
+                    webView.Settings.MixedContentMode = global::Android.Webkit.MixedContentHandling.AlwaysAllow;
+                    Android.Util.Log.Info("Animarr.WebView",
+                        $"Configured: MixedContentMode={webView.Settings.MixedContentMode}, chromeClient=AnimarrWebChromeClient");
+                }
+                // Phase 2b (2026-05-27): make the WebView transparent so the
+                // TextureView MainActivity inserted at the bottom of DecorView
+                // shows through during playback. Body remains opaque by default
+                // (via tokens.css' :root background) so non-player pages still
+                // paint their dark chrome; the player overlay (animarr-player.js
+                // attach()) adds a `native-playback` class to <body> that wipes
+                // the background, exposing the video underneath the HUD.
+                webView.SetBackgroundColor(global::Android.Graphics.Color.Transparent);
+            }
+            catch (Exception ex)
+            {
+                Android.Util.Log.Error("Animarr.WebView", $"ConfigureAndroidWebView failed: {ex.Message}");
+            }
+        }
+
+        void OnBlazorWebViewInitialized(object? sender,
+            Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
+        {
+            ConfigureAndroidWebView(e.WebView as global::Android.Webkit.WebView);
+        }
+
+        Microsoft.AspNetCore.Components.WebView.Maui.BlazorWebViewHandler
+            .BlazorWebViewMapper.AppendToMapping(
+                "AnimarrWebViewSetup",
+                (handler, view) =>
+                {
+                    ConfigureAndroidWebView(handler.PlatformView as global::Android.Webkit.WebView);
+                    // Also wire the Initialized event for the late retry — it
+                    // fires once per BlazorWebView lifetime, AFTER MAUI's own
+                    // post-create configuration would have stomped our
+                    // MixedContentMode setting.
+                    if (view is Microsoft.AspNetCore.Components.WebView.Maui.BlazorWebView bwv)
+                    {
+                        bwv.BlazorWebViewInitialized -= OnBlazorWebViewInitialized;
+                        bwv.BlazorWebViewInitialized += OnBlazorWebViewInitialized;
+                    }
+                });
+#endif
+
         // Resolve the Animarr server URL — env var wins, otherwise the
         // compile-time default lands on the developer's box. This seeds the
         // ServerAddressProvider; if ServerRegistryState later hydrates a
@@ -114,6 +191,21 @@ public static class MauiProgram
         // always resolves to the same instance across page reloads.
         builder.Services.AddSingleton<WatchNextService>();
 
+        // NativePlayerService (Phase 2 ExoPlayer-backed TV playback) is
+        // currently disabled — the AndroidX.Media3 binding 1.4.1.1 has a
+        // namespace/class name collision on ExoPlayer.Builder that breaks
+        // the build. The service file is removed from compilation via
+        // <Compile Remove> in the csproj. Once we pin a binding version
+        // where ExoPlayer.Builder resolves cleanly, re-enable both this
+        // line + the Compile Remove + the static-instance registration.
+
+        // Subnet probe — TCP fallback for when mDNS broadcasts can't cross
+        // the home-WiFi AP's wired/wireless boundary (very common on consumer
+        // routers). Discovery.razor calls this only when the mDNS browse came
+        // back empty, so cheap setups still get a working "find my server"
+        // flow without the user having to memorise an IP.
+        builder.Services.AddSingleton<SubnetProbeService>();
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
@@ -135,6 +227,16 @@ public static class MauiProgram
         // accessor is non-null and the JS bridge needs no platform check.
         var watchNext = app.Services.GetRequiredService<WatchNextService>();
         WatchNextService.RegisterStaticInstance(watchNext);
+
+        // Same static-accessor pattern for the subnet probe — JsInterop layer
+        // dispatches through SubnetProbeBridge without juggling a per-page
+        // DotNetObjectReference.
+        var subnet = app.Services.GetRequiredService<SubnetProbeService>();
+        JsInterop.SubnetProbeBridge.RegisterStaticInstance(subnet);
+
+        // Native player (Phase 2) — registration commented out until the
+        // AndroidX.Media3.ExoPlayer binding is unpinned. See the comment
+        // above the (now-removed) builder.Services.AddSingleton<NativePlayerService>().
 
         return app;
     }

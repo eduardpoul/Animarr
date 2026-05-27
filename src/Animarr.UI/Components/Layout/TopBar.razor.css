@@ -5,7 +5,12 @@
 .d-topbar {
     position: fixed;
     top: 0; left: 0; right: 0;
-    height: 60px;
+    /* Edge-to-edge: extend the bar's painted area BEHIND the Android status
+       bar / iOS dynamic island, then pad the inner content down by the
+       safe-area inset so the buttons aren't covered. On TV both insets are
+       0 so this collapses back to a flat 60px bar. */
+    height: calc(60px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 24px 0;
     z-index: 50;
     /* Fully transparent — no gradient, no blur, no border, no shadow. The
        interactive pills below also drop their backdrop-filter so the bar
@@ -19,55 +24,6 @@
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 0 24px;
-}
-
-/* ── Server pill (v5 multi-server) ───────────────────────
-   Sits leftmost when ServerRegistryState.Current is set.
-   Click opens ProfilePanel pre-focused on the Server section. */
-.d-topbar__server-pill {
-    appearance: none;
-    background: transparent;
-    border: 0;
-    border-radius: 6px;
-    cursor: pointer;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    height: 28px;
-    padding: 0 10px;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: 0.6px;
-    transition: background var(--motion-fast);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-.d-topbar__server-pill:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.d-topbar__server-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent-hi);
-    box-shadow: 0 0 6px var(--accent-soft);
-    flex-shrink: 0;
-}
-
-.d-topbar__server-name {
-    line-height: 1;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    max-width: 140px;
-}
-
-/* On narrow viewports collapse the label, keeping only the dot. */
-@media (max-width: 720px) {
-    .d-topbar__server-name { display: none; }
-    .d-topbar__server-pill { padding: 0 8px; }
 }
 
 /* ── Brand ──────────────────────────────────────────────── */
@@ -84,21 +40,14 @@
     color: inherit;
 }
 
+/* v6: brand mark is now the BrandMark SVG (sharp geo A + sparkle) rather
+   than a text-rendered "a". The rect inside the SVG paints its own dark
+   tile + teal accent, so this rule only adds the brand-glow shadow that
+   the chip used to draw via the gradient bg. */
 .d-topbar__brand-mark {
-    width: 30px;
-    height: 30px;
     border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hi));
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font-family: var(--font-display);
-    font-size: 17px;
     box-shadow: 0 4px 16px -4px var(--accent-soft);
-    line-height: 1;
-    /* v5: brand mark is "a" lowercase. Force lowercase in case a theme's
-       --label-casing tries to flip it to uppercase. */
-    text-transform: lowercase;
+    flex-shrink: 0;
 }
 
 .d-topbar__brand-name {

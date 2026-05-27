@@ -91,4 +91,68 @@ public static class PlatformBridge
         return null;
 #endif
     }
+
+    /// <summary>Fetch an http:// image from .NET land and return it as a
+    /// base64 data-URL. The JS image-proxy uses this to side-step Chromium
+    /// WebView's mixed-content gate, which refuses to load http:// resources
+    /// from the https://0.0.0.x/ bundle even with MixedContentMode set to
+    /// AlwaysAllow. Returns the data URL (e.g. "data:image/jpeg;base64,…")
+    /// or an empty string on failure — JS treats empty as "leave img.src
+    /// alone" so the broken-image icon still appears for genuinely missing
+    /// resources rather than silently disappearing.</summary>
+    [JSInvokable("FetchImageAsDataUrl")]
+    public static async Task<string> FetchImageAsDataUrlAsync(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "";
+        try
+        {
+            using var http = new System.Net.Http.HttpClient
+            {
+                Timeout = System.TimeSpan.FromSeconds(8),
+            };
+            using var resp = await http.GetAsync(url).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return "";
+            var bytes = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var mime  = resp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            return $"data:{mime};base64,{System.Convert.ToBase64String(bytes)}";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    /// <summary>Ask the OS for the CAMERA runtime permission (if not already
+    /// held) and return whether we have it after the prompt. The phone's QR
+    /// scanner in <c>PairConfirm.razor</c> calls this BEFORE invoking the
+    /// html5-qrcode bridge — without an explicit grant Android's WebView
+    /// resolves <c>onPermissionRequest</c> for video-capture as Deny and
+    /// the JS side sees "NotAllowedError".
+    ///
+    /// On non-Android targets always returns true so the QR scanner code
+    /// path is uniform; WASM in a browser already prompts via the standard
+    /// getUserMedia dialog and doesn't need this round trip.</summary>
+    [JSInvokable("RequestCameraPermission")]
+    public static async Task<bool> RequestCameraPermissionAsync()
+    {
+#if ANDROID
+        try
+        {
+            var status = await Microsoft.Maui.ApplicationModel.Permissions
+                .CheckStatusAsync<Microsoft.Maui.ApplicationModel.Permissions.Camera>();
+            if (status == Microsoft.Maui.ApplicationModel.PermissionStatus.Granted) return true;
+
+            status = await Microsoft.Maui.ApplicationModel.Permissions
+                .RequestAsync<Microsoft.Maui.ApplicationModel.Permissions.Camera>();
+            return status == Microsoft.Maui.ApplicationModel.PermissionStatus.Granted;
+        }
+        catch
+        {
+            return false;
+        }
+#else
+        await Task.CompletedTask;
+        return true;
+#endif
+    }
 }

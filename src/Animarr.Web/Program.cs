@@ -703,6 +703,11 @@ app.MapPost("/api/hls/start", async (
         double? seek,
         int? audioOffsetHwMs,
         int? audioOffsetSwMs,
+        // 0 = first audio stream (historical default). Surfaced via the HUD's
+        // Audio popup which restarts the session with a different index when
+        // the user picks another track — there's no in-stream switching with
+        // our single-stream transcode pipeline.
+        int? audioTrackIndex,
         IDbContextFactory<AppDbContext> dbFactory,
         HlsSessionService hls,
         ILoggerFactory loggerFactory) =>
@@ -729,6 +734,10 @@ app.MapPost("/api/hls/start", async (
                 directPlayUrl = decision.DirectUrl,
                 totalDuration = decision.DurationSec,
                 resumeSec     = seekSec,
+                // What the player actually receives — for the HUD plashka.
+                // Direct Play means source passes through unchanged, so HDR
+                // tags etc. are preserved here.
+                output        = decision.Output,
             });
         }
 
@@ -757,7 +766,8 @@ app.MapPost("/api/hls/start", async (
             : 0.0;   // SW path has no sensible default — user must dial it in
         var result = await hls.StartAsync(fullPath!, seekSec,
             audioOffsetHwSec: audioOffsetHwSec,
-            audioOffsetSwSec: audioOffsetSwSec);
+            audioOffsetSwSec: audioOffsetSwSec,
+            audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0));
         return Results.Ok(new
         {
             token        = result.Token,
@@ -770,6 +780,10 @@ app.MapPost("/api/hls/start", async (
             resumeSec    = seekSec,
             audioOffsetHwMs = (int)Math.Round(audioOffsetHwSec * 1000),
             audioOffsetSwMs = (int)Math.Round(audioOffsetSwSec * 1000),
+            // What the player actually receives — drives the HUD plashka.
+            // For re-encode plans this differs from /api/probe output (e.g.
+            // HEVC 10-bit DV source → H.264 8-bit SDR here).
+            output       = result.Output,
         });
     }
     catch (Exception ex)

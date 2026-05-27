@@ -1,0 +1,66 @@
+@*
+    BrandMark — v6 Animarr glyph (sharp geo A + sparkle) from
+    design-system/scratch-mark4.html.
+
+    Replaces the simple `<span class="d-topbar__brand-mark">a</span>`
+    pattern that was scattered across TopBar / Welcome / Discovery /
+    Login / MobileShell. Lettering as a path means the mark survives
+    every theme + system-font combination identically (the old text-
+    rendered "a" used Inter / Geist / Archivo Black depending on theme,
+    and shifted alignment with each).
+
+    The accent (A fill) reads `var(--accent-hi)` from the active theme
+    so swapping accent hue in ProfilePanel updates the mark live. The
+    background tile is fixed dark #0a0c10 — high contrast against any
+    accent and any theme bg.
+
+    Sparkle stays static here; CSS-driven pulse / orbit variants belong
+    on splash / hero where they don't add visual noise to a chip.
+*@
+
+@*
+   Inline CSS rather than a scoped .razor.css file: BrandMark is used as
+   `<svg>` inside other components' DOM (TopBar, Welcome, …) and their
+   own scoped attributes don't reach our SVG children. A single style
+   block here is cheaper than rebuilding the scoped-CSS pipeline.
+*@
+
+<svg class="d-brandmark @ExtraClass"
+     width="@Size" height="@Size"
+     viewBox="0 0 72 72"
+     xmlns="http://www.w3.org/2000/svg"
+     aria-hidden="true">
+    <rect width="72" height="72" rx="20" fill="@TileColor"/>
+    <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+          fill="@AColor"
+          fill-rule="evenodd"/>
+    <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+          fill="@SparkleColor"/>
+</svg>
+
+@code {
+    /// <summary>Render side in CSS pixels (square). Defaults to 30 — the size
+    /// the TopBar brand chip used to be. Use 84 for Welcome's hero stack, 38
+    /// for Discovery / Login cards, 28 for TopBar / MobileShell.</summary>
+    [Parameter] public int Size { get; set; } = 30;
+
+    /// <summary>Extra classes piped to the root <c>&lt;svg&gt;</c> for callers
+    /// that want to position / animate the mark from their own scoped CSS.</summary>
+    [Parameter] public string? ExtraClass { get; set; }
+
+    /// <summary>Override the tile colour. Default is the design's #0a0c10
+    /// near-black; the splash + Welcome variants use the same value so the
+    /// mark reads as one consistent surface across the boot → catalog
+    /// hand-off.</summary>
+    [Parameter] public string TileColor { get; set; } = "#0a0c10";
+
+    /// <summary>"A" path fill. <c>var(--accent-hi)</c> picks up the active
+    /// theme's accent so the mark recolours when the user switches
+    /// accent in ProfilePanel.</summary>
+    [Parameter] public string AColor { get; set; } = "var(--accent-hi)";
+
+    /// <summary>Sparkle (✦) path fill. White by default — survives at 16px
+    /// (favicon) as a flicker of light. Override only for inverse colour
+    /// schemes (light-mode favicons etc.).</summary>
+    [Parameter] public string SparkleColor { get; set; } = "#ffffff";
+}

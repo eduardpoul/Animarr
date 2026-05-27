@@ -25,20 +25,36 @@
 @if (Item is not null)
 {
     <div class="emd-overlay" @onclick="OnCloseAsync"></div>
-    <div class="emd">
+    <div class="emd" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
         <header class="emd__header">
-            <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
+            @if (_mobileShowingDetail)
+            {
+                <button type="button" class="emd__back tv-focus"
+                        @onclick="@(() => _mobileShowingDetail = false)"
+                        aria-label="Back to metadata sections">
+                    <DIcon Name="arrow-l" Size="18" />
+                </button>
+            }
+            else
+            {
+                <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
+            }
             <div class="emd__header-text">
-                <div class="emd__overline">EDIT METADATA</div>
+                <div class="emd__overline">@(_mobileShowingDetail ? CurrentTabLabel.ToUpperInvariant() : "EDIT METADATA")</div>
                 <div class="emd__title">@Item.Title</div>
-                <div class="emd__hint">SQLite metadata only — folders on disk stay untouched</div>
+                @if (!_mobileShowingDetail)
+                {
+                    <div class="emd__hint">SQLite metadata only — folders on disk stay untouched</div>
+                }
             </div>
             <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="Close">
                 <DIcon Name="x" Size="20" />
             </button>
         </header>
 
-        <nav class="emd__tabs">
+        @* Desktop horizontal tabs — hidden on phone via CSS in favour of the
+           drilldown list below. *@
+        <nav class="emd__tabs emd__tabs--desktop">
             @foreach (var t in _tabDefs)
             {
                 var key = t.Key;
@@ -47,6 +63,23 @@
                         class="@($"emd__tab {(_tab == key ? "emd__tab--active" : "")}")"
                         @onclick="@(() => SwitchTabAsync(key))">
                     @label
+                </button>
+            }
+        </nav>
+
+        @* Mobile drilldown list — vertical cards. Click → set tab + flip to
+           detail mode. CSS toggles list ⇄ body via data-mobile-detail. *@
+        <nav class="emd__mlist" aria-label="Metadata sections">
+            @foreach (var t in _tabDefs)
+            {
+                var key = t.Key;
+                <button type="button" class="emd__mlist-row tv-focus"
+                        @onclick="@(async () => { await SwitchTabAsync(key); _mobileShowingDetail = true; })">
+                    <span class="emd__mlist-ic">
+                        <DIcon Name="@TabIcon(key)" Size="14" />
+                    </span>
+                    <span class="emd__mlist-label">@t.Value</span>
+                    <DIcon Name="chev-r" Size="13" />
                 </button>
             }
         </nav>
@@ -85,6 +118,12 @@
     private string _tab = "ids";
     private bool _saving;
 
+    /// <summary>Mobile drilldown state. False = show the vertical category
+    /// list (default on phone), true = show the active tab's body with a
+    /// back arrow in place of the icon. Desktop ignores this — the
+    /// horizontal tab strip is always visible there.</summary>
+    private bool _mobileShowingDetail;
+
     private static readonly KeyValuePair<string, string>[] _tabDefs =
     [
         new("ids",        "Source IDs"),
@@ -95,6 +134,32 @@
         new("categories", "Categories"),
         new("manage",     "Manage"),
     ];
+
+    /// <summary>Friendly label of the currently-active tab — shown in the
+    /// mobile detail header so the user knows where they are.</summary>
+    private string CurrentTabLabel
+    {
+        get
+        {
+            foreach (var t in _tabDefs)
+                if (t.Key == _tab) return t.Value;
+            return "Edit";
+        }
+    }
+
+    /// <summary>Map each tab to an icon for the mobile list. Picks from the
+    /// existing DIcon vocabulary — no new artwork needed.</summary>
+    private static string TabIcon(string key) => key switch
+    {
+        "ids"        => "link",
+        "basics"     => "pencil",
+        "poster"     => "image",
+        "backdrop"   => "image",
+        "tags"       => "filter",
+        "categories" => "folder",
+        "manage"     => "trash",
+        _            => "info",
+    };
 
     // ── Image gallery state (Poster / Backdrop tabs) ──
     // One-shot lazy fetch on first visit per tab. Apply is per-candidate so
@@ -545,13 +610,28 @@
     </div>;
 
     private RenderFragment TagsTab() => @<div class="emd-form">
-        <div class="emd-chips">
-            @foreach (var t in _tags)
+        @* Active tags — accent-soft pill, with the × button as a NESTED button
+           (was a single-button-pill that removed on any click; the design
+           intent is "click × to remove", not "click anywhere on the tag"). *@
+        <div class="emd-tags">
+            @if (_tags.Count == 0)
             {
-                var tag = t;
-                <button type="button" class="emd-chip emd-chip--active" @onclick="@(() => RemoveTag(tag))">
-                    @tag <DIcon Name="x" Size="10" />
-                </button>
+                <span class="emd-tags__empty">No tags yet — add one below or pick a suggestion.</span>
+            }
+            else
+            {
+                @foreach (var t in _tags)
+                {
+                    var tag = t;
+                    <span class="emd-tag">
+                        @tag
+                        <button type="button" class="emd-tag__x"
+                                @onclick="@(() => RemoveTag(tag))"
+                                aria-label="@($"Remove tag {tag}")">
+                            <DIcon Name="x" Size="10" />
+                        </button>
+                    </span>
+                }
             }
         </div>
         <div class="emd-idfield__row">
@@ -561,15 +641,17 @@
                    @onkeydown="OnTagKeyDown" />
             <button class="emd__btn emd__btn--solid" @onclick="AddTag">Add</button>
         </div>
-        <div class="emd-field__label" style="margin-top:8px">SUGGESTED</div>
-        <div class="emd-chips">
-            @foreach (var t in _suggestedTags.Where(s => !_tags.Contains(s, StringComparer.OrdinalIgnoreCase)))
-            {
-                var tag = t;
-                <button type="button" class="emd-chip" @onclick="@(() => { _tags.Add(tag); })">
-                    + @tag
-                </button>
-            }
+        <div class="emd-tags-suggest">
+            <div class="emd-tags-suggest__label">SUGGESTED</div>
+            <div class="emd-tags-suggest__list">
+                @foreach (var t in _suggestedTags.Where(s => !_tags.Contains(s, StringComparer.OrdinalIgnoreCase)))
+                {
+                    var tag = t;
+                    <button type="button" class="emd-tag-suggest" @onclick="@(() => { _tags.Add(tag); })">
+                        + @tag
+                    </button>
+                }
+            </div>
         </div>
     </div>;
 

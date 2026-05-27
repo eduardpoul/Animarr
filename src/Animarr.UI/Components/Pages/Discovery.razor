@@ -37,7 +37,7 @@
 
     <div class="d-discovery__card" role="dialog" aria-label="Find your library">
         <header class="d-discovery__brand">
-            <span class="d-discovery__brand-mark">a</span>
+            <BrandMark Size="38" ExtraClass="d-discovery__brand-mark" />
             <div>
                 <div class="d-discovery__brand-name">Animarr</div>
                 <div class="d-discovery__brand-sub">Find your library</div>
@@ -150,7 +150,11 @@
 
 @code {
     private enum State { Scanning, Found, Empty }
-    private State _state = State.Empty;
+    // Start in Scanning so the very first frame after navigation shows the
+    // searching UI instead of a "No servers found" flash. OnAfterRenderAsync
+    // either confirms (StartScanAsync) or flips to Found / Empty once it has
+    // an honest answer.
+    private State _state = State.Scanning;
 
     private List<RegisteredServerDto> _found = new();
     private int _elapsedSec;
@@ -181,41 +185,14 @@
             return;
         }
 
-        // Auto-discovery shortcut: when the WASM bundle was served by an
-        // Animarr server itself (browser context), /api/server/info on the
-        // current origin answers cleanly and we can skip straight to Found.
-        // SKIP this entirely under MAUI Hybrid — there the WebView's origin
-        // is `https://0.0.0.0/` (the BlazorWebView virtual host), which
-        // resolves to nothing and hangs ~2s on the SocketException stack
-        // trace before falling through. That delay was the first half of
-        // the "Discovery does nothing for 10s" complaint.
-        try
-        {
-            var currentOrigin = await JS.InvokeAsync<string>("eval", "window.location.origin");
-            if (!string.IsNullOrEmpty(currentOrigin) && !IsPlaceholderOrigin(currentOrigin))
-            {
-                var probed = await ServerReg.AddServerAsync(currentOrigin);
-                if (probed is not null)
-                {
-                    _found = ServerReg.Servers.OrderByDescending(s => s.LastSeenUtc).ToList();
-                    _state = State.Found;
-                    StateHasChanged();
-                    return;
-                }
-            }
-        }
-        catch { /* fall through to the regular scan flow */ }
-
-        // Detect whether mDNS scan is available. window.animarrMdnsScan is a
-        // platform hook the MAUI host registers (returns a list of servers as
-        // {name, baseUrl} pairs). When missing — pure browser context — go
-        // straight to the manual-add empty state.
-        try
-        {
-            _canScan = await JS.InvokeAsync<bool>("eval",
-                "typeof window.animarrMdnsScan === 'function'");
-        }
-        catch { _canScan = false; }
+        // Probe path is available outside the pure-WASM browser context.
+        // OperatingSystem.IsBrowser() is true ONLY in the Blazor WASM runtime
+        // — false in MAUI, server-side rendering, desktop hosts, etc. We used
+        // to do a JS typeof check here, but on Android that first eval() can
+        // fail with a transient JSInterop error (DotNet bootstrap race after
+        // a hard reload), leaving _canScan=false → Discovery skipped the
+        // scan entirely → "No servers found" with no NSD lookup ever fired.
+        _canScan = !OperatingSystem.IsBrowser();
 
         // If the registry already holds servers, render them as "Found" and
         // skip the empty-state animation entirely.
@@ -296,30 +273,51 @@
             InvokeAsync(StateHasChanged);
         }, null, 1000, 1000);
 
-        // Run the JS-side scan. The host implementation returns when it's
-        // done (or after its own timeout); we cap at 8s on our side.
+        // Race mDNS + TCP subnet probe in parallel. mDNS is faster when the
+        // network allows multicast across the wired/wireless boundary; subnet
+        // probe is the reliable fallback that just enumerates hosts on the
+        // local /24 and asks each for /api/server/info. Whichever returns
+        // results first wins — no point making the user wait 8s for mDNS
+        // before kicking off the probe that finds the server in 3s anyway.
         try
         {
-            var task = JS.InvokeAsync<JsServer[]?>("animarrMdnsScan").AsTask();
-            var timeout = Task.Delay(TimeSpan.FromSeconds(8), ct);
-            var first = await Task.WhenAny(task, timeout);
-            JsServer[]? results = null;
-            if (first == task) results = await task;
+            var mdnsTask = JS.InvokeAsync<JsServer[]?>("animarrMdnsScan").AsTask();
 
-            // Probe each discovered candidate over /api/server/info so we get
-            // the same DTO shape we'd get from manual add. Probes in parallel
-            // — slowest one caps the whole scan at ~4s (HttpClient timeout).
-            if (results is { Length: > 0 })
+            // Only available under MAUI — pure WASM doesn't ship the bridge.
+            // Skip the typeof check to save a JS round-trip; an undefined
+            // method just throws, which we swallow alongside the cancellation
+            // path below.
+            var probeTask = TryStartSubnetProbeAsync(ct);
+
+            var overallTimeout = Task.Delay(TimeSpan.FromSeconds(15), ct);
+
+            // Drain whichever path finishes first (and isn't empty). Subnet
+            // probe always returns something when the server is reachable, so
+            // mDNS is allowed to lose the race.
+            while (_found.Count == 0)
             {
-                var probes = results
-                    .Select(async r => await ServerReg.AddServerAsync(r.BaseUrl, ct))
-                    .ToArray();
-                await Task.WhenAll(probes);
-                _found = probes
-                    .Select(p => p.Result)
-                    .Where(p => p is not null)
-                    .Cast<RegisteredServerDto>()
-                    .ToList();
+                var winner = await Task.WhenAny(mdnsTask, probeTask, overallTimeout);
+                if (winner == overallTimeout) break;
+
+                JsServer[]? hits = null;
+                try
+                {
+                    if (winner == mdnsTask)        hits = await mdnsTask;
+                    else if (winner == probeTask)  hits = await probeTask;
+                }
+                catch { /* one path failed — keep waiting on the other */ }
+
+                if (hits is { Length: > 0 })
+                {
+                    var resolved = await Task.WhenAll(hits.Select(h => RegisterOrSurfaceAsync(h, ct)));
+                    foreach (var r in resolved)
+                        if (r is not null && _found.All(f => f.ServerId != r.ServerId))
+                            _found.Add(r);
+                    if (_found.Count > 0) break;
+                }
+
+                // Both tasks completed empty → bail.
+                if (mdnsTask.IsCompleted && probeTask.IsCompleted) break;
             }
         }
         catch (OperationCanceledException) { /* user navigated away */ }
@@ -337,6 +335,52 @@
         _state = _found.Count > 0 ? State.Found : State.Empty;
         if (_state == State.Empty) _manualOpen = true;
         StateHasChanged();
+    }
+
+    /// <summary>Turn a JsServer (raw scan hit) into a RegisteredServerDto and
+    /// add it to the registry. Two paths:
+    ///
+    ///   • Hit already carries ServerId — trust the scanner (mDNS resolved
+    ///     the SRV/TXT records, subnet probe parsed /api/server/info). Build
+    ///     a registry entry directly. Skips the HTTP re-probe that was
+    ///     silently failing on Android MAUI for hosts the platform-level
+    ///     daemon could still reach.
+    ///   • No ServerId — fall back to <see cref="ServerRegistryState.AddServerAsync"/>
+    ///     which probes /api/server/info itself. This is the pure-WASM
+    ///     manual-add path.</summary>
+    private async Task<RegisteredServerDto?> RegisterOrSurfaceAsync(JsServer hit, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(hit.ServerId))
+        {
+            var entry = new RegisteredServerDto(
+                ServerId:    hit.ServerId,
+                Name:        string.IsNullOrWhiteSpace(hit.Name) ? "Animarr" : hit.Name,
+                BaseUrl:     hit.BaseUrl,
+                LastSeenUtc: DateTime.UtcNow,
+                Version:     hit.Version,
+                TitleCount:  null);
+            await ServerReg.UpsertAsync(entry, ct);
+            return entry;
+        }
+        return await ServerReg.AddServerAsync(hit.BaseUrl, ct);
+    }
+
+    /// <summary>Wrapper around <c>window.animarrSubnetScan</c> that returns
+    /// empty instead of throwing when the bridge isn't registered (pure WASM
+    /// in a browser). Lets the race loop in <c>StartScanAsync</c> Task.WhenAny
+    /// against the mDNS task without a separate typeof probe.</summary>
+    private async Task<JsServer[]?> TryStartSubnetProbeAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await JS.InvokeAsync<JsServer[]?>("animarrSubnetScan").AsTask().WaitAsync(ct);
+        }
+        catch
+        {
+            // Bridge missing or threw — return empty so the race loop ignores
+            // this path. mDNS still has a chance to deliver.
+            return Array.Empty<JsServer>();
+        }
     }
 
     private Task Rescan() => StartScanAsync();
@@ -445,8 +489,13 @@
         _scanTimer?.Dispose();
     }
 
-    /// <summary>Shape returned by window.animarrMdnsScan(). Only the BaseUrl
-    /// field is required; everything else gets re-fetched via /api/server/info
-    /// so the Discovery card matches what the manual-add path produces.</summary>
-    private sealed record JsServer(string Name, string BaseUrl);
+    /// <summary>Shape returned by window.animarrMdnsScan() / animarrSubnetScan.
+    /// Carries everything the registry card needs — ServerId + Version come
+    /// directly from the mDNS TXT record (or the subnet probe's GET response)
+    /// so we don't have to re-do the HTTP probe to surface a card. The probe
+    /// route used to re-fetch /api/server/info before adding to the registry,
+    /// but Android MAUI's HttpClient sometimes can't reach the same host the
+    /// platform-level mDNS daemon just resolved (cleartext policy, IPv6
+    /// preference, etc.), so we'd silently drop a perfectly good server.</summary>
+    private sealed record JsServer(string Name, string BaseUrl, string? ServerId = null, string? Version = null);
 }

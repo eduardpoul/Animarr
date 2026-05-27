@@ -175,16 +175,26 @@ button.d-pill:focus-visible {
     display: none;
     z-index: 9;
     width: 100%;
-    height: 56px;
+    /* Edge-to-edge: extend the painted area BEHIND the status bar / dynamic
+       island, then pad the content row down by the inset so the brand +
+       icons aren't covered. Status-bar height on most phones is ~24-32px;
+       the gesture indicator on iPhones can land in the top 44px. */
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 16px 0;
     flex-shrink: 0;
     align-items: center;
-    padding: 0 16px;
     gap: 12px;
     background: linear-gradient(180deg, rgba(20,15,12,0.92), rgba(10,8,7,0.88));
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--border);
     position: relative;
+}
+/* TV doesn't have a status bar — collapse back to the flat 56px so we don't
+   leave a dead strip at the top of the screen. */
+html.tv-mode .d-mobile-nav {
+    height: 56px;
+    padding: 0 16px;
 }
 
 .d-mobile-nav__brand {
@@ -2065,10 +2075,15 @@ button.d-pill:focus-visible {
     .animarr-body { flex-direction: column; }
     .animarr-sidebar { display: none; }
     .animarr-main {
-        padding: 16px 18px 96px; /* bottom space for tabbar */
+        /* No tabbar on phone (removed for cleaner one-bar nav) → trim the
+           reserved bottom space so the catalog grid uses the whole viewport.
+           TV still wants the row of tab targets for DPad selection, so the
+           tv-mode override at the bottom of this file restores both the
+           tabbar and the bottom padding. */
+        padding: 16px 18px 22px;
     }
     .d-mobile-nav { display: flex; }
-    .d-tabbar     { display: grid; }
+    .d-tabbar     { display: none; }
 
     /* Page header — title scales down, right-side actions wrap below. */
     .d-page-header {
@@ -3054,3 +3069,239 @@ table.d-table tbody td code {
     background: var(--surface-2);
     color: var(--text);
 }
+
+/* ============================================================================
+   Hero pager — F / G / H variants. Global so BOTH heros share them:
+   • CatalogContinueHero (Continue Watching block on Home)
+   • CatalogHero         (Featured block when Continue is empty)
+
+   The variant is picked from UserPreferences.HeroPagerStyle and lives on the
+   hero section as a `.d-chero--pager-{f|g|h}` modifier (legacy class kept on
+   CatalogContinueHero). Each variant has its own root class
+   (`.d-chero__pager`, `.d-chero__pager-g`, `.d-chero__pager-h`) so only one
+   markup branch is rendered at a time.
+   ============================================================================ */
+
+/* F-variant pager — short, centered dashes; active dash is a touch
+   longer and accent-coloured. v5 rev: was a `grid-auto-columns: 1fr`
+   layout that stretched every stroke to fill the hero width — the
+   visual read as a continuous bar with one tinted segment instead of
+   a discrete pager. Now each slot is fixed-width with a flex centre,
+   so the strip is a row of "—  —  —  ━  —" beneath the title. */
+.d-chero__pager {
+    position: absolute;
+    inset: auto 0 var(--space-6) 0;
+    z-index: 3;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: var(--space-3);
+    padding: 0 var(--space-7);
+}
+
+.d-chero__pager-slot {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    padding: var(--space-2) 0 0;
+    color: var(--text-faint);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+    transition: color var(--motion-base);
+    /* Cap slot width so very long titles don't push neighbours apart. */
+    max-width: 140px;
+}
+.d-chero__pager-slot:hover { color: var(--text-dim); }
+
+.d-chero__pager-stroke {
+    display: block;
+    height: 2px;
+    width: 28px;
+    background: rgba(255,255,255,0.30);
+    border-radius: 2px;
+    transition: background var(--motion-base), width var(--motion-base);
+}
+.d-chero__pager-slot:hover .d-chero__pager-stroke {
+    background: rgba(255,255,255,0.55);
+}
+.d-chero__pager-slot.is-active .d-chero__pager-stroke {
+    background: var(--accent);
+    width: 48px;
+    box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.d-chero__pager-name {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+    /* Only show the label for the active slot — otherwise the row becomes
+       a wall of small text under each dash and competes with the title. */
+    opacity: 0;
+    transition: opacity var(--motion-base);
+}
+.d-chero__pager-slot.is-active .d-chero__pager-name {
+    color: var(--text);
+    font-weight: 600;
+    opacity: 1;
+}
+.d-chero__pager-slot:hover .d-chero__pager-name { opacity: 0.7; }
+
+/* Phone: kill the slot-name labels entirely. On a 360px viewport the labels
+   wrapped onto two rows and overflowed onto the hero title (the bug the
+   user screenshotted as "Renegade Immortal: Battle of Gods" rendered twice
+   with tag pills bleeding off the right edge). The dashes still convey
+   position; the active slot's name lives in the hero title itself, so
+   showing them under each dash is redundant on a small screen. */
+@media (max-width: 720px) {
+    .d-chero__pager-name        { display: none; }
+    .d-chero__pager-slot        { max-width: none; }
+    .d-chero__pager-stroke      { width: 16px; }
+    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 28px; }
+    .d-chero__pager              { gap: var(--space-1); padding: 0 var(--space-4); }
+}
+
+/* G variant — hover-revealed chevrons + dash pager. Chevrons sit anchored
+   to the left / right of the hero; dashes live in the centre. Chevrons fade
+   up on the hero's :hover so they don't compete with the title at rest. */
+.d-chero__pager-g {
+    position: absolute;
+    inset: auto 0 var(--space-6) 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-5);
+    pointer-events: none;
+}
+.d-chero__pager-g > * { pointer-events: auto; }
+
+.d-chero__pager-chev {
+    appearance: none;
+    cursor: pointer;
+    background: rgba(20, 23, 27, 0.55);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition: opacity var(--motion-base), background var(--motion-base);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.d-chero:hover .d-chero__pager-chev,
+.d-chero:focus-within .d-chero__pager-chev,
+.d-hero:hover  .d-chero__pager-chev,
+.d-hero:focus-within .d-chero__pager-chev { opacity: 1; }
+.d-chero__pager-chev:hover { background: rgba(20, 23, 27, 0.85); }
+
+.d-chero__pager-dashes {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.d-chero__pager-dash {
+    appearance: none;
+    cursor: pointer;
+    border: 0;
+    background: rgba(255,255,255,0.22);
+    width: 28px;
+    height: 3px;
+    border-radius: 2px;
+    padding: 0;
+    transition: background var(--motion-base), width var(--motion-base);
+}
+.d-chero__pager-dash:hover { background: rgba(255,255,255,0.42); }
+.d-chero__pager-dash.is-active {
+    background: var(--accent);
+    width: 44px;
+}
+
+/* H variant — numbered pills + always-visible chevrons. */
+.d-chero__pager-h {
+    position: absolute;
+    inset: auto var(--space-11) var(--space-6) var(--space-11);
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+}
+.d-chero__pager-h .d-chero__pager-chev {
+    opacity: 1; /* H keeps chevrons visible at rest */
+}
+
+.d-chero__pager-pills {
+    display: flex;
+    gap: 8px;
+}
+
+.d-chero__pager-pill {
+    appearance: none;
+    cursor: pointer;
+    background: rgba(20, 23, 27, 0.55);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background var(--motion-base), color var(--motion-base), border-color var(--motion-base);
+}
+.d-chero__pager-pill:hover {
+    background: rgba(20, 23, 27, 0.85);
+    color: var(--text);
+}
+.d-chero__pager-pill.is-active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+@media (max-width: 959px) {
+    .d-chero__pager      { gap: var(--space-2); padding: 0 var(--space-5); inset: auto 0 var(--space-5) 0; }
+    .d-chero__pager-stroke              { width: 22px; }
+    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 36px; }
+    /* Tight viewports drop the per-slot caption altogether — the active
+       title still lives in the hero's own headline above. */
+    .d-chero__pager-name { display: none; }
+}
+
+@media (max-width: 639px) {
+    .d-chero__pager    { inset: auto 0 var(--space-4) 0; padding: 0 var(--space-4); }
+    .d-chero__pager-g  { inset: auto 0 var(--space-4) 0; gap: var(--space-3); }
+    .d-chero__pager-h  { inset: auto var(--space-5) var(--space-4) var(--space-5); gap: var(--space-3); }
+    .d-chero__pager-dash { width: 22px; }
+    .d-chero__pager-dash.is-active { width: 32px; }
+    .d-chero__pager-pill { width: 28px; height: 28px; font-size: 11px; }
+}
+
+/* ── TV restores the bottom tabbar even at narrow CSS-px viewports.
+   Cheap Android TVs report a 540-CSS-px width, which triggers the same
+   media queries as phones. The tv-mode class set in index.html bootstrap
+   reverses the "hide tabbar on phone" rule above and brings back the
+   bottom padding the catalog grid needs to clear it. Specificity beats
+   the @media rules because `html.tv-mode .d-tabbar` is (0,1,1) and the
+   phone rule is just (0,1,0). */
+html.tv-mode .d-tabbar     { display: grid; }
+html.tv-mode .animarr-main { padding-bottom: 96px; }

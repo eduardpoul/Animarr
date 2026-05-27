@@ -91,6 +91,17 @@ public sealed record TorrentFileSelectionDto(
     int Priority,
     bool IsDownloaded);
 
+/// <summary>One entry inside a parsed .torrent file (no engine state).
+/// Returned by <c>POST /api/torrents/parse</c> so the Add drawer can
+/// preview the manifest before the user commits.</summary>
+public sealed record ParsedTorrentFileDto(string Path, long Length);
+
+/// <summary>Result of <c>POST /api/torrents/parse</c>.</summary>
+public sealed record ParsedTorrentDto(
+    string Name,
+    long TotalSize,
+    ParsedTorrentFileDto[] Files);
+
 /// <summary>
 /// Singleton engine-wide torrent settings. Saved via PUT to
 /// <c>/api/torrent-config</c>.

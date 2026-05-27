@@ -1,8 +1,8 @@
 ﻿using Android.App;
 using Android.Content;
 using Android.Content.PM;
-using Android.Net.Wifi;
 using Android.OS;
+using Android.Views;
 
 namespace Animarr.App;
 
@@ -79,41 +79,71 @@ public class MainActivity : MauiAppCompatActivity
         return id;
     }
 
-    /// <summary>WiFi multicast lock — held for the lifetime of the activity so
-    /// the kernel doesn't drop the mDNS broadcasts the Animarr server publishes
-    /// on <c>_animarr._tcp.local</c>. Without it, Android's WiFi driver
-    /// filters all UDP 5353 traffic by default to save battery, and the
-    /// Discovery page's scan returns zero results even when the server is
-    /// happily advertising on the same LAN. CHANGE_WIFI_MULTICAST_STATE is
-    /// already in AndroidManifest.</summary>
-    private WifiManager.MulticastLock? _multicastLock;
-
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        // MulticastLock is acquired earlier in MainApplication.OnCreate so it's
+        // already held by the time MauiProgram.CreateMauiApp resolves
+        // MdnsBrowserService. Activity.OnCreate is too late for that.
         base.OnCreate(savedInstanceState);
-        AcquireMulticastLock();
-        // Cold start launched via deep link — Intent's already on us.
-        CaptureDeepLink(Intent);
-    }
 
-    private void AcquireMulticastLock()
-    {
+        // Edge-to-edge: paint behind the system bars so the cinematic backdrop
+        // fills the whole screen rather than getting boxed in by a black
+        // status / nav strip. The Blazor side then uses
+        //   padding-top: env(safe-area-inset-top)
+        // on top-pinned surfaces (TopBar, drawer headers, modal headers) and
+        //   padding-bottom: env(safe-area-inset-bottom)
+        // on the mobile bottom-tab so content doesn't slide under the
+        // gesture indicator. On TV both insets are 0 — no-op.
         try
         {
-            // Use ApplicationContext so the lock isn't tied to the activity
-            // window — survives configuration changes (rotation etc.) without
-            // re-creating. The lock itself doesn't need release; releasing
-            // happens implicitly when the process exits.
-            var wifi = (WifiManager?)ApplicationContext?.GetSystemService(WifiService);
-            if (wifi is null) return;
-            _multicastLock = wifi.CreateMulticastLock("animarr-mdns");
-            _multicastLock.SetReferenceCounted(false);
-            _multicastLock.Acquire();
+            if (Window is { } w)
+            {
+                AndroidX.Core.View.WindowCompat.SetDecorFitsSystemWindows(w, false);
+                // Transparent system bars so the backdrop shows through. The
+                // gradient washes at the top/bottom of the page own the
+                // contrast — we don't need an opaque status bar overlay.
+                w.SetStatusBarColor(Android.Graphics.Color.Transparent);
+                w.SetNavigationBarColor(Android.Graphics.Color.Transparent);
+            }
         }
         catch
         {
-            // Permission denied / device without WiFi (emulator) — Discovery
-            // falls back to manual URL entry, no crash. Swallow.
+            // OEM ROMs (Mi TV, Huawei) sometimes reject SetDecorFitsSystemWindows
+            // on older API levels — fall back to the default layout, the UI
+            // still works just with a ~24px black strip at the top.
+        }
+
+        CaptureDeepLink(Intent);
+
+        // Phase 2b (2026-05-27): native ExoPlayer video surface.
+        // We insert a TextureView at the very bottom of the activity's view
+        // tree (index 0 of DecorView). When the player opens, ExoPlayer hands
+        // its frames to this TextureView; the BlazorWebView above has a
+        // transparent background (set in MauiProgram's WebView mapper) so the
+        // video shows through wherever the HTML body is also transparent.
+        // Outside playback the TextureView is GONE — zero compositing cost.
+        // TextureView (not SurfaceView) so the regular GL pipeline can
+        // composite it BEHIND the translucent WebView; SurfaceView's
+        // hole-punch model wouldn't let the HUD overlay layer cleanly.
+        try
+        {
+            if (Window?.DecorView is ViewGroup decor)
+            {
+                var tv = new TextureView(this)
+                {
+                    Visibility = ViewStates.Gone,
+                    LayoutParameters = new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MatchParent,
+                        ViewGroup.LayoutParams.MatchParent),
+                };
+                decor.AddView(tv, 0);
+                Services.NativePlayerService.RegisterTextureView(tv);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Error("Animarr.NativePlayer",
+                $"Failed to insert TextureView: {ex.Message}");
         }
     }
 
@@ -125,6 +155,42 @@ public class MainActivity : MauiAppCompatActivity
         base.OnNewIntent(intent);
         if (intent is not null) Intent = intent;
         CaptureDeepLink(intent);
+    }
+
+    // ── Phase 2d lifecycle hooks for native ExoPlayer ──────────────────
+    // Without these the ExoPlayer instance keeps decoding in the background
+    // after the user presses Home — burns battery, holds the audio focus,
+    // and can crash the renderer on memory pressure. Web (BlazorWebView's
+    // hls.js) doesn't have this issue because the WebView lifecycle
+    // pauses its own decoders.
+    protected override void OnPause()
+    {
+        base.OnPause();
+        try { Services.NativePlayerService.Instance?.OnHostActivityPaused(); }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityPaused threw: {ex.Message}");
+        }
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        try { Services.NativePlayerService.Instance?.OnHostActivityResumed(); }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityResumed threw: {ex.Message}");
+        }
+    }
+
+    protected override void OnDestroy()
+    {
+        try { Services.NativePlayerService.Instance?.OnHostActivityDestroyed(); }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityDestroyed threw: {ex.Message}");
+        }
+        base.OnDestroy();
     }
 
     /// <summary>

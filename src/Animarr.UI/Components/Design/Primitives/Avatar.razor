@@ -6,6 +6,8 @@
     Spec: screens-v4.jsx → AvatarV4, lines 1-30.
 *@
 
+@implements IDisposable
+
 @if (!string.IsNullOrEmpty(ImagePath))
 {
     <img src="@Animarr.UI.Services.MediaUrl.Image(ImagePath)"
@@ -21,6 +23,13 @@ else
 }
 
 @code {
+    // Re-render when the active server URL flips so the avatar src rebases.
+    protected override void OnInitialized()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    public void Dispose()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
     /// <summary>Displayed name — first letter(s) form the initials when no image.</summary>
     [Parameter, EditorRequired] public string Name { get; set; } = "";
 

@@ -208,6 +208,51 @@ internal static class FolderEndpoints
             catch (Exception) { return Results.Problem("Couldn't read directory."); }
         });
 
+        // v5: multipart upload — drop arbitrary files into a watcher's folder
+        // without going through the torrent engine. Third tab of the Add
+        // download drawer. Conservative: per-file size capped at 4 GiB,
+        // skips entries that would escape the watcher root via "../" in
+        // the supplied filename. Returns the number of files actually
+        // written so the caller can render an accurate toast.
+        app.MapPost(ApiRoutes.FolderUpload, async (
+            Guid watcherId,
+            HttpRequest httpReq,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            if (!httpReq.HasFormContentType)
+                return Results.BadRequest("multipart/form-data expected.");
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var folder = await db.FolderWatchers.FirstOrDefaultAsync(f => f.Id == watcherId, ct);
+            if (folder is null) return Results.NotFound("Unknown folder.");
+            if (string.IsNullOrWhiteSpace(folder.Path) || !Directory.Exists(folder.Path))
+                return Results.Problem("Folder path missing on disk.");
+
+            var form = await httpReq.ReadFormAsync(ct);
+            var written = 0;
+            foreach (var file in form.Files)
+            {
+                if (file.Length <= 0) continue;
+                // Strip any directory parts from the supplied filename so a
+                // malicious "../../../etc/passwd" can't escape the watcher root.
+                var safeName = System.IO.Path.GetFileName(file.FileName);
+                if (string.IsNullOrWhiteSpace(safeName)) continue;
+                var target = System.IO.Path.Combine(folder.Path, safeName);
+                try
+                {
+                    await using var fs = System.IO.File.Create(target);
+                    await file.CopyToAsync(fs, ct);
+                    written++;
+                }
+                catch
+                {
+                    // One bad file shouldn't abort the rest of the batch.
+                }
+            }
+            return Results.Ok(new { Written = written });
+        }).DisableAntiforgery();
+
         return app;
     }
 

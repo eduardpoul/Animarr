@@ -141,6 +141,17 @@
         }
     }
 
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips so the fanart/poster
+        // <img src>'s rebase to the user's chosen server. Without this, a
+        // cookie-restored MAUI boot bakes the wrong host into src on first
+        // render and never updates.
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    }
+
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && !string.IsNullOrEmpty(Item.FanartPath))
@@ -177,5 +188,9 @@
         foreach (var t in item.Tags.Take(3)) yield return t;
     }
 
-    public void Dispose() { /* JS layer owns the backdrop lifecycle */ }
+    public void Dispose()
+    {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+        /* JS layer owns the backdrop lifecycle */
+    }
 }

@@ -37,9 +37,12 @@ internal static class PairEndpoints
     /// to click "Refresh" (or remount) to mint a new one.</summary>
     private static readonly TimeSpan PairTtl = TimeSpan.FromMinutes(5);
 
-    /// <summary>Code alphabet — A-Z + 2-9, with I/O/0/1 omitted so users can't
-    /// confuse 1/I/l or 0/O when reading the dash-separated code off a TV.</summary>
-    private const string CodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    /// <summary>Code alphabet — digits only. We used to ship a 31-char
+    /// alphanumeric alphabet but the phone-side confirm UX wants a numeric
+    /// keyboard (much less fiddly than switching keyboards mid-code on
+    /// mobile), so the codespace narrowed to 0-9. Six digits = 1M permutations
+    /// with a 5-minute TTL is plenty for a LAN-scoped pairing flow.</summary>
+    private const string CodeAlphabet = "0123456789";
 
     public static IEndpointRouteBuilder MapPairEndpoints(this IEndpointRouteBuilder app)
     {
@@ -143,7 +146,12 @@ internal static class PairEndpoints
             if (uid is null) return Results.Unauthorized();
             if (string.IsNullOrWhiteSpace(req.Code)) return Results.BadRequest();
 
-            var key = CacheKeyPrefix + req.Code;
+            // Normalise the user-typed code: strip dashes / spaces / case so a
+            // friendly "123-456" rendering on the TV still hits the same
+            // cache key whether the phone POSTs "123456" or "123-456". Kept
+            // here in the confirm path (not the cache key) because the cache
+            // key already stores the canonical form the TV showed.
+            var key = CacheKeyPrefix + NormaliseCode(req.Code);
             if (!cache.TryGetValue(key, out PairRequest? entry) || entry is null)
                 return Results.NotFound();
             // Entry exists but has been consumed already — treat as gone so
@@ -196,19 +204,38 @@ internal static class PairEndpoints
     }
 
     /// <summary>
-    /// 6-char dash-separated code (e.g. "4F-7K-92"). Reads cryptographic
-    /// randomness because brute-forcing 6-of-31 alphabet entries from
-    /// outside the LAN is conceivable; the 5-minute TTL limits the window
-    /// but a higher-entropy code keeps the attack surface trivial.
+    /// 6-digit numeric code, stored canonically without any separators.
+    /// 10⁶ permutations × 5-minute TTL is well above brute-force budget on a
+    /// LAN-scoped pairing flow. The TV renders the digits with a soft
+    /// "123 456" or "123-456" presentation purely for legibility.
     /// </summary>
     private static string GenerateCode()
     {
         Span<char> chars = stackalloc char[6];
         // RandomNumberGenerator.GetInt32 is rejection-sampled internally so
-        // the distribution stays uniform across the 31-char alphabet.
+        // the distribution stays uniform across the digit alphabet.
         for (int i = 0; i < 6; i++)
             chars[i] = CodeAlphabet[RandomNumberGenerator.GetInt32(CodeAlphabet.Length)];
-        return $"{chars[0]}{chars[1]}-{chars[2]}{chars[3]}-{chars[4]}{chars[5]}";
+        return new string(chars);
+    }
+
+    /// <summary>Strip everything except digits + ASCII letters so user-typed
+    /// codes with separators (123-456) or stray spaces still match the
+    /// canonical stored form. Uppercases so the legacy alphanumeric alphabet
+    /// (still readable from older TV builds in the cache) keeps matching.</summary>
+    private static string NormaliseCode(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        Span<char> buf = stackalloc char[raw.Length];
+        int n = 0;
+        foreach (var ch in raw)
+        {
+            if (ch is >= '0' and <= '9') buf[n++] = ch;
+            else if (ch is >= 'A' and <= 'Z') buf[n++] = ch;
+            else if (ch is >= 'a' and <= 'z') buf[n++] = (char)(ch - 32);
+            // anything else (dashes, spaces, punctuation) — drop
+        }
+        return new string(buf[..n]);
     }
 
     /// <summary>

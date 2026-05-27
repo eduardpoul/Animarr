@@ -105,7 +105,8 @@ public sealed class HlsSessionService : IDisposable
     /// real movie length, otherwise resuming would silently truncate the
     /// stored watch position on every replay.
     /// </summary>
-    public sealed record StartResult(string Token, string ManifestRelativeUrl, double TotalDurationSec);
+    public sealed record StartResult(string Token, string ManifestRelativeUrl, double TotalDurationSec,
+        PlayerOutputInfo Output);
 
     /// <summary>
     /// Returned from <see cref="ChoosePlaybackAsync"/>. When <c>DirectPlay</c>
@@ -113,7 +114,39 @@ public sealed class HlsSessionService : IDisposable
     /// directly and skip the HLS session entirely. Otherwise the caller falls
     /// through to <see cref="StartAsync"/> for the HLS path.
     /// </summary>
-    public sealed record PlaybackDecision(bool DirectPlay, string? DirectUrl, double DurationSec);
+    public sealed record PlaybackDecision(bool DirectPlay, string? DirectUrl, double DurationSec,
+        PlayerOutputInfo? Output);
+
+    /// <summary>
+    /// Describes what the player actually receives — NOT what's on disk. The
+    /// distinction matters for transcoded paths: a HEVC 10-bit DV source goes
+    /// through VAAPI re-encode and the player sees H.264 8-bit SDR; a HEVC
+    /// 10-bit stream-copy passes HDR through unchanged. The HUD's right-side
+    /// meta plashka reads from this so the user sees "what's actually playing
+    /// right now", not "what the source file claims to be".
+    ///
+    /// Plan values mirror <c>HlsPlan</c> (kept as strings to avoid leaking the
+    /// internal enum through the API surface):
+    ///   • "directplay"      — source plays as-is via /api/file
+    ///   • "ts-copy"         — H.264 source remuxed to MPEG-TS for HLS
+    ///   • "vaapi-reencode"  — HEVC 8-bit → h264 via VAAPI (HDR lost)
+    ///   • "nvenc-reencode"  — HEVC any-bit → h264 via NVENC (HDR lost)
+    ///   • "fmp4-copy"       — HEVC 10-bit/HDR/DV passed through unchanged
+    /// </summary>
+    public sealed record PlayerOutputInfo(
+        string  Plan,
+        string  Container,
+        string  VideoCodec,
+        int     BitDepth,
+        string  Hdr,
+        string[] HdrFormats,
+        int     Width,
+        int     Height,
+        string  AudioCodec,
+        int     AudioChannels,
+        string  AudioLanguage,
+        bool    Transcoded,
+        string? TranscodeReason);
 
     /// <summary>
     /// Probe the source file and decide whether the browser can play it
@@ -129,17 +162,82 @@ public sealed class HlsSessionService : IDisposable
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
-        if (probe is null) return new PlaybackDecision(false, null, duration);
+        if (probe is null) return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
         if (!IsDirectPlayEligible(container, probe))
-            return new PlaybackDecision(false, null, duration);
+            return new PlaybackDecision(false, null, duration, null);
 
         // /api/file serves the raw bytes with Range support — exactly what
         // <video> needs for native seek. URL-escape the path so spaces and
         // unicode survive (file paths frequently have both).
         var directUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
-        return new PlaybackDecision(true, directUrl, duration);
+        var output = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
+        return new PlaybackDecision(true, directUrl, duration, output);
+    }
+
+    /// <summary>
+    /// Builds the <see cref="PlayerOutputInfo"/> the HUD reads off — the
+    /// stream the player actually receives after our serving decision. For
+    /// direct play and stream-copy paths it mirrors the source; for re-encode
+    /// paths it reports the post-transcode codec/bit-depth/HDR state.
+    /// </summary>
+    private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay)
+    {
+        // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
+        // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
+        bool isReencode = plan is HlsPlan.Fmp4VaapiReencode or HlsPlan.Fmp4NvencReencode;
+
+        var hdrFormats = new List<string>();
+        if (!isReencode)
+        {
+            if (probe.HasDolbyVision) hdrFormats.Add("dolbyvision");
+            var xfer = (probe.ColorTransfer ?? "").ToLowerInvariant();
+            if (xfer == "smpte2084") hdrFormats.Add("hdr10");
+            else if (xfer == "arib-std-b67") hdrFormats.Add("hlg");
+        }
+        var hdr = hdrFormats.Count > 0 ? hdrFormats[0] : "sdr";
+
+        string videoCodec = isReencode ? "h264" : (probe.VideoCodec ?? "");
+        int    bitDepth   = isReencode ? 8       : (probe.Is10Bit ? 10 : 8);
+
+        string container = isDirectPlay      ? "mp4"
+                         : plan == HlsPlan.TsStreamCopy ? "mpegts"
+                         :                                "fmp4";
+
+        string planName = isDirectPlay ? "directplay"
+            : plan switch
+            {
+                HlsPlan.TsStreamCopy      => "ts-copy",
+                HlsPlan.Fmp4VaapiReencode => "vaapi-reencode",
+                HlsPlan.Fmp4NvencReencode => "nvenc-reencode",
+                HlsPlan.Fmp4StreamCopy    => "fmp4-copy",
+                _                          => "unknown",
+            };
+
+        string? reason = isDirectPlay ? null : plan switch
+        {
+            HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
+            HlsPlan.Fmp4VaapiReencode => "HEVC 8-bit re-encoded to H.264 via VAAPI for browser compatibility (HDR lost)",
+            HlsPlan.Fmp4NvencReencode => "HEVC re-encoded to H.264 via NVENC for browser compatibility (HDR lost)",
+            HlsPlan.Fmp4StreamCopy    => "HEVC 10-bit / HDR / DV stream-copied to fMP4 (HDR preserved if browser can decode)",
+            _                          => null,
+        };
+
+        return new PlayerOutputInfo(
+            Plan:            planName,
+            Container:       container,
+            VideoCodec:      videoCodec,
+            BitDepth:        bitDepth,
+            Hdr:             hdr,
+            HdrFormats:      hdrFormats.ToArray(),
+            Width:           probe.Width,
+            Height:          probe.Height,
+            AudioCodec:      probe.AudioCodec ?? "",
+            AudioChannels:   probe.AudioChannels,
+            AudioLanguage:   probe.AudioLanguage ?? "",
+            Transcoded:      !isDirectPlay,
+            TranscodeReason: reason);
     }
 
     private static bool IsDirectPlayEligible(string container, ProbeInfo probe)
@@ -165,7 +263,13 @@ public sealed class HlsSessionService : IDisposable
     }
 
     public async Task<StartResult> StartAsync(string fullPath, double seekSec, CancellationToken ct = default,
-        double audioOffsetHwSec = 0.07, double audioOffsetSwSec = 0.0)
+        double audioOffsetHwSec = 0.07, double audioOffsetSwSec = 0.0,
+        // Index of the audio stream inside the source to use (`-map 0:a:N?`).
+        // 0 = first audio (the historical behaviour). The HUD's Audio popup
+        // restarts the session with a different index when the user picks
+        // another track — there's no way to switch tracks live because our
+        // HLS pipeline transcodes a single audio stream.
+        int audioTrackIndex = 0)
     {
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
         // 1) Kill EXISTING sessions for the same source file — a second Play
@@ -315,7 +419,7 @@ public sealed class HlsSessionService : IDisposable
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height);
         var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
-            audioOffsetSec: audioOffsetSec);
+            audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex);
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
@@ -342,7 +446,7 @@ public sealed class HlsSessionService : IDisposable
         }
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
-            probe?.VideoCodec, plan, audioOffsetSec, totalDuration);
+            probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex);
         _sessions[token] = session;
 
         // Drain stderr — visible at Warning level so genuine encoder issues
@@ -415,7 +519,28 @@ public sealed class HlsSessionService : IDisposable
         _logger.LogInformation("HLS {Token}: startup ready, returning manifest (warmedSegments={Count})",
             token, Directory.EnumerateFiles(dir, $"seg-*.{segExt}").Count());
 
-        return new StartResult(token, $"/api/hls/{token}/master.m3u8", probe?.DurationSec ?? 0);
+        // Output info describes what the player actually receives — the
+        // post-transcode codec/HDR/container for the HUD's right-side meta
+        // plashka. Built from probe + plan so re-encode paths correctly
+        // report "h264 8-bit SDR" rather than echoing the source's HEVC HDR.
+        // Falls back to a defaults block if probe was null (live mode).
+        var output = probe is not null
+            ? BuildOutputInfo(probe, plan, isDirectPlay: false)
+            : new PlayerOutputInfo(
+                Plan:            "unknown",
+                Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
+                VideoCodec:      "",
+                BitDepth:        8,
+                Hdr:             "sdr",
+                HdrFormats:      Array.Empty<string>(),
+                Width:           0,
+                Height:          0,
+                AudioCodec:      "",
+                AudioChannels:   0,
+                AudioLanguage:   "",
+                Transcoded:      true,
+                TranscodeReason: "Probe failed — output info unavailable");
+        return new StartResult(token, $"/api/hls/{token}/master.m3u8", probe?.DurationSec ?? 0, output);
     }
 
     public string? GetSessionDir(string token)
@@ -578,7 +703,7 @@ public sealed class HlsSessionService : IDisposable
             // fixed for the session's lifetime and BuildFfmpegArgs only needs
             // the video codec hint (for the `-tag:v hvc1` on stream-copy HEVC).
             // Pass a minimal ProbeInfo carrying just that.
-            var miniProbe = new ProbeInfo(0, session.VideoCodec, null, 0, 0, null, false, false);
+            var miniProbe = new ProbeInfo(0, session.VideoCodec, null, 0, 0, null, false, false, null, 0, null);
             var args = BuildFfmpegArgs(session.SourcePath, sourceSeekSec, session.OutputDir,
                 Path.Combine(session.OutputDir, "_ffmpeg.m3u8"),
                 "_ffmpeg_master.m3u8",
@@ -586,7 +711,8 @@ public sealed class HlsSessionService : IDisposable
                 session.Plan,
                 startNumber: targetSegment,
                 reuseInit: true,
-                audioOffsetSec: session.AudioOffsetSec);
+                audioOffsetSec: session.AudioOffsetSec,
+                audioTrackIndex: session.AudioTrackIndex);
 
             var psi = new ProcessStartInfo
             {
@@ -647,7 +773,11 @@ public sealed class HlsSessionService : IDisposable
     // ─── Synthetic playlist generation ─────────────────────────────────────
 
     private sealed record ProbeInfo(double DurationSec, string? VideoCodec, string? AudioCodec,
-        int Width, int Height, string? CodecsAttribute, bool HasDolbyVision, bool Is10Bit);
+        int Width, int Height, string? CodecsAttribute, bool HasDolbyVision, bool Is10Bit,
+        // 2026-05-27: extended for PlayerOutputInfo. ColorTransfer drives
+        // HDR10 / HLG detection (smpte2084 vs arib-std-b67), AudioChannels +
+        // AudioLanguage feed the right-side meta plashka in the player HUD.
+        string? ColorTransfer, int AudioChannels, string? AudioLanguage);
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once
@@ -836,7 +966,10 @@ public sealed class HlsSessionService : IDisposable
         string masterPlaylistName, ProbeInfo? probe, HlsPlan plan,
         int startNumber = 0, bool reuseInit = false,
         int targetHeight = 0,
-        double audioOffsetSec = 0.04)
+        double audioOffsetSec = 0.04,
+        // Audio stream index inside the source (0 = first). Threaded through
+        // to each Build*Args branch which substitutes it in the `-map` arg.
+        int audioTrackIndex = 0)
     {
         var args = new List<string>();
         var videoCodec = probe?.VideoCodec;
@@ -854,16 +987,16 @@ public sealed class HlsSessionService : IDisposable
         switch (plan)
         {
             case HlsPlan.TsStreamCopy:
-                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber);
+                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
-                BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight);
+                BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex);
                 break;
             case HlsPlan.Fmp4NvencReencode:
-                BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight);
+                BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex);
                 break;
             case HlsPlan.Fmp4StreamCopy:
-                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec);
+                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex);
                 break;
         }
 
@@ -926,7 +1059,7 @@ public sealed class HlsSessionService : IDisposable
     /// absolute clock-time the player can chase. Audio gets AAC re-encoded
     /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
     private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        string? audioCodec, int startNumber)
+        string? audioCodec, int startNumber, int audioTrackIndex)
     {
         if (seekSec > 0)
         {
@@ -948,7 +1081,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
-            "-map", "0:a:0?",
+            "-map", $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
         // Audio: passthrough when the browser can decode it inside MPEG-TS.
@@ -972,7 +1105,7 @@ public sealed class HlsSessionService : IDisposable
     /// Used for HEVC 8-bit on hosts with /dev/dri available. Combined with
     /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight)
+        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -1021,7 +1154,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
-            "-map", "1:a:0?",
+            "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
             "-c:v", "h264_vaapi",
             "-profile:v", "main",
@@ -1041,7 +1174,7 @@ public sealed class HlsSessionService : IDisposable
     /// NVIDIA hosts. -bf 0 still applied so B-frame reorder doesn't
     /// reintroduce the fMP4 TFDT sync wobble.</summary>
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight)
+        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -1081,7 +1214,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
-            "-map", "1:a:0?",
+            "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
             "-c:v", "h264_nvenc",
             "-preset", "p4",          // p1=fastest, p7=highest quality; p4 is balanced
@@ -1104,7 +1237,7 @@ public sealed class HlsSessionService : IDisposable
     /// input — same trick the VAAPI path uses. Without this knob the user
     /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        int startNumber, string? videoCodec, double audioOffsetSec)
+        int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex)
     {
         bool useDualInput = audioOffsetSec != 0.0;
 
@@ -1138,7 +1271,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
-            "-map", useDualInput ? "1:a:0?" : "0:a:0?",
+            "-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
@@ -1191,6 +1324,9 @@ public sealed class HlsSessionService : IDisposable
             int width = 1280, height = 720;
             bool hasDv = false;
             bool is10Bit = false;
+            string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
+            int audioChannels = 0;
+            string? audioLanguage = null;
             string? videoCodecsAttr = null;
             string? audioCodecsAttr = null;
 
@@ -1205,6 +1341,11 @@ public sealed class HlsSessionService : IDisposable
                         if (s.TryGetProperty("codec_name", out var cn)) vCodec = cn.GetString();
                         if (s.TryGetProperty("width",  out var w) && w.TryGetInt32(out var wi)) width  = wi;
                         if (s.TryGetProperty("height", out var h) && h.TryGetInt32(out var hi)) height = hi;
+                        // Capture color transfer characteristic so BuildOutputInfo
+                        // can mark the stream as HDR10 / HLG. Distinct from
+                        // bit-depth — 10-bit alone isn't HDR.
+                        if (s.TryGetProperty("color_transfer", out var ctEl))
+                            colorTransfer = ctEl.GetString();
                         // pix_fmt yuv420p10le / yuv444p10le etc. — anything containing
                         // "10le" or "10be" is 10-bit. Profile strings like "Main 10"
                         // are also a tell.
@@ -1239,6 +1380,17 @@ public sealed class HlsSessionService : IDisposable
                         // the TS branch sidesteps the master playlist's codecs
                         // attribute entirely (browsers infer from segment bytes).
                         if (s.TryGetProperty("codec_name", out var acn)) aCodec = acn.GetString();
+                        if (s.TryGetProperty("channels",   out var ach) && ach.TryGetInt32(out var ci))
+                            audioChannels = ci;
+                        // Language tag: ffprobe puts it under tags.language, but
+                        // MKV-from-Matroska sometimes uses LANGUAGE (uppercase).
+                        if (s.TryGetProperty("tags", out var tags))
+                        {
+                            if (tags.TryGetProperty("language", out var langEl))
+                                audioLanguage = langEl.GetString();
+                            else if (tags.TryGetProperty("LANGUAGE", out var langElU))
+                                audioLanguage = langElU.GetString();
+                        }
                         audioCodecsAttr = "mp4a.40.2";
                     }
                 }
@@ -1252,7 +1404,8 @@ public sealed class HlsSessionService : IDisposable
                 _                    => null,
             };
 
-            return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit);
+            return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
+                colorTransfer, audioChannels, audioLanguage);
         }
         catch (Exception ex)
         {
@@ -1419,6 +1572,10 @@ public sealed class HlsSessionService : IDisposable
         public HlsPlan Plan       { get; }
         public double  AudioOffsetSec { get; }
         public double  TotalDurationSec { get; }
+        // Which audio stream of the source we selected via `-map 0:a:{N}?`.
+        // Set once at session creation; the session restart logic (used for
+        // backward scrub jumps) needs to keep mapping the same audio track.
+        public int     AudioTrackIndex { get; }
         public DateTime CreatedAt  { get; }
         public DateTime LastActive { get; private set; }
 
@@ -1440,7 +1597,8 @@ public sealed class HlsSessionService : IDisposable
         }
 
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
-            string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec)
+            string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
+            int audioTrackIndex)
         {
             Token       = token;
             SourcePath  = source;
@@ -1452,6 +1610,7 @@ public sealed class HlsSessionService : IDisposable
             Plan        = plan;
             AudioOffsetSec = audioOffsetSec;
             TotalDurationSec = totalDurationSec;
+            AudioTrackIndex  = audioTrackIndex;
             CreatedAt   = DateTime.UtcNow;
             LastActive  = DateTime.UtcNow;
         }
