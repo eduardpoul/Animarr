@@ -593,5 +593,10 @@
   "media_search.btn_cancel": "Отмена",
   "media_search.toast_applied": "Метаданные применены.",
 
-  "loader.identifying_title": "Идентификация через LLM"
+  "loader.identifying_title": "Идентификация через LLM",
+
+  "profile.server_settings_title": "Настройки сервера",
+  "profile.server_settings_sub": "Папки · LLM · паттерны · загрузки",
+
+  "episode_card.meta_missing": "Не скачано"
 }

@@ -1,63 +1,60 @@
 @*
-    Section folder Add / Edit dialog with drill-down filesystem picker.
+    Section folder Add / Edit — right-edge SettingsEditDrawer (v5 panel
+    refactor). Used to live as a centered modal; now slides in from the
+    right like the user / role / category editors so the admin keeps the
+    Settings list visible behind a dimmed backdrop.
 
-    Picker enumerates the server's well-known roots (/mnt, /Pool-*/*, drives)
-    via /api/folders/browse, then drills down through subdirectories. Same
-    UX as the original Animarr.Web Razor version, but the directory listing
-    comes from the server over HTTP instead of Directory.GetDirectories
-    running in-process.
+    Body has two states, toggled by the "Browse…" button:
+      • Form view     — title, path (+ Browse), type select
+      • Picker view   — drill-down filesystem browser served by
+                        /api/folders/browse. Picker has its own foot row
+                        with Use / Cancel buttons; dismissing the whole
+                        drawer (× or backdrop click) cancels both.
 *@
 
 @inject IAnimarrApiClient Api
 @inject ToastService Toasts
 
-<div class="sfd-overlay" @onclick="CancelAsync"></div>
-<div class="sfd" role="dialog" aria-modal="true" @onclick:stopPropagation>
-    <header class="sfd__header">
-        <div class="sfd__header-text">
-            <div class="sfd__overline">SETTINGS</div>
-            <h2 class="sfd__title">@(Existing is null ? L["settings.root_folders.add_title"] : L["settings.root_folders.edit_title"])</h2>
-            <div class="sfd__sub">@L["settings.root_folders.dialog_sub"]</div>
-        </div>
-        <button type="button" class="sfd__close" @onclick="CancelAsync" aria-label="Close">
-            <DIcon Name="x" Size="18" />
-        </button>
-    </header>
+@using Animarr.UI.Components.Design.Layout
 
-    <div class="sfd__body">
+<SettingsEditDrawer IsOpen="true"
+                    Title="@(Existing is null ? L["settings.root_folders.add_title"] : L["settings.root_folders.edit_title"])"
+                    Overline="SETTINGS"
+                    Hint="@L["settings.root_folders.dialog_sub"]"
+                    Icon="folder"
+                    OnClose="CancelAsync">
+    <Body>
         @if (!_pickerOpen)
         {
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.root_folders.field_title"]</span>
-                <input class="settings-field__input"
-                       placeholder="@L["settings.root_folders.field_title_placeholder"]"
-                       value="@_title"
-                       @oninput="@(e => _title = e.Value?.ToString() ?? "")" />
-            </label>
+            <div class="sfd__form">
+                <Input Value="@_title"
+                       ValueChanged="@(v => _title = v ?? "")"
+                       Label="@L["settings.root_folders.field_title"]"
+                       Placeholder="@L["settings.root_folders.field_title_placeholder"]" />
 
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.root_folders.field_path"]</span>
-                <div class="sfd__row">
-                    <input class="settings-field__input settings-field__input--mono"
-                           placeholder="@L["settings.root_folders.field_path_placeholder"]"
-                           value="@_path"
-                           @oninput="@(e => _path = e.Value?.ToString() ?? "")" />
-                    <Btn Variant="ghost" Size="md" OnClick="OpenPickerAsync">
-                        <DIcon Name="folder" Size="13" /> @L["settings.root_folders.btn_pick"]
-                    </Btn>
-                </div>
-            </label>
+                <label class="d-input-group">
+                    <span class="d-input-group__label">@L["settings.root_folders.field_path"]</span>
+                    <div class="sfd__row">
+                        <Input Value="@_path"
+                               ValueChanged="@(v => _path = v ?? "")"
+                               Placeholder="@L["settings.root_folders.field_path_placeholder"]" />
+                        <Btn Variant="ghost" Size="md" OnClick="OpenPickerAsync">
+                            <DIcon Name="folder" Size="13" /> @L["settings.root_folders.btn_pick"]
+                        </Btn>
+                    </div>
+                </label>
 
-            <label class="settings-field settings-field--240">
-                <span class="settings-field__label">@L["settings.root_folders.field_type"]</span>
-                <select class="settings-field__select"
-                        value="@_typeStr"
-                        @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
-                    <option value="Auto">@L["settings.root_folders.type_auto"]</option>
-                    <option value="Series">@L["settings.root_folders.type_series"]</option>
-                    <option value="Movie">@L["settings.root_folders.type_movie"]</option>
-                </select>
-            </label>
+                <label class="d-input-group">
+                    <span class="d-input-group__label">@L["settings.root_folders.field_type"]</span>
+                    <select class="d-profile__select"
+                            value="@_typeStr"
+                            @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
+                        <option value="Auto">@L["settings.root_folders.type_auto"]</option>
+                        <option value="Series">@L["settings.root_folders.type_series"]</option>
+                        <option value="Movie">@L["settings.root_folders.type_movie"]</option>
+                    </select>
+                </label>
+            </div>
         }
         else
         {
@@ -70,6 +67,16 @@
                 }
                 else if (_pickerCurrent is null)
                 {
+                    @* Top-of-picker (roots view) — no crumb to anchor a chev-l
+                       back, so a dedicated "Back to form" row lets the user
+                       bail without dismissing the whole drawer. Same intent
+                       as the Cancel in the drill-down branch below. *@
+                    <div class="sfd-picker__crumb">
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _pickerOpen = false)">
+                            <DIcon Name="chev-l" Size="13" /> @L["settings.root_folders.btn_cancel"]
+                        </Btn>
+                        <span class="sfd-picker__crumb-path">@L["settings.root_folders.picker_title"]</span>
+                    </div>
                     <div class="sfd-picker__roots">
                         @foreach (var entry in _pickerEntries)
                         {
@@ -126,11 +133,10 @@
                 }
             </div>
         }
-    </div>
-
-    @if (!_pickerOpen)
-    {
-        <footer class="sfd__footer">
+    </Body>
+    <Footer>
+        @if (!_pickerOpen)
+        {
             <Btn Variant="primary" Size="md" OnClick="SaveAsync"
                  Loading="@_saving"
                  Disabled="@(string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_path))">
@@ -139,9 +145,9 @@
             <Btn Variant="ghost" Size="md" OnClick="CancelAsync">
                 @L["settings.root_folders.btn_cancel"]
             </Btn>
-        </footer>
-    }
-</div>
+        }
+    </Footer>
+</SettingsEditDrawer>
 
 @code {
     [Parameter] public FolderWatcherDto? Existing { get; set; }

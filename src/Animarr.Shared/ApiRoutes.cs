@@ -81,6 +81,13 @@ public static class ApiRoutes
     // ─── App config + hardware probe ─────────────────────────────────────
     public const string AppConfig          = "/api/app-config";
     public const string AppConfigByKey     = "/api/app-config/{key}";
+
+    // ─── LLM diagnostics ──────────────────────────────────────────────────
+    /// <summary>Live "ping" test against the configured LLM endpoint. Returns
+    /// {ok, latencyMs, sample, error} so the AI tab can show success / failure
+    /// without restarting identification. Saved config is used — Save before
+    /// hitting Test.</summary>
+    public const string LlmTest            = "/api/llm/test";
     public const string HardwareInfo       = "/api/hardware-info";
 
     // ─── Metadata / search ───────────────────────────────────────────────

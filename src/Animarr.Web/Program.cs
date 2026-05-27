@@ -235,6 +235,7 @@ app.MapAuthEndpoints();
 app.MapPairEndpoints();
 app.MapUsersEndpoints();
 app.MapCategoryEndpoints();
+app.MapLlmEndpoints();
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();

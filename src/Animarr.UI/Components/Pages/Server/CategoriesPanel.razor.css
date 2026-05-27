@@ -9,55 +9,86 @@
     margin-bottom: 16px;
 }
 
+/* 4-column row: Toggle | Text (name + desc + hint) | Count | Actions.
+   `align-items: center` works because the count and actions sit in their
+   own columns — they no longer have to fight `margin-left: auto` inside
+   the name flex. The text column stretches to fill leftover space. */
 .d-srv-cat__row {
     display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 14px;
+    grid-template-columns: auto 1fr auto auto;
+    column-gap: 14px;
     align-items: center;
     padding: 12px 14px;
     background: var(--bg-1);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    transition: opacity var(--motion-fast);
+    border-radius: var(--radius-card);
+    transition: opacity var(--motion-fast), border-color var(--motion-fast);
 }
+.d-srv-cat__row:hover { border-color: var(--border-strong); }
 
-.d-srv-cat__row.is-disabled {
-    opacity: 0.5;
-}
+.d-srv-cat__row.is-disabled { opacity: 0.55; }
 
 .d-srv-cat__row-text {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .d-srv-cat__row-name {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1.3;
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    line-height: 1.3;
 }
 
+.d-srv-cat__row-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Real chip — no leading "·" separator. Centered against the name and
+   visible against both the row's --bg-1 and the row's hover state. */
 .d-srv-cat__row-builtin {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
     letter-spacing: 0.6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-badge);
 }
 
+/* Right-aligned column. `<itemCount> items` was inconsistent — built-in vs.
+   custom categories ended up with wildly different widths. Show just the
+   number with a mono "ITEMS" label below for stable alignment. */
 .d-srv-cat__row-count {
-    margin-left: auto;
+    align-self: center;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 13px;
+    color: var(--text-dim);
+    text-align: right;
+    min-width: 40px;
+    line-height: 1;
+}
+.d-srv-cat__row-count::after {
+    content: "ITEMS";
+    display: block;
+    font-size: 9px;
     color: var(--text-faint);
+    letter-spacing: 0.8px;
+    margin-top: 4px;
 }
 
 .d-srv-cat__row-desc {
     font-size: 11.5px;
     color: var(--text-dim);
-    margin-top: 4px;
     line-height: 1.45;
 }
 
@@ -65,7 +96,6 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
-    margin-top: 6px;
     line-height: 1.5;
     display: flex;
     align-items: flex-start;
@@ -73,6 +103,7 @@
     background: var(--surface);
     padding: 6px 8px;
     border-radius: 6px;
+    margin-top: 2px;
 }
 
 .d-srv-cat__row-hint > svg {
@@ -84,35 +115,32 @@
 .d-srv-cat__row-actions {
     display: inline-flex;
     gap: 4px;
-    align-self: flex-start;
 }
 
-/* ── Inline edit form (legacy — pre-v5 drawer refactor) ──── */
-.d-srv-cat__form {
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 12px;
-    padding: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    margin-top: 8px;
+/* Local icon-button (was borrowing .d-srv-users__icon-btn cross-namespace).
+   Same visual treatment, just decoupled from the Users panel CSS. */
+.d-srv-cat__icon-btn {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 6px;
+    color: var(--text-faint);
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.d-srv-cat__icon-btn:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
 }
 
-/* v5 drawer form — no extra background, the SettingsEditDrawer body
-   already supplies the surface. Just a vertical stack with the same
-   gap as the legacy inline form so spacing feels consistent. */
+/* ── Drawer form (used by SettingsEditDrawer body) ───────── */
 .d-srv-cat__drawer-form {
     display: flex;
     flex-direction: column;
     gap: 14px;
-}
-
-.d-srv-cat__form-title {
-    font-family: var(--font-display);
-    font-size: 14px;
-    letter-spacing: -0.2px;
-    color: var(--text);
 }
 
 .d-srv-cat__form-grid {
@@ -151,4 +179,102 @@
     margin-top: 8px;
     line-height: 1.55;
     font-style: italic;
+}
+
+/* ── Categories panel header + header-CTAs ────────────────────
+   Top-right cluster: primary "+ New category" + ghost "Rescan all".
+   Mirrors the segment-bar pattern used by Users/Roles so admin-section
+   actions live next to the section title, not as huge full-width CTAs
+   at the bottom of the card. */
+.d-srv-card__head--with-cta {
+    flex-direction: row !important;   /* parent .d-srv-card__head is column */
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.d-srv-card__head-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.d-srv-card__head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* Scoped copy of the Users/Roles "+ New …" button — scoped CSS doesn't
+   cross component boundaries, so we redefine the rules here against
+   :host classes from this panel. Same visual treatment though. */
+.d-srv-users__new-btn {
+    appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--accent);
+    border: 1px solid var(--accent-line);
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-srv-users__new-btn:hover {
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
+}
+
+.d-srv-cat__rescan-btn {
+    appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background var(--motion-fast), color var(--motion-fast),
+                border-color var(--motion-fast);
+}
+.d-srv-cat__rescan-btn:hover:not([disabled]) {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+.d-srv-cat__rescan-btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+/* ── Mobile (< 640px) — drop Count to a new row so the grid fits. ──── */
+@media (max-width: 639px) {
+    .d-srv-cat__row {
+        grid-template-columns: auto 1fr auto;
+        grid-template-areas:
+            "toggle text actions"
+            ".      count count";
+        row-gap: 6px;
+    }
+    .d-srv-cat__row > :nth-child(1) { grid-area: toggle; }
+    .d-srv-cat__row-text { grid-area: text; }
+    .d-srv-cat__row-count { grid-area: count; justify-self: end; text-align: right; }
+    .d-srv-cat__row-count::after { display: inline; margin: 0 0 0 6px; }
+    .d-srv-cat__row-actions { grid-area: actions; }
 }

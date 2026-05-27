@@ -16,12 +16,26 @@
 @inject ToastService Toasts
 
 <div class="d-srv-card">
-    <header class="d-srv-card__head">
-        <h2 class="d-srv-card__title">Categories</h2>
-        <div class="d-srv-card__sub">
-            Chip strip above the catalog grid. Each item can belong to multiple
-            categories. The LLM classifier reads the Hint at identification time;
-            manual overrides per item win over auto-classification.
+    <header class="d-srv-card__head d-srv-card__head--with-cta">
+        <div class="d-srv-card__head-text">
+            <h2 class="d-srv-card__title">Categories</h2>
+            <div class="d-srv-card__sub">
+                Chip strip above the catalog grid. Each item can belong to multiple
+                categories. The LLM classifier reads the Hint at identification time;
+                manual overrides per item win over auto-classification.
+            </div>
+        </div>
+        @* "+ New category" floats top-right next to the header instead of
+           sitting full-width at the bottom — matches the Users/Roles
+           segment-bar pattern. Rescan stays as a ghost CTA alongside. *@
+        <div class="d-srv-card__head-actions">
+            <button type="button" class="d-srv-users__new-btn tv-focus" @onclick="StartAdd">
+                <DIcon Name="plus" Size="13" /> New category
+            </button>
+            <button type="button" class="d-srv-cat__rescan-btn tv-focus"
+                    @onclick="RescanAsync" disabled="@_rescanning">
+                <DIcon Name="refresh" Size="13" /> @(_rescanning ? "Rescanning…" : "Rescan all")
+            </button>
         </div>
     </header>
 
@@ -40,12 +54,11 @@
                             CheckedChanged="@(v => ToggleEnabledAsync(cat, v))" />
                     <div class="d-srv-cat__row-text">
                         <div class="d-srv-cat__row-name">
-                            @cat.Name
+                            <span class="d-srv-cat__row-title">@cat.Name</span>
                             @if (cat.BuiltIn)
                             {
-                                <span class="d-srv-cat__row-builtin">· BUILT-IN</span>
+                                <span class="d-srv-cat__row-builtin">BUILT-IN</span>
                             }
-                            <span class="d-srv-cat__row-count">@cat.ItemCount items</span>
                         </div>
                         @if (!string.IsNullOrEmpty(cat.Description))
                         {
@@ -58,15 +71,16 @@
                             </div>
                         }
                     </div>
+                    <span class="d-srv-cat__row-count">@cat.ItemCount</span>
                     <div class="d-srv-cat__row-actions">
-                        <button type="button" class="d-srv-users__icon-btn tv-focus"
+                        <button type="button" class="d-srv-cat__icon-btn tv-focus"
                                 title="Edit"
                                 @onclick="@(() => StartEdit(cat))">
                             <DIcon Name="pencil" Size="14" />
                         </button>
                         @if (!cat.BuiltIn)
                         {
-                            <button type="button" class="d-srv-users__icon-btn tv-focus"
+                            <button type="button" class="d-srv-cat__icon-btn tv-focus"
                                     title="Delete"
                                     @onclick="@(() => DeleteAsync(cat.Id))">
                                 <DIcon Name="trash" Size="14" />
@@ -77,19 +91,9 @@
             }
         </div>
 
-        @* v5 drawer refactor: New / Edit no longer replace the row list with
-           an inline form. The list stays visible behind a SettingsEditDrawer
-           that slides in from the right (560px), backed by a dimmed
-           backdrop. Same Save/Cancel callbacks, same Api.Create*/Update*
-           calls — only the chrome changed. *@
-        <div class="d-srv-card__actions">
-            <Btn Variant="primary" Size="md" OnClick="StartAdd">
-                <DIcon Name="plus" Size="13" /> New category
-            </Btn>
-            <Btn Variant="ghost" Size="md" OnClick="RescanAsync" Loading="@_rescanning">
-                <DIcon Name="refresh" Size="13" /> Rescan all items
-            </Btn>
-        </div>
+        @* New / Edit drawer fires from the header's "+ New category" button.
+           Rescan also hoisted to the header. Hint stays here so admins see
+           the cost / behaviour callout right under the list. *@
         <div class="d-srv-cat__rescan-hint">
             Rescan reclassifies every media item against current categories.
             Manual overrides are preserved. Cost: ~1 LLM call per item.

@@ -498,6 +498,28 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         }
     }
 
+    // ─── LLM diagnostics ─────────────────────────────────────────────────
+
+    public async Task<LlmTestResponse> TestLlmAsync(CancellationToken ct = default)
+    {
+        // POST with empty body — the server reads its own AppConfig to know
+        // which provider to ping. The response is always a JSON body
+        // (success or failure both serialise LlmTestResponse with Ok flag),
+        // so we EnsureSuccessStatusCode-but-not-on-200 only on transport
+        // errors. The endpoint times out internally to keep this UI-friendly.
+        using var resp = await _http.PostAsync(ApiRoutes.LlmTest, content: null, ct);
+        if (resp.StatusCode is HttpStatusCode.InternalServerError)
+        {
+            // The endpoint catches its own exceptions and returns Ok=false;
+            // a 5xx response means something at the HTTP layer broke. Surface
+            // that as a synthetic failure so the UI shows a readable error.
+            return new LlmTestResponse(Ok: false, LatencyMs: 0, Sample: null,
+                Error: $"Server returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+        }
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<LlmTestResponse>(JsonOpts, ct))!;
+    }
+
     // ─── Auth + per-user (v4) ────────────────────────────────────────────
 
     public async Task<AuthStatusDto> GetAuthStatusAsync(CancellationToken ct = default)

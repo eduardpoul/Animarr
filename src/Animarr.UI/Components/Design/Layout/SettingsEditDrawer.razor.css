@@ -11,9 +11,12 @@
     position: fixed;
     inset: 0;
     /* TopBar lives at z-index: 50, MobileShell tabbar at 49. The drawer
-       overlays the entire shell (mimics EditMetadataDrawer which uses
-       z-index 30/31 but predates the v4 TopBar). Anything ≥ 60 wins. */
-    z-index: 60;
+       must clear both. Earlier z-60/61 worked at the root stacking level
+       but used to get trapped under TopBar because .animarr-main carried
+       z-index:2 (creating a stacking context that pinned TopBar above any
+       nested z-60). MainLayout no longer sets z-index, so this 70/71 pair
+       safely sits above the TopBar in every case. */
+    z-index: 70;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
@@ -30,7 +33,7 @@
     bottom: 0;
     width: 560px;
     max-width: 95vw;
-    z-index: 61;
+    z-index: 71;
     display: flex;
     flex-direction: column;
     background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
@@ -65,6 +68,22 @@
     border: 1px solid var(--accent-line);
     flex-shrink: 0;
 }
+
+/* Tone variants — Tone="warn"/"danger" swap the head icon chip and the
+   overline to a non-accent palette. Body and footer stay neutral. */
+.d-srv-drawer--warn .d-srv-drawer__head-ic {
+    background: oklch(0.80 0.17 75 / 0.18);
+    color: var(--warn);
+    border-color: oklch(0.60 0.16 75 / 0.40);
+}
+.d-srv-drawer--warn .d-srv-drawer__overline { color: var(--warn); }
+
+.d-srv-drawer--danger .d-srv-drawer__head-ic {
+    background: oklch(0.66 0.20 25 / 0.18);
+    color: oklch(0.78 0.20 25);
+    border-color: oklch(0.66 0.20 25 / 0.45);
+}
+.d-srv-drawer--danger .d-srv-drawer__overline { color: oklch(0.78 0.20 25); }
 
 .d-srv-drawer__head-text { flex: 1; min-width: 0; }
 

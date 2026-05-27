@@ -795,6 +795,7 @@
   "episode_card.tooltip_mark_watched": "Mark as watched",
   "episode_card.tooltip_mark_unwatched": "Mark as unwatched",
   "episode_card.overlay_empty": "EMPTY",
+  "episode_card.meta_missing": "Not downloaded",
 
   "poster.type_anime": "ANIME",
   "poster.type_movie": "MOVIE",
@@ -971,6 +972,8 @@
 
   "profile.switch_user_label": "Switch user · on {0}",
   "profile.add_user": "Add user",
+  "profile.server_settings_title": "Server settings",
+  "profile.server_settings_sub": "Folders · LLM · patterns · downloads",
   "pin.title_for_user": "Sign in as {0}",
   "pin.subtitle": "Enter 4-digit PIN",
   "pin.invalid": "Wrong PIN — try again"

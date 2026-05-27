@@ -964,5 +964,10 @@
   "reconnect.title_resume_failed": "Error al reanudar",
   "reconnect.sub_resume_failed": "No se ha podido reanudar la sesión.",
   "reconnect.btn_retry": "Reintentar conexión",
-  "reconnect.btn_resume": "Reanudar sesión"
+  "reconnect.btn_resume": "Reanudar sesión",
+
+  "profile.server_settings_title": "Configuración del servidor",
+  "profile.server_settings_sub": "Carpetas · LLM · patrones · descargas",
+
+  "episode_card.meta_missing": "No descargado"
 }

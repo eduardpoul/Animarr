@@ -5,7 +5,18 @@
 
 .d-srv-users { display: flex; flex-direction: column; gap: 18px; }
 
-/* ── Segmented Users / Roles ─────────────────────────────── */
+/* ── Segmented Users / Roles + right-aligned "+ New …" button ── */
+/* Flex row: segment chip group on the left, "+ New user/role" CTA on
+   the right. Both share the same vertical alignment so the bar reads
+   as one line on every viewport. */
+.d-srv-users__segment-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
 .d-srv-users__segment {
     display: inline-flex;
     gap: 4px;
@@ -15,6 +26,35 @@
     border-radius: 10px;
     width: fit-content;
 }
+
+/* Compact contextual create button — sits opposite the segment chips.
+   Label flips Users↔Roles automatically; click dispatches via the
+   _view-aware OpenCurrentCreateDrawer handler. */
+.d-srv-users__new-btn {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--accent);
+    border: 1px solid var(--accent-line);
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+                transform var(--motion-fast);
+}
+.d-srv-users__new-btn:hover {
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
+}
+.d-srv-users__new-btn:active { transform: translateY(1px); }
 
 .d-srv-users__seg-item {
     appearance: none;

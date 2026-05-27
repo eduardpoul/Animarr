@@ -1,106 +1,60 @@
-@page "/torrents/{Hash}/edit"
+@*
+    TorrentEdit — right-edge SettingsEditDrawer (v5 panel refactor).
+
+    Was a full /torrents/{hash}/edit page with a 2-column layout (file
+    tree | sidebar cards). The @page directive is gone; the Torrents
+    list now opens this component as a drawer instead of navigating.
+
+    Body is a vertical stack at 560px drawer width:
+      • Stats card  (progress bar, downloaded/total, live speed, peers, path)
+      • Files       (priority list with Skip / Normal / High)
+      • Speed       (DL / UL limits in MB/s)
+      • Options     (toggles)
+
+    Footer has the canonical Save + Cancel pair, with the danger Remove
+    pushed to the right so it's separated from the affirmative actions.
+*@
+
 @implements IAsyncDisposable
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 
 @using Microsoft.AspNetCore.SignalR.Client
+@using Animarr.UI.Components.Design.Layout
 
-<PageTitle>Animarr</PageTitle>
+<SettingsEditDrawer IsOpen="true"
+                    Title="@(_record?.Name ?? Hash)"
+                    Overline="TORRENT"
+                    Hint="@(_live?.State is { } s ? $"State · {s}" : "Loading state…")"
+                    Icon="torrent"
+                    OnClose="OnCloseAsync">
+    <Body>
+        @if (_loading)
+        {
+            <div class="te-loading"><InlineDots Label="Loading torrent" /></div>
+        }
+        else if (_record is null)
+        {
+            <div class="te-empty">@L["torrent_edit.not_found"]</div>
+        }
+        else
+        {
+            var rec = _record!;
 
-<div class="te-header">
-    <Btn Variant="ghost" Size="sm" OnClick="@(() => Nav.NavigateTo("/torrents"))">
-        <DIcon Name="chev-l" Size="14" /> @L["torrent_edit.btn_back"]
-    </Btn>
-    <h1 class="te-header__title">@(_record?.Name ?? Hash)</h1>
-    @if (_live is not null)
-    {
-        <span class="tor-dot tor-dot--@StateColorClass()" title="@_live.State"></span>
-        <span class="te-header__state">@_live.State</span>
-    }
-</div>
-
-@if (_record is null && !_loading)
-{
-    <div class="te-empty">@L["torrent_edit.not_found"]</div>
-}
-else if (_loading)
-{
-    <div class="te-loading"><InlineDots Label="Loading torrent" /></div>
-}
-else
-{
-    var rec = _record!;
-    <div class="te-grid">
-
-        @* ── FILE SELECTIONS ────────────────────────────────────────── *@
-        <section class="te-files">
-            <div class="te-files__head">
-                <h2 class="te-files__title">
-                    @L["torrent_edit.files_title"] (@rec.FileSelections.Length)
-                </h2>
-                <Btn Variant="primary" Size="sm" Disabled="@_saving" OnClick="SavePrioritiesAsync">
-                    @(_saving ? L["torrent_edit.btn_saving"] : L["torrent_edit.btn_save"])
-                </Btn>
-            </div>
-
-            <div class="te-tree">
-                @foreach (var sel in rec.FileSelections.OrderBy(s => s.FilePath))
-                {
-                    var path = sel.FilePath;
-                    var prio = _priorities.GetValueOrDefault(path, sel.Priority);
-                    <div class="te-tree__file" style="--depth:0">
-                        <input type="checkbox" checked="@(prio != 0)"
-                               @onchange="@(e => { _priorities[path] = (bool)e.Value! ? 1 : 0; StateHasChanged(); })" />
-                        <span class="te-tree__file-name" title="@path">@System.IO.Path.GetFileName(path)</span>
-                        <select class="te-tree__priority @(prio == 0 ? "te-tree__priority--skip" : "")"
-                                value="@prio"
-                                @onchange="@(e => _priorities[path] = int.TryParse(e.Value?.ToString(), out var p) ? p : 1)">
-                            <option value="0">@L["file_priority.skip"]</option>
-                            <option value="1">@L["file_priority.normal"]</option>
-                            <option value="2">@L["file_priority.high"]</option>
-                        </select>
-                    </div>
-                }
-            </div>
-        </section>
-
-        @* ── SETTINGS SIDEBAR ──────────────────────────────────────── *@
-        <aside class="te-side">
-
-            <div class="te-card">
-                <h3 class="te-card__title">@L["torrent_edit.speed_title"]</h3>
-                <label class="te-field">
-                    <span class="te-field__label">@L["torrent_edit.dl_limit_label"]</span>
-                    <input type="number" min="0" class="te-input"
-                           value="@_dlLimit"
-                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _dlLimit))" />
-                </label>
-                <label class="te-field">
-                    <span class="te-field__label">@L["torrent_edit.ul_limit_label"]</span>
-                    <input type="number" min="0" class="te-input"
-                           value="@_ulLimit"
-                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _ulLimit))" />
-                </label>
-                <Btn Variant="primary" Size="sm" OnClick="ApplySettingsAsync">@L["torrent_edit.btn_apply"]</Btn>
-            </div>
-
-            <div class="te-card">
-                <h3 class="te-card__title">@L["torrent_edit.options_title"]</h3>
-                <div class="te-toggle-row">
-                    <Toggle Checked="@_stopAfterDownload"
-                            CheckedChanged="@((bool v) => { _stopAfterDownload = v; })" />
-                    <span class="te-toggle-row__label">@L["torrent_edit.stop_after_download"]</span>
-                </div>
-                <div class="te-toggle-row te-toggle-row--disabled">
-                    <Toggle Checked="@_skipSubfolderStructure" Disabled="true"
-                            CheckedChanged="@((bool _) => {})" />
-                    <span class="te-toggle-row__label">@L["torrent_edit.flatten_subfolders"]</span>
-                </div>
-            </div>
-
+            @* ── STATS CARD ────────────────────────────────────────── *@
             <div class="te-card">
                 <h3 class="te-card__title">@L["torrent_edit.stats_title"]</h3>
                 <div class="te-stats">
+                    @if (_live is not null)
+                    {
+                        <div class="te-stats__row">
+                            <span class="te-stats__label">State</span>
+                            <span class="te-stats__state">
+                                <span class="@($"tor-dot tor-dot--{StateColorClass()}")"></span>
+                                @_live.State
+                            </span>
+                        </div>
+                    }
                     <div class="te-stats__row">
                         <span class="te-stats__label">@L["torrent_edit.stat_progress"]</span>
                         <b>@(Progress.ToString("F1"))%</b>
@@ -138,17 +92,90 @@ else
                 </div>
             </div>
 
+            @* ── FILE SELECTIONS ───────────────────────────────────── *@
             <div class="te-card">
-                <Btn Variant="danger" Size="sm" OnClick="DeleteAsync">
-                    <DIcon Name="trash" Size="13" /> Remove torrent
-                </Btn>
+                <h3 class="te-card__title">
+                    @L["torrent_edit.files_title"] (@rec.FileSelections.Length)
+                </h3>
+                <div class="te-tree">
+                    @foreach (var sel in rec.FileSelections.OrderBy(s => s.FilePath))
+                    {
+                        var path = sel.FilePath;
+                        var prio = _priorities.GetValueOrDefault(path, sel.Priority);
+                        <div class="te-tree__file" style="--depth:0">
+                            <input type="checkbox" checked="@(prio != 0)"
+                                   @onchange="@(e => { _priorities[path] = (bool)e.Value! ? 1 : 0; StateHasChanged(); })" />
+                            <span class="te-tree__file-name" title="@path">@System.IO.Path.GetFileName(path)</span>
+                            <select class="te-tree__priority @(prio == 0 ? "te-tree__priority--skip" : "")"
+                                    value="@prio"
+                                    @onchange="@(e => _priorities[path] = int.TryParse(e.Value?.ToString(), out var p) ? p : 1)">
+                                <option value="0">@L["file_priority.skip"]</option>
+                                <option value="1">@L["file_priority.normal"]</option>
+                                <option value="2">@L["file_priority.high"]</option>
+                            </select>
+                        </div>
+                    }
+                </div>
             </div>
-        </aside>
-    </div>
-}
+
+            @* ── SPEED LIMITS ──────────────────────────────────────── *@
+            <div class="te-card">
+                <h3 class="te-card__title">@L["torrent_edit.speed_title"]</h3>
+                <label class="te-field">
+                    <span class="te-field__label">@L["torrent_edit.dl_limit_label"]</span>
+                    <input type="number" min="0" class="te-input"
+                           value="@_dlLimit"
+                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _dlLimit))" />
+                </label>
+                <label class="te-field">
+                    <span class="te-field__label">@L["torrent_edit.ul_limit_label"]</span>
+                    <input type="number" min="0" class="te-input"
+                           value="@_ulLimit"
+                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _ulLimit))" />
+                </label>
+            </div>
+
+            @* ── OPTIONS ───────────────────────────────────────────── *@
+            <div class="te-card">
+                <h3 class="te-card__title">@L["torrent_edit.options_title"]</h3>
+                <div class="te-toggle-row">
+                    <Toggle Checked="@_stopAfterDownload"
+                            CheckedChanged="@((bool v) => { _stopAfterDownload = v; })" />
+                    <span class="te-toggle-row__label">@L["torrent_edit.stop_after_download"]</span>
+                </div>
+                <div class="te-toggle-row te-toggle-row--disabled">
+                    <Toggle Checked="@_skipSubfolderStructure" Disabled="true"
+                            CheckedChanged="@((bool _) => {})" />
+                    <span class="te-toggle-row__label">@L["torrent_edit.flatten_subfolders"]</span>
+                </div>
+            </div>
+        }
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" Disabled="@(_saving || _record is null)" OnClick="SaveAllAsync">
+            <DIcon Name="check" Size="13" />
+            @(_saving ? L["torrent_edit.btn_saving"] : L["torrent_edit.btn_save"])
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">Cancel</Btn>
+        <div class="te-footer__spacer"></div>
+        @if (_record is not null)
+        {
+            <Btn Variant="danger" Size="md" OnClick="DeleteAsync">
+                <DIcon Name="trash" Size="13" /> Remove
+            </Btn>
+        }
+    </Footer>
+</SettingsEditDrawer>
 
 @code {
-    [Parameter] public string Hash { get; set; } = "";
+    /// <summary>InfoHash of the torrent to edit. Drawer reloads when this
+    /// parameter changes so the parent can swap between torrents without
+    /// remounting.</summary>
+    [Parameter, EditorRequired] public string Hash { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Fired after a successful Remove. Parent uses this to refresh
+    /// the torrent list and close the drawer.</summary>
+    [Parameter] public EventCallback OnDeleted { get; set; }
 
     private TorrentRecordDto? _record;
     private TorrentLiveStatsDto? _live;
@@ -160,21 +187,37 @@ else
     private int _ulLimit;
     private Dictionary<string, int> _priorities = new();
     private HubConnection? _hub;
+    private string? _loadedHash;
 
     private double Progress => _live?.Progress * 100
         ?? (_record is { TotalSize: > 0 } r ? 100.0 * r.Downloaded / r.TotalSize : 0);
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadAsync();
         await ConnectHubAsync();
+        await LoadAsync();
+        _loadedHash = Hash;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Reload when the parent swaps the Hash without remounting us.
+        if (_loadedHash is not null && _loadedHash != Hash)
+        {
+            _loadedHash = Hash;
+            _record = null;
+            _live = null;
+            _loading = true;
+            StateHasChanged();
+            await LoadAsync();
+        }
     }
 
     private async Task LoadAsync()
     {
         try
         {
-            // The route param uses InfoHash; resolve via the torrent list so we
+            // The Hash param uses InfoHash; resolve via the torrent list so we
             // get the Guid + persisted settings + file selections in one call.
             var torrents = await Api.GetTorrentsAsync();
             _record = torrents.FirstOrDefault(t => string.Equals(t.InfoHash, Hash, StringComparison.OrdinalIgnoreCase));
@@ -214,7 +257,10 @@ else
         if (_hub is not null) await _hub.DisposeAsync();
     }
 
-    private async Task SavePrioritiesAsync()
+    /// <summary>Single Save that commits file priorities AND speed limits in
+    /// one go — the drawer footer collapses the two old separate "Save"
+    /// buttons (priorities vs. apply) into one affirmative action.</summary>
+    private async Task SaveAllAsync()
     {
         if (_record is null) return;
         _saving = true;
@@ -225,16 +271,7 @@ else
                 .Select(kv => new TorrentFileSelectionUpdate(kv.Key, kv.Value))
                 .ToArray();
             await Api.UpdateTorrentFileSelectionsAsync(_record.Id, new UpdateFileSelectionsRequest(updates));
-        }
-        catch { /* swallow */ }
-        finally { _saving = false; StateHasChanged(); }
-    }
 
-    private async Task ApplySettingsAsync()
-    {
-        if (_record is null) return;
-        try
-        {
             await Api.UpdateTorrentAsync(_record.Id, new UpdateTorrentRequest(
                 FolderWatcherId:        _record.FolderWatcherId,
                 AutoRename:             _record.AutoRename,
@@ -248,6 +285,7 @@ else
             await LoadAsync();
         }
         catch { /* swallow */ }
+        finally { _saving = false; StateHasChanged(); }
     }
 
     private async Task DeleteAsync()
@@ -256,7 +294,7 @@ else
         try
         {
             await Api.DeleteTorrentAsync(_record.Id, deleteFiles: false);
-            Nav.NavigateTo("/torrents");
+            await OnDeleted.InvokeAsync();
         }
         catch { /* swallow */ }
     }
@@ -287,4 +325,6 @@ else
         if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
         return $"{bytes} B";
     }
+
+    private async Task OnCloseAsync() => await OnClose.InvokeAsync();
 }

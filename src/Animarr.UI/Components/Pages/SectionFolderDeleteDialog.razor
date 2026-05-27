@@ -1,34 +1,39 @@
 @*
-    Section folder delete-confirm dialog. The server's DELETE /api/folders/{id}
-    cascades through child watchers, queue rows and MediaItems — so the client
-    just makes one call and reloads. Files on disk are never touched.
+    Section folder delete-confirm — right-edge SettingsEditDrawer with a
+    warn-tinted icon (v5 panel refactor). The server's DELETE /api/folders/{id}
+    cascades through child watchers, queue rows and MediaItems — so the
+    client just makes one call and reloads. Files on disk are never touched.
 *@
 
 @inject IAnimarrApiClient Api
 
-<div class="sfdd-overlay" @onclick="CancelAsync"></div>
-<div class="sfdd" role="dialog" aria-modal="true" @onclick:stopPropagation>
-    <header class="sfdd__header">
-        <div class="sfdd__header-icon"><DIcon Name="warn" Size="17" /></div>
-        <div class="sfdd__header-text">
-            <div class="sfdd__overline">DANGER</div>
-            <h2 class="sfdd__title">@L.Get("settings.root_folders.delete_title", Section.Label)</h2>
-            <div class="sfdd__sub">@L["settings.root_folders.delete_body"]</div>
-        </div>
-        <button type="button" class="sfdd__close" @onclick="CancelAsync" aria-label="Close">
-            <DIcon Name="x" Size="18" />
-        </button>
-    </header>
+@using Animarr.UI.Components.Design.Layout
 
-    <footer class="sfdd__footer">
+<SettingsEditDrawer IsOpen="true"
+                    Title="@L.Get("settings.root_folders.delete_title", Section.Label)"
+                    Overline="DANGER"
+                    Hint="@L["settings.root_folders.delete_body"]"
+                    Icon="warn"
+                    Tone="warn"
+                    OnClose="CancelAsync">
+    <Body>
+        <div class="sfdd__body">
+            <p class="sfdd__copy">@L["settings.root_folders.delete_body"]</p>
+            <ul class="sfdd__effects">
+                <li><DIcon Name="check" Size="13" /> <span>Files on disk are <strong>not</strong> touched.</span></li>
+                <li><DIcon Name="trash" Size="13" /> <span>Removes the section entry, child watchers, identification queue rows and any media items mapped under it.</span></li>
+            </ul>
+        </div>
+    </Body>
+    <Footer>
         <Btn Variant="danger" Size="md" OnClick="ConfirmAsync" Loading="@_removing">
             @L["settings.root_folders.btn_remove"]
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="CancelAsync" Disabled="@_removing">
             @L["settings.root_folders.btn_cancel"]
         </Btn>
-    </footer>
-</div>
+    </Footer>
+</SettingsEditDrawer>
 
 @code {
     [Parameter, EditorRequired] public FolderWatcherDto Section { get; set; } = null!;
@@ -46,7 +51,7 @@
             await Api.DeleteFolderAsync(Section.Id);
             await OnRemoved.InvokeAsync();
         }
-        catch { /* server-side delete failed — leave dialog open */ }
+        catch { /* server-side delete failed — leave drawer open */ }
         finally
         {
             _removing = false;
