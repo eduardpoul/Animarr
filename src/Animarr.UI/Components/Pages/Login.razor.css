@@ -1,0 +1,232 @@
+/* Login + Setup share the same card aesthetic — both load their own
+   page-scoped CSS but base shell rules are unified.
+   Spec: screens-v4.jsx 129-232 (Login) and 245+ (Setup placeholder). */
+
+.d-login,
+.d-setup {
+    position: relative;
+    z-index: 2;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 60px 22px;
+}
+
+.d-login__back,
+.d-setup__back {
+    position: absolute;
+    top: 22px; left: 22px;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 7px 14px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    backdrop-filter: blur(10px);
+}
+.d-login__back:hover,
+.d-setup__back:hover { color: var(--text); }
+
+.d-login__card,
+.d-setup__card {
+    width: 420px;
+    max-width: 100%;
+    padding: 32px 28px;
+    background: linear-gradient(180deg, rgba(21, 17, 14, 0.85), rgba(15, 12, 10, 0.85));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+}
+
+.d-setup__card { width: 480px; }
+
+.d-login__brand,
+.d-setup__brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+/* v6: BrandMark SVG renders its own dark tile + accent A. CSS keeps just
+   the soft accent shadow under the chip — matches the welcome / topbar
+   chip glow so the brand reads as one continuous surface across screens. */
+.d-login__brand-mark,
+.d-setup__brand-mark {
+    border-radius: 10px;
+    box-shadow: 0 6px 20px -6px var(--accent-soft);
+    flex-shrink: 0;
+}
+
+.d-login__brand-name,
+.d-setup__brand-name {
+    font-family: var(--font-display);
+    font-size: 18px;
+    letter-spacing: -0.3px;
+    line-height: 1;
+}
+
+.d-login__brand-sub,
+.d-setup__brand-sub {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 4px;
+    letter-spacing: 0.3px;
+}
+
+.d-login__form,
+.d-setup__form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.d-login__error,
+.d-setup__error {
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 8px 10px;
+    background: oklch(0.78 0.16 75 / 0.08);
+    border: 1px solid oklch(0.78 0.16 75 / 0.25);
+    border-radius: 8px;
+}
+
+.d-login__footer,
+.d-setup__footer {
+    position: absolute;
+    bottom: 22px; right: 22px;
+}
+.d-login__footer-link,
+.d-setup__footer-link {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+    text-decoration: none;
+}
+.d-login__footer-link:hover,
+.d-setup__footer-link:hover { color: var(--text-dim); }
+
+/* ─── v5 Phase 7: Scan QR from TV link + modal ─────────────────────── */
+
+.d-login__qr-link {
+    appearance: none;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-ctrl);
+    padding: 8px 12px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+.d-login__qr-link:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+/* Modal — fixed-position overlay that dims the login backdrop while the
+   camera viewfinder renders. Stays on top of .d-login__card thanks to a
+   higher z-index. */
+.d-login__qr-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.72);
+    display: grid;
+    place-items: center;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.d-login__qr-modal-card {
+    width: 360px;
+    max-width: calc(100% - 32px);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card-lg);
+    padding: 16px;
+    box-shadow: var(--shadow-modal);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.d-login__qr-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+}
+.d-login__qr-modal-close {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px;
+    display: inline-flex;
+}
+.d-login__qr-modal-close:hover { color: var(--text); }
+
+.d-login__qr-viewer {
+    /* html5-qrcode injects a <video> tag inside this element; we size it
+       square so the preview doesn't jump as the video metadata arrives. */
+    aspect-ratio: 1 / 1;
+    background: #000;
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
+}
+/* html5-qrcode draws its own button bar inside the viewer; hide its UI so
+   the only chrome is our header. */
+.d-login__qr-viewer :global(button) { display: none; }
+
+.d-login__qr-status {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    text-align: center;
+}
+.d-login__qr-modal-hint {
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+}
+
+/* Confirmation toast — bottom-centered pill that fades after a few seconds. */
+.d-login__toast {
+    position: fixed;
+    bottom: 32px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 110;
+    background: var(--surface-2);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--radius-pill);
+    padding: 9px 16px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-card-hi);
+}

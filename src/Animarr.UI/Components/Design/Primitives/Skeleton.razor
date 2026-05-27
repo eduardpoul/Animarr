@@ -1,0 +1,30 @@
+@*
+    Animated shimmer placeholder. Two shapes:
+      Variant="poster" — 2:3 ratio poster placeholder with top-block + CJK bar
+                         (used in Catalog grid while data loads)
+      Variant="row"    — rectangular block sized via parameters (used in lists)
+      Variant="plain"  — bare shimmer rectangle, sized by the caller's CSS
+
+    Spec: design_handoff_animarr/pages/loaders.html §03.
+*@
+
+@if (Variant == "poster")
+{
+    <div class="d-skel d-skel--poster">
+        <div class="d-skel__top"></div>
+        <div class="d-skel__cjk"></div>
+    </div>
+}
+else if (Variant == "row")
+{
+    <div class="d-skel d-skel--row" style="--h: @(Height)px;"></div>
+}
+else
+{
+    <div class="d-skel d-skel--plain"></div>
+}
+
+@code {
+    [Parameter] public string Variant { get; set; } = "poster"; // poster | row | plain
+    [Parameter] public int    Height  { get; set; } = 32;
+}

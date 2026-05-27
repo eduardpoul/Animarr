@@ -1,0 +1,103 @@
+/* ============================================================
+   Terminal — sysadmin / hacker aesthetic.
+
+   Pure black canvas, neon green text, JetBrains Mono everywhere,
+   scanlines + grid overlay, zero radii. The UI feels like a CRT
+   running an SSH session. Sharp corners only, monospace labels,
+   uppercase tracked text. No grain, no CJK, no sparkles — just
+   phosphor and signal.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission (0,0,1,0, source-ordered after this
+   file) can't wipe out the per-theme font tokens. */
+html[data-theme="terminal"] {
+    /* ── Backgrounds — pure black, very flat ──────────────── */
+    --bg-0:        #000000;
+    --bg-1:        #050807;
+    --surface:     #0a0e0c;
+    --surface-2:   #0e1310;
+    --surface-3:   #131a16;
+
+    /* ── Borders — faint green, no warmth ─────────────────── */
+    --border:        rgba(180, 255, 200, 0.12);
+    --border-strong: rgba(180, 255, 200, 0.24);
+
+    /* ── Text — phosphor green ────────────────────────────── */
+    --text:       #c6ffd2;
+    --text-dim:   #7fc998;
+    --text-faint: #4a7a5c;
+
+    /* ── Accent — neon green, no hue rotation ─────────────── */
+    --accent-hue:  145;
+    --accent:      oklch(0.78 0.22 var(--accent-hue));
+    --accent-hi:   oklch(0.86 0.22 var(--accent-hue));
+    --accent-soft: oklch(0.78 0.22 var(--accent-hue) / 0.18);
+    --accent-line: oklch(0.78 0.22 var(--accent-hue) / 0.50);
+
+    /* ── Semantic ─────────────────────────────────────────── */
+    --success: oklch(0.82 0.22 145);
+    --warn:    oklch(0.85 0.20  85);
+    --info:    oklch(0.78 0.16 195);
+
+    /* ── Typography — mono everywhere ─────────────────────── */
+    --font-ui:      'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+    --font-display: 'JetBrains Mono', ui-monospace, monospace;
+    --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+    /* ── Labels — uppercase + wide tracking ───────────────── */
+    --label-casing: uppercase;
+    --label-tracking: 0.15em;
+
+    /* ── Decoration flags ─────────────────────────────────── */
+    --decor-scanlines: block;
+
+    /* ── Radii — sharp corners only ───────────────────────── */
+    --radius-badge:   0;
+    --radius-ctrl:    0;
+    --radius-chip:    0;
+    --radius-card:    0;
+    --radius-card-lg: 0;
+    --radius-panel:   0;
+    --radius-hero:    0;
+    --radius-modal:   0;
+    --radius-pill:    0;
+
+    /* ── Shadows — flat, slight green glow on cards ───────── */
+    --shadow-card:    0 0 0 1px rgba(180, 255, 200, 0.10),
+                      0 8px 24px -16px rgba(0, 255, 120, 0.20);
+    --shadow-card-hi: 0 0 0 1px rgba(180, 255, 200, 0.18),
+                      0 12px 30px -14px rgba(0, 255, 120, 0.30);
+}
+
+/* ── Scanlines + grid overlay (Terminal-only decoration) ──
+   Two repeating-linear-gradients layered: 1px horizontal lines
+   every 3px (scanlines) + 32px grid lines (very faint). Fixed,
+   pointer-events:none so it never blocks interaction. */
+[data-theme="terminal"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background-image:
+        repeating-linear-gradient(
+            0deg,
+            transparent 0,
+            transparent 2px,
+            rgba(0, 0, 0, 0.22) 2px,
+            rgba(0, 0, 0, 0.22) 3px
+        ),
+        linear-gradient(rgba(180, 255, 200, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(180, 255, 200, 0.04) 1px, transparent 1px);
+    background-size: 100% 3px, 32px 32px, 32px 32px;
+    mix-blend-mode: normal;
+    opacity: 0.9;
+}
+
+/* ── Buttons get a subtle outer glow ──────────────────── */
+[data-theme="terminal"] .d-btn,
+[data-theme="terminal"] button.d-pill {
+    border-radius: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+}

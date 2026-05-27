@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr · marks with media hint</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;margin-bottom:36px;}
+  .mk{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;display:flex;flex-direction:column;align-items:center;gap:16px;transition:.15s;}
+  .mk:hover{border-color:var(--border-strong);}
+  .mk .stage{width:120px;height:120px;display:grid;place-items:center;border-radius:18px;background:var(--bg-1);position:relative;overflow:hidden;}
+  .mk .nm{font-size:13px;font-weight:600;letter-spacing:-0.01em;text-align:center;}
+  .mk .desc{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);text-align:center;line-height:1.5;}
+
+  /* Reusable base square */
+  .sq{width:72px;height:72px;background:var(--accent);color:#0a0c10;border-radius:18px;font-family:'Inter',sans-serif;font-weight:800;letter-spacing:-0.04em;position:relative;display:grid;place-items:center;font-size:42px;}
+
+  /* ── 1: a + small r subscript ── */
+  .m1{position:relative;}
+  .m1 .r{position:absolute;bottom:14px;right:12px;font-size:18px;font-weight:700;color:#0a0c10;line-height:1;opacity:0.55;letter-spacing:0;}
+
+  /* ── 2: a with play triangle inside counter ── */
+  .m2 svg{width:72px;height:72px;display:block;}
+
+  /* ── 3: a + play triangle right of letter ── */
+  .m3 .play{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:0;height:0;border-left:14px solid #0a0c10;border-top:9px solid transparent;border-bottom:9px solid transparent;opacity:0.7;}
+  .m3 .ltr{transform:translateX(-6px);}
+
+  /* ── 4: monospace "ar" with corner notch ── */
+  .m4{font-family:'Inter',sans-serif;font-weight:800;font-size:34px;letter-spacing:-0.05em;}
+  .m4::after{content:"";position:absolute;top:0;right:0;width:14px;height:14px;background:var(--bg-1);clip-path:polygon(0 0,100% 0,100% 100%);}
+
+  /* ── 5: a with bottom progress bar ── */
+  .m5::after{content:"";position:absolute;left:14px;right:14px;bottom:12px;height:3px;background:rgba(10,12,16,0.2);border-radius:3px;}
+  .m5::before{content:"";position:absolute;left:14px;width:24px;bottom:12px;height:3px;background:#0a0c10;border-radius:3px;z-index:2;}
+
+  /* ── 6: a with film perforation sides ── */
+  .m6 .strip{position:absolute;top:0;bottom:0;width:8px;background-image:radial-gradient(circle at center,rgba(10,12,16,0.4) 0 2px,transparent 2px);background-size:8px 14px;background-repeat:repeat-y;}
+  .m6 .l{left:4px;} .m6 .r{right:4px;}
+
+  /* ── 7: SVG "a-play" — counter is a play triangle ── */
+  .m7 svg{width:72px;height:72px;display:block;}
+
+  /* ── 8: a with cursor caret ── */
+  .m8::after{content:"";position:absolute;right:14px;top:18px;bottom:18px;width:3px;background:#0a0c10;opacity:0.75;animation:m8-blink 1.2s steps(2) infinite;}
+  @keyframes m8-blink{50%{opacity:0;}}
+
+  /* ── 9: ar lockup, single shape ── */
+  .m9{font-family:'Inter',sans-serif;font-weight:900;font-size:32px;letter-spacing:-0.06em;}
+
+  /* ── 10: a inside circle frame, with notch like a film reel ── */
+  .m10{background:transparent;color:var(--accent-hi);border:2px solid var(--accent);border-radius:50%;font-family:'Inter',sans-serif;font-size:36px;font-weight:800;}
+  .m10::before{content:"";position:absolute;top:-2px;left:50%;width:6px;height:10px;background:var(--bg-1);transform:translateX(-50%);}
+
+  /* ── 11: a with mini-poster aspect frame in corner ── */
+  .m11 .frame{position:absolute;top:10px;right:10px;width:14px;height:20px;background:rgba(10,12,16,0.55);border-radius:2px;}
+
+  /* ── 12: a · r dotted pair (animarr.) ── */
+  .m12{background:#0a0c10;color:#fff;border:1px solid var(--border-strong);font-family:'Inter',sans-serif;font-weight:800;}
+  .m12 .r{position:absolute;right:14px;bottom:14px;font-size:20px;color:var(--accent-hi);font-weight:700;}
+  .m12 .dot{position:absolute;bottom:16px;right:10px;width:5px;height:5px;border-radius:5px;background:var(--accent);}
+
+  /* ── 13: a with progress arc around it ── */
+  .m13 svg{position:absolute;inset:0;width:100%;height:100%;}
+  .m13 .lbl{position:relative;z-index:2;color:#0a0c10;font-family:'Inter',sans-serif;font-weight:800;font-size:36px;}
+
+  /* ── 14: a counter is a small film reel notch ── */
+  .m14 svg{width:72px;height:72px;display:block;}
+
+  /* ── 15: "a▸" play right inside same shape ── */
+  .m15{background:transparent;}
+  .m15 svg{width:72px;height:72px;display:block;}
+
+  /* Wordmark previews */
+  .wm{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:36px;}
+  .wmrow{display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
+  .wmrow .small{width:32px;height:32px;border-radius:8px;font-size:18px;font-weight:800;display:grid;place-items:center;background:var(--accent);color:#0a0c10;font-family:'Inter',sans-serif;letter-spacing:-0.04em;position:relative;}
+  .wmrow .br{font-size:15px;font-weight:700;}
+  .wmrow .desc{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Brand mark · v2</div>
+  <h1 class="page">"a" with a media hint</h1>
+  <p class="lede">Each variant tries to push the symbol past "just a letter" — adding a small <b>r</b> (for "animarr"), a play triangle, a progress arc, film perforations, or a poster frame. Pick the direction; we then refine.</p>
+
+  <h2 class="sec"><span class="n">01</span><span class="t">Letter pairing — a + r</span><span class="d">Wordmark compressed into the icon. The "r" hints "animarr" without spelling it.</span></h2>
+  <div class="grid">
+    <div class="mk"><div class="stage"><div class="sq m1">a<span class="r">r</span></div></div><div class="nm">01 · ar · subscript</div><div class="desc">Small "r" bottom-right<br/>most subtle wordmark hint</div></div>
+    <div class="mk"><div class="stage"><div class="sq m4">ar</div></div><div class="nm">02 · ar · ligature</div><div class="desc">"ar" as one mark · -0.05em<br/>corner-notch like film tape</div></div>
+    <div class="mk"><div class="stage"><div class="sq m9">a<span style="color:rgba(10,12,16,0.55);">r</span></div></div><div class="nm">03 · ar · dim r</div><div class="desc">Full size both letters<br/>r at 55% opacity</div></div>
+    <div class="mk"><div class="stage"><div class="sq m12">a<span class="r">r</span><span class="dot"></span></div></div><div class="nm">04 · a · r ·</div><div class="desc">Dark + accent r + accent dot<br/>brand "animarr." pattern</div></div>
+  </div>
+
+  <h2 class="sec"><span class="n">02</span><span class="t">Play triangle</span><span class="d">Most literal "media" cue. Different placements / fusions.</span></h2>
+  <div class="grid">
+    <div class="mk"><div class="stage">
+      <svg viewBox="0 0 72 72" class="m2"><rect width="72" height="72" rx="18" fill="var(--accent)"/><path d="M22 22 L22 52 L34 47 L34 27 Z" fill="#0a0c10"/><path d="M38 27 L38 47 L52 37 Z" fill="#0a0c10" opacity="0.85"/></svg>
+    </div><div class="nm">05 · a-stem + play</div><div class="desc">Left stem of "a" + play triangle<br/>geometric · scales to favicon</div></div>
+
+    <div class="mk"><div class="stage"><div class="sq m3"><span class="ltr">a</span><span class="play"></span></div></div><div class="nm">06 · a + play right</div><div class="desc">Letter and triangle co-exist<br/>play replaces no glyph part</div></div>
+
+    <div class="mk"><div class="stage">
+      <svg viewBox="0 0 72 72" class="m7"><rect width="72" height="72" rx="18" fill="var(--accent)"/><text x="36" y="56" font-family="Inter" font-size="52" font-weight="800" text-anchor="middle" fill="#0a0c10" letter-spacing="-2">a</text><path d="M32 32 L46 38 L32 44 Z" fill="var(--accent)"/></svg>
+    </div><div class="nm">07 · a-counter = play</div><div class="desc">The hole in "a" is the play triangle<br/>cleverest of the bunch</div></div>
+
+    <div class="mk"><div class="stage">
+      <svg viewBox="0 0 72 72" class="m15"><rect width="72" height="72" rx="18" fill="#0a0c10" stroke="var(--accent-line)"/><text x="22" y="52" font-family="Inter" font-size="38" font-weight="800" fill="var(--accent-hi)" letter-spacing="-1.5">a</text><path d="M44 32 L44 48 L58 40 Z" fill="var(--accent)"/></svg>
+    </div><div class="nm">08 · a▸ next to play</div><div class="desc">Dark · letter + standalone play<br/>terminal vibe</div></div>
+  </div>
+
+  <h2 class="sec"><span class="n">03</span><span class="t">Progress &amp; cursor</span><span class="d">A bar / arc / cursor — implies "in the middle of watching".</span></h2>
+  <div class="grid">
+    <div class="mk"><div class="stage"><div class="sq m5">a</div></div><div class="nm">09 · progress bar</div><div class="desc">Mini 38% bar under "a"<br/>"continue watching" cue</div></div>
+    <div class="mk"><div class="stage"><div class="sq m13">
+      <svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="32" stroke="rgba(10,12,16,0.18)" stroke-width="3" fill="none"/><circle cx="36" cy="36" r="32" stroke="#0a0c10" stroke-width="3" fill="none" stroke-dasharray="76 200" stroke-linecap="round" transform="rotate(-90 36 36)"/></svg>
+      <span class="lbl">a</span>
+    </div></div><div class="nm">10 · progress arc</div><div class="desc">Circular progress ring<br/>around the letter</div></div>
+    <div class="mk"><div class="stage"><div class="sq m8">a</div></div><div class="nm">11 · text cursor</div><div class="desc">Blinking caret after "a"<br/>"identifying…" vibe</div></div>
+  </div>
+
+  <h2 class="sec"><span class="n">04</span><span class="t">Film / poster framing</span><span class="d">Film-strip perforation, poster-aspect chip — physical media cues.</span></h2>
+  <div class="grid">
+    <div class="mk"><div class="stage"><div class="sq m6">a<div class="strip l"></div><div class="strip r"></div></div></div><div class="nm">12 · film perforation</div><div class="desc">8-px sprocket strips L+R<br/>most "media" cue</div></div>
+    <div class="mk"><div class="stage"><div class="sq m11">a<div class="frame"></div></div></div><div class="nm">13 · poster chip corner</div><div class="desc">Tiny 2:3 poster top-right<br/>library-as-icon</div></div>
+    <div class="mk"><div class="stage"><div class="sq m10">a</div></div><div class="nm">14 · film reel</div><div class="desc">Outline circle + top notch<br/>looks like a reel</div></div>
+    <div class="mk"><div class="stage">
+      <svg viewBox="0 0 72 72" class="m14"><rect width="72" height="72" rx="18" fill="var(--accent)"/><circle cx="36" cy="36" r="6" fill="#0a0c10"/><text x="36" y="60" font-family="Inter" font-size="22" font-weight="800" text-anchor="middle" fill="#0a0c10">a</text><circle cx="36" cy="36" r="20" stroke="#0a0c10" stroke-width="1.5" fill="none" opacity="0.3"/></svg>
+    </div><div class="nm">15 · reel + a label</div><div class="desc">Big reel circle + "a" subtitle<br/>VHS / cinema vibe</div></div>
+  </div>
+
+  <!-- Wordmark previews in topbar -->
+  <h2 class="sec"><span class="n">05</span><span class="t">In context · topbar 32 px</span><span class="d">Same marks at the size used by the real catalog topbar.</span></h2>
+  <div class="wm">
+    <div class="wmrow">
+      <div class="small">a<span style="position:absolute;bottom:5px;right:5px;font-size:9px;font-weight:700;opacity:0.5;line-height:1;">r</span></div>
+      <span class="br">ANIMARR</span><span class="desc">01 ar subscript</span>
+    </div>
+    <div class="wmrow">
+      <div class="small" style="font-size:16px;letter-spacing:-0.06em;">ar</div>
+      <span class="br">ANIMARR</span><span class="desc">02 ar ligature</span>
+    </div>
+    <div class="wmrow">
+      <svg width="32" height="32" viewBox="0 0 72 72"><rect width="72" height="72" rx="14" fill="var(--accent)"/><text x="36" y="56" font-family="Inter" font-size="52" font-weight="800" text-anchor="middle" fill="#0a0c10" letter-spacing="-2">a</text><path d="M32 32 L46 38 L32 44 Z" fill="var(--accent)"/></svg>
+      <span class="br">ANIMARR</span><span class="desc">07 counter = play</span>
+    </div>
+    <div class="wmrow">
+      <div class="small">a<div style="position:absolute;left:5px;right:5px;bottom:5px;height:2px;background:rgba(10,12,16,0.2);border-radius:2px;"></div><div style="position:absolute;left:5px;width:10px;bottom:5px;height:2px;background:#0a0c10;border-radius:2px;z-index:2;"></div></div>
+      <span class="br">ANIMARR</span><span class="desc">09 progress bar</span>
+    </div>
+    <div class="wmrow">
+      <svg width="32" height="32" viewBox="0 0 72 72"><circle cx="36" cy="36" r="32" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="var(--accent)"/><circle cx="36" cy="36" r="32" stroke="#0a0c10" stroke-width="6" fill="none" stroke-dasharray="76 200" stroke-linecap="round" transform="rotate(-90 36 36)"/><text x="36" y="50" font-family="Inter" font-size="32" font-weight="800" text-anchor="middle" fill="#0a0c10">a</text></svg>
+      <span class="br">ANIMARR</span><span class="desc">10 progress arc</span>
+    </div>
+    <div class="wmrow">
+      <div class="small" style="position:relative;">a<div style="position:absolute;top:0;bottom:0;left:0;width:3px;background-image:radial-gradient(circle at center,rgba(10,12,16,0.4) 0 1px,transparent 1px);background-size:3px 5px;"></div><div style="position:absolute;top:0;bottom:0;right:0;width:3px;background-image:radial-gradient(circle at center,rgba(10,12,16,0.4) 0 1px,transparent 1px);background-size:3px 5px;"></div></div>
+      <span class="br">ANIMARR</span><span class="desc">12 film perf</span>
+    </div>
+  </div>
+
+  <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:22px 26px;margin-bottom:60px;font-size:13px;color:var(--text-dim);line-height:1.65;">
+    <b style="color:var(--text);">My pick:</b> <b style="color:var(--accent-hi);">07 — a-counter is the play triangle</b>. The hole in the letter "a" becomes the play icon. Reads as "a" first, as "play" second. Stays sharp at 16 px. Pairs with the wordmark cleanly. Runner-up: <b style="color:var(--text);">09 progress bar</b> — quietest hint, works on any background.
+  </div>
+
+</div>
+</body>
+</html>

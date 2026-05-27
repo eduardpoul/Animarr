@@ -1,0 +1,32 @@
+@page "/error"
+@using System.Diagnostics
+
+@*
+    Generic error fallback. The WASM/MAUI runtimes don't expose an
+    HttpContext, so we drop the Request ID block from the server-side
+    version and rely on Activity.Current for a correlation hint.
+*@
+
+<PageTitle>Error</PageTitle>
+
+<h1 class="text-danger">Error.</h1>
+<h2 class="text-danger">Something went wrong handling your request.</h2>
+
+@if (!string.IsNullOrEmpty(_activityId))
+{
+    <p>
+        <strong>Trace ID:</strong> <code>@_activityId</code>
+    </p>
+}
+
+<p>
+    Try reloading. If the problem persists, check the server logs and the
+    browser devtools network tab for the failed API call.
+</p>
+
+@code {
+    private string? _activityId;
+
+    protected override void OnInitialized()
+        => _activityId = Activity.Current?.Id;
+}

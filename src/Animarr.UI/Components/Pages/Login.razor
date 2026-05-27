@@ -1,0 +1,283 @@
+@*
+    LoginScreen — 420px card centered over the fanart backdrop.
+    Spec: screens-v4.jsx lines 129-232.
+
+    v5 Phase 7 addition — "Scan QR from TV" button opens a camera overlay
+    powered by the html5-qrcode library. When a QR is decoded, the phone
+    calls POST /api/auth/pair/confirm with the embedded code so the TV is
+    signed in. The phone itself stays on /login.
+*@
+
+@page "/login"
+@layout AuthLayout
+@implements IDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject IJSRuntime JS
+
+<PageTitle>Animarr — Sign in</PageTitle>
+
+<div class="d-login">
+    <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
+        <DIcon Name="arrow-l" Size="13" /> BACK
+    </button>
+
+    <div class="d-login__card" role="dialog" aria-label="Sign in">
+        <header class="d-login__brand">
+            <BrandMark Size="38" ExtraClass="d-login__brand-mark" />
+            <div>
+                <div class="d-login__brand-name">ANIMARR</div>
+                <div class="d-login__brand-sub">Sign in to continue</div>
+            </div>
+        </header>
+
+        <form class="d-login__form" @onsubmit="OnSubmit" @onsubmit:preventDefault>
+            <Input @bind-Value="_username" Placeholder="Username" Label="USERNAME"
+                   Autocomplete="username" Disabled="@_loading" />
+            <Input @bind-Value="_password" Placeholder="••••••••" Label="PASSWORD" Type="password"
+                   Autocomplete="current-password" Disabled="@_loading" />
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="d-login__error">@_error</div>
+            }
+
+            @* Two QR shortcuts — only one is visible at a time depending on
+               whether this device already has a session.
+                 • Anon user: "Pair on TV" → /pair shows a QR THIS device
+                   exposes for another (signed-in) phone to scan.
+                 • Signed-in user: "Scan TV QR" opens the camera so this
+                   phone can confirm a code shown on another (anonymous) TV.
+               The visual styling is identical; only the labels and onclick
+               differ. *@
+            @if (UserCtx.IsAuthenticated)
+            {
+                <button type="button" class="d-login__qr-link tv-focus" @onclick="OpenQrScan">
+                    <DIcon Name="qr-code" Size="14" /> @L["login.scan_qr"]
+                </button>
+            }
+            else
+            {
+                <button type="button" class="d-login__qr-link tv-focus"
+                        @onclick="@(() => Nav.NavigateTo("/pair"))">
+                    <DIcon Name="qr-code" Size="14" /> Sign in via phone QR
+                </button>
+            }
+
+            <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || string.IsNullOrEmpty(_username) || string.IsNullOrEmpty(_password))">
+                @if (_loading)
+                {
+                    <Spinner Size="14" />
+                    <text>SIGNING IN…</text>
+                }
+                else
+                {
+                    <text>SIGN IN</text>
+                    <DIcon Name="arrow-r" Size="13" />
+                }
+            </Btn>
+        </form>
+    </div>
+
+    @if (_qrModalOpen)
+    {
+        <div class="d-login__qr-modal" role="dialog" aria-label="Scan TV QR">
+            <div class="d-login__qr-modal-card">
+                <header class="d-login__qr-modal-head">
+                    <span>SCAN TV</span>
+                    <button type="button" class="d-login__qr-modal-close tv-focus" @onclick="CloseQrScan" aria-label="Close">
+                        <DIcon Name="x" Size="14" />
+                    </button>
+                </header>
+                <div id="animarr-qr-viewer" class="d-login__qr-viewer"></div>
+                @if (!string.IsNullOrEmpty(_qrStatus))
+                {
+                    <div class="d-login__qr-status">@_qrStatus</div>
+                }
+                <div class="d-login__qr-modal-hint">
+                    Point the camera at the QR shown on your TV's pairing screen.
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_toast))
+    {
+        <div class="d-login__toast" role="status">
+            <DIcon Name="check" Size="13" /> @_toast
+        </div>
+    }
+
+    <footer class="d-login__footer">
+        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-login__footer-link tv-focus" aria-label="Animarr on GitHub">
+            github
+        </a>
+    </footer>
+</div>
+
+@code {
+    private string _username = "";
+    private string _password = "";
+    private string? _error;
+    private bool _loading;
+
+    // QR scan modal state — kept on the same page so we don't need a separate
+    // modal component for a one-off flow.
+    private bool _qrModalOpen;
+    private string? _qrStatus;
+    private string? _toast;
+    private DotNetObjectReference<Login>? _selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+        if (UserCtx.AuthStatus is { SetupRequired: true })
+        {
+            Nav.NavigateTo("/setup", replace: true);
+            return;
+        }
+
+        // TV remote can't realistically type usernames + passwords. When the
+        // platform is a TV (html.tv-mode is set by the MAUI host's startup
+        // script or by the native IsTelevision DotNet check) AND the user
+        // isn't already authenticated, send them straight to /pair — they
+        // scan the QR with their phone and the TV's cookie lands via the
+        // pair poll loop. Stays on /login for non-TV / already-authed cases.
+        if (!UserCtx.IsAuthenticated)
+        {
+            try
+            {
+                var isTv = await JS.InvokeAsync<bool>("eval",
+                    "document.documentElement.classList.contains('tv-mode')");
+                if (isTv)
+                {
+                    Nav.NavigateTo("/pair", replace: true);
+                    return;
+                }
+            }
+            catch { /* eval failed — fall through and show the password form */ }
+        }
+        // Do NOT redirect already-authed users away — they might be revisiting
+        // /login to scan a TV QR. Welcome / catalog stay reachable via the
+        // header. If the page is plain anonymous and lands here, we stay put.
+    }
+
+    private async Task OnSubmit()
+    {
+        if (_loading) return;
+        _error = null;
+        _loading = true;
+        try
+        {
+            var user = await Api.LoginAsync(new LoginRequest(_username, _password));
+            if (user is null)
+            {
+                _error = "Wrong username or password";
+                _loading = false;
+                return;
+            }
+            await UserCtx.RefreshMeAsync();
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Sign-in failed: {ex.Message}";
+            _loading = false;
+        }
+    }
+
+    // ─── QR scan flow ────────────────────────────────────────────────────
+
+    private async Task OpenQrScan()
+    {
+        _qrModalOpen = true;
+        _qrStatus = null;
+        _selfRef ??= DotNetObjectReference.Create(this);
+        // Give Blazor one frame to mount #animarr-qr-viewer before we hand
+        // its element id to html5-qrcode.
+        StateHasChanged();
+        try
+        {
+            await JS.InvokeVoidAsync("animarr_startQrScan", "animarr-qr-viewer", _selfRef);
+        }
+        catch (Exception ex)
+        {
+            _qrStatus = $"Camera unavailable: {ex.Message}";
+        }
+    }
+
+    private async Task CloseQrScan()
+    {
+        _qrModalOpen = false;
+        try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
+    }
+
+    /// <summary>Called from JS once html5-qrcode decodes a payload. The
+    /// payload should be "animarr://pair?code=...&server=...". We parse out
+    /// the code and POST it to /api/auth/pair/confirm.</summary>
+    [JSInvokable]
+    public async Task OnQrDecoded(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload)) return;
+        var code = ExtractCode(payload);
+        if (code is null)
+        {
+            _qrStatus = "Not an Animarr pairing code";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _qrStatus = "Confirming…";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var ok = await Api.ConfirmPairAsync(new ConfirmPairRequest(code));
+            if (!ok)
+            {
+                _qrStatus = "Code expired or unknown";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            await CloseQrScan();
+            _toast = "Signed in TV";
+            await InvokeAsync(StateHasChanged);
+            // Auto-dismiss the toast after a couple of seconds.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2500);
+                _toast = null;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (Exception ex)
+        {
+            _qrStatus = $"Failed: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Parse the 6-char code out of either an animarr:// URI or
+    /// a bare code string. Tolerates the user typing the code manually too,
+    /// although the modal is camera-driven for now.</summary>
+    private static string? ExtractCode(string payload)
+    {
+        // Bare "XX-XX-XX" form
+        if (payload.Length == 8 && payload[2] == '-' && payload[5] == '-')
+            return payload;
+        // URI form — look for ?code=... or &code=...
+        var marker = "code=";
+        var idx = payload.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return null;
+        var rest = payload[(idx + marker.Length)..];
+        var amp = rest.IndexOf('&');
+        var raw = amp < 0 ? rest : rest[..amp];
+        return Uri.UnescapeDataString(raw);
+    }
+
+    public void Dispose()
+    {
+        _selfRef?.Dispose();
+    }
+}

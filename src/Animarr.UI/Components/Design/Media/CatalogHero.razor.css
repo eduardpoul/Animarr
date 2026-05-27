@@ -1,0 +1,178 @@
+.d-hero {
+    position: relative;
+    /* Matched to .d-chero (CatalogContinueHero) — Featured + Continue
+       share the same ladder so they read as one surface that swaps
+       content, not two heros at different scales. ~700px on a typical
+       desktop. */
+    height: clamp(480px, 75vh, 720px);
+    /* Negative margins exactly negate .animarr-main padding (96 top + 24 sides
+       on desktop, 14 + 16 on mobile) so the hero sits flush against the
+       transparent TopBar and reaches both viewport edges. Bottom margin keeps
+       the breathing room before the category strip / grid below.
+       No border-radius — straight bleed on every edge per user request. */
+    margin: -96px -24px var(--space-9);
+    overflow: hidden;
+    border-radius: 0;
+}
+
+.d-hero__bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+}
+
+.d-hero__bg-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    display: block;
+    /* Sharp full-brightness — the global blurred backdrop sits beneath. */
+}
+
+.d-hero__wash {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, rgba(10, 8, 7, 0.85) 0%, transparent 55%),
+        linear-gradient(180deg, transparent 50%, rgba(10, 8, 7, 0.95) 100%),
+        radial-gradient(
+            70% 50% at 12% 100%,
+            oklch(0.66 0.20 var(--hue) / 0.30),
+            transparent 70%
+        );
+    pointer-events: none;
+}
+
+.d-hero__cjk {
+    position: absolute;
+    top: var(--space-7);
+    right: var(--space-9);
+    font-family: var(--font-cjk);
+    font-size: clamp(140px, 16vw, 280px);
+    line-height: 0.9;
+    color: oklch(0.95 0.1 var(--hue) / 0.08);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+    animation: cjk-fade-in var(--motion-hero-cjk);
+}
+
+.d-hero__content {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 2;
+    padding: var(--space-9) var(--space-11) var(--space-11);
+    display: flex;
+    flex-direction: column;
+    /* Explicit flex-start — overrides the legacy .d-hero__content rule in
+       Styles/components.css §6 which ships `align-items: flex-end` (designed
+       for an earlier hero layout with a `__main` child wrapper that no longer
+       exists). Without this, children get right-aligned because the
+       flex-direction:column + flex-end cascade. */
+    align-items: flex-start;
+    gap: var(--space-5);
+    max-width: 920px;
+}
+
+.d-hero__pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.d-hero__title {
+    font-family: var(--font-display);
+    /* Matched 1:1 to CatalogContinueHero. Earlier clamp(56,8vw,120) on a
+       long title (e.g. "RENEGADE IMMORTAL: BATTLE OF GODS") forced four
+       lines and pushed pills up into the TopBar's zone. Same ladder as
+       /home's Continue Watching hero so featured + continue look like
+       one surface that swaps content. */
+    font-size: clamp(36px, 6vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -1px;
+    color: var(--text);
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    margin: 0;
+}
+
+.d-hero__meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    /* CatalogV3 line 126: 22px gap, no inline separator dots. */
+    gap: 22px;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+.d-hero__rating {
+    color: var(--accent-hi);
+    font-weight: 700;
+}
+
+.d-hero__overview {
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.d-hero__actions {
+    display: flex;
+    gap: var(--space-5);
+    align-items: center;
+    margin-top: var(--space-3);
+}
+
+/* v5: pager moved to global components.css and now uses the same F/G/H
+   variants as CatalogContinueHero (driven by UserPreferences.HeroPagerStyle).
+   The old vertical numbered side rail (.d-hero__pager*) was removed when the
+   markup switched to .d-chero__pager*. */
+
+/* ── Mobile / tablet — shrink hero. */
+@media (max-width: 959px) {
+    .d-hero {
+        height: clamp(360px, 56vh, 520px);
+        /* Negate the mobile .animarr-main padding (14 top + 16 sides). */
+        margin: -14px -16px var(--space-7);
+    }
+    .d-hero__content {
+        padding: var(--space-6) var(--space-7) var(--space-7);
+        gap: var(--space-4);
+        max-width: 100%;
+    }
+    .d-hero__overview {
+        -webkit-line-clamp: 2;
+    }
+}
+
+/* ── Phone — single-column title, hide oversized CJK watermark. */
+@media (max-width: 639px) {
+    .d-hero {
+        height: clamp(320px, 52vh, 460px);
+    }
+    .d-hero__content {
+        padding: var(--space-5) var(--space-5) var(--space-6);
+    }
+    .d-hero__cjk {
+        font-size: clamp(80px, 22vw, 140px);
+        right: var(--space-3);
+        top: var(--space-3);
+    }
+    .d-hero__title {
+        font-size: clamp(36px, 9vw, 52px);
+    }
+    .d-hero__meta { gap: 12px; font-size: 11px; }
+    .d-hero__actions { flex-wrap: wrap; gap: var(--space-3); }
+}

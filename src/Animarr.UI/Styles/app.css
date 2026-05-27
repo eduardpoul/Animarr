@@ -1,0 +1,455 @@
+/* ============================================================
+   Tailwind CSS v4 — Animarr Web
+
+   Layer order:
+     1. tokens.css            — design system source of truth (CSS custom props)
+     2. tailwindcss/theme     — Tailwind core theme primitives
+     3. tailwindcss/utilities — Tailwind utility generator
+     4. @theme block          — alias design tokens as Tailwind utilities
+     5. fluent-overrides.css  — map design tokens onto Fluent's variables
+     6. fluent-custom-classes — legacy class helpers (to be migrated to Design/)
+     7. base + utility layers — app-wide resets and typography utilities
+
+   NB: preflight intentionally NOT imported — Fluent FAST web components
+   rely on browser defaults for their internal padding/margin.
+   ============================================================ */
+
+@import "./tokens.css";
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+/* Scan Razor components for utility-class usage */
+@source "../Components/**/*.razor";
+@source "../Pages/**/*.razor";
+
+/* ── Tailwind utility aliases for design tokens ───────────
+   Maps tokens.css custom properties into Tailwind's @theme
+   so utilities like bg-surface, text-fg-dim, rounded-card,
+   shadow-card, font-display, etc. work.
+   ──────────────────────────────────────────────────────── */
+@theme {
+    /* Font tokens — Quietude (default) values.
+
+       Tailwind v4's @theme block emits these as a `:root, :host` rule
+       that lands in the compiled output AFTER tokens.css's `:root`
+       block AND AFTER `@import "tailwindcss/theme"`. The latter sets
+       Tailwind's own default --font-mono = ui-monospace, which would
+       otherwise wipe out our 'JetBrains Mono'. Keeping the literals
+       here ensures Quietude's typography survives the cascade.
+
+       Previously this block held Cinematic values ('Geist',
+       'Archivo Black'), which meant every theme — including Quietude
+       — rendered with Cinematic typography. The Welcome heading
+       "Your library, understood." came out in Archivo Black on
+       Android Chrome instead of Inter. Restored to Quietude
+       (Inter / JetBrains Mono / Noto Serif SC) as the design board's
+       declared default.
+
+       Theme overrides for non-Quietude palettes live in
+       Styles/themes/<name>.css. To beat this @theme's
+       :root,:host output (specificity 0,0,1,0) they must use
+       `html[data-theme="<name>"]` (specificity 0,0,1,1). Same trick
+       applied to the Cinematic block in tokens.css. */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
+
+    /* Backgrounds → bg-page, bg-panel, bg-surface, bg-surface-2, bg-surface-3 */
+    --color-page:      var(--bg-0);
+    --color-panel:     var(--bg-1);
+    --color-surface:   var(--surface);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+
+    /* Text → text-fg, text-fg-dim, text-fg-faint */
+    --color-fg:       var(--text);
+    --color-fg-dim:   var(--text-dim);
+    --color-fg-faint: var(--text-faint);
+
+    /* Accent → bg-accent, text-accent, border-accent-line */
+    --color-accent:      var(--accent);
+    --color-accent-hi:   var(--accent-hi);
+    --color-accent-soft: var(--accent-soft);
+    --color-accent-line: var(--accent-line);
+
+    /* Semantic */
+    --color-success: var(--success);
+    --color-warn:    var(--warn);
+    --color-info:    var(--info);
+
+    /* Borders */
+    --color-border:        var(--border);
+    --color-border-strong: var(--border-strong);
+
+    /* Radius → rounded-badge, rounded-chip, rounded-ctrl, rounded-card, rounded-card-lg,
+       rounded-panel, rounded-hero, rounded-modal.
+       MUST be literal values, NOT `var(--radius-X)` — same circular-ref trap
+       as the font tokens. tokens.css :root sets these first, then Tailwind
+       v4 @theme emits a :root,:host AFTER it. A self-referencing var() at
+       that point becomes a guaranteed-invalid cycle, which wipes the previous
+       value AND every consumer falls back to 0 (initial border-radius). The
+       result: the entire app rendered with sharp corners. Keep these in sync
+       with tokens.css. */
+    --radius-badge:    6px;
+    --radius-ctrl:     8px;
+    --radius-chip:    10px;
+    --radius-card:    12px;
+    --radius-card-lg: 14px;
+    --radius-panel:   16px;
+    --radius-hero:    20px;
+    --radius-modal:   24px;
+
+    /* Shadows — literal values for the same reason. */
+    --shadow-card:    0 10px 30px -16px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04);
+    --shadow-card-hi: 0 14px 36px -14px rgba(0,0,0,0.78), inset 0 0 0 1px rgba(255,255,255,0.06);
+    --shadow-modal:   0 40px 80px -20px rgba(0,0,0,0.7);
+    --shadow-drawer:  -30px 0 60px -20px rgba(0,0,0,0.6);
+
+    /* Fixed shell dimensions */
+    --width-sidebar: 230px;
+    --height-navbar: 56px;
+}
+
+/* ── Fluent UI re-skin ────────────────────────────────── */
+@import "./fluent-overrides.css";
+
+/* ── Legacy custom classes (in-flight migration) ──────── */
+@import "./fluent-custom-classes.css";
+
+/* ── Design-system component CSS (ported from design_handoff_animarr).
+   Owns generic d-* classes (drawers, modals, cards, fields, hero,
+   episode cards, etc.) plus mobile responsive breakpoints. ─── */
+@import "./components.css";
+
+/* ── Personality themes (v5). Each file overrides design tokens
+   via [data-theme="<name>"]. Order doesn't matter — only one block
+   is ever active because data-theme is a single attribute. The
+   default look (no data-theme) is Quietude from tokens.css. ─── */
+@import "./themes/terminal.css";
+@import "./themes/anime.css";
+@import "./themes/ember-edge.css";
+@import "./themes/mountain-sect.css";
+@import "./themes/immortal-path.css";
+@import "./themes/heavens-defiance.css";
+@import "./themes/ink-and-paper.css";
+@import "./themes/cyberpunk.css";
+
+/* ── Base resets ──────────────────────────────────────── */
+@layer base {
+    *, ::before, ::after {
+        box-sizing: border-box;
+        /* Tailwind v4 sets --tw-ring-offset-color:#fff globally; transparent
+           prevents it leaking through Fluent shadow DOM as a white ring. */
+        --tw-ring-offset-color: transparent;
+    }
+
+    body {
+        margin: 0;
+        font-family: var(--font-ui);
+        background: var(--bg-0);
+        color: var(--text);
+    }
+
+    html, body {
+        height: 100%;
+        /* v4: document body scrolls natively. The fixed-position TopBar +
+           backdrop stay in viewport via position:fixed, so removing
+           overflow:hidden here is what lets the catalog / media-detail /
+           settings pages scroll past the viewport. */
+    }
+
+    /* When backdrop slideshow is active, body lets the fixed-position
+       backdrop show through panel transparency. */
+    body.has-backdrop {
+        background: var(--bg-0);
+    }
+
+    a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+    a:hover {
+        color: var(--accent-hi);
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        font-family: var(--font-display);
+        font-weight: normal;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        margin: 0;
+    }
+
+    h1:focus { outline: none; }
+
+    code, pre, .mono {
+        font-family: var(--font-mono);
+    }
+
+    /* ── Native form-element defaults ─────────────────────
+       Tailwind preflight is intentionally NOT imported (Fluent FAST web
+       components break without browser defaults). That means raw <input>,
+       <select>, <textarea>, <button> hit the user with browser-native
+       chrome — sharp corners, native borders, system fonts.
+
+       Below: a sane baseline so any unclassed control still picks up
+       Animarr tokens (radius, border, color). Components with a specific
+       look (`.d-btn`, `.settings-field__input`, `.add-input`, etc.) override
+       via higher specificity selectors.
+
+       NB: checkboxes / radios / file / range / color stay native — they
+       rely on browser primitive rendering that gets weird with custom
+       border-radius. */
+    input[type="text"],
+    input[type="number"],
+    input[type="search"],
+    input[type="email"],
+    input[type="password"],
+    input[type="url"],
+    input[type="tel"],
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
+    input:not([type]),
+    select,
+    textarea {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-ctrl);
+        padding: 8px 10px;
+        font-family: var(--font-ui);
+        font-size: 13px;
+        outline: none;
+        transition: border-color var(--motion-base);
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    input[type="search"]:focus,
+    input[type="email"]:focus,
+    input[type="password"]:focus,
+    input[type="url"]:focus,
+    input[type="tel"]:focus,
+    input[type="date"]:focus,
+    input[type="datetime-local"]:focus,
+    input[type="time"]:focus,
+    input:not([type]):focus,
+    select:focus,
+    textarea:focus { border-color: var(--accent-line); }
+
+    /* Native <select> dropdown panel — most browsers expose only limited
+       styling control over the OPEN popup (it's drawn by the OS), but
+       background/color on <option> and <optgroup> do propagate. Without
+       explicit rules, colors leak from inherited properties and you get a
+       red-on-orange-on-blue mess (Windows native + accent inheritance).
+       Pin both to design tokens here, app-wide. */
+    option {
+        background: var(--surface-2);
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-weight: normal;
+    }
+    optgroup {
+        background: var(--surface);
+        color: var(--text-faint);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        font-style: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    /* Buttons without an explicit class still pick up the d-btn--solid look
+       (surface-2 fill, text + border-strong, 6px radius). Anything with
+       class="d-btn …" / class="fbtn …" / class="emd__btn …" / etc. wins
+       via higher specificity. */
+    button:not([class]) {
+        appearance: none;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 7px 12px;
+        background: var(--surface-2);
+        color: var(--text);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-ctrl);
+        font-family: var(--font-ui);
+        font-size: 12.5px;
+        font-weight: 600;
+        line-height: 1.2;
+    }
+    button:not([class]):hover { background: var(--surface-3); }
+    button:not([class]):disabled { opacity: 0.4; cursor: not-allowed; }
+}
+
+/* ── Typography utility classes ───────────────────────── */
+@layer utilities {
+    .text-display-xl {
+        font-family: var(--font-display);
+        font-size: clamp(72px, 8vw, 120px);
+        line-height: 0.87;
+        letter-spacing: -0.022em;
+        text-transform: uppercase;
+    }
+    .text-display-l {
+        font-family: var(--font-display);
+        font-size: 44px;
+        line-height: 0.95;
+        letter-spacing: -0.018em;
+        text-transform: uppercase;
+    }
+    .text-display-m {
+        font-family: var(--font-display);
+        font-size: 22px;
+        line-height: 1.1;
+        letter-spacing: -0.018em;
+    }
+    .text-body {
+        font-family: var(--font-ui);
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    .text-body-lg {
+        font-family: var(--font-ui);
+        font-size: 15px;
+        line-height: 1.65;
+    }
+    .text-meta {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.4;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+
+    /* Glass surface for hero chips / floating buttons */
+    .surface-glass {
+        background: rgba(20, 15, 12, 0.55);
+        backdrop-filter: blur(14px) saturate(0.95);
+        border: 1px solid var(--border-strong);
+    }
+
+    /* ── Status row utility (CANVAS §01.6.7) ───────────────
+       Drop on a row to give it the ON-DISK / MISSING treatment.
+       Pairs with status-row__strip, status-row__chip slots — but
+       the strip is rendered via the ::before pseudo so a single
+       class on the row is enough for the common case. */
+    .status-row {
+        position: relative;
+        padding-left: 16px;
+        background: var(--surface);
+        border-radius: var(--radius-chip);
+    }
+    .status-row::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        border-radius: 3px 0 0 3px;
+    }
+    .status-row--ok::before {
+        background: var(--success);
+        box-shadow: 0 0 12px var(--success);
+    }
+    .status-row--miss {
+        opacity: 0.55;
+    }
+    .status-row--miss::before {
+        background: var(--warn);
+    }
+    .status-row--miss .status-row__text { color: var(--text-dim); }
+}
+
+/* ── App-specific layout helpers ──────────────────────── */
+
+.fluent-layout {
+    height: 100vh !important;
+}
+
+/* Animated progress (reused by Torrents grid — flicker-free) */
+.animarr-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+}
+.animarr-progress__track {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border-strong);
+    overflow: hidden;
+    min-width: 0;
+}
+.animarr-progress__fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width .25s ease-out;
+    will-change: width;
+}
+.animarr-progress__fill--indeterminate {
+    width: 30%;
+    background: linear-gradient(90deg,
+        var(--border-strong) 0%,
+        var(--accent) 50%,
+        var(--border-strong) 100%);
+    animation: animarr-progress-indeterminate 1.4s ease-in-out infinite;
+}
+.animarr-progress__label {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    min-width: 36px;
+    text-align: right;
+}
+@keyframes animarr-progress-indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+}
+
+/* Folder combobox width (used by Explorer / TorrentEdit) */
+.folder-combobox {
+    min-width: 560px;
+    width: 100%;
+}
+
+/* Form validation accents (Blazor EditForm convention) */
+.valid.modified:not([type=checkbox]) { outline: 1px solid var(--success); }
+.invalid                              { outline: 1px solid var(--warn); }
+.validation-message                   { color: var(--warn); }
+
+/* ── Blazor error UI ──────────────────────────────────── */
+#blazor-error-ui {
+    background: var(--surface-2);
+    border-top: 1px solid var(--warn);
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.4);
+    color: var(--text);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+.blazor-error-boundary {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40' fill='none' stroke='%23FF0000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='20' cy='20' r='18'/%3E%3Cline x1='20' y1='13' x2='20' y2='22'/%3E%3Cline x1='20' y1='27' x2='20.01' y2='27'/%3E%3C/svg%3E") no-repeat 1rem/1.8rem, #b32121;
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: white;
+}

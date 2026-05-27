@@ -1,0 +1,283 @@
+@*
+    Catalog hero — full-bleed fanart of the currently-featured item.
+    Rotates every IntervalSec across Items[]; also pushes its FanartPath
+    into the global backdrop layer so the page-wide blurred backdrop matches.
+
+    The hero owns its own visual layer (sharp fanart), separate from the
+    global backdrop (blurred). Both layers cross-fade in lockstep.
+
+    v5: pager UI is unified with CatalogContinueHero — the three variants
+    (F transparent strokes / G dash + chevrons / H numbered pills) are
+    picked from UserPreferences.HeroPagerStyle so the picker in
+    ProfilePanel changes BOTH the Continue hero and this Featured fallback.
+    Before that the Featured hero had its own vertical numbered list and
+    flat-out ignored the picker, which surfaced as "смена Hero pager
+    style не меняет стиль hero на главной".
+*@
+
+@implements IDisposable
+@inject IJSRuntime JS
+@inject UserContextState UserCtx
+
+@if (_active is not null)
+{
+    var item = _active;
+    var pager = PagerStyle;
+    <section class="@($"d-hero d-chero d-chero--pager-{pager}")" style="--hue: @(item.Hue ?? 0)">
+        <div class="d-hero__bg">
+            @if (!string.IsNullOrEmpty(item.FanartPath))
+            {
+                @* Cache-buster on LastMetadataRefreshedAt so rescans surface the new image. *@
+                <img src="@Animarr.UI.Services.MediaUrl.Image(item.FanartPath, item.LastMetadataRefreshedAt?.Ticks ?? 0)"
+                     alt="@item.Title"
+                     class="d-hero__bg-img" />
+            }
+            <div class="d-hero__wash"></div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(item.CjkTitle))
+        {
+            <div class="d-hero__cjk">@item.CjkTitle</div>
+        }
+
+        <div class="d-hero__content">
+            @* Title leads. Pills row sits below it so a long featured title
+               can't push the chips up under the TopBar's category strip
+               (this was the "MOVIE / BASED ON FAIRY TALE / XIANXIA / BASED
+               ON TV SERIES" overlap reported on Home). Same ordering as
+               MediaDetailHero so both heros share layout intent. *@
+            <h1 class="d-hero__title">@item.Title</h1>
+            <div class="d-hero__pills">
+                <Pill Tone="accent" Dense="false">@TypeLabel(item.MediaType)</Pill>
+                @foreach (var tag in TagPreview(item))
+                {
+                    <Pill Tone="default">@tag</Pill>
+                }
+            </div>
+
+            <div class="d-hero__meta">
+                @if (item.Rating is > 0) { <span class="d-hero__rating">★ @($"{item.Rating:F1}")</span> }
+                @if (item.Year is not null) { <span>@item.Year</span> }
+                @if (item.EpisodeCount is > 0) { <span>@item.EpisodeCount EP</span> }
+                @if (!string.IsNullOrEmpty(item.Studio)) { <span>@item.Studio</span> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <span>@item.Language.ToUpperInvariant()</span> }
+            </div>
+
+            @if (!string.IsNullOrEmpty(item.Description))
+            {
+                <p class="d-hero__overview">@item.Description</p>
+            }
+
+            <div class="d-hero__actions">
+                <Btn Variant="primary" Size="lg" OnClick="@(() => Nav.NavigateTo($"/catalog/{item.Id}"))">
+                    <DIcon Name="play" Size="16" /> Open detail
+                </Btn>
+            </div>
+        </div>
+
+        @* Pager — same three variants as CatalogContinueHero. Class names
+           are global (Styles/components.css) so both heros share the look.
+           Only rendered when there's more than one featured item. *@
+        @if (Items.Count > 1)
+        {
+            @if (pager == "f")
+            {
+                <nav class="d-chero__pager" role="tablist" aria-label="Featured slots">
+                    @for (int i = 0; i < Items.Count; i++)
+                    {
+                        var idx = i;
+                        var it  = Items[idx];
+                        var active = idx == _index;
+                        <button type="button"
+                                class="@($"d-chero__pager-slot tv-focus {(active ? "is-active" : "")}")"
+                                @onclick="@(() => SetIndex(idx))"
+                                role="tab" aria-selected="@active.ToString().ToLower()"
+                                title="@it.Title">
+                            <span class="d-chero__pager-stroke"></span>
+                            <span class="d-chero__pager-name">@it.Title</span>
+                        </button>
+                    }
+                </nav>
+            }
+            else if (pager == "g")
+            {
+                <nav class="d-chero__pager-g" role="tablist" aria-label="Featured slots">
+                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
+                            @onclick="PrevManual" aria-label="Previous slot">
+                        <DIcon Name="chev-l" Size="20" />
+                    </button>
+                    <div class="d-chero__pager-dashes">
+                        @for (int i = 0; i < Items.Count; i++)
+                        {
+                            var idx = i;
+                            var active = idx == _index;
+                            <button type="button"
+                                    class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
+                                    @onclick="@(() => SetIndex(idx))"
+                                    role="tab" aria-selected="@active.ToString().ToLower()"
+                                    aria-label="@($"Slot {idx + 1}")"></button>
+                        }
+                    </div>
+                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
+                            @onclick="NextManual" aria-label="Next slot">
+                        <DIcon Name="chev-r" Size="20" />
+                    </button>
+                </nav>
+            }
+            else // pager == "h"
+            {
+                <nav class="d-chero__pager-h" role="tablist" aria-label="Featured slots">
+                    <button type="button" class="d-chero__pager-chev tv-focus"
+                            @onclick="PrevManual" aria-label="Previous slot">
+                        <DIcon Name="chev-l" Size="20" />
+                    </button>
+                    <div class="d-chero__pager-pills">
+                        @for (int i = 0; i < Items.Count; i++)
+                        {
+                            var idx = i;
+                            var active = idx == _index;
+                            <button type="button"
+                                    class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
+                                    @onclick="@(() => SetIndex(idx))"
+                                    role="tab" aria-selected="@active.ToString().ToLower()"
+                                    aria-label="@($"Slot {idx + 1}")">@(idx + 1)</button>
+                        }
+                    </div>
+                    <button type="button" class="d-chero__pager-chev tv-focus"
+                            @onclick="NextManual" aria-label="Next slot">
+                        <DIcon Name="chev-r" Size="20" />
+                    </button>
+                </nav>
+            }
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<MediaItemDto> Items { get; set; } = [];
+    [Parameter] public int IntervalSec { get; set; } = 30;
+    [Inject] public NavigationManager Nav { get; set; } = null!;
+
+    private int _index;
+    private MediaItemDto? _active;
+    private System.Threading.Timer? _timer;
+
+    /// <summary>Lower-cased pager style: "f" (default) / "g" / "h". Read on
+    /// every render so a switch in ProfilePanel takes effect without
+    /// remounting the hero. Unknown values fall back to "f" so a stale
+    /// client can't render an unknown markup branch.</summary>
+    private string PagerStyle
+    {
+        get
+        {
+            var s = UserCtx.Preferences?.HeroPagerStyle;
+            if (string.IsNullOrWhiteSpace(s)) return "f";
+            return s.ToLowerInvariant() switch
+            {
+                "g" => "g",
+                "h" => "h",
+                _   => "f",
+            };
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips so cached <img src>
+        // entries rebase to the user's chosen server after Welcome/Discovery
+        // are skipped (cookie-restored MAUI boot lands straight on /home).
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnExternalChanged;
+        // Re-render when the user picks a different pager style / accent /
+        // theme in ProfilePanel — UserContextState.OnChange fires after
+        // every PATCH.
+        UserCtx.OnChange += OnExternalChanged;
+    }
+
+    private void OnExternalChanged() => InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet()
+    {
+        _active = Items.Count > 0 ? Items[_index % Items.Count] : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Items.Count > 1)
+        {
+            _timer = new System.Threading.Timer(_ => InvokeAsync(Rotate),
+                null, TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+        }
+        if (_active is not null && !string.IsNullOrEmpty(_active.FanartPath))
+        {
+            // Push current fanart URL to the global backdrop so the blurred
+            // layer matches the hero. (backdrop.js handles cross-fade.)
+            await PushBackdropAsync(_active.FanartPath);
+        }
+    }
+
+    private async Task Rotate()
+    {
+        if (Items.Count == 0) return;
+        _index  = (_index + 1) % Items.Count;
+        _active = Items[_index];
+        StateHasChanged();
+        if (!string.IsNullOrEmpty(_active.FanartPath))
+            await PushBackdropAsync(_active.FanartPath);
+    }
+
+    private async Task SetIndex(int i)
+    {
+        _index  = i;
+        _active = Items[i];
+        // Reset timer so a manual click doesn't immediately advance.
+        _timer?.Change(TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+        StateHasChanged();
+        if (_active?.FanartPath is { Length: > 0 } p)
+            await PushBackdropAsync(p);
+    }
+
+    /// <summary>Next-slot button on G/H pagers. Wraps and resets the timer.</summary>
+    private async Task NextManual()
+    {
+        if (Items.Count == 0) return;
+        await SetIndex((_index + 1) % Items.Count);
+    }
+
+    /// <summary>Prev-slot button on G/H pagers. Wraps and resets the timer.</summary>
+    private async Task PrevManual()
+    {
+        if (Items.Count == 0) return;
+        await SetIndex((_index - 1 + Items.Count) % Items.Count);
+    }
+
+    private async Task PushBackdropAsync(string path)
+    {
+        // Tick suffix forces the browser to fetch the new file after a rescan.
+        var v = _active?.LastMetadataRefreshedAt?.Ticks ?? 0;
+        var url = Animarr.UI.Services.MediaUrl.Image(path, v);
+        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
+    }
+
+    private static string TypeLabel(MediaItemType t) => t switch
+    {
+        MediaItemType.Anime       => "ANIME",
+        MediaItemType.Movie       => "MOVIE",
+        MediaItemType.Series      => "SERIES",
+        MediaItemType.Multserials => "MULTI",
+        _                         => "MEDIA",
+    };
+
+    private static IEnumerable<string> TagPreview(MediaItemDto item)
+    {
+        // Limit to 3 tags; the DTO already deserialises the JSON column into
+        // a string[] for us so we don't parse a second time.
+        foreach (var t in item.Tags.Take(3)) yield return t.ToUpperInvariant();
+    }
+
+    public void Dispose()
+    {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnExternalChanged;
+        UserCtx.OnChange -= OnExternalChanged;
+        _timer?.Dispose();
+    }
+}

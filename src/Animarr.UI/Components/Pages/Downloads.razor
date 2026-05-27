@@ -1,0 +1,11 @@
+@*
+    /downloads — alias of the existing Torrents page. Gated by uploadContent
+    in v4 (route guard added in Phase B); for now anyone can visit.
+
+    Just renders the existing Torrents component so the markup stays single-
+    sourced. Phase B will move the gating logic into a route filter.
+*@
+
+@page "/downloads"
+
+<Torrents />

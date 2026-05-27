@@ -1,0 +1,187 @@
+@*
+    PinKeypad — 4-digit numeric keypad rendered as a modal-style card.
+    Spec: multi-server-flow.html lines 430-462 (the C2 frame).
+
+    Layout:
+        ┌─────────────────────────┐
+        │   Enter PIN for {name}  │
+        │        ●  ●  ○  ○       │   (dots fill as digits land)
+        │        1  2  3          │
+        │        4  5  6          │
+        │        7  8  9          │
+        │           0   ⌫         │
+        │     Wrong PIN message   │   (red, only when Error set)
+        │       CANCEL link       │
+        └─────────────────────────┘
+
+    The component is presentational — it owns the buffer of typed digits, fires
+    OnSubmit(string pin) when the user types the 4th digit (no separate
+    "submit" button — design uses auto-advance), and OnCancel when the user
+    bails. The parent is responsible for clearing/refilling Error and for
+    deciding what to do with the supplied PIN.
+
+    Accessibility: each digit button has a aria-label and big tap targets
+    (60×60) for touch + TV remote. The Backspace key (real keyboard) and the
+    on-screen ⌫ both pop the last digit.
+
+    Error animation: when Error transitions from null → string the dots row
+    runs a tiny shake animation. The buffer auto-clears so the user can retry
+    immediately.
+*@
+
+<div class="d-pin" role="dialog" aria-modal="true" aria-label="Enter PIN"
+     tabindex="0" @ref="_root" @onkeydown="OnKeyDown">
+    <div class="d-pin__title">@TitleText</div>
+    <div class="d-pin__sub">@SubtitleText</div>
+
+    <div class="@DotsCssClass" aria-live="polite" aria-atomic="true">
+        @for (int i = 0; i < 4; i++)
+        {
+            <span class="@($"d-pin__dot {(i < _buffer.Length ? "is-on" : "")}")"></span>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="d-pin__error" role="alert">@Error</div>
+    }
+
+    <div class="d-pin__keys">
+        @for (int n = 1; n <= 9; n++)
+        {
+            var digit = n;
+            <button type="button" class="d-pin__key tv-focus"
+                    aria-label="@($"Digit {digit}")"
+                    @onclick="@(() => Push(digit.ToString()[0]))">
+                @digit
+            </button>
+        }
+        @* Bottom row: blank-spacer / 0 / backspace *@
+        <span class="d-pin__key d-pin__key--spacer" aria-hidden="true"></span>
+        <button type="button" class="d-pin__key tv-focus"
+                aria-label="Digit 0"
+                @onclick="@(() => Push('0'))">
+            0
+        </button>
+        <button type="button" class="d-pin__key d-pin__key--back tv-focus"
+                aria-label="Backspace"
+                @onclick="OnBackspace">
+            <DIcon Name="x" Size="14" />
+        </button>
+    </div>
+
+    <button type="button" class="d-pin__cancel tv-focus" @onclick="OnCancelClick">
+        CANCEL
+    </button>
+</div>
+
+@code {
+    /// <summary>Fires when the user types the 4th digit. Argument is the
+    /// raw 4-character PIN. Parent is responsible for clearing/setting
+    /// <see cref="Error"/> based on the verification result.</summary>
+    [Parameter] public EventCallback<string> OnSubmit { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>Display name of the target user (e.g. "Anna"). Used in the
+    /// "Enter PIN for Anna" headline.</summary>
+    [Parameter] public string UserName { get; set; } = "";
+
+    /// <summary>Optional override for the headline. Defaults to a localised
+    /// "Sign in as {name}". Use this when the keypad is embedded somewhere
+    /// other than a switch-user flow (e.g. first-time PIN setup).</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>Optional override for the subtitle line ("Enter 4-digit PIN").
+    /// Set null to hide.</summary>
+    [Parameter] public string? Subtitle { get; set; } = "Enter 4-digit PIN";
+
+    /// <summary>When non-null, renders the red error row + triggers a single
+    /// shake animation on the dots. Parent should clear it on the next typed
+    /// digit so the message doesn't linger across retries.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    private string _buffer = "";
+    private string? _lastError;
+    private bool _shake;
+    private ElementReference _root;
+
+    private string TitleText => string.IsNullOrEmpty(Title)
+        ? (string.IsNullOrEmpty(UserName) ? "Enter PIN" : $"Sign in as {UserName}")
+        : Title;
+
+    private string SubtitleText => Subtitle ?? "";
+
+    private string DotsCssClass => $"d-pin__dots{(_shake ? " is-shake" : "")}";
+
+    protected override void OnParametersSet()
+    {
+        // Detect a transition into a non-null Error and trigger the shake.
+        // We don't want to shake on every render — only when the parent
+        // sets a fresh error after a failed attempt.
+        if (Error is not null && Error != _lastError)
+        {
+            _shake = true;
+            _buffer = ""; // wipe so the user can retype without manual backspace
+        }
+        _lastError = Error;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Auto-focus the dialog so keyboard input lands here without a
+            // tab from the user. Browsers ignore .Focus() on non-tabbable
+            // elements unless tabindex >= 0, hence tabindex="0" on the root.
+            try { await _root.FocusAsync(); } catch { }
+        }
+        if (_shake)
+        {
+            // Reset the shake flag after one frame so the animation only
+            // plays once per error rather than every re-render.
+            _shake = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Push(char c)
+    {
+        if (_buffer.Length >= 4) return;
+        _buffer += c;
+        if (_buffer.Length == 4)
+        {
+            var snapshot = _buffer;
+            // Don't clear the buffer here — parent decides whether to keep
+            // the dots filled (success transitions away) or wipe via Error
+            // setter (next OnParametersSet handles it).
+            await OnSubmit.InvokeAsync(snapshot);
+        }
+    }
+
+    private void OnBackspace()
+    {
+        if (_buffer.Length == 0) return;
+        _buffer = _buffer[..^1];
+    }
+
+    private Task OnCancelClick() => OnCancel.InvokeAsync();
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        // Real-keyboard support for d-pad / TV remotes / users who prefer
+        // typing. Digits push, Backspace deletes, Escape cancels.
+        if (e.Key.Length == 1 && e.Key[0] >= '0' && e.Key[0] <= '9')
+        {
+            await Push(e.Key[0]);
+        }
+        else if (e.Key == "Backspace")
+        {
+            OnBackspace();
+        }
+        else if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

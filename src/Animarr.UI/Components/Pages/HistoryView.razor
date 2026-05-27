@@ -1,0 +1,397 @@
+@*
+    Embed-able rename-history view. Two tabs:
+      • Renames — paginated history rows with Revert action.
+      • Scan logs — identification queue entries with expandable logs.
+
+    Server-side equivalent paginated via EF; here we fetch a wide window
+    (default take=500) and paginate client-side. Both lists are bounded
+    so this is reasonable until the user genuinely accumulates thousands
+    of entries — at which point the API gets ?skip/take query params.
+*@
+
+@inject IAnimarrApiClient Api
+
+<div class="hv-tabs">
+    <button type="button"
+            class="@($"hv-tab {(_activeTab == "renames" ? "hv-tab--active" : "")}")"
+            @onclick="@(() => _activeTab = "renames")">@L["history.tab_renames"]</button>
+    <button type="button"
+            class="@($"hv-tab {(_activeTab == "scanlogs" ? "hv-tab--active" : "")}")"
+            @onclick="@(() => _activeTab = "scanlogs")">@L["history.tab_scan_logs"]</button>
+</div>
+
+@if (_activeTab == "renames")
+{
+    <div class="hv-pane">
+    <div class="hv-filters">
+        <label class="settings-field hv-filter-field">
+            <span class="settings-field__label">@L["history.filter_folder_label"]</span>
+            <select class="settings-field__select" value="@_filterFolder"
+                    @onchange="@(async e => { _filterFolder = e.Value?.ToString() ?? ""; await OnFilterChangedAsync(); })">
+                <option value="">@L["history.filter_folder_all"]</option>
+                @foreach (var f in _allFolders)
+                {
+                    <option value="@f.Id.ToString()">@f.Label</option>
+                }
+            </select>
+        </label>
+        <label class="settings-field hv-filter-field hv-filter-field--narrow">
+            <span class="settings-field__label">@L["history.filter_status_label"]</span>
+            <select class="settings-field__select" value="@_filterStatus"
+                    @onchange="@(async e => { _filterStatus = e.Value?.ToString() ?? ""; await OnFilterChangedAsync(); })">
+                <option value="">@L["history.filter_status_all"]</option>
+                <option value="Renamed">@L["history.status_renamed"]</option>
+                <option value="Skipped">@L["history.status_skipped"]</option>
+                <option value="Error">@L["history.status_error"]</option>
+                <option value="Reverted">@L["history.status_reverted"]</option>
+            </select>
+        </label>
+        <button type="button" class="hv-icon-btn" title="@L["history.btn_reset_filters"]" @onclick="ResetFilters">
+            <DIcon Name="x" Size="16" />
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="hv-loading"><InlineDots Label="Loading rename history" /></div>
+    }
+    else
+    {
+        var page = _historyPage;
+        var total = _historyTotal;
+
+        <div class="d-table-wrap">
+            <table class="d-table d-table--renames">
+                <thead>
+                    <tr>
+                        <th>@L["history.col_date"]</th>
+                        <th>@L["history.col_folder"]</th>
+                        <th>@L["history.col_original_name"]</th>
+                        <th></th>
+                        <th>@L["history.col_new_name"]</th>
+                        <th>@L["history.col_status"]</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (page.Length == 0)
+                    {
+                        <tr><td colspan="7" class="d-table__empty">@L["history.empty"]</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var h in page)
+                        {
+                            <tr>
+                                <td class="d-table__date">@h.ProcessedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")</td>
+                                <td class="d-table__folder" title="@h.FolderLabel">@h.FolderLabel</td>
+                                <td class="d-table__name"><code>@System.IO.Path.GetFileName(h.OriginalPath)</code></td>
+                                <td class="d-table__arrow">→</td>
+                                <td class="d-table__name"><code>@System.IO.Path.GetFileName(h.NewPath)</code></td>
+                                <td class="d-table__status">
+                                    <Pill Tone="@StatusTone(h.Status)" Dense="true">@GetStatusLabel(h.Status)</Pill>
+                                </td>
+                                <td class="d-table__actions">
+                                    @if (h.Status == RenameStatus.Renamed && !h.IsReverted)
+                                    {
+                                        <button type="button" class="hv-icon-btn"
+                                                title="@L["history.btn_revert"]"
+                                                @onclick="@(() => AskRevert(h))">
+                                            <DIcon Name="undo" Size="16" />
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="hv-pager">
+            <button type="button" class="hv-icon-btn"
+                    disabled="@(_pageIndex == 0)"
+                    @onclick="@(async () => { _pageIndex--; await LoadHistoryPageAsync(); StateHasChanged(); })">
+                <DIcon Name="chev-l" Size="14" />
+            </button>
+            <span class="hv-pager__label">
+                @(total == 0 ? 0 : _pageIndex * PageSize + 1)–@(Math.Min(total, (_pageIndex + 1) * PageSize)) / @total
+            </span>
+            <button type="button" class="hv-icon-btn"
+                    disabled="@((_pageIndex + 1) * PageSize >= total)"
+                    @onclick="@(async () => { _pageIndex++; await LoadHistoryPageAsync(); StateHasChanged(); })">
+                <DIcon Name="chev-r" Size="14" />
+            </button>
+        </div>
+    }
+    </div>
+}
+
+@if (_activeTab == "scanlogs")
+{
+    <div class="hv-pane">
+    <div class="hv-filters">
+        <label class="settings-field hv-filter-field">
+            <span class="settings-field__label">@L["history.filter_folder_label"]</span>
+            <select class="settings-field__select" value="@_scanFilterFolder"
+                    @onchange="@(e => { _scanFilterFolder = e.Value?.ToString() ?? ""; StateHasChanged(); })">
+                <option value="">@L["history.filter_folder_all"]</option>
+                @foreach (var f in _allFolders)
+                {
+                    <option value="@f.Id.ToString()">@f.Label</option>
+                }
+            </select>
+        </label>
+        <label class="settings-field hv-filter-field hv-filter-field--narrow">
+            <span class="settings-field__label">@L["history.filter_status_label"]</span>
+            <select class="settings-field__select" value="@_scanFilterStatus"
+                    @onchange="@(e => { _scanFilterStatus = e.Value?.ToString() ?? ""; StateHasChanged(); })">
+                <option value="">@L["history.filter_status_all"]</option>
+                <option value="Done">@L["history.scan_status_done"]</option>
+                <option value="Failed">@L["history.scan_status_failed"]</option>
+                <option value="Queued">@L["history.scan_status_queued"]</option>
+                <option value="Processing">@L["history.scan_status_processing"]</option>
+            </select>
+        </label>
+        <button type="button" class="hv-icon-btn" title="@L["history.btn_reset_filters"]" @onclick="ResetScanFilters">
+            <DIcon Name="x" Size="16" />
+        </button>
+        <button type="button" class="hv-icon-btn" title="@L["history.btn_refresh"]" @onclick="LoadAsync">
+            <DIcon Name="refresh" Size="16" />
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="hv-loading"><InlineDots Label="Loading scan logs" /></div>
+    }
+    else if (!FilteredScanJobs().Any())
+    {
+        <div class="hv-empty">@L["history.scan_empty"]</div>
+    }
+    else
+    {
+        <div class="hv-scanlist">
+            @foreach (var job in FilteredScanJobs())
+            {
+                <div class="hv-scan">
+                    <button type="button" class="hv-scan__head" @onclick="@(() => ToggleScanLog(job.Id))">
+                        <Pill Tone="@ScanStatusTone(job.Status)" Dense="true">@ScanStatusLabel(job.Status)</Pill>
+                        <span class="hv-scan__title">@job.FolderLabel</span>
+                        <span class="hv-scan__when">
+                            @((job.ProcessedAt ?? job.QueuedAt).ToLocalTime().ToString("dd.MM.yy HH:mm"))
+                        </span>
+                        @if (!string.IsNullOrEmpty(job.ErrorMessage))
+                        {
+                            <span class="hv-scan__err" title="@job.ErrorMessage">⚠ @job.ErrorMessage</span>
+                        }
+                        <span class="hv-scan__chev">
+                            <DIcon Name="@(_expandedScanIds.Contains(job.Id) ? "chev-d" : "chev-r")" Size="14" />
+                        </span>
+                    </button>
+                    @if (_expandedScanIds.Contains(job.Id))
+                    {
+                        @if (!string.IsNullOrEmpty(job.LogDetails))
+                        {
+                            <div class="hv-scan__body">
+                                <pre class="hv-scan__log">@job.LogDetails</pre>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="hv-scan__body hv-scan__body--empty">@L["history.scan_no_log"]</div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+    </div>
+}
+
+@if (!_revertHidden)
+{
+    <div class="rvdlg-overlay" @onclick="@(() => _revertHidden = true)"></div>
+    <div class="rvdlg" role="dialog" aria-modal="true">
+        <header class="rvdlg__header">
+            <h4 class="rvdlg__title">@L["history.revert_dialog_title"]</h4>
+            <button type="button" class="rvdlg__close" @onclick="@(() => _revertHidden = true)" aria-label="Close">
+                <DIcon Name="x" Size="18" />
+            </button>
+        </header>
+        <div class="rvdlg__body">
+            @L["history.revert_dialog_body"]<br />
+            <b>@System.IO.Path.GetFileName(_revertTarget?.NewPath ?? "")</b>
+            &nbsp;→&nbsp;
+            <b>@System.IO.Path.GetFileName(_revertTarget?.OriginalPath ?? "")</b>
+        </div>
+        <footer class="rvdlg__footer">
+            <Btn Variant="primary" OnClick="ConfirmRevert"
+                 Loading="@(_revertingId is not null && _revertTarget?.Id == _revertingId)">
+                @L["history.btn_revert_confirm"]
+            </Btn>
+            <Btn Variant="flat" OnClick="@(() => _revertHidden = true)">@L["history.btn_cancel"]</Btn>
+        </footer>
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private RenameHistoryEntryDto[]           _historyPage = Array.Empty<RenameHistoryEntryDto>();
+    private int                               _historyTotal;
+    private List<FolderWatcherDto>            _allFolders = new();
+    private List<IdentificationQueueEntryDto> _scanJobs = new();
+
+    private int    _pageIndex;
+    private bool   _loading = true;
+    private string _filterFolder = "";
+    private string _filterStatus = "";
+    private string _scanFilterFolder = "";
+    private string _scanFilterStatus = "";
+    private string _activeTab = "renames";
+    private HashSet<Guid> _expandedScanIds = new();
+
+    private bool _revertHidden = true;
+    private RenameHistoryEntryDto? _revertTarget;
+    private Guid? _revertingId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var folders = await Api.GetFoldersAsync();
+            var scan = await Api.GetIdentificationQueueAsync();
+
+            _allFolders = folders.OrderBy(f => f.Label).ToList();
+            _scanJobs   = scan
+                .OrderByDescending(j => j.ProcessedAt ?? j.QueuedAt)
+                .Take(200)
+                .ToList();
+
+            await LoadHistoryPageAsync();
+        }
+        catch { /* network blip — leave lists alone */ }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Server-side paged fetch for the current filter + page index.
+    /// Returns ascending page slices so we never round-trip more than
+    /// <see cref="PageSize"/> rows at once.</summary>
+    private async Task LoadHistoryPageAsync()
+    {
+        Guid? folderId = (!string.IsNullOrEmpty(_filterFolder) && Guid.TryParse(_filterFolder, out var fid)) ? fid : null;
+        RenameStatus? status = (!string.IsNullOrEmpty(_filterStatus) && Enum.TryParse<RenameStatus>(_filterStatus, out var st)) ? st : null;
+
+        try
+        {
+            var page = await Api.GetRenameHistoryPageAsync(
+                skip:     _pageIndex * PageSize,
+                take:     PageSize,
+                folderId: folderId,
+                status:   status);
+            _historyPage = page.Items;
+            _historyTotal = page.Total;
+            // Snap the cursor back if a filter change pushed us past the end.
+            if (_pageIndex > 0 && _historyPage.Length == 0 && _historyTotal > 0)
+            {
+                _pageIndex = Math.Max(0, (_historyTotal - 1) / PageSize);
+                await LoadHistoryPageAsync();
+            }
+        }
+        catch { _historyPage = Array.Empty<RenameHistoryEntryDto>(); _historyTotal = 0; }
+    }
+
+    private async Task OnFilterChangedAsync()
+    {
+        _pageIndex = 0;
+        await LoadHistoryPageAsync();
+        StateHasChanged();
+    }
+
+    private async Task ResetFilters()
+    {
+        _filterFolder = "";
+        _filterStatus = "";
+        _pageIndex = 0;
+        await LoadHistoryPageAsync();
+        StateHasChanged();
+    }
+
+    private void ResetScanFilters() { _scanFilterFolder = ""; _scanFilterStatus = ""; }
+
+    private IEnumerable<IdentificationQueueEntryDto> FilteredScanJobs()
+    {
+        var q = _scanJobs.AsEnumerable();
+        if (!string.IsNullOrEmpty(_scanFilterFolder) && Guid.TryParse(_scanFilterFolder, out var fid))
+            q = q.Where(j => j.FolderId == fid);
+        if (!string.IsNullOrEmpty(_scanFilterStatus) && Enum.TryParse<IdentificationQueueStatus>(_scanFilterStatus, out var st))
+            q = q.Where(j => j.Status == st);
+        return q;
+    }
+
+    private void ToggleScanLog(Guid id)
+    {
+        if (!_expandedScanIds.Add(id))
+            _expandedScanIds.Remove(id);
+    }
+
+    private void AskRevert(RenameHistoryEntryDto h) { _revertTarget = h; _revertHidden = false; }
+
+    private async Task ConfirmRevert()
+    {
+        if (_revertTarget is null) return;
+        _revertingId = _revertTarget.Id;
+        StateHasChanged();
+        try
+        {
+            await Api.RevertRenameAsync(_revertTarget.Id);
+            _revertHidden = true;
+            _revertTarget = null;
+            await LoadAsync();
+        }
+        catch { /* failed — leave dialog open */ }
+        finally { _revertingId = null; StateHasChanged(); }
+    }
+
+    private string GetStatusLabel(RenameStatus s) => s switch
+    {
+        RenameStatus.Renamed  => L["history.status_renamed"],
+        RenameStatus.Skipped  => L["history.status_skipped"],
+        RenameStatus.Error    => L["history.status_error"],
+        RenameStatus.Reverted => L["history.status_reverted"],
+        _ => "—"
+    };
+
+    private static string StatusTone(RenameStatus s) => s switch
+    {
+        RenameStatus.Renamed  => "accent",
+        RenameStatus.Error    => "warn",
+        RenameStatus.Reverted => "info",
+        _                     => "default",
+    };
+
+    private string ScanStatusLabel(IdentificationQueueStatus s) => s switch
+    {
+        IdentificationQueueStatus.Done       => L["history.scan_status_done"],
+        IdentificationQueueStatus.Failed     => L["history.scan_status_failed"],
+        IdentificationQueueStatus.Processing => L["history.scan_status_processing"],
+        _                                    => L["history.scan_status_queued"],
+    };
+
+    private static string ScanStatusTone(IdentificationQueueStatus s) => s switch
+    {
+        IdentificationQueueStatus.Done       => "success",
+        IdentificationQueueStatus.Failed     => "warn",
+        IdentificationQueueStatus.Processing => "info",
+        _                                    => "default",
+    };
+}

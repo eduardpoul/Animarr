@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Accent testbed · Welcome + Login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg-0:#0f1115; --bg-1:#13161c;
+  --surface:#181c24; --surface-2:#1e232c; --surface-3:#262c37;
+  --border:rgba(255,255,255,0.06); --border-strong:rgba(255,255,255,0.12);
+  --text:#e8eaed; --text-dim:#9aa0a8; --text-faint:#5d636d;
+  --success:oklch(0.70 0.08 150);
+  --accent:oklch(0.74 0.17 232);
+  --accent-hi:oklch(0.82 0.14 232);
+  --accent-deep:oklch(0.55 0.18 232);
+  --accent-soft:oklch(0.74 0.17 232 / 0.16);
+  --accent-line:oklch(0.74 0.17 232 / 0.40);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:#08090c;color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;}
+*::-webkit-scrollbar{display:none;} *{scrollbar-width:none;}
+
+.board{max-width:1840px;margin:0 auto;padding:36px 32px 80px;}
+h1{font-size:36px;font-weight:700;letter-spacing:-1px;margin:0 0 6px;}
+.lede{color:var(--text-dim);max-width:760px;font-size:13.5px;line-height:1.6;margin-bottom:24px;}
+
+/* Palette strip */
+.palette{display:flex;flex-wrap:wrap;gap:8px;background:var(--bg-1);border:1px solid var(--border);border-radius:14px;padding:14px;position:sticky;top:12px;z-index:10;backdrop-filter:blur(20px);}
+.sw{
+  cursor:pointer;display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:2px solid transparent;border-radius:10px;
+  padding:6px 12px 6px 6px;transition:all .15s;
+}
+.sw:hover{background:var(--surface-2);transform:translateY(-1px);}
+.sw.on{border-color:#fff;background:var(--surface-2);box-shadow:0 0 0 1px rgba(0,0,0,0.4) inset;}
+.sw .chip{width:28px;height:28px;border-radius:7px;flex-shrink:0;}
+.sw .body{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.sw .nm{font-size:12px;font-weight:600;white-space:nowrap;}
+.sw .val{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--text-faint);letter-spacing:0.2px;white-space:nowrap;}
+
+.toggleBar{display:flex;gap:0;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:3px;margin:30px 0 16px;width:fit-content;}
+.toggleBar button{all:unset;cursor:pointer;padding:8px 18px;font-size:12.5px;font-weight:600;color:var(--text-dim);border-radius:5px;}
+.toggleBar button.on{background:var(--surface-3);color:var(--text);}
+
+.stage{display:flex;gap:24px;}
+.stage-card{
+  background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:14px;overflow:hidden;flex:1;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,0.7);
+}
+.stage-head{padding:11px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:rgba(15,17,21,0.6);}
+.stage-head .pad{background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;}
+.stage-head .ftitle{font-size:13px;font-weight:600;letter-spacing:-0.01em;}
+
+/* WELCOME canvas */
+.wel{position:relative;overflow:hidden;height:0;padding-bottom:62.5%;background:#0a0c10;}
+.wel .stripe{position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:6px;opacity:0.35;filter:saturate(0.7);}
+.wel .stripe > div{background-size:cover;background-position:center;border-radius:4px;animation:drift 24s ease-in-out infinite;}
+.wel .stripe > div:nth-child(2n){animation-delay:-6s;animation-direction:reverse;}
+.wel .stripe > div:nth-child(3n){animation-delay:-12s;}
+@keyframes drift{0%,100%{transform:translateY(0);}50%{transform:translateY(-22px);}}
+.wel .vignette{position:absolute;inset:0;background:radial-gradient(60% 60% at 50% 55%,transparent 0%,rgba(10,12,16,0.7) 50%,rgba(10,12,16,0.95) 100%),linear-gradient(180deg,rgba(10,12,16,0.5) 0%,transparent 40%,rgba(10,12,16,0.6) 100%);}
+.wel .cjk{position:absolute;right:-2%;top:-6%;font-family:'Noto Serif SC',serif;font-size:280px;font-weight:900;color:rgba(255,255,255,0.025);writing-mode:vertical-rl;text-orientation:upright;letter-spacing:14px;pointer-events:none;}
+.wel .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px;}
+.wel .mark{
+  width:84px;height:84px;border-radius:20px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-deep));
+  color:#0f1115;display:grid;place-items:center;
+  font-size:46px;font-weight:800;letter-spacing:-0.04em;line-height:1;
+  box-shadow:0 0 0 1px rgba(255,255,255,0.06) inset,0 18px 48px -10px var(--accent-soft),0 0 80px -20px var(--accent-hi);
+  animation:mark-pulse 3s ease-in-out infinite;margin-bottom:24px;
+}
+@keyframes mark-pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.04);box-shadow:0 0 0 1px rgba(255,255,255,0.12) inset,0 22px 60px -10px var(--accent-soft),0 0 120px -10px var(--accent-hi);}}
+.wel h1.t{margin:0;font-size:76px;font-weight:800;letter-spacing:-2.6px;line-height:0.95;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.6);}
+.wel .ver{font-size:13px;color:var(--accent-hi);font-weight:500;margin-top:14px;display:inline-flex;align-items:center;gap:10px;background:rgba(15,17,21,0.45);backdrop-filter:blur(8px);border:1px solid var(--border-strong);padding:6px 16px;border-radius:999px;}
+.wel .ver .dot{width:7px;height:7px;border-radius:7px;background:var(--success);box-shadow:0 0 8px var(--success);}
+.wel .lede{margin:24px 0 0;font-size:16px;line-height:1.55;color:var(--text-dim);max-width:520px;}
+.wel .lede b{color:var(--text);}
+.wel .actions{display:flex;gap:12px;margin-top:30px;flex-wrap:wrap;justify-content:center;}
+.wel .actions .bp{padding:13px 26px;font-size:14px;font-weight:700;border-radius:10px;background:var(--accent);color:#0f1115;border:0;cursor:pointer;box-shadow:0 12px 30px -10px var(--accent-soft);}
+.wel .actions .bg2{padding:13px 22px;font-size:14px;font-weight:600;border-radius:10px;background:rgba(15,17,21,0.55);backdrop-filter:blur(10px);color:var(--text);border:1px solid var(--border-strong);cursor:pointer;}
+
+/* LOGIN canvas */
+.lgn{position:relative;overflow:hidden;height:0;padding-bottom:62.5%;background:#0a0c10;}
+.lgn .bg{position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70') center/cover;filter:blur(28px) brightness(0.4) saturate(0.7);transform:scale(1.06);}
+.lgn .card{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:380px;background:rgba(15,17,21,0.78);backdrop-filter:blur(20px);
+  border:1px solid var(--border-strong);border-radius:14px;padding:32px;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,0.7);
+}
+.lgn .head{display:flex;align-items:center;gap:12px;margin-bottom:22px;}
+.lgn .mark{width:36px;height:36px;border-radius:9px;background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:20px;font-weight:700;}
+.lgn .br{font-size:18px;font-weight:700;letter-spacing:-0.3px;}
+.lgn .sub{font-size:11px;color:var(--text-faint);}
+.lgn h2{margin:0 0 4px;font-size:22px;font-weight:700;letter-spacing:-0.5px;}
+.lgn .lede{font-size:12.5px;color:var(--text-dim);margin-bottom:22px;}
+.lgn .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px;}
+.lgn .lb{font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;}
+.lgn .in{background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:7px;padding:9px 12px;font-size:13px;font-family:inherit;}
+.lgn .in:focus{outline:none;border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft);}
+.lgn .btn-go{width:100%;padding:10px 14px;font-size:13px;font-weight:700;border-radius:7px;background:var(--accent);color:#0f1115;border:0;cursor:pointer;margin-top:8px;}
+.lgn .foot{text-align:center;font-size:11px;color:var(--text-faint);margin-top:18px;}
+.lgn .foot a{color:var(--accent-hi);}
+
+/* Current selection readout */
+.readout{
+  margin-top:30px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;padding:22px 26px;
+  display:grid;grid-template-columns:auto 1fr auto;gap:20px;align-items:center;
+}
+.readout .swatch-big{width:84px;height:84px;border-radius:14px;background:var(--accent);}
+.readout .name-big{font-size:22px;font-weight:700;letter-spacing:-0.4px;}
+.readout .vals{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--text-dim);margin-top:6px;line-height:1.55;}
+.readout .vals .v{color:var(--accent-hi);}
+.readout .cp{padding:10px 16px;font-size:12.5px;font-weight:600;border-radius:8px;background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);cursor:pointer;font-family:inherit;}
+</style>
+</head>
+<body>
+
+<div class="board">
+
+  <h1>Accent testbed</h1>
+  <p class="lede">Click any swatch above — Welcome and Login redraw instantly. The full ramp (deep, base, hi, soft, line) is computed from the L/C/H of the swatch.</p>
+
+  <!-- Palette -->
+  <div class="palette" id="pal"></div>
+
+  <!-- Toggle Welcome / Login -->
+  <div class="toggleBar">
+    <button class="on" data-view="welcome">Welcome</button>
+    <button data-view="login">Login</button>
+    <button data-view="both">Both side-by-side</button>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage" id="stage"></div>
+
+  <!-- Readout -->
+  <div class="readout">
+    <div class="swatch-big" id="rd_sw"></div>
+    <div>
+      <div class="name-big" id="rd_nm">— · —</div>
+      <div class="vals" id="rd_vals"></div>
+    </div>
+    <button class="cp" id="rd_copy">Copy CSS · 5 vars</button>
+  </div>
+
+</div>
+
+<!-- Templates -->
+<template id="tpl-welcome">
+<div class="stage-card">
+  <div class="stage-head"><span class="pad">Browser</span><span class="ftitle">Welcome</span></div>
+  <div class="wel">
+    <div class="stripe">
+      <div style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"></div>
+      <div style="background-image:url('https://images.unsplash.com/photo-1604079628040-94301bb21b91?auto=format&fit=crop&w=400&q=70');"></div>
+    </div>
+    <div class="vignette"></div>
+    <div class="cjk">动画</div>
+    <div class="center">
+      <div class="mark">a</div>
+      <h1 class="t">Animarr</h1>
+      <div class="ver"><span class="dot"></span>v2.0 · self-hosted · donghua · anime · movies</div>
+      <p class="lede">Your library at home, anywhere. <b>An LLM</b> knows the titles, <b>BitTorrent</b> brings the files, <b>you</b> just press play.</p>
+      <div class="actions">
+        <button class="bp">Get started →</button>
+        <button class="bg2">I have a server</button>
+      </div>
+    </div>
+  </div>
+</div>
+</template>
+
+<template id="tpl-login">
+<div class="stage-card">
+  <div class="stage-head"><span class="pad">Browser</span><span class="ftitle">Login</span></div>
+  <div class="lgn">
+    <div class="bg"></div>
+    <div class="card">
+      <div class="head">
+        <div class="mark">a</div>
+        <div><div class="br">Animarr</div><div class="sub">Donghua · Anime · Movies</div></div>
+      </div>
+      <h2>Welcome back</h2>
+      <div class="lede">Sign in to continue watching.</div>
+      <div class="fld"><span class="lb">Email or username</span><input class="in" value="yuri" /></div>
+      <div class="fld"><span class="lb">Password</span><input class="in" type="password" value="••••••••••" /></div>
+      <button class="btn-go">Sign in →</button>
+      <div class="foot">Or <a>request invite</a> · this server is invite-only</div>
+    </div>
+  </div>
+</div>
+</template>
+
+<script>
+// 20 candidates across the spectrum
+const PALETTE = [
+  // — Blues
+  { name: 'Sky',        L: 0.74, C: 0.17, H: 232 },
+  { name: 'Cyan',       L: 0.78, C: 0.14, H: 215 },
+  { name: 'Sky-azure',  L: 0.74, C: 0.18, H: 238 },
+  { name: 'Azure',      L: 0.72, C: 0.18, H: 245 },
+  { name: 'Cobalt',     L: 0.66, C: 0.22, H: 252 },
+  { name: 'Electric',   L: 0.70, C: 0.22, H: 240 },
+  { name: 'Indigo',     L: 0.60, C: 0.22, H: 262 },
+  { name: 'Periwinkle', L: 0.74, C: 0.14, H: 270 },
+  // — Cool / teal
+  { name: 'Teal',       L: 0.72, C: 0.14, H: 195 },
+  { name: 'Mint',       L: 0.78, C: 0.14, H: 175 },
+  // — Greens
+  { name: 'Lime',       L: 0.82, C: 0.18, H: 135 },
+  { name: 'Emerald',    L: 0.72, C: 0.16, H: 150 },
+  // — Warms
+  { name: 'Amber',      L: 0.78, C: 0.16, H: 80 },
+  { name: 'Sunset',     L: 0.72, C: 0.18, H: 50 },
+  { name: 'Coral',      L: 0.72, C: 0.18, H: 30 },
+  { name: 'Crimson',    L: 0.66, C: 0.20, H: 25 },
+  // — Cool warm
+  { name: 'Rose',       L: 0.72, C: 0.17, H: 5 },
+  { name: 'Magenta',    L: 0.66, C: 0.22, H: 340 },
+  { name: 'Violet',     L: 0.66, C: 0.20, H: 295 },
+  { name: 'Lavender',   L: 0.78, C: 0.13, H: 285 },
+];
+
+// Render swatches
+const pal = document.getElementById('pal');
+PALETTE.forEach((p, i) => {
+  const div = document.createElement('div');
+  div.className = 'sw';
+  const v = `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H})`;
+  div.innerHTML = `<div class="chip" style="background:${v};"></div>
+                   <div class="body"><div class="nm">${p.name}</div><div class="val">${v.replace('oklch(', '').replace(')', '')}</div></div>`;
+  div.onclick = () => apply(i);
+  pal.appendChild(div);
+});
+
+const stage = document.getElementById('stage');
+let currentView = 'welcome';
+
+function renderStage() {
+  stage.innerHTML = '';
+  if (currentView === 'welcome' || currentView === 'both') {
+    stage.appendChild(document.getElementById('tpl-welcome').content.cloneNode(true));
+  }
+  if (currentView === 'login' || currentView === 'both') {
+    stage.appendChild(document.getElementById('tpl-login').content.cloneNode(true));
+  }
+}
+
+function apply(i) {
+  const p = PALETTE[i];
+  // Update CSS vars
+  const baseHi = Math.min(0.92, p.L + 0.08);
+  const baseDeep = Math.max(0.30, p.L - 0.20);
+  const r = document.documentElement.style;
+  r.setProperty('--accent',       `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H})`);
+  r.setProperty('--accent-hi',    `oklch(${baseHi.toFixed(2)} ${(p.C * 0.85).toFixed(2)} ${p.H})`);
+  r.setProperty('--accent-deep',  `oklch(${baseDeep.toFixed(2)} ${(p.C * 1.0).toFixed(2)} ${p.H})`);
+  r.setProperty('--accent-soft',  `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.16)`);
+  r.setProperty('--accent-line',  `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.40)`);
+
+  // Visual selection
+  [...pal.children].forEach((c, idx) => c.classList.toggle('on', idx === i));
+
+  // Readout
+  document.getElementById('rd_sw').style.background = `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H})`;
+  document.getElementById('rd_nm').textContent = p.name;
+  document.getElementById('rd_vals').innerHTML =
+    `--accent:      <span class="v">oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H})</span><br/>` +
+    `--accent-hi:   <span class="v">oklch(${baseHi.toFixed(2)} ${(p.C * 0.85).toFixed(2)} ${p.H})</span><br/>` +
+    `--accent-deep: <span class="v">oklch(${baseDeep.toFixed(2)} ${(p.C * 1.0).toFixed(2)} ${p.H})</span><br/>` +
+    `--accent-soft: <span class="v">oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.16)</span><br/>` +
+    `--accent-line: <span class="v">oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.40)</span>`;
+
+  // copy button
+  document.getElementById('rd_copy').onclick = () => {
+    const css =
+`--accent: oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H});
+--accent-hi: oklch(${baseHi.toFixed(2)} ${(p.C * 0.85).toFixed(2)} ${p.H});
+--accent-deep: oklch(${baseDeep.toFixed(2)} ${(p.C * 1.0).toFixed(2)} ${p.H});
+--accent-soft: oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.16);
+--accent-line: oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H} / 0.40);`;
+    navigator.clipboard.writeText(css);
+    const b = document.getElementById('rd_copy');
+    b.textContent = '✓ Copied';
+    setTimeout(() => b.textContent = 'Copy CSS · 5 vars', 1400);
+  };
+}
+
+// Toggle view
+document.querySelectorAll('.toggleBar button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.toggleBar button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    currentView = b.dataset.view;
+    renderStage();
+  };
+});
+
+// Init
+renderStage();
+apply(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android Network Security Config — relaxes the strict defaults so the
+    BlazorWebView can reach a self-hosted Animarr server on the LAN.
+
+    Animarr is a self-hosted media app whose servers, by design, live on
+    arbitrary LAN IPs the user picks at install time (192.168.x.x,
+    10.x.x.x, 172.16.x.x, Tailscale magic-DNS hosts, .local mDNS names,
+    custom hostnames, etc.). The old config tried to enumerate those with
+    CIDR ranges in <domain> tags — but Android's NSC does NOT support
+    CIDR; those entries were silently ignored, so cleartext HTTP to
+    192.168.11.200 was actually BLOCKED and login failed with the
+    misleading "Connection failure" error.
+
+    Policy: cleartext on EVERYWHERE. We accept the (small) downside that a
+    misconfigured client could fall back to HTTP against a public server
+    in exchange for not having to maintain an unknowable IP allowlist for
+    every user's home LAN. Production deploys behind Caddy use HTTPS
+    anyway; the cleartext path is purely for direct LAN access.
+
+    User certs are still trusted in debug-overrides so self-signed Caddy
+    certs work for testing.
+-->
+<network-security-config>
+
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="user"/>
+        </trust-anchors>
+    </debug-overrides>
+
+</network-security-config>

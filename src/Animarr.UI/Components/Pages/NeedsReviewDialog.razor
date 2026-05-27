@@ -1,0 +1,223 @@
+@*
+    NeedsReview — right-edge SettingsEditDrawer (v5 panel refactor).
+
+    Lists every MediaItem whose LLM identification dropped below the
+    auto-apply confidence threshold, with 2–3 candidate cards per row.
+    Click "Use" → resolves to that source/external-id pair.
+    Click "Search manually" → inline search panel (TMDB / MAL / IMDb).
+
+    Was a 720px centered modal; now slides in from the right. The candidate
+    grid collapses naturally to one column at drawer width (560px), which
+    matches mobile and is easier to scan top-to-bottom.
+*@
+
+@inject IAnimarrApiClient Api
+
+@using Animarr.UI.Components.Design.Layout
+
+@if (IsOpen)
+{
+    <SettingsEditDrawer IsOpen="true"
+                        Title="@($"{_items.Count} titles below confidence")"
+                        Overline="NEEDS REVIEW"
+                        Hint="Pick the right match — Animarr stores it in SQLite, leaves folders on disk untouched."
+                        Icon="warn"
+                        Tone="warn"
+                        OnClose="OnCloseAsync">
+        <Body>
+            @if (_loading)
+            {
+                <div class="nrm__empty">Loading…</div>
+            }
+            else if (_items.Count == 0)
+            {
+                <div class="nrm__empty">All items are identified.</div>
+            }
+            else
+            {
+                @foreach (var item in _items)
+                {
+                    var mi = item;
+                    var isExpanded = _expandedSearch == mi.Id;
+                    <div class="nrm-row">
+                        <div class="nrm-row__folder"><code>@mi.Title</code></div>
+                        <div class="nrm-row__candidates">
+                            @foreach (var c in mi.Candidates)
+                            {
+                                var cand = c;
+                                var key = $"{mi.Id}|{cand.Source}|{cand.ExternalId}";
+                                <div class="nrm-card">
+                                    <div class="nrm-card__poster" style="--hue:@(mi.Hue ?? 25);">
+                                        @if (!string.IsNullOrEmpty(cand.PosterUrl))
+                                        {
+                                            <img src="@cand.PosterUrl" alt="" />
+                                        }
+                                        else
+                                        {
+                                            <span class="nrm-card__cjk">@(mi.CjkTitle ?? "?")</span>
+                                        }
+                                    </div>
+                                    <div class="nrm-card__body">
+                                        <div>
+                                            <div class="nrm-card__title">@cand.Title</div>
+                                            <div class="nrm-card__meta">@(cand.Year?.ToString() ?? "—") · @cand.Source.ToUpperInvariant()</div>
+                                        </div>
+                                        <div class="nrm-card__foot">
+                                            <span class="@($"nrm-card__conf {(cand.Confidence > 0.7 ? "nrm-card__conf--ok" : "nrm-card__conf--warn")}")">
+                                                @($"{cand.Confidence:P0}")
+                                            </span>
+                                            <button type="button"
+                                                    class="@($"nrm-card__use {(_busyKey == key ? "nrm-card__use--loading" : "")}")"
+                                                    disabled="@(_busyKey == key)"
+                                                    @onclick="@(() => ApplyAsync(mi.Id, cand))">
+                                                @if (_busyKey == key) { <Spinner Size="sm" Tone="light" /> }
+                                                Use
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                            <button type="button" class="nrm-search"
+                                    @onclick="@(() => ToggleSearchPanel(mi))">
+                                <DIcon Name="search" Size="13" /> @(isExpanded ? "CLOSE SEARCH" : "SEARCH MANUALLY")
+                            </button>
+
+                            @if (isExpanded)
+                            {
+                                <div class="nrm-search-panel">
+                                    <div class="nrm-search-panel__row">
+                                        <select class="nrm-search-panel__src" value="@_searchSource"
+                                                @onchange="@(e => _searchSource = e.Value?.ToString() ?? "tmdb")">
+                                            <option value="tmdb">TMDB</option>
+                                            <option value="mal">MAL</option>
+                                            <option value="imdb">IMDb</option>
+                                        </select>
+                                        <input class="nrm-search-panel__input"
+                                               placeholder="@($"Search {_searchSource.ToUpperInvariant()}…")"
+                                               value="@_searchQuery"
+                                               @onkeydown="@(e => { if (e.Key == "Enter") _ = RunSearchAsync(mi); })"
+                                               @oninput="@(e => _searchQuery = e.Value?.ToString() ?? "")" />
+                                        <Btn Variant="primary" Size="sm" Loading="@_searchBusy"
+                                             OnClick="@(() => RunSearchAsync(mi))">Search</Btn>
+                                    </div>
+                                    @if (_searchResults.Length > 0)
+                                    {
+                                        <div class="nrm-search-panel__results">
+                                            @foreach (var r in _searchResults)
+                                            {
+                                                var res = r;
+                                                var rkey = $"{mi.Id}|{res.Source}|{res.ExternalId}";
+                                                <div class="nrm-search-panel__result">
+                                                    <div class="nrm-search-panel__title">@res.Title</div>
+                                                    <div class="nrm-search-panel__meta">@(res.Year?.ToString() ?? "—")</div>
+                                                    <Btn Variant="solid" Size="sm" Loading="@(_busyKey == rkey)"
+                                                         OnClick="@(() => ApplyAsync(mi.Id, res))">Use</Btn>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        </Body>
+        <Footer>
+            <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">Close</Btn>
+        </Footer>
+    </SettingsEditDrawer>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool _loading = true;
+    private string? _busyKey;
+    private List<MediaItemDto> _items = new();
+
+    // ── Manual-search state (one panel open at a time, identified by MediaItem.Id) ──
+    private Guid? _expandedSearch;
+    private string _searchSource = "tmdb";
+    private string _searchQuery = "";
+    private bool   _searchBusy;
+    private IdentificationCandidateDto[] _searchResults = Array.Empty<IdentificationCandidateDto>();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && _items.Count == 0) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var fetched = await Api.GetNeedsReviewAsync();
+            _items = fetched.ToList();
+        }
+        catch { _items = new(); }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ApplyAsync(Guid mediaItemId, IdentificationCandidateDto cand)
+    {
+        _busyKey = $"{mediaItemId}|{cand.Source}|{cand.ExternalId}";
+        StateHasChanged();
+        try
+        {
+            await Api.ResolveMediaCandidateAsync(mediaItemId,
+                new ResolveCandidateRequest(cand.Source, cand.ExternalId));
+            // The item is no longer NeedsReview after a successful resolve;
+            // reload so it drops out of the list.
+            await LoadAsync();
+            _expandedSearch = null;
+            _searchResults = Array.Empty<IdentificationCandidateDto>();
+            _searchQuery = "";
+        }
+        catch { /* swallow */ }
+        finally { _busyKey = null; StateHasChanged(); }
+    }
+
+    private void ToggleSearchPanel(MediaItemDto item)
+    {
+        if (_expandedSearch == item.Id)
+        {
+            _expandedSearch = null;
+            _searchResults = Array.Empty<IdentificationCandidateDto>();
+        }
+        else
+        {
+            _expandedSearch = item.Id;
+            _searchQuery = item.Title;
+            _searchResults = Array.Empty<IdentificationCandidateDto>();
+            _searchSource = item.MediaType == MediaItemType.Anime ? "mal"
+                          : item.MediaType == MediaItemType.Movie ? "tmdb"
+                          : "tmdb";
+        }
+    }
+
+    private async Task RunSearchAsync(MediaItemDto item)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+        _searchBusy = true;
+        StateHasChanged();
+        try
+        {
+            var request = new SearchRequest(_searchQuery.Trim(), item.Year, item.MediaType);
+            SearchResponse resp = _searchSource switch
+            {
+                "mal"  => await Api.SearchMalAsync(request),
+                "imdb" => await Api.SearchImdbAsync(request),
+                _      => await Api.SearchTmdbAsync(request),
+            };
+            _searchResults = resp.Candidates;
+        }
+        catch { _searchResults = Array.Empty<IdentificationCandidateDto>(); }
+        finally { _searchBusy = false; StateHasChanged(); }
+    }
+
+    private async Task OnCloseAsync() => await OnClose.InvokeAsync();
+}

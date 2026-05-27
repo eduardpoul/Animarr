@@ -1,0 +1,13 @@
+<!-- Animarr favicon — v6 mark from design-system/scratch-mark4.html.
+     Sharp geometric A in teal + white sparkle on a dark rounded tile.
+     Sized so the mark stays legible at 16×16 in a browser tab. -->
+<svg width="32" height="32" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">
+    <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+    <!-- A path with evenodd cut for the counter (triangle hole). -->
+    <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+          fill="#84c0d2"
+          fill-rule="evenodd"/>
+    <!-- Sparkle (✦) in the top-right — survives even at 16px as a flicker of white. -->
+    <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+          fill="#ffffff"/>
+</svg>

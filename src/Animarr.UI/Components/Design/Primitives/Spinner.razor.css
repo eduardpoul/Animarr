@@ -1,0 +1,26 @@
+/* Indeterminate ring — used inline (md) and inside buttons (sm).
+   Spec: design_handoff_animarr/pages/loaders.html §02 / §04. */
+
+.d-spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.10);
+    animation: d-spinner-rot 0.9s linear infinite;
+    flex-shrink: 0;
+}
+
+/* Sizes */
+.d-spinner--sm { width: 13px; height: 13px; border-width: 1.6px; animation-duration: 0.8s; }
+.d-spinner--md { width: 18px; height: 18px; border-width: 2.0px; }
+.d-spinner--lg { width: 36px; height: 36px; border-width: 3.0px; }
+
+/* Tones — top edge is the moving part; the rest of the ring is the track. */
+.d-spinner--accent { border-top-color: var(--accent-hi); }
+.d-spinner--light {
+    border-color: rgba(255, 255, 255, 0.25);
+    border-top-color: #fff;
+}
+
+@keyframes d-spinner-rot { to { transform: rotate(360deg); } }

@@ -1,0 +1,75 @@
+/* ============================================================
+   Mountain Sect — donghua / wuxia gravitas.
+
+   Warm black canvas with brown undertones, deep crimson accent,
+   gold-tinted text and Noto Serif SC throughout. The CJK
+   watermark is the hero decoration here — bigger than any other
+   theme — to evoke calligraphy banners hanging in a sect hall.
+   Uppercase labels with serif weight.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="mountain-sect"] {
+    /* ── Backgrounds — warm black, brown surfaces ─────────── */
+    --bg-0:        #0d0907;
+    --bg-1:        #14100c;
+    --surface:     #1a1410;
+    --surface-2:   #221a14;
+    --surface-3:   #2b2118;
+
+    /* ── Borders — gold-tinted ────────────────────────────── */
+    --border:        rgba(245, 200, 130, 0.12);
+    --border-strong: rgba(245, 200, 130, 0.24);
+
+    /* ── Text — gold-warmed cream ─────────────────────────── */
+    --text:       #f3e5c8;
+    --text-dim:   #b8a586;
+    --text-faint: #6a5c46;
+
+    /* ── Accent — deep red ────────────────────────────────── */
+    --accent-hue:  25;
+    --accent:      oklch(0.50 0.20 var(--accent-hue));
+    --accent-hi:   oklch(0.60 0.22 var(--accent-hue));
+    --accent-soft: oklch(0.50 0.20 var(--accent-hue) / 0.20);
+    --accent-line: oklch(0.50 0.20 var(--accent-hue) / 0.50);
+
+    /* ── Semantic — gold success, fits the palette ────────── */
+    --success: oklch(0.72 0.14 110);
+    --warn:    oklch(0.78 0.16  70);
+    --info:    oklch(0.66 0.10 220);
+
+    /* ── Typography — Noto Serif SC everywhere ────────────── */
+    --font-ui:      'Noto Serif SC', 'Inter', serif;
+    --font-display: 'Noto Serif SC', serif;
+
+    /* ── Labels — uppercase, wide tracking ────────────────── */
+    --label-casing: uppercase;
+    --label-tracking: 0.14em;
+
+    /* ── Decoration flags — CJK watermark is the hero ─────── */
+    --decor-cjk: block;
+
+    /* ── Shadows — warm, slightly red ─────────────────────── */
+    --shadow-card:    0 14px 36px -18px rgba(160, 40, 30, 0.38),
+                      inset 0 0 0 1px rgba(245, 200, 130, 0.06);
+    --shadow-card-hi: 0 20px 46px -16px rgba(160, 40, 30, 0.52),
+                      inset 0 0 0 1px rgba(245, 200, 130, 0.12);
+}
+
+/* ── Oversize CJK watermark — override the shared rule ────
+   The shared .cjk-watermark uses clamp(140px, 22vw, 360px).
+   Mountain Sect goes bigger to dominate the canvas as a banner. */
+[data-theme="mountain-sect"] .cjk-watermark {
+    font-size: clamp(180px, 28vw, 480px);
+    color: oklch(0.85 0.12 25 / 0.10);
+    font-weight: 900;
+    letter-spacing: 6px;
+}
+
+/* ── Display titles get full serif weight ─────────────── */
+[data-theme="mountain-sect"] h1,
+[data-theme="mountain-sect"] h2,
+[data-theme="mountain-sect"] .d-display {
+    font-weight: 900;
+    letter-spacing: -0.3px;
+}

@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Animarr</title>
+    <base href="/" />
+    <!-- v5 multi-theme CDN fonts.
+
+         Tailwind CLI v4 strips @import url() declarations from tokens.css
+         during minification, so the Inter / JetBrains Mono / Quicksand /
+         Noto Serif SC / Noto Serif JP families never load through the
+         compiled app.css alone. Explicit <link rel="stylesheet"> here in
+         <head> guarantees var(--font-ui), var(--font-display) and the rest
+         get real glyphs (not the system-ui fallback that renders Welcome
+         and Server Settings titles in Roboto-serif). Loaded upfront so
+         theme swap is FOUT-free. The MAUI WebView still has internet
+         (same WebView shell as a regular browser) so the CDN hit works
+         on all targets. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Quicksand:wght@500;600;700&family=Noto+Serif+SC:wght@500;700;900&family=Noto+Serif+JP:wght@500;700&display=swap" />
+
+    <!-- Global design tokens + Tailwind output. Lives in Animarr.UI's wwwroot
+         and gets exposed as a static web asset under _content/Animarr.UI/.
+         Owns :root design tokens, all 10 personality themes ([data-theme=...]),
+         and every `.d-*` global class (Btn, Pill, hero, Input, Select, ...).
+         The Web.Client index.html has the same link — MAUI's was missing
+         which is why theme tokens, fonts and global button/select styles all
+         fell back to browser defaults in the native shell. -->
+    <link rel="stylesheet" href="_content/Animarr.UI/app.css" />
+
+    <!-- Animarr.App.styles.css is the merged scoped-CSS bundle Blazor
+         aggregates from every referenced RCL — Animarr.UI's [b-xxx] rules
+         land here. Must come AFTER app.css so scoped rules can override
+         global ones when a component needs to. -->
+    <link href="Animarr.App.styles.css" rel="stylesheet" />
+    <!-- Custom HUD overlay for animarr-player.js. Not scoped-CSS because the
+         HUD DOM is injected by JS and wouldn't match [b-xxx] selectors. -->
+    <link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css" />
+    <style>
+        html, body { margin: 0; padding: 0; background: #0b0d10; color: #f0f1f3;
+                     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+        .status-bar-safe-area { height: env(safe-area-inset-top); background: #14171b; }
+
+        /* Boot placeholder — paints inside #app until Blazor mounts and
+           swaps the children for Routes content. Mirrors the WASM client's
+           boot splash so the hand-off from MAUI native splash → WebView →
+           Blazor feels like one continuous brand surface. Earlier this was
+           a default-styled "Loading…" text at top-left because the only
+           rule on #app was browser-default. */
+        #app:has(.animarr-boot) {
+            position: fixed; inset: 0;
+            background: #0b0d10;
+            display: grid; place-items: center;
+            z-index: 9999;
+        }
+        .animarr-boot {
+            display: flex; flex-direction: column;
+            align-items: center; gap: 18px;
+        }
+        .animarr-boot__mark {
+            width: 84px; height: 84px;
+            display: block;
+            border-radius: 22px;
+            box-shadow: 0 16px 40px -12px oklch(0.62 0.06 200 / 0.35);
+        }
+        .animarr-boot__ring {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.10);
+            border-top-color: #84c0d2;
+            animation: animarr-boot-spin 0.9s linear infinite;
+            margin-top: 8px;
+        }
+        .animarr-boot__label {
+            font-family: 'JetBrains Mono', ui-monospace, "SF Mono", monospace;
+            font-size: 11px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(154, 163, 178, 0.7);
+        }
+        @keyframes animarr-boot-spin { to { transform: rotate(360deg); } }
+    </style>
+
+    <!-- Same player vendor setup as the WASM host. The BlazorWebView's
+         WebView shares the device network, so the CDN loads inside the
+         native app just like in a browser. -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
+
+    <!-- v5 Phase 7: html5-qrcode for TV-pairing QR scan. Same CDN as WASM. -->
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+    <script>
+        // ── http:// image proxy ───────────────────────────────────────
+        // BlazorWebView mounts the bundle at https://0.0.0.x/, while the
+        // Animarr server runs on plain http://192.168.x.x:port. Chromium's
+        // Mixed Content policy refuses to load http:// images from https://
+        // pages — even with WebSettings.MixedContentMode=AlwaysAllow, the
+        // stock Android WebView still blocks them at the renderer layer.
+        //
+        // Workaround: a MutationObserver watches the DOM for <img> elements
+        // whose src is http://. For each, we fetch the bytes through the
+        // .NET host (PlatformBridge.FetchImageAsDataUrl), get a base64
+        // data: URL back, and swap img.src to that. The renderer never
+        // sees the http:// URL, so Mixed Content never trips.
+        //
+        // Cost: each image goes through one DotNet round-trip + a
+        // ~33%-larger base64 string. For our LAN-served posters / fanart
+        // (50-200 KB each) that's a one-time hit on first paint; subsequent
+        // renders pull from the browser's normal data-URL cache.
+        (function () {
+            var pending = new WeakSet();   // imgs already in flight
+            var resolved = new WeakSet();  // imgs whose src is now data:
+
+            async function rewriteImg(img) {
+                if (!img || pending.has(img) || resolved.has(img)) return;
+                var src = img.getAttribute('src');
+                if (!src || !src.toLowerCase().startsWith('http://')) return;
+                if (!window.DotNet) return;  // not ready yet
+                pending.add(img);
+                try {
+                    var dataUrl = await DotNet.invokeMethodAsync(
+                        'Animarr.App', 'FetchImageAsDataUrl', src);
+                    if (dataUrl && dataUrl.length > 0) {
+                        img.src = dataUrl;
+                        resolved.add(img);
+                    }
+                } catch (e) {
+                    // Leave the broken-image icon visible — that's a
+                    // diagnostic signal that the proxy itself failed,
+                    // not just that the URL was unreachable.
+                    console.warn('image proxy failed for', src, e);
+                } finally {
+                    pending.delete(img);
+                }
+            }
+
+            function sweep(root) {
+                if (!root || !root.querySelectorAll) return;
+                var imgs = root.querySelectorAll('img[src^="http://"]');
+                for (var i = 0; i < imgs.length; i++) rewriteImg(imgs[i]);
+            }
+
+            function attach() {
+                sweep(document);
+                var mo = new MutationObserver(function (mutations) {
+                    for (var i = 0; i < mutations.length; i++) {
+                        var m = mutations[i];
+                        if (m.type === 'attributes' && m.target.tagName === 'IMG') {
+                            rewriteImg(m.target);
+                        } else if (m.type === 'childList') {
+                            for (var j = 0; j < m.addedNodes.length; j++) {
+                                var n = m.addedNodes[j];
+                                if (n.nodeType !== 1) continue;
+                                if (n.tagName === 'IMG') rewriteImg(n);
+                                sweep(n);
+                            }
+                        }
+                    }
+                });
+                mo.observe(document.body, {
+                    childList: true,
+                    subtree:   true,
+                    attributes: true,
+                    attributeFilter: ['src'],
+                });
+            }
+
+            // Wait for DOMContentLoaded (body must exist) AND for DotNet
+            // bridge to be ready. The mutation observer needs document.body;
+            // the rewrite call needs DotNet.invokeMethodAsync.
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', attach);
+            } else {
+                attach();
+            }
+        })();
+    </script>
+
+    <script>
+        // ── Android TV viewport fix ───────────────────────────────────
+        // Cheap Android TVs (Mi TV, Realme TV, generic boxes) ship with
+        // density=320dpi, which makes a 1920×1080 panel report ~540 CSS
+        // pixels wide to the WebView. Our responsive CSS triggers
+        // mobile-layout at <960px, so without this the TV renders the
+        // phone shell on a 55" screen — Welcome text full-width, content
+        // overflows vertically.
+        //
+        // Detection heuristic: any of —
+        //   • User agent contains "Leanback" / "Google TV" / "Android TV"
+        //   • No touch input + landscape orientation + viewport ≤ 1280
+        //   • UI mode flag (window.matchMedia for "TV")
+        // When detected: override the viewport meta to fix CSS width at
+        // 1280, so all `max-width: 959px` media queries evaluate false and
+        // the desktop layout kicks in. initial-scale is chosen so the
+        // 1280-CSS-px page fits the physical screen width.
+        (function () {
+            var ua = navigator.userAgent || '';
+            var uaLooksTv = /Leanback|Google TV|Android TV|; TV[^a-z]|BRAVIA|AFT[A-Z]/i.test(ua);
+            var noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
+            var landscape = window.innerWidth > window.innerHeight;
+            var smallCssLandscape = landscape && window.innerWidth <= 1280;
+            // matchMedia('(tv)') doesn't exist in browsers, but matchMedia
+            // for "pointer: none" + "hover: none" approximates a TV remote.
+            var remoteOnly = window.matchMedia && window.matchMedia('(pointer: none)').matches;
+
+            var isTv = uaLooksTv || (noTouch && smallCssLandscape) || remoteOnly;
+            if (!isTv) return;
+
+            var meta = document.querySelector('meta[name=viewport]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.setAttribute('name', 'viewport');
+                document.head.appendChild(meta);
+            }
+            // Fix CSS width to 1280; the initial-scale lets the browser
+            // shrink (or in our case stretch) that to fill the physical
+            // panel. The result: same UI as a 1280px desktop browser.
+            var scale = window.innerWidth / 1280;
+            meta.setAttribute('content',
+                'width=1280, initial-scale=' + scale.toFixed(3) +
+                ', maximum-scale=' + scale.toFixed(3) +
+                ', user-scalable=no');
+
+            // Mark <html> so anything else that wants TV-specific behaviour
+            // (focus rings, hero variants) can opt in.
+            document.documentElement.classList.add('animarr-tv-host');
+            document.documentElement.classList.add('tv-mode');
+        })();
+
+        // ── Native TV-detect refine ───────────────────────────────────
+        // The heuristic above runs synchronously off UA + viewport, which
+        // works for "honest" Android TV / Google TV devices but misses
+        // Xiaomi Mi TV with MIUI for TV (custom UA), emulators, and OEM
+        // budget boxes that don't broadcast Leanback in their user agent.
+        //
+        // Once Blazor mounts we can ask the MAUI process directly via
+        // PlatformBridge.IsTelevision — that goes through UiModeManager +
+        // PackageManager.FEATURE_LEANBACK and is what Android itself uses
+        // to pick the right launcher. If the native check disagrees with
+        // the heuristic (heuristic missed a TV), we apply tv-mode classes
+        // post-boot. Pure-WASM browser context: DotNet bridge never
+        // appears, loop times out, no harm done.
+        (async function () {
+            for (var i = 0; i < 50; i++) {
+                if (window.DotNet && typeof window.DotNet.invokeMethodAsync === 'function') break;
+                await new Promise(function (r) { setTimeout(r, 100); });
+            }
+            if (!window.DotNet) return;
+            try {
+                var isTv = await window.DotNet.invokeMethodAsync('Animarr.App', 'IsTelevision');
+                if (isTv === true && !document.documentElement.classList.contains('tv-mode')) {
+                    document.documentElement.classList.add('animarr-tv-host');
+                    document.documentElement.classList.add('tv-mode');
+                }
+            } catch (_) { /* method not wired (non-MAUI host) — silent */ }
+        })();
+
+        // ── DPad navigation for TV remote ─────────────────────────────
+        // Android TV remotes deliver ArrowUp/ArrowDown/ArrowLeft/ArrowRight
+        // (and Enter for OK / Back as the system back gesture). Without an
+        // explicit handler the browser falls back to default tab order
+        // which on Blazor pages is roughly DOM order — disastrous for
+        // remote nav across a tile grid because pressing ↓ on a row card
+        // ends up jumping to the next form field on the page instead of
+        // the card directly below.
+        //
+        // Strategy: spatial focus. For every arrow press, find the
+        // currently-focused element, measure its bounding rect, then scan
+        // all `[tabindex]:not([tabindex="-1"])` + button + a[href] +
+        // .tv-focus elements for the geometrically-nearest neighbour in
+        // the pressed direction. Move focus there. If nothing fits the
+        // direction (we're at an edge), fall back to the first focusable
+        // we can find so the remote never feels "stuck".
+        //
+        // Only active when html.tv-mode is set — phones use touch focus
+        // and we don't want to fight their native scroll on arrow keys.
+        (function () {
+            var ACTIVE_SELECTOR =
+                'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), ' +
+                'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+            function focusables() {
+                var els = Array.from(document.querySelectorAll(ACTIVE_SELECTOR));
+                return els.filter(function (el) {
+                    if (el.offsetParent === null) return false;  // hidden
+                    var r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+            }
+
+            function center(rect) {
+                return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            }
+
+            function pickNeighbour(direction) {
+                var current = document.activeElement;
+                var all = focusables();
+                if (all.length === 0) return null;
+                if (!current || current === document.body) return all[0];
+
+                var cRect = current.getBoundingClientRect();
+                var cCenter = center(cRect);
+
+                var best = null;
+                var bestScore = Infinity;
+
+                for (var i = 0; i < all.length; i++) {
+                    var el = all[i];
+                    if (el === current) continue;
+                    var rect = el.getBoundingClientRect();
+                    var p = center(rect);
+                    var dx = p.x - cCenter.x;
+                    var dy = p.y - cCenter.y;
+
+                    // Filter to candidates in the pressed direction.
+                    if (direction === 'up'    && dy >= -4) continue;
+                    if (direction === 'down'  && dy <=  4) continue;
+                    if (direction === 'left'  && dx >= -4) continue;
+                    if (direction === 'right' && dx <=  4) continue;
+
+                    // Weighted distance: primary axis dominates, secondary
+                    // axis has a soft penalty so we don't jump sideways
+                    // when there's a closer same-column candidate.
+                    var primary, secondary;
+                    if (direction === 'up' || direction === 'down') {
+                        primary   = Math.abs(dy);
+                        secondary = Math.abs(dx);
+                    } else {
+                        primary   = Math.abs(dx);
+                        secondary = Math.abs(dy);
+                    }
+                    var score = primary + secondary * 2;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = el;
+                    }
+                }
+                return best;
+            }
+
+            document.addEventListener('keydown', function (e) {
+                if (!document.documentElement.classList.contains('tv-mode')) return;
+
+                // BACK key on the TV remote should never be swallowed — let
+                // it bubble to MAUI's native handler so the user can exit the
+                // app or back out of a stack frame. If we ever preventDefault
+                // it the remote stops being able to close the app and the
+                // user has to long-press HOME, which feels horrible.
+                if (e.key === 'GoBack' || e.key === 'Escape' || e.keyCode === 4) return;
+
+                // Let inputs handle their own arrow nav (cursor positioning).
+                var tag = (e.target && e.target.tagName) || '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+                var dir = null;
+                switch (e.key) {
+                    case 'ArrowUp':    dir = 'up';    break;
+                    case 'ArrowDown':  dir = 'down';  break;
+                    case 'ArrowLeft':  dir = 'left';  break;
+                    case 'ArrowRight': dir = 'right'; break;
+                    default: return;
+                }
+                var next = pickNeighbour(dir);
+                if (!next) return;
+                e.preventDefault();
+                next.focus();
+                // If the new element is off-screen (e.g. the row grid
+                // continues past the viewport), scroll it into view so the
+                // user actually sees the focused tile.
+                try { next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); }
+                catch (_) { next.scrollIntoView(); }
+            }, true);
+
+            // On every navigation (Blazor's pushState fires popstate-like) and
+            // after each render, make sure SOME element is focused. Without
+            // an active element the first ↓ press has nothing to pick a
+            // neighbour from and the remote feels stuck. We pick the first
+            // visible focusable as a sane default — the user can always
+            // override by clicking / tapping.
+            function ensureFocus() {
+                if (!document.documentElement.classList.contains('tv-mode')) return;
+                if (document.activeElement && document.activeElement !== document.body) return;
+                var els = focusables();
+                if (els.length > 0) {
+                    try { els[0].focus({ preventScroll: true }); } catch (_) { els[0].focus(); }
+                }
+            }
+            // MutationObserver fires every time Blazor rerenders — cheaper
+            // than polling, and idempotent since we early-out when something's
+            // already focused. Attach inside a DOMContentLoaded handler
+            // because this script lives in <head> and document.body may not
+            // exist yet (TypeError: parameter 1 is not of type 'Node' — that
+            // was bricking the WebView boot and showing as a "hung" splash).
+            function attachObserver() {
+                if (!document.body) return;
+                var moObserver = new MutationObserver(function () {
+                    if (moObserver._t) cancelAnimationFrame(moObserver._t);
+                    moObserver._t = requestAnimationFrame(ensureFocus);
+                });
+                try { moObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function () {
+                    attachObserver();
+                    ensureFocus();
+                });
+            } else {
+                attachObserver();
+                ensureFocus();
+            }
+            window.addEventListener('popstate', ensureFocus);
+        })();
+
+        // Accent-hue setter (mirrors WASM host).
+        window.animarr_setAccentHue = function (hue) {
+            if (typeof hue !== 'number') hue = parseInt(hue, 10);
+            if (Number.isFinite(hue))
+                document.documentElement.style.setProperty('--accent-hue', hue);
+        };
+        // Personality theme setter (v5).
+        window.animarr_setTheme = function (slug) {
+            if (typeof slug !== 'string' || slug.length === 0) slug = 'quietude';
+            document.documentElement.setAttribute('data-theme', slug);
+            try { localStorage.setItem('animarr-theme', slug); } catch (_) {}
+        };
+        (function () {
+            var storedHue = localStorage.getItem('animarr-accent');
+            if (storedHue && /^\d+$/.test(storedHue))
+                window.animarr_setAccentHue(parseInt(storedHue, 10));
+            var storedTheme = localStorage.getItem('animarr-theme');
+            document.documentElement.setAttribute('data-theme', storedTheme || 'quietude');
+        })();
+
+        // Cross-platform MAUI mDNS browse. Calls into the MAUI process via
+        // a static [JSInvokable] in Animarr.App.JsInterop.MdnsBridge, which
+        // delegates to the singleton MdnsBrowserService (Makaretu.Dns
+        // listener). Works on Windows / macOS / Android / iOS / Catalyst —
+        // every MAUI target binds a UDP 5353 socket for us. Pure browser
+        // WASM never reaches this script so the Discovery page's
+        // feature-detect (`typeof window.animarrMdnsScan === 'function'`)
+        // is the gate that hides the scanning UI in non-MAUI contexts.
+        window.animarrMdnsScan = async function () {
+            try {
+                var rows = await DotNet.invokeMethodAsync('Animarr.App', 'AnimarrMdnsBrowse');
+                // Discovery.razor's JsServer record only consumes Name +
+                // BaseUrl; the bridge returns the same shape (plus extras
+                // ServerId / Version) so .NET deserialization is a no-op.
+                return rows || [];
+            } catch (e) {
+                console.warn('animarrMdnsScan failed', e);
+                return [];
+            }
+        };
+
+        // TCP subnet probe fallback. mDNS multicast often can't cross the
+        // wired/wireless boundary on consumer WiFi APs, so we also expose a
+        // dumb-but-reliable scan of the local /24 against the known Animarr
+        // ports (8080 + 8450). Discovery.razor calls this only when mDNS
+        // returned nothing — it's slower but works on any LAN that allows
+        // host-to-host unicast.
+        window.animarrSubnetScan = async function () {
+            try {
+                var rows = await DotNet.invokeMethodAsync('Animarr.App', 'AnimarrSubnetProbe');
+                return rows || [];
+            } catch (e) {
+                console.warn('animarrSubnetScan failed', e);
+                return [];
+            }
+        };
+
+        // Ask the MAUI host to grant the OS-level CAMERA permission ahead of
+        // a getUserMedia call. PairConfirm's QR scanner invokes this before
+        // animarr_startQrScan because Android's WebView denies video-capture
+        // permission requests when the host app hasn't been granted CAMERA
+        // first, regardless of what our WebChromeClient says. Returns true
+        // when the permission is held (or N/A on non-Android hosts).
+        window.animarr_requestCameraPermission = async function () {
+            try {
+                return await DotNet.invokeMethodAsync('Animarr.App', 'RequestCameraPermission');
+            } catch (e) {
+                console.warn('animarr_requestCameraPermission failed', e);
+                return false;
+            }
+        };
+
+        // Drain the Watch-Next / "Continue watching" deep link the launcher
+        // dispatched to MainActivity (if any). Returns the media GUID to
+        // navigate to, or null when there's nothing pending. Called by
+        // Welcome.razor's OnAfterRenderAsync — when present, we route to
+        // /media/{id} instead of the default landing page.
+        window.animarrConsumePendingDeepLink = async function () {
+            try {
+                return await DotNet.invokeMethodAsync('Animarr.App', 'ConsumePendingDeepLink');
+            } catch { return null; }
+        };
+
+        // Watch-Next publish/remove. Fired from animarr-player.js on every
+        // progress tick + pause/ended. The static [JSInvokable] in
+        // WatchNextBridge routes to the singleton WatchNextService, which
+        // is a no-op on non-Leanback Androids and on non-Android platforms.
+        // We catch + swallow here so a Watch-Next failure never propagates
+        // back into the player's event loop.
+        window.animarrWatchNextUpsert = async function (mediaId, title, posterUrl, positionMs, durationMs) {
+            try {
+                await DotNet.invokeMethodAsync('Animarr.App', 'WatchNextUpsert',
+                    mediaId, title, posterUrl, positionMs, durationMs);
+            } catch { /* swallow */ }
+        };
+        window.animarrWatchNextRemove = async function (mediaId) {
+            try {
+                await DotNet.invokeMethodAsync('Animarr.App', 'WatchNextRemove', mediaId);
+            } catch { /* swallow */ }
+        };
+    </script>
+</head>
+<body>
+    <div class="status-bar-safe-area"></div>
+    <div id="app">
+        <!-- v6 boot splash — inline SVG mark (same path as splash.svg /
+             favicon.svg / BrandMark.razor) so it paints instantly without
+             waiting for a file fetch. Sparkle pulses while Blazor boots. -->
+        <div class="animarr-boot">
+            <svg class="animarr-boot__mark" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect width="72" height="72" rx="20" fill="#0a0c10"/>
+                <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+                      fill="#84c0d2"
+                      fill-rule="evenodd"/>
+                <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+                      fill="#ffffff">
+                    <animate attributeName="opacity" values="0.6;1;0.6" dur="2.4s" repeatCount="indefinite"/>
+                </path>
+            </svg>
+            <div class="animarr-boot__ring" aria-hidden="true"></div>
+            <div class="animarr-boot__label">Loading library</div>
+        </div>
+    </div>
+    <div id="blazor-error-ui" data-nosnippet>
+        Что-то пошло не так.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+    <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
+    <script src="_content/Animarr.UI/animarr-player.js"></script>
+    <script src="_content/Animarr.UI/tv-nav.js"></script>
+    <script src="_content/Animarr.UI/qr-scan.js"></script>
+
+    <!-- Phase 2 native player bridge (2026-05-27). On Android TV the future
+         NativeAdapter inside animarr-player.js calls into these methods, each
+         of which proxies to the NativePlayerBridge JSInvokables in the MAUI
+         host (Animarr.App/JsInterop/NativePlayerBridge.cs) → NativePlayerService
+         → ExoPlayer.
+
+         isAvailable() stays hard-false in Phase 2a because ExoPlayer has no
+         SurfaceView to render into yet (Phase 2b ships the custom Handler
+         that lays a PlayerView behind the BlazorWebView). Flipping the gate
+         is a one-line change once 2b lands. The other methods are wired now
+         so the C# pipeline is exercisable from devtools without further JS
+         changes.
+
+         Note on DotNet.invokeMethodAsync: blazor.webview.js publishes the
+         DotNet global once the WebView IPC handshake completes — calls made
+         before that point throw. We don't pre-call anything here; only the
+         NativeAdapter (Phase 2b) will dispatch, by which time Blazor has
+         long since mounted. -->
+    <script>
+        window.animarrNativePlayer = {
+            // Phase 2b gate. Returns true on Android TV (where MAUI's
+            // index.html boot script has stamped `.animarr-tv-host` on
+            // <html>), false on phones/desktop/iOS where the Artplayer
+            // path is the right choice. The class is set synchronously
+            // at boot time so this check is safe to call from
+            // animarr-player.js attach() — no async dance needed.
+            //
+            // Note: this is a UA/viewport heuristic, not the authoritative
+            // FEATURE_LEANBACK signal. To verify from the C# side at
+            // runtime, call NativePlayerIsAvailable directly from devtools:
+            //   await DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable')
+            isAvailable: function () {
+                return document.documentElement.classList.contains('animarr-tv-host');
+            },
+
+            play: function (url, opts) {
+                opts = opts || {};
+                var resumeMs = Math.max(0, Math.round((opts.resumeSec || 0) * 1000));
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerPlay', url, resumeMs);
+            },
+            pause:  function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerPause');  },
+            resume: function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerResume'); },
+            seek:   function (ms)  {
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerSeek', Math.max(0, Math.round(ms || 0)));
+            },
+            detach: function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerDetach'); },
+            // Polled every 250ms by the JS NativeAdapter while playback is
+            // active. The C# side reads live state off ExoPlayer; we don't
+            // cache because the property reads themselves are cheap.
+            getState: function ()  { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerGetState'); },
+
+            // Volume (0..1). Mute = 0; the JS adapter restores the saved
+            // volume on un-mute. ExoPlayer applies clamping server-side.
+            setVolume: function (v) {
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerSetVolume', Math.max(0, Math.min(1, v)));
+            },
+            // Subtitle URL (null/'' to disable). Language is an ISO code
+            // hint stored on the MediaItem's SubtitleConfiguration.
+            setSubtitle: function (url, lang) {
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerSetSubtitle', url || null, lang || null);
+            },
+            // 'default' / '21:9' / '16:9' / '4:3' / '2.35:1'. Implemented
+            // via TextureView.SetTransform on the C# side.
+            setAspect: function (value) {
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerSetAspect', value || 'default');
+            },
+            // Pre-flight: ask Android's MediaCodecList whether the device
+            // can actually decode the format we're about to stream. Returns
+            // Promise<bool>. Called once in attach() before committing to
+            // the native path; if false the JS falls back to Artplayer.
+            canDecode: function (codec, bitDepth, hdr, width, height) {
+                return window.DotNet.invokeMethodAsync('Animarr.App',
+                    'NativePlayerCanDecode',
+                    codec || '', bitDepth || 0, hdr || '', width || 0, height || 0);
+            },
+        };
+    </script>
+</body>
+</html>

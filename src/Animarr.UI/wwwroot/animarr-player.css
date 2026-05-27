@@ -1,0 +1,382 @@
+/* ─────────────────────────────────────────────────────────────────
+   Animarr custom HUD — variant B.
+   Companion to wwwroot/animarr-player.js. Hides Artplayer's built-in
+   chrome and styles the .vp-hud overlay rendered as an Artplayer layer.
+   Matches design_handoff_animarr/design-system/04-tv.html § T-03 with
+   the additions iterated on 2026-05-27.
+   Tokens scoped to .vp-hud so the rest of the app keeps its own accent.
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Phase 2 native-playback transparency ────────────────────────── */
+/* On Android TV the JS-side NativeAdapter sets body[data-animarr-native]
+   while ExoPlayer is rendering into a TextureView behind the BlazorWebView.
+   The body needs to be transparent on this state so the video shows through.
+   The HUD overlay keeps its own painted backgrounds (gradients on .vp-hud__top
+   / __bottom) so controls remain readable over any frame.
+
+   On non-Android hosts (browser, MAUI desktop, iOS) the body attribute is
+   never set, so the existing dark-chrome backgrounds keep painting. */
+body[data-animarr-native="1"] {
+    background: transparent !important;
+}
+body[data-animarr-native="1"] .vp-art,
+body[data-animarr-native="1"] .vp-backdrop,
+body[data-animarr-native="1"] .vp-shell {
+    background: transparent !important;
+}
+
+/* ── Hide Artplayer's built-in chrome ─────────────────────────────── */
+.vp-art .art-bottom,
+.vp-art .art-progress,
+.vp-art .art-state,
+.vp-art .art-controls,
+.vp-art .art-mini-progress-bar { display: none !important; }
+
+/* Keep the loading spinner + subtitle overlay visible. */
+.vp-art .art-loading,
+.vp-art .art-subtitle { display: block; }
+
+/* ── HUD root ─────────────────────────────────────────────────────── */
+.vp-hud {
+    --hud-accent:      oklch(0.72 0.18 245);
+    --hud-accent-hi:   oklch(0.80 0.15 245);
+    --hud-accent-soft: oklch(0.72 0.18 245 / 0.16);
+    --hud-text:        #e8eaed;
+    --hud-text-dim:    #9aa0a8;
+    --hud-text-faint:  #5d636d;
+    --hud-border:      rgba(255,255,255,0.06);
+    --hud-border-str:  rgba(255,255,255,0.12);
+
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 30;
+
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--hud-text);
+    transition: opacity 220ms ease;
+}
+.vp-hud--hidden { opacity: 0; }
+.vp-hud--hidden .vp-hud__top,
+.vp-hud--hidden .vp-hud__bottom { pointer-events: none; }
+
+/* ── Top bar ──────────────────────────────────────────────────────── */
+.vp-hud__top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 28px 40px;
+    background: linear-gradient(180deg, rgba(15,17,21,0.7), transparent);
+    pointer-events: auto;
+}
+/* Title is absolute-centred so the meta plashka on the right doesn't pull
+   it left when the meta line is long (HEVC · 10-bit · DV · HDR10 · …).
+   pointer-events:none so the title can never block clicks on whatever
+   sits behind. */
+.vp-hud__title {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    min-width: 0;
+    max-width: min(55%, 640px);
+    pointer-events: none;
+}
+.vp-hud__kicker {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--hud-accent-hi);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.vp-hud__kicker:empty { display: none; }
+.vp-hud__name {
+    font-size: 20px;
+    font-weight: 600;
+    margin-top: 4px;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.vp-hud__meta {
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+    font-size: 13px;
+    color: var(--hud-text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    text-align: right;
+    max-width: 480px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Bottom HUD ───────────────────────────────────────────────────── */
+.vp-hud__bottom {
+    padding: 32px 40px 28px;
+    background: linear-gradient(0deg, rgba(15,17,21,0.85), transparent);
+    pointer-events: auto;
+}
+
+/* Progress row */
+.vp-hud__progress {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+    font-size: 14px;
+    color: var(--hud-text-dim);
+    font-variant-numeric: tabular-nums;
+}
+.vp-hud__time { flex-shrink: 0; }
+
+.vp-hud__track {
+    position: relative;
+    flex: 1;
+    height: 5px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 5px;
+    cursor: pointer;
+    touch-action: none;
+    transition: height 120ms ease;
+}
+.vp-hud__track:hover,
+.vp-hud__track:focus-within { height: 7px; }
+
+.vp-hud__track-buffer,
+.vp-hud__track-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    border-radius: 5px;
+    pointer-events: none;
+}
+.vp-hud__track-buffer { background: rgba(255,255,255,0.22); }
+.vp-hud__track-fill   { background: var(--hud-accent); }
+.vp-hud__thumb {
+    position: absolute;
+    left: 0%;
+    top: 50%;
+    width: 20px;
+    height: 20px;
+    border-radius: 20px;
+    background: var(--hud-accent-hi);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow:
+        0 0 0 5px var(--hud-accent-soft),
+        0 0 0 9px rgba(255,255,255,0.06);
+}
+
+/* Controls row */
+.vp-hud__controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.vp-hud__cluster {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+/* All bottom-row buttons share the same height (.vp-btn--tv). The
+   previous "primary, large" play button has been retired per user
+   request 2026-05-27. */
+.vp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    color: var(--hud-text);
+    background: rgba(255,255,255,0.04);
+    border-color: var(--hud-border-str);
+    transition: background 140ms ease, transform 120ms ease, box-shadow 140ms ease, color 140ms ease;
+}
+.vp-btn:hover  { background: rgba(255,255,255,0.09); }
+.vp-btn:active { transform: scale(0.97); }
+.vp-btn:focus-visible {
+    outline: none;
+    box-shadow:
+        0 0 0 3px var(--hud-accent-hi),
+        0 18px 40px -12px rgba(0,0,0,0.6);
+    transform: scale(1.02);
+}
+
+/* Primary (Play button) — keeps the same height, just azure background. */
+.vp-btn--p {
+    background: var(--hud-accent);
+    color: #0f1115;
+    font-weight: 700;
+    border-color: transparent;
+}
+.vp-btn--p:hover { background: var(--hud-accent-hi); }
+
+/* Back button — almost transparent ghost over the gradient. The gradient
+   on .vp-hud__top already provides enough contrast for the icon to read,
+   so the chip just needs a faint affordance on hover. */
+.vp-btn--back {
+    background: rgba(15,17,21,0.18);
+    border-color: rgba(255,255,255,0.08);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.vp-btn--back:hover {
+    background: rgba(15,17,21,0.45);
+    border-color: var(--hud-border-str);
+}
+
+.vp-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+.vp-glyph svg { display: block; }
+
+/* ── Icons-only style (no labels, no background) ─────────────────── */
+/* Activated when .vp-hud has data-style="icons". Buttons become naked
+   icon hit-targets. Hover still shows a subtle background so it's
+   clear they're interactive. */
+.vp-hud[data-style="icons"] .vp-btn {
+    background: transparent;
+    border-color: transparent;
+    padding: 10px;
+    gap: 0;
+    box-shadow: none;
+    color: var(--hud-text);
+}
+.vp-hud[data-style="icons"] .vp-btn:hover {
+    background: rgba(255,255,255,0.10);
+    border-color: transparent;
+}
+.vp-hud[data-style="icons"] .vp-btn--p {
+    background: transparent;
+    color: var(--hud-accent-hi);
+}
+.vp-hud[data-style="icons"] .vp-btn--p:hover {
+    background: var(--hud-accent-soft);
+    color: var(--hud-accent-hi);
+}
+.vp-hud[data-style="icons"] .vp-btn--back {
+    background: transparent;
+    backdrop-filter: none;
+}
+.vp-hud[data-style="icons"] .vp-btn--back:hover {
+    background: rgba(255,255,255,0.10);
+}
+.vp-hud[data-style="icons"] .vp-label { display: none; }
+.vp-hud[data-style="icons"] .vp-glyph svg {
+    width: 22px;
+    height: 22px;
+}
+
+/* +10s button is special — in icons mode we replace the SVG with literal
+   "+10" text so the action remains readable without depending on a
+   tooltip. Outside icons mode the text alt-glyph stays hidden and the
+   SVG + "+10s" label do the work. */
+.vp-icon-text {
+    display: none;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-glyph { display: none; }
+.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-icon-text { display: inline-block; }
+
+/* ── Popup picker (CC / Audio / Aspect) ──────────────────────────── */
+.vp-hud-popup {
+    position: absolute;
+    right: 40px;
+    bottom: 120px;
+    z-index: 50;
+    min-width: 240px;
+    max-width: 360px;
+    padding: 12px 14px;
+    background: rgba(24,24,24,0.98);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.6);
+    color: #e8eaed;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    pointer-events: auto;
+}
+.vp-hud-popup__title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9aa0a8;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 10px;
+}
+.vp-hud-popup__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+.vp-hud-popup__item {
+    all: unset;
+    display: block;
+    cursor: pointer;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #e8eaed;
+}
+.vp-hud-popup__item:hover { background: rgba(255,255,255,0.06); }
+.vp-hud-popup__item.is-active {
+    background: oklch(0.72 0.18 245 / 0.16);
+    color: oklch(0.80 0.15 245);
+}
+
+/* Slider variant (audio-offset). Used by the .vp-hud-popup--slider class. */
+.vp-hud-popup--slider {
+    width: 300px;
+}
+.vp-hud-popup__slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+.vp-hud-popup__slider-row input[type=range] {
+    flex: 1;
+    accent-color: oklch(0.72 0.18 245);
+}
+.vp-hud-popup__slider-value {
+    min-width: 60px;
+    text-align: right;
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.70);
+}
+.vp-hud-popup__hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    margin-top: 6px;
+}

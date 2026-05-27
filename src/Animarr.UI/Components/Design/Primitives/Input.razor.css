@@ -1,0 +1,77 @@
+/* Spec match: design_handoff_animarr/screens-v3.jsx::FilterBar (search input).
+   CTRL_H = 36px shared with Tabs and NRBadge. */
+.d-input {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    color: var(--text-dim);
+    box-sizing: border-box;
+    transition: border-color var(--motion-base);
+}
+
+.d-input:focus-within {
+    border-color: var(--accent-line);
+    color: var(--text);
+}
+
+.d-input__field {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--text);
+    padding: 0 var(--space-2);
+}
+
+.d-input__field::placeholder {
+    color: var(--text-faint);
+}
+
+.d-input__field::-webkit-search-cancel-button {
+    display: none;
+}
+
+.d-input__clear {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: var(--text-faint);
+    padding: 4px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+}
+.d-input__clear:hover { color: var(--text); }
+
+/* Label wrapper — used when <Input Label="..." /> is set. */
+.d-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    /* When placed in a grid cell (e.g. Setup.razor's 1fr 1fr row) the group
+       itself fills the cell, but the inner inline-flex .d-input doesn't —
+       force both to 100% so the inputs always have matching widths. */
+    width: 100%;
+    min-width: 0;
+}
+
+.d-input-group .d-input { width: 100%; }
+
+.d-input-group__label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: var(--label-tracking, 0.4px);
+    color: var(--text-faint);
+    /* v5 Quietude default — sentence case. Other themes (Cinematic /
+       Terminal / Mountain Sect) override --label-casing to uppercase. */
+    text-transform: var(--label-casing, none);
+}

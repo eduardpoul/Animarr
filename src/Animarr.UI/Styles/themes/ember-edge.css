@@ -1,0 +1,83 @@
+/* ============================================================
+   Ember Edge — anime shonen energy with editorial typography.
+
+   Deep midnight-blue canvas, indigo accent with subtle glow, Noto
+   Serif JP for display titles paired with Inter for UI body. A
+   diagonal checker pattern dusted across the background hints at
+   the genre's energetic geometry without screaming. Uppercase
+   labels, wide tracking.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="ember-edge"] {
+    /* ── Backgrounds — midnight indigo ────────────────────── */
+    --bg-0:        #0a0e1a;
+    --bg-1:        #0e1320;
+    --surface:     #131826;
+    --surface-2:   #181e2e;
+    --surface-3:   #1e2538;
+
+    /* ── Borders — subtle indigo glow ─────────────────────── */
+    --border:        rgba(120, 100, 220, 0.14);
+    --border-strong: rgba(120, 100, 220, 0.28);
+
+    /* ── Text — cool white ────────────────────────────────── */
+    --text:       #e6e9f5;
+    --text-dim:   #a4abc2;
+    --text-faint: #5a607a;
+
+    /* ── Accent — vivid indigo ────────────────────────────── */
+    --accent-hue:  270;
+    --accent:      oklch(0.55 0.22 var(--accent-hue));
+    --accent-hi:   oklch(0.66 0.22 var(--accent-hue));
+    --accent-soft: oklch(0.55 0.22 var(--accent-hue) / 0.20);
+    --accent-line: oklch(0.55 0.22 var(--accent-hue) / 0.50);
+
+    /* ── Semantic ─────────────────────────────────────────── */
+    --success: oklch(0.74 0.16 155);
+    --warn:    oklch(0.80 0.18  70);
+    --info:    oklch(0.72 0.13 240);
+
+    /* ── Typography — Noto Serif JP for display, Inter UI ─── */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Noto Serif JP', 'Inter', serif;
+
+    /* ── Labels — uppercase, wide tracking ────────────────── */
+    --label-casing: uppercase;
+    --label-tracking: 0.10em;
+
+    /* ── Shadows — indigo-tinted glow on cards ────────────── */
+    --shadow-card:    0 14px 34px -18px rgba(120, 100, 220, 0.36),
+                      inset 0 0 0 1px rgba(120, 100, 220, 0.06);
+    --shadow-card-hi: 0 20px 44px -16px rgba(120, 100, 220, 0.50),
+                      inset 0 0 0 1px rgba(120, 100, 220, 0.12);
+}
+
+/* ── Diagonal checker overlay (Ember-Edge decoration) ─────
+   45° linear-gradient repeating every 8px to create a subtle
+   diagonal grid — energetic but understated. */
+[data-theme="ember-edge"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background-image:
+        linear-gradient(
+            45deg,
+            transparent 49%,
+            rgba(120, 100, 220, 0.04) 50%,
+            transparent 51%
+        );
+    background-size: 8px 8px;
+    opacity: 0.7;
+    mix-blend-mode: screen;
+}
+
+/* ── Display titles use weight 700 from Noto Serif JP ──── */
+[data-theme="ember-edge"] h1,
+[data-theme="ember-edge"] h2,
+[data-theme="ember-edge"] .d-display {
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}

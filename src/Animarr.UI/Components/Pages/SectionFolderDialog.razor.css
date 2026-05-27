@@ -1,0 +1,131 @@
+/*
+    SectionFolderDialog — Settings → Root folders Add/Edit panel.
+
+    Modal scaffold was removed in the v5 panel refactor: this component
+    now embeds inside a <SettingsEditDrawer> (right-edge slide-in). The
+    only styles left are the picker subtree (the filesystem drill-down
+    UI inside the drawer body) and a couple of helper wrappers.
+*/
+
+.sfd__form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sfd__row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+.sfd__row > .d-input { flex: 1; min-width: 0; }
+
+/* ── Picker ─── */
+
+.sfd-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 320px;
+}
+
+.sfd-picker__title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+}
+
+.sfd-picker__roots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+}
+
+.sfd-picker__root {
+    appearance: none;
+    cursor: pointer;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-chip);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: left;
+}
+.sfd-picker__root:hover {
+    border-color: var(--accent-line);
+    color: var(--text);
+}
+
+.sfd-picker__crumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.sfd-picker__crumb-path {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
+}
+
+.sfd-picker__list {
+    flex: 1;
+    min-height: 200px;
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--bg-1);
+    padding: 4px 0;
+}
+
+.sfd-picker__row {
+    cursor: pointer;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.sfd-picker__row:hover { background: var(--surface-2); }
+
+.sfd-picker__empty {
+    padding: 22px 12px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 12.5px;
+}
+
+.sfd-picker__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 4px;
+}
+.sfd-picker__selected {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.sfd-picker__selected b {
+    color: var(--text);
+    font-weight: 600;
+}

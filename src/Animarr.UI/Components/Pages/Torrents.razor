@@ -1,0 +1,670 @@
+@page "/torrents"
+@implements IAsyncDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+@*
+    Torrents list with add-magnet form + pause/resume/delete + per-row link
+    to TorrentEdit. SignalR live snapshots merge over the persistent record
+    by InfoHash for download/upload rates.
+
+    The full .torrent file upload UX still lives in Animarr.Web (uses
+    InputFile + JS interop for drag-and-drop). Magnet-add covers most of
+    the day-to-day need and lands here first.
+*@
+
+<header class="d-page-header">
+    <div class="d-page-header__main">
+        <div class="d-page-header__overline">TRANSFERS</div>
+        <h1 class="d-page-header__title">TORRENTS</h1>
+        <div class="d-page-header__sub">Live status pulled every 500ms via SignalR.</div>
+    </div>
+    @* v5 fix: was .d-page-header__actions which doesn't exist (the page-header
+       partial in components.css defines .d-page-header__right + flex helpers).
+       The old class collapsed to display:block, stacking the buttons under the
+       header instead of pinning them top-right.
+       On phone .d-page-header__right is hidden via CSS — the Add action
+       lands as a floating FAB instead (design_handoff_animarr/05-mobile.html
+       Downloads spec), and the History link moves into the FAB's long-press
+       menu in a follow-up (for now still reachable via /torrents/history). *@
+    <div class="d-page-header__right">
+        <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
+            <DIcon Name="archive" Size="13" /> History
+        </Btn>
+        <Btn Variant="primary" Size="md" OnClick="OpenAdd">
+            <DIcon Name="plus" Size="14" /> Add
+        </Btn>
+    </div>
+</header>
+
+@* Mobile-only floating action button — pinned bottom-right above the
+   safe-area inset. Matches the design's "+ Add" FAB on the Downloads
+   screen (05-mobile.html). Desktop hides this via CSS in favour of the
+   inline header button above. *@
+<button type="button" class="tor-fab tv-focus" @onclick="OpenAdd"
+        aria-label="Add download">
+    <DIcon Name="plus" Size="22" />
+</button>
+
+@* Add Torrent drawer — slides in from the right (SettingsEditDrawer
+   shell). Matches design_handoff_animarr/screens.jsx::AddTorrentDrawer
+   (lines 1046-1167): source segment toggle → source-specific input →
+   destination + subfolder → 4 post-processing toggles. *@
+<SettingsEditDrawer IsOpen="@_addOpen"
+                    Title="Add download"
+                    Overline="NEW"
+                    Hint="Paste a magnet link or drop a .torrent file. Pick where it lands and how the files settle once it's done."
+                    Icon="torrent"
+                    OnClose="CloseAdd">
+    <Body>
+        @* ── 1. SOURCE SEGMENT — Magnet / .torrent file / Upload files.
+              v5: third tab lets the user drop arbitrary local files (mkv /
+              mp4 / srt /…) straight into a registered folder, bypassing the
+              torrent engine entirely. Useful when you already have the file
+              and just want Animarr to index it. *@
+        <div class="tor-add__segment" role="tablist">
+            @foreach (var (key, label, icon) in new[]
+                {
+                    ("magnet", "Magnet link", "link"),
+                    ("file",   ".torrent file", "paperclip"),
+                    ("upload", "Upload files", "download"),
+                })
+            {
+                var k = key;
+                var l = label;
+                var ic = icon;
+                var active = _addSource == k;
+                <button type="button"
+                        class="@($"tor-add__seg-item tv-focus {(active ? "is-active" : "")}")"
+                        role="tab"
+                        aria-selected="@active"
+                        @onclick="@(() => _addSource = k)">
+                    <DIcon Name="@ic" Size="13" />
+                    @l
+                </button>
+            }
+        </div>
+
+        @* ── 2. SOURCE-SPECIFIC INPUT. *@
+        @if (_addSource == "magnet")
+        {
+            <label class="d-input-group tor-add__field">
+                <span class="d-input-group__label">Magnet URI</span>
+                <input class="tor-add__input tor-add__input--mono"
+                       placeholder="magnet:?xt=urn:btih:…"
+                       value="@_addMagnet"
+                       @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
+            </label>
+        }
+        else if (_addSource == "file")
+        {
+            <div class="tor-add__field">
+                <span class="tor-add__field-label">.torrent file</span>
+                <div class="@($"tor-add__dropzone {(_addFileName is not null ? "tor-add__dropzone--loaded" : "")}")">
+                    @* InputFile invisibly fills the dropzone — click anywhere
+                       opens the picker. Visual prompt sits behind via CSS. *@
+                    <InputFile OnChange="OnTorrentFilePicked" accept=".torrent" class="tor-add__dropzone-input" />
+                    <div class="tor-add__dropzone-content">
+                        @if (_addFileName is null)
+                        {
+                            <DIcon Name="paperclip" Size="20" />
+                            <div class="tor-add__dropzone-prompt">
+                                Drop a .torrent file or <span class="tor-add__dropzone-browse">browse</span>
+                            </div>
+                            <div class="tor-add__dropzone-hint">Up to 5 MB</div>
+                        }
+                        else
+                        {
+                            <DIcon Name="check" Size="16" />
+                            <div class="tor-add__dropzone-prompt">
+                                @_addFileName · @FormatBytesShort(_addFileSize)
+                            </div>
+                            <div class="tor-add__dropzone-hint">Click to swap</div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @* v5: parsed-manifest preview. Server's POST /api/torrents/parse
+               returns the file list inside the .torrent — surfacing it here
+               lets the user see what they're about to download (and how big)
+               BEFORE committing. Was present in the v4 design but lost in
+               the drawer rewrite. *@
+            @if (_parsed is not null)
+            {
+                <div class="tor-add__field">
+                    <span class="tor-add__field-label">Contents · @_parsed.Files.Length file(s) · @FormatBytesShort(_parsed.TotalSize)</span>
+                    <div class="tor-add__filelist">
+                        @foreach (var f in _parsed.Files)
+                        {
+                            <div class="tor-add__filelist-row">
+                                <span class="tor-add__filelist-path">@f.Path</span>
+                                <span class="tor-add__filelist-size">@FormatBytesShort(f.Length)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            else if (_parseError is not null)
+            {
+                <div class="tor-add__field tor-add__error">@_parseError</div>
+            }
+        }
+        else
+        {
+            @* ── Upload files tab — multiple local files into a chosen folder.
+                 No torrent / magnet involved. Server endpoint is
+                 POST /api/folders/{watcherId}/upload (multipart). *@
+            <div class="tor-add__field">
+                <span class="tor-add__field-label">Local files</span>
+                <div class="@($"tor-add__dropzone {(_uploadFiles.Count > 0 ? "tor-add__dropzone--loaded" : "")}")">
+                    <InputFile OnChange="OnUploadFilesPicked" multiple class="tor-add__dropzone-input" />
+                    <div class="tor-add__dropzone-content">
+                        @if (_uploadFiles.Count == 0)
+                        {
+                            <DIcon Name="download" Size="20" />
+                            <div class="tor-add__dropzone-prompt">
+                                Drop files or <span class="tor-add__dropzone-browse">browse</span>
+                            </div>
+                            <div class="tor-add__dropzone-hint">Multiple files OK</div>
+                        }
+                        else
+                        {
+                            <DIcon Name="check" Size="16" />
+                            <div class="tor-add__dropzone-prompt">
+                                @_uploadFiles.Count file(s) · @FormatBytesShort(_uploadFiles.Sum(f => f.Content.LongLength))
+                            </div>
+                            <div class="tor-add__dropzone-hint">Click to swap</div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (_uploadFiles.Count > 0)
+            {
+                <div class="tor-add__field">
+                    <span class="tor-add__field-label">Picked</span>
+                    <div class="tor-add__filelist">
+                        @foreach (var f in _uploadFiles)
+                        {
+                            <div class="tor-add__filelist-row">
+                                <span class="tor-add__filelist-path">@f.FileName</span>
+                                <span class="tor-add__filelist-size">@FormatBytesShort(f.Content.LongLength)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+
+        @* ── 3. DESTINATION (root folder) + subfolder. Subfolder maps to
+              CustomRootFolderName on the add request — server creates that
+              directory under the chosen root and drops the torrent in.
+              Filter: skip flat-section LEAF entries (SingleFilePath != null).
+              Those rows point at individual video files inside a flat section,
+              not at folders — selecting them as a download target made no
+              sense and the picker rendered them as if they were folders. *@
+        <label class="d-input-group tor-add__field">
+            <span class="d-input-group__label">Save to folder</span>
+            <select class="tor-add__select"
+                    value="@(_addFolderId?.ToString() ?? "")"
+                    @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                <option value="">— default download folder —</option>
+                @foreach (var f in FolderOptions())
+                {
+                    <option value="@f.Id">@f.Label — @f.Path</option>
+                }
+            </select>
+        </label>
+
+        <label class="d-input-group tor-add__field">
+            <span class="d-input-group__label">Create subfolder (optional)</span>
+            <input class="tor-add__input tor-add__input--mono"
+                   placeholder="e.g. Cowboy Bebop (1998) — leave empty for none"
+                   value="@_addSubfolder"
+                   @oninput="@(e => _addSubfolder = e.Value?.ToString() ?? "")" />
+        </label>
+
+        @* ── 4. Bandwidth caps — per-torrent rate limits in KB/s. Zero = no
+              limit. Only meaningful for magnet/.torrent — the upload-files
+              tab doesn't go through the engine. v5: previously these lived
+              only on TorrentEdit (after the fact); the Add drawer hardcoded
+              both sides to "unlimited" so the user had to throttle by hand
+              once the torrent was already saturating the line. *@
+        @if (_addSource != "upload")
+        {
+            <div class="tor-add__limits">
+                <label class="d-input-group tor-add__field tor-add__field--half">
+                    <span class="d-input-group__label">Download limit (KB/s · 0 = unlimited)</span>
+                    <input type="number" min="0" step="50"
+                           class="tor-add__input tor-add__input--mono"
+                           placeholder="0"
+                           value="@_addDownloadKBps"
+                           @oninput="@(e => _addDownloadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
+                </label>
+                <label class="d-input-group tor-add__field tor-add__field--half">
+                    <span class="d-input-group__label">Upload limit (KB/s · 0 = unlimited)</span>
+                    <input type="number" min="0" step="50"
+                           class="tor-add__input tor-add__input--mono"
+                           placeholder="0"
+                           value="@_addUploadKBps"
+                           @oninput="@(e => _addUploadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
+                </label>
+            </div>
+        }
+
+        @* ── 5. POST-PROCESSING TOGGLES — match design spec line 1152-1157.
+              Hidden in the Upload tab: the toggles only make sense for
+              torrents (seeding, root-folder stripping, etc.). *@
+        @if (_addSource != "upload")
+        {
+            <div class="tor-add__toggles">
+                <div class="tor-add__toggle-row">
+                    <div class="tor-add__toggle-text">
+                        <div class="tor-add__toggle-title">Auto-rename files via patterns</div>
+                        <div class="tor-add__toggle-hint">After download finishes, apply the global rename rules (S01E03 etc.).</div>
+                    </div>
+                    <Toggle Checked="@_addAutoRename" CheckedChanged="@((bool v) => _addAutoRename = v)" />
+                </div>
+                <div class="tor-add__toggle-row">
+                    <div class="tor-add__toggle-text">
+                        <div class="tor-add__toggle-title">Stop after download (no seed)</div>
+                        <div class="tor-add__toggle-hint">Skip the seeding phase once 100% is reached.</div>
+                    </div>
+                    <Toggle Checked="@_addStopAfter" CheckedChanged="@((bool v) => _addStopAfter = v)" />
+                </div>
+                <div class="tor-add__toggle-row">
+                    <div class="tor-add__toggle-text">
+                        <div class="tor-add__toggle-title">Flatten subfolders</div>
+                        <div class="tor-add__toggle-hint">Move every file to the destination root, drop internal directory structure.</div>
+                    </div>
+                    <Toggle Checked="@_addFlatten" CheckedChanged="@((bool v) => _addFlatten = v)" />
+                </div>
+                <div class="tor-add__toggle-row">
+                    <div class="tor-add__toggle-text">
+                        <div class="tor-add__toggle-title">Strip root folder</div>
+                        <div class="tor-add__toggle-hint">Drop the torrent's own top-level wrapper directory. Files land directly in the destination.</div>
+                    </div>
+                    <Toggle Checked="@_addStripRoot" CheckedChanged="@((bool v) => _addStripRoot = v)" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="tor-add__upload-note">
+                Files are copied straight into the chosen folder — no torrent /
+                seeding involved. Pick the destination above; the auto-rename
+                step still applies when the FolderWatcher runs.
+            </div>
+        }
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" Loading="@_adding"
+             Disabled="@(!CanAdd || _adding)"
+             OnClick="AddTorrentAsync">
+            <DIcon Name="download" Size="13" /> Start download
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseAdd">Cancel</Btn>
+    </Footer>
+</SettingsEditDrawer>
+
+@if (_records is null)
+{
+    <div class="torrents-loading"><InlineDots /></div>
+}
+else if (_records.Length == 0)
+{
+    @* v5 fix: was .torrent-empty (no matching rule); .torrents-empty already
+       exists in Torrents.razor.css with the right token-based styling. *@
+    <div class="torrents-empty">No torrents yet — paste a magnet above to start one.</div>
+}
+else
+{
+    @* v5 fix: was <table class="torrent-table">. The scoped CSS defines
+       .tor-table with full row/cell styles + responsive grid layout for
+       mobile — rename to pick that up. .bar/.bar-fill/.bar-pct were
+       page-local ad-hoc helpers; switched to the global .animarr-progress
+       primitive so the bar tracks the accent token instead of staying
+       Cinematic-era crimson. *@
+    <div class="torrents-grid-wrap">
+        @* v5: column widths come from CSS classes (.tor-col-*) so they
+           live next to the .tor-table rules and stay consistent across
+           pages. Inline widths squeezed Progress to 140px which left the
+           actual bar around 70px — way too short for the percentage and
+           bar to both be readable. The progress column is now 320px and
+           the speed columns trim back to 90px. *@
+        <table class="tor-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th class="tor-col-status">State</th>
+                    <th class="tor-col-progress">Progress</th>
+                    <th class="tor-col-mono tor-col--right">Down</th>
+                    <th class="tor-col-mono tor-col--right">Up</th>
+                    <th class="tor-col-actions"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in _records.OrderByDescending(r => r.AddedAt))
+                {
+                    _live.TryGetValue(t.InfoHash, out var live);
+                    var progress = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
+                    var state = live?.State ?? t.State.ToString();
+                    var paused = t.State == TorrentRecordState.Paused;
+                    <tr>
+                        <td class="tor-name">
+                            <button type="button" class="tor-name__text"
+                                    @onclick="@(() => OpenEdit(t.InfoHash))">@t.Name</button>
+                        </td>
+                        <td class="tor-cell tor-cell--dim">@state</td>
+                        <td>
+                            <div class="tor-progress tor-progress--info">
+                                <div class="animarr-progress">
+                                    <div class="animarr-progress__track">
+                                        <div class="animarr-progress__fill" style="width:@(progress*100)%"></div>
+                                    </div>
+                                </div>
+                                <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
+                            </div>
+                        </td>
+                        <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.DownloadRate ?? 0)</td>
+                        <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.UploadRate ?? 0)</td>
+                        <td class="tor-col-actions">
+                            <div class="tor-actions">
+                                @if (paused)
+                                {
+                                    <button class="tor-iconbtn" title="Resume" @onclick="@(() => ResumeAsync(t.Id))">
+                                        <DIcon Name="play" Size="13" />
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="tor-iconbtn" title="Pause" @onclick="@(() => PauseAsync(t.Id))">
+                                        <DIcon Name="pause" Size="13" />
+                                    </button>
+                                }
+                                <button class="tor-iconbtn tor-iconbtn--danger" title="Remove" @onclick="@(() => DeleteAsync(t.Id))">
+                                    <DIcon Name="trash" Size="13" />
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_editHash is not null)
+{
+    <TorrentEdit Hash="@_editHash"
+                 OnClose="CloseEdit"
+                 OnDeleted="OnTorrentDeleted" />
+}
+
+@code {
+    private TorrentRecordDto[]? _records;
+    private FolderWatcherDto[]? _folders;
+    private readonly Dictionary<string, TorrentLiveStatsDto> _live = new();
+    private HubConnection? _hub;
+
+    private bool   _addOpen;
+    private string _addSource = "magnet";
+    private string _addMagnet = "";
+    private string? _addFileName;
+    private byte[]? _addFileBytes;
+    private long   _addFileSize;
+    private Guid?  _addFolderId;
+    private string _addSubfolder  = "";   // → CustomRootFolderName
+    private bool   _addAutoRename = true;
+    private bool   _addStopAfter;
+    private bool   _addFlatten;           // → SkipSubfolderStructure
+    private bool   _addStripRoot;         // → SuppressRootFolder
+    private int    _addDownloadKBps;       // v5: per-torrent dl cap (0 = unlimited)
+    private int    _addUploadKBps;         // v5: per-torrent ul cap (0 = unlimited)
+    private bool   _adding;
+
+    // v5 parse preview — populated after OnTorrentFilePicked succeeds.
+    private ParsedTorrentDto? _parsed;
+    private string?           _parseError;
+
+    // v5 upload-tab state — list of staged files waiting for "Start upload".
+    private readonly List<UploadFilePart> _uploadFiles = new();
+
+    /// <summary>InfoHash of the torrent the right-edge edit drawer is bound
+    /// to. Null = drawer closed. Set by clicking a torrent name; cleared by
+    /// the drawer's Cancel button or after a successful Remove.</summary>
+    private string? _editHash;
+
+    private void OpenEdit(string infoHash) => _editHash = infoHash;
+
+    private void CloseEdit() => _editHash = null;
+
+    /// <summary>Open the Add Torrent drawer — resets the form so a previous
+    /// cancelled session doesn't bleed into the next attempt.</summary>
+    private void OpenAdd()
+    {
+        _addSource     = "magnet";
+        _addMagnet     = "";
+        _addFileName   = null;
+        _addFileBytes  = null;
+        _addFileSize   = 0;
+        _addFolderId   = null;
+        _addSubfolder  = "";
+        _addAutoRename = true;
+        _addStopAfter  = false;
+        _addFlatten    = false;
+        _addStripRoot  = false;
+        _addDownloadKBps = 0;
+        _addUploadKBps   = 0;
+        _parsed        = null;
+        _parseError    = null;
+        _uploadFiles.Clear();
+        _addOpen       = true;
+    }
+
+    private void CloseAdd() => _addOpen = false;
+
+    private async Task OnTorrentDeleted()
+    {
+        _editHash = null;
+        await LoadAsync();
+    }
+
+    private bool CanAdd => _addSource switch
+    {
+        "magnet" => !string.IsNullOrWhiteSpace(_addMagnet),
+        "file"   => _addFileBytes is { Length: > 0 },
+        // Upload tab needs at least one file AND a destination folder
+        // chosen — files have to land somewhere, no "default" makes sense.
+        "upload" => _uploadFiles.Count > 0 && _addFolderId is not null,
+        _        => false,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+
+        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder()
+            .WithUrl(hubUri)
+            .WithAutomaticReconnect()
+            .Build();
+        _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
+        {
+            _live.Clear();
+            foreach (var s in env.Items) _live[s.InfoHash] = s;
+            InvokeAsync(StateHasChanged);
+        });
+        try { await _hub.StartAsync(); }
+        catch { /* hub unavailable — list still renders from REST */ }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _records = await Api.GetTorrentsAsync();
+            _folders = await Api.GetFoldersAsync();
+        }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    /// <summary>Folders that are valid download targets in the Add-Torrent
+    /// drawer. Sections are containers, not destinations — they auto-create
+    /// child rows when files land, so a torrent pointed straight at a section
+    /// would orphan its files. Keep only leaves.</summary>
+    private IEnumerable<FolderWatcherDto> FolderOptions()
+        => (_folders ?? Array.Empty<FolderWatcherDto>()).Where(f => !f.IsSection);
+
+    private async Task OnTorrentFilePicked(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        // .torrent files top out around 100KB — small enough to keep in
+        // memory and ship as Base64 in the request body.
+        const long MaxBytes = 5 * 1024 * 1024;
+        if (file.Size > MaxBytes) return;
+        using var ms = new System.IO.MemoryStream();
+        await file.OpenReadStream(MaxBytes).CopyToAsync(ms);
+        _addFileBytes = ms.ToArray();
+        _addFileName  = file.Name;
+        _addFileSize  = file.Size;
+        _parsed       = null;
+        _parseError   = null;
+        StateHasChanged();
+
+        // v5: ask the server for the file manifest so the dropzone can
+        // preview what's inside the .torrent. Fire-and-forget UX — if the
+        // call fails the user still sees the filename + size and Start
+        // download still works, just without the preview.
+        try
+        {
+            var b64 = Convert.ToBase64String(_addFileBytes);
+            _parsed = await Api.ParseTorrentAsync(new ParseTorrentRequest(b64));
+            if (_parsed is null) _parseError = "Couldn't read the .torrent file.";
+        }
+        catch (Exception ex)
+        {
+            _parseError = $"Parse failed: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>Stage files for the Upload-files tab. Multiple files come in
+    /// via InputFile's `multiple` attribute; we buffer them all in memory
+    /// (capped per-file at 4 GiB to match the server endpoint).</summary>
+    private async Task OnUploadFilesPicked(InputFileChangeEventArgs e)
+    {
+        _uploadFiles.Clear();
+        // Hard cap to keep one ridiculous file from OOM-ing the WebView.
+        const long PerFileMax = 4L * 1024 * 1024 * 1024;
+        // GetMultipleFiles caps how many entries InputFile yields at once;
+        // bump it from the default (10) so a season's worth of episodes
+        // doesn't get truncated silently.
+        foreach (var file in e.GetMultipleFiles(maximumFileCount: 200))
+        {
+            if (file.Size <= 0 || file.Size > PerFileMax) continue;
+            using var ms = new System.IO.MemoryStream();
+            await file.OpenReadStream(PerFileMax).CopyToAsync(ms);
+            _uploadFiles.Add(new UploadFilePart(file.Name, ms.ToArray()));
+        }
+        StateHasChanged();
+    }
+
+    private async Task AddTorrentAsync()
+    {
+        if (!CanAdd) return;
+        _adding = true;
+        StateHasChanged();
+        try
+        {
+            var subfolder = string.IsNullOrWhiteSpace(_addSubfolder) ? null : _addSubfolder.Trim();
+            if (_addSource == "magnet")
+            {
+                await Api.AddMagnetAsync(new AddMagnetRequest(
+                    MagnetLink:             _addMagnet.Trim(),
+                    FolderWatcherId:        _addFolderId,
+                    AutoRename:             _addAutoRename,
+                    StopAfterDownload:      _addStopAfter,
+                    SkipSubfolderStructure: _addFlatten,
+                    SuppressRootFolder:     _addStripRoot,
+                    CustomRootFolderName:   subfolder,
+                    DownloadLimitKBps:      _addDownloadKBps,
+                    UploadLimitKBps:        _addUploadKBps));
+            }
+            else if (_addSource == "file" && _addFileBytes is not null)
+            {
+                await Api.AddTorrentFileAsync(new AddTorrentFileRequest(
+                    Filename:               _addFileName ?? "torrent.torrent",
+                    Base64Content:          Convert.ToBase64String(_addFileBytes),
+                    FolderWatcherId:        _addFolderId,
+                    AutoRename:             _addAutoRename,
+                    StopAfterDownload:      _addStopAfter,
+                    SkipSubfolderStructure: _addFlatten,
+                    SuppressRootFolder:     _addStripRoot,
+                    CustomRootFolderName:   subfolder,
+                    DownloadLimitKBps:      _addDownloadKBps,
+                    UploadLimitKBps:        _addUploadKBps));
+            }
+            else if (_addSource == "upload" && _addFolderId is Guid folder && _uploadFiles.Count > 0)
+            {
+                await Api.UploadFilesToFolderAsync(folder, _uploadFiles);
+            }
+
+            _addMagnet = "";
+            _addFileBytes = null;
+            _addFileName  = null;
+            _parsed       = null;
+            _parseError   = null;
+            _uploadFiles.Clear();
+            _addOpen = false;
+            await LoadAsync();
+        }
+        catch { /* swallow */ }
+        finally { _adding = false; StateHasChanged(); }
+    }
+
+    private static string FormatBytesShort(long bytes)
+    {
+        if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)      return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+
+    private async Task PauseAsync(Guid id)
+    {
+        try { await Api.PauseTorrentAsync(id); await LoadAsync(); }
+        catch { /* swallow */ }
+    }
+
+    private async Task ResumeAsync(Guid id)
+    {
+        try { await Api.ResumeTorrentAsync(id); await LoadAsync(); }
+        catch { /* swallow */ }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try { await Api.DeleteTorrentAsync(id, deleteFiles: false); await LoadAsync(); }
+        catch { /* swallow */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null) await _hub.DisposeAsync();
+    }
+
+    private static string FormatRate(long bps)
+    {
+        if (bps <= 0) return "0";
+        var units = new[] { "B/s", "KB/s", "MB/s", "GB/s" };
+        double v = bps;
+        int i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return $"{v:F1} {units[i]}";
+    }
+}

@@ -1,0 +1,102 @@
+@*
+    Welcome — public landing for anonymous users.
+
+    Stripped-down v5: vertically + horizontally centered stack. Icon,
+    name, one-line tagline, single "Get started" CTA. Feature cards and
+    long lede paragraph were noise — the user only ever clicks the CTA
+    from this screen, so anything else is decoration competing with it.
+*@
+
+@page "/welcome"
+@layout AuthLayout
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject ServerRegistryState ServerReg
+@inject IJSRuntime JS
+
+<PageTitle>Animarr — Your library, understood.</PageTitle>
+
+<div class="d-welcome">
+    <div class="d-welcome__cjk" aria-hidden="true">动画</div>
+
+    <div class="d-welcome__stack">
+        <BrandMark Size="84" ExtraClass="d-welcome__mark" />
+
+        <h1 class="d-welcome__name">Animarr</h1>
+
+        <p class="d-welcome__tagline">
+            Self-hosted anime &amp; movie library, understood by an LLM.
+        </p>
+
+        <Btn Variant="primary" Size="lg" OnClick="StartFlow">
+            Get started <DIcon Name="arrow-r" Size="13" />
+        </Btn>
+    </div>
+
+    <a href="@GithubUrl" target="_blank" rel="noopener" class="d-welcome__gh tv-focus" aria-label="Animarr on GitHub">
+        github
+    </a>
+</div>
+
+@code {
+    private const string GithubUrl = "https://github.com/eduardpoul/Animarr";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Local state hydrates fast (localStorage) — always safe to await.
+        if (!ServerReg.Loaded) await ServerReg.LoadAsync();
+
+        // Don't probe /api/auth/status until we have at least one server in
+        // the registry. UserCtx.LoadAsync goes through the rewriting
+        // HttpClient pipeline, which on first run still points at the
+        // compile-time placeholder URL (animarr.tower.one). That host doesn't
+        // exist on the user's LAN, so the request hangs for the full 30s
+        // HttpClient timeout before Welcome paints. We just sit on a frozen
+        // splash. Fix: only call LoadAsync when we genuinely have a server
+        // to ask, and even then fire-and-forget so the UI never blocks.
+        if (ServerReg.Count == 0)
+        {
+            return;
+        }
+
+        if (!UserCtx.Loaded)
+        {
+            // Fire-and-forget — Welcome renders immediately; once the probe
+            // completes (or times out) UserCtx.OnChange will fire and any
+            // dependent UI re-renders. The redirect-if-authenticated path
+            // still works because we re-evaluate after a successful load.
+            _ = ProbeAuthAsync();
+            return;
+        }
+
+        await TryRedirectIfAuthenticatedAsync();
+    }
+
+    private async Task ProbeAuthAsync()
+    {
+        try { await UserCtx.LoadAsync(); } catch { /* swallow — UI stays on Welcome */ }
+        await InvokeAsync(TryRedirectIfAuthenticatedAsync);
+    }
+
+    private async Task TryRedirectIfAuthenticatedAsync()
+    {
+        if (!UserCtx.IsAuthenticated) return;
+        string? deepLinkId = null;
+        try { deepLinkId = await JS.InvokeAsync<string?>("animarrConsumePendingDeepLink"); }
+        catch { /* shim absent (browser WASM) — no deep link path */ }
+
+        Nav.NavigateTo(
+            !string.IsNullOrEmpty(deepLinkId) ? $"/media/{deepLinkId}" : "/",
+            replace: true);
+    }
+
+    private void StartFlow()
+    {
+        if (UserCtx.AuthStatus is { SetupRequired: true })
+            Nav.NavigateTo("/setup");
+        else
+            Nav.NavigateTo("/discovery");
+    }
+}

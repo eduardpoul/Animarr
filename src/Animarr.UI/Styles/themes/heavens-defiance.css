@@ -1,0 +1,103 @@
+/* ============================================================
+   Heaven's Defiance — donghua / cultivation, storm side.
+
+   Stormy black canvas with a blue undertone, blood-red accent,
+   bone-white text, Noto Serif SC for display + Inter for UI.
+   Lightning bolts streak across the background — drawn with a
+   linear-gradient mask, zigzagged via clip-path or repeating
+   conic-like geometry. The vibe is "challenging the Will of
+   Heaven" — defiant, brooding, on the verge of breaking.
+   ============================================================ */
+/* `html` prefix bumps specificity to 0,0,1,1 so Tailwind v4's
+   @theme :root,:host emission can't wipe per-theme font tokens. */
+html[data-theme="heavens-defiance"] {
+    /* ── Backgrounds — stormy with blue undertone ─────────── */
+    --bg-0:        #060810;
+    --bg-1:        #0a0d18;
+    --surface:     #0d1018;
+    --surface-2:   #131722;
+    --surface-3:   #1a1f2c;
+
+    /* ── Borders — red tint ───────────────────────────────── */
+    --border:        rgba(255, 50, 50, 0.15);
+    --border-strong: rgba(255, 50, 50, 0.28);
+
+    /* ── Text — bone white ────────────────────────────────── */
+    --text:       #f0e8e0;
+    --text-dim:   #a89c90;
+    --text-faint: #5e544c;
+
+    /* ── Accent — blood red ───────────────────────────────── */
+    --accent-hue:  28;
+    --accent:      oklch(0.45 0.28 var(--accent-hue));
+    --accent-hi:   oklch(0.58 0.28 var(--accent-hue));
+    --accent-soft: oklch(0.45 0.28 var(--accent-hue) / 0.22);
+    --accent-line: oklch(0.45 0.28 var(--accent-hue) / 0.55);
+
+    /* ── Semantic — gold success matches lightning ────────── */
+    --success: oklch(0.74 0.16 110);
+    --warn:    oklch(0.78 0.18  75);
+    --info:    oklch(0.70 0.14 220);
+
+    /* ── Typography — Serif SC display + Inter UI ─────────── */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Noto Serif SC', 'Inter', serif;
+
+    /* ── Labels — uppercase, very wide tracking ───────────── */
+    --label-casing: uppercase;
+    --label-tracking: 0.16em;
+
+    /* ── Shadows — red-glow on cards ──────────────────────── */
+    --shadow-card:    0 14px 34px -18px rgba(200, 40, 30, 0.42),
+                      inset 0 0 0 1px rgba(255, 50, 50, 0.05);
+    --shadow-card-hi: 0 22px 48px -14px rgba(200, 40, 30, 0.58),
+                      inset 0 0 0 1px rgba(255, 50, 50, 0.14);
+}
+
+/* ── Lightning streak decoration (Heaven's-Defiance) ──────
+   Three vertical linear-gradients positioned + skewed to mimic
+   forked lightning. White-yellow core, blue-white glow halo. Very
+   low opacity so the background reads as stormy ambiance, not as
+   literal bolts hitting the screen. */
+[data-theme="heavens-defiance"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.10;
+    background-image:
+        linear-gradient(
+            8deg,
+            transparent 0%,
+            transparent 17%,
+            rgba(200, 224, 255, 0.30) 17.4%,
+            rgba(255, 255, 240, 0.55) 17.6%,
+            rgba(200, 224, 255, 0.30) 17.8%,
+            transparent 18.2%,
+            transparent 100%
+        ),
+        linear-gradient(
+            -12deg,
+            transparent 0%,
+            transparent 76%,
+            rgba(200, 224, 255, 0.20) 76.4%,
+            rgba(255, 255, 240, 0.45) 76.6%,
+            rgba(200, 224, 255, 0.20) 76.8%,
+            transparent 77.2%,
+            transparent 100%
+        ),
+        radial-gradient(
+            ellipse 60% 40% at 30% 90%,
+            rgba(160, 20, 30, 0.30) 0%,
+            transparent 70%
+        );
+}
+
+/* ── Display titles get full serif weight ─────────────── */
+[data-theme="heavens-defiance"] h1,
+[data-theme="heavens-defiance"] h2,
+[data-theme="heavens-defiance"] .d-display {
+    font-weight: 900;
+    letter-spacing: -0.4px;
+}

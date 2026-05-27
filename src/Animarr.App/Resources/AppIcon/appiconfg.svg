@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Animarr app icon — foreground. New v6 mark from
+     design-system/scratch-mark4.html: dark rounded tile + sharp geometric
+     "A" in teal accent + white sparkle in the top-right corner.
+
+     MAUI emits this layer as the adaptive-icon foreground on Android and
+     as the squircle/rounded-rect content on iOS / Windows. Aggressive
+     launchers crop to the central ~66% — the tile sits within that safe
+     zone (280×280 inside 456×456) so the mark never gets clipped.
+
+     Sparkle stays in the visible safe zone too: the original 72×72
+     design puts it at (52..64, 14..25) inside the 72-unit grid, which
+     scales here to (~292..344, ~134..220) — comfortably within the
+     center crop on every launcher. -->
+<svg width="456" height="456" viewBox="0 0 456 456" xmlns="http://www.w3.org/2000/svg">
+    <!-- Inner dark tile — 312×312 centred (456 - 72 padding each side).
+         rx scales as 20/72 of the tile width = 86.7px. -->
+    <g transform="translate(72 72)">
+        <rect width="312" height="312" rx="86.7" fill="#0a0c10"/>
+
+        <!-- Mark in the 72×72 design coordinate system, scaled 4.333× to fill
+             the 312 tile. Original path coords from scratch-mark4.html:
+               A:       M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z
+                        M31 39 L41 39 L36 24 Z  (evenodd cuts the counter)
+               Sparkle: M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z -->
+        <g transform="scale(4.333)">
+            <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+                  fill="#84c0d2"
+                  fill-rule="evenodd"/>
+            <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+                  fill="#ffffff"/>
+        </g>
+    </g>
+</svg>

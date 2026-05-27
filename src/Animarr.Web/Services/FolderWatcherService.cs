@@ -139,24 +139,18 @@ public class FolderWatcherService(
         watcher.Renamed += (_, e) => OnFileCreated(e.FullPath, folderId);
         watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
 
+        // Sections always get both watchers: directories (for new subfolder per-title
+        // entries) AND files (for standalone movies dropped right in the section root).
+        // The previous "either/or" controlled by flatSection meant a Movies section
+        // with mixed content (one Title-subfolder + loose .mkv files) only picked up
+        // one mode. flatSection is kept as the toggle that turns OFF the dir-watcher
+        // — useful for sections that should never auto-register subfolders.
         FileSystemWatcher? dirWatcher = null;
+        FileSystemWatcher? fileWatcher = null;
         if (isSection)
         {
-            if (flatSection)
+            if (!flatSection)
             {
-                // Flat section: watch for video files directly in the root
-                dirWatcher = new FileSystemWatcher(path)
-                {
-                    IncludeSubdirectories = false,
-                    NotifyFilter = NotifyFilters.FileName,
-                    EnableRaisingEvents = true,
-                };
-                dirWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
-                dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FlatWatcher error for {Path}", path);
-            }
-            else
-            {
-                // Normal section: watch for new subdirectories
                 dirWatcher = new FileSystemWatcher(path)
                 {
                     IncludeSubdirectories = false,
@@ -166,9 +160,21 @@ public class FolderWatcherService(
                 dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
                 dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
             }
+
+            // Standalone video files in the section root → always register a SingleFilePath
+            // entry per file. Filtering happens inside OnVideoFileCreated.
+            fileWatcher = new FileSystemWatcher(path)
+            {
+                IncludeSubdirectories = false,
+                NotifyFilter = NotifyFilters.FileName,
+                EnableRaisingEvents = true,
+            };
+            fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+            fileWatcher.Renamed += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+            fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
         }
 
-        _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher);
+        _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher, fileWatcher);
     }
 
     private void OnDirectoryCreated(string dirPath, Guid sectionId)
@@ -441,6 +447,154 @@ public class FolderWatcherService(
     }
 
     /// <summary>
+    /// One-shot scan of a section's path: enumerates immediate subdirectories
+    /// and registers each one as a child FolderWatcher (the OnDirectoryCreated
+    /// FSW path only fires for dirs created AFTER the watcher starts, so an
+    /// existing populated tree never gets picked up otherwise).
+    ///
+    /// Used by:
+    ///   - SectionFolderDialog after a brand-new section is saved — turns an
+    ///     "added an existing /Pool-D1/Media/Anime with 40 anime in it" into
+    ///     40 child rows the catalog can identify.
+    ///   - RootFoldersList Rescan button — picks up any folders added while
+    ///     the app was down OR while the section was disabled.
+    ///
+    /// Skips: already-registered paths, dismissed paths, junk/empty dirs (via
+    /// MediaFolderHeuristics). Identification queuing is the caller's choice
+    /// so we don't duplicate the policy that lives in OnDirectoryCreated.
+    ///
+    /// Returns the IDs of the newly-registered child watchers.
+    /// </summary>
+    public async Task<List<Guid>> DiscoverChildrenAsync(Guid sectionId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var section = await db.FolderWatchers.FindAsync(sectionId);
+        if (section is null || !section.IsSection) return [];
+        if (!Directory.Exists(section.Path))
+        {
+            logger.LogWarning("DiscoverChildrenAsync: section path missing — {Path}", section.Path);
+            return [];
+        }
+
+        string[] dirs;
+        string[] files;
+        try
+        {
+            dirs  = Directory.GetDirectories(section.Path);
+            // Loose video files in the section root → register each as a flat
+            // SingleFilePath entry. Same shape as OnVideoFileCreated, but for
+            // files that were already there when the section was added.
+            files = Directory.GetFiles(section.Path)
+                .Where(f => _videoExtensions.Contains(Path.GetExtension(f)))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "DiscoverChildrenAsync: enumerate failed for {Path}", section.Path);
+            return [];
+        }
+
+        // Pre-load existing registrations + dismissed list once, in-memory comparisons after.
+        // Track both folder Paths and SingleFilePath entries so we don't double-register either.
+        var existingChildren = await db.FolderWatchers
+            .Where(f => f.ParentSectionId == sectionId)
+            .Select(f => new { f.Path, f.SingleFilePath })
+            .ToListAsync();
+        var existingPaths = new HashSet<string>(
+            existingChildren.Where(c => c.SingleFilePath is null).Select(c => c.Path),
+            StringComparer.OrdinalIgnoreCase);
+        var existingFiles = new HashSet<string>(
+            existingChildren.Where(c => c.SingleFilePath is { Length: > 0 }).Select(c => c.SingleFilePath!),
+            StringComparer.OrdinalIgnoreCase);
+
+        var dismissed = ParseDismissed(
+            (await db.AppConfigs.FindAsync(DismissedKey(sectionId)))?.Value);
+
+        var newIds = new List<Guid>();
+        var toAdd  = new List<FolderWatcher>();
+
+        foreach (var dirPath in dirs)
+        {
+            if (existingPaths.Contains(dirPath)) continue;
+            if (dismissed.Contains(NormalisePath(dirPath))) continue;
+            if (!MediaFolderHeuristics.LooksLikeMediaFolder(dirPath))
+            {
+                logger.LogDebug("DiscoverChildrenAsync: skipping non-media dir {Path}", dirPath);
+                continue;
+            }
+
+            var newFolder = new FolderWatcher
+            {
+                Id              = Guid.NewGuid(),
+                Path            = dirPath,
+                Label           = Path.GetFileName(dirPath),
+                WatchEnabled    = section.WatchEnabled,
+                RenameEnabled   = section.RenameEnabled,
+                IdentifyEnabled = section.IdentifyEnabled,
+                FolderType      = section.FolderType,
+                IsSection       = false,
+                ParentSectionId = sectionId,
+                CreatedAt       = DateTime.UtcNow,
+            };
+            toAdd.Add(newFolder);
+            newIds.Add(newFolder.Id);
+        }
+
+        foreach (var filePath in files)
+        {
+            if (existingFiles.Contains(filePath)) continue;
+            if (dismissed.Contains(NormalisePath(filePath))) continue;
+
+            // SingleFilePath entry — represents one standalone movie sitting in
+            // the section root. Path = section root (so /api/image and rename
+            // queues still resolve correctly); identification keys off SingleFilePath.
+            var newEntry = new FolderWatcher
+            {
+                Id              = Guid.NewGuid(),
+                Path            = section.Path,
+                SingleFilePath  = filePath,
+                Label           = Path.GetFileNameWithoutExtension(filePath),
+                WatchEnabled    = false,
+                RenameEnabled   = section.RenameEnabled,
+                IdentifyEnabled = section.IdentifyEnabled,
+                FolderType      = FolderType.Movie,
+                IsSection       = false,
+                FlatSection     = false,
+                ParentSectionId = sectionId,
+                CreatedAt       = DateTime.UtcNow,
+            };
+            toAdd.Add(newEntry);
+            newIds.Add(newEntry.Id);
+        }
+
+        if (toAdd.Count == 0) return newIds;
+
+        db.FolderWatchers.AddRange(toAdd);
+        await db.SaveChangesAsync();
+
+        // Start file watchers (for subfolders only — SingleFilePath entries don't
+        // need their own watcher, the section root watcher handles them) and
+        // best-effort torrent linking. Done outside the DB transaction so a
+        // single bad path doesn't block the rest.
+        foreach (var f in toAdd)
+        {
+            if (f.SingleFilePath is null)
+            {
+                try { await StartWatcherAsync(f.Id); } catch (Exception ex) { logger.LogWarning(ex, "Watcher start failed for {Path}", f.Path); }
+                try { await torrentEngine.TryLinkTorrentAsync(f.Path, f.Id); } catch { /* best-effort */ }
+            }
+            SubfolderCreated?.Invoke(sectionId, f.Id);
+        }
+
+        logger.LogInformation(
+            "DiscoverChildrenAsync: registered {DirCount} child folders + {FileCount} standalone files under {Section}",
+            toAdd.Count(t => t.SingleFilePath is null),
+            toAdd.Count(t => t.SingleFilePath is not null),
+            section.Label);
+        return newIds;
+    }
+
+    /// <summary>
     /// Removes FolderWatcher rows whose on-disk path (or SingleFilePath for
     /// flat-section entries) no longer exists. The MediaItem cascades, so the
     /// /catalog stops showing ghost cards that don't correspond to any disk
@@ -545,7 +699,10 @@ public class FolderWatcherService(
 
     // ─── Entry wrapper ────────────────────────────────────────────────────────
 
-    private sealed class FolderWatcherEntry(FileSystemWatcher watcher, FileSystemWatcher? dirWatcher = null) : IDisposable
+    private sealed class FolderWatcherEntry(
+        FileSystemWatcher watcher,
+        FileSystemWatcher? dirWatcher = null,
+        FileSystemWatcher? fileWatcher = null) : IDisposable
     {
         public void Dispose()
         {
@@ -555,6 +712,11 @@ public class FolderWatcherService(
             {
                 dirWatcher.EnableRaisingEvents = false;
                 dirWatcher.Dispose();
+            }
+            if (fileWatcher is not null)
+            {
+                fileWatcher.EnableRaisingEvents = false;
+                fileWatcher.Dispose();
             }
         }
     }

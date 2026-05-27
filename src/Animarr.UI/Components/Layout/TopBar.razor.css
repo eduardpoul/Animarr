@@ -1,0 +1,245 @@
+/* ============================================================
+   TopBarV4 — 60px fixed header. Spec: screens-v4.jsx lines 251-366.
+   ============================================================ */
+
+.d-topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    /* Edge-to-edge: extend the bar's painted area BEHIND the Android status
+       bar / iOS dynamic island, then pad the inner content down by the
+       safe-area inset so the buttons aren't covered. On TV both insets are
+       0 so this collapses back to a flat 60px bar. */
+    height: calc(60px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 24px 0;
+    z-index: 50;
+    /* Fully transparent — no gradient, no blur, no border, no shadow. The
+       interactive pills below also drop their backdrop-filter so the bar
+       reads as a row of floating text/icon controls over hero artwork,
+       not a separate glass strip across the top of the viewport. */
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 0;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* ── Brand ──────────────────────────────────────────────── */
+.d-topbar__brand {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex-shrink: 0;
+    padding: 0;
+    color: inherit;
+}
+
+/* v6: brand mark is now the BrandMark SVG (sharp geo A + sparkle) rather
+   than a text-rendered "a". The rect inside the SVG paints its own dark
+   tile + teal accent, so this rule only adds the brand-glow shadow that
+   the chip used to draw via the gradient bg. */
+.d-topbar__brand-mark {
+    border-radius: 8px;
+    box-shadow: 0 4px 16px -4px var(--accent-soft);
+    flex-shrink: 0;
+}
+
+.d-topbar__brand-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: -0.3px;
+    line-height: 1;
+    color: var(--text);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    text-transform: var(--label-casing, none);
+}
+
+/* ── Folder nav (replaces v3 sidebar folder chips) ───────── */
+.d-topbar__nav {
+    display: flex;
+    gap: 4px;
+    margin-left: 16px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.d-topbar__nav::-webkit-scrollbar { display: none; }
+
+.d-topbar__pill {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border-radius: 8px;
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+.d-topbar__pill:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.d-topbar__pill--active {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 1px 0 var(--accent) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+
+/* ── LLM status pill ─────────────────────────────────────── */
+/* Glass-morphism: dark translucent fill + saturated blur. Lifts the
+   pill off bright hero artwork so the dot + counter stay legible
+   without the bar itself needing a solid strip. */
+.d-topbar__llm {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text);
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+.d-topbar__llm:hover {
+    color: var(--text);
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.d-topbar__llm-dot {
+    width: 7px; height: 7px;
+    border-radius: 7px;
+    background: var(--success);
+    box-shadow: 0 0 10px var(--success);
+    animation: llm-pulse 1.8s ease-in-out infinite;
+}
+@keyframes llm-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+}
+
+.d-topbar__llm-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.6px;
+}
+
+/* ── Icon buttons (Downloads, Admin, Search) ──────────────── */
+/* Same glass treatment as the LLM pill — pill-fills lift them off the
+   hero artwork. drop-shadow on the SVG was a workaround for fully
+   transparent backgrounds; with a real fill we don't need it. */
+.d-topbar__icon-btn {
+    appearance: none;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    color: var(--text);
+    display: grid;
+    place-items: center;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+                color var(--motion-fast);
+}
+.d-topbar__icon-btn:hover {
+    color: var(--text);
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.d-topbar__icon-btn--active {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--accent-hi);
+}
+
+.d-topbar__badge {
+    position: absolute;
+    top: -3px; right: -3px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--bg-0);
+    line-height: 1;
+}
+
+/* ── Profile chip ────────────────────────────────────────── */
+.d-topbar__profile {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px 4px 4px;
+    border-radius: 999px;
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    height: 36px;
+    box-sizing: border-box;
+    color: var(--text);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.d-topbar__profile:hover {
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.d-topbar__profile-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+    align-items: flex-start;
+}
+.d-topbar__profile-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+}
+.d-topbar__profile-role {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+/* ── Mobile (< 960px) — hide the desktop topbar entirely;
+   MobileShell renders its own header strip. ──────────── */
+@media (max-width: 959px) {
+    .d-topbar { display: none; }
+}

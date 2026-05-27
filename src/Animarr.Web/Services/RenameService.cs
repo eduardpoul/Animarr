@@ -23,7 +23,8 @@ public class RenameService(
     private sealed record SeasonMetaDto(int Number, string? Name, List<EpisodeMetaDto>? Episodes);
     private sealed record EpisodeMetaDto(int Number, string? Name);
 
-    private async Task<EffectiveRules?> LoadEffectiveRulesAsync(AppDbContext db, Guid folderId, CancellationToken ct)
+    private async Task<EffectiveRules?> LoadEffectiveRulesAsync(
+        AppDbContext db, Guid folderId, string? filePath, CancellationToken ct)
     {
         var folder = await db.FolderWatchers
             .Include(f => f.Patterns)
@@ -31,6 +32,31 @@ public class RenameService(
             .FirstOrDefaultAsync(f => f.Id == folderId, ct);
 
         if (folder is null) return null;
+
+        // ─── Flat-section override ────────────────────────────────────────────
+        // A section's FSW also fires for video files dropped directly in its
+        // root. Those files are registered as SingleFilePath child watchers
+        // (FolderType=Movie) by OnVideoFileCreated, but the rename queue is
+        // populated by OnFileCreated which always uses the SECTION's folderId.
+        // Without this swap, movie files inherit the section's FolderType=Auto
+        // and get matched against TV-episode patterns (e.g. "Universal Episode
+        // fallback" captures the year and renames Inception.2010.mkv → 2010.mkv).
+        // Resolution: if we know the file path AND a SingleFilePath child of
+        // this section matches it, evaluate using that child's rules.
+        if (folder.IsSection && !string.IsNullOrEmpty(filePath))
+        {
+            var child = await db.FolderWatchers
+                .Include(f => f.Patterns)
+                .Include(f => f.IgnoreRules)
+                .FirstOrDefaultAsync(f => f.ParentSectionId == folder.Id
+                                       && f.SingleFilePath == filePath, ct);
+            if (child is not null)
+            {
+                logger.LogDebug("Flat-section file routed to child watcher: {Path} (child {ChildId}, FolderType={Type})",
+                    filePath, child.Id, child.FolderType);
+                folder = child;
+            }
+        }
 
         var globalPatterns = await db.RenamePatterns
             .Where(p => p.Scope == PatternScope.Global)
@@ -105,11 +131,33 @@ public class RenameService(
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        var rules = await LoadEffectiveRulesAsync(db, folderId, ct)
+        var rules = await LoadEffectiveRulesAsync(db, folderId, filePath: null, ct)
                     ?? throw new InvalidOperationException($"Folder {folderId} not found.");
 
         if (!Directory.Exists(rules.Folder.Path))
             throw new DirectoryNotFoundException($"Directory not found: {rules.Folder.Path}");
+
+        // If we're scanning a section, preload SingleFilePath children so each flat
+        // movie file is evaluated under its own (FolderType=Movie) rules instead
+        // of inheriting the section's auto-rules.
+        Dictionary<string, EffectiveRules>? flatChildRules = null;
+        if (rules.Folder.IsSection)
+        {
+            var childIds = await db.FolderWatchers
+                .Where(f => f.ParentSectionId == folderId && f.SingleFilePath != null)
+                .Select(f => new { f.Id, f.SingleFilePath })
+                .ToListAsync(ct);
+            if (childIds.Count > 0)
+            {
+                flatChildRules = new Dictionary<string, EffectiveRules>(StringComparer.OrdinalIgnoreCase);
+                foreach (var c in childIds)
+                {
+                    if (string.IsNullOrEmpty(c.SingleFilePath)) continue;
+                    var cr = await LoadEffectiveRulesAsync(db, c.Id, c.SingleFilePath, ct);
+                    if (cr is not null) flatChildRules[c.SingleFilePath] = cr;
+                }
+            }
+        }
 
         // Enumerate all files recursively (M-11: yields control to keep UI responsive)
         var activeDownloads = torrentEngine.GetActiveDownloadFilePaths();
@@ -125,9 +173,11 @@ public class RenameService(
         foreach (var filePath in files)
         {
             ct.ThrowIfCancellationRequested();
-            var item = matcher.EvaluateFile(filePath, rules.Patterns, rules.IgnoreRules,
-                rules.Folder.FolderType, rules.Folder.IsSection, rules.Folder.Path,
-                rules.EpisodeNames);
+            var effective = (flatChildRules != null && flatChildRules.TryGetValue(filePath, out var cr))
+                ? cr : rules;
+            var item = matcher.EvaluateFile(filePath, effective.Patterns, effective.IgnoreRules,
+                effective.Folder.FolderType, effective.Folder.IsSection, effective.Folder.Path,
+                effective.EpisodeNames);
             results.Add(item);
 
             // M-11: yield every 200 items so a huge tree doesn't peg the request thread
@@ -291,7 +341,7 @@ public class RenameService(
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        var rules = await LoadEffectiveRulesAsync(db, folderId, ct);
+        var rules = await LoadEffectiveRulesAsync(db, folderId, filePath, ct);
         if (rules is null) return;
 
         var item = matcher.EvaluateFile(filePath, rules.Patterns, rules.IgnoreRules,

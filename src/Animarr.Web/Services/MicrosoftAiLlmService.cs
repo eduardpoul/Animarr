@@ -22,6 +22,37 @@ public class MicrosoftAiLlmService(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    // ── Telemetry (in-memory, resets on restart) ──────────────────────────────
+    // Rolling window of last N call latencies. ConcurrentQueue + atomic count
+    // because identify calls run on the background processor thread but the
+    // settings page reads from the Blazor circuit thread.
+
+    private const int LatencyWindowSize = 50;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<int> _latenciesMs = new();
+    private long _totalCalls;
+    private volatile bool _lastProbeOk;
+    private DateTime? _lastProbeAt;
+
+    public LlmTelemetry GetTelemetry()
+    {
+        var snapshot = _latenciesMs.ToArray();
+        var avg = snapshot.Length > 0 ? (int)snapshot.Average() : 0;
+        return new LlmTelemetry
+        {
+            AverageLatencyMs = avg,
+            CallCount        = (int)Interlocked.Read(ref _totalCalls),
+            LastProbeOk      = _lastProbeOk,
+            LastProbeAt      = _lastProbeAt,
+        };
+    }
+
+    private void RecordLatency(int ms)
+    {
+        _latenciesMs.Enqueue(ms);
+        while (_latenciesMs.Count > LatencyWindowSize && _latenciesMs.TryDequeue(out _)) { }
+        Interlocked.Increment(ref _totalCalls);
+    }
+
     // ── ILlmService ───────────────────────────────────────────────────────────
 
     public async Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, string? sectionLabel = null, CancellationToken ct = default)
@@ -98,7 +129,11 @@ public class MicrosoftAiLlmService(
             "- For \"suggested_regex\", include named groups: (?<episode>...) and optionally (?<season>...).\n" +
             "- Return ONLY the JSON object, no extra text.";
 
+        var sw  = System.Diagnostics.Stopwatch.StartNew();
         var raw = await CallAsync(prompt, ct);
+        sw.Stop();
+        RecordLatency((int)sw.ElapsedMilliseconds);
+
         if (raw is null) return null;
 
         try
@@ -239,23 +274,43 @@ public class MicrosoftAiLlmService(
         }
     }
 
+    public async Task<string?> GetCompletionAsync(string prompt, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var raw = await CallAsync(prompt, ct);
+        sw.Stop();
+        RecordLatency((int)sw.ElapsedMilliseconds);
+        return raw;
+    }
+
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         try
         {
             var (client, _) = await CreateClientAsync(ct);
-            if (client is null) return false;
+            if (client is null)
+            {
+                _lastProbeOk = false;
+                _lastProbeAt = DateTime.UtcNow;
+                return false;
+            }
 
             // Send a minimal completion to test connectivity
             var result = await client.GetResponseAsync(
                 [new ChatMessage(ChatRole.User, "Reply with the single word: ok")],
                 new ChatOptions { MaxOutputTokens = 8 },
                 ct);
-            return result?.Text is not null;
+            var ok = result?.Text is not null;
+            _lastProbeOk = ok;
+            _lastProbeAt = DateTime.UtcNow;
+            return ok;
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "LLM availability check failed");
+            _lastProbeOk = false;
+            _lastProbeAt = DateTime.UtcNow;
             return false;
         }
     }

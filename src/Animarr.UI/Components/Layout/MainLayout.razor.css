@@ -1,0 +1,128 @@
+/* ============================================================
+   MainLayout (v4) — scoped styles. The TopBar is fixed at top 0,
+   60px tall; the <main> column pushes down by that amount so the
+   first content doesn't sit under the topbar's blur.
+   ============================================================ */
+
+.animarr-shell {
+    min-height: 100vh;
+    position: relative;
+    /* No flex/column wrapper — TopBar is position:fixed (lives outside the
+       layout flow). Document body scrolls naturally; .animarr-main below
+       just pushes content down 80px to clear the fixed topbar. */
+}
+
+/* Backdrop layer — fixed under everything, painted by backdrop.js.
+   z-order (bottom→top):
+     0 page bg / 1 slides / 2 vignette / 3 hue tint */
+.animarr-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.animarr-backdrop ::deep .backdrop-slide {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    pointer-events: none;
+}
+
+.animarr-backdrop__vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 80% at 50% 30%,
+        transparent 0%,
+        rgba(10, 8, 7, 0.5) 60%,
+        rgba(10, 8, 7, 0.95) 100%);
+}
+
+.animarr-backdrop__hue-tint {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: oklch(0.66 0.20 var(--accent-hue) / 0.10);
+    mix-blend-mode: color;
+}
+
+/* Main content column — pushed down by 60px to clear the fixed TopBar.
+   No height constraint and no overflow: document body scrolls natively,
+   so the catalog grid / media detail / settings page can be as tall as
+   they need without us managing a custom scroll container.
+
+   No z-index here on purpose — assigning one creates a stacking context
+   that would trap fixed-position drawers (SettingsEditDrawer z-60,
+   ProfilePanel z-60) below the fixed TopBar (root z-50). Stay
+   position:relative without z-index so the drawers compete with TopBar
+   at the root stacking level. */
+.animarr-main {
+    padding: 96px 24px 24px;   /* 60 topbar + 36 breathing — was tight on tabs */
+    position: relative;
+}
+
+@media (max-width: 959px) {
+    .animarr-main {
+        /* d-mobile-nav (56px) is in-flow; no fixed-element clearance needed.
+           Bottom padding leaves room above the d-tabbar (78px). */
+        padding: 14px 16px 96px;
+    }
+}
+
+@media (max-width: 639px) {
+    .animarr-main { padding: 12px 14px 96px; }
+}
+
+/* ── Toast stack — bottom-right ─────────────────────────── */
+.ml-toast-stack {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.ml-toast {
+    pointer-events: auto;
+    min-width: 240px;
+    max-width: 360px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    box-shadow: var(--shadow-modal);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    animation: ml-toast-in 0.2s ease;
+}
+
+@keyframes ml-toast-in {
+    from { transform: translateY(8px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+
+.ml-toast--success { border-left-color: var(--success); }
+.ml-toast--warning { border-left-color: var(--warn); }
+.ml-toast--error   { border-left-color: oklch(0.66 0.20 25); }
+.ml-toast--info    { border-left-color: var(--info); }
+
+.ml-toast__msg { flex: 1; }
+.ml-toast__close {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    padding: 2px 4px;
+    margin: -2px -4px;
+}
+.ml-toast__close:hover { color: var(--text); }

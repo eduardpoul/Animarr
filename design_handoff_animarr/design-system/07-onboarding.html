@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>07 · Onboarding · server discovery · pairing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  .frames{display:grid;gap:40px;}
+
+  /* Server row */
+  .srv{
+    display:flex;align-items:center;gap:12px;
+    padding:14px 16px;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:var(--r-3);cursor:pointer;
+  }
+  .srv:hover{background:var(--surface-3);border-color:var(--border-strong);}
+  .srv.on{background:var(--accent-soft);border-color:var(--accent-line);}
+  .srv .ic{width:36px;height:36px;border-radius:var(--r-3);background:var(--surface-3);display:grid;place-items:center;color:var(--accent-hi);flex-shrink:0;font-size:14px;}
+  .srv .ic.live{background:var(--success-soft);color:var(--success);}
+  .srv .body{flex:1;min-width:0;}
+  .srv .nm{font-size:13.5px;font-weight:600;}
+  .srv .meta{font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);margin-top:3px;letter-spacing:0.3px;}
+  .srv .dot{width:6px;height:6px;border-radius:6px;background:var(--success);box-shadow:0 0 8px var(--success);display:inline-block;margin-right:5px;vertical-align:1px;}
+  .srv .right{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:0.4px;}
+
+  /* QR */
+  .qr{width:230px;height:230px;background:#fff;border-radius:var(--r-5);display:grid;place-items:center;position:relative;margin:0 auto;padding:18px;}
+  .qr.lg{width:340px;height:340px;padding:24px;}
+
+  /* Scanning ring */
+  .ring{
+    width:14px;height:14px;border-radius:14px;
+    border:2px solid rgba(255,255,255,0.1);border-top-color:var(--accent-hi);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* PIN */
+  .pin{width:280px;margin:0 auto;}
+  .pin .dots{display:flex;gap:12px;justify-content:center;margin-bottom:22px;}
+  .pin .dots > div{width:14px;height:14px;border-radius:14px;background:rgba(255,255,255,0.08);}
+  .pin .dots > div.on{background:var(--accent);box-shadow:0 0 8px var(--accent-soft);}
+  .pin .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .pin .keys button{all:unset;cursor:pointer;height:54px;border-radius:var(--r-4);background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:18px;font-family:var(--font-mono);font-weight:600;display:grid;place-items:center;}
+  .pin .keys button:hover{background:var(--surface-2);border-color:var(--border-strong);}
+
+  /* Phone camera frame */
+  .cam-frame{position:absolute;top:80px;left:40px;right:40px;bottom:240px;border-radius:var(--r-5);background:radial-gradient(60% 60% at 50% 50%,rgba(255,255,255,0.04),transparent 80%),#050505;border:2px dashed rgba(255,255,255,0.18);display:grid;place-items:center;}
+  .cam-frame .corner{position:absolute;width:30px;height:30px;border:3px solid var(--accent-hi);}
+  .cam-frame .corner.tl{top:14px;left:14px;border-right:0;border-bottom:0;border-radius:6px 0 0 0;}
+  .cam-frame .corner.tr{top:14px;right:14px;border-left:0;border-bottom:0;border-radius:0 6px 0 0;}
+  .cam-frame .corner.bl{bottom:14px;left:14px;border-right:0;border-top:0;border-radius:0 0 0 6px;}
+  .cam-frame .corner.br{bottom:14px;right:14px;border-left:0;border-top:0;border-radius:0 0 6px 0;}
+  .cam-frame .scanline{position:absolute;left:20px;right:20px;height:2px;background:linear-gradient(90deg,transparent,var(--accent-hi),transparent);box-shadow:0 0 14px var(--accent-hi);top:50%;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Section 07</div>
+  <h1 class="page">Onboarding · server discovery · pairing</h1>
+  <p class="lede">Every first-run path: scan LAN → pick server → sign in. PLUS the TV-pairing dance where the TV shows a QR and the phone confirms. Same atoms across browser, TV, mobile — only the chrome differs.</p>
+
+  <nav class="ds-nav">
+    <a href="index.html"><span class="n">00</span>Cover</a>
+    <a href="01-foundations.html"><span class="n">01</span>Foundations</a>
+    <a href="02-components.html"><span class="n">02</span>Components</a>
+    <a href="03-browser.html"><span class="n">03</span>Browser</a>
+    <a href="04-tv.html"><span class="n">04</span>TV</a>
+    <a href="05-mobile.html"><span class="n">05</span>Mobile</a>
+    <a href="06-themes.html"><span class="n">06</span>Themes</a>
+    <a href="07-onboarding.html" class="cur"><span class="n">07</span>Onboarding</a>
+    <a href="08-hero-variants.html"><span class="n">08</span>Hero variants</a>
+  </nav>
+
+  <!-- ═══════════ 0 · WELCOME ═══════════ -->
+  <h2 class="sec" id="welcome"><span class="n">0</span><span class="t">Welcome screen</span><span class="d">Cold-boot first impression. Same composition on all three form-factors — different proportions.</span></h2>
+
+  <style>
+    .wel{position:relative;overflow:hidden;height:0;padding-bottom:62.5%;background:#0a0c10;}
+    .wel .stripe{position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:6px;opacity:0.35;filter:saturate(0.7);}
+    .wel .stripe > div{background-size:cover;background-position:center;border-radius:4px;}
+    .wel .vignette{position:absolute;inset:0;background:radial-gradient(60% 60% at 50% 55%,transparent 0%,rgba(10,12,16,0.7) 50%,rgba(10,12,16,0.95) 100%),linear-gradient(180deg,rgba(10,12,16,0.5) 0%,transparent 40%,rgba(10,12,16,0.6) 100%);}
+    .wel .cjk{position:absolute;right:-2%;top:-6%;font-family:'Noto Serif SC',serif;font-size:280px;font-weight:900;color:rgba(255,255,255,0.025);writing-mode:vertical-rl;text-orientation:upright;letter-spacing:14px;pointer-events:none;}
+    .wel .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px;}
+    .wel .mark{
+      width:84px;height:84px;border-radius:20px;
+      background:linear-gradient(135deg,var(--accent),var(--accent-deep));
+      color:#0f1115;display:grid;place-items:center;
+      font-size:46px;font-weight:800;letter-spacing:-0.04em;line-height:1;
+      box-shadow:0 0 0 1px rgba(255,255,255,0.06) inset,0 18px 48px -10px var(--accent-soft),0 0 80px -20px var(--accent-hi);
+      margin-bottom:28px;
+    }
+    .wel h1{margin:0;font-size:88px;font-weight:800;letter-spacing:-3px;line-height:0.95;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.6);}
+    .wel .ver{font-size:13px;color:var(--accent-hi);font-weight:500;margin-top:14px;display:inline-flex;align-items:center;gap:10px;background:rgba(15,17,21,0.45);backdrop-filter:blur(8px);border:1px solid var(--border-strong);padding:6px 16px;border-radius:999px;}
+    .wel .ver .dot{width:7px;height:7px;border-radius:7px;background:var(--success);box-shadow:0 0 8px var(--success);}
+    .wel .lede{margin:32px 0 0;font-size:18px;line-height:1.55;color:var(--text-dim);max-width:560px;}
+    .wel .lede b{color:var(--text);}
+    .wel .actions{display:flex;gap:14px;margin-top:36px;flex-wrap:wrap;justify-content:center;}
+    .wel .actions .bp{padding:14px 28px;font-size:14px;font-weight:700;border-radius:10px;background:var(--accent);color:#0f1115;border:0;cursor:pointer;box-shadow:0 12px 30px -10px var(--accent-soft);}
+    .wel .actions .bp:hover{background:var(--accent-hi);transform:translateY(-1px);}
+    .wel .actions .bg2{padding:14px 24px;font-size:14px;font-weight:600;border-radius:10px;background:rgba(15,17,21,0.55);backdrop-filter:blur(10px);color:var(--text);border:1px solid var(--border-strong);cursor:pointer;}
+    .wel .foot{position:absolute;bottom:24px;left:0;right:0;display:flex;justify-content:center;gap:22px;font-size:12px;color:var(--text-faint);}
+    .wel .foot a{color:var(--text-dim);text-decoration:none;}
+
+    /* Mobile variant */
+    .wel-m{padding-bottom:0;height:710px;}
+    .wel-m .center{padding:24px;}
+    .wel-m .mark{width:68px;height:68px;border-radius:16px;font-size:38px;margin-bottom:22px;}
+    .wel-m h1{font-size:54px;letter-spacing:-1.8px;}
+    .wel-m .lede{font-size:14px;margin-top:22px;max-width:280px;}
+    .wel-m .actions{flex-direction:column;width:100%;gap:10px;}
+    .wel-m .actions .bp,.wel-m .actions .bg2{width:100%;}
+    .wel-m .foot{font-size:9px;flex-direction:column;gap:6px;align-items:center;}
+  </style>
+
+  <div class="frame" style="margin-bottom:32px;">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Welcome · cold boot · no server saved</span><span class="fnote">1280 × 800 · /</span></div>
+    <div class="desk"><div class="inner">
+      <div class="wel">
+        <div class="stripe">
+          <div style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"></div>
+          <div style="background-image:url('https://images.unsplash.com/photo-1604079628040-94301bb21b91?auto=format&fit=crop&w=400&q=70');"></div>
+        </div>
+        <div class="vignette"></div>
+        <div class="cjk">动画</div>
+
+        <div class="center">
+          <div class="mark">a</div>
+          <h1>Animarr</h1>
+          <div class="ver"><span class="dot"></span>v2.0 · self-hosted · donghua · anime · movies</div>
+          <p class="lede">Your library at home, anywhere. <b>An LLM</b> knows the titles, <b>BitTorrent</b> brings the files, <b>you</b> just press play.</p>
+          <div class="actions">
+            <button class="bp">Get started →</button>
+          </div>
+        </div>
+
+        <div class="foot">
+          <span>github.com/animarr</span>
+          <span>MIT licensed</span>
+          <span>v2.0.1 · build 3429</span>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;">
+    <!-- TV -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">TV</span><span class="ftitle">Welcome · cold boot</span><span class="fnote">1920 × 1080</span></div>
+      <div class="tv"><div class="inner">
+        <div class="wel" style="padding-bottom:0;height:100%;">
+          <div class="stripe">
+            <div style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1604079628040-94301bb21b91?auto=format&fit=crop&w=400&q=70');"></div>
+          </div>
+          <div class="vignette"></div>
+          <div class="cjk">动画</div>
+          <div class="center">
+            <div class="mark" style="width:100px;height:100px;font-size:54px;">a</div>
+            <h1 style="font-size:108px;">Animarr</h1>
+            <div class="ver" style="font-size:13px;"><span class="dot"></span>v2.0 · Living Room</div>
+            <p class="lede" style="font-size:20px;max-width:680px;">Your library at home, anywhere. <b>An LLM</b> knows the titles, <b>BitTorrent</b> brings the files, <b>you</b> just press play.</p>
+            <div class="actions">
+              <button class="bp" style="padding:18px 36px;font-size:17px;box-shadow:0 0 0 3px var(--accent-hi),0 18px 40px -12px rgba(0,0,0,0.6);">Get started →</button>
+            </div>
+          </div>
+          <div class="foot" style="font-size:12px;">
+            <span>github.com/animarr</span>
+            <span>MIT</span>
+            <span>v2.0.1</span>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Mobile -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="wel wel-m">
+            <div class="stripe" style="grid-template-columns:repeat(4,1fr);">
+              <div style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"></div>
+              <div style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"></div>
+              <div style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"></div>
+              <div style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"></div>
+            </div>
+            <div class="vignette"></div>
+            <div class="center">
+              <div class="mark">a</div>
+              <h1>Animarr</h1>
+              <div class="ver" style="font-size:9.5px;"><span class="dot"></span>v2.0 · donghua · anime · movies</div>
+              <p class="lede">Your library at home, anywhere. <b>An LLM</b> knows the titles, <b>BitTorrent</b> brings the files.</p>
+              <div class="actions">
+                <button class="bp">Get started →</button>
+              </div>
+            </div>
+            <div class="foot">
+              <span>github.com/animarr · v2.0.1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);">Mobile</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ A · DISCOVERY (3 states) ═══════════ -->
+  <h2 class="sec" id="discovery"><span class="n">A</span><span class="t">Server discovery · 3 states</span><span class="d">First boot on any device. mDNS scan, found list, empty state — same UI on every form-factor.</span></h2>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+
+    <!-- Scanning -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">A1</span><span class="ftitle">Scanning</span><span class="fnote">mDNS · first boot</span></div>
+      <div style="position:relative;height:420px;background:var(--bg-0);overflow:hidden;">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1200&q=70') center/cover;filter:blur(28px) brightness(0.35) saturate(0.7);transform:scale(1.08);"></div>
+        <div style="position:absolute;top:24px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:10px;z-index:5;">
+          <div style="width:30px;height:30px;border-radius:var(--r-2);background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:16px;font-weight:700;">a</div>
+          <span style="font-size:14px;font-weight:600;">Animarr</span>
+        </div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:380px;text-align:center;">
+          <div style="font-size:28px;font-weight:700;letter-spacing:-0.8px;line-height:1.05;">Find your library</div>
+          <div style="color:var(--text-dim);font-size:13px;margin-top:10px;">Looking for Animarr servers on your network…</div>
+          <div style="display:inline-flex;align-items:center;gap:10px;color:var(--accent-hi);font-family:var(--font-mono);font-size:11px;letter-spacing:0.4px;margin-top:24px;">
+            <span class="ring"></span> SCANNING · 4s
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Found -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">A2</span><span class="ftitle">Found servers</span><span class="fnote">tap to connect</span></div>
+      <div style="position:relative;height:420px;background:var(--bg-0);overflow:hidden;">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1200&q=70') center/cover;filter:blur(28px) brightness(0.35) saturate(0.7);transform:scale(1.08);"></div>
+        <div style="position:absolute;top:24px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:10px;z-index:5;">
+          <div style="width:30px;height:30px;border-radius:var(--r-2);background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:16px;font-weight:700;">a</div>
+          <span style="font-size:14px;font-weight:600;">Animarr</span>
+        </div>
+        <div style="position:absolute;top:80px;left:20px;right:20px;">
+          <div style="text-align:center;font-size:20px;font-weight:700;letter-spacing:-0.5px;">Find your library</div>
+          <div style="text-align:center;color:var(--text-dim);font-size:11.5px;margin-top:6px;margin-bottom:18px;">2 servers found</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div class="srv on">
+              <div class="ic live">▣</div>
+              <div class="body"><div class="nm">Living Room Server</div><div class="meta"><span class="dot"></span>192.168.1.50 · 24 titles · v2.0</div></div>
+              <div class="right">5 ms</div>
+            </div>
+            <div class="srv">
+              <div class="ic live">▣</div>
+              <div class="body"><div class="nm">Office NAS</div><div class="meta"><span class="dot"></span>10.0.0.21 · 481 titles · v2.0</div></div>
+              <div class="right">18 ms</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:18px;">
+            <button class="btn g s">+ Add manually</button>
+            <button class="btn g s">↻ Rescan</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">A3</span><span class="ftitle">No servers</span><span class="fnote">empty state</span></div>
+      <div style="position:relative;height:420px;background:var(--bg-0);overflow:hidden;">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1200&q=70') center/cover;filter:blur(28px) brightness(0.35) saturate(0.7);transform:scale(1.08);"></div>
+        <div style="position:absolute;top:24px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:10px;z-index:5;">
+          <div style="width:30px;height:30px;border-radius:var(--r-2);background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:16px;font-weight:700;">a</div>
+          <span style="font-size:14px;font-weight:600;">Animarr</span>
+        </div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:380px;text-align:center;">
+          <div style="width:54px;height:54px;border-radius:var(--r-5);background:var(--surface);border:1px solid var(--border-strong);display:grid;place-items:center;margin:0 auto 16px;color:var(--warn);font-size:24px;">∅</div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">No servers found</div>
+          <div style="color:var(--text-dim);font-size:12.5px;margin-top:10px;">Make sure your Animarr server is running on the same network. Tailscale, ZeroTier and WireGuard subnets are detected automatically.</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:18px;">
+            <button class="btn p s">+ Add manually</button>
+            <button class="btn g s">↻ Scan again</button>
+          </div>
+          <div style="margin-top:18px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:0.4px;">github.com/animarr/issues</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ B · MANUAL ADD ═══════════ -->
+  <h2 class="sec" id="manual"><span class="n">B</span><span class="t">Add server manually</span><span class="d">One field — host or magic-DNS. Same form on all 3 form-factors; presentation differs.</span></h2>
+
+  <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:32px;align-items:start;">
+
+    <!-- Desktop drawer -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">B1</span><span class="ftitle">Add server · browser drawer</span><span class="fnote">2 host modes</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pill"><span class="dot"></span>Discover · 1 server</div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(8px) brightness(0.4);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">+</div><div><div class="dh-s">Server</div><div class="dh-n">Add manually</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="db">
+            <div class="seg" style="display:grid;grid-template-columns:1fr 1fr;width:100%;margin-bottom:14px;">
+              <button class="on">Local IP</button>
+              <button>Magic-DNS · Tailscale</button>
+            </div>
+            <div class="fld"><span class="lb">Host</span><input class="in" value="192.168.1.50" style="font-family:var(--font-mono);" /></div>
+            <div style="display:grid;grid-template-columns:1fr 80px;gap:8px;"><div class="fld"><span class="lb">Port</span><input class="in" value="9090" style="font-family:var(--font-mono);" /></div><div class="fld"><span class="lb">HTTPS</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;"><span style="font-size:11px;color:var(--text-dim);">off</span><span class="tg"></span></div></div></div>
+            <div class="fld"><span class="lb">Display name (optional)</span><input class="in" placeholder="Living Room Server" /></div>
+            <div class="alert info" style="margin-top:8px;"><span>✦</span><div><b>Magic-DNS mode</b> · enter <code style="font-family:var(--font-mono);color:var(--accent-hi);">animarr.your-tailnet.ts.net</code> — no port-forwarding needed.</div></div>
+          </div>
+          <div class="df"><button class="btn p s">Connect</button><button class="btn g s">Test reachability</button><button class="btn g s" style="margin-left:auto;">Cancel</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Mobile manual -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=900&q=70') center/cover;filter:blur(28px) brightness(0.4) saturate(0.7);transform:scale(1.08);"></div>
+          <div style="position:absolute;top:50px;left:16px;right:16px;display:flex;align-items:center;gap:8px;">
+            <div style="font-size:18px;color:var(--text-dim);cursor:pointer;">←</div>
+            <div style="font-size:16px;font-weight:700;letter-spacing:-0.3px;">Add server</div>
+          </div>
+          <div style="position:absolute;top:110px;left:16px;right:16px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:3px;margin-bottom:14px;font-size:10.5px;">
+              <button class="btn g s" style="padding:7px 0;background:var(--surface-3);border:0;justify-content:center;font-size:10.5px;">Local IP</button>
+              <button style="all:unset;cursor:pointer;padding:7px 0;text-align:center;color:var(--text-dim);font-weight:600;font-size:10.5px;">Magic-DNS</button>
+            </div>
+            <div class="fld"><span class="lb">Host</span><input class="in" value="192.168.1.50" style="font-size:12px;font-family:var(--font-mono);" /></div>
+            <div class="fld"><span class="lb">Port</span><input class="in" value="9090" style="font-size:12px;font-family:var(--font-mono);" /></div>
+            <div class="fld"><span class="lb">Display name</span><input class="in" placeholder="Living Room" style="font-size:12px;" /></div>
+            <button class="btn p" style="width:100%;justify-content:center;margin-top:14px;">Connect</button>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);letter-spacing:0.5px;text-transform:uppercase;">Mobile · same form</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ C · TV PAIRING ═══════════ -->
+  <h2 class="sec" id="pairing"><span class="n">C</span><span class="t">TV pairing</span><span class="d">TV shows a QR code + 6-digit fallback. Phone (already signed in) scans → confirms. No keyboard typing on TV.</span></h2>
+
+  <div class="frames">
+
+    <!-- TV side -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">C1</span><span class="ftitle">TV · Sign-in screen with QR</span><span class="fnote">code refreshes every 5min</span></div>
+      <div class="tv"><div class="inner">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70') center/cover;filter:blur(40px) brightness(0.35);transform:scale(1.08);"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,17,21,0.4),rgba(15,17,21,0.85));"></div>
+
+        <div style="position:relative;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:0 64px;">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
+            <div style="width:42px;height:42px;border-radius:10px;background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:22px;font-weight:700;">a</div>
+            <div style="font-size:18px;font-weight:600;letter-spacing:-0.3px;">Animarr · LIVING ROOM SERVER</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:48px;align-items:center;max-width:980px;">
+            <div class="qr lg">
+              <!-- Stylized QR placeholder -->
+              <svg width="280" height="280" viewBox="0 0 21 21">
+                <rect width="21" height="21" fill="#fff"/>
+                <g fill="#000">
+                  <rect x="0" y="0" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="2" y="2" width="3" height="3"/>
+                  <rect x="14" y="0" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="16" y="2" width="3" height="3"/>
+                  <rect x="0" y="14" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="2" y="16" width="3" height="3"/>
+                  <rect x="8" y="2" width="1" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/>
+                  <rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="1" height="1"/>
+                  <rect x="8" y="6" width="1" height="1"/><rect x="10" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/>
+                  <rect x="2" y="8" width="1" height="1"/><rect x="4" y="8" width="1" height="1"/>
+                  <rect x="0" y="10" width="1" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="5" y="10" width="1" height="1"/>
+                  <rect x="2" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/>
+                  <rect x="9" y="9" width="3" height="3"/>
+                  <rect x="13" y="9" width="1" height="1"/><rect x="15" y="9" width="1" height="1"/><rect x="17" y="9" width="1" height="1"/><rect x="19" y="9" width="1" height="1"/>
+                  <rect x="14" y="11" width="1" height="1"/><rect x="16" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/>
+                  <rect x="13" y="13" width="1" height="1"/><rect x="15" y="13" width="1" height="1"/><rect x="17" y="13" width="1" height="1"/>
+                  <rect x="9" y="14" width="1" height="1"/><rect x="11" y="14" width="1" height="1"/>
+                  <rect x="14" y="15" width="1" height="1"/><rect x="16" y="15" width="1" height="1"/><rect x="18" y="15" width="1" height="1"/>
+                  <rect x="9" y="17" width="1" height="1"/><rect x="11" y="17" width="1" height="1"/>
+                  <rect x="13" y="17" width="3" height="3"/>
+                  <rect x="17" y="17" width="1" height="1"/><rect x="19" y="17" width="1" height="1"/>
+                </g>
+              </svg>
+            </div>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:13px;color:var(--accent-hi);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:12px;">Sign in from phone</div>
+              <div style="font-size:46px;font-weight:700;letter-spacing:-1.2px;line-height:1.02;color:#fff;">Scan or enter code</div>
+              <ol style="padding-left:22px;margin:24px 0 0;color:var(--text-dim);font-size:16px;line-height:1.8;">
+                <li>Open <b style="color:var(--text);">Animarr</b> on your phone</li>
+                <li>Tap <b style="color:var(--text);">▦ Camera</b> top-right of the catalog</li>
+                <li>Scan this code</li>
+              </ol>
+              <div style="margin-top:24px;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-4);max-width:380px;">
+                <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-faint);letter-spacing:0.4px;margin-bottom:4px;">Or enter code at</div>
+                <div style="font-family:var(--font-mono);font-size:15px;color:var(--text);">animarr.local / pair</div>
+                <div style="font-family:var(--font-mono);font-size:34px;letter-spacing:10px;color:var(--accent-hi);margin-top:12px;font-weight:600;">4F-7K-92</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:48px;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);letter-spacing:0.6px;">CODE REFRESHES IN 4:32 · OR PRESS ⏎ TO USE USERNAME / PASSWORD</div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Phone scan + confirm -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div style="position:absolute;top:50px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);letter-spacing:0.3px;">Point at the QR code</div>
+            <div class="cam-frame">
+              <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+              <div class="scanline"></div>
+            </div>
+            <div style="position:absolute;bottom:30px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:0.6px;">Tap to focus · Cancel</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-faint);">C2 — Phone scan</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div style="position:absolute;inset:0;background:var(--bg-0);"></div>
+            <div style="position:absolute;top:50px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:10.5px;color:var(--accent-hi);letter-spacing:0.3px;">● Pairing request</div>
+            <div style="position:absolute;left:24px;right:24px;top:110px;background:linear-gradient(180deg,var(--surface),var(--surface-2));border:1px solid var(--border-strong);border-radius:var(--r-5);padding:20px 18px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                <div style="width:38px;height:38px;border-radius:38px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:16px;font-weight:700;">Y</div>
+                <div><div style="font-size:14px;font-weight:600;">Yuri</div><div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);letter-spacing:0.4px;">MASTER · 192.168.1.50</div></div>
+              </div>
+              <div style="padding:10px 12px;background:var(--bg-1);border-radius:10px;border:1px solid var(--border);margin-bottom:10px;">
+                <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);letter-spacing:0.3px;">SIGN IN ON</div>
+                <div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px;">Living Room TV</div>
+                <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:2px;">Samsung Tizen · 192.168.1.74</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--bg-1);border-radius:10px;border:1px solid var(--border);margin-bottom:14px;">
+                <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);letter-spacing:0.3px;">SERVER</div>
+                <div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px;">Living Room Server</div>
+                <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:2px;">Animarr v2.0 · 24 titles</div>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn g s" style="flex:1;justify-content:center;">Deny</button>
+                <button class="btn p s" style="flex:1;justify-content:center;">✓ Sign in</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-faint);">C3 — Phone confirm</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ D · PAIR FROM SETTINGS (Mobile "Sign in other device") ═══════════ -->
+  <h2 class="sec" id="device-login"><span class="n">D</span><span class="t">Mobile · "Sign in other device"</span><span class="d">Inside mobile Settings. Two modes: enter the 6-digit code shown on the other device, or open the camera to scan a QR.</span></h2>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;justify-items:center;">
+
+    <!-- D1 list entry point -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="mss-h"><div class="ti">Settings</div></div>
+          <div class="mss-list">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;opacity:0.5;"><div style="width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:13px;">⚙</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">General</div></div><span style="color:var(--text-faint);font-size:11px;">▸</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:10px;"><div style="width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:13px;">⊞</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">Sign in other device</div><div style="font-size:10.5px;color:var(--text-dim);margin-top:2px;">Pair a TV or browser with this account</div></div><span style="color:var(--text-faint);font-size:11px;">▸</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;opacity:0.5;"><div style="width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:13px;">🎨</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">Appearance</div></div><span style="color:var(--text-faint);font-size:11px;">▸</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;opacity:0.5;"><div style="width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:13px;">✦</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">AI / LLM</div></div><span style="color:var(--text-faint);font-size:11px;">▸</span></div>
+          </div>
+          <div class="mtab"><div class="it"><span class="ic">▦</span>Catalog</div><div class="it"><span class="ic">↓</span>Downloads</div><div class="it on"><span class="ic">⚙</span>Settings</div></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);text-align:center;">D1 — Settings entry</div>
+    </div>
+
+    <!-- D2 mode picker -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div style="position:absolute;top:50px;left:16px;right:16px;display:flex;align-items:center;gap:8px;"><div style="font-size:18px;color:var(--text-dim);">←</div><div style="font-size:16px;font-weight:700;letter-spacing:-0.3px;">Sign in other device</div></div>
+          <div style="position:absolute;top:110px;left:16px;right:16px;">
+            <div style="font-size:11.5px;color:var(--text-dim);line-height:1.55;margin-bottom:20px;">Sign in to Animarr on a TV, browser, or another phone using your <b style="color:var(--text);">Yuri</b> account on <b style="color:var(--text);">Living Room Server</b>.</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--accent-line);border-radius:10px;display:flex;align-items:center;gap:12px;cursor:pointer;">
+                <div style="width:40px;height:40px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:18px;flex-shrink:0;">▦</div>
+                <div style="flex:1;"><div style="font-size:13.5px;font-weight:600;">Scan QR from TV</div><div style="font-size:10.5px;color:var(--text-dim);margin-top:2px;">Opens the camera</div></div>
+                <span style="color:var(--text-faint);">→</span>
+              </div>
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:12px;cursor:pointer;">
+                <div style="width:40px;height:40px;border-radius:10px;background:var(--surface-3);color:var(--text);display:grid;place-items:center;font-size:18px;font-family:var(--font-mono);flex-shrink:0;">#</div>
+                <div style="flex:1;"><div style="font-size:13.5px;font-weight:600;">Enter pairing code</div><div style="font-size:10.5px;color:var(--text-dim);margin-top:2px;">6-character code (4F-7K-92)</div></div>
+                <span style="color:var(--text-faint);">→</span>
+              </div>
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:12px;cursor:pointer;">
+                <div style="width:40px;height:40px;border-radius:10px;background:var(--surface-3);color:var(--text);display:grid;place-items:center;font-size:18px;flex-shrink:0;">🖥</div>
+                <div style="flex:1;"><div style="font-size:13.5px;font-weight:600;">Active devices</div><div style="font-size:10.5px;color:var(--text-dim);margin-top:2px;">3 signed-in · revoke any</div></div>
+                <span style="color:var(--text-faint);">→</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);text-align:center;">D2 — Mode picker</div>
+    </div>
+
+    <!-- D3 code entry -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div style="position:absolute;top:50px;left:16px;right:16px;display:flex;align-items:center;gap:8px;"><div style="font-size:18px;color:var(--text-dim);">←</div><div style="font-size:16px;font-weight:700;letter-spacing:-0.3px;">Enter code</div></div>
+          <div style="position:absolute;top:120px;left:16px;right:16px;text-align:center;">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:24px;">Enter the 6 characters shown on your TV</div>
+            <div style="display:flex;justify-content:center;gap:6px;font-family:var(--font-mono);font-size:30px;font-weight:600;letter-spacing:0;">
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--accent-line);border-radius:7px;display:grid;place-items:center;color:var(--text);">4</div>
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--accent-line);border-radius:7px;display:grid;place-items:center;color:var(--text);">F</div>
+              <div style="display:grid;place-items:center;color:var(--text-faint);">−</div>
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--accent-line);border-radius:7px;display:grid;place-items:center;color:var(--text);">7</div>
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--accent-line);border-radius:7px;display:grid;place-items:center;color:var(--text);">K</div>
+              <div style="display:grid;place-items:center;color:var(--text-faint);">−</div>
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--accent);border-radius:7px;display:grid;place-items:center;color:var(--accent-hi);box-shadow:0 0 0 3px var(--accent-soft);"><span style="animation:blink 1s infinite;">|</span></div>
+              <div style="width:36px;height:48px;background:var(--surface);border:1px solid var(--border-strong);border-radius:7px;display:grid;place-items:center;color:var(--text-faint);"></div>
+            </div>
+            <button class="btn p" style="width:100%;justify-content:center;margin-top:24px;" disabled>Continue</button>
+            <div style="margin-top:14px;font-size:11px;color:var(--text-faint);">Or <a style="color:var(--accent-hi);">scan QR instead</a></div>
+          </div>
+          <style>@keyframes blink{50%{opacity:0;}}</style>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);text-align:center;">D3 — Code entry</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ E · PROFILE PICKER ═══════════ -->
+  <h2 class="sec" id="pin"><span class="n">E</span><span class="t">Profile picker + PIN</span><span class="d">After server is chosen, this is where multi-user splits. PIN is per-user, per-device.</span></h2>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;">
+
+    <!-- TV profile picker -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">E1</span><span class="ftitle">TV · Profile picker</span><span class="fnote">D-pad · big avatars</span></div>
+      <div class="tv"><div class="inner">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70') center/cover;filter:blur(40px) brightness(0.35) saturate(0.7);transform:scale(1.1);"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,17,21,0.4),rgba(15,17,21,0.85));"></div>
+        <div style="position:relative;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:0 64px;">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+            <div style="width:42px;height:42px;border-radius:10px;background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:22px;font-weight:700;">a</div>
+            <div style="font-size:22px;font-weight:700;letter-spacing:-0.3px;">Animarr · Living Room</div>
+          </div>
+          <div style="font-size:38px;font-weight:700;letter-spacing:-0.8px;margin-top:24px;">Who's watching?</div>
+          <div style="display:flex;gap:18px;margin-top:42px;">
+            <div style="text-align:center;"><div style="width:120px;height:120px;border-radius:120px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:46px;font-weight:700;margin:0 auto 12px;">Y</div><div style="font-size:18px;font-weight:600;">Yuri</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">MASTER</div></div>
+            <div style="text-align:center;padding:14px 18px;background:var(--surface);border-radius:var(--r-4);box-shadow:0 0 0 3px var(--accent-hi);transform:scale(1.05);"><div style="width:120px;height:120px;border-radius:120px;background:var(--av-grn);color:#fff;display:grid;place-items:center;font-size:46px;font-weight:700;margin:0 auto 12px;position:relative;"><span style="position:absolute;bottom:-2px;right:-2px;font-size:18px;background:var(--bg-0);border-radius:18px;width:30px;height:30px;display:grid;place-items:center;">🔒</span>A</div><div style="font-size:18px;font-weight:600;">Anna</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">USER · 🔒 PIN</div></div>
+            <div style="text-align:center;"><div style="width:120px;height:120px;border-radius:120px;background:var(--av-blu);color:#fff;display:grid;place-items:center;font-size:46px;font-weight:700;margin:0 auto 12px;">P</div><div style="font-size:18px;font-weight:600;">Pavel</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">UPLOADER</div></div>
+            <div style="text-align:center;"><div style="width:120px;height:120px;border-radius:120px;background:rgba(255,255,255,0.04);border:2px dashed var(--border-strong);color:var(--text-dim);display:grid;place-items:center;font-size:46px;font-weight:300;margin:0 auto 12px;">+</div><div style="font-size:18px;font-weight:600;color:var(--text-dim);">Add user</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">MASTER ONLY</div></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- TV PIN entry -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">E2</span><span class="ftitle">TV · PIN entry · switching to Anna</span><span class="fnote">D-pad friendly</span></div>
+      <div class="tv"><div class="inner">
+        <div style="position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70') center/cover;filter:blur(40px) brightness(0.35) saturate(0.7);transform:scale(1.1);"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,17,21,0.4),rgba(15,17,21,0.85));"></div>
+        <div style="position:relative;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:0 64px;">
+          <div style="width:96px;height:96px;border-radius:96px;background:var(--av-grn);color:#fff;display:grid;place-items:center;font-size:38px;font-weight:700;margin-bottom:24px;">A</div>
+          <div style="font-size:34px;font-weight:700;letter-spacing:-0.5px;">Sign in as Anna</div>
+          <div style="color:var(--text-dim);font-size:15px;margin-top:8px;margin-bottom:32px;">Enter 4-digit PIN</div>
+          <div class="pin" style="width:320px;">
+            <div class="dots"><div class="on"></div><div class="on"></div><div></div><div></div></div>
+            <div class="keys">
+              <button>1</button><button>2</button><button>3</button>
+              <button>4</button><button>5</button><button style="box-shadow:0 0 0 3px var(--accent-hi);background:var(--surface-2);">6</button>
+              <button>7</button><button>8</button><button>9</button>
+              <button style="visibility:hidden;"></button>
+              <button>0</button>
+              <button style="background:transparent;border:0;color:var(--text-dim);">⌫</button>
+            </div>
+          </div>
+          <div style="margin-top:24px;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);letter-spacing:0.6px;">
+            <a style="color:var(--accent-hi);text-decoration:none;">CONFIRM ON ANNA'S PHONE</a> · OR · <a style="color:var(--text-dim);text-decoration:none;">CANCEL</a>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Active devices ═══════════ -->
+  <h2 class="sec" id="active"><span class="n">F</span><span class="t">Active devices · revoke</span><span class="d">Same list on browser settings and mobile settings. Every paired device is here; revoking signs that device out instantly.</span></h2>
+
+  <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:32px;align-items:start;">
+    <!-- Desktop -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">F1</span><span class="ftitle">Browser · Account · Active devices</span><span class="fnote">/settings/account/devices</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>Identity</button><button class="on">Devices</button><button>Sessions</button><button>Security</button><button>Sign out</button></div>
+          <div class="dss-c">
+            <h4>Active devices</h4><div class="hsub">3 signed-in across this server.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;">▭</div>
+                <div><div style="font-size:13px;font-weight:600;">This browser · Chrome 121</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">192.168.1.20 · macOS · 14:08 today</div></div>
+                <span class="pl a">Current</span>
+                <span style="color:var(--text-faint);font-size:11px;">—</span>
+              </div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;">⬜</div>
+                <div><div style="font-size:13px;font-weight:600;">Living Room TV · Samsung Tizen</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">192.168.1.74 · paired 12:30 today</div></div>
+                <span class="pl">Watching · Perfect World EP 5</span>
+                <button class="btn d s">Revoke</button>
+              </div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;">▯</div>
+                <div><div style="font-size:13px;font-weight:600;">iPhone 15 · Animarr 2.0.1</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">10.0.0.21 · LTE · 08:14 today</div></div>
+                <span class="pl">Idle</span>
+                <button class="btn d s">Revoke</button>
+              </div>
+            </div>
+            <button class="btn d s" style="margin-top:16px;">↘ Revoke all other devices</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Mobile -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div style="position:absolute;top:50px;left:16px;right:16px;display:flex;align-items:center;gap:8px;"><div style="font-size:18px;color:var(--text-dim);">←</div><div style="font-size:16px;font-weight:700;letter-spacing:-0.3px;">Active devices</div></div>
+          <div style="position:absolute;top:110px;left:16px;right:16px;display:flex;flex-direction:column;gap:8px;">
+            <div style="padding:11px;background:var(--surface);border:1px solid var(--accent-line);border-radius:10px;"><div style="display:flex;align-items:center;gap:10px;"><div style="width:30px;height:30px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;font-size:14px;flex-shrink:0;">▯</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">This phone</div><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:2px;">iPhone · just now</div></div><span class="pl a" style="font-size:9.5px;padding:2px 6px;">Current</span></div></div>
+            <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;"><div style="display:flex;align-items:center;gap:10px;"><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;font-size:14px;flex-shrink:0;">⬜</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">Living Room TV</div><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:2px;">Samsung · watching · 38%</div></div></div><div style="display:flex;gap:6px;margin-top:8px;"><button class="btn d s" style="flex:1;justify-content:center;font-size:10.5px;">Revoke</button></div></div>
+            <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:10px;"><div style="display:flex;align-items:center;gap:10px;"><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;font-size:14px;flex-shrink:0;">▭</div><div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">Chrome on Mac</div><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:2px;">paired 2d ago</div></div></div><div style="display:flex;gap:6px;margin-top:8px;"><button class="btn d s" style="flex:1;justify-content:center;font-size:10.5px;">Revoke</button></div></div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);">F2 — Mobile · same list</div>
+    </div>
+  </div>
+
+  <div style="margin-top:80px;padding-top:32px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+    <a href="06-themes.html" style="color:var(--text-dim);text-decoration:none;font-size:13px;">← Themes</a>
+    <a href="index.html" style="color:var(--accent-hi);text-decoration:none;font-size:13px;font-weight:600;">Back to cover ↺</a>
+  </div>
+
+</div>
+</body>
+</html>
