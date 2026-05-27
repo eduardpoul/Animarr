@@ -65,7 +65,7 @@
             // so without this the browser keeps serving the stale image even after
             // a rescan downloads a new poster.
             var v = Item.LastMetadataRefreshedAt?.Ticks ?? 0;
-            return $"/api/image?path={Uri.EscapeDataString(path)}&t={v}";
+            return Animarr.UI.Services.MediaUrl.Image(path, v);
         }
     }
 

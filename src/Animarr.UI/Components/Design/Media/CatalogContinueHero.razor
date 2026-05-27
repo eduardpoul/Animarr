@@ -21,12 +21,12 @@
         <div class="d-chero__bg">
             @if (!string.IsNullOrEmpty(item.FanartPath))
             {
-                <img src="@($"/api/image?path={Uri.EscapeDataString(item.FanartPath)}")"
+                <img src="@Animarr.UI.Services.MediaUrl.Image(item.FanartPath)"
                      alt="@item.Title" class="d-chero__bg-img" />
             }
             else if (!string.IsNullOrEmpty(item.PosterPath))
             {
-                <img src="@($"/api/image?path={Uri.EscapeDataString(item.PosterPath)}")"
+                <img src="@Animarr.UI.Services.MediaUrl.Image(item.PosterPath)"
                      alt="@item.Title" class="d-chero__bg-img d-chero__bg-img--poster" />
             }
             <div class="d-chero__wash"></div>
@@ -238,7 +238,7 @@
         if (_active is null) return;
         var path = _active.FanartPath ?? _active.PosterPath;
         if (string.IsNullOrEmpty(path)) return;
-        var url = $"/api/image?path={Uri.EscapeDataString(path)}";
+        var url = Animarr.UI.Services.MediaUrl.Image(path);
         try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 14, 38); } catch { }
     }
 

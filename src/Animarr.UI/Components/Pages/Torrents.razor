@@ -29,63 +29,74 @@
         <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
             <DIcon Name="archive" Size="13" /> History
         </Btn>
-        <Btn Variant="primary" Size="md" OnClick="@(() => _addOpen = !_addOpen)">
-            <DIcon Name="plus" Size="14" /> Add magnet
+        <Btn Variant="primary" Size="md" OnClick="OpenAdd">
+            <DIcon Name="plus" Size="14" /> Add
         </Btn>
     </div>
 </header>
 
-@*  v5 fix: the inline add-form below previously used a `.torrent-add*` BEM
-    family that has zero matching rules anywhere in the project. Switched to
-    `.tor-add-*` so the styles live next to the rest of the page-scoped
-    Torrents.razor.css (new rules added there). *@
-@if (_addOpen)
-{
-    <div class="tor-add">
-        <div class="tor-add__source">
-            <button type="button"
-                    class="@($"tor-add__source-btn {(_addSource == "magnet" ? "is-active" : "")}")"
-                    @onclick="@(() => _addSource = "magnet")">Magnet</button>
-            <button type="button"
-                    class="@($"tor-add__source-btn {(_addSource == "file" ? "is-active" : "")}")"
-                    @onclick="@(() => _addSource = "file")">.torrent file</button>
+@* Add Torrent / Magnet / File drawer — slides in from the right and
+   shares chrome with every other admin drawer (SettingsEditDrawer:
+   header + Body + Footer). Source picker at the top of the body
+   swaps between Magnet URI input and .torrent file picker. *@
+<SettingsEditDrawer IsOpen="@_addOpen"
+                    Title="Add torrent"
+                    Overline="TRANSFERS"
+                    Hint="Paste a magnet link or drop a .torrent file. Save destination + post-processing flags below."
+                    Icon="torrent"
+                    OnClose="CloseAdd">
+    <Body>
+        <div class="d-srv-users__segment-bar">
+            <div class="d-srv-users__segment" role="tablist">
+                @foreach (var (key, label) in new[] { ("magnet", "Magnet"), ("file", ".torrent file") })
+                {
+                    var k = key;
+                    var l = label;
+                    var active = _addSource == k;
+                    <button type="button"
+                            class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
+                            @onclick="@(() => _addSource = k)">@l</button>
+                }
+            </div>
         </div>
 
-        @if (_addSource == "magnet")
-        {
-            <label class="tor-add__field">
-                <span class="tor-add__label">Magnet URI</span>
-                <input class="tor-add__input" placeholder="magnet:?xt=urn:btih:…"
-                       value="@_addMagnet"
-                       @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
+        <div class="tor-add__form">
+            @if (_addSource == "magnet")
+            {
+                <label class="d-input-group">
+                    <span class="d-input-group__label">Magnet URI</span>
+                    <input class="settings-field__input" placeholder="magnet:?xt=urn:btih:…"
+                           value="@_addMagnet"
+                           @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
+                </label>
+            }
+            else
+            {
+                <label class="d-input-group">
+                    <span class="d-input-group__label">.torrent file</span>
+                    <InputFile OnChange="OnTorrentFilePicked" accept=".torrent" />
+                    @if (_addFileName is not null)
+                    {
+                        <div class="tor-add__filehint">
+                            <DIcon Name="paperclip" Size="12" /> @_addFileName (@FormatBytesShort(_addFileSize))
+                        </div>
+                    }
+                </label>
+            }
+
+            <label class="d-input-group">
+                <span class="d-input-group__label">Save to folder</span>
+                <select class="d-profile__select"
+                        value="@(_addFolderId?.ToString() ?? "")"
+                        @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                    <option value="">— default —</option>
+                    @foreach (var f in _folders ?? Array.Empty<FolderWatcherDto>())
+                    {
+                        <option value="@f.Id">@f.Label — @f.Path</option>
+                    }
+                </select>
             </label>
-        }
-        else
-        {
-            <label class="tor-add__field">
-                <span class="tor-add__label">.torrent file</span>
-                <InputFile OnChange="OnTorrentFilePicked" accept=".torrent" />
-                @if (_addFileName is not null)
-                {
-                    <div class="tor-add__filehint">
-                        <DIcon Name="paperclip" Size="12" /> @_addFileName (@FormatBytesShort(_addFileSize))
-                    </div>
-                }
-            </label>
-        }
-        <label class="tor-add__field">
-            <span class="tor-add__label">Save to folder</span>
-            <select class="tor-add__select"
-                    value="@(_addFolderId?.ToString() ?? "")"
-                    @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
-                <option value="">— default —</option>
-                @foreach (var f in _folders ?? Array.Empty<FolderWatcherDto>())
-                {
-                    <option value="@f.Id">@f.Label — @f.Path</option>
-                }
-            </select>
-        </label>
-        <div class="tor-add__row">
+
             <label class="tor-add__check">
                 <input type="checkbox" checked="@_addAutoRename"
                        @onchange="@(e => _addAutoRename = (bool)e.Value!)" />
@@ -97,16 +108,16 @@
                 <span>Stop after download</span>
             </label>
         </div>
-        <div class="tor-add__actions">
-            <Btn Variant="primary" Size="md" Loading="@_adding"
-                 Disabled="@(!CanAdd || _adding)"
-                 OnClick="AddTorrentAsync">
-                Add torrent
-            </Btn>
-            <Btn Variant="ghost" Size="md" OnClick="@(() => _addOpen = false)">Cancel</Btn>
-        </div>
-    </div>
-}
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" Loading="@_adding"
+             Disabled="@(!CanAdd || _adding)"
+             OnClick="AddTorrentAsync">
+            <DIcon Name="plus" Size="13" /> Add torrent
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseAdd">Cancel</Btn>
+    </Footer>
+</SettingsEditDrawer>
 
 @if (_records is null)
 {
@@ -221,6 +232,23 @@ else
     private void OpenEdit(string infoHash) => _editHash = infoHash;
 
     private void CloseEdit() => _editHash = null;
+
+    /// <summary>Open the Add Torrent drawer — resets the form so a previous
+    /// cancelled session doesn't bleed into the next attempt.</summary>
+    private void OpenAdd()
+    {
+        _addSource     = "magnet";
+        _addMagnet     = "";
+        _addFileName   = null;
+        _addFileBytes  = null;
+        _addFileSize   = 0;
+        _addFolderId   = null;
+        _addAutoRename = true;
+        _addStopAfter  = false;
+        _addOpen       = true;
+    }
+
+    private void CloseAdd() => _addOpen = false;
 
     private async Task OnTorrentDeleted()
     {

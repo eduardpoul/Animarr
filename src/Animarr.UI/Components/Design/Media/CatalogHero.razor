@@ -18,7 +18,7 @@
             @if (!string.IsNullOrEmpty(item.FanartPath))
             {
                 @* Cache-buster on LastMetadataRefreshedAt so rescans surface the new image. *@
-                <img src="@($"/api/image?path={Uri.EscapeDataString(item.FanartPath)}&t={item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+                <img src="@Animarr.UI.Services.MediaUrl.Image(item.FanartPath, item.LastMetadataRefreshedAt?.Ticks ?? 0)"
                      alt="@item.Title"
                      class="d-hero__bg-img" />
             }
@@ -139,7 +139,7 @@
     {
         // Tick suffix forces the browser to fetch the new file after a rescan.
         var v = _active.LastMetadataRefreshedAt?.Ticks ?? 0;
-        var url = $"/api/image?path={Uri.EscapeDataString(path)}&t={v}";
+        var url = Animarr.UI.Services.MediaUrl.Image(path, v);
         try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
     }
 

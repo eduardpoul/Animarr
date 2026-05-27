@@ -14,7 +14,7 @@
         @if (!string.IsNullOrEmpty(Item.FanartPath))
         {
             @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
-            <img src="@($"/api/image?path={Uri.EscapeDataString(Item.FanartPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+            <img src="@Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0)"
                  alt="" class="d-mdhero__bg-img" />
         }
         <div class="d-mdhero__wash"></div>
@@ -55,7 +55,7 @@
         @if (!string.IsNullOrEmpty(Item.PosterPath))
         {
             @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
-            <img src="@($"/api/image?path={Uri.EscapeDataString(Item.PosterPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}")"
+            <img src="@Animarr.UI.Services.MediaUrl.Image(Item.PosterPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0)"
                  alt="@Item.Title" class="d-mdhero__poster" />
         }
         else
@@ -145,7 +145,7 @@
     {
         if (firstRender && !string.IsNullOrEmpty(Item.FanartPath))
         {
-            var url = $"/api/image?path={Uri.EscapeDataString(Item.FanartPath)}&t={Item.LastMetadataRefreshedAt?.Ticks ?? 0}";
+            var url = Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0);
             try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
         }
     }
