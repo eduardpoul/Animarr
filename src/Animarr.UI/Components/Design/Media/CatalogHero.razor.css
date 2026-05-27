@@ -144,8 +144,11 @@
 @media (max-width: 959px) {
     .d-hero {
         height: clamp(360px, 56vh, 520px);
-        /* Negate the mobile .animarr-main padding (14 top + 16 sides). */
-        margin: -14px -16px var(--space-7);
+        /* Negate animarr-main's mobile top padding (which is now
+           56px + safe-area-inset-top to clear the fixed mobile nav) +
+           side padding so the hero bleeds edge-to-edge AND extends up
+           behind the transparent nav. */
+        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
     }
     .d-hero__content {
         padding: var(--space-6) var(--space-7) var(--space-7);

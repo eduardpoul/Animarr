@@ -40,7 +40,15 @@
     <link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css" />
     <style>
         html, body { margin: 0; padding: 0; background: #0b0d10; color: #f0f1f3;
-                     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+                     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                     /* Stop scroll-chain to the WebView's pull-to-refresh /
+                        rubber-band bounce. `touch-action: pan-y` was set
+                        here in an earlier round but it broke catalog grid
+                        taps — the renderer treated each tile as gesture-
+                        only and swallowed click events. Default
+                        touch-action (auto) keeps taps working; overscroll
+                        alone is enough to kill the jelly bounce. */
+                     overscroll-behavior: none; }
         .status-bar-safe-area { height: env(safe-area-inset-top); background: #14171b; }
 
         /* Boot placeholder — paints inside #app until Blazor mounts and
@@ -180,33 +188,48 @@
     </script>
 
     <script>
-        // ── Android TV viewport fix ───────────────────────────────────
-        // Cheap Android TVs (Mi TV, Realme TV, generic boxes) ship with
-        // density=320dpi, which makes a 1920×1080 panel report ~540 CSS
-        // pixels wide to the WebView. Our responsive CSS triggers
-        // mobile-layout at <960px, so without this the TV renders the
-        // phone shell on a 55" screen — Welcome text full-width, content
-        // overflows vertically.
+        // ── TV detection + boot-time tv-mode class ─────────────────────
+        // Resolves tv-mode on FIRST paint (before Blazor mounts) so:
+        //   • tv-nav.js's keydown handler activates immediately,
+        //   • Login.razor's tv-mode check at OnAfterRender returns the
+        //     real answer (else the redirect-to-/pair never fires),
+        //   • the bigger focus rings + min-hit-targets paint without flash.
         //
-        // Detection heuristic: any of —
-        //   • User agent contains "Leanback" / "Google TV" / "Android TV"
-        //   • No touch input + landscape orientation + viewport ≤ 1280
-        //   • UI mode flag (window.matchMedia for "TV")
-        // When detected: override the viewport meta to fix CSS width at
-        // 1280, so all `max-width: 959px` media queries evaluate false and
-        // the desktop layout kicks in. initial-scale is chosen so the
-        // 1280-CSS-px page fits the physical screen width.
+        // Precedence:
+        //   1. localStorage.animarr_tv_mode override (user toggled it in
+        //      ProfilePanel → Appearance, "off" here means force-off even
+        //      if the device is a TV — e.g. testing the phone layout on a
+        //      Mi TV).
+        //   2. UA / pointer / viewport heuristic. Matches Leanback, Google
+        //      TV, Bravia, Fire TV, plus "no-touch landscape ≤ 1280 CSS-px"
+        //      (cheap Android TVs that report 540 CSS-px wide because of
+        //      density=320dpi but are physically 1920×1080).
+        //
+        // The native MAUI `IsTelevision` check runs once DotNet is ready
+        // (next block) and refines the answer when the UA-based heuristic
+        // missed (Xiaomi MIUI for TV, emulators, OEM budget boxes).
+        //
+        // Cheap Android TVs also need a viewport-meta override — without
+        // pinning width to 1280 the responsive CSS triggers mobile-layout
+        // and the user sees a phone shell on a 55" screen.
         (function () {
-            var ua = navigator.userAgent || '';
-            var uaLooksTv = /Leanback|Google TV|Android TV|; TV[^a-z]|BRAVIA|AFT[A-Z]/i.test(ua);
-            var noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
-            var landscape = window.innerWidth > window.innerHeight;
-            var smallCssLandscape = landscape && window.innerWidth <= 1280;
-            // matchMedia('(tv)') doesn't exist in browsers, but matchMedia
-            // for "pointer: none" + "hover: none" approximates a TV remote.
-            var remoteOnly = window.matchMedia && window.matchMedia('(pointer: none)').matches;
+            var stored = null;
+            try { stored = localStorage.getItem('animarr_tv_mode'); } catch (_) {}
 
-            var isTv = uaLooksTv || (noTouch && smallCssLandscape) || remoteOnly;
+            var isTv;
+            if (stored === '1') {
+                isTv = true;
+            } else if (stored === '0') {
+                isTv = false;
+            } else {
+                var ua = navigator.userAgent || '';
+                var uaLooksTv = /Leanback|Google TV|Android TV|; TV[^a-z]|BRAVIA|AFT[A-Z]/i.test(ua);
+                var noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
+                var landscape = window.innerWidth > window.innerHeight;
+                var smallCssLandscape = landscape && window.innerWidth <= 1280;
+                var remoteOnly = window.matchMedia && window.matchMedia('(pointer: none)').matches;
+                isTv = uaLooksTv || (noTouch && smallCssLandscape) || remoteOnly;
+            }
             if (!isTv) return;
 
             var meta = document.querySelector('meta[name=viewport]');
@@ -215,17 +238,12 @@
                 meta.setAttribute('name', 'viewport');
                 document.head.appendChild(meta);
             }
-            // Fix CSS width to 1280; the initial-scale lets the browser
-            // shrink (or in our case stretch) that to fill the physical
-            // panel. The result: same UI as a 1280px desktop browser.
             var scale = window.innerWidth / 1280;
             meta.setAttribute('content',
                 'width=1280, initial-scale=' + scale.toFixed(3) +
                 ', maximum-scale=' + scale.toFixed(3) +
                 ', user-scalable=no');
 
-            // Mark <html> so anything else that wants TV-specific behaviour
-            // (focus rings, hero variants) can opt in.
             document.documentElement.classList.add('animarr-tv-host');
             document.documentElement.classList.add('tv-mode');
         })();
@@ -258,161 +276,13 @@
             } catch (_) { /* method not wired (non-MAUI host) — silent */ }
         })();
 
-        // ── DPad navigation for TV remote ─────────────────────────────
-        // Android TV remotes deliver ArrowUp/ArrowDown/ArrowLeft/ArrowRight
-        // (and Enter for OK / Back as the system back gesture). Without an
-        // explicit handler the browser falls back to default tab order
-        // which on Blazor pages is roughly DOM order — disastrous for
-        // remote nav across a tile grid because pressing ↓ on a row card
-        // ends up jumping to the next form field on the page instead of
-        // the card directly below.
-        //
-        // Strategy: spatial focus. For every arrow press, find the
-        // currently-focused element, measure its bounding rect, then scan
-        // all `[tabindex]:not([tabindex="-1"])` + button + a[href] +
-        // .tv-focus elements for the geometrically-nearest neighbour in
-        // the pressed direction. Move focus there. If nothing fits the
-        // direction (we're at an edge), fall back to the first focusable
-        // we can find so the remote never feels "stuck".
-        //
-        // Only active when html.tv-mode is set — phones use touch focus
-        // and we don't want to fight their native scroll on arrow keys.
-        (function () {
-            var ACTIVE_SELECTOR =
-                'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), ' +
-                'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-            function focusables() {
-                var els = Array.from(document.querySelectorAll(ACTIVE_SELECTOR));
-                return els.filter(function (el) {
-                    if (el.offsetParent === null) return false;  // hidden
-                    var r = el.getBoundingClientRect();
-                    return r.width > 0 && r.height > 0;
-                });
-            }
-
-            function center(rect) {
-                return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-            }
-
-            function pickNeighbour(direction) {
-                var current = document.activeElement;
-                var all = focusables();
-                if (all.length === 0) return null;
-                if (!current || current === document.body) return all[0];
-
-                var cRect = current.getBoundingClientRect();
-                var cCenter = center(cRect);
-
-                var best = null;
-                var bestScore = Infinity;
-
-                for (var i = 0; i < all.length; i++) {
-                    var el = all[i];
-                    if (el === current) continue;
-                    var rect = el.getBoundingClientRect();
-                    var p = center(rect);
-                    var dx = p.x - cCenter.x;
-                    var dy = p.y - cCenter.y;
-
-                    // Filter to candidates in the pressed direction.
-                    if (direction === 'up'    && dy >= -4) continue;
-                    if (direction === 'down'  && dy <=  4) continue;
-                    if (direction === 'left'  && dx >= -4) continue;
-                    if (direction === 'right' && dx <=  4) continue;
-
-                    // Weighted distance: primary axis dominates, secondary
-                    // axis has a soft penalty so we don't jump sideways
-                    // when there's a closer same-column candidate.
-                    var primary, secondary;
-                    if (direction === 'up' || direction === 'down') {
-                        primary   = Math.abs(dy);
-                        secondary = Math.abs(dx);
-                    } else {
-                        primary   = Math.abs(dx);
-                        secondary = Math.abs(dy);
-                    }
-                    var score = primary + secondary * 2;
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = el;
-                    }
-                }
-                return best;
-            }
-
-            document.addEventListener('keydown', function (e) {
-                if (!document.documentElement.classList.contains('tv-mode')) return;
-
-                // BACK key on the TV remote should never be swallowed — let
-                // it bubble to MAUI's native handler so the user can exit the
-                // app or back out of a stack frame. If we ever preventDefault
-                // it the remote stops being able to close the app and the
-                // user has to long-press HOME, which feels horrible.
-                if (e.key === 'GoBack' || e.key === 'Escape' || e.keyCode === 4) return;
-
-                // Let inputs handle their own arrow nav (cursor positioning).
-                var tag = (e.target && e.target.tagName) || '';
-                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
-                var dir = null;
-                switch (e.key) {
-                    case 'ArrowUp':    dir = 'up';    break;
-                    case 'ArrowDown':  dir = 'down';  break;
-                    case 'ArrowLeft':  dir = 'left';  break;
-                    case 'ArrowRight': dir = 'right'; break;
-                    default: return;
-                }
-                var next = pickNeighbour(dir);
-                if (!next) return;
-                e.preventDefault();
-                next.focus();
-                // If the new element is off-screen (e.g. the row grid
-                // continues past the viewport), scroll it into view so the
-                // user actually sees the focused tile.
-                try { next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); }
-                catch (_) { next.scrollIntoView(); }
-            }, true);
-
-            // On every navigation (Blazor's pushState fires popstate-like) and
-            // after each render, make sure SOME element is focused. Without
-            // an active element the first ↓ press has nothing to pick a
-            // neighbour from and the remote feels stuck. We pick the first
-            // visible focusable as a sane default — the user can always
-            // override by clicking / tapping.
-            function ensureFocus() {
-                if (!document.documentElement.classList.contains('tv-mode')) return;
-                if (document.activeElement && document.activeElement !== document.body) return;
-                var els = focusables();
-                if (els.length > 0) {
-                    try { els[0].focus({ preventScroll: true }); } catch (_) { els[0].focus(); }
-                }
-            }
-            // MutationObserver fires every time Blazor rerenders — cheaper
-            // than polling, and idempotent since we early-out when something's
-            // already focused. Attach inside a DOMContentLoaded handler
-            // because this script lives in <head> and document.body may not
-            // exist yet (TypeError: parameter 1 is not of type 'Node' — that
-            // was bricking the WebView boot and showing as a "hung" splash).
-            function attachObserver() {
-                if (!document.body) return;
-                var moObserver = new MutationObserver(function () {
-                    if (moObserver._t) cancelAnimationFrame(moObserver._t);
-                    moObserver._t = requestAnimationFrame(ensureFocus);
-                });
-                try { moObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
-            }
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', function () {
-                    attachObserver();
-                    ensureFocus();
-                });
-            } else {
-                attachObserver();
-                ensureFocus();
-            }
-            window.addEventListener('popstate', ensureFocus);
-        })();
+        // Spatial D-pad navigation lives in _content/Animarr.UI/tv-nav.js
+        // (loaded below alongside the other Animarr.UI scripts). Previously
+        // this file had an inline duplicate that bound its own capture-phase
+        // keydown handler — two handlers both calling preventDefault meant
+        // arrows occasionally picked DIFFERENT next-elements depending on
+        // which listener fired first, which the user saw as "navigation jumps
+        // somewhere random". Removed; tv-nav.js is now the single source.
 
         // Accent-hue setter (mirrors WASM host).
         window.animarr_setAccentHue = function (hue) {

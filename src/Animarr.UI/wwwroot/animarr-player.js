@@ -24,6 +24,47 @@
     const apiBase = () => (typeof window !== 'undefined' && window.animarrApiBase) || '';
     const apiUrl  = (path) => apiBase() + path;
 
+    // Mixed-content shim for MAUI BlazorWebView (Android).
+    //
+    // MAUI mounts the Razor bundle at https://0.0.0.x/ (a virtual host that's
+    // hardcoded by the framework). If the configured Animarr server lives at
+    // plain http://192.168.x.x:port, Chromium's renderer refuses every fetch
+    // from the HTTPS page as "active mixed content" — even with
+    // WebSettings.MixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW. The block
+    // happens before our AnimarrWebViewClient.ShouldInterceptRequest gets a
+    // crack at proxying the raw HTTP URL.
+    //
+    // Workaround: rewrite the api base to a same-origin proxy path of the
+    // form `/_animarr_proxy_/<url-encoded-base>`. JS fetches then go to
+    // https://0.0.0.x/_animarr_proxy_/... (same-origin, no mixed content);
+    // the WebViewClient on Android sees the prefix, decodes the real target,
+    // and proxies the call via native HttpClient — which has no
+    // mixed-content rules to enforce. End result is a transparent shim that
+    // lets HTTP-only LAN servers work from the MAUI HTTPS WebView.
+    //
+    // Schemes where the helper is a passthrough (no rewrite):
+    //   • Plain browser visiting an http://server/  (page already HTTP)
+    //   • HTTPS-page + HTTPS-server (Caddy in front)
+    // Only the HTTPS-page + HTTP-server combination triggers rewrite.
+    window.animarrSetApiBase = function (newBase) {
+        if (newBase && typeof newBase === 'string'
+            && newBase.toLowerCase().startsWith('http://')
+            && typeof window.location !== 'undefined'
+            && window.location.protocol === 'https:')
+        {
+            window.animarrApiBaseRaw = newBase;
+            window.animarrApiBase    = '/_animarr_proxy_/' + encodeURIComponent(newBase);
+            // eslint-disable-next-line no-console
+            console.info('animarr: api base rewritten through same-origin proxy '
+                + '(page is HTTPS, server is HTTP) — was', newBase);
+        }
+        else
+        {
+            window.animarrApiBase    = newBase || '';
+            window.animarrApiBaseRaw = newBase || '';
+        }
+    };
+
     // ── formatting helpers ────────────────────────────────────────────
     function formatTime(sec) {
         if (!Number.isFinite(sec) || sec < 0) sec = 0;

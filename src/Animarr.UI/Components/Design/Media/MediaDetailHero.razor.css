@@ -16,7 +16,23 @@
 
 @media (max-width: 959px) {
     .d-mdhero {
-        margin: -14px -16px var(--space-7);
+        /* Phone has a fixed transparent mobile-nav at the top
+           (56px + safe-area-inset-top tall). animarr-main reserves that
+           padding so non-hero pages don't collide with the bar; the
+           detail hero negates it so the fanart bleeds up behind the bar
+           AND into the status-bar overlay area. */
+        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
+    }
+    /* Push the inner content (back chip, edit chip, poster, title block)
+       down by the status-bar inset so they don't render under the
+       system clock / battery indicator. The .d-mdhero__bg layer keeps
+       filling the whole rect — only the foreground shifts. */
+    .d-mdhero__back,
+    .d-mdhero__top-actions {
+        top: calc(var(--space-4) + env(safe-area-inset-top, 0px)) !important;
+    }
+    .d-mdhero__content {
+        padding-top: calc(56px + env(safe-area-inset-top, 0px));
     }
 }
 

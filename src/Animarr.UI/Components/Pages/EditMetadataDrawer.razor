@@ -24,7 +24,7 @@
 
 @if (Item is not null)
 {
-    <div class="emd-overlay" @onclick="OnCloseAsync"></div>
+    <div class="emd-overlay" @onclick="OnCloseAsync" aria-hidden="true"></div>
     <div class="emd" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
         <header class="emd__header">
             @if (_mobileShowingDetail)

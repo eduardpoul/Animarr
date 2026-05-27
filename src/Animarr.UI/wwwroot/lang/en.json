@@ -538,6 +538,7 @@
 
   "catalog.title": "Catalog",
   "catalog.tab_all": "All",
+  "catalog.loading": "Loading library…",
   "catalog.empty": "No media found. Add folders in the Explorer and they will appear here after identification.",
   "catalog.shown_of_total": "Showing {0} of {1} — refine the search to narrow down.",
   "catalog.badge_anime": "Anime",

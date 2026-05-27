@@ -37,6 +37,17 @@
         // the response (eventually) lands, and StateHasChanged in
         // LocalizationService's LanguageChanged handler refreshes the UI.
         _ = SetupAsync();
+
+        // First paint of an AuthLayout-hosted route (Welcome / Login /
+        // Setup / Pair / Discovery). Blazor's router doesn't call
+        // history.pushState for the initial route — it just renders —
+        // so tv-nav.js's history-API hook would miss this. Dispatching
+        // the event manually triggers focusFirstInMain → lands on the
+        // page's [data-tv-autofocus] element (e.g. Welcome's "Get
+        // started" CTA) without the user having to press an arrow
+        // first.
+        _ = JS.InvokeVoidAsync("eval",
+            "window.dispatchEvent(new Event('Animarr:navigated'));");
     }
 
     private async Task SetupAsync()

@@ -3,6 +3,7 @@ using Android.Content;
 using Android.Content.PM;
 using Android.OS;
 using Android.Views;
+using AndroidX.Activity;
 
 namespace Animarr.App;
 
@@ -115,6 +116,18 @@ public class MainActivity : MauiAppCompatActivity
 
         CaptureDeepLink(Intent);
 
+        // Back-gesture handling temporarily disabled. The earlier
+        // OnBackPressedDispatcher.AddCallback intercept appeared to
+        // collide with Blazor's own router-level history handling — the
+        // catalog ended up empty after the first launch, suggesting the
+        // callback fired and popped history mid-bootstrap. Until we have
+        // a cleaner integration with Blazor.Router (which already
+        // supports browser back via window.history), the system default
+        // is back. The user will lose in-app navigation back, but the
+        // app's own back affordances (chips, drawer back arrows) still
+        // work, and the back gesture cleanly closes the app instead of
+        // crashing into a blank page.
+
         // Phase 2b (2026-05-27): native ExoPlayer video surface.
         // We insert a TextureView at the very bottom of the activity's view
         // tree (index 0 of DecorView). When the player opens, ExoPlayer hands
@@ -155,6 +168,134 @@ public class MainActivity : MauiAppCompatActivity
         base.OnNewIntent(intent);
         if (intent is not null) Intent = intent;
         CaptureDeepLink(intent);
+    }
+
+    /// <summary>Forward Android's system back gesture (edge swipe / hardware
+    /// BACK) to the WebView's history stack. The default
+    /// <c>MauiAppCompatActivity</c> behaviour just finish()s the activity,
+    /// which closes the entire app the very first time the user swipes —
+    /// even from a deeply nested route.
+    ///
+    /// Three-step decision in JS:
+    ///   1. <c>window.animarrHandleBack()</c> — closes the topmost open
+    ///      drawer / modal (or the fullscreen player). Returns 'consumed'
+    ///      when something was actually dismissed.
+    ///   2. Otherwise <c>window.history.back()</c> pops one route — the
+    ///      Blazor router treats it as a normal nav and updates the page.
+    ///   3. Otherwise (history length == 1, the user is on Welcome /
+    ///      catalog root) we Finish() the activity so the launcher
+    ///      reclaims focus instead of leaving the app on a dead screen.
+    ///
+    /// EvaluateJavascript is async — the renderer runs the snippet on
+    /// its own thread, then ValueCallback gets the result back on the
+    /// UI thread (BackResultCallback below). We don't fall through to
+    /// base.OnBackPressed() here because the system handler would
+    /// instantly finish() the activity and race the async result.</summary>
+#pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
+    public override void OnBackPressed()
+    {
+        try
+        {
+            var webView = FindWebView(Window?.DecorView);
+            if (webView is not null)
+            {
+                webView.EvaluateJavascript(
+                    "(function(){" +
+                    "  if (window.animarrHandleBack && window.animarrHandleBack()) return 'consumed';" +
+                    "  if (window.history.length > 1) { window.history.back(); return 'pop'; }" +
+                    "  return 'exit';" +
+                    "})()",
+                    new BackResultCallback(this));
+                return;
+            }
+        }
+        catch { /* WebView missing or threw — fall through to default */ }
+        base.OnBackPressed();
+    }
+#pragma warning restore CA1422
+
+    private global::Android.Webkit.WebView? _cachedWebView;
+    internal global::Android.Webkit.WebView? FindWebView(global::Android.Views.View? root)
+    {
+        if (_cachedWebView is not null) return _cachedWebView;
+        if (root is null) return null;
+        if (root is global::Android.Webkit.WebView wv) { _cachedWebView = wv; return wv; }
+        if (root is global::Android.Views.ViewGroup vg)
+        {
+            for (int i = 0; i < vg.ChildCount; i++)
+            {
+                var found = FindWebView(vg.GetChildAt(i));
+                if (found is not null) return found;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// OnBackPressedDispatcher callback that runs on every Android version,
+    /// including the predictive back gesture on Android 13+ (which doesn't
+    /// fire the deprecated OnBackPressed override). When invoked:
+    ///
+    ///   • Asks the WebView whether window.history can be popped.
+    ///   • If yes — Blazor router pops a route, we stay in the app.
+    ///   • If no — `finish()` the activity so the launcher reclaims focus.
+    ///
+    /// The callback is permanently enabled (`true` to base()) so the system
+    /// always calls us first; we decide whether to forward or consume.
+    /// </summary>
+    private sealed class AnimarrBackCallback : OnBackPressedCallback
+    {
+        private readonly MainActivity _activity;
+        public AnimarrBackCallback(MainActivity activity) : base(enabled: true)
+        {
+            _activity = activity;
+        }
+
+        public override void HandleOnBackPressed()
+        {
+            try
+            {
+                var webView = _activity.FindWebView(_activity.Window?.DecorView);
+                if (webView is not null)
+                {
+                    // Use ValueCallback so we can decide whether to finish()
+                    // the activity AFTER the WebView reports its history
+                    // length. The renderer runs JS on a separate thread; the
+                    // callback below marshals back to the activity thread.
+                    webView.EvaluateJavascript(
+                        "(function(){var h=window.history.length;if(h>1){window.history.back();return 'pop';}return 'exit';})()",
+                        new BackResultCallback(_activity));
+                    return; // we'll finish() inside the callback if needed
+                }
+            }
+            catch { /* fall through to immediate finish */ }
+            _activity.Finish();
+        }
+    }
+
+    /// <summary>ValueCallback receiver for the EvaluateJavascript above —
+    /// reads the JS return value and decides whether to finish the
+    /// activity. The string arrives wrapped in JSON quotes ("consumed"
+    /// / "pop" / "exit") so we substring-match.
+    ///
+    /// • "consumed" — a drawer / player closed in JS, stay put.
+    /// • "pop"      — Blazor router popped one route, stay put.
+    /// • "exit"     — user was at Welcome with no history; finish() so
+    ///                the launcher takes over instead of leaving the
+    ///                app frozen on a dead screen.
+    /// • anything else (transport blip, null) — treat as 'exit'
+    ///   defensively, the user can always relaunch.</summary>
+    private sealed class BackResultCallback : Java.Lang.Object, global::Android.Webkit.IValueCallback
+    {
+        private readonly MainActivity _activity;
+        public BackResultCallback(MainActivity activity) { _activity = activity; }
+        public void OnReceiveValue(Java.Lang.Object? value)
+        {
+            var s = value?.ToString() ?? "";
+            if (s.Contains("consumed", System.StringComparison.OrdinalIgnoreCase)) return;
+            if (s.Contains("pop",      System.StringComparison.OrdinalIgnoreCase)) return;
+            _activity.RunOnUiThread(() => _activity.Finish());
+        }
     }
 
     // ── Phase 2d lifecycle hooks for native ExoPlayer ──────────────────

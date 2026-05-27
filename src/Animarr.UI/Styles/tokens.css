@@ -259,6 +259,38 @@ html.tv-mode .d-focus-ring:focus-visible {
     outline-offset: 2px;
 }
 
+/* ── Safety net: every focusable in TV mode gets a visible ring ──────
+   Many components scope `outline: none` on their own selectors (input
+   border-as-focus, scoped buttons that pre-date the .tv-focus class) and
+   never define a replacement. Without a global fallback, the spatial
+   navigator IS moving focus correctly but the user can't *see* where it
+   lands — which on a TV looks indistinguishable from "navigation broke".
+   This rule paints an accent ring on any :focus-visible element while
+   tv-mode is on. !important is justified because we need to beat
+   component-scoped outline:none declarations (Blazor scoped CSS adds a
+   [b-xxx] attribute selector that bumps specificity above plain class
+   selectors). Text inputs get a thinner ring + an outline-offset of 1px
+   so the caret stays unambiguous.
+
+   References:
+     • Samsung Smart TV UX Checklist — "The focused object must be
+       clearly recognizable against the other objects."
+     • Android TV Focus System docs — "Visual focus indication is the
+       single most important affordance on a TV." */
+html.tv-mode *:focus-visible {
+    outline: 3px solid var(--accent-hi) !important;
+    outline-offset: 4px !important;
+    box-shadow: 0 0 0 6px var(--accent-soft) !important;
+    border-radius: var(--radius-sm, 6px);
+}
+html.tv-mode input:focus-visible,
+html.tv-mode textarea:focus-visible,
+html.tv-mode select:focus-visible {
+    outline: 2px solid var(--accent-line) !important;
+    outline-offset: 1px !important;
+    box-shadow: none !important;
+}
+
 /* ── Film-grain overlay layer ─────────────────────────────
    Driven by --decor-grain (none|block). Cinematic enables it,
    Quietude/Terminal/Cyberpunk skip it. */

@@ -474,9 +474,16 @@
         {
             // Reflect the toggle in the DOM immediately so .tv-focus heavier
             // rings and the larger base font-size kick in without a reload.
+            // Mirror to localStorage too — the boot resolver in index.html
+            // reads `animarr_tv_mode` on first paint, before MainLayout has
+            // had a chance to fetch /api/me/preferences, so persisting here
+            // keeps the bootstrap class application aligned with the user's
+            // explicit choice (no flash of wrong layout on next launch).
             await JS.InvokeVoidAsync("eval",
-                v ? "document.documentElement.classList.add('tv-mode')"
-                  : "document.documentElement.classList.remove('tv-mode')");
+                v ? "document.documentElement.classList.add('tv-mode');" +
+                    "try{localStorage.setItem('animarr_tv_mode','1');}catch(_){};"
+                  : "document.documentElement.classList.remove('tv-mode');" +
+                    "try{localStorage.setItem('animarr_tv_mode','0');}catch(_){};");
         }
         catch { }
         await PatchAsync(new UpdatePreferencesRequest(

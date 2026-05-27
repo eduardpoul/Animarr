@@ -184,11 +184,32 @@ button.d-pill:focus-visible {
     flex-shrink: 0;
     align-items: center;
     gap: 12px;
-    background: linear-gradient(180deg, rgba(20,15,12,0.92), rgba(10,8,7,0.88));
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid var(--border);
-    position: relative;
+    /* Transparent — like the desktop d-topbar — so the cinematic hero
+       behind shows through and the bar reads as a row of floating
+       controls. The brand text + avatar carry their own text-shadow so
+       legibility on a busy backdrop isn't lost. Earlier this had an
+       opaque gradient + blur that painted a 56px slab of dark above the
+       hero, which is what the user saw as "huge top gap" — the hero
+       started BELOW this bar instead of behind it. */
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 0;
+    /* Float over the catalog. The mobile shell still reserves its 56px
+       height via the spacer below so content doesn't collide with the
+       bar. */
+    position: fixed;
+    top: 0; left: 0; right: 0;
+}
+/* When the mobile nav is fixed, animarr-main needs matching top padding to
+   keep its first row clear. Hero pages cancel this via their own negative
+   margin (CatalogHero / CatalogContinueHero), so they bleed up behind the
+   bar; non-hero pages just respect the offset. */
+@media (max-width: 959px) {
+    .animarr-main { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; }
+}
+@media (max-width: 639px) {
+    .animarr-main { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; }
 }
 /* TV doesn't have a status bar — collapse back to the flat 56px so we don't
    leave a dead strip at the top of the screen. */
@@ -3296,12 +3317,12 @@ table.d-table tbody td code {
     .d-chero__pager-pill { width: 28px; height: 28px; font-size: 11px; }
 }
 
-/* ── TV restores the bottom tabbar even at narrow CSS-px viewports.
-   Cheap Android TVs report a 540-CSS-px width, which triggers the same
-   media queries as phones. The tv-mode class set in index.html bootstrap
-   reverses the "hide tabbar on phone" rule above and brings back the
-   bottom padding the catalog grid needs to clear it. Specificity beats
-   the @media rules because `html.tv-mode .d-tabbar` is (0,1,1) and the
-   phone rule is just (0,1,0). */
-html.tv-mode .d-tabbar     { display: grid; }
-html.tv-mode .animarr-main { padding-bottom: 96px; }
+/* Bottom tabbar is hidden on every form factor now. Phone uses the
+   ProfilePanel drilldown (Catalog stays the home page, Downloads + all
+   other nav moves into Settings). TV uses DPad-driven navigation from
+   the topbar / sidebar — having a stick-to-bottom strip duplicated the
+   nav and ate vertical space the catalog grid wanted. !important kills
+   any leftover .d-tabbar { display: grid } that may still live in a
+   prebuilt Tailwind output (wwwroot/app.css) until the next css:build
+   regenerates it. */
+.d-tabbar { display: none !important; }

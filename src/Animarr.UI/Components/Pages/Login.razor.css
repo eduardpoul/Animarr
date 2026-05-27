@@ -6,10 +6,22 @@
 .d-setup {
     position: relative;
     z-index: 2;
-    min-height: 100vh;
+    min-height: 100dvh;
     display: grid;
     place-items: center;
     padding: 60px 22px;
+}
+@media (max-width: 540px) {
+    /* Phone — drop the 22px shell padding so the card uses the full
+       viewport width. The card's own internal padding still gives the
+       inputs comfortable room. Also tightens the vertical padding so
+       the brand doesn't sit a third of the way down a tall screen. */
+    .d-login,
+    .d-setup {
+        padding: 28px 0 32px;
+        align-items: center;
+        justify-items: stretch;
+    }
 }
 
 .d-login__back,
@@ -45,6 +57,19 @@
     border: 1px solid var(--border-strong);
     border-radius: 18px;
     box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+    box-sizing: border-box;
+}
+@media (max-width: 540px) {
+    /* Phone — card fills the viewport edge-to-edge. Drop the side
+       radius / border so it reads as a panel, not a floating card. */
+    .d-login__card,
+    .d-setup__card {
+        width: 100%;
+        border-left: 0;
+        border-right: 0;
+        border-radius: 0;
+        padding: 28px 22px 24px;
+    }
 }
 
 .d-setup__card { width: 480px; }

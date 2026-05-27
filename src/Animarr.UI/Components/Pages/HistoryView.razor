@@ -211,7 +211,7 @@
 
 @if (!_revertHidden)
 {
-    <div class="rvdlg-overlay" @onclick="@(() => _revertHidden = true)"></div>
+    <div class="rvdlg-overlay" @onclick="@(() => _revertHidden = true)" aria-hidden="true"></div>
     <div class="rvdlg" role="dialog" aria-modal="true">
         <header class="rvdlg__header">
             <h4 class="rvdlg__title">@L["history.revert_dialog_title"]</h4>

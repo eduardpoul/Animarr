@@ -18,10 +18,12 @@
     isolation: isolate;
 }
 
-/* Mobile: smaller .animarr-main padding so the negation values shrink. */
+/* Mobile: .animarr-main now reserves 56px+safe-area top padding for the
+   fixed transparent mobile nav. Hero negates that whole stack so it
+   bleeds up behind the bar. */
 @media (max-width: 959px) {
     .d-chero {
-        margin: -14px -16px var(--space-7);
+        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
     }
 }
 

@@ -111,10 +111,16 @@
                             @foreach (var entry in _pickerEntries)
                             {
                                 var e = entry;
-                                <div class="sfd-picker__row" @onclick="@(() => DrillInAsync(e.Path))">
+                                @* Real <button> instead of clickable <div> so the
+                                   folder picker is reachable with a TV remote /
+                                   tab key. <div @onclick> looks identical in the
+                                   browser but spatial nav (tv-nav.js) only scans
+                                   focusable elements and skips bare divs. *@
+                                <button type="button" class="sfd-picker__row tv-focus"
+                                        @onclick="@(() => DrillInAsync(e.Path))">
                                     <DIcon Name="folder" Size="14" />
                                     <span>@e.Name</span>
-                                </div>
+                                </button>
                             }
                         }
                     </div>
