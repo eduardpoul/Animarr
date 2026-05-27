@@ -153,15 +153,12 @@
 
 .d-mdhero__title {
     font-family: var(--font-display);
-    /* Was clamp(40, 6vw, 96px) — capped at 96px the title pushed the pills
-       row up into the fixed TopBar's zone on long anime/donghua names.
-       New clamp matches CatalogContinueHero so the two heros read at the
-       same visual weight, and tall titles wrap onto a second line
-       instead of forcing the row above to climb. */
-    font-size: clamp(28px, 4vw, 52px);
+    /* Matched 1:1 to CatalogContinueHero (.d-chero__title): same clamp,
+       same line-height, no uppercase transform — so a movie's hero
+       reads as the same surface the catalog showed one click ago. */
+    font-size: clamp(36px, 6vw, 56px);
     line-height: 1.05;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
+    letter-spacing: -1px;
     color: var(--text);
     text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
     margin: 0;

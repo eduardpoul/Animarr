@@ -883,8 +883,18 @@
     private RenderFragment RenderAppearance() => __builder =>
     {
         <div class="d-profile__section">
-            <label class="d-profile__field">
-                <span class="d-profile__field-label">THEME</span>
+            @* All Appearance sections share the same "title + hint then
+               control" header shape so they read as a single column of
+               settings rather than mixing tiny mono labels and big toggle
+               titles — earlier the THEME block looked like a different
+               type of control than TV mode. Now they all use d-profile__
+               section-head + body. *@
+
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Theme</div>
+                    <div class="d-profile__section-hint">Pick the personality palette and typography.</div>
+                </div>
                 <div class="d-profile__theme-grid">
                     @foreach (var th in Themes)
                     {
@@ -902,10 +912,13 @@
                         </button>
                     }
                 </div>
-            </label>
+            </div>
 
-            <label class="d-profile__field">
-                <span class="d-profile__field-label">ACCENT COLOR</span>
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Accent color</div>
+                    <div class="d-profile__section-hint">Tints buttons, links, hero highlights and the brand mark.</div>
+                </div>
                 <div class="d-profile__swatches">
                     @foreach (var sw in AccentSwatches)
                     {
@@ -918,7 +931,7 @@
                                 @onclick="@(() => OnSelectAccent(s.Hue))"></button>
                     }
                 </div>
-            </label>
+            </div>
 
             <div class="d-profile__toggle-row">
                 <div class="d-profile__toggle-text">
@@ -941,8 +954,15 @@
                  5 in-progress titles. Three pager styles ship; the user
                  picks which fits their vibe. Preview swatches mimic the
                  actual pager markup so a glance is enough to pick. *@
-            <label class="d-profile__field">
-                <span class="d-profile__field-label">HERO PAGER STYLE</span>
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Hero pager style</div>
+                    <div class="d-profile__section-hint">
+                        Layout of the Continue Watching slot pager. Only visible
+                        when you have in-progress titles — the Featured hero
+                        below uses its own numbered side rail.
+                    </div>
+                </div>
                 <div class="d-profile__pager-grid">
                     @foreach (var p in PagerOptions)
                     {
@@ -996,7 +1016,7 @@
                         </button>
                     }
                 </div>
-            </label>
+            </div>
         </div>
     };
 
