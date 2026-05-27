@@ -1,12 +1,12 @@
 .d-hero {
     position: relative;
     height: clamp(420px, 70vh, 720px);
-    /* Negative margins exactly negate .animarr-main padding (80 top + 24 sides
+    /* Negative margins exactly negate .animarr-main padding (96 top + 24 sides
        on desktop, 14 + 16 on mobile) so the hero sits flush against the
        transparent TopBar and reaches both viewport edges. Bottom margin keeps
        the breathing room before the category strip / grid below.
        No border-radius — straight bleed on every edge per user request. */
-    margin: -80px -24px var(--space-9);
+    margin: -96px -24px var(--space-9);
     overflow: hidden;
     border-radius: 0;
 }

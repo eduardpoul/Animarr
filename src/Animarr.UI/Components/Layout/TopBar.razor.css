@@ -149,6 +149,9 @@
 }
 
 /* ── LLM status pill ─────────────────────────────────────── */
+/* Glass-morphism: dark translucent fill + saturated blur. Lifts the
+   pill off bright hero artwork so the dot + counter stay legible
+   without the bar itself needing a solid strip. */
 .d-topbar__llm {
     appearance: none;
     cursor: pointer;
@@ -158,17 +161,19 @@
     gap: 8px;
     padding: 6px 12px;
     border-radius: 999px;
-    background: transparent;
-    border: 0;
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
     height: 36px;
     box-sizing: border-box;
-    color: var(--text-dim);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    transition: background var(--motion-fast), color var(--motion-fast);
+    color: var(--text);
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
 .d-topbar__llm:hover {
     color: var(--text);
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 .d-topbar__llm-dot {
@@ -191,6 +196,9 @@
 }
 
 /* ── Icon buttons (Downloads, Admin, Search) ──────────────── */
+/* Same glass treatment as the LLM pill — pill-fills lift them off the
+   hero artwork. drop-shadow on the SVG was a workaround for fully
+   transparent backgrounds; with a real fill we don't need it. */
 .d-topbar__icon-btn {
     appearance: none;
     cursor: pointer;
@@ -199,21 +207,24 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: transparent;
-    border: 0;
-    color: var(--text-dim);
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    color: var(--text);
     display: grid;
     place-items: center;
-    /* Subtle shadow so the SVG stays legible on bright artwork without a fill. */
-    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
-    transition: background var(--motion-fast), color var(--motion-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+                color var(--motion-fast);
 }
 .d-topbar__icon-btn:hover {
     color: var(--text);
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
 }
 .d-topbar__icon-btn--active {
     background: var(--accent-soft);
+    border-color: var(--accent-line);
     color: var(--accent-hi);
 }
 
@@ -245,16 +256,18 @@
     gap: 10px;
     padding: 4px 10px 4px 4px;
     border-radius: 999px;
-    background: transparent;
-    border: 0;
+    background: rgba(15, 17, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
     height: 36px;
     box-sizing: border-box;
     color: var(--text);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    transition: background var(--motion-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .d-topbar__profile:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(15, 17, 21, 0.70);
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 .d-topbar__profile-text {
