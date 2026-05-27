@@ -1,12 +1,23 @@
 .d-mdhero {
     position: relative;
-    /* v5: was clamp(480px, 68vh, 720px) — design board calls for a 380px
-       compact hero so the catalog scrolls into view sooner. Kept the
-       margin-overflow trick so the hero still bleeds to the page edges. */
-    height: clamp(340px, 48vh, 460px);
-    margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-9)) var(--space-9);
+    /* Matched 1:1 to CatalogContinueHero (.d-chero) so a movie detail
+       page's hero is the same height as the catalog hero one swipe ago.
+       Negative top margin negates .animarr-main's 96px padding-top so
+       the hero starts flush against the transparent TopBar; horizontal
+       -24px reaches both viewport edges; bottom var(--space-9) is the
+       gap before the synopsis / details columns. No rounding on any
+       corner — clean bleed on all four edges, matching catalog. */
+    height: clamp(360px, 50vh, 440px);
+    margin: -96px -24px var(--space-9);
     overflow: hidden;
-    border-radius: 0 0 var(--radius-hero) var(--radius-hero);
+    border-radius: 0;
+    isolation: isolate;
+}
+
+@media (max-width: 959px) {
+    .d-mdhero {
+        margin: -14px -16px var(--space-7);
+    }
 }
 
 .d-mdhero__bg     { position: absolute; inset: 0; z-index: 0; }

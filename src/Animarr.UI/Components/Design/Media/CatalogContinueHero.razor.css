@@ -5,10 +5,11 @@
 .d-chero {
     position: relative;
     height: clamp(360px, 50vh, 440px);
-    /* Flush against the transparent TopBar (top -80px) and edge-to-edge
-       horizontally (sides -24px). No rounding on any corner — clean bleed
-       on all four edges. */
-    margin: -80px -24px var(--space-9);
+    /* Flush against the transparent TopBar (top -96px to cancel .animarr-main
+       padding-top) and edge-to-edge horizontally (sides -24px). No rounding
+       on any corner — clean bleed on all four edges. The TopBar floats over
+       this with its own glass pills; no separator needed. */
+    margin: -96px -24px var(--space-9);
     border-radius: 0;
     overflow: hidden;
     isolation: isolate;
