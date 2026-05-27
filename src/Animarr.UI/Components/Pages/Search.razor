@@ -1,0 +1,180 @@
+@*
+    /search — full-page library search. Free-text input at the top filters
+    the catalog grid below in real time as the user types. Replaces the
+    cramped "Filter by title" input that used to live at the bottom of the
+    Catalog page.
+
+    Same de-dup + multi-language title matching the Home page used to do
+    (Title / OriginalTitle / EnglishTitle / CjkTitle). Posters and the
+    visual treatment are the same primitives so the grid feels continuous
+    with the Catalog.
+
+    The page fetches the full library once on mount (10k cap, same as
+    Home). All filtering happens client-side — no per-keystroke API call.
+*@
+
+@page "/search"
+@implements IDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Animarr — @L["search.title"]</PageTitle>
+
+<div class="search-page">
+    <header class="search-page__head">
+        <button type="button" class="search-page__back tv-focus"
+                @onclick="@(() => Nav.NavigateTo("/"))"
+                aria-label="@L["search.btn_back"]">
+            <DIcon Name="chev-l" Size="14" />
+        </button>
+
+        <div class="search-page__input-wrap">
+            <DIcon Name="search" Size="16" />
+            <input id="search-page-input"
+                   class="search-page__input"
+                   type="search"
+                   value="@_query"
+                   placeholder="@L["search.placeholder"]"
+                   autocomplete="off"
+                   spellcheck="false"
+                   @oninput="OnQueryInput"
+                   @ref="_inputRef" />
+            @if (!string.IsNullOrEmpty(_query))
+            {
+                <button type="button" class="search-page__clear tv-focus"
+                        @onclick="ClearQuery" aria-label="@L["search.btn_clear"]">
+                    <DIcon Name="x" Size="14" />
+                </button>
+            }
+        </div>
+
+        <div class="search-page__count">
+            @if (!string.IsNullOrWhiteSpace(_query))
+            {
+                @_filtered.Count<span class="search-page__count-sep">/</span>@_allItems.Count
+            }
+            else
+            {
+                @_allItems.Count
+            }
+            <span class="search-page__count-label">@L["search.results_label"]</span>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        @* Same indeterminate-stripe loader as /home — the poster grid skeleton
+           used to read like an empty library while items were still in flight. *@
+        <div class="animarr-progress">
+            <div class="animarr-progress__track">
+                <div class="animarr-progress__fill animarr-progress__fill--indeterminate"></div>
+            </div>
+        </div>
+    }
+    else if (_allItems.Count == 0)
+    {
+        <div class="catalog-empty">
+            <DIcon Name="video" Size="48" />
+            <div class="catalog-empty__text">@L["search.empty_library"]</div>
+        </div>
+    }
+    else if (_filtered.Count == 0 && !string.IsNullOrWhiteSpace(_query))
+    {
+        <div class="catalog-empty">
+            <DIcon Name="search" Size="48" />
+            <div class="catalog-empty__text">@L.Get("search.no_matches", _query)</div>
+        </div>
+    }
+    else
+    {
+        <div class="catalog-grid">
+            @* Cap to 240 like Home — typing narrows it well before the cap. *@
+            @foreach (var item in _filtered.Take(240))
+            {
+                <Poster Item="@item" />
+            }
+        </div>
+        @if (_filtered.Count > 240)
+        {
+            <div class="catalog-more">
+                @L.Get("catalog.shown_of_total", 240, _filtered.Count)
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<MediaItemDto> _allItems = new();
+    private List<MediaItemDto> _filtered = new();
+    private bool _loading = true;
+    private string _query = "";
+    private ElementReference _inputRef;
+    private bool _inputFocused;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            // Same de-dup ladder as Home — by Id first, then by (title, year)
+            // so a duplicate folder doesn't render twice in the result list.
+            _allItems = items
+                .GroupBy(m => m.Id)
+                .Select(g => g.First())
+                .GroupBy(m => (m.Title?.Trim().ToLowerInvariant() ?? "", m.Year))
+                .Select(g => g.First())
+                .ToList();
+            _filtered = _allItems;
+        }
+        catch { /* offline — empty grid */ }
+        _loading = false;
+    }
+
+    /// <summary>Auto-focus the input on first paint so the user can start
+    /// typing immediately. Only runs once — subsequent renders (from query
+    /// changes) shouldn't steal focus while the user is typing.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_inputFocused)
+        {
+            _inputFocused = true;
+            try { await _inputRef.FocusAsync(); } catch { /* ref not yet bound — let the user click */ }
+        }
+    }
+
+    private void OnQueryInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? "";
+        Refilter();
+    }
+
+    private void ClearQuery()
+    {
+        _query = "";
+        Refilter();
+        InvokeAsync(async () =>
+        {
+            try { await _inputRef.FocusAsync(); } catch { }
+        });
+    }
+
+    private void Refilter()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            _filtered = _allItems;
+            return;
+        }
+        var q = _query.Trim();
+        _filtered = _allItems
+            .Where(m =>
+                m.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (m.OriginalTitle?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (m.EnglishTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)  ?? false) ||
+                (m.CjkTitle?.Contains(q, StringComparison.OrdinalIgnoreCase)      ?? false))
+            .ToList();
+    }
+
+    public void Dispose() { /* no subscriptions */ }
+}

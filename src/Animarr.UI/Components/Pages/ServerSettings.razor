@@ -1,0 +1,189 @@
+@*
+    ServerSettingsScreen — admin-only /server route.
+
+    Phase A stub: shell + 240px vertical tab rail + content card. The 9 tab
+    bodies (Users & Roles, Folders, History, LLM, Patterns, Ignore,
+    Downloads-config, Metadata, About) get filled in over the next
+    iterations. Tab buttons switch the active tab in local state — no
+    persistence, no real data yet.
+
+    Spec: screens-v4.jsx → ServerSettingsScreen lines 651-704.
+*@
+
+@page "/server"
+@inject NavigationManager Nav
+
+<PageTitle>Animarr — Server settings</PageTitle>
+
+<div class="d-server" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
+    <header class="d-page-header">
+        @if (_mobileShowingDetail)
+        {
+            <button type="button" class="d-server__mback tv-focus"
+                    @onclick="@(() => _mobileShowingDetail = false)"
+                    aria-label="Back to server settings list">
+                <DIcon Name="arrow-l" Size="14" /> BACK
+            </button>
+        }
+        <div class="d-page-header__main">
+            <div class="d-page-header__overline">ADMIN</div>
+            <h1 class="d-page-header__title">@(_mobileShowingDetail ? CurrentTab.Label : "SERVER SETTINGS")</h1>
+            @if (!_mobileShowingDetail)
+            {
+                <div class="d-page-header__sub">
+                    Visible only to users with the systemSettings permission. Changes apply live.
+                </div>
+            }
+        </div>
+    </header>
+
+    <div class="d-server__body">
+        @* Desktop rail — vertical list pinned next to the content. Hidden
+           on phone in favour of the drilldown list below. *@
+        <nav class="d-server__rail" aria-label="Server settings sections">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                var active = _active == key;
+                <button type="button"
+                        class="@($"d-server__rail-item tv-focus {(active ? "is-active" : "")}")"
+                        @onclick="@(() => _active = key)">
+                    <span class="d-server__rail-icon"><DIcon Name="@t.Icon" Size="16" /></span>
+                    <span class="d-server__rail-label">@t.Label</span>
+                    @if (t.New)
+                    {
+                        <span class="d-server__rail-new">NEW</span>
+                    }
+                </button>
+            }
+        </nav>
+
+        @* Mobile drilldown list — full-width vertical cards. Click → set
+           the active tab + flip to detail mode. CSS toggles list ⇄ body
+           via the parent's data-mobile-detail attribute. *@
+        <nav class="d-server__mlist" aria-label="Server settings categories">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                <button type="button" class="d-server__mlist-row tv-focus"
+                        @onclick="@(() => { _active = key; _mobileShowingDetail = true; })">
+                    <span class="d-server__mlist-ic">
+                        <DIcon Name="@t.Icon" Size="14" />
+                    </span>
+                    <span class="d-server__mlist-body">
+                        <span class="d-server__mlist-label">@t.Label</span>
+                        <span class="d-server__mlist-meta">@t.Description</span>
+                    </span>
+                    @if (t.New)
+                    {
+                        <span class="d-server__mlist-new">NEW</span>
+                    }
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
+        </nav>
+
+        <section class="d-server__content">
+            @* Embed the matching v3 Settings tab body when the admin tab maps
+               to one. The legacy /settings page exposes each tab as a
+               separate RenderFragment; Settings.razor now accepts an
+               EmbeddedTab parameter so it renders that body without its
+               own page header / tab bar. *@
+            @switch (_active)
+            {
+                case "users":
+                    @* v5 deep-link: ProfilePanel's "+ Add user" lands here with
+                       ?openForm=user so the inline UserBuilder is open out of
+                       the gate. _openCreateUserForm is consumed once and then
+                       cleared by UsersRolesPanel via the OnFormOpened callback. *@
+                    <UsersRolesPanel OpenCreateForm="@_openCreateUserForm" />
+                    break;
+                case "categories":
+                    <CategoriesPanel />
+                    break;
+                case "about":
+                    <AboutPanel />
+                    break;
+                case "folders":
+                    <Settings EmbeddedTab="root_folders" />
+                    break;
+                case "history":
+                    <Settings EmbeddedTab="rename_history" />
+                    break;
+                case "llm":
+                    <Settings EmbeddedTab="ai" />
+                    break;
+                case "patterns":
+                    <Settings EmbeddedTab="patterns" />
+                    break;
+                case "ignore":
+                    <Settings EmbeddedTab="rules" />
+                    break;
+                case "downloads":
+                    <Settings EmbeddedTab="torrent" />
+                    break;
+                case "meta":
+                    <Settings EmbeddedTab="metadata" />
+                    break;
+                default:
+                    <div class="d-server__placeholder">
+                        <DIcon Name="@CurrentTab.Icon" Size="48" />
+                        <h2 class="d-server__placeholder-title">@CurrentTab.Label</h2>
+                        <p class="d-server__placeholder-body">@CurrentTab.Description</p>
+                    </div>
+                    break;
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private record TabDef(string Key, string Label, string Icon, string Description, bool New = false);
+
+    private static readonly TabDef[] Tabs =
+    {
+        new("users",      "Users & Roles",  "users",    "Manage user accounts and permission roles.", New: true),
+        new("categories", "Categories",     "sparkle",  "Catalog tags — chips above the grid. LLM auto-classifies; admin curates.", New: true),
+        new("folders",    "Root folders",   "folder",   "Library source paths that the watcher monitors."),
+        new("history",    "Rename history", "clock",    "Every rename the watcher / queue has executed."),
+        new("llm",        "AI / LLM",       "magic",    "Configure the on-host LLM provider used for identification."),
+        new("patterns",   "Patterns",       "pencil",   "Regex rules that parse season / episode from filenames."),
+        new("ignore",     "Ignore rules",   "filter",   "Filename patterns to skip during scans."),
+        new("downloads",  "Downloads",      "download", "Torrent listen port, encryption, global Mbps caps, DHT / PEX / UPnP."),
+        new("meta",       "Metadata",       "external", "TMDB / MAL / IMDb / AniDB order + API credentials."),
+        new("about",      "About",          "info",     "Version, build, runtime, license, GitHub link.", New: true),
+    };
+
+    private string _active = "users";
+
+    /// <summary>Mobile drilldown state. False = show vertical list of
+    /// categories (default for phones), true = show the selected panel
+    /// with a back button. Desktop ignores this — the rail is always
+    /// visible there.</summary>
+    private bool _mobileShowingDetail;
+
+    /// <summary>v5 deep-link: set true when the query string says
+    /// ?openForm=user (ProfilePanel's "+ Add user" path). Forwarded into
+    /// UsersRolesPanel once, then cleared. Default tab + form state stay
+    /// untouched for users arriving via the regular Server Settings nav. *
+    /// </summary>
+    private bool _openCreateUserForm;
+
+    private TabDef CurrentTab => Tabs.FirstOrDefault(t => t.Key == _active) ?? Tabs[0];
+
+    protected override void OnInitialized()
+    {
+        // Parse ?panel=&openForm= once on page mount. Browsing between
+        // tabs after mount uses local state (_active) — we don't keep
+        // re-reading the query string. URL is left alone so the user can
+        // back/forward without the deep-link re-firing.
+        var uri = new Uri(Nav.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var panel = query["panel"];
+        if (!string.IsNullOrEmpty(panel) && Tabs.Any(t => t.Key == panel))
+            _active = panel;
+        var openForm = query["openForm"];
+        if (string.Equals(openForm, "user", StringComparison.OrdinalIgnoreCase))
+            _openCreateUserForm = true;
+    }
+}

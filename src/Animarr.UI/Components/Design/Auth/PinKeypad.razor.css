@@ -1,0 +1,170 @@
+/* ============================================================
+   PinKeypad — 4-digit numeric keypad. Spec: multi-server-flow.html
+   lines 108-115 (.pin styles) + 430-462 (C2 frame layout).
+
+   The component is unstyled relative to the surrounding container —
+   the parent decides whether to embed it in a centered card, a
+   modal backdrop, or a tab body. Keep the rules local so the
+   keypad behaves the same in every host.
+   ============================================================ */
+
+.d-pin {
+    /* Width is the canonical 280px from the design spec. The keys grid
+       inside computes its column width relative to this. */
+    width: 280px;
+    max-width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Take focus rings without a visible outline on the wrapper itself
+       — the keypad buttons own their own .tv-focus treatment. */
+    outline: none;
+}
+
+.d-pin__title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: -0.4px;
+    color: var(--text);
+    text-align: center;
+    line-height: 1.15;
+}
+
+.d-pin__sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.6px;
+    color: var(--text-faint);
+    text-align: center;
+    margin-top: 6px;
+    margin-bottom: 22px;
+    text-transform: uppercase;
+}
+
+/* ── Dots row ──────────────────────────────────────────────────
+   Four filled/unfilled discs that indicate how many digits the
+   user has typed. The accent halo on filled dots matches the
+   keypad's accent. */
+.d-pin__dots {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin-bottom: 22px;
+}
+
+.d-pin__dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    transition: background var(--motion-fast), box-shadow var(--motion-fast);
+}
+.d-pin__dot.is-on {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-soft);
+}
+
+/* Wrong-PIN feedback: tiny lateral shake. Plays once per error
+   set by the parent (component flips .is-shake on, then clears it
+   on the next render so subsequent re-renders don't replay). */
+.d-pin__dots.is-shake {
+    animation: d-pin-shake 0.32s cubic-bezier(.36,.07,.19,.97);
+}
+
+@keyframes d-pin-shake {
+    10%, 90% { transform: translateX(-2px); }
+    20%, 80% { transform: translateX(3px); }
+    30%, 50%, 70% { transform: translateX(-5px); }
+    40%, 60% { transform: translateX(5px); }
+}
+
+.d-pin__error {
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.4px;
+    text-align: center;
+    margin-bottom: 14px;
+    padding: 6px 10px;
+    background: oklch(0.78 0.16 75 / 0.08);
+    border: 1px solid oklch(0.78 0.16 75 / 0.25);
+    border-radius: 8px;
+    width: 100%;
+}
+
+/* ── Keys grid ──────────────────────────────────────────────── */
+.d-pin__keys {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+}
+
+.d-pin__key {
+    appearance: none;
+    cursor: pointer;
+    height: 60px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    display: grid;
+    place-items: center;
+    transition:
+        background var(--motion-fast),
+        border-color var(--motion-fast),
+        transform var(--motion-fast);
+}
+.d-pin__key:hover,
+.d-pin__key:focus {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+    outline: none;
+}
+.d-pin__key:active {
+    transform: scale(0.97);
+}
+
+/* The empty cell in the 4th row keeps the layout 3-wide without
+   inserting another digit. Pointer-events:none so accidental
+   keyboard focus skips it. */
+.d-pin__key--spacer {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* Backspace cell — same shape as a digit key but visually subdued
+   so the eye doesn't read it as "10". */
+.d-pin__key--back {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-dim);
+}
+.d-pin__key--back:hover,
+.d-pin__key--back:focus {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+/* ── Cancel link under the keypad ──────────────────────────── */
+.d-pin__cancel {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    margin-top: 18px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.8px;
+    padding: 8px 14px;
+    border-radius: 6px;
+}
+.d-pin__cancel:hover {
+    color: var(--text);
+}

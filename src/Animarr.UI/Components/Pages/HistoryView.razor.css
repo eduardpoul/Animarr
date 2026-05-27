@@ -1,0 +1,395 @@
+/* HistoryView — embedded rename history + scan logs view.
+   Scoped to the component; classes here only match elements defined in
+   HistoryView.razor (Blazor adds the [b-xxx] attribute selector for us). */
+
+/* ── Top segmented tabs (Renames / Scan logs) ───────────────────────── */
+.hv-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    width: fit-content;
+    margin-bottom: 16px;
+}
+
+.hv-tab {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    height: 28px;
+    padding: 0 14px;
+    border-radius: 7px;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: background var(--motion-base), color var(--motion-base);
+}
+.hv-tab:hover { color: var(--text); }
+.hv-tab--active {
+    background: var(--surface-3);
+    color: var(--text);
+    box-shadow: inset 0 1px 0 var(--accent);
+}
+
+.hv-pane { padding-top: 4px; }
+
+/* ── Filter row ─────────────────────────────────────────────────────── */
+.hv-filters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: 16px;
+}
+
+.hv-filter-field { min-width: 200px; }
+.hv-filter-field--narrow { min-width: 160px; }
+
+/* Small icon-only button used for filter reset / pagination / refresh.
+   Replaces FluentButton Appearance=Stealth. */
+.hv-icon-btn {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-ctrl);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--motion-base), background var(--motion-base), border-color var(--motion-base);
+}
+.hv-icon-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-3);
+    border-color: var(--accent-line);
+}
+.hv-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Loading spinner (replaces FluentProgressRing) ──────────────────── */
+.hv-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 80px 0;
+}
+
+.hv-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--surface-3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: hv-spin 1s linear infinite;
+}
+
+@keyframes hv-spin {
+    to { transform: rotate(360deg); }
+}
+
+.hv-empty {
+    text-align: center;
+    padding: 60px 0;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+/* ── Data table (`.d-table`) — replaces FluentDataGrid.
+   We get a real <table> instead of a CSS grid so widths flex naturally
+   and copy-paste works. Borders + hover via the d-table__* classes. */
+.d-table-wrap {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+}
+
+.d-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.d-table thead {
+    background: var(--surface);
+}
+
+.d-table th {
+    text-align: left;
+    padding: 10px 14px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.d-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.d-table tbody tr:last-child td { border-bottom: 0; }
+
+.d-table tbody tr:hover {
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+/* Per-column cell helpers — width hints + truncation. */
+.d-table--renames .d-table__date    { width: 120px; white-space: nowrap; color: var(--text-dim); font-family: var(--font-mono); font-size: 11.5px; }
+.d-table--renames .d-table__folder  { width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.d-table--renames .d-table__name    { min-width: 0; }
+.d-table--renames .d-table__name code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+.d-table--renames .d-table__arrow   { width: 28px; text-align: center; color: var(--text-faint); }
+.d-table--renames .d-table__status  { width: 110px; }
+.d-table--renames .d-table__actions { width: 52px; text-align: center; }
+
+.d-table__empty {
+    text-align: center;
+    padding: 32px 14px !important;
+    color: var(--text-dim);
+}
+
+/* ── Pager row (Prev / N–M of N / Next) ─────────────────────────────── */
+.hv-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+.hv-pager__label {
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+}
+
+.hv-pager .hv-icon-btn {
+    width: 30px;
+    height: 30px;
+}
+
+/* ── Scan-log list (expandable rows) ────────────────────────────────── */
+.hv-scanlist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hv-scan {
+    border-radius: var(--radius-chip);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.hv-scan__head {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    color: inherit;
+    font: inherit;
+}
+.hv-scan__head:hover { background: var(--surface); }
+
+.hv-scan__title {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hv-scan__when {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+}
+
+.hv-scan__err {
+    font-size: 11px;
+    color: var(--warn);
+    flex-shrink: 0;
+    margin-left: 4px;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hv-scan__chev {
+    flex-shrink: 0;
+    opacity: 0.5;
+    display: inline-flex;
+}
+
+.hv-scan__body {
+    border-top: 1px solid var(--border);
+    padding: 10px 14px;
+}
+
+.hv-scan__body--empty {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.hv-scan__log {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* ── Revert confirmation dialog. Scoped — mirrors design language. */
+.rvdlg-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(3px);
+}
+
+.rvdlg {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 480px;
+    max-width: 92vw;
+    max-height: 88vh;
+    z-index: 41;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-modal);
+    box-shadow: var(--shadow-modal);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: rvdlg-in 0.2s ease;
+}
+
+@keyframes rvdlg-in {
+    from { transform: translate(-50%, -48%) scale(0.96); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
+}
+
+.rvdlg__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 20px 24px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.rvdlg__title {
+    flex: 1;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 18px;
+    letter-spacing: -0.018em;
+    color: var(--text);
+}
+
+.rvdlg__close {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    padding: 6px;
+    border-radius: var(--radius-ctrl);
+    flex-shrink: 0;
+}
+.rvdlg__close:hover { color: var(--text); background: var(--surface); }
+
+.rvdlg__body {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 24px;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.rvdlg__footer {
+    display: flex;
+    gap: 10px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--border);
+    justify-content: flex-end;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, transparent, var(--surface-2));
+}
+
+/* ── Mobile / tablet (≤ 959px) ─────────────────────────────────────────
+   Filters wrap to multi-line, the rename table collapses non-essential
+   columns and lets the name cell wrap so long paths don't overflow. */
+@media (max-width: 959px) {
+    .hv-filters { gap: 8px; }
+    .hv-filter-field {
+        min-width: 0;
+        flex: 1 1 200px;
+    }
+    .hv-filter-field--narrow { flex: 1 1 140px; }
+    .hv-tabs { width: 100%; box-sizing: border-box; }
+    .hv-tab  { flex: 1; }
+
+    .d-table--renames .d-table__folder { display: none; }
+    .d-table--renames .d-table__date {
+        width: 90px;
+        font-size: 10.5px;
+    }
+    .d-table--renames .d-table__name code { font-size: 11px; }
+    .d-table--renames .d-table__status { width: 80px; font-size: 11px; }
+}
+
+/* ── Phone (≤ 639px) — strip more columns, stack scan-log title/when. */
+@media (max-width: 639px) {
+    .d-table { font-size: 12px; }
+    .d-table th,
+    .d-table td { padding: 6px 8px; }
+    .d-table--renames .d-table__arrow { width: 18px; }
+    .d-table--renames .d-table__status { display: none; }
+    .hv-pager { justify-content: center; flex-wrap: wrap; }
+
+    .hv-scan__head { flex-wrap: wrap; }
+    .hv-scan__title { flex: 1 1 100%; order: 1; }
+    .hv-scan__when  { order: 2; }
+    .hv-scan__err   { order: 3; flex: 1 1 100%; max-width: 100%; }
+
+    .rvdlg__footer { flex-wrap: wrap; }
+    .rvdlg__footer > * { flex: 1 1 auto; }
+}

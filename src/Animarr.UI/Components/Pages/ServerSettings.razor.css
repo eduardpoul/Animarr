@@ -1,0 +1,240 @@
+/* ============================================================
+   ServerSettingsScreen — /server admin page. Spec: screens-v4.jsx
+   lines 651-704. 240px vertical tab rail + content card.
+   ============================================================ */
+
+.d-server {
+    max-width: 1480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.d-server__body {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 28px;
+    align-items: start;
+}
+
+/* ── Vertical tab rail ───────────────────────────────────── */
+.d-server__rail {
+    position: sticky;
+    top: 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 8px;
+}
+
+.d-server__rail-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+    display: inline-grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.d-server__rail-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text);
+}
+
+.d-server__rail-item.is-active {
+    background: var(--surface-3);
+    color: var(--text);
+    padding-left: 12px;
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.d-server__rail-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+.d-server__rail-item.is-active .d-server__rail-icon { color: var(--accent-hi); }
+
+.d-server__rail-label { line-height: 1.2; }
+
+.d-server__rail-new {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    padding: 2px 6px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+}
+
+/* ── Content card ────────────────────────────────────────── */
+.d-server__content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    min-height: 480px;
+}
+
+.d-server__placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 64px 24px;
+    color: var(--text-dim);
+}
+
+.d-server__placeholder > :first-child {
+    color: var(--text-faint);
+    margin-bottom: 18px;
+}
+
+.d-server__placeholder-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: -0.4px;
+    color: var(--text);
+    margin: 0 0 10px;
+}
+
+.d-server__placeholder-body {
+    max-width: 420px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    margin: 0;
+}
+
+.d-server__placeholder-coming {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+}
+
+/* ── Mobile drilldown list — replaces the rail on phones. ─────────── */
+.d-server__mlist { display: none; }
+
+.d-server__mback {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    margin-bottom: 8px;
+}
+.d-server__mback:hover { background: rgba(255, 255, 255, 0.07); }
+
+/* ── Mobile collapse ─────────────────────────────────────── */
+@media (max-width: 959px) {
+    .d-server__body {
+        grid-template-columns: 1fr;
+    }
+    /* Hide the desktop rail entirely on phones — the drilldown list below
+       takes over. */
+    .d-server__rail { display: none; }
+
+    .d-server__mlist {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .d-server__mlist-row {
+        appearance: none;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-size: 14px;
+        text-align: left;
+        cursor: pointer;
+        display: grid;
+        grid-template-columns: 32px 1fr auto auto;
+        align-items: center;
+        gap: 12px;
+        transition: background var(--motion-fast), border-color var(--motion-fast);
+    }
+    .d-server__mlist-row:hover,
+    .d-server__mlist-row:focus-visible {
+        background: var(--surface-2);
+        border-color: var(--border-strong);
+    }
+    .d-server__mlist-ic {
+        display: inline-grid;
+        place-items: center;
+        width: 32px; height: 32px;
+        border-radius: 9px;
+        background: var(--accent-soft);
+        color: var(--accent-hi);
+    }
+    .d-server__mlist-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .d-server__mlist-label { font-weight: 600; }
+    .d-server__mlist-meta {
+        font-size: 11px;
+        color: var(--text-faint);
+        font-family: var(--font-mono);
+        letter-spacing: 0.2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .d-server__mlist-new {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--accent-hi);
+        background: var(--accent-soft);
+        padding: 2px 6px;
+        border-radius: 999px;
+        letter-spacing: 0.4px;
+    }
+
+    /* Toggle list ⇄ content via the parent's data attribute. List mode
+       shows .d-server__mlist + hides .d-server__content; detail mode does
+       the inverse + reveals the back button. */
+    .d-server[data-mobile-detail="false"] .d-server__mlist { display: flex; }
+    .d-server[data-mobile-detail="false"] .d-server__content { display: none; }
+    .d-server[data-mobile-detail="true"]  .d-server__mlist   { display: none; }
+    .d-server[data-mobile-detail="true"]  .d-server__mback   { display: inline-flex; }
+
+    /* Tighter content padding on phones — the body already has a margin
+       from the parent shell, no need for the extra 28-32px the desktop
+       card uses. */
+    .d-server__content { padding: 18px; min-height: 0; }
+}
+
+/* TV reverts to the desktop rail even though it may match the mobile media
+   query (1280px viewport). The rail is fine on a remote because focus
+   moves item-by-item with DPad up/down. */
+html.tv-mode .d-server__rail  { display: flex; }
+html.tv-mode .d-server__mlist { display: none; }
+html.tv-mode .d-server__mback { display: none; }
+html.tv-mode .d-server__content { display: block; }

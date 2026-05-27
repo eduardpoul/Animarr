@@ -1,0 +1,215 @@
+@*
+    TV pairing page (v5 Phase 7).
+
+    Flow:
+      1. OnAfterRenderAsync calls /api/auth/pair/init → renders QR + 6-digit code.
+      2. Polls /api/auth/pair/poll every 2s until status flips to "confirmed".
+      3. On confirmed, the poll response carried Set-Cookie for the user, so a
+         full page nav to "/" lands on /catalog already authenticated.
+
+    Auth gate: anonymous-friendly. If the TV's cookie is already valid, the
+    page still works — the user just authorises a second device.
+*@
+
+@page "/pair"
+@layout AuthLayout
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject Animarr.UI.Services.ServerAddressProvider ServerAddr
+@implements IDisposable
+
+<PageTitle>Animarr — Sign in on TV</PageTitle>
+
+<div class="d-pair">
+    <button type="button" class="d-pair__back tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
+        <DIcon Name="arrow-l" Size="13" /> BACK
+    </button>
+
+    <div class="d-pair__card" role="dialog" aria-label="TV pairing">
+        <header class="d-pair__brand">
+            <BrandMark Size="38" ExtraClass="d-pair__brand-mark" />
+            <div>
+                <div class="d-pair__brand-name">ANIMARR</div>
+                <div class="d-pair__brand-sub">@L["pair.title"]</div>
+            </div>
+        </header>
+
+        @if (_loading || _init is null)
+        {
+            <div class="d-pair__loading">
+                <Spinner Size="22" />
+            </div>
+        }
+        else if (_expired)
+        {
+            <div class="d-pair__expired">
+                <div class="d-pair__expired-msg">Code expired</div>
+                <Btn Variant="primary" Size="md" OnClick="@StartPairAsync">
+                    <DIcon Name="refresh" Size="13" /> NEW CODE
+                </Btn>
+            </div>
+        }
+        else
+        {
+            <div class="d-pair__hint">@L["pair.scan_hint"]</div>
+
+            @* Side-by-side QR + digits so the whole pairing UI fits inside a
+               TV viewport without scrolling. The 6-digit code is large and
+               legible from across the room — readable as a manual fallback
+               for any phone that fails to scan. *@
+            <div class="d-pair__split">
+                <div class="d-pair__qr">
+                    @* Absolute URL via MediaUrl.Base — under MAUI the
+                       BlazorWebView's origin is https://0.0.0.0/ which the
+                       virtual host doesn't route to the real Animarr API.
+                       MediaUrl.Base is seeded from ServerAddressProvider in
+                       AuthLayout. WASM falls back to a relative path because
+                       Base stays empty when same-origin. *@
+                    <img src="@QrImageUrl" alt="Pairing QR code" />
+                </div>
+                <div class="d-pair__digits">
+                    <div class="d-pair__code" aria-label="Pairing code">@PrettyCode</div>
+                    <div class="d-pair__url">on your phone: <span class="d-pair__url-mono">Profile → Pair a TV</span></div>
+                </div>
+            </div>
+        }
+
+        <button type="button" class="d-pair__cancel tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
+            CANCEL
+        </button>
+    </div>
+
+    <footer class="d-pair__footer">
+        <span class="d-pair__device">@_deviceName</span>
+    </footer>
+</div>
+
+@code {
+    private PairInitDto? _init;
+    private bool _loading = true;
+    private bool _expired;
+    private CancellationTokenSource? _pollCts;
+    private string _deviceName = "TV";
+    /// <summary>Absolute URL for the QR image. Under MAUI the BlazorWebView
+    /// hosts at <c>https://0.0.0.0/</c> (Android) or <c>https://0.0.0.1/</c>
+    /// (Windows) — those virtual hosts don't proxy <c>/api/...</c> to the
+    /// Animarr server, so a relative <c>&lt;img src&gt;</c> renders broken.
+    /// We read the authority directly from <see cref="ServerAddressProvider"/>
+    /// so this never races with AuthLayout's MediaUrl seeding (which only
+    /// fires on first render of the FIRST auth page in a session — by the
+    /// time we get to /pair the layout's OnAfterRender may have already
+    /// run with a stale or null current). When the provider has no current
+    /// (e.g. WASM same-origin) we fall back to a relative URL.</summary>
+    private string QrImageUrl
+    {
+        get
+        {
+            var path = $"{ApiRoutes.PairQr}?code={Uri.EscapeDataString(_init!.Code)}";
+            var authority = ServerAddr.Current?.GetLeftPart(UriPartial.Authority);
+            return string.IsNullOrEmpty(authority) ? path : $"{authority}{path}";
+        }
+    }
+
+    /// <summary>"123456" → "123 456" purely for legibility on the TV. Server
+    /// stores the canonical un-spaced form; the phone strips separators
+    /// before submit so either format round-trips.</summary>
+    private string PrettyCode
+    {
+        get
+        {
+            var code = _init?.Code ?? "";
+            if (code.Length != 6) return code;
+            return $"{code[..3]} {code[3..]}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _deviceName = GuessDeviceName();
+        await StartPairAsync();
+    }
+
+    /// <summary>
+    /// Mint a fresh code and kick off the poll loop. Idempotent — also used
+    /// by the "NEW CODE" button after expiry. Tears down any prior poll
+    /// task before starting a new one so we never run two loops concurrently.
+    /// </summary>
+    private async Task StartPairAsync()
+    {
+        StopPoll();
+        _loading = true;
+        _expired = false;
+        _init = null;
+        StateHasChanged();
+
+        try
+        {
+            _init = await Api.InitPairAsync(new PairInitRequest(_deviceName));
+            _loading = false;
+            StateHasChanged();
+
+            _pollCts = new CancellationTokenSource();
+            _ = PollLoopAsync(_init.Code, _pollCts.Token);
+        }
+        catch
+        {
+            _loading = false;
+            _expired = true;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Background poll — runs until ct is cancelled (component
+    /// disposed / "NEW CODE" pressed) or the server reports a terminal
+    /// status. On "confirmed" we do a hard reload so the auth cookie that
+    /// just landed takes effect from the first request of the new page.</summary>
+    private async Task PollLoopAsync(string code, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(2000, ct);
+                if (ct.IsCancellationRequested) return;
+
+                var poll = await Api.PollPairAsync(code, ct);
+                if (poll.Status == "confirmed")
+                {
+                    // Hard reload — the cookie is in the jar now, so the
+                    // very first /api/auth/status request will report
+                    // authenticated and the SPA's router will land us
+                    // on /catalog.
+                    Nav.NavigateTo("/", forceLoad: true);
+                    return;
+                }
+                if (poll.Status == "expired")
+                {
+                    _expired = true;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+            }
+            catch (TaskCanceledException) { return; }
+            catch
+            {
+                // Network blip — keep polling. The 5-minute TTL guarantees
+                // we won't loop forever.
+            }
+        }
+    }
+
+    private void StopPoll()
+    {
+        try { _pollCts?.Cancel(); } catch { }
+        _pollCts?.Dispose();
+        _pollCts = null;
+    }
+
+    /// <summary>Best-effort device label without a JS round-trip. Picks a
+    /// generic "TV" label for now; future work can read navigator.userAgent
+    /// via JSInterop and infer brand/model. The server only uses this for
+    /// display in any future "active sessions" panel.</summary>
+    private string GuessDeviceName() => "TV";
+
+    public void Dispose() => StopPoll();
+}

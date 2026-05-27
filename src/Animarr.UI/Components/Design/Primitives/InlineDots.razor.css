@@ -1,0 +1,37 @@
+/* Spec: design_handoff_animarr/pages/loaders.html §06. */
+
+.d-dots-host {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 22px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.d-dots {
+    display: inline-flex;
+    gap: 5px;
+}
+.d-dots span {
+    width: 5px;
+    height: 5px;
+    border-radius: 5px;
+    background: var(--accent);
+    animation: d-dot-blink 1.2s ease-in-out infinite;
+}
+.d-dots span:nth-child(2) { animation-delay: 0.2s; }
+.d-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes d-dot-blink {
+    0%, 100% { opacity: 0.3; transform: translateY(0);    }
+    50%      { opacity: 1;   transform: translateY(-2px); }
+}
+
+.d-dots__label { line-height: 1.4; }

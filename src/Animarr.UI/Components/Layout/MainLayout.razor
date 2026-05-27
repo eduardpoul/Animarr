@@ -1,0 +1,362 @@
+@*
+    MainLayout (v4) — default layout for authenticated routes.
+
+    Composition:
+      • Backdrop layer (fanart slideshow + vignette + hue tint)
+      • TopBar.razor (desktop ≥ 960px)
+      • MobileShell.razor (< 960px, top strip + bottom tabbar)
+      • <main> body
+      • ProfilePanel drawer (Phase 4 — stub for now)
+      • LLMStatusPopup (anchored top-right under TopBar)
+      • Toast stack (bottom-right)
+
+    Boots /api/auth/status + /api/me on first render through
+    UserContextState. Redirects anonymous users to /welcome or /setup as
+    needed — those routes have their own AuthLayout that skips this shell.
+*@
+
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+@inject UserContextState UserCtx
+@inject IJSRuntime JS
+@inject IAnimarrApiClient Api
+@inject HttpClient Http
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject ThemeService ThemeService
+@inject LocalizationService Loc
+@inject ServerAddressProvider ServerAddr
+@inject ServerRegistryState ServerReg
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+<div class="animarr-shell">
+
+    @* Backdrop: fixed under everything. backdrop.js paints the slides;
+       vignette + hue tint are pure CSS. *@
+    <div class="animarr-backdrop">
+        <div id="backdrop-container">
+            <div id="backdrop-slide-a" class="backdrop-slide"></div>
+            <div id="backdrop-slide-b" class="backdrop-slide"></div>
+        </div>
+        <div class="animarr-backdrop__vignette" aria-hidden="true"></div>
+        <div class="animarr-backdrop__hue-tint" aria-hidden="true"></div>
+    </div>
+
+    <div class="film-grain"></div>
+
+    @if (UserCtx.Loaded && UserCtx.IsAuthenticated)
+    {
+        <TopBar ActiveDownloads="_activeDownloads"
+                LlmDone="_llmDone" LlmTotal="_llmTotal"
+                FolderNames="@_folderNames"
+                OnProfileClickEvent="@(() => OpenProfile(null))"
+                OnLlmClickEvent="@(() => _llmOpen = true)" />
+
+        <MobileShell ActiveDownloads="_activeDownloads"
+                     OnProfileClickEvent="@(() => _profileOpen = true)" />
+    }
+
+    <main class="animarr-main">
+        @Body
+    </main>
+
+    @* Phase 4 will replace this stub with the full ProfilePanel drawer. *@
+    @if (_profileOpen && UserCtx.Me is not null)
+    {
+        <ProfilePanel IsOpen="_profileOpen"
+                      InitialTab="@_profileInitialTab"
+                      OnCloseEvent="@(() => _profileOpen = false)" />
+    }
+
+    <LLMStatusPopup Open="_llmOpen"
+                    Done="_llmDone" Total="_llmTotal"
+                    AvgMs="480" HitRate="99.2"
+                    Recent="_recentIdentifications"
+                    OnClose="@(() => _llmOpen = false)" />
+</div>
+
+<div class="ml-toast-stack">
+    @foreach (var t in _toasts)
+    {
+        <div class="@($"ml-toast ml-toast--{t.Intent.ToString().ToLowerInvariant()}")">
+            <span class="ml-toast__msg">@t.Message</span>
+            <button type="button" class="ml-toast__close" @onclick="@(() => _toasts.Remove(t))" aria-label="Close">
+                <DIcon Name="x" Size="13" />
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private const string AccentStorageKey = "animarr-accent";
+
+    private int _activeDownloads;
+    private int _llmDone;
+    private int _llmTotal;
+    private bool _profileOpen;
+    /// <summary>v5 multi-server: when the TopBar server pill opens the
+    /// ProfilePanel we pre-focus the Identity tab (where the Server section
+    /// lives). null = default tab.</summary>
+    private string? _profileInitialTab;
+
+    private void OpenProfile(string? tab)
+    {
+        _profileInitialTab = tab;
+        _profileOpen = true;
+    }
+    private bool _llmOpen;
+    private bool _everywhereBackdropStarted;
+    private HubConnection? _hub;
+    private HubConnection? _identHub;
+    private string[] _folderNames = Array.Empty<string>();
+    private readonly List<ToastInfo> _toasts = new();
+    private const int ToastAutoDismissMs = 4000;
+    private IReadOnlyList<LLMStatusPopup.RecentItem> _recentIdentifications = Array.Empty<LLMStatusPopup.RecentItem>();
+
+    protected override void OnInitialized()
+    {
+        UserCtx.OnChange += OnUserCtxChanged;
+        ThemeService.OnChange += OnThemeChanged;
+        L.LanguageChanged += OnLanguageChanged;
+        Toasts.OnShow += OnToastShown;
+    }
+
+    private void OnUserCtxChanged() => InvokeAsync(StateHasChanged);
+    private void OnThemeChanged()   => InvokeAsync(ApplyAccentHueToDomAsync);
+    private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnToastShown(ToastInfo info) => InvokeAsync(async () =>
+    {
+        _toasts.Add(info);
+        StateHasChanged();
+        await Task.Delay(ToastAutoDismissMs);
+        _toasts.Remove(info);
+        StateHasChanged();
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // 1. Bridge active server URL to JS + MediaUrl helper.
+        //    HttpClient.BaseAddress is a placeholder (set once at boot for
+        //    PrepareRequestMessage's relative-URI check); the *real* server is
+        //    in ServerAddressProvider.Current — that's what gets swapped when
+        //    the user picks a server in Discovery / ProfilePanel. Reading from
+        //    there means a server switch immediately rebases <img src>'s too.
+        try
+        {
+            // Hook server-pick + login flows so MediaUrl/JS pick up the new
+            // base address without a full reload.
+            ServerReg.OnChange += ApplyServerBase;
+
+            // CRITICAL: hydrate the persisted registry FIRST. Without this,
+            // a cookie-restored boot that lands straight on /home (skipping
+            // Welcome + Discovery, which are the only other call sites for
+            // LoadAsync) leaves ServerAddressProvider on the compile-time
+            // DefaultServerUrl. Every <img src> then resolves against
+            // tower.one and DNS-fails on LAN-only deployments. LoadAsync
+            // calls ApplyCurrentToHttp() internally, which writes
+            // ServerAddr.Current and fires OnChange — that triggers our
+            // ApplyServerBase via the subscription above.
+            await ServerReg.LoadAsync();
+            ApplyServerBase();
+        }
+        catch { }
+
+        // 2. Boot auth probe — /api/auth/status (anonymous-safe) then /api/me
+        //    if the cookie is valid.
+        await UserCtx.LoadAsync();
+
+        // 2a. Apply user's saved interface language. Web.Client preloads "en"
+        //     at boot in its own Program.cs; Animarr.App (MAUI) does NOT,
+        //     so on MAUI the dict is empty for the first render and any
+        //     L["nav.catalog"] returns the raw key. Always seed with "en"
+        //     here so MAUI gets readable labels even when the user's pref
+        //     is null/"en". Loc.LoadAsync transparently falls back to
+        //     en.json if a non-English pack file is missing.
+        try { await Loc.LoadAsync("en"); } catch { /* keys-as-values fallback */ }
+        var prefLang = UserCtx.Preferences?.Language;
+        if (!string.IsNullOrEmpty(prefLang) && prefLang != "en")
+        {
+            try { await Loc.LoadAsync(prefLang); } catch { /* keep English */ }
+        }
+
+        // 2b. Apply user's chosen personality theme. index.html paints a
+        //     bootstrap data-theme from localStorage so first paint matches
+        //     last session; this call reconciles with the server-stored
+        //     preference in case the user switched theme on another device.
+        var prefTheme = UserCtx.Preferences?.Theme;
+        if (!string.IsNullOrEmpty(prefTheme))
+        {
+            try { await JS.InvokeVoidAsync("animarr_setTheme", prefTheme); } catch { }
+        }
+        // Same idea for accent hue — server is the truth.
+        var prefHue = UserCtx.Preferences?.AccentHue;
+        if (prefHue is int hue && hue >= 0 && hue < 360)
+        {
+            try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+        }
+
+        // 3. Route guard. Pages with @layout AuthLayout (Welcome / Login /
+        //    Setup) skip this whole block — they're rendered by the router
+        //    against AuthLayout, not MainLayout. Anyone hitting an
+        //    auth-required route while anonymous gets bounced to /welcome,
+        //    which acts as the public landing page. Welcome itself routes
+        //    the user onward to /setup (first-run) or /login (returning) via
+        //    its START button — we don't short-circuit straight to /setup
+        //    here so the marketing copy is always shown at least once.
+        if (!UserCtx.IsAuthenticated)
+        {
+            Nav.NavigateTo("/welcome", replace: true);
+            return;
+        }
+
+        if (UserCtx.IsAuthenticated)
+        {
+            await ApplyAccentHueToDomAsync();
+            await StartBackdropAsync();
+            await LoadFolderNamesAsync();
+            await StartTorrentHubAsync();
+            await StartIdentificationHubAsync();
+            await RefreshIdentificationStatusAsync();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Recompute LLM popup counters (_llmDone, _llmTotal, recent list)
+    /// from a single /api/identification-queue snapshot. Called on initial
+    /// mount and on every QueueChanged hub broadcast.</summary>
+    private async Task RefreshIdentificationStatusAsync()
+    {
+        try
+        {
+            var entries = await Api.GetIdentificationQueueAsync();
+            _llmTotal = entries.Length;
+            _llmDone  = entries.Count(e =>
+                e.Status == IdentificationQueueStatus.Done ||
+                e.Status == IdentificationQueueStatus.Failed);
+            _recentIdentifications = entries
+                .Where(e => e.Status == IdentificationQueueStatus.Done && e.ProcessedAt is not null)
+                .OrderByDescending(e => e.ProcessedAt!.Value)
+                .Take(5)
+                .Select(e => new LLMStatusPopup.RecentItem(e.FolderLabel, 0.92))
+                .ToList();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* offline — popup just shows 0/0 */ }
+    }
+
+    private async Task ApplyAccentHueToDomAsync()
+    {
+        int hue = UserCtx.Preferences?.AccentHue ?? ThemeService.AccentHue;
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); }
+        catch { }
+    }
+
+    private async Task StartBackdropAsync()
+    {
+        var prefs = UserCtx.Preferences;
+        if (prefs?.BackdropEnabled == false) return;
+        try
+        {
+            var interval   = prefs?.BackdropIntervalSec ?? 30;
+            var blur       = prefs?.BackdropBlurPx      ?? 14;
+            var brightness = prefs?.BackdropBrightness  ?? 38;
+            if (blur > 30) blur = 14;
+
+            var paths = await Api.GetBackdropRotationAsync();
+            if (paths.Length > 0)
+            {
+                // Route through MediaUrl so the backdrop slideshow uses the
+                // user's chosen server authority. Raw "/api/image?…" URLs
+                // resolve against the WebView2 virtual host on MAUI Windows
+                // (https://0.0.0.1) and 404.
+                var urls = paths
+                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p))
+                    .ToArray();
+                _everywhereBackdropStarted = true;
+                await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
+            }
+        }
+        catch { }
+    }
+
+    private async Task LoadFolderNamesAsync()
+    {
+        try
+        {
+            var sections = await Api.GetSectionFoldersAsync();
+            _folderNames = sections
+                .OrderBy(f => f.Label)
+                .Select(f => f.Label)
+                .ToArray();
+        }
+        catch { _folderNames = Array.Empty<string>(); }
+    }
+
+    private async Task StartTorrentHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
+        {
+            var live = env.Items.Count(s =>
+                s.State == "Downloading" || s.DownloadRate > 0 || s.UploadRate > 0);
+            if (live != _activeDownloads)
+            {
+                _activeDownloads = live;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+        try { await _hub.StartAsync(); } catch { }
+    }
+
+    /// <summary>Identification hub — broadcasts QueueChanged on every status
+    /// transition inside the LLM/metadata pipeline. We just refetch the snapshot
+    /// rather than diff-mutating local state; the popup re-render is cheap and
+    /// the queue rarely exceeds ~50 rows in practice.</summary>
+    private async Task StartIdentificationHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubIdentification);
+        _identHub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
+        {
+            InvokeAsync(RefreshIdentificationStatusAsync);
+        });
+        try { await _identHub.StartAsync(); } catch { }
+    }
+
+    /// <summary>Push the active server's authority into MediaUrl + JS shim so
+    /// every &lt;img src&gt; and url(…) in the page resolves against the
+    /// real Animarr host (not the WebView2 virtual host 0.0.0.1 that
+    /// MAUI mounts the bundle under). Called once on first render and again
+    /// every time ServerRegistryState fires OnChange (Discovery pick,
+    /// ProfilePanel switch).</summary>
+    private void ApplyServerBase()
+    {
+        var apiBase = ServerAddr.Current?.GetLeftPart(UriPartial.Authority) ?? "";
+        Animarr.UI.Services.MediaUrl.SetBase(apiBase);
+        // Also publish to JS; backdrop.js + animarr-player.js use this when
+        // they construct absolute fetch URLs outside the HttpClient pipeline.
+        try { _ = JS.InvokeVoidAsync("eval", $"window.animarrApiBase = '{apiBase}';"); }
+        catch { /* JS not ready on first call — next render will succeed */ }
+        // Force a re-render so any image whose src was cached at the wrong
+        // base re-evaluates against the new one.
+        InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        UserCtx.OnChange -= OnUserCtxChanged;
+        ThemeService.OnChange -= OnThemeChanged;
+        L.LanguageChanged -= OnLanguageChanged;
+        Toasts.OnShow -= OnToastShown;
+        ServerReg.OnChange -= ApplyServerBase;
+        if (_hub is not null) await _hub.DisposeAsync();
+        if (_identHub is not null) await _identHub.DisposeAsync();
+        if (_everywhereBackdropStarted)
+            try { await JS.InvokeVoidAsync("stopBackdrop"); } catch { }
+    }
+}

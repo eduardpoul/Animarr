@@ -1,0 +1,39 @@
+@*
+    Inline label / chip. Tones: default | accent | success | warn | info.
+    Renders as <span>; pass Clickable=true for filter chips (button-like).
+*@
+
+@if (Clickable)
+{
+    <button type="button" class="@CssClass" @attributes="Extra" @onclick="OnClick">
+        @ChildContent
+    </button>
+}
+else
+{
+    <span class="@CssClass" @attributes="Extra">
+        @ChildContent
+    </span>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string Tone     { get; set; } = "default";
+    [Parameter] public bool   Dense    { get; set; }
+    [Parameter] public bool   Active   { get; set; }
+    [Parameter] public bool   Clickable { get; set; }
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? Extra { get; set; }
+
+    private string CssClass
+    {
+        get
+        {
+            var cls = $"d-pill d-pill--{Tone}";
+            if (Dense)  cls += " d-pill--dense";
+            if (Active) cls += " d-pill--active";
+            return cls;
+        }
+    }
+}

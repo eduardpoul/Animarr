@@ -1,0 +1,598 @@
+@*
+    Server Settings → Users & Roles tab.
+    Spec: screens-v4.jsx → AdminUsersRoles, UsersList, RolesList, RoleBuilder,
+    UserBuilder, lines 709-907.
+
+    Sub-views switched by a segmented control:
+      • users    — UsersList
+      • roles    — RolesList
+      • newUser  — UserBuilder (form)
+      • newRole  — RoleBuilder (form)
+
+    Reads /api/users + /api/roles. Create/Edit/Delete wired through
+    IAnimarrApiClient (manageUsers policy enforced server-side).
+*@
+
+@inject IAnimarrApiClient Api
+@inject ToastService Toasts
+
+<div class="d-srv-users">
+
+    @* ── Segmented Users / Roles control + contextual "+ New …" button ── *@
+    @* v5 drawer refactor: segments only toggle between the two lists.
+       Add / Edit affordances now slide a SettingsEditDrawer in from the
+       right (560px), leaving the list visible behind the backdrop.
+
+       "+ New user" / "+ New role" sits on the right edge of the segment
+       bar — label switches with the active tab so a single button covers
+       both create actions without the wide full-width CTA at the bottom. *@
+    <div class="d-srv-users__segment-bar">
+        <div class="d-srv-users__segment" role="tablist">
+            @foreach (var (key, label) in new[] { ("users", "Users"), ("roles", "Roles") })
+            {
+                var k = key;
+                var l = label;
+                var active = _view == k;
+                <button type="button"
+                        class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
+                        @onclick="@(() => _view = k)">@l</button>
+            }
+        </div>
+        <button type="button" class="d-srv-users__new-btn tv-focus"
+                @onclick="OpenCurrentCreateDrawer">
+            <DIcon Name="plus" Size="13" /> New @(_view == "users" ? "user" : "role")
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="d-srv-users__loading"><Spinner Size="md" /></div>
+    }
+    else
+    {
+        @switch (_view)
+        {
+            case "users": @RenderUsersList; break;
+            case "roles": @RenderRolesList; break;
+        }
+    }
+</div>
+
+@* ── Edit/Create drawer — only one open at a time (User vs Role). ── *@
+<SettingsEditDrawer IsOpen="@_userDrawerOpen"
+                    Title="@(_editingUserId is null ? "Create user" : "Edit user")"
+                    Overline="USERS"
+                    Hint="@(_editingUserId is null
+                            ? "Add a new account that can sign in."
+                            : "Update name, email, role. Leave password blank to keep current.")"
+                    Icon="user"
+                    OnClose="CloseUserDrawer">
+    <Body>
+        <div class="d-srv-users__form-grid">
+            <Input Value="@_newUserName" ValueChanged="@(v => _newUserName = v ?? "")"
+                   Label="FULL NAME" Placeholder="Anna Petrova" />
+            <Input Value="@_newUserUsername" ValueChanged="@(v => _newUserUsername = v ?? "")"
+                   Label="USERNAME" Placeholder="anna"
+                   Disabled="@(_editingUserId is not null)" />
+            <Input Value="@_newUserEmail" ValueChanged="@(v => _newUserEmail = v ?? "")"
+                   Label="EMAIL (OPTIONAL)" Placeholder="anna@example.com" />
+            <label class="d-input-group">
+                <span class="d-input-group__label">ROLE</span>
+                <select class="d-profile__select" @bind="_newUserRoleId">
+                    @foreach (var r in _roles)
+                    {
+                        <option value="@r.Id">@r.Name</option>
+                    }
+                </select>
+            </label>
+            <Input Value="@_newUserPass" ValueChanged="@(v => _newUserPass = v ?? "")"
+                   Type="password"
+                   Label="@(_editingUserId is null ? "INITIAL PASSWORD" : "NEW PASSWORD (OPTIONAL)")"
+                   Placeholder="••••••••" />
+            <Input Value="@_newUserPass2" ValueChanged="@(v => _newUserPass2 = v ?? "")"
+                   Type="password" Label="REPEAT PASSWORD" Placeholder="••••••••" />
+        </div>
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" OnClick="SubmitUserAsync">
+            <DIcon Name="check" Size="13" /> @(_editingUserId is null ? "Create user" : "Save changes")
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseUserDrawer">Cancel</Btn>
+    </Footer>
+</SettingsEditDrawer>
+
+<SettingsEditDrawer IsOpen="@_roleDrawerOpen"
+                    Title="@(_editingRoleId is null ? "Create role" : "Edit role")"
+                    Overline="ROLES"
+                    Hint="Bundle permissions + folder access. Folder access is enforced server-side at the API layer."
+                    Icon="shield"
+                    OnClose="CloseRoleDrawer">
+    <Body>
+        <div class="d-srv-form__col">
+            <Input Value="@_newRoleName" ValueChanged="@(v => _newRoleName = v ?? "")"
+                   Label="ROLE NAME" Placeholder="e.g. Donghua uploader" />
+
+            <div class="d-srv-form__block">
+                <div class="d-srv-form__block-label">PERMISSIONS</div>
+                <div class="d-srv-form__perms">
+                    <label class="d-srv-form__perm">
+                        <Toggle Checked="@_newRoleView" CheckedChanged="@(v => _newRoleView = v)" />
+                        <div>
+                            <div class="d-srv-form__perm-title">View content</div>
+                            <div class="d-srv-form__perm-hint">Playback library, mark watched, manage favorites.</div>
+                        </div>
+                    </label>
+                    <label class="d-srv-form__perm">
+                        <Toggle Checked="@_newRoleUpload" CheckedChanged="@(v => _newRoleUpload = v)" />
+                        <div>
+                            <div class="d-srv-form__perm-title">Upload content</div>
+                            <div class="d-srv-form__perm-hint">Add downloads (torrents, magnets, file uploads).</div>
+                        </div>
+                    </label>
+                    <label class="d-srv-form__perm">
+                        <Toggle Checked="@_newRoleSys" CheckedChanged="@(v => _newRoleSys = v)" />
+                        <div>
+                            <div class="d-srv-form__perm-title">System settings</div>
+                            <div class="d-srv-form__perm-hint">Access Server Settings: LLM, patterns, ignore rules, downloads config.</div>
+                        </div>
+                    </label>
+                    <label class="d-srv-form__perm">
+                        <Toggle Checked="@_newRoleUsers" CheckedChanged="@(v => _newRoleUsers = v)" />
+                        <div>
+                            <div class="d-srv-form__perm-title">Manage users</div>
+                            <div class="d-srv-form__perm-hint">Create / edit / delete users and roles.</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="d-srv-form__block">
+                <div class="d-srv-form__block-label">SOURCE FOLDERS</div>
+                <div class="d-srv-form__segment">
+                    @foreach (var (key, label) in new[] { ("all", "All folders"), ("selected", "Selected only") })
+                    {
+                        var k = key; var l = label;
+                        <button type="button"
+                                class="@($"d-srv-form__seg-item tv-focus {(_newRoleFolderMode == k ? "is-active" : "")}")"
+                                @onclick="@(() => _newRoleFolderMode = k)">@l</button>
+                    }
+                </div>
+                @if (_newRoleFolderMode == "selected")
+                {
+                    <div class="d-srv-form__folders">
+                        @if (_allFolders.Length == 0)
+                        {
+                            <div class="d-srv-form__folder-empty">
+                                No section folders defined yet — add them in Server Settings → Folders.
+                            </div>
+                        }
+                        @foreach (var f in _allFolders)
+                        {
+                            var folderId = f.Id;
+                            var active = _newRoleFolders.Contains(folderId);
+                            <label class="@($"d-srv-form__folder {(active ? "is-active" : "")}")">
+                                <input type="checkbox" checked="@active"
+                                       @onchange="@(e => ToggleFolder(folderId, (bool)e.Value!))" />
+                                <DIcon Name="folder" Size="13" />
+                                <span>@f.Label</span>
+                            </label>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </Body>
+    <Footer>
+        <Btn Variant="primary" Size="md" OnClick="SubmitRoleAsync">
+            <DIcon Name="check" Size="13" /> @(_editingRoleId is null ? "Create role" : "Save changes")
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseRoleDrawer">Cancel</Btn>
+    </Footer>
+</SettingsEditDrawer>
+
+@code {
+    /// <summary>v5 deep-link: when true, the panel mounts with the inline
+    /// UserBuilder open instead of the users list. Set by ServerSettings.razor
+    /// after parsing ?openForm=user (from ProfilePanel's "+ Add user" button).
+    /// The flag is consumed once on first render then ignored — switching
+    /// tabs / re-visiting the page uses _view local state. </summary>
+    [Parameter] public bool OpenCreateForm { get; set; }
+
+    /// <summary>"users" or "roles" — segmented list under the panel header.
+    /// v5 drawer refactor: add/edit no longer mutate _view; they flip
+    /// <see cref="_userDrawerOpen"/> / <see cref="_roleDrawerOpen"/> instead
+    /// so the list stays visible behind the drawer backdrop.</summary>
+    private string _view = "users";
+    private bool _userDrawerOpen;
+    private bool _roleDrawerOpen;
+
+    private UserDto[] _users = Array.Empty<UserDto>();
+    private RoleDto[] _roles = Array.Empty<RoleDto>();
+    private FolderWatcherDto[] _allFolders = Array.Empty<FolderWatcherDto>();
+    private bool _loading = true;
+    private bool _consumedOpenForm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Honor the deep-link the first time the parameter comes in true.
+        // ProfilePanel's "+ Add user" → /server?openForm=user lands here.
+        // After consumption we stay on whatever view the user navigated to.
+        if (OpenCreateForm && !_consumedOpenForm)
+        {
+            _consumedOpenForm = true;
+            ResetUserForm();
+            _view = "users";
+            _userDrawerOpen = true;
+        }
+    }
+
+    // ─── Drawer open/close helpers ─────────────────────────────────────
+
+    private void CloseUserDrawer()
+    {
+        _userDrawerOpen = false;
+        ResetUserForm();
+    }
+
+    private void CloseRoleDrawer()
+    {
+        _roleDrawerOpen = false;
+        ResetRoleForm();
+    }
+
+    private void OpenCreateUserDrawer()
+    {
+        ResetUserForm();
+        _userDrawerOpen = true;
+    }
+
+    private void OpenCreateRoleDrawer()
+    {
+        ResetRoleForm();
+        _roleDrawerOpen = true;
+    }
+
+    /// <summary>Single-handler proxy used by the segment-bar's "+ New …"
+    /// button — picks the right drawer based on the active tab so the
+    /// button label and target stay in sync.</summary>
+    private void OpenCurrentCreateDrawer()
+    {
+        if (_view == "users") OpenCreateUserDrawer();
+        else                  OpenCreateRoleDrawer();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _users = await Api.GetUsersAsync();
+            _roles = await Api.GetRolesAsync();
+            // Section folders feed the "Selected only" picker in the Role
+            // builder. Falls back to empty array on failure (picker shows
+            // an empty list rather than the old hardcoded mock set).
+            try { _allFolders = await Api.GetSectionFoldersAsync(); }
+            catch { _allFolders = Array.Empty<FolderWatcherDto>(); }
+            // Default New-User role: prefer non-master built-in ("User"), else
+            // first available. Avoids the "Master is selected by default" pit.
+            if (_newUserRoleId == Guid.Empty && _roles.Length > 0)
+            {
+                var userRole = _roles.FirstOrDefault(r =>
+                    string.Equals(r.Name, "User", StringComparison.OrdinalIgnoreCase));
+                _newUserRoleId = userRole?.Id ?? _roles[0].Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Failed to load users / roles: {ex.Message}");
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    /// <summary>One submit handler that creates a new user or patches the
+    /// existing one based on _editingUserId. Password fields are optional
+    /// in edit mode — empty values mean "keep current".</summary>
+    private async Task SubmitUserAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newUserName) || string.IsNullOrWhiteSpace(_newUserUsername))
+        {
+            Toasts.ShowWarning("Name and username are required");
+            return;
+        }
+        var passwordProvided = !string.IsNullOrEmpty(_newUserPass);
+        if (_editingUserId is null && !passwordProvided)
+        {
+            Toasts.ShowWarning("Password is required for new users");
+            return;
+        }
+        if (passwordProvided && _newUserPass.Length < 6)
+        {
+            Toasts.ShowWarning("Password must be at least 6 characters");
+            return;
+        }
+        if (passwordProvided && _newUserPass != _newUserPass2)
+        {
+            Toasts.ShowWarning("Passwords don't match");
+            return;
+        }
+        try
+        {
+            if (_editingUserId is Guid uid)
+            {
+                await Api.UpdateUserAsync(uid, new UpdateUserRequest(
+                    Name:        _newUserName.Trim(),
+                    Email:       string.IsNullOrWhiteSpace(_newUserEmail) ? null : _newUserEmail.Trim(),
+                    RoleId:      _newUserRoleId == Guid.Empty ? null : _newUserRoleId,
+                    NewPassword: passwordProvided ? _newUserPass : null));
+                Toasts.ShowSuccess("User updated");
+            }
+            else
+            {
+                await Api.CreateUserAsync(new CreateUserRequest(
+                    _newUserName.Trim(), _newUserUsername.Trim(),
+                    string.IsNullOrWhiteSpace(_newUserEmail) ? null : _newUserEmail.Trim(),
+                    _newUserRoleId, _newUserPass));
+                Toasts.ShowSuccess("User created");
+            }
+            ResetUserForm();
+            await LoadAsync();
+            _userDrawerOpen = false;
+            _view = "users";
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Save failed: {ex.Message}");
+        }
+    }
+
+    private async Task SubmitRoleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newRoleName))
+        {
+            Toasts.ShowWarning("Role name is required");
+            return;
+        }
+        try
+        {
+            var folderIds = _newRoleFolderMode == "selected" ? _newRoleFolders.ToArray() : null;
+            if (_editingRoleId is Guid rid)
+            {
+                await Api.UpdateRoleAsync(rid, new UpdateRoleRequest(
+                    Name:           _newRoleName.Trim(),
+                    Description:    null,
+                    ViewContent:    _newRoleView,
+                    UploadContent:  _newRoleUpload,
+                    SystemSettings: _newRoleSys,
+                    ManageUsers:    _newRoleUsers,
+                    FolderIds:      folderIds));
+                Toasts.ShowSuccess("Role updated");
+            }
+            else
+            {
+                await Api.CreateRoleAsync(new CreateRoleRequest(
+                    _newRoleName.Trim(), "",
+                    _newRoleView, _newRoleUpload, _newRoleSys, _newRoleUsers,
+                    folderIds));
+                Toasts.ShowSuccess("Role created");
+            }
+            ResetRoleForm();
+            await LoadAsync();
+            _roleDrawerOpen = false;
+            _view = "roles";
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Save failed: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteUserAsync(Guid id)
+    {
+        try
+        {
+            await Api.DeleteUserAsync(id);
+            await LoadAsync();
+            Toasts.ShowSuccess("User deleted");
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Delete failed: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteRoleAsync(Guid id)
+    {
+        try
+        {
+            await Api.DeleteRoleAsync(id);
+            await LoadAsync();
+            Toasts.ShowSuccess("Role deleted");
+        }
+        catch (Exception ex)
+        {
+            Toasts.ShowError($"Delete failed: {ex.Message}");
+        }
+    }
+
+    // RoleBuilder form state
+    private string _newRoleName  = "";
+    private bool   _newRoleView  = true;
+    private bool   _newRoleUpload;
+    private bool   _newRoleSys;
+    private bool   _newRoleUsers;
+    private string _newRoleFolderMode = "all"; // all | selected
+    private HashSet<Guid> _newRoleFolders = new();
+
+    // UserBuilder form state
+    private string _newUserName = "";
+    private string _newUserUsername = "";
+    private string _newUserEmail = "";
+    private Guid   _newUserRoleId = Guid.Empty;
+    private string _newUserPass = "";
+    private string _newUserPass2 = "";
+
+    // Edit-mode state — when non-null the builder forms update an existing
+    // record instead of creating a new one. The Submit button text and the
+    // backing API call branch on this.
+    private Guid? _editingUserId;
+    private Guid? _editingRoleId;
+
+    private void StartEditUser(UserDto u)
+    {
+        _editingUserId    = u.Id;
+        _newUserName      = u.Name;
+        _newUserUsername  = u.Username;
+        _newUserEmail     = u.Email ?? "";
+        _newUserRoleId    = u.RoleId;
+        _newUserPass      = "";
+        _newUserPass2     = "";
+        _userDrawerOpen = true;
+    }
+
+    private void StartEditRole(RoleDto r)
+    {
+        _editingRoleId       = r.Id;
+        _newRoleName         = r.Name;
+        _newRoleView         = r.Permissions.ViewContent;
+        _newRoleUpload       = r.Permissions.UploadContent;
+        _newRoleSys          = r.Permissions.SystemSettings;
+        _newRoleUsers        = r.Permissions.ManageUsers;
+        _newRoleFolderMode   = r.FolderIds is { Length: > 0 } ? "selected" : "all";
+        _newRoleFolders      = r.FolderIds is { Length: > 0 }
+            ? r.FolderIds.ToHashSet()
+            : new HashSet<Guid>();
+        _roleDrawerOpen = true;
+    }
+
+    private void ResetUserForm()
+    {
+        _editingUserId = null;
+        _newUserName = _newUserUsername = _newUserEmail = _newUserPass = _newUserPass2 = "";
+    }
+
+    private void ResetRoleForm()
+    {
+        _editingRoleId = null;
+        _newRoleName = "";
+        _newRoleView = true;
+        _newRoleUpload = _newRoleSys = _newRoleUsers = false;
+        _newRoleFolderMode = "all";
+        _newRoleFolders.Clear();
+    }
+
+    // ─── Users list ────────────────────────────────────────────
+    private RenderFragment RenderUsersList => __builder =>
+    {
+        <div class="d-srv-card">
+            <header class="d-srv-card__head">
+                <h2 class="d-srv-card__title">Users</h2>
+                <div class="d-srv-card__sub">Accounts that can sign in. Roles define what each can do.</div>
+            </header>
+            <div class="d-srv-users__rows">
+                @foreach (var u in _users)
+                {
+                    var isMaster = string.Equals(u.RoleName, "Master", StringComparison.OrdinalIgnoreCase);
+                    <div class="d-srv-users__row">
+                        <Avatar Name="@u.Name" HueOverride="u.AvatarHue" Size="md" />
+                        <div class="d-srv-users__row-text">
+                            <div class="d-srv-users__row-name">@u.Name</div>
+                            <div class="d-srv-users__row-meta">
+                                @u.Username@(string.IsNullOrEmpty(u.Email) ? "" : " · " + u.Email)
+                            </div>
+                        </div>
+                        <Pill Tone="@(isMaster ? "accent" : "")">@u.RoleName.ToUpperInvariant()</Pill>
+                        <span class="d-srv-users__row-seen">@(u.LastSeenAt is null ? "—" : RelativeTime(u.LastSeenAt.Value))</span>
+                        <div class="d-srv-users__row-actions">
+                            <button type="button" class="d-srv-users__icon-btn tv-focus" title="Edit"
+                                    @onclick="@(() => StartEditUser(u))">
+                                <DIcon Name="pencil" Size="14" />
+                            </button>
+                            @if (!isMaster)
+                            {
+                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="Delete"
+                                        @onclick="@(() => DeleteUserAsync(u.Id))">
+                                    <DIcon Name="trash" Size="14" />
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    };
+
+    // ─── Roles list ────────────────────────────────────────────
+    private RenderFragment RenderRolesList => __builder =>
+    {
+        <div class="d-srv-card">
+            <header class="d-srv-card__head">
+                <h2 class="d-srv-card__title">Roles</h2>
+                <div class="d-srv-card__sub">Roles bundle permissions + folder access. Master is built-in and cannot be edited.</div>
+            </header>
+            <div class="d-srv-roles__rows">
+                @foreach (var r in _roles)
+                {
+                    <div class="d-srv-roles__row">
+                        <header class="d-srv-roles__row-head">
+                            <div class="@($"d-srv-roles__icon {(r.BuiltIn ? "is-builtin" : "")}")">
+                                <DIcon Name="shield" Size="14" />
+                            </div>
+                            <div class="d-srv-roles__row-text">
+                                <div class="d-srv-roles__row-name">
+                                    @r.Name
+                                    @if (r.BuiltIn)
+                                    {
+                                        <span class="d-srv-roles__row-builtin">· BUILT-IN</span>
+                                    }
+                                </div>
+                                <div class="d-srv-roles__row-desc">@r.Description</div>
+                            </div>
+                            <span class="d-srv-roles__row-count">@r.UserCount users</span>
+                            @if (!r.BuiltIn)
+                            {
+                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="Edit"
+                                        @onclick="@(() => StartEditRole(r))">
+                                    <DIcon Name="pencil" Size="14" />
+                                </button>
+                            }
+                        </header>
+                        <div class="d-srv-roles__perms">
+                            @if (r.Permissions.ViewContent)    { <Pill Tone="success">View content</Pill> }
+                            @if (r.Permissions.UploadContent)  { <Pill Tone="accent">Upload content</Pill> }
+                            @if (r.Permissions.SystemSettings) { <Pill Tone="warn">System settings</Pill> }
+                            @if (r.Permissions.ManageUsers)    { <Pill Tone="warn">Manage users</Pill> }
+                            <span class="d-srv-roles__folders">
+                                @(r.FolderIds is null
+                                    ? "ALL FOLDERS"
+                                    : $"{r.FolderIds.Length} FOLDER{(r.FolderIds.Length == 1 ? "" : "S")}")
+                            </span>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    };
+
+    private void ToggleFolder(Guid id, bool on)
+    {
+        if (on) _newRoleFolders.Add(id);
+        else    _newRoleFolders.Remove(id);
+    }
+
+    private static string RelativeTime(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        if (d.TotalMinutes < 1)  return "now";
+        if (d.TotalHours   < 1)  return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalDays    < 1)  return $"{(int)d.TotalHours}h ago";
+        if (d.TotalDays    < 2)  return "yesterday";
+        if (d.TotalDays    < 7)  return $"{(int)d.TotalDays}d ago";
+        return utc.ToString("yyyy-MM-dd");
+    }
+}

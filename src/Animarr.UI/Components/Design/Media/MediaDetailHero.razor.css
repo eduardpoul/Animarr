@@ -1,0 +1,240 @@
+.d-mdhero {
+    position: relative;
+    /* Matched 1:1 to CatalogContinueHero (.d-chero) so a movie detail
+       page's hero is the same height as the catalog hero one swipe ago.
+       ~700px on a typical desktop. Negative top margin negates
+       .animarr-main's 96px padding-top so the hero starts flush against
+       the transparent TopBar; horizontal -24px reaches both viewport
+       edges; bottom var(--space-9) is the gap before the synopsis /
+       details columns. No rounding on any corner. */
+    height: clamp(480px, 75vh, 720px);
+    margin: -96px -24px var(--space-9);
+    overflow: hidden;
+    border-radius: 0;
+    isolation: isolate;
+}
+
+@media (max-width: 959px) {
+    .d-mdhero {
+        margin: -14px -16px var(--space-7);
+    }
+}
+
+.d-mdhero__bg     { position: absolute; inset: 0; z-index: 0; }
+.d-mdhero__bg-img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }
+
+.d-mdhero__wash {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, transparent 40%, rgba(10, 8, 7, 0.95) 100%),
+        linear-gradient(90deg, rgba(10, 8, 7, 0.45) 0%, transparent 60%),
+        radial-gradient(70% 50% at 10% 100%, oklch(0.66 0.20 var(--hue) / 0.25), transparent 70%);
+    pointer-events: none;
+}
+
+.d-mdhero__cjk {
+    position: absolute;
+    top: var(--space-7);
+    right: var(--space-9);
+    font-family: var(--font-cjk);
+    font-size: clamp(140px, 18vw, 320px);
+    line-height: 0.9;
+    color: oklch(0.95 0.1 var(--hue) / 0.08);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+}
+
+.d-mdhero__back,
+.d-mdhero__edit,
+.d-mdhero__fav {
+    appearance: none;
+    cursor: pointer;
+    height: 32px;
+    padding: 0 var(--space-5);
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: var(--label-tracking, 0.1em);
+    text-transform: var(--label-casing, none);
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    transition: background var(--motion-base), color var(--motion-base);
+    z-index: 3;
+}
+
+.d-mdhero__back {
+    position: absolute;
+    /* Drop below the fixed TopBar (60px tall) — was var(--space-7) ≈ 16px
+       and the Back chip collided with the brand mark on the left. 72px
+       clears the bar with 12px of breathing room. */
+    top: 72px;
+    left: var(--space-9);
+}
+
+/* v5: a row of action buttons (favorite + edit) is anchored top-right
+   instead of just the edit button — favorite gets its own pill.
+   Matching top: 72px so favorite/edit chips also sit cleanly under the
+   TopBar's profile + LLM pills on the right. */
+.d-mdhero__top-actions {
+    position: absolute;
+    top: 72px;
+    right: var(--space-9);
+    z-index: 3;
+    display: inline-flex;
+    gap: var(--space-3);
+}
+
+.d-mdhero__back:hover,
+.d-mdhero__edit:hover,
+.d-mdhero__fav:hover {
+    background: rgba(20, 15, 12, 0.75);
+}
+
+.d-mdhero__fav.is-active {
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+}
+
+.d-mdhero__fav-star {
+    font-size: 14px;
+    line-height: 1;
+}
+.d-mdhero__fav-star--filled {
+    color: var(--accent-hi);
+}
+
+.d-mdhero__content {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 2;
+    padding: var(--space-9) var(--space-11) var(--space-11);
+    display: flex;
+    gap: var(--space-8);
+    align-items: flex-end;
+}
+
+.d-mdhero__poster {
+    width: 220px;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: var(--radius-card);
+    box-shadow: 0 16px 48px -16px rgba(0, 0, 0, 0.85);
+    flex-shrink: 0;
+}
+
+.d-mdhero__poster--placeholder {
+    background: var(--surface-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+
+.d-mdhero__title-block {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.d-mdhero__pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.d-mdhero__title {
+    font-family: var(--font-display);
+    /* Matched 1:1 to CatalogContinueHero (.d-chero__title): same clamp,
+       same line-height, no uppercase transform — so a movie's hero
+       reads as the same surface the catalog showed one click ago. */
+    font-size: clamp(36px, 6vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -1px;
+    color: var(--text);
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    margin: 0;
+}
+
+.d-mdhero__alt {
+    font-size: 14px;
+    color: var(--text-dim);
+}
+
+.d-mdhero__meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: baseline;
+}
+
+.d-mdhero__dot { color: var(--text-faint); }
+
+.d-mdhero__conf {
+    color: var(--success);
+    font-weight: 600;
+}
+
+/* Primary CTA row — sits below meta strip, hero foreground.
+   Spec: CHANGELOG §2 ("the big primary button under the title"). */
+.d-mdhero__cta {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+}
+
+/* ── Mobile / tablet — shrink hero, tighten poster, stack content. */
+@media (max-width: 959px) {
+    .d-mdhero {
+        height: clamp(300px, 42vh, 420px);
+        margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-7);
+    }
+    .d-mdhero__content {
+        padding: var(--space-6) var(--space-7) var(--space-7);
+        gap: var(--space-5);
+    }
+    .d-mdhero__poster { width: 160px; }
+    .d-mdhero__back        { left:  var(--space-6); top: var(--space-5); }
+    .d-mdhero__top-actions { right: var(--space-6); top: var(--space-5); gap: var(--space-2); }
+    /* On tablets the Favorite chip drops its label and shows only the star
+       so the action row stays compact. */
+    .d-mdhero__fav span:not(.d-mdhero__fav-star) { display: none; }
+}
+
+/* ── Phone — stack poster above title, shrink everything. */
+@media (max-width: 639px) {
+    .d-mdhero {
+        height: auto;
+        min-height: 460px;
+    }
+    .d-mdhero__content {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: var(--space-5);
+        gap: var(--space-4);
+    }
+    .d-mdhero__poster { width: 110px; }
+    .d-mdhero__title { font-size: clamp(28px, 8vw, 42px); }
+    .d-mdhero__cjk {
+        font-size: clamp(80px, 28vw, 160px);
+        right: 0;
+        opacity: 0.7;
+    }
+    .d-mdhero__back        { left:  var(--space-4); top: var(--space-4); height: 28px; padding: 0 var(--space-3); }
+    .d-mdhero__top-actions { right: var(--space-4); top: var(--space-4); gap: var(--space-2); }
+    .d-mdhero__fav,
+    .d-mdhero__edit { height: 28px; padding: 0 var(--space-3); }
+}

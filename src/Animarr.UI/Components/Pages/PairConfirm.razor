@@ -1,0 +1,299 @@
+@*
+    PairConfirm — phone-side companion to /pair.
+
+    The signed-in phone uses this page to authorise an anonymous TV. Two
+    parallel entry points so the user doesn't have to fight a camera in poor
+    lighting:
+      1. Scan QR — opens the html5-qrcode camera overlay.
+      2. Enter the 6-digit code shown under the QR on the TV manually.
+    Both ultimately POST the same code to /api/auth/pair/confirm — the TV's
+    own /pair polling loop notices the status flip and lands authenticated.
+
+    Auth gate: signed-in only. An anonymous phone has no session to authorise
+    a TV with, so we redirect to /login first.
+*@
+
+@page "/pair-confirm"
+@layout AuthLayout
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Animarr — Pair a TV</PageTitle>
+
+<div class="d-pair-confirm">
+    <button type="button" class="d-pair-confirm__back tv-focus"
+            @onclick="@(() => Nav.NavigateTo("/"))">
+        <DIcon Name="arrow-l" Size="13" /> BACK
+    </button>
+
+    <div class="d-pair-confirm__card" role="dialog" aria-label="Pair a TV">
+        <header class="d-pair-confirm__brand">
+            <BrandMark Size="38" ExtraClass="d-pair-confirm__brand-mark" />
+            <div>
+                <div class="d-pair-confirm__brand-name">PAIR A TV</div>
+                <div class="d-pair-confirm__brand-sub">Sign your TV in to this account</div>
+            </div>
+        </header>
+
+        @* Mode tabs — Scan QR | Enter code. *@
+        <div class="d-pair-confirm__tabs" role="tablist">
+            <button type="button"
+                    class="@($"d-pair-confirm__tab tv-focus {(_mode == "scan" ? "is-active" : "")}")"
+                    @onclick="@(() => SwitchModeAsync("scan"))"
+                    role="tab" aria-selected="@(_mode == "scan")">
+                <DIcon Name="qr-code" Size="13" /> Scan QR
+            </button>
+            <button type="button"
+                    class="@($"d-pair-confirm__tab tv-focus {(_mode == "code" ? "is-active" : "")}")"
+                    @onclick="@(() => SwitchModeAsync("code"))"
+                    role="tab" aria-selected="@(_mode == "code")">
+                <DIcon Name="pencil" Size="13" /> Enter code
+            </button>
+        </div>
+
+        @if (_mode == "scan")
+        {
+            <div class="d-pair-confirm__scanner-wrap">
+                @* The viewer element MUST exist in the DOM before
+                   animarr_startQrScan touches it (html5-qrcode looks the id
+                   up via getElementById and throws otherwise). We render it
+                   unconditionally and wait a render-tick in OnAfterRender
+                   before kicking the JS off. *@
+                <div id="animarr-qr-viewer" class="d-pair-confirm__scanner"></div>
+                @if (!string.IsNullOrEmpty(_status))
+                {
+                    <div class="d-pair-confirm__status">@_status</div>
+                }
+                <div class="d-pair-confirm__hint">
+                    Point the camera at the QR code shown on your TV's pairing screen.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="d-pair-confirm__code-wrap">
+                <div class="d-pair-confirm__hint">
+                    Type the 6-digit code shown under the QR on your TV.
+                </div>
+                <input class="d-pair-confirm__code-input"
+                       type="tel"
+                       inputmode="numeric"
+                       pattern="[0-9]*"
+                       autocomplete="one-time-code"
+                       maxlength="7"
+                       placeholder="000000"
+                       value="@_typedCode"
+                       @oninput="OnCodeInput"
+                       @onkeypress="OnCodeKeyPress" />
+                @if (!string.IsNullOrEmpty(_status))
+                {
+                    <div class="d-pair-confirm__status">@_status</div>
+                }
+                <Btn Variant="primary" Size="lg" Loading="@_submitting"
+                     OnClick="OnSubmitCode"
+                     Disabled="@(_typedCode.Length < 6 || _submitting)">
+                    <DIcon Name="check" Size="14" /> Confirm pairing
+                </Btn>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(_toast))
+        {
+            <div class="d-pair-confirm__toast" role="status">
+                <DIcon Name="check" Size="13" /> @_toast
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>"scan" or "code". Defaults to scan since the camera-driven
+    /// flow is the headline feature; users with no camera (or who don't want
+    /// to grant permission) flip to "code".</summary>
+    private string _mode = "scan";
+    private string _typedCode = "";
+    private string? _status;
+    private string? _toast;
+    private bool _submitting;
+    private bool _scannerStarted;
+    private DotNetObjectReference<PairConfirm>? _selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+            if (!UserCtx.IsAuthenticated)
+            {
+                Nav.NavigateTo("/login", replace: true);
+                return;
+            }
+        }
+
+        // Start the scanner AFTER the viewer div has been written to the DOM.
+        // Doing this in OnAfterRender (rather than OnInitializedAsync) gives
+        // Blazor a render pass to commit #animarr-qr-viewer first, which is
+        // what fixed the prior "HTML Element with id=… not found" error.
+        if (_mode == "scan" && !_scannerStarted)
+        {
+            _scannerStarted = true;
+            _selfRef ??= DotNetObjectReference.Create(this);
+            try
+            {
+                // Ask the MAUI host (if present) to grant CAMERA before we hit
+                // getUserMedia. Without this, the WebView's onPermissionRequest
+                // fires before the user has granted the OS-level CAMERA
+                // permission and the JS side gets NotAllowedError. WASM in a
+                // browser has no bridge — animarr_requestCameraPermission is
+                // shimmed to "always granted" and the browser's native prompt
+                // takes over.
+                var granted = await JS.InvokeAsync<bool>("animarr_requestCameraPermission");
+                if (!granted)
+                {
+                    _status = "Camera permission denied. Use the code tab or grant the permission in app settings.";
+                    StateHasChanged();
+                    return;
+                }
+                await JS.InvokeVoidAsync("animarr_startQrScan", "animarr-qr-viewer", _selfRef);
+            }
+            catch (Exception ex)
+            {
+                _status = $"Camera unavailable: {ex.Message}. Use the code tab instead.";
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task SwitchModeAsync(string next)
+    {
+        if (next == _mode) return;
+        _status = null;
+        if (_mode == "scan" && _scannerStarted)
+        {
+            try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
+            _scannerStarted = false;
+        }
+        _mode = next;
+    }
+
+    private void OnCodeInput(ChangeEventArgs e)
+    {
+        // Keep only digits as the user types — autofill from one-time-code
+        // can drop the system separators in ("123 456" or "123-456") and the
+        // server stores the un-separated canonical form. Strip anything that
+        // isn't a digit so the visible input + the submitted body match.
+        var raw = e.Value?.ToString() ?? "";
+        var digits = new System.Text.StringBuilder(raw.Length);
+        foreach (var ch in raw)
+            if (ch is >= '0' and <= '9') digits.Append(ch);
+        _typedCode = digits.ToString();
+    }
+
+    private async Task OnCodeKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await OnSubmitCode();
+    }
+
+    private async Task OnSubmitCode()
+    {
+        var code = (_typedCode ?? "").Trim();
+        if (code.Length < 6) return;
+        _submitting = true;
+        _status = null;
+        StateHasChanged();
+        await SubmitCodeAsync(code);
+        _submitting = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Called from JS once html5-qrcode decodes a payload. Same
+    /// extraction logic as Login.razor's OnQrDecoded so a QR generated by
+    /// /api/auth/pair/qr (which embeds <c>animarr://pair?code=…</c>) is
+    /// accepted regardless of which page is hosting the scanner.</summary>
+    [JSInvokable]
+    public async Task OnQrDecoded(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload)) return;
+        var code = ExtractCode(payload);
+        if (code is null)
+        {
+            _status = "Not an Animarr pairing QR";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        await SubmitCodeAsync(code);
+    }
+
+    private async Task SubmitCodeAsync(string code)
+    {
+        _status = "Confirming…";
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var ok = await Api.ConfirmPairAsync(new ConfirmPairRequest(code));
+            if (!ok)
+            {
+                _status = "Code expired or unknown — refresh the TV and try again.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            // Stop the scanner so the camera light goes out immediately, then
+            // bounce back to the catalog so the user knows we're done.
+            try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
+            _scannerStarted = false;
+            _status = null;
+            _toast = "TV signed in!";
+            await InvokeAsync(StateHasChanged);
+            // Brief delay so the success toast registers, then go home.
+            await Task.Delay(1200);
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch (Exception ex)
+        {
+            _status = $"Confirm failed: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Pull the 6-digit code out of an <c>animarr://pair?code=…</c>
+    /// URL. Also tolerates a bare digit string as a fallback for users who
+    /// scanned an unusual QR with the digits printed inside instead of a
+    /// deep-link. Always normalises to digits-only so the submitted code
+    /// matches the server's canonical form regardless of separators.</summary>
+    private static string? ExtractCode(string payload)
+    {
+        try
+        {
+            string raw = payload.Trim();
+            if (raw.StartsWith("animarr://pair", StringComparison.OrdinalIgnoreCase))
+            {
+                var q = raw.IndexOf('?');
+                if (q < 0) return null;
+                var qs = System.Web.HttpUtility.ParseQueryString(raw[(q + 1)..]);
+                raw = qs["code"] ?? "";
+            }
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+
+            // Strip everything except digits — server canonical form is 6
+            // digits, no separators. Returns the digit subsequence if it
+            // ends up 4-12 chars long (we accept 4-12 to keep room for a
+            // future longer alphabet without bumping clients).
+            var digits = new System.Text.StringBuilder(raw.Length);
+            foreach (var ch in raw)
+                if (ch is >= '0' and <= '9') digits.Append(ch);
+            var canonical = digits.ToString();
+            return canonical.Length is >= 4 and <= 12 ? canonical : null;
+        }
+        catch { }
+        return null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
+        _selfRef?.Dispose();
+    }
+}

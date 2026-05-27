@@ -38,6 +38,18 @@ public class LlmCandidateItem
     public string? Overview { get; init; }
 }
 
+/// <summary>Lightweight telemetry surface for the AI/LLM settings page hero card.
+/// Counters live in-memory in the singleton implementation; reset on restart.</summary>
+public class LlmTelemetry
+{
+    /// <summary>Last 50 IdentifyFolder latencies in ms. Average computed on read.</summary>
+    public int AverageLatencyMs { get; init; }
+    public int CallCount        { get; init; }
+    /// <summary>Probe state: did the last IsAvailable check pass?</summary>
+    public bool LastProbeOk     { get; init; }
+    public DateTime? LastProbeAt { get; init; }
+}
+
 public interface ILlmService
 {
     /// <summary>Ask the LLM to identify a media folder from its path/name.</summary>
@@ -45,6 +57,9 @@ public interface ILlmService
     /// <param name="sectionLabel">User-defined label of the parent section
     /// (e.g. "Anime", "Movies"); a category hint that biases classification.</param>
     Task<LlmIdentifyResult?> IdentifyFolderAsync(string folderPath, string? sectionLabel = null, CancellationToken ct = default);
+
+    /// <summary>Telemetry snapshot for the settings page. Cheap; safe to call on every render.</summary>
+    LlmTelemetry GetTelemetry();
 
     /// <summary>Ask the LLM to suggest a rename regex for an unmatched filename.</summary>
     Task<LlmRegexResult?> SuggestRegexAsync(string fileName, CancellationToken ct = default);
@@ -68,4 +83,11 @@ public interface ILlmService
         IReadOnlyList<string> fileNames,
         IReadOnlyList<(int Number, string Name)> episodes,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Send an arbitrary prompt and return the raw text response. Currently
+    /// used by <c>CategoryClassifierService</c> to ask for a JSON list of
+    /// categories. Returns null when the LLM is disabled or the call fails.
+    /// </summary>
+    Task<string?> GetCompletionAsync(string prompt, CancellationToken ct = default);
 }

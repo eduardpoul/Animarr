@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>01 · Foundations</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  /* page-specific */
+  .ramp{display:grid;grid-template-columns:repeat(11,1fr);border-radius:var(--r-3);overflow:hidden;border:1px solid var(--border);}
+  .ramp .r{padding:14px 8px 12px;text-align:center;font-family:var(--font-mono);font-size:10px;color:rgba(255,255,255,0.55);}
+  .ramp .r b{display:block;color:#fff;font-size:12px;margin-bottom:2px;}
+
+  .spacer-table{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-5);padding:24px 30px;}
+  .spacer-row{display:grid;grid-template-columns:80px 1fr 140px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);gap:24px;}
+  .spacer-row:last-child{border-bottom:0;}
+  .spacer-row .nm{font-family:var(--font-mono);font-size:12px;color:var(--accent-hi);}
+  .spacer-row .bar{background:var(--accent);height:14px;border-radius:3px;}
+  .spacer-row .px{text-align:right;color:var(--text-dim);font-size:11px;font-family:var(--font-mono);}
+
+  .radii-row{display:flex;gap:16px;flex-wrap:wrap;}
+  .rad{background:var(--surface);border:1px solid var(--border);width:120px;padding:14px;text-align:center;}
+  .rad .sq{background:var(--accent-soft);border:1px solid var(--accent-line);height:72px;margin-bottom:10px;}
+  .rad .nm{font-size:11px;font-family:var(--font-mono);color:var(--text);}
+  .rad .px{font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;}
+
+  .shadows-row{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+  .sh{background:var(--bg-0);padding:34px;border-radius:var(--r-4);}
+  .sh .box{background:var(--surface);height:88px;border-radius:var(--r-4);border:1px solid var(--border-strong);}
+  .sh .nm{font-family:var(--font-mono);font-size:11.5px;color:var(--accent-hi);margin-top:14px;}
+  .sh .d{font-size:11px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);}
+
+  .motion-row{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+  .mo{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-4);padding:22px;}
+  .mo .nm{font-size:13px;font-weight:600;margin-bottom:8px;}
+  .mo .v{font-family:var(--font-mono);font-size:11.5px;color:var(--accent-hi);}
+  .mo .desc{font-size:11.5px;color:var(--text-dim);margin-top:8px;line-height:1.5;}
+
+  .icons-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;}
+  .ic{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-3);padding:14px 8px;
+    display:flex;flex-direction:column;align-items:center;gap:6px;
+  }
+  .ic .glyph{font-size:22px;line-height:1;color:var(--text);height:28px;display:grid;place-items:center;}
+  .ic .nm{font-size:10px;color:var(--text-faint);font-family:var(--font-mono);}
+
+  .status-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+  .st{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-4);padding:18px;}
+  .st .head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .st .dot{width:10px;height:10px;border-radius:10px;}
+  .st .name{font-size:13px;font-weight:600;}
+  .st .examples{display:flex;flex-direction:column;gap:6px;}
+  .st .ex{display:inline-flex;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Section 01</div>
+  <h1 class="page">Foundations</h1>
+  <p class="lede">Tokens are the contract. Every screen in the next three sections is built from these primitives and nothing else — surfaces, text, accent, status, spacing, radii, motion. If a screen reaches outside this list, it's not Animarr.</p>
+
+  <nav class="ds-nav">
+    <a href="index.html"><span class="n">00</span>Cover</a>
+    <a href="01-foundations.html" class="cur"><span class="n">01</span>Foundations</a>
+    <a href="02-components.html"><span class="n">02</span>Components</a>
+    <a href="03-browser.html"><span class="n">03</span>Browser</a>
+    <a href="04-tv.html"><span class="n">04</span>TV</a>
+    <a href="05-mobile.html"><span class="n">05</span>Mobile</a>
+    <a href="06-themes.html"><span class="n">06</span>Themes</a>
+    <a href="07-onboarding.html"><span class="n">07</span>Onboarding</a>
+    <a href="08-hero-variants.html"><span class="n">08</span>Hero variants</a>
+  </nav>
+
+  <!-- ─────────── COLOR ─────────── -->
+  <h2 class="sec"><span class="n">01.01</span><span class="t">Color · Surfaces</span><span class="d">Cool charcoal ramp. Backgrounds get darker as content layers up; surfaces lighten with elevation.</span></h2>
+
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#08090c;"></div><div class="meta"><div class="name">page</div><div class="val">#08090C · the void</div></div></div>
+    <div class="sw"><div class="chip" style="background:#0f1115;"></div><div class="meta"><div class="name">--bg-0</div><div class="val">#0F1115 · app canvas</div></div></div>
+    <div class="sw"><div class="chip" style="background:#13161c;"></div><div class="meta"><div class="name">--bg-1</div><div class="val">#13161C · inset panels</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181c24;"></div><div class="meta"><div class="name">--surface</div><div class="val">#181C24 · cards · topbar</div></div></div>
+    <div class="sw"><div class="chip" style="background:#1e232c;"></div><div class="meta"><div class="name">--surface-2</div><div class="val">#1E232C · raised</div></div></div>
+    <div class="sw"><div class="chip" style="background:#262c37;"></div><div class="meta"><div class="name">--surface-3</div><div class="val">#262C37 · active tab · selected</div></div></div>
+  </div>
+
+  <h3 class="sub">Borders<span class="meta">low-contrast hairlines</span></h3>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#181c24;border-bottom:1px solid rgba(255,255,255,0.06);"></div><div class="meta"><div class="name">--border</div><div class="val">rgba(255,255,255,0.06)</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181c24;border-bottom:1px solid rgba(255,255,255,0.12);"></div><div class="meta"><div class="name">--border-strong</div><div class="val">rgba(255,255,255,0.12)</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181c24;border:1.5px dashed rgba(255,255,255,0.12);"></div><div class="meta"><div class="name">dashed</div><div class="val">file drop · empty</div></div></div>
+  </div>
+
+  <h3 class="sub">Text on dark<span class="meta">3 weights of warmth</span></h3>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#181c24;display:grid;place-items:center;color:#e8eaed;font-size:24px;font-weight:600;letter-spacing:-0.5px;">Aa</div><div class="meta"><div class="name">--text</div><div class="val">#E8EAED · primary</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181c24;display:grid;place-items:center;color:#9aa0a8;font-size:24px;font-weight:500;">Aa</div><div class="meta"><div class="name">--text-dim</div><div class="val">#9AA0A8 · secondary</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181c24;display:grid;place-items:center;color:#5d636d;font-size:24px;font-weight:500;">Aa</div><div class="meta"><div class="name">--text-faint</div><div class="val">#5D636D · meta · labels</div></div></div>
+  </div>
+
+  <h2 class="sec"><span class="n">01.02</span><span class="t">Color · Accent</span><span class="d">A single muted blue (oklch hue 245). It's quiet on purpose — Animarr isn't gamer-coded.</span></h2>
+
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:oklch(0.55 0.18 232);"></div><div class="meta"><div class="name">--accent-deep</div><div class="val">L 0.42 · pressed</div></div></div>
+    <div class="sw"><div class="chip" style="background:oklch(0.74 0.17 232);"></div><div class="meta"><div class="name">--accent</div><div class="val">L 0.62 · primary CTAs</div></div></div>
+    <div class="sw"><div class="chip" style="background:oklch(0.82 0.14 232);"></div><div class="meta"><div class="name">--accent-hi</div><div class="val">L 0.72 · hover · text on dim</div></div></div>
+    <div class="sw"><div class="chip" style="background:oklch(0.74 0.17 232 / 0.40);"></div><div class="meta"><div class="name">--accent-line</div><div class="val">α 0.32 · pill border</div></div></div>
+    <div class="sw"><div class="chip" style="background:oklch(0.74 0.17 232 / 0.16);"></div><div class="meta"><div class="name">--accent-soft</div><div class="val">α 0.14 · pill fill</div></div></div>
+  </div>
+
+  <h3 class="sub">Lightness ramp<span class="meta">single hue · 245</span></h3>
+  <div class="ramp">
+    <div class="r" style="background:oklch(0.16 0.08 232);"><b>10</b>10</div>
+    <div class="r" style="background:oklch(0.24 0.10 232);"><b>18</b>18</div>
+    <div class="r" style="background:oklch(0.34 0.13 232);"><b>28</b>28</div>
+    <div class="r" style="background:oklch(0.44 0.15 232);"><b>38</b>38</div>
+    <div class="r" style="background:oklch(0.55 0.17 232);"><b>48</b>48</div>
+    <div class="r" style="background:oklch(0.66 0.18 232);"><b>58</b>58</div>
+    <div class="r" style="background:oklch(0.74 0.17 232);"><b>62</b>62*</div>
+    <div class="r" style="background:oklch(0.82 0.14 232);"><b>72</b>72*</div>
+    <div class="r" style="background:oklch(0.86 0.12 232);color:rgba(0,0,0,0.6);"><b style="color:#000;">82</b>82</div>
+    <div class="r" style="background:oklch(0.92 0.09 232);color:rgba(0,0,0,0.6);"><b style="color:#000;">90</b>90</div>
+    <div class="r" style="background:oklch(0.96 0.05 232);color:rgba(0,0,0,0.6);"><b style="color:#000;">96</b>96</div>
+  </div>
+  <p style="color:var(--text-faint);font-size:11.5px;margin-top:8px;font-family:var(--font-mono);">* steps in use today</p>
+
+  <h2 class="sec"><span class="n">01.03</span><span class="t">Color · Status</span><span class="d">Four channels for state. Each ships as fill + border + foreground triplet.</span></h2>
+
+  <div class="status-row">
+    <div class="st">
+      <div class="head"><span class="dot" style="background:oklch(0.70 0.08 150);"></span><span class="name">success</span><span class="pl s" style="margin-left:auto;">L 0.70</span></div>
+      <div class="examples">
+        <span class="ex"><span class="pl s">✓ Watched · 24/24</span></span>
+        <span class="ex"><span class="pl s">↑ Synced</span></span>
+        <div class="alert success">Library re-scanned. 47 new episodes matched.</div>
+      </div>
+    </div>
+    <div class="st">
+      <div class="head"><span class="dot" style="background:oklch(0.75 0.10 70);"></span><span class="name">warn</span><span class="pl w" style="margin-left:auto;">L 0.75</span></div>
+      <div class="examples">
+        <span class="ex"><span class="pl w">Missing files</span></span>
+        <span class="ex"><span class="pl w">Needs review</span></span>
+        <div class="alert warn">3 episodes can't be matched. Open the review queue.</div>
+      </div>
+    </div>
+    <div class="st">
+      <div class="head"><span class="dot" style="background:oklch(0.68 0.18 25);"></span><span class="name">danger</span><span class="pl d" style="margin-left:auto;">L 0.68</span></div>
+      <div class="examples">
+        <span class="ex"><span class="pl d">Failed</span></span>
+        <span class="ex"><span class="pl d">Delete media</span></span>
+        <div class="alert danger">Torrent stalled · check tracker reachability.</div>
+      </div>
+    </div>
+    <div class="st">
+      <div class="head"><span class="dot" style="background:oklch(0.82 0.14 232);"></span><span class="name">info / accent</span><span class="pl a" style="margin-left:auto;">L 0.72</span></div>
+      <div class="examples">
+        <span class="ex"><span class="pl a">✦ LLM matched</span></span>
+        <span class="ex"><span class="pl a">Continue · 38%</span></span>
+        <div class="alert info"><span>✦</span><div><b>Auto-match · 98%</b><br/>qwen2.5:1.5b normalized OK</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────── TYPE ─────────── -->
+  <h2 class="sec"><span class="n">01.04</span><span class="t">Type</span><span class="d">Inter for everything. JetBrains Mono for data — torrent hashes, file paths, timecodes, token names.</span></h2>
+
+  <div class="specimen">
+    <div class="spec-row">
+      <div class="role">Display</div>
+      <div class="sample" style="font-size:54px;font-weight:700;letter-spacing:-1.4px;line-height:1;">Perfect <em style="font-style:normal;color:var(--text-dim);">World</em></div>
+      <div class="spec">Inter 700 · 54 / 54<br/>tracking -1.4px</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">H1 · Page</div>
+      <div class="sample" style="font-size:42px;font-weight:700;letter-spacing:-1.2px;line-height:1.05;">Downloads · 3 active</div>
+      <div class="spec">Inter 700 · 42 / 44<br/>-1.2px</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">H2 · Section</div>
+      <div class="sample" style="font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.15;">Season 1 · 4 of 24 watched</div>
+      <div class="spec">Inter 700 · 26 / 30<br/>-0.5px</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">H3 · Card title</div>
+      <div class="sample" style="font-size:18px;font-weight:600;letter-spacing:-0.3px;line-height:1.3;">Featured · ★ 8.0+</div>
+      <div class="spec">Inter 600 · 18 / 24<br/>-0.3px</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">Body</div>
+      <div class="sample" style="font-size:14px;line-height:1.6;color:var(--text-dim);max-width:560px;">Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world soaked in war, betrayal and forbidden ancient ruins.</div>
+      <div class="spec">Inter 400 · 14 / 22<br/>--text-dim</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">UI · Button</div>
+      <div class="sample" style="font-size:12px;font-weight:700;letter-spacing:0.1px;"><span class="btn p">▶ Continue · 38%</span> &nbsp; <span class="btn g">↻ Restart</span></div>
+      <div class="spec">Inter 700 · 12 / 16</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">Caption</div>
+      <div class="sample" style="font-size:11px;color:var(--accent-hi);font-weight:600;letter-spacing:0.4px;text-transform:uppercase;">Continue · Episode 5 · 38%</div>
+      <div class="spec">Inter 600 · 11 / 14<br/>tracking 0.4px ALL CAPS</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">Label</div>
+      <div class="sample" style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;">TMDB ID</div>
+      <div class="spec">Inter 500 · 10 / 14<br/>0.3px ALL CAPS</div>
+    </div>
+    <div class="spec-row">
+      <div class="role">Mono</div>
+      <div class="sample" style="font-family:var(--font-mono);font-size:13px;color:var(--text);">tt12345678 · sha1:7c54…ab</div>
+      <div class="spec">JetBrains Mono 400 · 13 / 18</div>
+    </div>
+  </div>
+
+  <!-- ─────────── SPACING ─────────── -->
+  <h2 class="sec"><span class="n">01.05</span><span class="t">Spacing</span><span class="d">4-px base. Use s-3 / s-4 / s-6 most; s-7+ for major layout gutters.</span></h2>
+
+  <div class="spacer-table">
+    <div class="spacer-row"><div class="nm">--s-1</div><div><div class="bar" style="width:4px;"></div></div><div class="px">4 px · hairline gap</div></div>
+    <div class="spacer-row"><div class="nm">--s-2</div><div><div class="bar" style="width:8px;"></div></div><div class="px">8 px · in-row gap</div></div>
+    <div class="spacer-row"><div class="nm">--s-3</div><div><div class="bar" style="width:12px;"></div></div><div class="px">12 px · card padding</div></div>
+    <div class="spacer-row"><div class="nm">--s-4</div><div><div class="bar" style="width:16px;"></div></div><div class="px">16 px · safe edge</div></div>
+    <div class="spacer-row"><div class="nm">--s-5</div><div><div class="bar" style="width:20px;"></div></div><div class="px">20 px · drawer pad</div></div>
+    <div class="spacer-row"><div class="nm">--s-6</div><div><div class="bar" style="width:24px;"></div></div><div class="px">24 px · section gap</div></div>
+    <div class="spacer-row"><div class="nm">--s-7</div><div><div class="bar" style="width:32px;"></div></div><div class="px">32 px · gutter</div></div>
+    <div class="spacer-row"><div class="nm">--s-8</div><div><div class="bar" style="width:40px;"></div></div><div class="px">40 px · page side</div></div>
+    <div class="spacer-row"><div class="nm">--s-9</div><div><div class="bar" style="width:48px;"></div></div><div class="px">48 px · hero pad</div></div>
+    <div class="spacer-row"><div class="nm">--s-10</div><div><div class="bar" style="width:64px;"></div></div><div class="px">64 px · TV side</div></div>
+  </div>
+
+  <!-- ─────────── RADII ─────────── -->
+  <h2 class="sec"><span class="n">01.06</span><span class="t">Radii</span><span class="d">Soft but not bubbly. Pills (999) only for chips and tags — never CTAs.</span></h2>
+
+  <div class="radii-row">
+    <div class="rad"><div class="sq" style="border-radius:0;"></div><div class="nm">--r-0</div><div class="px">0px · rails</div></div>
+    <div class="rad"><div class="sq" style="border-radius:4px;"></div><div class="nm">--r-1</div><div class="px">4px · pads</div></div>
+    <div class="rad"><div class="sq" style="border-radius:6px;"></div><div class="nm">--r-2</div><div class="px">6px · input · btn</div></div>
+    <div class="rad"><div class="sq" style="border-radius:8px;"></div><div class="nm">--r-3</div><div class="px">8px · card</div></div>
+    <div class="rad"><div class="sq" style="border-radius:10px;"></div><div class="nm">--r-4</div><div class="px">10px · panel</div></div>
+    <div class="rad"><div class="sq" style="border-radius:14px;"></div><div class="nm">--r-5</div><div class="px">14px · frame</div></div>
+    <div class="rad"><div class="sq" style="border-radius:18px;"></div><div class="nm">--r-6</div><div class="px">18px · sheet</div></div>
+    <div class="rad"><div class="sq" style="border-radius:999px;"></div><div class="nm">--r-pill</div><div class="px">999px · chip</div></div>
+  </div>
+
+  <!-- ─────────── SHADOWS ─────────── -->
+  <h2 class="sec"><span class="n">01.07</span><span class="t">Elevation</span><span class="d">Three steps. Most surfaces don't get one — depth comes from border + surface color, not shadow.</span></h2>
+
+  <div class="shadows-row">
+    <div class="sh"><div class="box" style="box-shadow:0 4px 12px -6px rgba(0,0,0,0.4);"></div><div class="nm">--sh-lift</div><div class="d">0 8 24 -10 / 0.5 · poster hover</div></div>
+    <div class="sh"><div class="box" style="box-shadow:0 18px 40px -15px rgba(0,0,0,0.6);"></div><div class="nm">--sh-pop</div><div class="d">0 18 40 -15 / 0.6 · poster · player overlay</div></div>
+    <div class="sh"><div class="box" style="box-shadow:0 30px 60px -30px rgba(0,0,0,0.7);"></div><div class="nm">--sh-drawer</div><div class="d">0 30 60 -30 / 0.7 · drawer · sheet</div></div>
+  </div>
+
+  <!-- ─────────── MOTION ─────────── -->
+  <h2 class="sec"><span class="n">01.08</span><span class="t">Motion</span><span class="d">Calm = patient. Nothing crosses 250ms. Springs allowed only on bottom sheets.</span></h2>
+
+  <div class="motion-row">
+    <div class="mo"><div class="nm">Instant</div><div class="v">80ms · linear</div><div class="desc">Hover color, focus ring, chip selection — never block the eye.</div></div>
+    <div class="mo"><div class="nm">Settled</div><div class="v">160ms · cubic-bezier(.2,.7,.3,1)</div><div class="desc">Tab swap, dropdown open, button press feedback. Default duration.</div></div>
+    <div class="mo"><div class="nm">Considered</div><div class="v">240ms · cubic-bezier(.2,.7,.3,1)</div><div class="desc">Drawer slide-in, sheet slide-up, modal scrim. The longest we go.</div></div>
+  </div>
+
+  <h3 class="sub">Easing curves<span class="meta">three is the limit</span></h3>
+  <div class="motion-row">
+    <div class="mo"><div class="nm">linear</div><div class="v">— · — · — · —</div><div class="desc">Only for opacity crossfades and indeterminate spinners.</div></div>
+    <div class="mo"><div class="nm">out · default</div><div class="v">cubic-bezier(.2,.7,.3,1)</div><div class="desc">Fast departure, soft arrival. Every UI transition unless told otherwise.</div></div>
+    <div class="mo"><div class="nm">spring · sheets</div><div class="v">300 stiff · 30 damp</div><div class="desc">Only the mobile bottom-sheet. Implies "grab handle".</div></div>
+  </div>
+
+  <!-- ─────────── ICONOGRAPHY ─────────── -->
+  <h2 class="sec"><span class="n">01.09</span><span class="t">Iconography</span><span class="d">Geometric, hairline, monospace. We use literal glyphs when possible — arrows, bars, dots — so meaning is unambiguous in any locale.</span></h2>
+
+  <div class="icons-grid">
+    <div class="ic"><div class="glyph">▦</div><div class="nm">catalog</div></div>
+    <div class="ic"><div class="glyph">▶</div><div class="nm">play</div></div>
+    <div class="ic"><div class="glyph">↻</div><div class="nm">restart</div></div>
+    <div class="ic"><div class="glyph">↓</div><div class="nm">download</div></div>
+    <div class="ic"><div class="glyph">↑</div><div class="nm">upload</div></div>
+    <div class="ic"><div class="glyph">↥</div><div class="nm">drop</div></div>
+    <div class="ic"><div class="glyph">⚙</div><div class="nm">settings</div></div>
+    <div class="ic"><div class="glyph">✎</div><div class="nm">edit</div></div>
+    <div class="ic"><div class="glyph">★</div><div class="nm">favorite</div></div>
+    <div class="ic"><div class="glyph">✓</div><div class="nm">done</div></div>
+    <div class="ic"><div class="glyph">×</div><div class="nm">close</div></div>
+    <div class="ic"><div class="glyph">+</div><div class="nm">add</div></div>
+    <div class="ic"><div class="glyph">←</div><div class="nm">back</div></div>
+    <div class="ic"><div class="glyph">→</div><div class="nm">forward</div></div>
+    <div class="ic"><div class="glyph">🔎</div><div class="nm">search</div></div>
+    <div class="ic"><div class="glyph">✦</div><div class="nm">llm · ai</div></div>
+    <div class="ic"><div class="glyph">●</div><div class="nm">status dot</div></div>
+    <div class="ic"><div class="glyph">▸</div><div class="nm">expand</div></div>
+    <div class="ic"><div class="glyph">⋯</div><div class="nm">more</div></div>
+    <div class="ic"><div class="glyph">⏸</div><div class="nm">pause</div></div>
+    <div class="ic"><div class="glyph">⏵</div><div class="nm">next</div></div>
+    <div class="ic"><div class="glyph">⏴</div><div class="nm">prev</div></div>
+    <div class="ic"><div class="glyph">🗁</div><div class="nm">folder</div></div>
+    <div class="ic"><div class="glyph">⤓</div><div class="nm">import</div></div>
+  </div>
+
+  <!-- ─────────── AVATARS ─────────── -->
+  <h2 class="sec"><span class="n">01.10</span><span class="t">Avatars</span><span class="d">Initial + 2-stop linear gradient. Five hues, deterministic from user id.</span></h2>
+
+  <div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:80px;height:80px;border-radius:80px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:32px;font-weight:700;">Y</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">red · 80</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:64px;height:64px;border-radius:64px;background:var(--av-grn);color:#fff;display:grid;place-items:center;font-size:26px;font-weight:700;">A</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">green · 64</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:48px;height:48px;border-radius:48px;background:var(--av-blu);color:#fff;display:grid;place-items:center;font-size:20px;font-weight:700;">P</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">blue · 48</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:40px;height:40px;border-radius:40px;background:var(--av-pur);color:#fff;display:grid;place-items:center;font-size:16px;font-weight:700;">K</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">purple · 40</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:32px;height:32px;border-radius:32px;background:var(--av-ylw);color:#fff;display:grid;place-items:center;font-size:14px;font-weight:700;">M</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">yellow · 32</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="width:24px;height:24px;border-radius:24px;background:var(--av-default);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;">U</div>
+      <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);">default · 24</div>
+    </div>
+  </div>
+
+  <div style="margin-top:80px;padding-top:32px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+    <a href="index.html" style="color:var(--text-dim);text-decoration:none;font-size:13px;">← Cover</a>
+    <a href="02-components.html" style="color:var(--accent-hi);text-decoration:none;font-size:13px;font-weight:600;">Components →</a>
+  </div>
+
+</div>
+</body>
+</html>

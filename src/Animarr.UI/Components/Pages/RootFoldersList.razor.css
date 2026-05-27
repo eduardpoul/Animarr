@@ -1,0 +1,153 @@
+.rfl {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.rfl-empty {
+    padding: 30px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+    background: var(--bg-1);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-card);
+}
+
+.rfl-row {
+    display: grid;
+    grid-template-columns: 44px 1fr auto auto auto;
+    gap: 14px;
+    align-items: center;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 12px 14px;
+}
+
+.rfl-row__thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-chip);
+    background:
+        linear-gradient(135deg, oklch(0.20 0.06 var(--hue) / 0.4), oklch(0.10 0.04 var(--hue) / 0.7));
+    display: grid;
+    place-items: center;
+    color: #fff;
+}
+
+.rfl-row__text { min-width: 0; }
+
+.rfl-row__title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.rfl-row__path {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rfl-row__pills {
+    display: flex;
+    gap: 6px;
+}
+
+.rfl-pill {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: var(--radius-badge);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+}
+
+.rfl-pill--success {
+    background: oklch(0.74 0.15 150 / 0.15);
+    color: var(--success);
+    border-color: oklch(0.55 0.15 150 / 0.35);
+}
+
+.rfl-pill--warn {
+    background: oklch(0.80 0.17 75 / 0.15);
+    color: var(--warn);
+    border-color: oklch(0.60 0.16 75 / 0.40);
+}
+
+.rfl-btn {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-ctrl);
+    padding: 5px 9px;
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rfl-btn:hover { background: var(--surface); color: var(--text); }
+
+.rfl-row__icons {
+    display: flex;
+    gap: 4px;
+}
+
+.rfl-icon {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: var(--text-faint);
+    padding: 6px;
+    display: inline-flex;
+    text-decoration: none;
+    border-radius: var(--radius-ctrl);
+}
+
+.rfl-icon:hover { color: var(--text); background: var(--surface); }
+
+.rfl-icon--danger:hover { color: var(--warn); }
+
+/* ── Mobile / tablet — folder rows reflow to 2 lines. */
+@media (max-width: 959px) {
+    .rfl-row {
+        grid-template-columns: 36px 1fr;
+        grid-template-areas:
+            "thumb text"
+            "pills pills"
+            "btn   icons";
+        gap: 10px 12px;
+    }
+    .rfl-row__thumb { grid-area: thumb; }
+    .rfl-row__text  { grid-area: text; min-width: 0; }
+    .rfl-row__pills { grid-area: pills; flex-wrap: wrap; }
+    .rfl-row__btn,
+    .rfl-btn       { grid-area: btn; justify-self: start; }
+    .rfl-row__icons { grid-area: icons; justify-self: end; }
+    .rfl-row__path { white-space: normal; word-break: break-all; }
+}
+
+/* ── Phone — drop the rename button text, icons only. */
+@media (max-width: 639px) {
+    .rfl-btn {
+        padding: 6px 8px;
+        font-size: 11px;
+    }
+}

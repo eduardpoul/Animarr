@@ -1,0 +1,298 @@
+/* ============================================================
+   Animarr design tokens — single source of truth.
+
+   v5 introduces 10 personality themes (Quietude / Cinematic /
+   Terminal / Anime / Ember Edge / Mountain Sect / Immortal Path /
+   Heaven's Defiance / Ink & Paper / Cyberpunk). Selection lives on
+   <html data-theme="..."> and is toggled live by ProfilePanel.
+
+   This file holds:
+     • All @font-face declarations (every theme's font is loaded
+       upfront so theme swap is instant — no FOUT mid-session).
+     • The Quietude defaults on :root.
+     • The Cinematic override block (legacy v3/v4 visual identity,
+       now a user-selectable theme).
+     • Shared TV-mode + global decoration rules (.film-grain,
+       .cjk-watermark) that any theme may use.
+
+   The other 8 themes live in Styles/themes/<name>.css and are
+   imported by app.css so the cascade picks the right override
+   based on the data-theme attribute.
+   ============================================================ */
+
+/* ── Self-hosted fonts (already in lib/fonts/) ─────────── */
+@font-face {
+    font-family: 'Geist';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-400.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-500.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-600.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist';
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-700.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist Mono';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-mono-400.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Geist Mono';
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/geist-mono-500.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'Archivo Black';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('/_content/Animarr.UI/lib/fonts/archivo-black-400.ttf') format('truetype');
+}
+
+/* CDN-hosted fonts for new themes (Inter, JetBrains Mono, Quicksand,
+   Noto Serif SC, Noto Serif JP) are now loaded via explicit
+   <link rel="stylesheet"> tags in both index.html files. We used to
+   @import them here, but Tailwind CLI v4 strips @import url() during
+   `--minify`, leaving the compiled app.css with no font references — so
+   var(--font-ui), var(--font-display) etc. fell back to system-ui (which
+   on Android Chrome paints as Roboto, and at heading weights looks like
+   a serif). Hoisting the <link> into <head> guarantees they're parsed
+   before app.css evaluates the var() chains. */
+
+/* ============================================================
+   :root — Quietude (calm) defaults
+
+   Cool charcoal background + soft teal accent + Inter typography.
+   Sentence-case throughout, low-density decoration. This is the
+   v5 design board's default visual language.
+   ============================================================ */
+:root {
+    /* ── Backgrounds ──────────────────────────────────────── */
+    --bg-0:        #0f1115;
+    --bg-1:        #14171c;
+    --surface:     #181c24;
+    --surface-2:   #1d222b;
+    --surface-3:   #232934;
+
+    /* ── Borders ──────────────────────────────────────────── */
+    --border:        rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.12);
+
+    /* ── Text ─────────────────────────────────────────────── */
+    --text:       #e9ecf2;
+    --text-dim:   #9aa3b2;
+    --text-faint: #5a6271;
+
+    /* ── Accent — soft teal default, hue-swappable.
+       Lower chroma than Cinematic so swatches feel calm. */
+    --accent-hue:  200;
+    --accent:      oklch(0.62 0.06 var(--accent-hue));
+    --accent-hi:   oklch(0.72 0.07 var(--accent-hue));
+    --accent-soft: oklch(0.62 0.06 var(--accent-hue) / 0.16);
+    --accent-line: oklch(0.62 0.06 var(--accent-hue) / 0.40);
+
+    /* ── Semantic ─────────────────────────────────────────── */
+    --success: oklch(0.72 0.12 155);
+    --warn:    oklch(0.78 0.14  80);
+    --info:    oklch(0.70 0.09 230);
+
+    /* ── Typography — Inter everywhere.
+
+       Fallback chain explicitly names sans-serif families (Roboto, Helvetica
+       Neue, Arial) before generic `sans-serif`. On Android Chrome,
+       `system-ui` resolves to Roboto which renders Inter-substitute
+       headings as a wide serif-feeling face at heavy weights. Naming
+       Arial / Helvetica Neue earlier gives a closer Inter facsimile while
+       the CDN font is still loading. */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
+
+    /* Casing — Quietude uses sentence case. Cinematic & friends
+       override to uppercase via their theme block. */
+    --label-casing: none;
+    --label-tracking: 0.02em;
+
+    /* Decoration flags — themes opt-in by overriding to "block". */
+    --decor-grain:        none;
+    --decor-cjk:          none;
+    --decor-scanlines:    none;
+    --decor-sparkles:     none;
+    --decor-washi:        none;
+    --decor-glitch:       none;
+
+    /* ── Spacing scale (px) ───────────────────────────────── */
+    --space-1:  4px;
+    --space-2:  6px;
+    --space-3:  8px;
+    --space-4: 10px;
+    --space-5: 12px;
+    --space-6: 14px;
+    --space-7: 16px;
+    --space-8: 18px;
+    --space-9: 22px;
+    --space-10: 26px;
+    --space-11: 36px;
+    --space-12: 48px;
+
+    /* ── Radius scale ─────────────────────────────────────── */
+    --radius-badge:   6px;
+    --radius-ctrl:    8px;
+    --radius-chip:   10px;
+    --radius-card:   12px;
+    --radius-card-lg: 14px;
+    --radius-panel:  16px;
+    --radius-hero:   20px;
+    --radius-modal:  24px;
+    --radius-pill: 9999px;
+
+    /* ── Shadows ──────────────────────────────────────────── */
+    --shadow-card:    0 10px 30px -16px rgba(0,0,0,0.7),
+                      inset 0 0 0 1px rgba(255,255,255,0.04);
+    --shadow-card-hi: 0 14px 36px -14px rgba(0,0,0,0.78),
+                      inset 0 0 0 1px rgba(255,255,255,0.06);
+    --shadow-modal:   0 40px 80px -20px rgba(0,0,0,0.7);
+    --shadow-drawer:  -30px 0 60px -20px rgba(0,0,0,0.6);
+
+    /* ── Motion ───────────────────────────────────────────── */
+    --motion-fast:      120ms ease;
+    --motion-base:      200ms ease;
+    --motion-slow:      400ms ease;
+    --motion-crossfade: 1600ms ease;
+    --motion-hero-cjk:  1400ms ease;
+}
+
+/* ============================================================
+   [data-theme="cinematic"] — legacy v3/v4 identity
+
+   Warm leather brown bg + crimson accent + Archivo Black display
+   + Geist UI/mono + CJK watermark. Preserved as a user-selectable
+   theme so anyone preferring the old look can keep it.
+   ============================================================ */
+/* `html[data-theme="cinematic"]` (specificity 0,0,1,1) is intentional —
+   Tailwind v4's @theme block in Styles/app.css emits `:root, :host`
+   rules AFTER this file in the compiled output. Using bare
+   `[data-theme="cinematic"]` (0,0,1,0) ties with Tailwind's selector
+   and source order wins, so the per-theme font overrides got wiped.
+   The `html` qualifier puts us at 0,0,1,1 and the override survives. */
+html[data-theme="cinematic"] {
+    --bg-0:        #0a0807;
+    --bg-1:        #100d0b;
+    --surface:     #15110e;
+    --surface-2:   #1c1814;
+    --surface-3:   #25201b;
+
+    --border:        rgba(255, 240, 220, 0.07);
+    --border-strong: rgba(255, 240, 220, 0.14);
+
+    --text:       #f4eee6;
+    --text-dim:   #a8a097;
+    --text-faint: #5d564f;
+
+    --accent-hue:  25;
+    --accent:      oklch(0.66 0.20 var(--accent-hue));
+    --accent-hi:   oklch(0.74 0.21 var(--accent-hue));
+    --accent-soft: oklch(0.66 0.20 var(--accent-hue) / 0.16);
+    --accent-line: oklch(0.66 0.20 var(--accent-hue) / 0.40);
+
+    --success: oklch(0.74 0.15 150);
+    --warn:    oklch(0.80 0.17  75);
+    --info:    oklch(0.74 0.10 240);
+
+    --font-ui:      'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Archivo Black', 'Geist', system-ui, sans-serif;
+    --font-mono:    'Geist Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+    --font-cjk:     'Noto Serif SC', serif;
+
+    --label-casing: uppercase;
+    --label-tracking: 0.12em;
+
+    --decor-grain: block;
+    --decor-cjk:   block;
+}
+
+/* ============================================================
+   TV mode — heavier focus rings + taller hit targets.
+   Independent of theme — adds to whatever palette is active.
+   ============================================================ */
+
+html.tv-mode {
+    font-size: 15px;
+}
+html.tv-mode .d-btn,
+html.tv-mode .d-pill,
+html.tv-mode .d-toggle,
+html.tv-mode button.d-pill {
+    min-height: 40px;
+}
+html.tv-mode .tv-focus:focus-visible,
+html.tv-mode .d-focus-ring:focus-visible {
+    outline: 3px solid var(--accent-hi);
+    outline-offset: 4px;
+    box-shadow: 0 0 0 6px var(--accent-soft);
+}
+.tv-focus:focus-visible {
+    outline: 2px solid var(--accent-line);
+    outline-offset: 2px;
+}
+
+/* ── Film-grain overlay layer ─────────────────────────────
+   Driven by --decor-grain (none|block). Cinematic enables it,
+   Quietude/Terminal/Cyberpunk skip it. */
+.film-grain {
+    display: var(--decor-grain, none);
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ── CJK decorative watermark ─────────────────────────────
+   Driven by --decor-cjk. Themes that want the watermark set
+   it to block; default :root (Quietude) hides it. */
+.cjk-watermark {
+    display: var(--decor-cjk, none);
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-family: var(--font-cjk);
+    font-size: clamp(140px, 22vw, 360px);
+    color: oklch(0.95 0.1 var(--accent-hue) / 0.08);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    user-select: none;
+    pointer-events: none;
+    line-height: 1;
+    animation: cjk-fade-in var(--motion-hero-cjk);
+}
+
+@keyframes cjk-fade-in {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0); }
+}

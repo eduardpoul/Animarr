@@ -1,0 +1,83 @@
+@*
+    Avatar primitive — 28/48px disc with the user's initials over a
+    deterministic-hue gradient. Used in TopBar profile chip, ProfilePanel
+    header, and Users list rows.
+
+    Spec: screens-v4.jsx → AvatarV4, lines 1-30.
+*@
+
+@implements IDisposable
+
+@if (!string.IsNullOrEmpty(ImagePath))
+{
+    <img src="@Animarr.UI.Services.MediaUrl.Image(ImagePath)"
+         alt="@AltText"
+         class="@($"d-avatar {SizeClass}")"
+         style="--hue: @Hue" />
+}
+else
+{
+    <div class="@($"d-avatar d-avatar--initials {SizeClass}")" style="--hue: @Hue" aria-label="@AltText">
+        @Initials
+    </div>
+}
+
+@code {
+    // Re-render when the active server URL flips so the avatar src rebases.
+    protected override void OnInitialized()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    public void Dispose()
+        => Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Displayed name — first letter(s) form the initials when no image.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    /// <summary>Optional override hue 0..359; if omitted, derived deterministically from <see cref="Name"/>.</summary>
+    [Parameter] public int? HueOverride { get; set; }
+
+    /// <summary>Optional saved image path (resolved through /api/image).</summary>
+    [Parameter] public string? ImagePath { get; set; }
+
+    /// <summary>One of <c>sm</c> (28px), <c>md</c> (36px), <c>lg</c> (48px). Defaults to <c>sm</c>.</summary>
+    [Parameter] public string Size { get; set; } = "sm";
+
+    private int Hue => HueOverride ?? StableHue(Name);
+
+    private string SizeClass => Size switch
+    {
+        "lg" => "d-avatar--lg",
+        "md" => "d-avatar--md",
+        _    => "d-avatar--sm",
+    };
+
+    private string Initials
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Name)) return "?";
+            var parts = Name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1)
+                return parts[0].Length == 0 ? "?" : parts[0][..1].ToUpperInvariant();
+            return $"{parts[0][..1]}{parts[^1][..1]}".ToUpperInvariant();
+        }
+    }
+
+    private string AltText => string.IsNullOrEmpty(Name) ? "Avatar" : $"{Name} avatar";
+
+    /// <summary>Same FNV-1a → mod 360 as <c>AuthService.StableHueFromName</c> so
+    /// the colour matches whether it's resolved on the server (UserDto.AvatarHue)
+    /// or on the client (legacy fallback before a user is fetched).</summary>
+    private static int StableHue(string name)
+    {
+        const uint offset = 2166136261u;
+        const uint prime  = 16777619u;
+        uint h = offset;
+        foreach (var c in name)
+        {
+            h ^= c;
+            h *= prime;
+        }
+        return (int)(h % 360u);
+    }
+}

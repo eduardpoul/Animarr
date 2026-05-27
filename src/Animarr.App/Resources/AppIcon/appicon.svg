@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Animarr app icon — background. Dark charcoal matching the v5 Quietude
+     surface tone (#181c24). The accent gradient is painted by appiconfg.svg
+     so this layer just establishes the contrast field. -->
+<svg width="456" height="456" viewBox="0 0 456 456" xmlns="http://www.w3.org/2000/svg">
+    <rect width="456" height="456" fill="#181c24"/>
+</svg>

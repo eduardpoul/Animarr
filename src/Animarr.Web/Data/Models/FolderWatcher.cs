@@ -60,6 +60,15 @@ public class FolderWatcher
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastScannedAt { get; set; }
 
+    /// <summary>Hue in degrees (0..360) used for the section card tint and folder chip color
+    /// in the catalog filter bar. Deterministically derived from Label hash on create;
+    /// user-editable from Settings → Root folders.</summary>
+    public int? Hue { get; set; }
+
+    /// <summary>Absolute path to a backdrop image used by the section card in the catalog.
+    /// When null, the UI falls back to the first identified child MediaItem's FanartPath.</summary>
+    public string? BackdropPath { get; set; }
+
     public ICollection<RenamePattern> Patterns { get; set; } = [];
     public ICollection<IgnoreRule> IgnoreRules { get; set; } = [];
     public ICollection<RenameHistory> History { get; set; } = [];

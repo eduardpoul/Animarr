@@ -1,0 +1,137 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFrameworks>net10.0-android</TargetFrameworks>
+        <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+
+        <!-- Note for MacCatalyst:
+            The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
+            When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
+            The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
+            either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
+        <!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Animarr.App</RootNamespace>
+        <UseMaui>true</UseMaui>
+        <SingleProject>true</SingleProject>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <EnableDefaultCssItems>false</EnableDefaultCssItems>
+        <Nullable>enable</Nullable>
+
+        <!-- Enable XAML source generation for faster build times and improved performance.
+             This generates C# code from XAML at compile time instead of runtime inflation.
+             To disable, remove this line.
+             For individual files, you can override by setting Inflator metadata:
+               <MauiXaml Update="MyPage.xaml" Inflator="Default" /> (reverts to defaults: Runtime for Debug, XamlC for Release)
+               <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
+        <MauiXamlInflator>SourceGen</MauiXamlInflator>
+
+        <!-- Display name shown in launcher / app switcher / Settings list.
+             Bundle identifier stays com.animarr.app for store stability. -->
+        <ApplicationTitle>Animarr</ApplicationTitle>
+
+        <!-- App Identifier -->
+        <ApplicationId>com.animarr.app</ApplicationId>
+
+        <!-- Versions -->
+        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+        <ApplicationVersion>1</ApplicationVersion>
+
+        <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
+        <WindowsPackageType>None</WindowsPackageType>
+
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+        <Company>Animarr</Company>
+        <Product>Animarr</Product>
+    </PropertyGroup>
+
+    <!-- Android Release-mode tuning.
+         Scoped to the android target so iOS / Mac / Windows builds don't see
+         `android-*` RIDs and choke. Includes 32-bit `android-arm` because
+         some Android TV boxes (cheap budget hardware sold with newer Android
+         versions) ship armeabi-v7a only, no arm64. Modern devices land on
+         android-arm64. android-x64 covers Android emulator.
+
+         AOT + trim are disabled on Release because the .NET 10 MAUI AOT
+         cross-compiler currently drops the Java-side MainActivity stub
+         from the merged DEX for armeabi-v7a — manifests as
+         `ClassNotFoundException: com.animarr.app.MainActivity` at first
+         launch on 32-bit TV boxes. With AOT off the app uses Mono
+         interpreter — a touch slower at cold start, but the WebView
+         hosts all the heavy code anyway so the runtime difference is
+         negligible for our use case. Trim off keeps the same Java
+         stub classes that AOT would otherwise rewrite. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Release' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <RuntimeIdentifiers>android-arm64;android-arm;android-x64</RuntimeIdentifiers>
+        <RunAOTCompilation>false</RunAOTCompilation>
+        <PublishTrimmed>false</PublishTrimmed>
+        <AndroidLinkMode>None</AndroidLinkMode>
+    </PropertyGroup>
+
+    <!-- Debug also ships both ABIs so installs on cheap armeabi-v7a TV boxes
+         (Mi TV, generic Android TV sticks) work straight from `dotnet build
+         -t:Install`. Without 32-bit support the installer fails with
+         IncompatibleCpuAbiException. The extra build time is negligible
+         compared to the friction of having to flip to Release just to push
+         a Debug build to a TV. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- App Icon — background fill matches Quietude surface (#181c24);
+             foreground SVG paints the teal-gradient brand tile + 'a' glyph. -->
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#181c24" />
+
+        <!-- Splash Screen — same charcoal background as the icon so the
+             hand-off into the WASM boot-splash feels continuous. -->
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#181c24" BaseSize="128,128" />
+
+        <!-- Images -->
+        <MauiImage Include="Resources\Images\*" />
+        <MauiImage Update="Resources\Images\dotnet_bot.svg" BaseSize="168,208" />
+
+        <!-- Custom Fonts -->
+        <MauiFont Include="Resources\Fonts\*" />
+
+        <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+        <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+        <!-- v5 multi-server: browse-side mDNS so MAUI can discover Animarr
+             servers publishing _animarr._tcp.local. Pure WASM in a browser
+             can't open a UDP socket on 5353, but the MAUI host's native
+             process can — Makaretu binds the same set of NICs on every
+             platform (Windows / macOS / Android / iOS / Mac Catalyst). -->
+        <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+    </ItemGroup>
+
+    <!-- Phase 2 (2026-05-27): Native ExoPlayer-backed playback path on
+         Android TV so HDR / Dolby Vision / DTS-HD passthrough works
+         (BlazorWebView + hls.js loses HDR metadata). The WebView still
+         hosts the HUD overlay; ExoPlayer sits behind it in a SurfaceView.
+         Pulled in only for the android target — other platforms keep
+         the Artplayer-on-<video> path. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+        <PackageReference Include="Xamarin.AndroidX.Media3.Common"          Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer"       Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer.Hls"   Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.UI"              Version="1.4.1.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Animarr.Shared\Animarr.Shared.csproj" />
+        <ProjectReference Include="..\Animarr.UI\Animarr.UI.csproj" />
+    </ItemGroup>
+
+</Project>

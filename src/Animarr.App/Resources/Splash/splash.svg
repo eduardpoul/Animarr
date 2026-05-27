@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Animarr splash — v6 mark from design-system/scratch-mark4.html.
+     Hard-edged geometric "A" + sparkle. The path-based glyph means the
+     splash renders identically across Android / iOS / Mac / Windows
+     without depending on system fonts (the earlier <text> version
+     collapsed to a blank tile on Android when the chosen font wasn't
+     bundled with the device). Sparkle stays static at boot — MAUI's
+     splash drawable doesn't run CSS animations. -->
+<svg width="456" height="456" viewBox="0 0 456 456" xmlns="http://www.w3.org/2000/svg">
+    <!-- Dark rounded tile, sized to the splash safe area. Sits over the
+         platform splash background colour (set via MauiSplashScreen Color
+         in Animarr.App.csproj — kept at #181c24 so the tile reads as a
+         softer inset against it). -->
+    <rect x="28" y="28" width="400" height="400" rx="112" fill="#0a0c10"/>
+
+    <!-- Mark — coordinate system scaled 1:6.333 from the 72×72 design
+         (mark fills 388×388 inside the 400 tile with 6px breathing room).
+         Original path: M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46
+         L24 58 Z M31 39 L41 39 L36 24 Z (evenodd cuts the counter). -->
+    <g transform="translate(60 60) scale(4.667)">
+        <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
+              fill="#84c0d2"
+              fill-rule="evenodd"/>
+        <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
+              fill="#ffffff"/>
+    </g>
+</svg>

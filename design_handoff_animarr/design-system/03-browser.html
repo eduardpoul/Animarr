@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>03 · Browser flow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="_ds.css" />
+<style>
+  /* Reusable big desktop frame */
+  .frames{display:grid;gap:36px;}
+  .frames > .frame{margin-bottom:0;}
+
+  .h2-sec{margin-top:48px !important;}
+
+  /* Inside desktop frame helpers (re-using flows-responsive idioms) */
+  .dhero{position:absolute;top:54px;left:0;right:0;height:55%;overflow:hidden;}
+  .dhero .bg{position:absolute;inset:0;background-size:cover;background-position:center;}
+  .dhero .grad{position:absolute;inset:0;background:linear-gradient(90deg,rgba(15,17,21,0.85) 0%,transparent 60%),linear-gradient(0deg,var(--bg-0) 0%,transparent 55%);}
+  .dhero .ct{position:absolute;left:44px;right:44px;bottom:36px;max-width:580px;z-index:3;}
+  .dhero .ov{font-size:11px;color:var(--accent-hi);font-weight:600;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:12px;display:inline-flex;align-items:center;gap:8px;}
+  .dhero .ov .dot{width:6px;height:6px;border-radius:6px;background:var(--accent);}
+  .dhero h2{margin:0;font-size:48px;font-weight:700;letter-spacing:-1.4px;line-height:1.02;}
+  .dhero h2 em{font-style:normal;color:var(--text-dim);}
+  .dhero .meta{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;font-size:12px;color:var(--text-dim);}
+  .dhero .meta .s{color:var(--accent-hi);font-weight:600;}
+  .dhero p{color:var(--text-dim);font-size:13.5px;line-height:1.6;margin:12px 0 0;max-width:500px;}
+  .dhero .actions{display:flex;gap:8px;margin-top:14px;}
+  .dhero .pager{position:absolute;bottom:14px;left:0;right:0;display:flex;justify-content:center;gap:12px;z-index:3;}
+  .dhero .pager .it{display:flex;flex-direction:column;align-items:center;gap:5px;padding:5px 9px;font-size:10.5px;color:var(--text-faint);}
+  .dhero .pager .it.on{color:var(--text-dim);}
+  .dhero .pager .bar{height:2px;width:32px;background:rgba(255,255,255,0.15);border-radius:2px;}
+  .dhero .pager .it.on .bar{width:64px;background:var(--accent);}
+
+  .dunder{position:absolute;left:0;right:0;bottom:0;top:60%;padding:18px 44px;overflow:hidden;}
+  .dunder h3{margin:0 0 12px;font-size:16px;font-weight:600;letter-spacing:-0.3px;}
+  .drow{display:flex;gap:12px;}
+  .dpost{flex:1;height:160px;border-radius:var(--r-3);background-size:cover;background-position:center;position:relative;}
+  .dpost::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,rgba(15,17,21,0.85));border-radius:var(--r-3);}
+  .dpost .t{position:absolute;left:10px;right:10px;bottom:8px;color:#fff;font-size:11.5px;font-weight:600;z-index:2;}
+
+  /* Settings tabs frame helper */
+  .tabset{display:flex;gap:4px;border-bottom:1px solid var(--border);overflow-x:auto;padding:8px 20px 0;}
+  .tabset button{all:unset;cursor:pointer;padding:9px 11px;font-size:11.5px;font-weight:600;color:var(--text-dim);white-space:nowrap;}
+  .tabset button.on{color:var(--text);border-bottom:2px solid var(--accent);margin-bottom:-1px;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="kicker">Section 03</div>
+  <h1 class="page">Browser flow</h1>
+  <p class="lede">Every desktop screen the Animarr app renders, in the order you'd traverse them. 1280×800 viewport, 16:10 aspect. Topbar always 54 px; drawers always 420 px on the right edge.</p>
+
+  <nav class="ds-nav">
+    <a href="index.html"><span class="n">00</span>Cover</a>
+    <a href="01-foundations.html"><span class="n">01</span>Foundations</a>
+    <a href="02-components.html"><span class="n">02</span>Components</a>
+    <a href="03-browser.html" class="cur"><span class="n">03</span>Browser</a>
+    <a href="04-tv.html"><span class="n">04</span>TV</a>
+    <a href="05-mobile.html"><span class="n">05</span>Mobile</a>
+    <a href="06-themes.html"><span class="n">06</span>Themes</a>
+    <a href="07-onboarding.html"><span class="n">07</span>Onboarding</a>
+    <a href="08-hero-variants.html"><span class="n">08</span>Hero variants</a>
+  </nav>
+
+  <!-- ════════════ 01 LOGIN ════════════ -->
+  <h2 class="sec" id="login"><span class="n">B-01</span><span class="t">Login</span><span class="d">Brand mark over blurred backdrop. Optional invite-only banner above form.</span></h2>
+
+  <div class="frame">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Login</span><span class="fnote">1280 × 800 · /login</span></div>
+    <div class="desk"><div class="inner">
+      <div class="bd" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70');filter:blur(28px) brightness(0.4) saturate(0.7);transform:scale(1.06);"></div>
+      <div style="position:absolute;inset:0;display:grid;place-items:center;">
+        <div style="width:380px;background:rgba(15,17,21,0.78);backdrop-filter:blur(20px);border:1px solid var(--border-strong);border-radius:var(--r-5);padding:36px;box-shadow:var(--sh-drawer);">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+            <div style="width:36px;height:36px;border-radius:9px;background:var(--accent);color:#0f1115;display:grid;place-items:center;font-size:20px;font-weight:700;">a</div>
+            <div><div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Animarr</div><div style="font-size:11px;color:var(--text-faint);">Donghua · Anime · Movies</div></div>
+          </div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;margin-bottom:4px;">Welcome back</div>
+          <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:22px;">Sign in to continue watching.</div>
+          <div class="fld"><span class="lb">Email or username</span><input class="in" value="yuri" /></div>
+          <div class="fld"><span class="lb">Password</span><input class="in" type="password" value="••••••••••" /></div>
+          <button class="btn p" style="width:100%;justify-content:center;margin-top:8px;">Sign in →</button>
+          <div style="text-align:center;font-size:11px;color:var(--text-faint);margin-top:18px;">Or <a style="color:var(--accent-hi);">request invite</a> · this server is invite-only</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ════════════ 02 CATALOG ════════════ -->
+  <h2 class="sec h2-sec" id="catalog"><span class="n">B-02</span><span class="t">Catalog</span><span class="d">5-slot hero pager + featured row beneath. Tabs in the topbar switch the corpus.</span></h2>
+
+  <div class="frame">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Catalog · All</span><span class="fnote">/catalog</span></div>
+    <div class="desk"><div class="inner">
+      <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"><div class="tab on">All</div><div class="tab">Anime</div><div class="tab">Movies</div><div class="tab">Donghua</div></div><div class="right"><div class="pill"><span class="dot"></span>LLM 17/25</div><div class="ib">↓</div><div class="ib">⚙</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+      <div class="dhero">
+        <div class="bg" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70');"></div><div class="grad"></div>
+        <div class="ct"><div class="ov"><span class="dot"></span>Continue · Episode 5 · 38%</div><h2>Perfect <em>World</em></h2><div class="meta"><span class="s">★ 8.5</span><span>2018</span><span>270 episodes</span><span>Yuewen</span></div><p>Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world soaked in war and betrayal.</p><div class="actions"><button class="btn p">▶ Continue · 38%</button><button class="btn g">↻ Restart</button><button class="btn g">Open detail</button></div></div>
+        <div class="pager"><div class="it on"><div class="bar"></div>Perfect World</div><div class="it"><div class="bar"></div>Swallowed Star</div><div class="it"><div class="bar"></div>Xian Ni</div><div class="it"><div class="bar"></div>Arcane</div><div class="it"><div class="bar"></div>Throne of Seal</div></div>
+      </div>
+      <div class="dunder"><h3>Featured · ★ 8.0+</h3><div class="drow">
+        <div class="dpost" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="t">Swallowed Star</div></div>
+        <div class="dpost" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="t">Xian Ni</div></div>
+        <div class="dpost" style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"><div class="t">Mortal's Journey</div></div>
+        <div class="dpost" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"><div class="t">Arcane</div></div>
+        <div class="dpost" style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"><div class="t">Throne of Seal</div></div>
+      </div></div>
+    </div></div>
+  </div>
+
+  <!-- ════════════ 02b CATALOG · NeedsReview drawer ════════════ -->
+  <div class="frame" style="margin-top:36px;">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Catalog · Needs review (drawer)</span><span class="fnote">/catalog?nr=open</span></div>
+    <div class="desk"><div class="inner">
+      <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"><div class="tab on">All</div><div class="tab">Anime</div><div class="tab">Movies</div></div><div class="right"><div class="pill" style="color:var(--warn);"><span class="dot" style="background:var(--warn);"></span>3 need review</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+      <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+      <div class="dr-d">
+        <div class="dh"><div class="dh-i" style="color:var(--warn);background:var(--warn-soft);border-color:oklch(0.6 0.10 70 / 0.4);">!</div><div><div class="dh-s" style="color:var(--warn);">Needs review</div><div class="dh-n">3 unmatched items</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+        <div class="db">
+          <div class="alert warn" style="margin-bottom:14px;"><span>!</span><div><b>3 episodes couldn't be matched.</b><br/>Resolve manually or hide from catalog.</div></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="padding:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:12px;font-weight:600;">[Perfect.World][270][1080p][AAC].mkv</div>
+              <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">/movies/incoming · 1.4 GB</div>
+              <div style="display:flex;gap:6px;margin-top:9px;"><button class="btn p s">✦ Suggest</button><button class="btn g s">Match…</button><button class="btn d s">Ignore</button></div>
+            </div>
+            <div style="padding:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:12px;font-weight:600;">Xian_Ni_E141_FINAL_v2.mp4</div>
+              <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">/series/donghua · 820 MB</div>
+              <div style="display:flex;gap:6px;margin-top:9px;"><button class="btn p s">✦ Suggest</button><button class="btn g s">Match…</button><button class="btn d s">Ignore</button></div>
+            </div>
+            <div style="padding:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:12px;font-weight:600;">ARCANE_S02E01.mkv</div>
+              <div style="font-size:10px;color:var(--text-faint);font-family:var(--font-mono);margin-top:3px;">/series/arcane · 2.1 GB</div>
+              <div style="display:flex;gap:6px;margin-top:9px;"><button class="btn p s">✦ Suggest</button><button class="btn g s">Match…</button><button class="btn d s">Ignore</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="df"><button class="btn p s">Match all (✦ auto)</button><button class="btn g s">Done</button></div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ════════════ 02c CATALOG · full browse (per prototype) ════════════ -->
+  <h2 class="sec h2-sec" id="catalog-full"><span class="n">B-02c</span><span class="t">Catalog · per the real prototype</span><span class="d">Faithful to the live Animarr UI screenshots — big display title in hero, MOVIE/SERIES corner badges, year + rating chip below each poster.</span></h2>
+
+  <style>
+    .pcat{position:relative;background:#0a0a0c;overflow:hidden;height:1480px;color:#fff;font-family:'Inter',system-ui,sans-serif;}
+    .pcat-top{position:absolute;top:0;left:0;right:0;height:64px;display:flex;align-items:center;gap:18px;padding:0 28px;z-index:5;background:linear-gradient(180deg,rgba(10,10,12,0.7),transparent);}
+    .pcat-top .mark{width:30px;height:30px;border-radius:7px;background:var(--accent);color:#0a0a0c;display:grid;place-items:center;font-size:16px;font-weight:800;}
+    .pcat-top .br{font-size:13px;font-weight:700;letter-spacing:1px;}
+    .pcat-top .tabs{display:flex;gap:14px;margin-left:18px;flex:1;}
+    .pcat-top .tab{padding:7px 14px;border-radius:999px;font-size:13px;color:rgba(255,255,255,0.65);cursor:pointer;}
+    .pcat-top .tab.on{background:var(--accent);color:#0a0a0c;font-weight:600;}
+    .pcat-top .right{display:flex;gap:8px;align-items:center;}
+    .pcat-top .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);font-size:11px;color:rgba(255,255,255,0.78);}
+    .pcat-top .pill .dot{width:6px;height:6px;border-radius:6px;background:var(--success);}
+    .pcat-top .ib{width:30px;height:30px;border-radius:8px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);display:grid;place-items:center;color:rgba(255,255,255,0.78);}
+    .pcat-top .pc{display:inline-flex;align-items:center;gap:8px;padding:3px 12px 3px 3px;border-radius:999px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);}
+    .pcat-top .pc .av{width:26px;height:26px;border-radius:26px;background:linear-gradient(135deg,oklch(0.65 0.18 80),oklch(0.45 0.15 80));color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;}
+    .pcat-top .pc .nm{font-size:12px;font-weight:600;}
+    .pcat-top .pc .rl{font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;}
+    .pcat-hero{position:absolute;top:0;left:0;right:0;height:600px;overflow:hidden;}
+    .pcat-hero .bg{position:absolute;inset:0;background:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=2400&q=70') center/cover;}
+    .pcat-hero .vig{position:absolute;inset:0;background:linear-gradient(0deg,#0a0a0c 0%,transparent 50%),linear-gradient(90deg,rgba(10,10,12,0.5),transparent 60%);}
+    .pcat-hero .ct{position:absolute;left:36px;right:36px;bottom:90px;max-width:780px;z-index:3;}
+    .pcat-hero .tags{display:flex;gap:8px;margin-bottom:14px;}
+    .pcat-hero .tags .t{padding:3px 10px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.75);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);}
+    .pcat-hero .tags .t.pr{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line);}
+    .pcat-hero h1{margin:0;font-size:96px;font-weight:900;letter-spacing:-3px;line-height:0.92;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.7);}
+    .pcat-hero .meta{display:flex;gap:16px;margin-top:18px;font-size:13px;letter-spacing:1.5px;color:rgba(255,255,255,0.7);text-transform:uppercase;font-weight:500;}
+    .pcat-hero .meta .star{color:var(--accent-hi);}
+    .pcat-hero p{font-size:14px;line-height:1.55;color:rgba(255,255,255,0.75);max-width:560px;margin:14px 0 0;}
+    .pcat-hero .cta{margin-top:20px;display:inline-flex;align-items:center;gap:8px;padding:11px 22px;background:var(--accent);color:#0a0a0c;border-radius:999px;font-size:14px;font-weight:700;border:0;cursor:pointer;}
+    .pcat-hero .pager{position:absolute;right:36px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:16px;z-index:3;}
+    .pcat-hero .pager .it{display:flex;align-items:center;gap:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(255,255,255,0.35);cursor:pointer;}
+    .pcat-hero .pager .it .line{width:34px;height:2px;background:rgba(255,255,255,0.2);}
+    .pcat-hero .pager .it.on{color:var(--accent-hi);}
+    .pcat-hero .pager .it.on .line{background:var(--accent);width:60px;}
+    .pcat-fil{position:absolute;top:620px;left:36px;right:36px;display:flex;align-items:center;justify-content:space-between;}
+    .pcat-search{flex:1;max-width:340px;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:999px;padding:10px 14px;}
+    .pcat-search input{all:unset;flex:1;color:#fff;font-size:13px;font-family:inherit;}
+    .pcat-search .ic{color:rgba(255,255,255,0.4);}
+    .pcat-fil .ct{font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:1.4px;text-transform:uppercase;}
+    .pcat-grid{position:absolute;top:730px;left:36px;right:36px;display:grid;grid-template-columns:repeat(9,1fr);gap:14px;}
+    .pcat-card{cursor:pointer;}
+    .pcat-card .img{aspect-ratio:2/3;border-radius:6px;background-size:cover;background-position:center;position:relative;overflow:hidden;border:1px solid rgba(255,255,255,0.05);}
+    .pcat-card .img .badge{position:absolute;top:8px;left:8px;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.8);background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);}
+    .pcat-card .img .badge.s{background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);}
+    .pcat-card .ttl{font-size:11.5px;font-weight:700;margin-top:8px;line-height:1.2;letter-spacing:0.5px;text-transform:uppercase;color:rgba(255,255,255,0.92);}
+    .pcat-card .mt{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:rgba(255,255,255,0.4);margin-top:4px;letter-spacing:0.4px;}
+    .pcat-card .mt .star{color:var(--accent-hi);}
+  </style>
+
+  <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Catalog — per the real prototype</span><span class="fnote">/catalog</span></div>
+  <div class="pcat">
+    <div class="pcat-top"><div class="mark">a</div><div class="br">ANIMARR</div><div class="tabs"><div class="tab on">All</div><div class="tab">Anime</div><div class="tab">Dorams</div><div class="tab">Movies</div><div class="tab">Multserials</div><div class="tab">Serials</div></div><div class="right"><div class="pill"><span class="dot"></span>71/71</div><div class="ib">↓</div><div class="ib">⚙</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+    <div class="pcat-hero"><div class="bg"></div><div class="vig"></div>
+      <div class="ct"><div class="tags"><span class="t pr">Series</span><span class="t">Anti hero</span><span class="t">Superhero</span><span class="t">Based on comic</span></div>
+        <h1>INVINCIBLE</h1>
+        <div class="meta"><span class="star">★ 8.6</span><span>2021</span><span>32 EP</span><span>Prime Video</span><span>English</span></div>
+        <p>Mark Grayson is a normal teenager except for the fact that his father is the most powerful superhero on the planet. Shortly after his seventeenth birthday, Mark begins to develop powers of his own and enters into his father's tutelage.</p>
+        <button class="cta">▶ Open detail</button></div>
+      <div class="pager"><div class="it"><span>01</span><div class="line"></div></div><div class="it"><span>02</span><div class="line"></div></div><div class="it on"><span>03</span><div class="line"></div></div><div class="it"><span>04</span><div class="line"></div></div><div class="it"><span>05</span><div class="line"></div></div></div>
+    </div>
+    <div class="pcat-fil"><div class="pcat-search"><span class="ic">🔎</span><input placeholder="Filter by title…" /></div><div class="ct">27 / 32 · titles</div></div>
+    <div class="pcat-grid"><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">BĀHUBALI 2: THE CONCLUSION</div><div class="mt">2017 &nbsp; <span class="star">★ 7.5</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">BĀHUBALI: THE BEGINNING</div><div class="mt">2015 &nbsp; <span class="star">★ 7.5</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="badge s">SERIES</div></div><div class="ttl">DEATH’S GAME</div><div class="mt">2023 · 8 EP &nbsp; <span class="star">★ 8.4</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">LOST IN STARLIGHT</div><div class="mt">2025 &nbsp; <span class="star">★ 7.3</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE</div><div class="mt">1996 &nbsp; <span class="star">★ 7.0</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE — DEAD RECKONING PART 1</div><div class="mt">2023 &nbsp; <span class="star">★ 7.5</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1604079628040-94301bb21b91?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE — FALLOUT</div><div class="mt">2018 &nbsp; <span class="star">★ 7.4</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE — ROGUE NATION</div><div class="mt">2015 &nbsp; <span class="star">★ 7.2</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE — THE FINAL RECKONING</div><div class="mt">2025 &nbsp; <span class="star">★ 7.2</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MISSION: IMPOSSIBLE II</div><div class="mt">2000 &nbsp; <span class="star">★ 6.1</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MOBILE SUIT GUNDAM 00 MOVIE</div><div class="mt">2010 &nbsp; <span class="star">★ 6.4</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MOBILE SUIT GUNDAM SEED FREEDOM</div><div class="mt">2024 &nbsp; <span class="star">★ 7.0</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">MOBILE SUIT GUNDAM: IRON-BLOODED ORPHANS</div><div class="mt">2025 &nbsp; <span class="star">★ 5.5</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1604079628040-94301bb21b91?auto=format&fit=crop&w=400&q=70');"><div class="badge s">SERIES</div></div><div class="ttl">MONEY HEIST: FROM TOKYO TO BERLIN</div><div class="mt">2021 · 2 EP &nbsp; <span class="star">★ 8.2</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">NE ZHA</div><div class="mt">2019 &nbsp; <span class="star">★ 7.9</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">NE ZHA 2</div><div class="mt">2025 &nbsp; <span class="star">★ 8.2</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">SEA IN A BOX</div><div class="mt">2024 &nbsp; <span class="star">★ 5.2</span></div></div><div class="pcat-card"><div class="img" style="background-image:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=400&q=70');"><div class="badge">MOVIE</div></div><div class="ttl">SHANGHAI NIGHT WALK 2</div><div class="mt">2022 &nbsp; <span class="star">★ 7.0</span></div></div></div>
+  </div></div>
+
+  
+  <!-- ════════════ 02d DETAIL · SERIES (per prototype) ════════════ -->
+  <h2 class="sec h2-sec" id="detail-proto-series"><span class="n">B-02d</span><span class="t">Series detail · per the real prototype</span><span class="d">Wide backdrop hero with massive display title left, small poster, action chips top-right; below — Synopsis + Details table + Identification card; season tabs + episode grid.</span></h2>
+
+  <style>
+    .pdt{position:relative;background:#0a0a0c;overflow:hidden;height:1180px;color:#fff;font-family:'Inter',system-ui,sans-serif;}
+    .pdt-top{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;gap:18px;padding:0 28px;z-index:6;background:linear-gradient(180deg,rgba(10,10,12,0.65),transparent);}
+    .pdt-top .mark{width:30px;height:30px;border-radius:7px;background:var(--accent);color:#0a0a0c;display:grid;place-items:center;font-size:16px;font-weight:800;}
+    .pdt-top .br{font-size:13px;font-weight:700;letter-spacing:1px;}
+    .pdt-top .tabs{display:flex;gap:14px;margin-left:18px;flex:1;}
+    .pdt-top .tab{padding:6px 12px;border-radius:999px;font-size:13px;color:rgba(255,255,255,0.6);}
+    .pdt-top .right{display:flex;gap:8px;align-items:center;}
+    .pdt-top .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);font-size:11px;color:rgba(255,255,255,0.78);}
+    .pdt-top .pill .dot{width:6px;height:6px;border-radius:6px;background:var(--success);}
+    .pdt-top .ib{width:30px;height:30px;border-radius:8px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);display:grid;place-items:center;color:rgba(255,255,255,0.78);}
+    .pdt-top .pc{display:inline-flex;align-items:center;gap:8px;padding:3px 12px 3px 3px;border-radius:999px;background:rgba(10,10,12,0.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.10);}
+    .pdt-top .pc .av{width:26px;height:26px;border-radius:26px;background:linear-gradient(135deg,oklch(0.65 0.18 80),oklch(0.45 0.15 80));color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;}
+    .pdt-top .pc .nm{font-size:12px;font-weight:600;}
+    .pdt-top .pc .rl{font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;}
+
+    .pdt-hero{position:absolute;top:0;left:0;right:0;height:480px;overflow:hidden;}
+    .pdt-hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;}
+    .pdt-hero .vig{position:absolute;inset:0;background:linear-gradient(0deg,#0a0a0c,transparent 60%),linear-gradient(90deg,rgba(10,10,12,0.85),transparent 70%);}
+    .pdt-hero .topcta{position:absolute;top:74px;right:28px;display:flex;gap:8px;z-index:5;}
+    .pdt-hero .topcta button{padding:8px 16px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(10,10,12,0.65);border:1px solid rgba(255,255,255,0.14);color:#fff;backdrop-filter:blur(12px);cursor:pointer;box-shadow:0 4px 14px -4px rgba(0,0,0,0.5);}
+    .pdt-hero .topcta button:hover{background:rgba(10,10,12,0.85);}
+    .pdt-hero .back{position:absolute;top:74px;left:28px;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:500;background:rgba(10,10,12,0.65);border:1px solid rgba(255,255,255,0.14);color:rgba(255,255,255,0.9);backdrop-filter:blur(12px);cursor:pointer;z-index:5;box-shadow:0 4px 14px -4px rgba(0,0,0,0.5);}
+    .pdt-hero .row{position:absolute;left:28px;right:28px;bottom:48px;display:grid;grid-template-columns:170px 1fr;gap:24px;align-items:end;z-index:3;}
+    .pdt-hero .poster{height:240px;border-radius:8px;background-size:cover;background-position:center;box-shadow:0 22px 50px -16px rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.06);}
+    .pdt-hero .tags{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;}
+    .pdt-hero .tags .t{padding:3px 9px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.75);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);}
+    .pdt-hero .tags .t.pr{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line);}
+    .pdt-hero h1{margin:0;font-size:78px;font-weight:900;letter-spacing:-2.6px;line-height:0.9;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.7);}
+    .pdt-hero .meta{display:flex;align-items:center;gap:14px;margin-top:18px;font-size:12.5px;letter-spacing:1.5px;color:rgba(255,255,255,0.7);text-transform:uppercase;font-weight:500;}
+    .pdt-hero .meta .star{color:var(--accent-hi);}
+    .pdt-hero .meta .match{color:var(--success);background:oklch(0.70 0.08 150 / 0.18);border:1px solid oklch(0.55 0.08 150 / 0.35);padding:2px 8px;border-radius:4px;font-weight:700;}
+    .pdt-hero .cta{margin-top:18px;display:inline-flex;align-items:center;gap:8px;padding:11px 22px;background:var(--accent);color:#0a0a0c;border-radius:999px;font-size:13px;font-weight:700;border:0;cursor:pointer;}
+
+    /* Body grid: synopsis · details · identification */
+    .pdt-body{position:absolute;top:520px;left:28px;right:28px;display:grid;grid-template-columns:1.4fr 1fr 280px;gap:36px;}
+    .pdt-body .lbl{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--accent-hi);margin-bottom:10px;}
+    .pdt-body p{margin:0;font-size:13.5px;line-height:1.65;color:rgba(255,255,255,0.78);}
+    .pdt-body .reb{margin-top:14px;display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);font-size:11.5px;font-weight:500;color:#fff;cursor:pointer;}
+    .pdt-body .deet{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;font-size:13px;align-items:baseline;}
+    .pdt-body .deet .k{color:rgba(255,255,255,0.45);}
+    .pdt-body .deet .v{color:#fff;}
+    .pdt-body .ident{background:rgba(255,255,255,0.025);border:1px dashed rgba(255,255,255,0.12);border-radius:8px;padding:16px 18px;}
+    .pdt-body .ident .row{display:grid;grid-template-columns:60px 1fr auto;gap:14px;align-items:center;padding:6px 0;font-size:12px;}
+    .pdt-body .ident .k{font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:0.5px;text-transform:uppercase;}
+    .pdt-body .ident .v{font-family:'JetBrains Mono',monospace;color:var(--accent-hi);}
+    .pdt-body .ident .ext{color:rgba(255,255,255,0.4);font-size:11px;}
+
+    /* Season tabs + episodes */
+    .pdt-seas{position:absolute;top:830px;left:28px;right:28px;}
+    .pdt-seas .tabs{display:flex;gap:30px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:0;}
+    .pdt-seas .tabs .t{padding:11px 0;font-size:14px;font-weight:600;color:rgba(255,255,255,0.5);cursor:pointer;position:relative;}
+    .pdt-seas .tabs .t .ct{font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(255,255,255,0.35);margin-left:8px;}
+    .pdt-seas .tabs .t.on{color:#fff;}
+    .pdt-seas .tabs .t.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);}
+
+    .pdt-ep-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:14px;margin-top:22px;}
+    .pdt-ep{position:relative;border-radius:7px;overflow:hidden;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.1);aspect-ratio:16/10;cursor:pointer;}
+    .pdt-ep .img{position:absolute;inset:0;background-size:cover;background-position:center;filter:saturate(0.5) brightness(0.65);}
+    .pdt-ep .num{position:absolute;top:8px;left:10px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:rgba(255,255,255,0.7);letter-spacing:1px;}
+    .pdt-ep .warn{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:5px;background:oklch(0.75 0.10 70 / 0.22);border:1px solid oklch(0.6 0.10 70 / 0.5);color:var(--warn);display:grid;place-items:center;font-size:10px;}
+    .pdt-ep .ttl{position:absolute;left:10px;bottom:8px;font-size:11px;color:#fff;font-weight:500;}
+    .pdt-ep .rt{position:absolute;right:10px;bottom:8px;font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,0.55);}
+  </style>
+
+  <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Series detail — Death's Game</span><span class="fnote">/media/deaths-game</span></div>
+  <div class="pdt">
+    <div class="pdt-top"><div class="mark">a</div><div class="br">ANIMARR</div><div class="tabs"><div class="tab">All</div><div class="tab">Anime</div><div class="tab">Dorams</div><div class="tab">Movies</div><div class="tab">Multserials</div><div class="tab">Serials</div></div><div class="right"><div class="pill"><span class="dot"></span>71/71</div><div class="ib">↓</div><div class="ib">⚙</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+
+    <button class="back">‹ Back</button>
+    <div class="pdt-hero">
+      <div class="bg" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=2400&q=70');"></div>
+      <div class="vig"></div>
+      <div class="topcta"><button>★ Favorite</button><button>✎ Edit metadata</button></div>
+      <div class="row">
+        <div class="poster" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');"></div>
+        <div>
+          <div class="tags"><span class="t pr">Series</span><span class="t">Manual</span><span class="t">Suicide</span><span class="t">Reincarnation</span><span class="t">Afterlife</span></div>
+          <h1>DEATH'S GAME</h1>
+          <div class="meta"><span class="star">★ 8.4</span><span>2023</span><span>TVING</span><span>53 m</span><span>8 EP</span><span>Korean</span><span class="match">100% MATCH</span></div>
+          <button class="cta">▶ Continue · EP 07</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pdt-body">
+      <div>
+        <div class="lbl">Synopsis</div>
+        <p>At the brink of going to hell, Yee-jae must cycle through twelve separate lives and twelve separate deaths in this reincarnation drama.</p>
+        <button class="reb">↻ Re-identify</button>
+      </div>
+      <div>
+        <div class="lbl">Details</div>
+        <div class="deet">
+          <span class="k">Studio</span><span class="v">TVING</span>
+          <span class="k">Language</span><span class="v">Korean</span>
+          <span class="k">Runtime</span><span class="v">53 m</span>
+          <span class="k">Episodes</span><span class="v">8</span>
+          <span class="k">Status</span><span class="v">Ended</span>
+          <span class="k">Rating</span><span class="v">TV-MA</span>
+          <span class="k">Tags</span><span class="v">Drama · Sci-Fi & Fantasy</span>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">Identification</div>
+        <div class="ident">
+          <div class="row"><span class="k">TMDB</span><span class="v">218230</span><span class="ext">↗</span></div>
+          <div class="row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:4px;padding-top:10px;"><span class="k">IMDB</span><span class="v">tt26225038</span><span class="ext">↗</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pdt-seas">
+      <div class="tabs"><div class="t on">Season 1<span class="ct">8</span></div></div>
+      <div class="pdt-ep-grid">
+        
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:12%;"></div>
+            <div class="num">01</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 1</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:24%;"></div>
+            <div class="num">02</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 2</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:36%;"></div>
+            <div class="num">03</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 3</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:48%;"></div>
+            <div class="num">04</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 4</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:60%;"></div>
+            <div class="num">05</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 5</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:72%;"></div>
+            <div class="num">06</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 6</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:84%;"></div>
+            <div class="num">07</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 7</div>
+            <div class="rt">53m</div>
+          </div>
+          <div class="pdt-ep">
+            <div class="img" style="background-image:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=400&q=70');background-position:96%;"></div>
+            <div class="num">08</div>
+            <div class="warn">!</div>
+            <div class="ttl">Episode 8</div>
+            <div class="rt">53m</div>
+          </div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- ════════════ 02e DETAIL · MOVIE (per prototype) ════════════ -->
+  <h2 class="sec h2-sec" id="detail-proto-movie"><span class="n">B-02e</span><span class="t">Movie detail · per the real prototype</span><span class="d">Same chrome — but body has a FILE · ON DISK card with file name, runtime, codec, resolution, size, and play / mark-as-watched buttons.</span></h2>
+
+  <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Movie detail — Mobile Suit Gundam SEED Freedom</span><span class="fnote">/media/gundam-seed-freedom</span></div>
+  <div class="pdt" style="height:1020px;">
+    <div class="pdt-top"><div class="mark">a</div><div class="br">ANIMARR</div><div class="tabs"><div class="tab">All</div><div class="tab">Anime</div><div class="tab">Dorams</div><div class="tab">Movies</div><div class="tab">Multserials</div><div class="tab">Serials</div></div><div class="right"><div class="pill"><span class="dot"></span>71/71</div><div class="ib">↓</div><div class="ib">⚙</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+
+    <button class="back">‹ Back</button>
+    <div class="pdt-hero">
+      <div class="bg" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=2400&q=70');"></div>
+      <div class="vig"></div>
+      <div class="topcta"><button>★ Favorite</button><button>✎ Edit metadata</button></div>
+      <div class="row">
+        <div class="poster" style="background-image:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70');"></div>
+        <div>
+          <div class="tags"><span class="t pr">Movie</span><span class="t">Mind control</span><span class="t">Sequel</span><span class="t">Love</span></div>
+          <h1>MOBILE SUIT GUNDAM SEED FREEDOM</h1>
+          <div class="meta"><span class="star">★ 7.0</span><span>2024</span><span>Bandai Namco Filmworks</span><span>125 m</span><span>Japanese</span><span class="match">100% MATCH</span></div>
+          <button class="cta">▶ Play movie</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pdt-body">
+      <div>
+        <div class="lbl">Synopsis</div>
+        <p>In C.E.75, the fighting still continues. There are independence movements, and aggression by Blue Cosmos. In order to calm the situation, a global peace monitoring agency called COMPASS is established, with Lacus as its first president. As members of COMPASS, Kira and his comrades intervene into various regional battles. Then a newly established nation called Foundation proposes a joint operation against a Blue Cosmos stronghold.</p>
+        <button class="reb">↻ Re-identify</button>
+      </div>
+      <div>
+        <div class="lbl">Details</div>
+        <div class="deet">
+          <span class="k">Studio</span><span class="v">Bandai Namco Filmworks</span>
+          <span class="k">Language</span><span class="v">Japanese</span>
+          <span class="k">Runtime</span><span class="v">125 m</span>
+          <span class="k">Status</span><span class="v">Released</span>
+          <span class="k">Rating</span><span class="v">NR</span>
+          <span class="k">Tags</span><span class="v">Animation · Science Fiction · Action · Drama</span>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">Identification</div>
+        <div class="ident">
+          <div class="row"><span class="k">TMDB</span><span class="v">1146972</span><span class="ext">↗</span></div>
+          <div class="row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:4px;padding-top:10px;"><span class="k">IMDB</span><span class="v">tt14759062</span><span class="ext">↗</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- File · on disk -->
+    <div style="position:absolute;top:820px;left:28px;right:28px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:18px 22px;display:grid;grid-template-columns:180px 1fr;gap:24px;align-items:start;">
+      <div style="height:115px;border-radius:6px;background:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=400&q=70') center/cover;position:relative;"><div style="position:absolute;top:6px;right:6px;width:18px;height:18px;border-radius:5px;background:var(--success-soft);border:1px solid oklch(0.55 0.08 150 / 0.4);color:var(--success);display:grid;place-items:center;font-size:10px;">✓</div></div>
+      <div>
+        <div style="display:flex;gap:14px;align-items:baseline;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--accent-hi);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;"><span>File</span><span style="color:rgba(255,255,255,0.4);">·</span><span>On disk</span></div>
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">Mobile Suit Gundam SEED FREEDOM</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">Mobile Suit Gundam SEED Freedom.mkv</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;">
+          <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:7px;padding:10px 12px;"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,0.45);letter-spacing:1px;text-transform:uppercase;">Runtime</div><div style="font-size:13px;font-weight:600;margin-top:3px;">125 min</div></div>
+          <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:7px;padding:10px 12px;"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,0.45);letter-spacing:1px;text-transform:uppercase;">Resolution</div><div style="font-size:13px;font-weight:600;margin-top:3px;">1920 × 1080</div></div>
+          <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:7px;padding:10px 12px;"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,0.45);letter-spacing:1px;text-transform:uppercase;">Codec</div><div style="font-size:13px;font-weight:600;margin-top:3px;">h.265 main10</div></div>
+          <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:7px;padding:10px 12px;"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,0.45);letter-spacing:1px;text-transform:uppercase;">Size</div><div style="font-size:13px;font-weight:600;margin-top:3px;">4.8 GB</div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;"><button style="padding:9px 18px;border-radius:999px;background:var(--accent);color:#0a0a0c;border:0;font-size:12.5px;font-weight:700;cursor:pointer;">▶ Play movie</button><button style="padding:9px 18px;border-radius:999px;background:rgba(255,255,255,0.06);color:#fff;border:1px solid rgba(255,255,255,0.12);font-size:12.5px;font-weight:600;cursor:pointer;">✓ Mark as watched</button></div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- ════════════ 05 EDIT METADATA × 6 TABS ════════════ -->
+  <h2 class="sec h2-sec" id="edit"><span class="n">B-05</span><span class="t">Edit metadata · 6 tabs</span><span class="d">Right drawer over a blurred backdrop. Six tabs reuse one drawer chrome.</span></h2>
+
+  <div class="frames">
+    <!-- IDs -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · IDs</span><span class="fnote">/media/x?edit=ids</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit · IDs</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button class="on">IDs</button><button>Basics</button><button>Poster</button><button>Backdrop</button><button>Tags</button><button>Manage</button></div>
+          <div class="db">
+            <div class="alert info" style="margin-bottom:14px;"><span>✦</span><div><b>Auto-match · 98%</b><br/>qwen2.5:1.5b normalized OK · <a style="color:var(--accent-hi);text-decoration:underline;cursor:pointer;">re-run match</a></div></div>
+            <div class="fld"><span class="lb">TMDB ID</span><div style="display:flex;gap:6px;"><input class="in" value="perfect-world-tmdb-id" style="flex:1;font-family:var(--font-mono);" /><button class="btn g s" title="Search TMDB">🔎</button><button class="btn g s" title="Open in browser" style="padding:6px 9px;">↗</button></div></div>
+            <div class="fld"><span class="lb">MAL ID</span><div style="display:flex;gap:6px;"><input class="in" value="perfect-world-mal-id" style="flex:1;font-family:var(--font-mono);" /><button class="btn g s">🔎</button><button class="btn g s" style="padding:6px 9px;">↗</button></div></div>
+            <div class="fld"><span class="lb">IMDb ID</span><div style="display:flex;gap:6px;"><input class="in" placeholder="(not linked)" style="flex:1;font-family:var(--font-mono);" /><button class="btn g s">🔎</button><button class="btn g s" style="padding:6px 9px;">↗</button></div></div>
+            <div class="fld"><span class="lb">AniList ID</span><div style="display:flex;gap:6px;"><input class="in" placeholder="(not linked)" style="flex:1;font-family:var(--font-mono);" /><button class="btn g s">🔎</button><button class="btn g s" style="padding:6px 9px;">↗</button></div></div>
+            <div style="margin-top:14px;padding:11px 13px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:0.3px;margin-bottom:6px;">SEARCH BY TITLE INSTEAD</div>
+              <div style="display:flex;gap:6px;"><input class="in" placeholder="Perfect World" style="flex:1;font-size:12px;" /><button class="btn p s">✦ Search all</button></div>
+            </div>
+          </div>
+          <div class="df"><button class="btn p s">Save</button><button class="btn g s">Cancel</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Basics -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · Basics</span><span class="fnote">/media/x?edit=basics</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit · Basics</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button>IDs</button><button class="on">Basics</button><button>Poster</button><button>Backdrop</button><button>Tags</button><button>Manage</button></div>
+          <div class="db">
+            <div class="fld"><span class="lb">Title</span><input class="in" value="Perfect World" /></div>
+            <div class="fld"><span class="lb">Original title (CJK)</span><input class="in" value="完美世界" /></div>
+            <div class="fld"><span class="lb">Year</span><input class="in" value="2018" /></div>
+            <div class="fld"><span class="lb">Studio</span><input class="in" value="Yuewen Animation" /></div>
+            <div class="fld"><span class="lb">Synopsis</span><textarea class="in" rows="4">Shi Hao, born with extraordinary talent…</textarea></div>
+          </div>
+          <div class="df"><button class="btn p s">Save</button><button class="btn g s">Cancel</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Poster -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · Poster gallery</span><span class="fnote">/media/x?edit=poster</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit · Poster</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button>IDs</button><button>Basics</button><button class="on">Poster</button><button>Backdrop</button><button>Tags</button><button>Manage</button></div>
+          <div class="db">
+            <div class="alert info" style="margin-bottom:12px;"><span>✦</span><div>12 candidates from TMDB · pick one</div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div style="aspect-ratio:2/3;border-radius:8px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=300&q=70') center/cover;outline:3px solid var(--accent);outline-offset:2px;"></div>
+              <div style="aspect-ratio:2/3;border-radius:8px;background:url('https://images.unsplash.com/photo-1465101162946-4377e57745c3?auto=format&fit=crop&w=300&q=70') center/cover;"></div>
+              <div style="aspect-ratio:2/3;border-radius:8px;background:url('https://images.unsplash.com/photo-1483356345088-49e5b1bfacdc?auto=format&fit=crop&w=300&q=70') center/cover;"></div>
+              <div style="aspect-ratio:2/3;border-radius:8px;background:url('https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=300&q=70') center/cover;"></div>
+            </div>
+            <div style="margin-top:12px;text-align:center;font-size:11px;color:var(--text-faint);">8 more · scroll ↓</div>
+          </div>
+          <div class="df"><button class="btn p s">Use selected</button><button class="btn g s">Upload custom</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Backdrop -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · Backdrop gallery</span><span class="fnote">/media/x?edit=backdrop</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit · Backdrop</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button>IDs</button><button>Basics</button><button>Poster</button><button class="on">Backdrop</button><button>Tags</button><button>Manage</button></div>
+          <div class="db">
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="aspect-ratio:16/9;border-radius:8px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=600&q=70') center/cover;outline:3px solid var(--accent);outline-offset:2px;"></div>
+              <div style="aspect-ratio:16/9;border-radius:8px;background:url('https://images.unsplash.com/photo-1518709594023-6eab9bab7b23?auto=format&fit=crop&w=600&q=70') center/cover;"></div>
+              <div style="aspect-ratio:16/9;border-radius:8px;background:url('https://images.unsplash.com/photo-1502472584811-0a2f2feb8968?auto=format&fit=crop&w=600&q=70') center/cover;"></div>
+            </div>
+          </div>
+          <div class="df"><button class="btn p s">Use selected</button><button class="btn g s">Upload custom</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Tags -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · Tags</span><span class="fnote">/media/x?edit=tags</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">✎</div><div><div class="dh-s">Edit · Tags</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button>IDs</button><button>Basics</button><button>Poster</button><button>Backdrop</button><button class="on">Tags</button><button>Manage</button></div>
+          <div class="db">
+            <div class="fld"><span class="lb">Genres</span></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;">
+              <span class="pl a">cultivation</span><span class="pl a">donghua</span><span class="pl a">action</span><span class="pl a">fantasy</span><span class="pl a">drama</span><span class="pl">+ add</span>
+            </div>
+            <div class="fld"><span class="lb">Content rating</span><input class="in" value="PG-13" /></div>
+            <div class="fld"><span class="lb">Audio tracks</span></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <span class="pl">cn-original</span><span class="pl">en-dub</span><span class="pl">jp-dub</span>
+            </div>
+          </div>
+          <div class="df"><button class="btn p s">Save</button><button class="btn g s">Cancel</button></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Manage -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Edit · Manage (danger zone)</span><span class="fnote">/media/x?edit=manage</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1800&q=70') center/cover;filter:blur(3px) brightness(0.45);"></div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i" style="color:var(--danger);background:var(--danger-soft);border-color:oklch(0.55 0.16 25 / 0.4);">!</div><div><div class="dh-s" style="color:var(--danger);">Edit · Manage</div><div class="dh-n">Perfect World</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="tabset"><button>IDs</button><button>Basics</button><button>Poster</button><button>Backdrop</button><button>Tags</button><button class="on">Manage</button></div>
+          <div class="db">
+            <div style="font-size:12px;color:var(--text-dim);margin-bottom:18px;">Operations that can't be undone.</div>
+            <div style="padding:14px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
+              <div style="font-size:13px;font-weight:600;">Re-scan files</div>
+              <div style="font-size:11.5px;color:var(--text-dim);margin:4px 0 10px;">Re-read filenames and re-match every episode.</div>
+              <button class="btn g s">Re-scan 270 files</button>
+            </div>
+            <div style="padding:14px;border:1px solid oklch(0.55 0.16 25 / 0.4);border-radius:8px;background:oklch(0.68 0.18 25 / 0.05);">
+              <div style="font-size:13px;font-weight:600;color:var(--danger);">Delete media</div>
+              <div style="font-size:11.5px;color:var(--text-dim);margin:4px 0 10px;">Removes metadata. Files on disk remain.</div>
+              <button class="btn d s">Delete · 270 EP</button>
+            </div>
+          </div>
+          <div class="df"><button class="btn g s" style="margin-left:auto;">Close</button></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ════════════ 06 DOWNLOADS ════════════ -->
+  <h2 class="sec h2-sec" id="downloads"><span class="n">B-06</span><span class="t">Downloads</span><span class="d">Table of torrents with quick actions. Add button opens right drawer.</span></h2>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Downloads · default</span><span class="fnote">/downloads</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pill"><span class="dot"></span>↓ 33 MB/s</div><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:0;bottom:0;padding:24px 40px;overflow:hidden;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:20px;">
+            <div><h3 style="margin:0;color:var(--text);font-size:24px;font-weight:700;letter-spacing:-0.5px;">Downloads · 3 active</h3><div style="font-size:12px;color:var(--text-dim);margin-top:4px;">↓ 32.9 MB/s · ↑ 1.2 MB/s · 1 stalled</div></div>
+            <div style="display:flex;gap:8px;"><div class="seg"><button class="on">All</button><button>Active</button><button>Done</button><button>Stalled</button></div><button class="btn p s">+ Add download</button></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1.3fr 280px 110px 80px 24px;gap:14px;align-items:center;font-size:11.5px;"><div><div style="color:var(--text);font-weight:500;">Perfect World — 270 [1080p]</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;font-family:var(--font-mono);">→ Perfect World (2018) · 1.4 GB</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:62%;height:100%;background:var(--accent);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;">62%</div></div><span style="color:var(--accent-hi);font-weight:600;">↓ 14.2 MB/s</span><span style="font-size:10.5px;color:var(--text-faint);">04:12</span><span style="color:var(--text-faint);">⋯</span></div>
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1.3fr 280px 110px 80px 24px;gap:14px;align-items:center;font-size:11.5px;"><div><div style="color:var(--text);font-weight:500;">Xian Ni — 141</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;font-family:var(--font-mono);">→ Xian Ni · 820 MB</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:34%;height:100%;background:var(--accent);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;">34%</div></div><span style="color:var(--accent-hi);font-weight:600;">↓ 18.7 MB/s</span><span style="font-size:10.5px;color:var(--text-faint);">18:40</span><span style="color:var(--text-faint);">⋯</span></div>
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1.3fr 280px 110px 80px 24px;gap:14px;align-items:center;font-size:11.5px;"><div><div style="color:var(--text);font-weight:500;">Throne of Seal — 200</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;font-family:var(--font-mono);">→ Throne of Seal · 2.1 GB</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:8%;height:100%;background:var(--warn);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--warn);margin-top:3px;">8% · stalled</div></div><span style="color:var(--warn);font-weight:600;">0 peers</span><span style="font-size:10.5px;color:var(--text-faint);">—</span><span style="color:var(--text-faint);">⋯</span></div>
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1.3fr 280px 110px 80px 24px;gap:14px;align-items:center;font-size:11.5px;opacity:0.6;"><div><div style="color:var(--text);font-weight:500;">Mortal's Journey [BluRay]</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;font-family:var(--font-mono);">→ Mortal's Journey · 4.2 GB</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:100%;height:100%;background:var(--success);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--success);margin-top:3px;">100% · done</div></div><span style="color:var(--text-faint);font-weight:600;">↑ 0.4 MB/s</span><span style="font-size:10.5px;color:var(--text-faint);">seeding</span><span style="color:var(--text-faint);">⋯</span></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Add drawer -->
+    <div class="frame">
+      <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Downloads · Add (drawer)</span><span class="fnote">/downloads?add=open</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div style="position:absolute;top:54px;left:0;right:420px;padding:24px 40px;">
+          <h3 style="margin:0;color:var(--text);font-size:22px;font-weight:700;letter-spacing:-0.5px;">Downloads · 3 active</h3>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;">
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1fr 100px 80px;gap:14px;align-items:center;font-size:11.5px;"><div><div style="color:var(--text);font-weight:500;">Perfect World — 270 [1080p]</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;">→ Perfect World (2018)</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:62%;height:100%;background:var(--accent);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;">62%</div></div><span style="color:var(--accent-hi);font-weight:600;">↓ 14.2 MB/s</span></div>
+            <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:1fr 100px 80px;gap:14px;align-items:center;font-size:11.5px;"><div><div style="color:var(--text);font-weight:500;">Xian Ni — 141</div><div style="color:var(--text-faint);margin-top:2px;font-size:10px;">→ Xian Ni</div></div><div><div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;"><div style="width:34%;height:100%;background:var(--accent);border-radius:3px;"></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;">34%</div></div><span style="color:var(--accent-hi);font-weight:600;">↓ 18.7 MB/s</span></div>
+          </div>
+        </div>
+        <div class="dr-d">
+          <div class="dh"><div class="dh-i">+</div><div><div class="dh-s">Downloads</div><div class="dh-n">Add download</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+          <div class="db">
+            <div class="seg" style="display:grid;grid-template-columns:1fr 1fr 1fr;width:100%;margin-bottom:14px;"><button class="on">.torrent</button><button>Magnet</button><button>Upload</button></div>
+
+            <div class="drop" style="margin-bottom:14px;"><div class="ic">↥</div><div class="l">Drop a .torrent file or <a>browse</a></div></div>
+
+            <div class="fld"><span class="lb">Magnet URI · or paste</span><input class="in" placeholder="magnet:?xt=urn:btih:…" style="font-family:var(--font-mono);font-size:11.5px;" /></div>
+
+            <div class="fld"><span class="lb">Match to library item</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Perfect World (2018)</span><span style="color:var(--text-faint);">▾</span></div></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">Category</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Donghua</span><span style="color:var(--text-faint);">▾</span></div></div><div class="fld"><span class="lb">Priority</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Normal</span><span style="color:var(--text-faint);">▾</span></div></div></div>
+
+            <div class="fld"><span class="lb">Save path</span><input class="in" value="/mnt/storage/donghua/Perfect World (2018)/" style="font-family:var(--font-mono);font-size:11px;" /></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">↓ limit</span><input class="in" value="0 (global)" /></div><div class="fld"><span class="lb">↑ limit</span><input class="in" value="0 (global)" /></div></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">Stop at ratio</span><input class="in" value="1.5" style="font-family:var(--font-mono);" /></div><div class="fld"><span class="lb">Stop at seed time</span><input class="in" value="48h" style="font-family:var(--font-mono);" /></div></div>
+
+            <div style="margin-top:6px;">
+              <div style="font-size:10px;color:var(--text-faint);letter-spacing:0.3px;text-transform:uppercase;font-weight:600;margin-bottom:8px;">Files · 270 · 12.4 GB</div>
+              <div style="background:var(--bg-1);border:1px solid var(--border);border-radius:7px;max-height:160px;overflow:auto;">
+                <div style="display:grid;grid-template-columns:22px 1fr 70px;gap:10px;padding:7px 12px;align-items:center;font-size:11px;border-bottom:1px solid var(--border);"><span class="tg sm on"></span><span style="font-family:var(--font-mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Perfect.World.E001.1080p.mkv</span><span style="color:var(--text-faint);font-family:var(--font-mono);text-align:right;">46.2 MB</span></div>
+                <div style="display:grid;grid-template-columns:22px 1fr 70px;gap:10px;padding:7px 12px;align-items:center;font-size:11px;border-bottom:1px solid var(--border);"><span class="tg sm on"></span><span style="font-family:var(--font-mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Perfect.World.E002.1080p.mkv</span><span style="color:var(--text-faint);font-family:var(--font-mono);text-align:right;">46.7 MB</span></div>
+                <div style="display:grid;grid-template-columns:22px 1fr 70px;gap:10px;padding:7px 12px;align-items:center;font-size:11px;border-bottom:1px solid var(--border);"><span class="tg sm on"></span><span style="font-family:var(--font-mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Perfect.World.E003.1080p.mkv</span><span style="color:var(--text-faint);font-family:var(--font-mono);text-align:right;">45.1 MB</span></div>
+                <div style="display:grid;grid-template-columns:22px 1fr 70px;gap:10px;padding:7px 12px;align-items:center;font-size:11px;opacity:0.5;"><span class="tg sm"></span><span style="font-family:var(--font-mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">sample/preview.mp4</span><span style="color:var(--text-faint);font-family:var(--font-mono);text-align:right;">8.4 MB</span></div>
+                <div style="padding:6px 12px;text-align:center;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);">… 266 more</div>
+              </div>
+            </div>
+
+            <div style="margin-top:14px;">
+              <div style="font-size:10px;color:var(--text-faint);letter-spacing:0.3px;text-transform:uppercase;font-weight:600;margin-bottom:8px;">After download</div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;"><span>Start immediately</span><span class="tg on"></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;"><span>Auto-rename to library</span><span class="tg on"></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;"><span>Run LLM match on completion</span><span class="tg on"></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;"><span>Move files after seed limit</span><span class="tg"></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;"><span>Delete .torrent after add</span><span class="tg"></span></div>
+              </div>
+            </div>
+
+            <div style="margin-top:14px;padding:10px 12px;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;">
+              <div style="font-size:10px;color:var(--text-faint);letter-spacing:0.3px;text-transform:uppercase;font-weight:600;margin-bottom:6px;">Trackers · 6</div>
+              <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);line-height:1.6;">udp://tracker.opentrackr.org:1337<br/>udp://9.rarbg.com:2810<br/>udp://tracker.openbittorrent.com:6969<br/><span style="color:var(--text-faint);">+ 3 more</span></div>
+            </div>
+          </div>
+          <div class="df"><button class="btn p s">▶ Start</button><button class="btn g s">Cancel</button></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ════════════ 07 SETTINGS · PROFILE (USER) ════════════ -->
+  <h2 class="sec h2-sec" id="settings-profile"><span class="n">B-07</span><span class="t">Settings · Profile</span><span class="d">Per-user, per-device. Default destination when you click ⚙. Master users see a "Server settings →" card at the bottom of the rail.</span></h2>
+
+  <style>
+    /* User settings rail */
+    .dss-pt{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-4);padding:6px;display:flex;flex-direction:column;gap:2px;height:fit-content;}
+    .dss-pt .lbl{font-size:9.5px;color:var(--text-faint);letter-spacing:0.4px;text-transform:uppercase;font-weight:600;padding:8px 12px 4px;}
+    .dss-pt button{all:unset;cursor:pointer;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:500;color:var(--text-dim);border-left:2px solid transparent;padding-left:10px;}
+    .dss-pt button.on{color:var(--text);background:var(--surface-3);border-left-color:var(--accent);}
+    .dss-pt .drill{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
+    .dss-pt .drill button{background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);border-left:1px solid var(--accent-line);padding:9px 12px;padding-left:11px;font-weight:600;display:flex;align-items:center;justify-content:space-between;}
+  </style>
+
+  <div class="frames">
+
+    <!-- Account -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Account</span><span class="fnote">/settings/account</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button class="on">Account</button>
+            <button>Appearance</button>
+            <button>Audio · subtitles</button>
+            <button>Language</button>
+            <button>Sign in other device</button>
+            <button>Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Account</h4><div class="hsub">Identity on Living Room Server.</div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:9px;margin-bottom:16px;">
+              <div style="width:48px;height:48px;border-radius:48px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:20px;font-weight:700;">Y</div>
+              <div style="flex:1;"><div style="font-size:14px;font-weight:600;">Yuri Kraskov</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">yuri · master · since 2025-08-12</div></div>
+              <button class="btn g s">Change avatar</button>
+            </div>
+
+            <div class="fld"><span class="lb">Display name</span><input class="in" value="Yuri Kraskov" /></div>
+            <div class="fld"><span class="lb">Username</span><input class="in" value="yuri" style="font-family:var(--font-mono);" /></div>
+            <div class="fld"><span class="lb">Email</span><input class="in" value="yuri@medsolutions.dev" /></div>
+
+            <h4 style="margin-top:22px;">Security</h4>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:13px;font-weight:600;">Password</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">Changed 14 days ago</div></div><button class="btn g s">Change…</button></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:13px;font-weight:600;">PIN · for device switching</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">4-digit · required to switch into your account</div></div><span class="pl s">SET</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:13px;font-weight:600;">Two-factor (TOTP)</div><div style="font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">Authy / Google Authenticator</div></div><span class="tg"></span></div>
+            </div>
+
+            <div style="margin-top:18px;display:flex;gap:8px;"><button class="btn p s">Save</button><button class="btn g s">Cancel</button></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Appearance -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Appearance</span><span class="fnote">/settings/appearance</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button>Account</button>
+            <button class="on">Appearance</button>
+            <button>Audio · subtitles</button>
+            <button>Language</button>
+            <button>Sign in other device</button>
+            <button>Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Appearance</h4><div class="hsub">Theme, accent, hero navigation — per-user, mirrors across all devices.</div>
+
+            <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Theme</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px;">
+              <div style="padding:11px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;cursor:pointer;"><div style="height:48px;border-radius:5px;background:linear-gradient(135deg,#0f1115,#181c24);border:1px solid var(--border);"></div><div style="font-size:11.5px;font-weight:600;margin-top:8px;">Quietude</div><div style="font-size:10px;color:var(--text-faint);">canon</div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="height:48px;border-radius:5px;background:linear-gradient(135deg,#0a0807,#25201b);border:1px solid var(--border);"></div><div style="font-size:11.5px;font-weight:600;margin-top:8px;">Cinematic</div><div style="font-size:10px;color:var(--text-faint);">warm + crimson</div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="height:48px;border-radius:5px;background:linear-gradient(135deg,#02060a,#0a1e16);border:1px solid var(--border);"></div><div style="font-size:11.5px;font-weight:600;margin-top:8px;">Terminal</div><div style="font-size:10px;color:var(--text-faint);">neon mono</div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="height:48px;border-radius:5px;background:linear-gradient(135deg,#1a0808,#2a0e0a);border:1px solid var(--border);"></div><div style="font-size:11.5px;font-weight:600;margin-top:8px;">Mountain Sect</div><div style="font-size:10px;color:var(--text-faint);">red+gold</div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;"><span style="color:var(--accent-hi);font-size:18px;">+</span><div style="font-size:11px;color:var(--accent-hi);margin-top:4px;font-weight:500;">6 more</div></div>
+            </div>
+
+            <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Accent · 10 options</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px;">
+              <div style="background:var(--surface);border:2px solid var(--accent);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.72 0.18 245);"></div><div style="font-size:10.5px;font-weight:600;">Azure</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.74 0.17 232);"></div><div style="font-size:10.5px;font-weight:600;">Sky</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.66 0.22 262);"></div><div style="font-size:10.5px;font-weight:600;">Indigo</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.72 0.14 195);"></div><div style="font-size:10.5px;font-weight:600;">Teal</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.72 0.16 150);"></div><div style="font-size:10.5px;font-weight:600;">Emerald</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.78 0.16 80);"></div><div style="font-size:10.5px;font-weight:600;">Amber</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.72 0.18 30);"></div><div style="font-size:10.5px;font-weight:600;">Coral</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.66 0.20 25);"></div><div style="font-size:10.5px;font-weight:600;">Crimson</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.66 0.22 340);"></div><div style="font-size:10.5px;font-weight:600;">Magenta</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;"><div style="width:36px;height:36px;border-radius:36px;background:oklch(0.66 0.20 295);"></div><div style="font-size:10.5px;font-weight:600;">Violet</div></div>
+            </div>
+
+            <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Hero navigation <a href="08-hero-variants.html" style="color:var(--accent-hi);text-decoration:underline;text-transform:none;letter-spacing:0;margin-left:8px;">see all 9 →</a></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;">
+              <div style="padding:11px 13px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">E · Hover chevrons</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Calm default</div></div>
+              <div style="padding:11px 13px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">A · Edge chevrons</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Discoverable</div></div>
+              <div style="padding:11px 13px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">C · Side-rail</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Auto on TV</div></div>
+            </div>
+
+            <div style="font-size:10px;color:var(--text-faint);font-weight:500;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:8px;">Behaviour</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Auto-rotate hero slots</div><div style="font-size:10.5px;color:var(--text-dim);">Cycle every 8 s while idle.</div></div><span class="tg on"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Reduce motion</div><div style="font-size:10.5px;color:var(--text-dim);">Disable carousel transitions and sheet springs.</div></div><span class="tg"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Film grain overlay</div><div style="font-size:10.5px;color:var(--text-dim);">Disabled in calm theme.</div></div><span class="tg"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Compact density</div><div style="font-size:10.5px;color:var(--text-dim);">Smaller padding on cards and rows.</div></div><span class="tg"></span></div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Audio · subtitles -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Audio & subtitles</span><span class="fnote">/settings/audio</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button>Account</button>
+            <button>Appearance</button>
+            <button class="on">Audio · subtitles</button>
+            <button>Language</button>
+            <button>Sign in other device</button>
+            <button>Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Audio & subtitles</h4><div class="hsub">Playback defaults for everything you open.</div>
+
+            <h4 style="margin-top:14px;font-size:13px;">Audio</h4>
+            <div class="fld"><span class="lb">Preferred audio track · in order</span></div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl a">#1</span><span>Original (CN/JP)</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">cn · jp · ko</span><span style="color:var(--text-faint);">✕</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#2</span><span>English dub</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">en</span><span style="color:var(--text-faint);">✕</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#3</span><span>Russian dub</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">ru · ua</span><span style="color:var(--text-faint);">✕</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Boost dialogue · centre channel</div><div style="font-size:10.5px;color:var(--text-dim);">+3 dB on the centre track when surround is detected.</div></div><span class="tg on"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Night mode · compress dynamic range</div><div style="font-size:10.5px;color:var(--text-dim);">Quieter explosions, louder whispers.</div></div><span class="tg"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"><div><div style="font-size:12.5px;font-weight:600;">Pass-through · Atmos / DTS-X</div><div style="font-size:10.5px;color:var(--text-dim);">Send original bitstream to AV-receiver. TV only.</div></div><span class="tg on"></span></div>
+            </div>
+
+            <h4 style="font-size:13px;">Subtitles</h4>
+            <div class="fld"><span class="lb">Preferred subtitle track · in order</span></div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl a">#1</span><span>English · forced + signs</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">en</span><span style="color:var(--text-faint);">✕</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#2</span><span>Russian</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">ru</span><span style="color:var(--text-faint);">✕</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;font-size:12px;"><span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#3</span><span>Original CJK</span><span style="color:var(--text-faint);font-family:var(--font-mono);font-size:10px;">cn · jp</span><span style="color:var(--text-faint);">✕</span></div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+              <div class="fld"><span class="lb">Size</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Medium · 22 px</span><span style="color:var(--text-faint);">▾</span></div></div>
+              <div class="fld"><span class="lb">Font</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Inter</span><span style="color:var(--text-faint);">▾</span></div></div>
+              <div class="fld"><span class="lb">Background</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Semi-transparent box</span><span style="color:var(--text-faint);">▾</span></div></div>
+              <div class="fld"><span class="lb">Vertical offset</span><input class="in" value="−24 px" style="font-family:var(--font-mono);" /></div>
+            </div>
+
+            <!-- Preview -->
+            <div style="margin-top:8px;height:80px;border-radius:8px;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1200&q=70') center/cover;position:relative;border:1px solid var(--border);overflow:hidden;">
+              <div style="position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:600;text-shadow:0 2px 4px rgba(0,0,0,0.8);">Preview · "Shi Hao stands at the edge of the world."</div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Language -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Language</span><span class="fnote">/settings/language</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button>Account</button>
+            <button>Appearance</button>
+            <button>Audio · subtitles</button>
+            <button class="on">Language</button>
+            <button>Sign in other device</button>
+            <button>Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Language</h4><div class="hsub">UI language and how titles are displayed.</div>
+
+            <div class="fld"><span class="lb">Interface</span>
+              <div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>English (US) · en-US</span><span style="color:var(--text-faint);">▾</span></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-faint);margin-top:-6px;margin-bottom:14px;font-family:var(--font-mono);">15 languages available · system default detected as ru-UA</div>
+
+            <h4 style="margin-top:14px;font-size:13px;">Title display</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+              <div style="padding:11px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">Romanised first</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;">Perfect World <span style="color:var(--text-dim);">完美世界</span></div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">Original first</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;">完美世界 <span style="color:var(--text-dim);">Perfect World</span></div></div>
+              <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">Romanised only</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;">Perfect World</div></div>
+            </div>
+
+            <h4 style="font-size:13px;">Date · time · numbers</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">Date format</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>YYYY-MM-DD · 2026-05-27</span><span style="color:var(--text-faint);">▾</span></div></div><div class="fld"><span class="lb">Time format</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>24h · 14:08</span><span style="color:var(--text-faint);">▾</span></div></div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">First day of week</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Monday</span><span style="color:var(--text-faint);">▾</span></div></div><div class="fld"><span class="lb">Time zone</span><div class="in" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"><span>Europe / Kyiv · UTC+2</span><span style="color:var(--text-faint);">▾</span></div></div></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Sign in other device -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Sign in other device</span><span class="fnote">/settings/pair</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button>Account</button>
+            <button>Appearance</button>
+            <button>Audio · subtitles</button>
+            <button>Language</button>
+            <button class="on">Sign in other device</button>
+            <button>Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Sign in other device</h4><div class="hsub">Pair a TV or another browser with your Yuri account on Living Room Server.</div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-4);padding:24px;">
+              <div style="width:200px;height:200px;background:#fff;border-radius:var(--r-3);padding:14px;display:grid;place-items:center;">
+                <svg width="170" height="170" viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><g fill="#000"><rect x="0" y="0" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="2" y="2" width="3" height="3"/><rect x="14" y="0" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="16" y="2" width="3" height="3"/><rect x="0" y="14" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/><rect x="2" y="16" width="3" height="3"/><rect x="8" y="2" width="1" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="1" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="10" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="2" y="8" width="1" height="1"/><rect x="9" y="9" width="3" height="3"/><rect x="13" y="9" width="1" height="1"/><rect x="15" y="9" width="1" height="1"/><rect x="9" y="14" width="1" height="1"/><rect x="11" y="14" width="1" height="1"/><rect x="13" y="17" width="3" height="3"/></g></svg>
+              </div>
+              <div>
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-hi);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:10px;">Show this on the other device</div>
+                <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;line-height:1.05;">Scan or enter code</div>
+                <ol style="padding-left:18px;margin:14px 0 0;color:var(--text-dim);font-size:13px;line-height:1.7;">
+                  <li>On the other device: open Animarr → tap "Sign in"</li>
+                  <li>Choose "Scan QR" or enter the code below</li>
+                  <li>Confirm here that it's you</li>
+                </ol>
+                <div style="margin-top:18px;padding:14px 16px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;">
+                  <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:0.3px;margin-bottom:4px;">Or enter at animarr.local / pair</div>
+                  <div style="font-family:var(--font-mono);font-size:28px;letter-spacing:8px;color:var(--accent-hi);margin-top:4px;font-weight:600;">4F-7K-92</div>
+                  <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:8px;letter-spacing:0.4px;">Refreshes in 04:32</div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:14px;"><button class="btn g s">↻ Regenerate code</button><button class="btn g s">Copy</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Active devices -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · Active devices</span><span class="fnote">/settings/devices</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-pt">
+            <div class="lbl">Profile · this user</div>
+            <button>Account</button>
+            <button>Appearance</button>
+            <button>Audio · subtitles</button>
+            <button>Language</button>
+            <button>Sign in other device</button>
+            <button class="on">Active devices</button>
+            <button>About this app</button>
+            <div class="drill"><button>Server settings <span>→</span></button></div>
+          </div>
+          <div class="dss-c">
+            <h4>Active devices</h4><div class="hsub">3 signed-in across Living Room Server. Revoking signs that device out instantly.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--accent-line);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-hi);display:grid;place-items:center;">▭</div>
+                <div><div style="font-size:13px;font-weight:600;">This browser · Chrome 121</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">192.168.1.20 · macOS · 14:08 today</div></div>
+                <span class="pl a">Current</span>
+                <span style="color:var(--text-faint);font-size:11px;">—</span>
+              </div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;">⬜</div>
+                <div><div style="font-size:13px;font-weight:600;">Living Room TV · Samsung Tizen</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">192.168.1.74 · paired 12:30 today</div></div>
+                <span class="pl">Watching · Perfect World EP 5</span>
+                <button class="btn d s">Revoke</button>
+              </div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr auto auto;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-dim);display:grid;place-items:center;">▯</div>
+                <div><div style="font-size:13px;font-weight:600;">iPhone 15 · Animarr 2.0.1</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:2px;">10.0.0.21 · LTE · 08:14 today</div></div>
+                <span class="pl">Idle</span>
+                <button class="btn d s">Revoke</button>
+              </div>
+            </div>
+            <button class="btn d s" style="margin-top:16px;">↘ Revoke all other devices</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+  </div>
+
+  <!-- ════════════ 08 SETTINGS · SERVER (MASTER) ════════════ -->
+  <h2 class="sec h2-sec" id="settings"><span class="n">B-08</span><span class="t">Settings · Server (master only)</span><span class="d">Drill-in from "Server settings →" at the bottom of the profile rail. 12 admin tabs.</span></h2>
+
+  <div class="frames">
+    <!-- General -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · General</span><span class="fnote">/settings</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button class="on">General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>General</h4><div class="hsub">Server-wide preferences.</div>
+            <div class="fld"><span class="lb">Server name</span><input class="in" value="medsolutions / animarr" /></div>
+            <div class="fld"><span class="lb">Default language</span><input class="in" value="English" /></div>
+            <div class="fld"><span class="lb">Time zone</span><input class="in" value="Europe / Kyiv (UTC+2)" /></div>
+            <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Telemetry</div><div style="font-size:11px;color:var(--text-dim);">Anonymous error reporting.</div></div><span class="tg on"></span></div>
+              
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Auto-update library</div><div style="font-size:11px;color:var(--text-dim);">Re-scan every 6 hours.</div></div><span class="tg"></span></div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Users -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Users & Roles</span><span class="fnote">/settings/users</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button class="on">Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Users & Roles</h4><div class="hsub">Accounts that can sign in.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:grid;grid-template-columns:36px 1fr 90px 70px auto;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;"><div style="width:32px;height:32px;border-radius:32px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">Y</div><div><div style="font-size:13px;font-weight:600;">Yuri</div><div style="font-size:11px;color:var(--text-faint);">yuri@medsolutions.dev</div></div><span class="pl a">Master</span><span style="font-size:11px;color:var(--text-faint);">now</span><span style="color:var(--text-faint);">✎</span></div>
+              <div style="display:grid;grid-template-columns:36px 1fr 90px 70px auto;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;"><div style="width:32px;height:32px;border-radius:32px;background:var(--av-grn);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">A</div><div><div style="font-size:13px;font-weight:600;">Anna</div><div style="font-size:11px;color:var(--text-faint);">anna@medsolutions.dev</div></div><span class="pl">User</span><span style="font-size:11px;color:var(--text-faint);">2h ago</span><span style="color:var(--text-faint);">✎</span></div>
+              <div style="display:grid;grid-template-columns:36px 1fr 90px 70px auto;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;"><div style="width:32px;height:32px;border-radius:32px;background:var(--av-blu);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">P</div><div><div style="font-size:13px;font-weight:600;">Pavel</div><div style="font-size:11px;color:var(--text-faint);">pavel</div></div><span class="pl">Uploader</span><span style="font-size:11px;color:var(--text-faint);">yest.</span><span style="color:var(--text-faint);">✎</span></div>
+              <div style="display:grid;grid-template-columns:36px 1fr 90px 70px auto;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;"><div style="width:32px;height:32px;border-radius:32px;background:var(--av-pur);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;">K</div><div><div style="font-size:13px;font-weight:600;">Kira</div><div style="font-size:11px;color:var(--text-faint);">kira</div></div><span class="pl">Viewer</span><span style="font-size:11px;color:var(--text-faint);">3d</span><span style="color:var(--text-faint);">✎</span></div>
+            </div>
+            <button class="btn p s" style="margin-top:14px;">+ New user</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Folders -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Root folders</span><span class="fnote">/settings/folders</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button class="on">Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Root folders</h4><div class="hsub">Paths Animarr scans for media.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:14px;align-items:center;"><span style="color:var(--accent-hi);">🗁</span><div><div style="font-family:var(--font-mono);font-size:12.5px;color:var(--text);">/mnt/storage/anime</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:2px;">1284 files · last scanned 12m ago</div></div><span class="pl a">Anime</span><span style="font-size:11px;color:var(--text-faint);">8.4 TB used</span><span style="color:var(--text-faint);">⋯</span></div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:14px;align-items:center;"><span style="color:var(--accent-hi);">🗁</span><div><div style="font-family:var(--font-mono);font-size:12.5px;color:var(--text);">/mnt/storage/movies</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:2px;">412 files · last scanned 12m ago</div></div><span class="pl a">Movies</span><span style="font-size:11px;color:var(--text-faint);">5.8 TB used</span><span style="color:var(--text-faint);">⋯</span></div>
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:14px;align-items:center;"><span style="color:var(--warn);">!</span><div><div style="font-family:var(--font-mono);font-size:12.5px;color:var(--text);">/mnt/external/donghua</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:2px;">unreachable · /dev/sdb not mounted</div></div><span class="pl">Donghua</span><span style="font-size:11px;color:var(--warn);">offline</span><span style="color:var(--text-faint);">⋯</span></div>
+            </div>
+            <button class="btn p s" style="margin-top:14px;">+ Add folder</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Rename history -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Rename history</span><span class="fnote">/settings/history</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button class="on">Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Rename history</h4><div class="hsub">Last 200 operations · click to revert.</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-family:var(--font-mono);font-size:11.5px;">
+              <div style="padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:grid;grid-template-columns:90px 1fr 1fr 24px;gap:14px;align-items:center;"><span style="color:var(--text-faint);">14:22 today</span><span style="color:var(--text-dim);">Perfect.World.E270.1080p.mkv</span><span style="color:var(--accent-hi);">→ Perfect World · S01E270.mkv</span><span style="color:var(--text-faint);cursor:pointer;">↺</span></div>
+              <div style="padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:grid;grid-template-columns:90px 1fr 1fr 24px;gap:14px;align-items:center;"><span style="color:var(--text-faint);">14:22 today</span><span style="color:var(--text-dim);">Perfect.World.E269.1080p.mkv</span><span style="color:var(--accent-hi);">→ Perfect World · S01E269.mkv</span><span style="color:var(--text-faint);cursor:pointer;">↺</span></div>
+              <div style="padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:grid;grid-template-columns:90px 1fr 1fr 24px;gap:14px;align-items:center;"><span style="color:var(--text-faint);">12:08 today</span><span style="color:var(--text-dim);">Xian_Ni_E141_FINAL.mp4</span><span style="color:var(--accent-hi);">→ Xian Ni · S01E141.mp4</span><span style="color:var(--text-faint);cursor:pointer;">↺</span></div>
+              <div style="padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:grid;grid-template-columns:90px 1fr 1fr 24px;gap:14px;align-items:center;opacity:0.6;"><span style="color:var(--text-faint);">yesterday</span><span style="color:var(--text-dim);">ARCANE_S02E03.mkv</span><span style="color:var(--accent-hi);">→ Arcane · S02E03.mkv</span><span style="color:var(--text-faint);">↺</span></div>
+              <div style="padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:grid;grid-template-columns:90px 1fr 1fr 24px;gap:14px;align-items:center;opacity:0.6;"><span style="color:var(--text-faint);">yesterday</span><span style="color:var(--text-dim);">ARCANE_S02E02.mkv</span><span style="color:var(--accent-hi);">→ Arcane · S02E02.mkv</span><span style="color:var(--text-faint);">↺</span></div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Appearance -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Appearance</span><span class="fnote">/settings/appearance</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button class="on">Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Appearance</h4><div class="hsub">Theme & density.</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;">
+              <div style="background:var(--surface);border:2px solid var(--accent);border-radius:9px;padding:14px;cursor:pointer;"><div style="height:60px;border-radius:5px;background:linear-gradient(135deg,#0f1115,#181c24);border:1px solid var(--border);"></div><div style="font-size:13px;font-weight:600;margin-top:10px;">Calm dark</div><div style="font-size:11px;color:var(--text-faint);">current</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:14px;cursor:pointer;"><div style="height:60px;border-radius:5px;background:linear-gradient(135deg,#0a0807,#25201b);border:1px solid var(--border);"></div><div style="font-size:13px;font-weight:600;margin-top:10px;">Warm dark</div><div style="font-size:11px;color:var(--text-faint);">crimson accent</div></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:14px;cursor:pointer;"><div style="height:60px;border-radius:5px;background:linear-gradient(135deg,#f5f3ef,#e6e2d8);border:1px solid var(--border);"></div><div style="font-size:13px;font-weight:600;margin-top:10px;">Light</div><div style="font-size:11px;color:var(--text-faint);">experimental</div></div>
+            </div>
+            <div class="fld"><span class="lb">Accent hue</span><div style="display:flex;gap:8px;"><div style="width:32px;height:32px;border-radius:32px;background:oklch(0.74 0.17 232);outline:2px solid #fff;outline-offset:2px;"></div><div style="width:32px;height:32px;border-radius:32px;background:oklch(0.62 0.16 25);"></div><div style="width:32px;height:32px;border-radius:32px;background:oklch(0.62 0.14 280);"></div><div style="width:32px;height:32px;border-radius:32px;background:oklch(0.65 0.13 150);"></div><div style="width:32px;height:32px;border-radius:32px;background:oklch(0.70 0.13 80);"></div></div></div>
+            <div style="margin-top:18px;display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Film grain overlay</div><div style="font-size:11px;color:var(--text-dim);">Disabled in calm theme.</div></div><span class="tg"></span></div>
+
+            <h4 style="margin-top:24px;">Hero navigation</h4><div class="hsub">How "Continue watching" rotates between 5 slots. <a href="08-hero-variants.html" style="color:var(--accent-hi);text-decoration:underline;">See all 9 variants →</a></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+              <div style="padding:11px 13px;background:var(--surface-2);border:2px solid var(--accent);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">E · Hover chevrons</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Calm default</div></div>
+              <div style="padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">A · Edge chevrons</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Most discoverable</div></div>
+              <div style="padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">B · Named pager</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Bottom slot chips</div></div>
+              <div style="padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">C · Side-rail thumbs</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Auto on TV</div></div>
+              <div style="padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">D · Mini-carousel</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Netflix-style</div></div>
+              <div style="padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">I · Expanding capsule</div><div style="font-size:10px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">Auto on mobile</div></div>
+            </div>
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;">
+              <span class="tg on"></span>
+              <div style="flex:1;"><div style="font-size:12.5px;font-weight:600;">Auto-rotate slots</div><div style="font-size:10.5px;color:var(--text-dim);">Cycle to next slot if user stays idle.</div></div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-hi);">8 s ▾</span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Hardware acceleration -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Hardware acceleration</span><span class="fnote">/settings/hardware</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button class="on">Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Hardware acceleration</h4><div class="hsub">Detected GPUs and codecs for transcoding. Read-only — Animarr auto-picks the fastest available.</div>
+
+            <div class="alert info" style="margin-bottom:18px;"><span>✦</span><div><b>Active path · NVENC (h.264 / h.265)</b><br/>NVIDIA RTX 3060 · driver 545.23 · 2 sessions out of 3 used</div></div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <!-- NVENC -->
+              <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--accent-line);border-radius:9px;display:grid;grid-template-columns:36px 1fr 120px 120px;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--success-soft);border:1px solid oklch(0.55 0.08 150 / 0.4);color:var(--success);display:grid;place-items:center;">●</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;">NVIDIA NVENC</div>
+                  <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;">RTX 3060 · driver 545.23 · 12 GB VRAM</div>
+                  <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">
+                    <span class="pl s">h.264 · enc/dec</span><span class="pl s">h.265 · enc/dec</span><span class="pl s">AV1 · dec only</span><span class="pl">VP9 · dec</span>
+                  </div>
+                </div>
+                <div><div style="font-size:11px;color:var(--text-faint);">SESSIONS</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:var(--accent-hi);">2 / 3</div></div>
+                <span class="pl a">PRIMARY</span>
+              </div>
+
+              <!-- VAAPI -->
+              <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr 120px 120px;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--success-soft);border:1px solid oklch(0.55 0.08 150 / 0.4);color:var(--success);display:grid;place-items:center;">●</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;">Intel QSV · VAAPI</div>
+                  <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;">UHD Graphics 770 · mesa 23.2 · iGPU</div>
+                  <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">
+                    <span class="pl s">h.264</span><span class="pl s">h.265</span><span class="pl">AV1 · dec</span>
+                  </div>
+                </div>
+                <div><div style="font-size:11px;color:var(--text-faint);">SESSIONS</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:var(--text);">0 / 2</div></div>
+                <span class="pl">FALLBACK</span>
+              </div>
+
+              <!-- AMD AMF -->
+              <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr 120px 120px;gap:14px;align-items:center;opacity:0.6;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-faint);display:grid;place-items:center;">∅</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;">AMD AMF</div>
+                  <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;">No compatible AMD GPU detected.</div>
+                </div>
+                <div></div>
+                <span class="pl">UNAVAILABLE</span>
+              </div>
+
+              <!-- VideoToolbox -->
+              <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr 120px 120px;gap:14px;align-items:center;opacity:0.6;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-3);color:var(--text-faint);display:grid;place-items:center;">∅</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;">Apple VideoToolbox</div>
+                  <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;">Server is Linux x86_64 — VT requires macOS host.</div>
+                </div>
+                <div></div>
+                <span class="pl">UNAVAILABLE</span>
+              </div>
+
+              <!-- Software fallback -->
+              <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:9px;display:grid;grid-template-columns:36px 1fr 120px 120px;gap:14px;align-items:center;">
+                <div style="width:32px;height:32px;border-radius:8px;background:var(--warn-soft);border:1px solid oklch(0.6 0.10 70 / 0.4);color:var(--warn);display:grid;place-items:center;">⚙</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;">Software (libx264 · libx265)</div>
+                  <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;">Used when no HW path matches the stream. Eats CPU.</div>
+                </div>
+                <div><div style="font-size:11px;color:var(--text-faint);">CPU CORES</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:var(--text);">16 avail.</div></div>
+                <span class="pl w">LAST RESORT</span>
+              </div>
+            </div>
+
+            <!-- Settings -->
+            <h4 style="margin-top:28px;">Preferences</h4>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Allow software fallback</div><div style="font-size:11px;color:var(--text-dim);">When the stream can't be HW-transcoded, fall back to libx264.</div></div><span class="tg on"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Prefer 10-bit HEVC</div><div style="font-size:11px;color:var(--text-dim);">Higher quality at the same bitrate · NVENC only.</div></div><span class="tg on"></span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Max concurrent transcodes</div><div style="font-size:11px;color:var(--text-dim);">Hard cap across all sessions.</div></div><span style="font-family:var(--font-mono);font-size:13px;color:var(--accent-hi);">3 ▾</span></div>
+            </div>
+            <div style="margin-top:18px;display:flex;gap:8px;">
+              <button class="btn p s">Save</button>
+              <button class="btn g s">↻ Re-detect hardware</button>
+              <button class="btn g s">View ffmpeg log</button>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- AI / LLM -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · AI / LLM</span><span class="fnote">/settings/llm</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button class="on">AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>AI / LLM</h4><div class="hsub">Auto-matching filenames to canonical metadata.</div>
+            <div class="alert info" style="margin-bottom:18px;"><span>✦</span><div><b>Daily budget</b> · 17 of 25 requests used. Resets at 00:00 UTC.</div></div>
+            <div class="fld"><span class="lb">Provider</span>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                <div style="padding:11px;background:var(--surface);border:2px solid var(--accent);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">Local · Ollama</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">qwen2.5:1.5b</div></div>
+                <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">OpenAI</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">gpt-4o-mini</div></div>
+                <div style="padding:11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;"><div style="font-size:12.5px;font-weight:600;">Anthropic</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;font-family:var(--font-mono);">claude-haiku</div></div>
+              </div>
+            </div>
+            <div class="fld" style="margin-top:14px;"><span class="lb">Endpoint</span><input class="in" value="http://localhost:11434" style="font-family:var(--font-mono);" /></div>
+            <div class="fld"><span class="lb">Daily budget</span><input class="in" value="25 requests" /></div>
+            <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Run on every scan</div><div style="font-size:11px;color:var(--text-dim);">Auto-match unmatched filenames.</div></div><span class="tg on"></span></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Patterns -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Rename patterns</span><span class="fnote">/settings/patterns</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button class="on">Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Rename patterns</h4><div class="hsub">Template tokens for the rename engine.</div>
+            <div class="fld"><span class="lb">Series episode</span><input class="in" value="{title} · S{season:02}E{episode:02}.{ext}" style="font-family:var(--font-mono);font-size:12px;" /></div>
+            <div class="fld"><span class="lb">Movie</span><input class="in" value="{title} ({year}).{ext}" style="font-family:var(--font-mono);font-size:12px;" /></div>
+            <div class="fld"><span class="lb">Special</span><input class="in" value="{title} · SP{episode:02}.{ext}" style="font-family:var(--font-mono);font-size:12px;" /></div>
+            <div style="margin-top:18px;padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;font-family:var(--font-mono);font-size:11.5px;">
+              <div style="color:var(--text-faint);">Preview · Perfect World · S01E05</div>
+              <div style="color:var(--accent-hi);margin-top:6px;">Perfect World · S01E05.mkv</div>
+            </div>
+            <h4 style="margin-top:24px;">Available tokens</h4>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-family:var(--font-mono);">
+              <span class="pl">{title}</span><span class="pl">{year}</span><span class="pl">{season}</span><span class="pl">{episode}</span><span class="pl">{quality}</span><span class="pl">{audio}</span><span class="pl">{group}</span><span class="pl">{ext}</span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Ignore -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Ignore rules</span><span class="fnote">/settings/ignore</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button class="on">Ignore</button><button>Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Ignore rules</h4><div class="hsub">Files matching any rule are skipped at scan time.</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-family:var(--font-mono);font-size:12.5px;">
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;"><span>**/sample/**</span><span style="color:var(--text-faint);">→ 14 matches</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;"><span>**/*.nfo</span><span style="color:var(--text-faint);">→ 28 matches</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;"><span>**/Thumbs.db</span><span style="color:var(--text-faint);">→ 0 matches</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;"><span>**/RARBG.txt</span><span style="color:var(--text-faint);">→ 3 matches</span></div>
+              <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;"><span>**/*.exe</span><span style="color:var(--text-faint);">→ 0 matches</span></div>
+            </div>
+            <button class="btn p s" style="margin-top:14px;">+ Add rule</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Torrent -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Torrent</span><span class="fnote">/settings/torrent</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button class="on">Torrent</button><button>Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Torrent</h4><div class="hsub">qBittorrent integration.</div>
+            <div class="fld"><span class="lb">qBittorrent URL</span><input class="in" value="http://localhost:8080" style="font-family:var(--font-mono);" /></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div class="fld"><span class="lb">Username</span><input class="in" value="admin" /></div><div class="fld"><span class="lb">Password</span><input class="in" type="password" value="••••••••" /></div></div>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--success-soft);border:1px solid oklch(0.55 0.08 150 / 0.35);border-radius:6px;font-size:11.5px;color:var(--success);"><span>●</span>Connected · 4.6.7</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px;"><div class="fld"><span class="lb">Global ↓ limit</span><input class="in" value="0 (unlimited)" /></div><div class="fld"><span class="lb">Global ↑ limit</span><input class="in" value="50 Mbps" /></div></div>
+            <div class="fld"><span class="lb">Concurrent torrents</span><input class="in" value="6" /></div>
+            <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);"><div><div style="font-size:13px;font-weight:600;">Remove after seed ratio 1.5</div></div><span class="tg on"></span></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Metadata -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Metadata sources</span><span class="fnote">/settings/metadata</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button class="on">Metadata</button><button>Categories</button></div>
+          <div class="dss-c">
+            <h4>Metadata sources</h4><div class="hsub">Order of priority for title resolution. Some sources need an API key; others scrape.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+
+              <!-- TMDB -->
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;">
+                <div style="display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;">
+                  <span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl a">#1</span>
+                  <div><div style="font-size:13px;font-weight:600;">TMDB</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">themoviedb.org · 99% avg conf.</div></div>
+                  <span class="pl s">connected</span><span class="tg on"></span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                  <div class="fld" style="margin:0;"><span class="lb">API Read-token</span><input class="in" type="password" value="eyJhbGciOi...•••••••" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                  <div class="fld" style="margin:0;"><span class="lb">Language</span><input class="in" value="en-US,zh-CN,ja-JP" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                </div>
+              </div>
+
+              <!-- MAL -->
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;">
+                <div style="display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;">
+                  <span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#2</span>
+                  <div><div style="font-size:13px;font-weight:600;">MAL · Jikan</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">myanimelist.net · 96% avg · OAuth optional</div></div>
+                  <span class="pl s">connected</span><span class="tg on"></span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                  <div class="fld" style="margin:0;"><span class="lb">Client ID</span><input class="in" value="9c3b...8e2f" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                  <div class="fld" style="margin:0;"><span class="lb">Client secret</span><input class="in" type="password" value="••••••••" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                </div>
+              </div>
+
+              <!-- AniList -->
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;">
+                <div style="display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;">
+                  <span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#3</span>
+                  <div><div style="font-size:13px;font-weight:600;">AniList</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">anilist.co · GraphQL public · no key needed</div></div>
+                  <span class="pl">disabled</span><span class="tg"></span>
+                </div>
+              </div>
+
+              <!-- IMDb -->
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;">
+                <div style="display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;">
+                  <span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#4</span>
+                  <div><div style="font-size:13px;font-weight:600;">IMDb</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">imdb.com · 78% avg · scraping (no public API)</div></div>
+                  <span class="pl w">scraping mode</span><span class="tg on"></span>
+                </div>
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--text-dim);line-height:1.55;">
+                  IMDb has no public API. Animarr scrapes title pages with a 1-req/sec rate-limit. May break if IMDb changes their markup.
+                </div>
+              </div>
+
+              <!-- Bilibili -->
+              <div style="padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;">
+                <div style="display:grid;grid-template-columns:24px 60px 1fr 80px 24px;gap:12px;align-items:center;">
+                  <span style="color:var(--text-faint);cursor:grab;">⋮⋮</span><span class="pl">#5</span>
+                  <div><div style="font-size:13px;font-weight:600;">Bilibili open API</div><div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);margin-top:2px;">api.bilibili.com · best for donghua · token required</div></div>
+                  <span class="pl">disabled</span><span class="tg"></span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                  <div class="fld" style="margin:0;"><span class="lb">Access token</span><input class="in" placeholder="(not configured)" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                  <div class="fld" style="margin:0;"><span class="lb">Region</span><input class="in" value="CN" style="font-family:var(--font-mono);font-size:11px;" /></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:18px;display:flex;gap:8px;align-items:center;">
+              <button class="btn p s">Save changes</button>
+              <button class="btn g s">↻ Test all</button>
+              <button class="btn g s">+ Add custom source</button>
+              <span style="margin-left:auto;font-size:11px;color:var(--text-faint);font-family:var(--font-mono);">Last test · 14:08 today · 3 of 5 OK</span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Categories -->
+    <div class="frame"><div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · Categories</span><span class="fnote">/settings/categories</span></div>
+      <div class="desk"><div class="inner">
+        <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+        <div class="dss">
+          <div class="dss-t"><button>General</button><button>Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button><button>Patterns</button><button>Ignore</button><button>Torrent</button><button>Metadata</button><button class="on">Categories</button></div>
+          <div class="dss-c">
+            <h4>Categories</h4><div class="hsub">Top-level tabs in the catalog topbar.</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:12px;align-items:center;"><span style="color:var(--text-faint);">⋮⋮</span><div style="font-size:13px;font-weight:600;">All</div><span style="color:var(--text-faint);font-size:11px;">auto</span><span class="pl">1284 items</span><span class="tg on"></span></div>
+              <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:12px;align-items:center;"><span style="color:var(--text-faint);">⋮⋮</span><div style="font-size:13px;font-weight:600;">Anime</div><span style="color:var(--text-faint);font-size:11px;">tag</span><span class="pl">418 items</span><span class="tg on"></span></div>
+              <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:12px;align-items:center;"><span style="color:var(--text-faint);">⋮⋮</span><div style="font-size:13px;font-weight:600;">Movies</div><span style="color:var(--text-faint);font-size:11px;">type</span><span class="pl">412 items</span><span class="tg on"></span></div>
+              <div style="padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:grid;grid-template-columns:24px 1fr 100px 100px 24px;gap:12px;align-items:center;"><span style="color:var(--text-faint);">⋮⋮</span><div style="font-size:13px;font-weight:600;">Donghua</div><span style="color:var(--text-faint);font-size:11px;">tag</span><span class="pl">454 items</span><span class="tg on"></span></div>
+            </div>
+            <button class="btn p s" style="margin-top:14px;">+ New category</button>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ════════════ 09 PROFILE PANEL ════════════ -->
+  <h2 class="sec h2-sec" id="profile"><span class="n">B-09</span><span class="t">Profile panel</span><span class="d">Click the topbar profile-chip → drops a 320-px panel with watch summary + switch user + sign-out.</span></h2>
+
+  <div class="frame">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Profile · panel open</span><span class="fnote">topbar.profile?open</span></div>
+    <div class="desk"><div class="inner">
+      <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"><div class="tab on">All</div><div class="tab">Anime</div><div class="tab">Movies</div></div><div class="right"><div class="pill"><span class="dot"></span>LLM 17/25</div><div class="pc" style="outline:2px solid var(--accent-line);outline-offset:2px;"><div class="av">Y</div><span class="nm">Yuri</span><span class="rl">master</span></div></div></div>
+      <div style="position:absolute;top:54px;left:0;right:0;bottom:0;background:url('https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=2400&q=70') center/cover;filter:brightness(0.4);"></div>
+      <div style="position:absolute;top:60px;right:22px;width:340px;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-4);box-shadow:var(--sh-drawer);z-index:10;overflow:hidden;">
+        <div style="padding:18px 18px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);">
+          <div style="width:48px;height:48px;border-radius:48px;background:var(--av-red);color:#fff;display:grid;place-items:center;font-size:20px;font-weight:700;">Y</div>
+          <div><div style="font-size:14px;font-weight:700;">Yuri Kraskov</div><div style="font-size:11px;color:var(--text-faint);">yuri@medsolutions.dev · master</div></div>
+        </div>
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);">
+          <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Watching</div>
+          <div style="display:flex;gap:10px;font-size:12.5px;"><div style="flex:1;"><div style="color:var(--text);font-weight:600;">Perfect World</div><div style="color:var(--text-faint);font-size:10.5px;margin-top:2px;">EP 5 · 38%</div></div><div style="color:var(--accent-hi);font-weight:600;">▶</div></div>
+        </div>
+        <div style="padding:6px;">
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:12.5px;"><span style="color:var(--text-faint);">⇄</span>Switch user…</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:12.5px;"><span style="color:var(--text-faint);">⚙</span>Account settings</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--danger);"><span>⎋</span>Sign out</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ════════════ 10 NEW USER ════════════ -->
+  <h2 class="sec h2-sec" id="new-user"><span class="n">B-10</span><span class="t">New user (drawer)</span><span class="d">Invite form + role picker + initial password.</span></h2>
+
+  <div class="frame">
+    <div class="frame-head"><span class="pad">Browser</span><span class="ftitle">Settings · New user</span><span class="fnote">/settings/users?new=open</span></div>
+    <div class="desk"><div class="inner">
+      <div class="dtb"><div class="mark">a</div><div class="br">Animarr</div><div class="tabs"></div><div class="right"><div class="pc"><div class="av">Y</div><span class="nm">Yuri</span></div></div></div>
+      <div class="dss" style="right:420px;">
+        <div class="dss-t"><button>General</button><button class="on">Users & Roles</button><button>Root folders</button><button>Rename history</button><button>Appearance</button><button>Hardware</button><button>AI / LLM</button></div>
+        <div class="dss-c">
+          <h4>Users & Roles</h4><div class="hsub">Accounts that can sign in.</div>
+          <div style="opacity:0.5;display:flex;flex-direction:column;gap:6px;">
+            <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;font-size:12px;">Yuri · master</div>
+            <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;font-size:12px;">Anna · user</div>
+            <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:9px;font-size:12px;">Pavel · uploader</div>
+          </div>
+        </div>
+      </div>
+      <div class="dr-d">
+        <div class="dh"><div class="dh-i">+</div><div><div class="dh-s">New user</div><div class="dh-n">Invite to this server</div></div><div style="margin-left:auto;color:var(--text-dim);">×</div></div>
+        <div class="db">
+          <div class="fld"><span class="lb">Display name</span><input class="in" placeholder="Anna Kraskov" /></div>
+          <div class="fld"><span class="lb">Username</span><input class="in" placeholder="anna" /></div>
+          <div class="fld"><span class="lb">Email (optional)</span><input class="in" placeholder="anna@medsolutions.dev" /></div>
+          <div class="fld"><span class="lb">Role</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+              <div style="padding:9px;background:var(--surface);border:2px solid var(--accent);border-radius:6px;text-align:center;font-size:11.5px;font-weight:600;cursor:pointer;">User</div>
+              <div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;text-align:center;font-size:11.5px;font-weight:600;cursor:pointer;">Uploader</div>
+              <div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;text-align:center;font-size:11.5px;font-weight:600;cursor:pointer;">Viewer</div>
+            </div>
+          </div>
+          <div class="fld"><span class="lb">Initial password</span><input class="in" placeholder="auto-generate" /></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;"><span style="font-size:12px;">Force password change on first login</span><span class="tg on"></span></div>
+        </div>
+        <div class="df"><button class="btn p s">Create user</button><button class="btn g s">Cancel</button></div>
+      </div>
+    </div></div>
+  </div>
+
+  <div style="margin-top:80px;padding-top:32px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+    <a href="02-components.html" style="color:var(--text-dim);text-decoration:none;font-size:13px;">← Components</a>
+    <a href="04-tv.html" style="color:var(--accent-hi);text-decoration:none;font-size:13px;font-weight:600;">TV flow →</a>
+  </div>
+
+</div>
+</body>
+</html>

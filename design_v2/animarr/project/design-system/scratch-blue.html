@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Blue · oklch swatch lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  body{margin:0;background:#08090c;color:#e8eaed;font-family:'Inter',system-ui,sans-serif;font-size:14px;}
+  .board{max-width:1640px;margin:0 auto;padding:48px 32px 80px;}
+  h1{font-size:42px;font-weight:700;letter-spacing:-1.2px;margin:0 0 8px;}
+  .lede{color:#9aa0a8;max-width:780px;font-size:14.5px;line-height:1.6;margin-bottom:40px;}
+  h2{font-size:22px;font-weight:700;letter-spacing:-0.4px;margin:48px 0 16px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.06);}
+  .meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:#5d636d;letter-spacing:0.3px;margin-bottom:14px;}
+
+  .row{display:grid;grid-template-columns:repeat(11,1fr);gap:8px;margin-bottom:6px;}
+  .row .h{font-size:10px;color:#5d636d;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px;text-align:center;padding-bottom:6px;}
+  .sw{aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;justify-content:space-between;padding:8px 10px;cursor:pointer;border:1px solid rgba(255,255,255,0.06);transition:.15s;}
+  .sw:hover{transform:scale(1.04);box-shadow:0 12px 30px -10px rgba(0,0,0,0.5);z-index:5;}
+  .sw .l{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:-0.2px;text-shadow:0 1px 2px rgba(0,0,0,0.6);}
+  .sw .h{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.4px;text-shadow:0 1px 2px rgba(0,0,0,0.6);opacity:0.7;}
+
+  /* Pair card */
+  .pair{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+  .pc{background:#13161c;border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;}
+  .pc .top{padding:18px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;background:#13161c;}
+  .pc .swatch{height:54px;border-radius:8px;width:100%;}
+  .pc .ttl{font-size:13.5px;font-weight:600;}
+  .pc .vv{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#5d636d;}
+  .pc .demo{padding:14px 18px 18px;border-top:1px solid rgba(255,255,255,0.06);background:#0f1115;}
+  .pc .ov{font-size:10.5px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:6px;}
+  .pc h3{margin:0 0 6px;font-size:22px;font-weight:700;letter-spacing:-0.5px;line-height:1.04;color:#fff;}
+  .pc h3 em{font-style:normal;color:#9aa0a8;}
+  .pc p{margin:6px 0 12px;font-size:12.5px;color:#9aa0a8;line-height:1.5;}
+  .pc .acts{display:flex;gap:6px;}
+  .pc .btn{padding:7px 12px;font-size:11.5px;font-weight:700;border-radius:6px;border:0;cursor:pointer;font-family:inherit;}
+  .pc .btn.g{background:rgba(255,255,255,0.04);color:#e8eaed;border:1px solid rgba(255,255,255,0.12);font-weight:600;}
+
+  .pick{margin-top:60px;background:#13161c;border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:24px;}
+  .pick h2{margin:0 0 14px;font-size:18px;border:0;padding:0;}
+  .pick .grid{display:grid;grid-template-columns:auto 1fr;gap:14px 22px;align-items:center;}
+  .pick label{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#9aa0a8;}
+  .pick input[type=range]{width:100%;}
+  .pick .out{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#5d636d;min-width:48px;text-align:right;}
+  .preview{margin-top:20px;display:grid;grid-template-columns:120px 1fr auto;gap:16px;align-items:center;background:#0f1115;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:18px;}
+  .preview .sq{width:88px;height:88px;border-radius:14px;}
+  .preview .val{font-family:'JetBrains Mono',monospace;font-size:12px;color:#9aa0a8;}
+  .preview .v2{margin-top:4px;color:#5d636d;font-size:10.5px;}
+  .preview .demo{display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+  .preview .b1{padding:9px 16px;font-size:13px;font-weight:700;border-radius:7px;border:0;cursor:pointer;}
+  .preview .b2{padding:9px 16px;font-size:13px;font-weight:600;background:transparent;border:1px solid currentColor;border-radius:7px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <h1>Blue · oklch scratch lab</h1>
+  <p class="lede">Twelve hues × six lightness steps across the blue spectrum. Hover a swatch to see code. Skim the right column for finished button + heading combos. Tweak the live picker at the bottom to dial in something not on the chart.</p>
+
+  <h2>By hue ↔ lightness</h2>
+  <div class="meta">chroma 0.18 · L from 0.50 → 0.85 · hue 200 → 270</div>
+
+  <div class="row">
+    <div class="h"></div>
+    <div class="h">L 0.50</div>
+    <div class="h">L 0.58</div>
+    <div class="h">L 0.65</div>
+    <div class="h">L 0.72</div>
+    <div class="h">L 0.78</div>
+    <div class="h">L 0.85</div>
+    <div></div><div></div><div></div><div></div>
+  </div>
+
+  <!-- Generate matrix -->
+  <div id="matrix" style="display:flex;flex-direction:column;gap:6px;"></div>
+
+  <h2>Paired previews · primary + ghost</h2>
+  <div class="meta">click to copy the oklch() string</div>
+  <div class="pair" id="pair"></div>
+
+  <!-- Live picker -->
+  <div class="pick">
+    <h2>Live picker</h2>
+    <div class="grid">
+      <label>L · lightness</label>
+      <div style="display:flex;align-items:center;gap:12px;"><input type="range" id="L" min="0.30" max="0.95" step="0.01" value="0.74" /><div class="out" id="L_out">0.74</div></div>
+      <label>C · chroma</label>
+      <div style="display:flex;align-items:center;gap:12px;"><input type="range" id="C" min="0" max="0.30" step="0.01" value="0.17" /><div class="out" id="C_out">0.17</div></div>
+      <label>H · hue</label>
+      <div style="display:flex;align-items:center;gap:12px;"><input type="range" id="H" min="180" max="280" step="1" value="232" /><div class="out" id="H_out">232</div></div>
+    </div>
+
+    <div class="preview" id="prev">
+      <div class="sq" id="sq"></div>
+      <div>
+        <div style="font-size:14px;font-weight:600;color:#fff;">Preview · "Continue · Episode 5"</div>
+        <div class="val" id="vv">oklch(0.74 0.17 232)</div>
+        <div class="v2">Use as <code>--accent</code>. <code>--accent-hi</code> shifts L → +0.08, <code>--accent-deep</code> shifts L → −0.18.</div>
+      </div>
+      <div class="demo" id="dm">
+        <button class="b1" id="bp">▶ Continue · 38%</button>
+        <button class="b2" id="bg">↻ Restart</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const hues = [200, 210, 220, 225, 230, 232, 235, 240, 245, 250, 260];
+const Ls = [0.50, 0.58, 0.65, 0.72, 0.78, 0.85];
+const matrix = document.getElementById('matrix');
+
+hues.forEach(h => {
+  const row = document.createElement('div');
+  row.className = 'row';
+  // label
+  const lbl = document.createElement('div');
+  lbl.className = 'h';
+  lbl.style.cssText = 'align-self:center;text-align:right;padding-right:10px;font-size:11px;color:#9aa0a8;';
+  lbl.textContent = 'hue ' + h;
+  row.appendChild(lbl);
+  Ls.forEach(L => {
+    const sw = document.createElement('div');
+    sw.className = 'sw';
+    const v = `oklch(${L.toFixed(2)} 0.18 ${h})`;
+    sw.style.background = v;
+    sw.title = v;
+    sw.innerHTML = `<span class="l">${L.toFixed(2)}</span><span class="h">${h}</span>`;
+    // contrast — pick dark text on bright, light on dark
+    if (L > 0.7) sw.style.color = '#0a0c10';
+    else sw.style.color = '#fff';
+    sw.onclick = () => navigator.clipboard.writeText(v);
+    row.appendChild(sw);
+  });
+  // padding cells
+  for (let i = 0; i < 4; i++) row.appendChild(document.createElement('div'));
+  matrix.appendChild(row);
+});
+
+// Paired previews — combinations to evaluate
+const pairs = [
+  { name: 'A · Cyan',           L: 0.74, C: 0.16, H: 215 },
+  { name: 'B · Sky',            L: 0.74, C: 0.17, H: 225 },
+  { name: 'C · Sky (current)',  L: 0.74, C: 0.17, H: 232 },
+  { name: 'D · Sky-azure',      L: 0.74, C: 0.18, H: 238 },
+  { name: 'E · Azure',          L: 0.72, C: 0.18, H: 245 },
+  { name: 'F · Cobalt',         L: 0.66, C: 0.22, H: 252 },
+  { name: 'G · Indigo',         L: 0.60, C: 0.22, H: 262 },
+  { name: 'H · Periwinkle',     L: 0.72, C: 0.16, H: 270 },
+  { name: 'I · Deep sky',       L: 0.62, C: 0.20, H: 225 },
+  { name: 'J · Soft sky',       L: 0.80, C: 0.13, H: 225 },
+  { name: 'K · Steel blue',     L: 0.62, C: 0.12, H: 235 },
+  { name: 'L · Electric',       L: 0.70, C: 0.22, H: 240 },
+];
+const pc = document.getElementById('pair');
+pairs.forEach(p => {
+  const accent = `oklch(${p.L.toFixed(2)} ${p.C.toFixed(2)} ${p.H})`;
+  const acHi   = `oklch(${Math.min(0.95, p.L + 0.08).toFixed(2)} ${(p.C * 0.85).toFixed(2)} ${p.H})`;
+  const card = document.createElement('div');
+  card.className = 'pc';
+  card.innerHTML = `
+    <div class="top">
+      <div class="swatch" style="background:${accent};"></div>
+      <div class="ttl">${p.name}</div>
+      <div class="vv">L ${p.L.toFixed(2)} · C ${p.C.toFixed(2)} · H ${p.H}</div>
+      <div class="vv" style="color:#9aa0a8;">${accent}</div>
+    </div>
+    <div class="demo" style="background:#0f1115;">
+      <div class="ov" style="color:${acHi};">Continue · Episode 5 · 38%</div>
+      <h3>Perfect <em>World</em></h3>
+      <p>Shi Hao walks the cruel road of cultivation.</p>
+      <div class="acts">
+        <button class="btn" style="background:${accent};color:#0f1115;">▶ Continue · 38%</button>
+        <button class="btn g">↻ Restart</button>
+      </div>
+    </div>
+  `;
+  pc.appendChild(card);
+  card.onclick = () => navigator.clipboard.writeText(accent);
+  card.style.cursor = 'pointer';
+});
+
+// Live picker
+const L = document.getElementById('L');
+const C = document.getElementById('C');
+const H = document.getElementById('H');
+const L_out = document.getElementById('L_out');
+const C_out = document.getElementById('C_out');
+const H_out = document.getElementById('H_out');
+const sq = document.getElementById('sq');
+const vv = document.getElementById('vv');
+const bp = document.getElementById('bp');
+const bg = document.getElementById('bg');
+
+function update() {
+  const l = parseFloat(L.value);
+  const c = parseFloat(C.value);
+  const h = parseInt(H.value);
+  const v = `oklch(${l.toFixed(2)} ${c.toFixed(2)} ${h})`;
+  const vhi = `oklch(${Math.min(0.95, l + 0.08).toFixed(2)} ${(c * 0.85).toFixed(2)} ${h})`;
+  L_out.textContent = l.toFixed(2);
+  C_out.textContent = c.toFixed(2);
+  H_out.textContent = h;
+  sq.style.background = v;
+  vv.textContent = v;
+  bp.style.background = v;
+  bp.style.color = l > 0.7 ? '#0a0c10' : '#fff';
+  bg.style.color = vhi;
+}
+[L, C, H].forEach(i => i.addEventListener('input', update));
+update();
+</script>
+</body>
+</html>

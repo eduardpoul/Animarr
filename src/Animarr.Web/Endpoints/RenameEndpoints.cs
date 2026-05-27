@@ -1,0 +1,264 @@
+using Animarr.Shared;
+using Animarr.Shared.Requests;
+using Animarr.Web.Data;
+using Animarr.Web.Data.Models;
+using Animarr.Web.Mapping;
+using Animarr.Web.Services;
+using Microsoft.EntityFrameworkCore;
+
+namespace Animarr.Web.Endpoints;
+
+/// <summary>
+/// REST surface for rename queue / history / patterns / ignore rules /
+/// identification queue. These all feed the History + Patterns Razor pages
+/// (and will feed their Animarr.UI replacements).
+/// </summary>
+internal static class RenameEndpoints
+{
+    public static IEndpointRouteBuilder MapRenameEndpoints(this IEndpointRouteBuilder app)
+    {
+        // ─── Rename queue (read-only — processor service does writes) ────
+        app.MapGet(ApiRoutes.RenameQueue, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var rows = await db.RenameQueues
+                .Include(q => q.Folder)
+                .OrderByDescending(q => q.QueuedAt)
+                .Take(200)
+                .ToListAsync(ct);
+            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        // ─── Rename history ──────────────────────────────────────────────
+        // Accepts skip/take + optional folderId/status filters so the History
+        // page can paginate server-side. Returns the items + total count in
+        // one round trip — saves a second COUNT(*) request from the client.
+        app.MapGet(ApiRoutes.RenameHistory, async (
+            int? skip,
+            int? take,
+            Guid? folderId,
+            Animarr.Shared.RenameStatus? status,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            IQueryable<RenameHistory> q = db.RenameHistories.Include(h => h.Folder);
+            if (folderId is not null) q = q.Where(h => h.FolderId == folderId.Value);
+            if (status is not null)
+                q = q.Where(h => (int)h.Status == (int)status.Value);
+
+            var total = await q.CountAsync(ct);
+            var rows = await q
+                .OrderByDescending(h => h.ProcessedAt)
+                .Skip(skip ?? 0)
+                .Take(take ?? 50)
+                .ToListAsync(ct);
+            return Results.Ok(new
+            {
+                items = rows.Select(r => r.ToDto()).ToArray(),
+                total = total,
+            });
+        });
+
+        app.MapPost(ApiRoutes.RenameHistoryRevert, async (
+            Guid id,
+            IRenameService rename,
+            CancellationToken ct) =>
+        {
+            var ok = await rename.RevertAsync(id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
+        // ─── Patterns ────────────────────────────────────────────────────
+        app.MapGet(ApiRoutes.Patterns, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var rows = await db.RenamePatterns
+                .OrderBy(p => p.Priority)
+                .ToListAsync(ct);
+            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        app.MapPost(ApiRoutes.Patterns, async (
+            UpsertPatternRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = new RenamePattern
+            {
+                Id              = Guid.NewGuid(),
+                Name            = request.Name,
+                Pattern         = request.Pattern,
+                Scope           = (Animarr.Web.Data.Models.PatternScope)(int)request.Scope,
+                IsExcluded      = request.IsExcluded,
+                GlobalPatternId = request.GlobalPatternId,
+                Priority        = request.Priority,
+                ApplicableTo    = request.ApplicableTo is null
+                    ? null
+                    : (Animarr.Web.Data.Models.FolderType)(int)request.ApplicableTo.Value,
+                FolderId        = request.FolderId,
+            };
+            db.RenamePatterns.Add(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.Created(ApiRoutes.Pattern(entity.Id), entity.ToDto());
+        });
+
+        app.MapPut(ApiRoutes.PatternById, async (
+            Guid id,
+            UpsertPatternRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.RenamePatterns.FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            if (entity.IsBuiltIn) return Results.Forbid();
+
+            entity.Name            = request.Name;
+            entity.Pattern         = request.Pattern;
+            entity.Scope           = (Animarr.Web.Data.Models.PatternScope)(int)request.Scope;
+            entity.IsExcluded      = request.IsExcluded;
+            entity.GlobalPatternId = request.GlobalPatternId;
+            entity.Priority        = request.Priority;
+            entity.ApplicableTo    = request.ApplicableTo is null
+                ? null
+                : (Animarr.Web.Data.Models.FolderType)(int)request.ApplicableTo.Value;
+            entity.FolderId        = request.FolderId;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(entity.ToDto());
+        });
+
+        app.MapDelete(ApiRoutes.PatternById, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.RenamePatterns.FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            if (entity.IsBuiltIn) return Results.Forbid();
+            db.RenamePatterns.Remove(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // ─── Ignore rules ────────────────────────────────────────────────
+        app.MapGet(ApiRoutes.IgnoreRules, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var rows = await db.IgnoreRules.ToListAsync(ct);
+            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        app.MapPost(ApiRoutes.IgnoreRules, async (
+            UpsertIgnoreRuleRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = new IgnoreRule
+            {
+                Id       = Guid.NewGuid(),
+                Mask     = request.Mask,
+                Scope    = (Animarr.Web.Data.Models.RuleScope)(int)request.Scope,
+                FolderId = request.FolderId,
+            };
+            db.IgnoreRules.Add(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.Created(ApiRoutes.IgnoreRule(entity.Id), entity.ToDto());
+        });
+
+        app.MapPut(ApiRoutes.IgnoreRuleById, async (
+            Guid id,
+            UpsertIgnoreRuleRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.IgnoreRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+
+            entity.Mask     = request.Mask;
+            entity.Scope    = (Animarr.Web.Data.Models.RuleScope)(int)request.Scope;
+            entity.FolderId = request.FolderId;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(entity.ToDto());
+        });
+
+        app.MapDelete(ApiRoutes.IgnoreRuleById, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.IgnoreRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            db.IgnoreRules.Remove(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // ─── Identification queue ────────────────────────────────────────
+        app.MapGet(ApiRoutes.IdentificationQueue, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var rows = await db.IdentificationQueues
+                .Include(q => q.Folder)
+                .OrderByDescending(q => q.QueuedAt)
+                .Take(200)
+                .ToListAsync(ct);
+            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        app.MapPost(ApiRoutes.IdentificationEnqueue, async (
+            Guid folderId,
+            bool? forceRefresh,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (!await db.FolderWatchers.AnyAsync(f => f.Id == folderId, ct))
+                return Results.NotFound();
+
+            var entity = new IdentificationQueue
+            {
+                Id           = Guid.NewGuid(),
+                FolderId     = folderId,
+                Status       = Animarr.Web.Data.Models.IdentificationQueueStatus.Queued,
+                ForceRefresh = forceRefresh ?? false,
+                QueuedAt     = DateTime.UtcNow,
+            };
+            db.IdentificationQueues.Add(entity);
+            await db.SaveChangesAsync(ct);
+
+            // The processor polls every few seconds; no manual nudge needed.
+            return Results.Created($"{ApiRoutes.IdentificationQueue}/{entity.Id}", entity.ToDto());
+        });
+
+        app.MapPost(ApiRoutes.IdentificationCancel, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.IdentificationQueues.FirstOrDefaultAsync(q => q.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            if (entity.Status == Animarr.Web.Data.Models.IdentificationQueueStatus.Processing)
+                return Results.Conflict("Already processing — wait for completion.");
+            db.IdentificationQueues.Remove(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        return app;
+    }
+}

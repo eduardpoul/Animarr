@@ -1,0 +1,212 @@
+/* NeedsReviewDialog — v5 panel refactor. Modal scaffold removed; body
+   styles below render inside a <SettingsEditDrawer Tone="warn">. */
+
+.nrm__empty {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--text-dim);
+    font-size: 14px;
+}
+
+.nrm-row {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 16px;
+    margin-bottom: 14px;
+}
+.nrm-row:last-child { margin-bottom: 0; }
+
+.nrm-row__folder {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    word-break: break-all;
+}
+
+/* Single column at drawer width (~508px content area). At wider drawer
+   variants (none today) auto-fill would let two columns coexist. */
+.nrm-row__candidates {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+/* candidate card */
+.nrm-card {
+    display: flex;
+    gap: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-chip);
+    padding: 8px;
+}
+
+.nrm-card__poster {
+    width: 64px;
+    height: 92px;
+    flex-shrink: 0;
+    border-radius: var(--radius-badge);
+    background:
+        radial-gradient(120% 80% at 50% 0%, oklch(0.66 0.20 var(--hue) / 0.45), transparent 70%),
+        linear-gradient(180deg, oklch(0.20 0.06 var(--hue)), oklch(0.10 0.04 var(--hue)));
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.nrm-card__poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.nrm-card__cjk {
+    font-family: var(--font-cjk);
+    font-size: 22px;
+    color: oklch(0.95 0.1 var(--hue) / 0.4);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    line-height: 1;
+    user-select: none;
+    pointer-events: none;
+}
+
+.nrm-card__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.nrm-card__title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    letter-spacing: -0.018em;
+    color: var(--text);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.nrm-card__meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 4px;
+    letter-spacing: 0.05em;
+}
+
+.nrm-card__foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nrm-card__conf {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+}
+
+.nrm-card__conf--ok   { color: var(--success); }
+.nrm-card__conf--warn { color: var(--warn); }
+
+.nrm-card__use {
+    appearance: none;
+    cursor: pointer;
+    padding: 4px 9px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 600;
+}
+.nrm-card__use:hover:not(:disabled) { background: var(--accent-hi); }
+.nrm-card__use:disabled { opacity: 0.5; cursor: wait; }
+
+.nrm-card__use--loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* manual-search panel (inline, opens under the dashed search button) */
+.nrm-search-panel {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-chip);
+}
+.nrm-search-panel__row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.nrm-search-panel__src {
+    padding: 6px 8px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-badge);
+    color: var(--text);
+}
+.nrm-search-panel__input {
+    flex: 1;
+    min-width: 140px;
+    padding: 6px 10px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-badge);
+    color: var(--text);
+}
+.nrm-search-panel__results {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.nrm-search-panel__result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-badge);
+}
+.nrm-search-panel__title { flex: 1; min-width: 0; }
+.nrm-search-panel__meta {
+    color: var(--text-faint);
+    font-size: 12px;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* manual-search empty card */
+.nrm-search {
+    appearance: none;
+    cursor: pointer;
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-chip);
+    padding: 0 12px;
+    min-height: 108px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+}
+.nrm-search:hover {
+    border-color: var(--accent-line);
+    color: var(--text);
+}

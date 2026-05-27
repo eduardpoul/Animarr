@@ -1,0 +1,163 @@
+/* Phone-side TV pairing companion. Mirrors the d-login card so a user
+   navigating between Login and PairConfirm doesn't see the layout jump. */
+
+.d-pair-confirm {
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    box-sizing: border-box;
+}
+
+.d-pair-confirm__back {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #e6e8ee);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+}
+
+.d-pair-confirm__card {
+    width: min(100%, 460px);
+    background: rgba(15, 18, 26, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+    padding: 28px 24px;
+    color: var(--text-primary, #e6e8ee);
+    backdrop-filter: blur(20px);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.d-pair-confirm__brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.d-pair-confirm__brand-name {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.d-pair-confirm__brand-sub {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.d-pair-confirm__tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 4px;
+    border-radius: 12px;
+}
+
+.d-pair-confirm__tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: transparent;
+    border: 0;
+    border-radius: 9px;
+    color: var(--text-secondary, #94a3b8);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.d-pair-confirm__tab.is-active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary, #e6e8ee);
+}
+
+.d-pair-confirm__scanner-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.d-pair-confirm__scanner {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* html5-qrcode injects an <video> inside #animarr-qr-viewer — make it fill. */
+.d-pair-confirm__scanner :is(video, canvas) {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+}
+
+.d-pair-confirm__code-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: stretch;
+}
+
+.d-pair-confirm__code-input {
+    width: 100%;
+    padding: 14px 18px;
+    font-size: 28px;
+    font-family: ui-monospace, "JetBrains Mono", "Consolas", monospace;
+    letter-spacing: 0.4em;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: var(--text-primary, #e6e8ee);
+    box-sizing: border-box;
+}
+
+.d-pair-confirm__code-input:focus {
+    outline: 2px solid rgba(132, 192, 210, 0.4);
+    border-color: rgba(132, 192, 210, 0.4);
+}
+
+.d-pair-confirm__hint {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    text-align: center;
+}
+
+.d-pair-confirm__status {
+    font-size: 12px;
+    color: rgb(255, 153, 102);
+    text-align: center;
+}
+
+.d-pair-confirm__toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: rgba(56, 178, 102, 0.16);
+    border: 1px solid rgba(56, 178, 102, 0.4);
+    border-radius: 999px;
+    color: rgb(112, 224, 160);
+    font-size: 13px;
+}

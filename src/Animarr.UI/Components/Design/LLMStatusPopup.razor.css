@@ -1,0 +1,179 @@
+/* ============================================================
+   LLMStatusPopup — anchored top-right popup. Spec: screens-v4.jsx 386-451.
+   ============================================================ */
+
+.d-llm-popup__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: transparent;
+}
+
+.d-llm-popup {
+    position: fixed;
+    top: 70px;
+    right: 24px;
+    z-index: 61;
+    width: 360px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+    color: var(--text);
+    padding: 16px;
+}
+
+.d-llm-popup__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.d-llm-popup__head-tile {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
+.d-llm-popup__head-text { flex: 1; min-width: 0; }
+
+.d-llm-popup__head-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--success);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.d-llm-popup__head-dot {
+    width: 8px; height: 8px;
+    border-radius: 8px;
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+    animation: llm-popup-pulse 1.8s ease-in-out infinite;
+}
+@keyframes llm-popup-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+}
+
+.d-llm-popup__head-meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 2px;
+}
+
+.d-llm-popup__close {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+}
+.d-llm-popup__close:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+
+/* ── Progress ────────────────────────────────────────────── */
+.d-llm-popup__progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.d-llm-popup__progress {
+    flex: 1;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+.d-llm-popup__progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+    box-shadow: 0 0 8px var(--accent-soft);
+    transition: width 240ms ease;
+}
+.d-llm-popup__progress-text {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    min-width: 50px;
+    text-align: right;
+}
+
+/* ── Stats grid ──────────────────────────────────────────── */
+.d-llm-popup__stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.d-llm-popup__stat {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+.d-llm-popup__stat--success { border-color: rgba(150, 200, 100, 0.18); }
+.d-llm-popup__stat-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.d-llm-popup__stat-value {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+.d-llm-popup__stat--success .d-llm-popup__stat-value { color: var(--success); }
+
+/* ── Recent list ─────────────────────────────────────────── */
+.d-llm-popup__recent { margin-top: 4px; }
+.d-llm-popup__recent-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+.d-llm-popup__recent-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.d-llm-popup__recent-title {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.d-llm-popup__recent-conf {
+    color: var(--text-faint);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.d-llm-popup__recent-conf.is-success { color: var(--success); }
+.d-llm-popup__recent-conf.is-warn    { color: var(--warn); }

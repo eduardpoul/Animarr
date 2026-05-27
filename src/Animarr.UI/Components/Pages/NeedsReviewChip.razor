@@ -1,0 +1,80 @@
+@implements IAsyncDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+@*
+    Catalog filter-bar chip that opens the NeedsReview modal inline.
+
+    Server-side equivalent used IdentificationQueueProcessorService.ItemIdentified
+    to refresh the count whenever an item was identified. The WASM/MAUI version
+    subscribes to the IdentificationHub which forwards the same event, plus
+    listens for the NeedsReviewCountChanged push for direct count updates.
+*@
+
+@if (_count > 0)
+{
+    <button type="button" class="nr-chip" @onclick="@(() => _open = true)" title="@($"{_count} need review")">
+        <DIcon Name="warn" Size="14" />
+        <span class="nr-chip__label">NEEDS REVIEW · @_count</span>
+        <span class="nr-chip__dot"></span>
+    </button>
+}
+
+<NeedsReviewDialog IsOpen="_open" OnClose="OnDialogClose" />
+
+@code {
+    private int  _count;
+    private bool _open;
+    private HubConnection? _hub;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshCountAsync();
+        await ConnectHubAsync();
+    }
+
+    private async Task RefreshCountAsync()
+    {
+        try
+        {
+            var items = await Api.GetNeedsReviewAsync();
+            _count = items.Length;
+        }
+        catch { /* network blip — keep last value */ }
+    }
+
+    private async Task ConnectHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubIdentification);
+        _hub = new HubConnectionBuilder()
+            .WithUrl(hubUri)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hub.On<NeedsReviewCountEnvelope>(
+            IdentificationHubMethods.NeedsReviewCountChanged,
+            env => InvokeAsync(() =>
+            {
+                _count = env.Count;
+                StateHasChanged();
+                return Task.CompletedTask;
+            }));
+
+        try { await _hub.StartAsync(); }
+        catch { /* hub not available — chip still works on next OnInitialized */ }
+    }
+
+    private async Task OnDialogClose()
+    {
+        _open = false;
+        await RefreshCountAsync();
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null) await _hub.DisposeAsync();
+    }
+}

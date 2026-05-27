@@ -1,0 +1,51 @@
+/*
+    SectionFolderDeleteDialog — v5 panel refactor. Modal scaffold removed;
+    the warning copy and effect list now live inside a <SettingsEditDrawer>
+    body with Tone="warn". Only the inner body markup needs scoped styles.
+*/
+
+.sfdd__body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.sfdd__copy {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.sfdd__effects {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sfdd__effects li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.sfdd__effects li > svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--text-faint);
+}
+
+.sfdd__effects li strong {
+    color: var(--text);
+    font-weight: 600;
+}

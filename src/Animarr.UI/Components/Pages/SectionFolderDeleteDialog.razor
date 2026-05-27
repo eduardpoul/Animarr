@@ -1,0 +1,63 @@
+@*
+    Section folder delete-confirm — right-edge SettingsEditDrawer with a
+    warn-tinted icon (v5 panel refactor). The server's DELETE /api/folders/{id}
+    cascades through child watchers, queue rows and MediaItems — so the
+    client just makes one call and reloads. Files on disk are never touched.
+*@
+
+@inject IAnimarrApiClient Api
+
+@using Animarr.UI.Components.Design.Layout
+
+<SettingsEditDrawer IsOpen="true"
+                    Title="@L.Get("settings.root_folders.delete_title", Section.Label)"
+                    Overline="DANGER"
+                    Hint="@L["settings.root_folders.delete_body"]"
+                    Icon="warn"
+                    Tone="warn"
+                    OnClose="CancelAsync">
+    <Body>
+        <div class="sfdd__body">
+            <p class="sfdd__copy">@L["settings.root_folders.delete_body"]</p>
+            <ul class="sfdd__effects">
+                <li><DIcon Name="check" Size="13" /> <span>Files on disk are <strong>not</strong> touched.</span></li>
+                <li><DIcon Name="trash" Size="13" /> <span>Removes the section entry, child watchers, identification queue rows and any media items mapped under it.</span></li>
+            </ul>
+        </div>
+    </Body>
+    <Footer>
+        <Btn Variant="danger" Size="md" OnClick="ConfirmAsync" Loading="@_removing">
+            @L["settings.root_folders.btn_remove"]
+        </Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CancelAsync" Disabled="@_removing">
+            @L["settings.root_folders.btn_cancel"]
+        </Btn>
+    </Footer>
+</SettingsEditDrawer>
+
+@code {
+    [Parameter, EditorRequired] public FolderWatcherDto Section { get; set; } = null!;
+    [Parameter] public EventCallback OnRemoved { get; set; }
+    [Parameter] public EventCallback OnCanceled { get; set; }
+
+    private bool _removing;
+
+    private async Task ConfirmAsync()
+    {
+        _removing = true;
+        StateHasChanged();
+        try
+        {
+            await Api.DeleteFolderAsync(Section.Id);
+            await OnRemoved.InvokeAsync();
+        }
+        catch { /* server-side delete failed — leave drawer open */ }
+        finally
+        {
+            _removing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CancelAsync() => await OnCanceled.InvokeAsync();
+}

@@ -1,0 +1,173 @@
+/* TorrentEdit — v5 panel refactor. The 2-column page layout is gone;
+   body now stacks vertically inside a <SettingsEditDrawer>. Most of the
+   card / files / stats styles below are reused, just no page header and
+   no .te-grid. */
+
+.te-loading,
+.te-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 14px;
+}
+
+/* Status dot — duplicated from Torrents.razor.css because scoped css
+   doesn't cross component boundaries. */
+.tor-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: var(--text-faint);
+    flex-shrink: 0;
+}
+.tor-dot--info     { background: var(--accent-hi); box-shadow: 0 0 10px var(--accent-soft); }
+.tor-dot--success  { background: var(--success);   box-shadow: 0 0 10px oklch(0.74 0.15 150 / 0.45); }
+.tor-dot--warning  { background: var(--warn); }
+.tor-dot--error    { background: oklch(0.66 0.22 25); }
+.tor-dot--neutral  { background: var(--text-faint); }
+
+/* ── Card block (vertical stack inside the drawer body) ────── */
+.te-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+.te-card + .te-card { margin-top: var(--space-5); }
+
+.te-card__title {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    color: var(--text);
+}
+
+/* ── Files list ──────────────────────────────────────────────── */
+.te-tree {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
+    max-height: 320px;
+    overflow-y: auto;
+    font-size: 12px;
+    background: var(--bg-1);
+}
+
+.te-tree__file {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 6px 8px;
+    padding-left: calc(var(--depth, 0) * 12px + 8px);
+    border-bottom: 1px solid var(--border);
+}
+.te-tree__file:last-child { border-bottom: 0; }
+
+.te-tree__file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text);
+}
+
+.te-tree__priority {
+    font-size: 11px;
+    padding: 2px 22px 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-badge);
+    background: var(--surface);
+    color: var(--text);
+    min-width: 90px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235d564f' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+}
+.te-tree__priority--skip { opacity: 0.4; }
+
+/* ── Speed / options fields ──────────────────────────────────── */
+.te-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.te-field__label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+}
+
+.te-input {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-ctrl);
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+    width: 100%;
+}
+.te-input:focus { border-color: var(--accent-line); }
+
+.te-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    font-size: 13px;
+}
+.te-toggle-row--disabled { opacity: 0.55; }
+.te-toggle-row__label { color: var(--text-dim); }
+
+/* ── Stats ───────────────────────────────────────────────────── */
+.te-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12.5px;
+    color: var(--text);
+}
+
+.te-stats__row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.te-stats__label { color: var(--text-faint); }
+
+.te-stats__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.te-stats__bar { margin: 4px 0; }
+
+.te-hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 6px 0;
+}
+
+.te-stats__path {
+    font-size: 11px;
+    color: var(--text-faint);
+    word-break: break-all;
+}
+.te-stats__hash { margin-top: 4px; }
+
+/* ── Footer spacer — pushes the danger Remove button to the right
+   so it can't be accidentally clicked next to the Save button. ──── */
+.te-footer__spacer { flex: 1; }

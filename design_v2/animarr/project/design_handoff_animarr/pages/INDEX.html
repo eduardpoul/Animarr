@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr — page gallery</title>
+<style>
+  body { margin: 0; padding: 40px; background: #0a0807; color: #f4eee6;
+         font-family: -apple-system, system-ui, sans-serif; }
+  h1 { font-family: 'Archivo Black', sans-serif; font-size: 42px; margin: 0 0 6px; letter-spacing: -1px; }
+  h2 { font-family: 'Archivo Black', sans-serif; font-size: 20px; letter-spacing: -0.4px; color: #f4eee6; margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,240,220,0.08); }
+  p { color: #a8a097; max-width: 760px; line-height: 1.55; }
+  a { color: oklch(0.74 0.21 25); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul { list-style: none; padding: 0; margin: 0;
+       display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+  li { background: #15110e; border: 1px solid rgba(255,240,220,0.07); border-radius: 8px;
+       padding: 12px 14px; }
+  li .file { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #5d564f; margin-bottom: 4px; }
+  li a { font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Animarr — page gallery</h1>
+<p>Each link opens a single page state in isolation. Same scripts as the live prototype, just booted with a different <code>window.__init</code> so the app lands directly on that screen. Use these for pixel inspection (open devtools) or as a Storybook-style reference.</p>
+
+<h2>Desktop (v3 / full-width)</h2>
+<ul>
+<li><div class="file">desktop/01-catalog.html</div><a href="desktop/01-catalog.html">Catalog — default</a></li>
+<li><div class="file">desktop/02-catalog-needs-review.html</div><a href="desktop/02-catalog-needs-review.html">Catalog — NeedsReview modal open</a></li>
+<li><div class="file">desktop/03-media-detail.html</div><a href="desktop/03-media-detail.html">Media detail — Perfect World</a></li>
+<li><div class="file">desktop/04-media-detail-edit-ids.html</div><a href="desktop/04-media-detail-edit-ids.html">Edit metadata · Source IDs tab</a></li>
+<li><div class="file">desktop/05-media-detail-edit-basics.html</div><a href="desktop/05-media-detail-edit-basics.html">Edit metadata · Basics tab</a></li>
+<li><div class="file">desktop/06-media-detail-edit-poster.html</div><a href="desktop/06-media-detail-edit-poster.html">Edit metadata · Poster gallery</a></li>
+<li><div class="file">desktop/07-media-detail-edit-backdrop.html</div><a href="desktop/07-media-detail-edit-backdrop.html">Edit metadata · Backdrop gallery</a></li>
+<li><div class="file">desktop/08-media-detail-edit-tags.html</div><a href="desktop/08-media-detail-edit-tags.html">Edit metadata · Tags</a></li>
+<li><div class="file">desktop/09-media-detail-edit-manage.html</div><a href="desktop/09-media-detail-edit-manage.html">Edit metadata · Manage (danger zone)</a></li>
+<li><div class="file">desktop/10-torrents.html</div><a href="desktop/10-torrents.html">Torrents — default</a></li>
+<li><div class="file">desktop/11-torrents-add.html</div><a href="desktop/11-torrents-add.html">Torrents — Add torrent drawer</a></li>
+<li><div class="file">desktop/12-settings-general.html</div><a href="desktop/12-settings-general.html">Settings — General</a></li>
+<li><div class="file">desktop/13-settings-folders.html</div><a href="desktop/13-settings-folders.html">Settings — Root folders</a></li>
+<li><div class="file">desktop/14-settings-history.html</div><a href="desktop/14-settings-history.html">Settings — Rename history</a></li>
+<li><div class="file">desktop/15-settings-appearance.html</div><a href="desktop/15-settings-appearance.html">Settings — Appearance</a></li>
+<li><div class="file">desktop/16-settings-llm.html</div><a href="desktop/16-settings-llm.html">Settings — AI / LLM</a></li>
+<li><div class="file">desktop/17-settings-patterns.html</div><a href="desktop/17-settings-patterns.html">Settings — Rename patterns</a></li>
+<li><div class="file">desktop/18-settings-ignore.html</div><a href="desktop/18-settings-ignore.html">Settings — Ignore rules</a></li>
+<li><div class="file">desktop/19-settings-torrent.html</div><a href="desktop/19-settings-torrent.html">Settings — Torrent</a></li>
+<li><div class="file">desktop/20-settings-metadata.html</div><a href="desktop/20-settings-metadata.html">Settings — Metadata sources</a></li>
+</ul>
+
+<h2>Mobile</h2>
+<ul>
+<li><div class="file">mobile/01-catalog.html</div><a href="mobile/01-catalog.html">Mobile · Catalog — default</a></li>
+<li><div class="file">mobile/02-catalog-needs-review.html</div><a href="mobile/02-catalog-needs-review.html">Mobile · Catalog — NR sheet</a></li>
+<li><div class="file">mobile/03-media-detail.html</div><a href="mobile/03-media-detail.html">Mobile · Media detail</a></li>
+<li><div class="file">mobile/04-media-detail-edit.html</div><a href="mobile/04-media-detail-edit.html">Mobile · Media detail — Edit sheet</a></li>
+<li><div class="file">mobile/05-torrents.html</div><a href="mobile/05-torrents.html">Mobile · Torrents</a></li>
+<li><div class="file">mobile/06-torrents-add.html</div><a href="mobile/06-torrents-add.html">Mobile · Torrents — Add sheet</a></li>
+<li><div class="file">mobile/07-settings.html</div><a href="mobile/07-settings.html">Mobile · Settings — root list</a></li>
+<li><div class="file">mobile/08-settings-history.html</div><a href="mobile/08-settings-history.html">Mobile · Settings — Rename history</a></li>
+<li><div class="file">mobile/09-settings-folders.html</div><a href="mobile/09-settings-folders.html">Mobile · Settings — Root folders</a></li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,196 @@
+@*
+    MediaDetail hero — full-bleed fanart, BACK + EDIT glass chips, poster +
+    title + meta strip. Pushes Item.FanartPath into the global backdrop on mount.
+
+    Layout: 68vh / min 580px hero, bottom row "260px poster | flex 1 title block".
+*@
+
+@implements IDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<section class="d-mdhero" style="--hue: @(Item.Hue ?? 0)">
+    <div class="d-mdhero__bg">
+        @if (!string.IsNullOrEmpty(Item.FanartPath))
+        {
+            @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
+            <img src="@Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0)"
+                 alt="" class="d-mdhero__bg-img" />
+        }
+        <div class="d-mdhero__wash"></div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Item.CjkTitle))
+    {
+        <div class="d-mdhero__cjk">@Item.CjkTitle</div>
+    }
+
+    <button type="button" class="d-mdhero__back surface-glass tv-focus"
+            @onclick="@(() => Nav.NavigateTo(BackHref))">
+        <DIcon Name="chev-l" Size="14" /> Back
+    </button>
+
+    <div class="d-mdhero__top-actions">
+        <button type="button"
+                class="@($"d-mdhero__fav surface-glass tv-focus {(Item.IsFavorite ? "is-active" : "")}")"
+                @onclick="OnFavorite"
+                title="@(Item.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+            @if (Item.IsFavorite)
+            {
+                <span class="d-mdhero__fav-star d-mdhero__fav-star--filled">★</span>
+                <span>Favorited</span>
+            }
+            else
+            {
+                <span class="d-mdhero__fav-star">☆</span>
+                <span>Favorite</span>
+            }
+        </button>
+        <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit">
+            <DIcon Name="pencil" Size="14" /> Edit metadata
+        </button>
+    </div>
+
+    <div class="d-mdhero__content">
+        @if (!string.IsNullOrEmpty(Item.PosterPath))
+        {
+            @* Cache-buster on LastMetadataRefreshedAt — rescan overwrites the file at the same path. *@
+            <img src="@Animarr.UI.Services.MediaUrl.Image(Item.PosterPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0)"
+                 alt="@Item.Title" class="d-mdhero__poster" />
+        }
+        else
+        {
+            <div class="d-mdhero__poster d-mdhero__poster--placeholder">
+                <DIcon Name="video" Size="48" />
+            </div>
+        }
+
+        <div class="d-mdhero__title-block">
+            @* Title leads — pills + meta sit BELOW it so a long anime name
+               can't push the tag chips up under the TopBar's brand row.
+               Matches CatalogContinueHero's order: brand mark, title, then
+               the secondary chip strip. *@
+            <h1 class="d-mdhero__title">@Item.Title</h1>
+            @if (!string.IsNullOrEmpty(Item.EnglishTitle) && Item.EnglishTitle != Item.Title)
+            {
+                <div class="d-mdhero__alt">@Item.EnglishTitle</div>
+            }
+
+            <div class="d-mdhero__pills">
+                <Pill Tone="accent">@TypeLabel(Item.MediaType)</Pill>
+                @if (Item.IdentificationStatus == IdentificationStatus.Manual) { <Pill Tone="info">Manual</Pill> }
+                @if (Item.IdentificationStatus == IdentificationStatus.NeedsReview) { <Pill Tone="warn">Needs review</Pill> }
+                @foreach (var tag in TagPreview(Item))
+                {
+                    <Pill>@tag</Pill>
+                }
+            </div>
+
+            <div class="d-mdhero__meta">
+                @if (Item.Rating is > 0) { <span>★ @($"{Item.Rating:F1}")</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.Year is not null) { <span>@Item.Year</span><span class="d-mdhero__dot">·</span> }
+                @if (!string.IsNullOrEmpty(Item.Studio)) { <span>@Item.Studio</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.Runtime is > 0) { <span>@Item.Runtime m</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.EpisodeCount is > 0) { <span>@Item.EpisodeCount ep</span><span class="d-mdhero__dot">·</span> }
+                @if (!string.IsNullOrEmpty(Item.Language)) { <span>@Item.Language</span><span class="d-mdhero__dot">·</span> }
+                @if (BestConfidence is > 0)
+                {
+                    <span class="d-mdhero__conf">@($"{BestConfidence:P0}") match</span>
+                }
+            </div>
+
+            @* Primary CTA — label resolves per CHANGELOG §2 (7-state matrix).
+               Click is a no-op until the inline player is wired up; the label
+               carrying the right user state is the point of this iteration. *@
+            @if (Continue is not null)
+            {
+                <div class="d-mdhero__cta">
+                    <Btn Variant="primary" Size="lg" OnClick="OnContinue">
+                        <DIcon Name="@Continue.IconName" Size="14" />
+                        @Continue.Label
+                    </Btn>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
+    [Parameter] public string BackHref { get; set; } = "/";
+    [Parameter] public EventCallback OnEditClick { get; set; }
+    /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
+    [Parameter] public ContinueAction? Continue { get; set; }
+    [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }
+    /// <summary>Fired when ★ Favorite button is clicked. Parent flips
+    /// the IsFavorite flag and calls Api.Add/RemoveFavoriteAsync.</summary>
+    [Parameter] public EventCallback OnFavoriteClick { get; set; }
+
+    private double BestConfidence
+    {
+        get
+        {
+            // Pick the highest confidence we have. UI shows ONE number.
+            double[] vals = [
+                Item.TmdbConfidence ?? 0,
+                Item.MalConfidence  ?? 0,
+                Item.ImdbConfidence ?? 0,
+                Item.LlmConfidence  ?? 0,
+            ];
+            return vals.Max();
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips so the fanart/poster
+        // <img src>'s rebase to the user's chosen server. Without this, a
+        // cookie-restored MAUI boot bakes the wrong host into src on first
+        // render and never updates.
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    }
+
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !string.IsNullOrEmpty(Item.FanartPath))
+        {
+            var url = Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0);
+            try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
+        }
+    }
+
+    private Task OnEdit() => OnEditClick.InvokeAsync();
+    private Task OnFavorite() => OnFavoriteClick.InvokeAsync();
+
+    private Task OnContinue()
+    {
+        // Parent (MediaDetail) owns the player lifecycle — it decides whether
+        // Continue means "resume at progress" or "start fresh" based on the
+        // resolved action that came in via the Continue parameter.
+        return Continue is null ? Task.CompletedTask : OnContinueClick.InvokeAsync(Continue);
+    }
+
+    private static string TypeLabel(MediaItemType t) => t switch
+    {
+        MediaItemType.Anime       => "Anime",
+        MediaItemType.Movie       => "Movie",
+        MediaItemType.Series      => "Series",
+        MediaItemType.Multserials => "Multi",
+        _                         => "Media",
+    };
+
+    private static IEnumerable<string> TagPreview(MediaItemDto item)
+    {
+        // Themes that want UPPERCASE labels handle it via CSS
+        // (`text-transform: var(--label-casing)`). Don't force case here.
+        foreach (var t in item.Tags.Take(3)) yield return t;
+    }
+
+    public void Dispose()
+    {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+        /* JS layer owns the backdrop lifecycle */
+    }
+}

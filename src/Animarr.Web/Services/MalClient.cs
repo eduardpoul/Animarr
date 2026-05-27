@@ -14,7 +14,9 @@ public class MalClient(IHttpClientFactory httpFactory, ILogger<MalClient> logger
 
     private const string DefaultFields =
         "id,title,main_picture,synopsis,genres,mean,num_episodes,status," +
-        "start_date,media_type,alternative_titles,rating,num_scoring_users";
+        "start_date,end_date,media_type,alternative_titles,rating,num_scoring_users," +
+        "studios,start_season,source,broadcast,nsfw,popularity,average_episode_duration," +
+        "pictures";
 
     private static readonly JsonSerializerOptions _json = new()
     {
@@ -79,14 +81,21 @@ public class MalAnime
     [JsonPropertyName("main_picture")]
     public MalPicture? MainPicture { get; set; }
 
+    /// <summary>Additional poster candidates beyond MainPicture. Returned only when `pictures` is requested.</summary>
+    public List<MalPicture> Pictures { get; set; } = [];
+
     [JsonPropertyName("alternative_titles")]
     public MalAlternativeTitles? AlternativeTitles { get; set; }
 
     [JsonPropertyName("start_date")]
     public string? StartDate { get; set; }
 
+    [JsonPropertyName("end_date")]
+    public string? EndDate { get; set; }
+
     public string? Synopsis { get; set; }
     public double? Mean { get; set; }
+    public double? Popularity { get; set; }
 
     [JsonPropertyName("num_scoring_users")]
     public int? NumScoringUsers { get; set; }
@@ -94,17 +103,35 @@ public class MalAnime
     [JsonPropertyName("num_episodes")]
     public int? NumEpisodes { get; set; }
 
+    [JsonPropertyName("average_episode_duration")]
+    /// <summary>Episode duration in SECONDS (MAL convention). Convert to minutes via /60 for display.</summary>
+    public int? AverageEpisodeDuration { get; set; }
+
     public string? Status { get; set; }
 
     [JsonPropertyName("media_type")]
     public string? MediaType { get; set; }
 
     public List<MalGenreWrapper> Genres { get; set; } = [];
+    public List<MalStudio> Studios { get; set; } = [];
+
+    [JsonPropertyName("start_season")]
+    public MalSeason? StartSeason { get; set; }
+
+    public MalBroadcast? Broadcast { get; set; }
+
+    /// <summary>Source material: "manga", "light_novel", "original", "novel", "web_manga", etc.</summary>
+    public string? Source { get; set; }
+
     public string? Rating { get; set; }
+    public bool? Nsfw { get; set; }
 
     public int? Year => int.TryParse((StartDate ?? "").Split('-')[0], out var y) ? y : null;
     public string EnglishTitle => AlternativeTitles?.En ?? Title;
     public string? PosterUrl => MainPicture?.Large ?? MainPicture?.Medium;
+    public string? StudioName => Studios.FirstOrDefault()?.Name;
+    /// <summary>Runtime per episode in minutes (MAL stores seconds).</summary>
+    public int? RuntimeMinutes => AverageEpisodeDuration.HasValue ? AverageEpisodeDuration.Value / 60 : null;
 }
 
 public class MalPicture
@@ -124,4 +151,23 @@ public class MalGenreWrapper
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
+}
+
+public class MalStudio
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+
+public class MalSeason
+{
+    public int Year { get; set; }
+    /// <summary>"winter" | "spring" | "summer" | "fall"</summary>
+    public string Season { get; set; } = "";
+}
+
+public class MalBroadcast
+{
+    [JsonPropertyName("day_of_the_week")] public string? DayOfTheWeek { get; set; }
+    [JsonPropertyName("start_time")]      public string? StartTime    { get; set; }
 }

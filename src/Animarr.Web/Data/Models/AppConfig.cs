@@ -70,4 +70,13 @@ public static class AppConfigKeys
     public const string Language    = "appearance.language";
     public const string ThemeMode   = "appearance.theme_mode";
     public const string AccentColor = "appearance.accent_color";
+
+    // ─── External player handoff ──────────────────────────────────────────────
+    /// <summary>Which external player the in-browser "external" icon hands
+    /// the file off to. One of: "mpv" (default), "iina", "infuse",
+    /// "vlc_ios", "m3u" (universal download fallback), "custom".</summary>
+    public const string ExternalPlayer       = "playback.external_player";
+    /// <summary>For ExternalPlayer="custom" — URI template with {url}
+    /// placeholder, e.g. "potplayer://{url}" or "mxplayer://play?url={url}".</summary>
+    public const string ExternalPlayerCustom = "playback.external_player_custom";
 }

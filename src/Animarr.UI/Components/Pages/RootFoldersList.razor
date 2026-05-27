@@ -1,0 +1,176 @@
+@*
+    Settings → Root folders list. One row per section, with child + identified
+    + missing counts. Edit/Delete bubble events up to the parent (Settings)
+    which opens the inline dialogs.
+
+    Identification refresh subscribes to IdentificationHub.MediaItemChanged
+    so changes propagate without page reload (mirrors the
+    MetadataService.MediaItemChanged event the server-side version used).
+*@
+
+@implements IAsyncDisposable
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+@using Microsoft.AspNetCore.SignalR.Client
+
+@if (_loading)
+{
+    <div class="rfl-empty">Loading…</div>
+}
+else if (_sections.Count == 0)
+{
+    <div class="rfl-empty">No section folders yet. Click <strong>Add section folder</strong> to point Animarr at a directory.</div>
+}
+else
+{
+    <div class="rfl">
+        @foreach (var s in _sections)
+        {
+            var section = s.Section;
+            <div class="rfl-row">
+                <div class="rfl-row__thumb" style="--hue:@(section.Hue ?? 25);">
+                    <DIcon Name="folder" Size="14" />
+                </div>
+                <div class="rfl-row__text">
+                    <div class="rfl-row__title">@section.Label</div>
+                    <div class="rfl-row__path">@section.Path</div>
+                </div>
+                <div class="rfl-row__pills">
+                    <span class="rfl-pill">@s.Watchers w</span>
+                    <span class="rfl-pill rfl-pill--success">@s.Identified ID</span>
+                    @if (s.Missing > 0)
+                    {
+                        <span class="rfl-pill rfl-pill--warn">@s.Missing ?</span>
+                    }
+                </div>
+                <button type="button" class="rfl-btn" @onclick="@(() => RescanAsync(section.Id))">
+                    <DIcon Name="refresh" Size="13" /> Rescan
+                </button>
+                <div class="rfl-row__icons">
+                    <button type="button" class="rfl-icon" title="Edit" @onclick="@(() => OnEdit.InvokeAsync(section))">
+                        <DIcon Name="pencil" Size="14" />
+                    </button>
+                    <button type="button" class="rfl-icon rfl-icon--danger" title="Remove" @onclick="@(() => OnDelete.InvokeAsync(section))">
+                        <DIcon Name="trash" Size="14" />
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>
+    /// Bumping this from the parent (e.g. after Save/Delete) forces a reload of the section list.
+    /// </summary>
+    [Parameter] public int ReloadToken { get; set; }
+    [Parameter] public EventCallback<FolderWatcherDto> OnEdit { get; set; }
+    [Parameter] public EventCallback<FolderWatcherDto> OnDelete { get; set; }
+
+    private bool _loading = true;
+    private List<SectionStat> _sections = new();
+    private int _lastReloadToken = -1;
+    private HubConnection? _hub;
+
+    private sealed class SectionStat
+    {
+        public FolderWatcherDto Section { get; init; } = null!;
+        public int Watchers { get; init; }
+        public int Identified { get; init; }
+        public int Missing { get; init; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _lastReloadToken = ReloadToken;
+        await ConnectHubAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReloadToken != _lastReloadToken)
+        {
+            _lastReloadToken = ReloadToken;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var folders = await Api.GetFoldersAsync();
+            var sections = folders.Where(f => f.IsSection)
+                .OrderBy(f => f.Label)
+                .ToList();
+
+            // Single pass over MediaItems gives us identification status counts
+            // by FolderId — cheaper than one query per section like the server
+            // version did (we trade an extra DB round-trip on the client for
+            // one extra ms of CPU instead of N round-trips).
+            var allItems = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000 });
+            var statusByFolder = allItems
+                .GroupBy(m => m.FolderId)
+                .ToDictionary(g => g.Key, g => g.Select(m => m.IdentificationStatus).ToList());
+
+            var stats = new List<SectionStat>();
+            foreach (var s in sections)
+            {
+                var children = folders.Where(f => f.ParentSectionId == s.Id).ToList();
+                int ident = 0, missing = 0;
+                foreach (var child in children)
+                {
+                    if (!statusByFolder.TryGetValue(child.Id, out var statuses)) continue;
+                    ident   += statuses.Count(st => st is IdentificationStatus.Identified or IdentificationStatus.Manual);
+                    missing += statuses.Count(st => st is IdentificationStatus.NeedsReview or IdentificationStatus.Failed);
+                }
+                stats.Add(new SectionStat
+                {
+                    Section    = s,
+                    Watchers   = children.Count,
+                    Identified = ident,
+                    Missing    = missing,
+                });
+            }
+            _sections = stats;
+        }
+        catch { /* network blip — keep prior state */ }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task RescanAsync(Guid sectionId)
+    {
+        // Server-side equivalent did filesystem discovery + queue work in one
+        // transaction. Here we delegate to two endpoints: ScanFolderAsync kicks
+        // off filesystem discovery on the server (which auto-creates children
+        // and queues identification jobs for them), then we reload.
+        try
+        {
+            await Api.ScanFolderAsync(sectionId);
+        }
+        catch { /* swallow — UI is best-effort */ }
+        await LoadAsync();
+    }
+
+    private async Task ConnectHubAsync()
+    {
+        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubIdentification);
+        _hub = new HubConnectionBuilder()
+            .WithUrl(hubUri)
+            .WithAutomaticReconnect()
+            .Build();
+        _hub.On<MediaItemStatusEnvelope>(
+            IdentificationHubMethods.MediaItemChanged,
+            _ => InvokeAsync(LoadAsync));
+        try { await _hub.StartAsync(); }
+        catch { /* hub unavailable — list still loads on initial render */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null) await _hub.DisposeAsync();
+    }
+}

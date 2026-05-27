@@ -1,0 +1,50 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- networkSecurityConfig — points at the XML that allows cleartext +
+         user CAs on LAN destinations. Default Android policy is too strict
+         for a self-hosted server reached via LAN IP / mDNS / self-signed cert.
+
+         usesCleartextTraffic="true" is the legacy fallback for API < 24 — on
+         modern Android the networkSecurityConfig wins. -->
+    <!-- application <activity> is contributed by MAUI's Android binding
+         generator from the [Activity] / [IntentFilter] attributes on
+         MainActivity.cs. Declaring it again here would create a duplicate
+         entry in the merged manifest (XAAMM0000) so we keep only the
+         <application> attributes that MAUI doesn't otherwise emit. -->
+    <application android:allowBackup="true"
+                 android:icon="@mipmap/appicon"
+                 android:roundIcon="@mipmap/appicon_round"
+                 android:supportsRtl="true"
+                 android:usesCleartextTraffic="true"
+                 android:networkSecurityConfig="@xml/network_security_config"
+                 android:hardwareAccelerated="true">
+    </application>
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Foreground media playback needs FOREGROUND_SERVICE since Android 9
+         + the typed variant since Android 14. Pairs with the audio-focus
+         keep-alive we set up so playback survives screen-lock. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Required for the device to keep WebView playing when screen is off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Local network / DLNA discovery — multicast for SSDP. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Camera — html5-qrcode in /pair-confirm uses getUserMedia to scan the
+         pairing QR code shown on the TV. android.permission.CAMERA is the
+         runtime grant; the <uses-feature> with required="false" stops the
+         Play Store + Android-TV install filters from refusing devices that
+         don't have a camera (so the same APK still installs on a wired TV
+         box where the user can fall back to "Enter code" instead). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!-- Declare Leanback support so the app shows in Android-TV launchers.
+         required="false" so it still installs on phones. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+</manifest>

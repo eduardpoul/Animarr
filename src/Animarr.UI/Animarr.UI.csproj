@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Animarr.Shared\Animarr.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Tailwind CSS build — compiles Styles/app.css (tokens + components +
+       fluent shims) into wwwroot/app.css before the Razor static-asset
+       pipeline picks it up. Node is required only at build time (the
+       Dockerfile installs it in the build stage). -->
+  <Target Name="BuildTailwindCSS" BeforeTargets="Build" Inputs="@(_TailwindInputs)" Outputs="wwwroot/app.css">
+    <ItemGroup>
+      <_TailwindInputs Include="Styles/*.css" />
+    </ItemGroup>
+    <Exec Command="npm install --no-audit --no-fund --silent" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="false" />
+    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="false" />
+  </Target>
+
+</Project>
