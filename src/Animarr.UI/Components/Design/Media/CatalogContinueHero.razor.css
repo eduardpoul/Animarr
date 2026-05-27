@@ -4,7 +4,10 @@
 
 .d-chero {
     position: relative;
-    height: clamp(360px, 50vh, 440px);
+    /* Tall hero — 700px on a typical desktop, scales down for shorter
+       laptop viewports but never collapses below 480px so the
+       backdrop image keeps its proportions. */
+    height: clamp(480px, 75vh, 720px);
     /* Flush against the transparent TopBar (top -96px to cancel .animarr-main
        padding-top) and edge-to-edge horizontally (sides -24px). No rounding
        on any corner — clean bleed on all four edges. The TopBar floats over

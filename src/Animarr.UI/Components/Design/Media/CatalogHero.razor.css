@@ -1,10 +1,10 @@
 .d-hero {
     position: relative;
-    /* Matched to .d-chero (CatalogContinueHero) — same ladder so Featured
-       and Continue Watching read as one surface that swaps content, not
-       two heros at different scales. Was clamp(420px, 70vh, 720px) which
-       was nearly viewport-tall on long titles. */
-    height: clamp(360px, 50vh, 440px);
+    /* Matched to .d-chero (CatalogContinueHero) — Featured + Continue
+       share the same ladder so they read as one surface that swaps
+       content, not two heros at different scales. ~700px on a typical
+       desktop. */
+    height: clamp(480px, 75vh, 720px);
     /* Negative margins exactly negate .animarr-main padding (96 top + 24 sides
        on desktop, 14 + 16 on mobile) so the hero sits flush against the
        transparent TopBar and reaches both viewport edges. Bottom margin keeps
