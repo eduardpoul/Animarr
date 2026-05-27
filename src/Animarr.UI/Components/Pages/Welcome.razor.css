@@ -1,20 +1,26 @@
-/* Welcome — minimal centered landing. Tokens-only; no marketing decor. */
+/* Welcome — minimal centered landing, no scroll. Tokens only.
+
+   Uses 100dvh (dynamic viewport height) instead of 100vh so the layout
+   doesn't overflow on mobile WebView where the status-bar-safe-area
+   <div> above #app added ~30px to the total body height — 100vh meant
+   "viewport" so .d-welcome + safe-area > viewport → page scrolls. dvh
+   accounts for that automatically. */
 
 .d-welcome {
     position: relative;
     z-index: 2;
-    min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 48px 20px;
+    /* Three-row column: top gutter (flex-grow) | centered stack |
+       bottom gutter with github link. justify-content: space-between
+       puts the stack in the middle of the remaining space. */
+    justify-content: space-between;
+    padding: 24px 20px;
     text-align: center;
 }
 
-/* The vertical CJK watermark stays — it's a single-glyph product mark
-   that ties Welcome back to the rest of the app's visual language, but
-   at much lower opacity so it never competes with the centered stack. */
 .d-welcome__cjk {
     position: fixed;
     top: 50%;
@@ -30,7 +36,9 @@
     line-height: 1;
 }
 
-/* Centered hero stack: icon → name → tagline → CTA. */
+/* Centered hero stack: icon → name → tagline → CTA. Wrapped in its own
+   flex column so margin: auto on the wrapper vertically centres against
+   the parent's space-between. */
 .d-welcome__stack {
     display: flex;
     flex-direction: column;
@@ -38,6 +46,7 @@
     gap: 22px;
     max-width: 420px;
     width: 100%;
+    margin: auto 0;
 }
 
 .d-welcome__mark {
@@ -73,19 +82,16 @@
     max-width: 360px;
 }
 
-/* GitHub link sits anchored to the bottom of the viewport but on its own
-   row — quiet, doesn't compete with the centered CTA. */
+/* GitHub link — quiet single word ("github") that doesn't compete with
+   the centered CTA. Sits at the bottom of the column via the parent's
+   space-between (no absolute positioning needed). */
 .d-welcome__gh {
-    position: absolute;
-    bottom: 22px;
-    left: 50%;
-    transform: translateX(-50%);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-faint);
     letter-spacing: 0.4px;
     text-decoration: none;
-    padding: 6px 10px;
+    padding: 6px 14px;
     border-radius: 999px;
     transition: color var(--motion-fast), background var(--motion-fast);
 }
@@ -94,9 +100,8 @@
     background: rgba(255, 255, 255, 0.04);
 }
 
-/* Mobile — tighter spacing, smaller marquee glyph. */
 @media (max-width: 639px) {
-    .d-welcome { padding: 36px 18px; }
+    .d-welcome { padding: 20px 18px; }
     .d-welcome__stack { gap: 18px; }
     .d-welcome__mark {
         width: 72px;
