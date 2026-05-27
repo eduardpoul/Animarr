@@ -66,6 +66,16 @@
         }
 
         <div class="d-mdhero__title-block">
+            @* Title leads — pills + meta sit BELOW it so a long anime name
+               can't push the tag chips up under the TopBar's brand row.
+               Matches CatalogContinueHero's order: brand mark, title, then
+               the secondary chip strip. *@
+            <h1 class="d-mdhero__title">@Item.Title</h1>
+            @if (!string.IsNullOrEmpty(Item.EnglishTitle) && Item.EnglishTitle != Item.Title)
+            {
+                <div class="d-mdhero__alt">@Item.EnglishTitle</div>
+            }
+
             <div class="d-mdhero__pills">
                 <Pill Tone="accent">@TypeLabel(Item.MediaType)</Pill>
                 @if (Item.IdentificationStatus == IdentificationStatus.Manual) { <Pill Tone="info">Manual</Pill> }
@@ -75,12 +85,6 @@
                     <Pill>@tag</Pill>
                 }
             </div>
-
-            <h1 class="d-mdhero__title">@Item.Title</h1>
-            @if (!string.IsNullOrEmpty(Item.EnglishTitle) && Item.EnglishTitle != Item.Title)
-            {
-                <div class="d-mdhero__alt">@Item.EnglishTitle</div>
-            }
 
             <div class="d-mdhero__meta">
                 @if (Item.Rating is > 0) { <span>★ @($"{Item.Rating:F1}")</span><span class="d-mdhero__dot">·</span> }
