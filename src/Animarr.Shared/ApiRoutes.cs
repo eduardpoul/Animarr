@@ -228,21 +228,13 @@ public static class AppConfigKeys
     // ─── Metadata sources ─────────────────────────────────────────────────
     public const string TmdbApiKey         = "metadata.tmdb_api_key";
     public const string MalClientId        = "metadata.mal_client_id";
-    /// <summary>AniList GraphQL public API — no key required to query, but a
-    /// client ID lifts the 90/min anonymous rate limit. Optional. Currently
-    /// surfaced in Settings as a stored config value; full identification
-    /// integration in <c>MetadataService</c> is a follow-up.</summary>
-    public const string AniListClientId    = "metadata.anilist_client_id";
-    /// <summary>AniDB UDP client name (registered at https://anidb.net/software).
-    /// Used by future AniDB lookups for high-quality anime metadata.</summary>
-    public const string AniDbClient        = "metadata.anidb_client";
-    /// <summary>FanArt.tv personal API key — supplies high-res poster /
-    /// backdrop alternatives the TMDB CDN doesn't always carry.</summary>
-    public const string FanArtApiKey       = "metadata.fanart_api_key";
-    /// <summary>CSV order of source IDs, e.g. "tmdb,mal,anilist,anidb,fanart".
-    /// MetadataService reads it left-to-right when probing identification
-    /// candidates. Missing entries fall through to the default order. Source
-    /// IDs must match the ones surfaced in the Settings UI.</summary>
+
+    /// <summary>JSON array of <c>{Id, Enabled}</c> entries that drives
+    /// <c>MetadataService.GatherCandidatesAsync</c>. Source IDs the server
+    /// honours: <c>tmdb_tv</c>, <c>tmdb_movie</c>, <c>mal</c>,
+    /// <c>imdb_search</c>. The two TMDb variants share the same key but
+    /// toggle independently (Movies vs TV); the Settings UI groups them
+    /// under one "TMDb" toggle for clarity.</summary>
     public const string SearchSourceOrder  = "metadata.search_source_order";
 
     // ─── Auto-identification ──────────────────────────────────────────────
