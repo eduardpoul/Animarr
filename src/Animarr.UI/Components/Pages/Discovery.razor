@@ -230,17 +230,30 @@
             return;
         }
 
-        // First-run path. Surface the manual-add input immediately — typing
-        // the IP is faster than waiting on mDNS that may not be active on
-        // this network anyway. The scan continues in the background and
-        // results show up if/when they arrive.
-        _state = State.Empty;
-        _manualOpen = true;
-        StateHasChanged();
-
+        // First-run path. Show the Scanning UI WHILE the mDNS browse
+        // actually runs — the previous "show Empty immediately" was a
+        // jarring flash of "No servers found" before the search had even
+        // started, then it flipped to Scanning, then back to Empty when
+        // the timeout fired. Awaiting the scan keeps the user on a single
+        // honest state until results (or no-results) are real.
+        //
+        // When mDNS isn't available (pure WASM browser) jump straight to
+        // Empty with the manual form open — there's nothing to wait on.
         if (_canScan)
         {
-            _ = StartScanAsync();
+            await StartScanAsync();
+            // StartScanAsync sets _state to Found if anything turned up.
+            // If it returned with Empty + no manual still open, surface
+            // the manual input alongside the empty state so the user
+            // doesn't have to hunt for the "Add manually" button.
+            if (_state == State.Empty) _manualOpen = true;
+            StateHasChanged();
+        }
+        else
+        {
+            _state = State.Empty;
+            _manualOpen = true;
+            StateHasChanged();
         }
     }
 
