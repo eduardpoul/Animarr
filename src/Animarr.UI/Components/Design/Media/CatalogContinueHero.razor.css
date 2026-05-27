@@ -5,10 +5,21 @@
 .d-chero {
     position: relative;
     height: clamp(360px, 50vh, 440px);
-    border-radius: var(--radius-hero);
+    /* Flush against the transparent TopBar (top -80px) and edge-to-edge
+       horizontally (sides -24px) — same negative-margin trick as the
+       Featured CatalogHero. Bottom-only rounding so the boundary into the
+       category strip is soft but the top stays straight under the bar. */
+    margin: -80px -24px var(--space-9);
+    border-radius: 0 0 var(--radius-hero) var(--radius-hero);
     overflow: hidden;
-    margin-bottom: var(--space-9);
     isolation: isolate;
+}
+
+/* Mobile: smaller .animarr-main padding so the negation values shrink. */
+@media (max-width: 959px) {
+    .d-chero {
+        margin: -14px -16px var(--space-7);
+    }
 }
 
 .d-chero__bg {

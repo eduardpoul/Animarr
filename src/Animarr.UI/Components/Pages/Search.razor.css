@@ -1,0 +1,139 @@
+/* Search page — full-page library text-filter UI. */
+
+.search-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-7);
+}
+
+.search-page__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    /* Pinned just under the transparent TopBar — the header itself sits
+       in-flow but reads as a "search bar" at the top of the page. */
+    padding-top: var(--space-3);
+}
+
+.search-page__back {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-ctrl);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    transition: background var(--motion-fast), color var(--motion-fast),
+                border-color var(--motion-fast);
+}
+.search-page__back:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: var(--text);
+}
+
+.search-page__input-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    height: 48px;
+    padding: 0 16px;
+    border-radius: var(--radius-ctrl);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--text-dim);
+    transition: border-color var(--motion-fast);
+}
+.search-page__input-wrap:focus-within {
+    border-color: var(--accent-line);
+    color: var(--text);
+}
+
+.search-page__input {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--text);
+    font-family: var(--font-display);
+    /* Large but not screaming — it's the page's primary control. */
+    font-size: 20px;
+    letter-spacing: -0.4px;
+    line-height: 1;
+    padding: 0;
+}
+.search-page__input::placeholder {
+    color: var(--text-faint);
+    font-family: var(--font-ui);
+    font-size: 16px;
+    letter-spacing: 0;
+}
+/* Webkit puts a built-in clear button on type=search — hide it; we render
+   our own to match the rest of the design. */
+.search-page__input::-webkit-search-cancel-button { display: none; }
+.search-page__input::-webkit-search-decoration   { display: none; }
+
+.search-page__clear {
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    border: 0;
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+.search-page__clear:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text);
+}
+
+.search-page__count {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    text-transform: uppercase;
+}
+.search-page__count-sep { color: var(--text-faint); padding: 0 2px; }
+.search-page__count-label {
+    color: var(--text-faint);
+    margin-left: 4px;
+}
+
+@media (max-width: 639px) {
+    .search-page__head {
+        flex-wrap: wrap;
+        gap: var(--space-3);
+    }
+    .search-page__count {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    .search-page__input {
+        font-size: 16px;
+    }
+    .search-page__input::placeholder {
+        font-size: 14px;
+    }
+}

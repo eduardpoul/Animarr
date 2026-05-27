@@ -43,36 +43,36 @@
         <span class="d-topbar__brand-name">Animarr</span>
     </button>
 
-    <nav class="d-topbar__nav d-scroll-x" aria-label="Category navigation">
-        @* v5: category tabs (was folder pills). "All" always pinned first.
-           If no categories are loaded yet (cold start), fall back to the
-           folder strip via FolderJump so the bar isn't empty. *@
-        @if (_categories.Length > 0)
+    <nav class="d-topbar__nav d-scroll-x" aria-label="Folder navigation">
+        @* v5 update: TopBar pills are ROOT FOLDER pills (Movies / Anime /
+           Donghua / …), not category chips. Folders are the admin-managed
+           sections from Server Settings → Folders; clicking one filters the
+           catalog grid AND the hero strip to items inside that section.
+           Category chips live below the hero on the Home page itself and
+           cross-cut folders (an Anime category might span the "Anime" folder
+           and a misclassified item from "Movies" — categories are a soft
+           taxonomy, folders are hard storage roots). Home subscribes to
+           FolderJumpService.OnChange and reapplies its section filter. *@
+        @foreach (var name in _folderNames)
         {
+            var n = name;
+            var active = IsFolderActive(n);
             <button type="button"
-                    class="@($"d-topbar__pill tv-focus {(IsCategoryActive(null) ? "d-topbar__pill--active" : "")}")"
-                    @onclick="@(() => OnPickCategory(null))">All</button>
-            @foreach (var cat in _categories)
-            {
-                var name = cat.Name;
-                var active = IsCategoryActive(name);
-                <button type="button"
-                        class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
-                        @onclick="@(() => OnPickCategory(name))">@name</button>
-            }
-        }
-        else
-        {
-            @foreach (var name in _folderNames)
-            {
-                var n = name;
-                var active = IsFolderActive(n);
-                <button type="button"
-                        class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
-                        @onclick="@(() => OnPickFolder(n))">@n</button>
-            }
+                    class="@($"d-topbar__pill tv-focus {(active ? "d-topbar__pill--active" : "")}")"
+                    @onclick="@(() => OnPickFolder(n))">@n</button>
         }
     </nav>
+
+    @* Search shortcut — goes to a dedicated /search page with realtime
+       filtering of the entire library. Replaces the bulky "Filter by title"
+       input + counter that used to live on the catalog. *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/search") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/search"))"
+            title="Search"
+            aria-label="Search">
+        <DIcon Name="search" Size="15" />
+    </button>
 
     @* LLM status pill *@
     <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">

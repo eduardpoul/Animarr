@@ -969,5 +969,13 @@
   "profile.server_settings_title": "Configuración del servidor",
   "profile.server_settings_sub": "Carpetas · LLM · patrones · descargas",
 
-  "episode_card.meta_missing": "No descargado"
+  "episode_card.meta_missing": "No descargado",
+
+  "search.title": "Buscar",
+  "search.btn_back": "Volver al catálogo",
+  "search.placeholder": "Buscar por título…",
+  "search.btn_clear": "Limpiar",
+  "search.results_label": "RESULTADOS",
+  "search.empty_library": "Tu biblioteca está vacía.",
+  "search.no_matches": "No hay coincidencias con «{0}»."
 }

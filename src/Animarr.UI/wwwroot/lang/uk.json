@@ -969,5 +969,13 @@
   "profile.server_settings_title": "Налаштування сервера",
   "profile.server_settings_sub": "Папки · LLM · шаблони · завантаження",
 
-  "episode_card.meta_missing": "Не завантажено"
+  "episode_card.meta_missing": "Не завантажено",
+
+  "search.title": "Пошук",
+  "search.btn_back": "До каталогу",
+  "search.placeholder": "Пошук за назвою…",
+  "search.btn_clear": "Очистити",
+  "search.results_label": "РЕЗУЛЬТАТИ",
+  "search.empty_library": "Бібліотека порожня.",
+  "search.no_matches": "Нічого не знайдено за запитом «{0}»."
 }

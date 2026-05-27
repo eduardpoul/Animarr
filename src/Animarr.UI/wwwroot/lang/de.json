@@ -969,5 +969,13 @@
   "profile.server_settings_title": "Servereinstellungen",
   "profile.server_settings_sub": "Ordner · LLM · Muster · Downloads",
 
-  "episode_card.meta_missing": "Nicht heruntergeladen"
+  "episode_card.meta_missing": "Nicht heruntergeladen",
+
+  "search.title": "Suche",
+  "search.btn_back": "Zurück zum Katalog",
+  "search.placeholder": "Nach Titel suchen…",
+  "search.btn_clear": "Löschen",
+  "search.results_label": "ERGEBNISSE",
+  "search.empty_library": "Deine Bibliothek ist leer.",
+  "search.no_matches": "Keine Treffer für „{0}“."
 }
