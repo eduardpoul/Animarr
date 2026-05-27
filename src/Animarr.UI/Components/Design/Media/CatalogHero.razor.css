@@ -1,6 +1,10 @@
 .d-hero {
     position: relative;
-    height: clamp(420px, 70vh, 720px);
+    /* Matched to .d-chero (CatalogContinueHero) — same ladder so Featured
+       and Continue Watching read as one surface that swaps content, not
+       two heros at different scales. Was clamp(420px, 70vh, 720px) which
+       was nearly viewport-tall on long titles. */
+    height: clamp(360px, 50vh, 440px);
     /* Negative margins exactly negate .animarr-main padding (96 top + 24 sides
        on desktop, 14 + 16 on mobile) so the hero sits flush against the
        transparent TopBar and reaches both viewport edges. Bottom margin keeps
@@ -81,10 +85,14 @@
 
 .d-hero__title {
     font-family: var(--font-display);
-    font-size: clamp(56px, 8vw, 120px);
-    line-height: 0.87;
-    letter-spacing: -0.022em;
-    text-transform: uppercase;
+    /* Matched 1:1 to CatalogContinueHero. Earlier clamp(56,8vw,120) on a
+       long title (e.g. "RENEGADE IMMORTAL: BATTLE OF GODS") forced four
+       lines and pushed pills up into the TopBar's zone. Same ladder as
+       /home's Continue Watching hero so featured + continue look like
+       one surface that swaps content. */
+    font-size: clamp(36px, 6vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -1px;
     color: var(--text);
     text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
     margin: 0;

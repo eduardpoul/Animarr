@@ -31,6 +31,12 @@
         }
 
         <div class="d-hero__content">
+            @* Title leads. Pills row sits below it so a long featured title
+               can't push the chips up under the TopBar's category strip
+               (this was the "MOVIE / BASED ON FAIRY TALE / XIANXIA / BASED
+               ON TV SERIES" overlap reported on Home). Same ordering as
+               MediaDetailHero so both heros share layout intent. *@
+            <h1 class="d-hero__title">@item.Title</h1>
             <div class="d-hero__pills">
                 <Pill Tone="accent" Dense="false">@TypeLabel(item.MediaType)</Pill>
                 @foreach (var tag in TagPreview(item))
@@ -38,8 +44,6 @@
                     <Pill Tone="default">@tag</Pill>
                 }
             </div>
-
-            <h1 class="d-hero__title">@item.Title</h1>
 
             <div class="d-hero__meta">
                 @if (item.Rating is > 0) { <span class="d-hero__rating">★ @($"{item.Rating:F1}")</span> }
