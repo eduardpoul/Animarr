@@ -47,8 +47,15 @@
     <!-- Merged scoped-CSS bundle (every RCL's [b-xxx] rules). -->
     <link href="Animarr.Web.Client.styles.css" rel="stylesheet" />
     <!-- Custom HUD overlay for animarr-player.js. Not scoped-CSS because the
-         HUD DOM is injected by JS and wouldn't match [b-xxx] selectors. -->
-    <link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css" />
+         HUD DOM is injected by JS and wouldn't match [b-xxx] selectors.
+         Cache-busted with a per-load token: the player JS/CSS iterate often and
+         the static `_content/Animarr.UI/` URLs were getting pinned in the
+         browser cache across deploys (Cache-Control:no-cache wasn't enough on
+         the WASM SPA). document.write during initial parse keeps load order
+         identical to a plain tag while making the URL unique each full load, so
+         a deploy is always picked up on the next page load — no hard-refresh /
+         cache-clear needed. ~60 KB re-fetch on a LAN is negligible. -->
+    <script>document.write('<link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css?v=' + Date.now() + '">');</script>
 
     <!-- Artplayer + hls.js. -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
@@ -190,7 +197,7 @@
 
     <script src="_content/Animarr.UI/backdrop.js"></script>
     <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
-    <script src="_content/Animarr.UI/animarr-player.js"></script>
+    <script>document.write('<script src="_content/Animarr.UI/animarr-player.js?v=' + Date.now() + '"><\/script>');</script>
     <script src="_content/Animarr.UI/tv-nav.js"></script>
     <script src="_content/Animarr.UI/qr-scan.js"></script>
 </body>
