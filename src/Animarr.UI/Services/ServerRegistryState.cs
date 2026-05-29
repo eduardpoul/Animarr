@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Animarr.Shared;
 using Animarr.Shared.Models;
+using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 namespace Animarr.UI.Services;
@@ -45,16 +46,19 @@ public sealed class ServerRegistryState
     private readonly IJSRuntime             _js;
     private readonly IAnimarrApiClient      _api;
     private readonly ServerAddressProvider  _addr;
+    private readonly NavigationManager      _nav;
 
     private readonly List<RegisteredServerDto> _servers = new();
     private string? _currentServerId;
     private bool _loaded;
 
-    public ServerRegistryState(IJSRuntime js, IAnimarrApiClient api, ServerAddressProvider addr)
+    public ServerRegistryState(IJSRuntime js, IAnimarrApiClient api,
+        ServerAddressProvider addr, NavigationManager nav)
     {
         _js   = js;
         _api  = api;
         _addr = addr;
+        _nav  = nav;
     }
 
     /// <summary>All known servers, ordered by most-recently-seen first.
@@ -106,7 +110,46 @@ public sealed class ServerRegistryState
         // the user's chosen server, not whatever compile-time DefaultServerUrl
         // MauiProgram pinned into HttpClient at boot.
         ApplyCurrentToHttp();
+
+        // If the registry is empty but we were SERVED FROM a real Animarr origin
+        // — i.e. the WASM web client running in a browser, as opposed to the
+        // MAUI app whose page lives at the 0.0.0.x virtual host — adopt that
+        // origin automatically. A browser hitting the server directly is, by
+        // definition, already talking to a server; making it sit on a "No
+        // servers found" discovery screen (which can't even mDNS-probe from a
+        // browser) is wrong. This also self-heals after the user clears site
+        // data, which wipes this localStorage registry.
+        if (_servers.Count == 0)
+            await TryAdoptServingOriginAsync(ct);
+
         OnChange?.Invoke();
+    }
+
+    /// <summary>
+    /// Probe + register the origin this client was served from, when the
+    /// registry is otherwise empty. No-op on the MAUI host (its page origin is
+    /// the <c>https://0.0.0.x/</c> virtual host, not a reachable server — MAUI
+    /// uses mDNS / subnet discovery + an explicit server pick instead).
+    /// </summary>
+    private async Task TryAdoptServingOriginAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!Uri.TryCreate(_nav.BaseUri, UriKind.Absolute, out var baseUri)) return;
+            if (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps) return;
+            // MAUI BlazorWebView virtual host — not a real server.
+            if (baseUri.Host.StartsWith("0.0.0.", StringComparison.Ordinal)) return;
+
+            var origin = baseUri.GetLeftPart(UriPartial.Authority);  // scheme://host[:port]
+            // AddServerAsync probes /api/server/info; on success it registers
+            // the entry AND makes it Current (registry was empty).
+            await AddServerAsync(origin, ct);
+        }
+        catch
+        {
+            // Probe failed (server briefly unreachable, etc.) — leave the
+            // registry empty so the discovery / manual-URL screen still shows.
+        }
     }
 
     /// <summary>Probe <paramref name="baseUrl"/> with /api/server/info and add
