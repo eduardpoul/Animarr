@@ -47,6 +47,10 @@
 
 @media (max-width: 959px) {
     .d-profile { width: 100vw; }
+    /* Bigger, thumb-friendly close target on phones — the 32px desktop hit
+       area was fiddly. Enlarge the button AND the glyph itself. */
+    .d-profile__close { width: 44px; height: 44px; border-radius: 12px; }
+    .d-profile__close svg { width: 22px; height: 22px; }
 }
 
 /* ── Header ──────────────────────────────────────────────── */
@@ -57,15 +61,18 @@
     /* Top padding stacks the status-bar safe-area inset on top of the base
        22px so the avatar/name sit comfortably below the notch / dynamic
        island. On desktop and TV the inset is 0 so the bar stays at 22px. */
-    padding: calc(22px + env(safe-area-inset-top, 0px)) 24px 16px;
+    padding: calc(22px + var(--animarr-safe-top)) 24px 16px;
     border-bottom: 1px solid var(--border);
 }
 /* Phone: bump the top padding so the header doesn't sit right under the
    status bar. The status-bar inset is already added above; this stacks an
    extra ~6px breathing room which only kicks in on narrow viewports. */
-@media (max-width: 720px) {
+/* 959px (not 720) to match the app-wide mobile breakpoint — the mobile
+   nav, MainLayout and ServerSettings all flip to their phone layout at
+   ≤959px, so the profile drawer must too. */
+@media (max-width: 959px) {
     .d-profile__head {
-        padding-top: calc(28px + env(safe-area-inset-top, 0px));
+        padding-top: calc(28px + var(--animarr-safe-top));
     }
 }
 
@@ -150,6 +157,11 @@
 .d-profile__body {
     flex: 1;
     overflow-y: auto;
+    /* Keep the drag inside the drawer — without this, scrolling past the
+       body's top/bottom chains to the page behind the backdrop and the user
+       sees the catalog scroll under the open drawer ("скролится что-то за
+       профилем"). */
+    overscroll-behavior: contain;
     padding: 22px;
 }
 
@@ -161,6 +173,15 @@
     flex-direction: column;
     gap: 8px;
     padding: 14px 20px 20px;
+    /* In list mode the mlist is the drawer's content area, so make IT the
+       scroll container (flex:1 + min-height:0 so it can shrink and scroll)
+       and contain the overscroll. Without a local scroller here, a swipe on
+       the list had nothing to scroll and bubbled to the page behind the
+       drawer. Inert while display:none (desktop). */
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .d-profile__mlist-row {
@@ -234,8 +255,8 @@
    list ⇄ body via the data-mobile-detail attribute set in Razor. TV stays
    in landscape so the horizontal strip continues to work — html.tv-mode
    below counteracts the mobile rules for it. */
-@media (max-width: 720px) {
-    .d-profile__tabs--desktop { display: none; }
+@media (max-width: 959px) {
+    .d-profile__tabs--desktop { display: none !important; }
     .d-profile[data-mobile-detail="false"] .d-profile__mlist { display: flex; }
     .d-profile[data-mobile-detail="false"] .d-profile__body  { display: none; }
     .d-profile[data-mobile-detail="true"]  .d-profile__mlist { display: none; }
@@ -345,6 +366,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     cursor: pointer;
     text-align: left;
     display: flex;
+    width: 100%;
+    box-sizing: border-box;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -406,6 +429,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 .d-profile__signout {
     appearance: none;
     cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
     background: transparent;
     color: oklch(0.74 0.20 25);
     border: 1px solid oklch(0.55 0.15 25 / 0.5);

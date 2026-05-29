@@ -57,60 +57,154 @@
         return true;
     }
 
-    function getFocusables() {
-        return Array.from(document.querySelectorAll(FOCUSABLE_SELECTOR)).filter(isVisible);
+    // Is this element a modal's dismiss scrim? Convention across Animarr.UI:
+    // <div class="*-backdrop|*-overlay" aria-hidden="true" @onclick="Close">
+    // rendered immediately before the modal panel.
+    function isBackdropEl(el) {
+        return el && el.matches && el.matches(
+            '[aria-hidden="true"][class*="backdrop"], [aria-hidden="true"][class*="overlay"]'
+        );
+    }
+
+    function visibleBackdrops() {
+        return Array.from(document.querySelectorAll(
+            '[aria-hidden="true"][class*="backdrop"], [aria-hidden="true"][class*="overlay"]'
+        )).filter(function (el) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return false;
+            const s = getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden';
+        });
+    }
+
+    // When a modal / drawer is open, D-pad navigation must be confined to it —
+    // otherwise arrows wander onto the catalog behind the scrim, which is the
+    // single biggest "navigation is a mess" complaint. Returns the modal panel
+    // to scope to, or `document` when nothing is open.
+    //
+    // The panel is the dismiss scrim's NEXT element sibling (the markup always
+    // renders <scrim/> then <panel/>). When several modals stack (PIN keypad
+    // over ProfilePanel) the highest z-index scrim wins, so we scope to the
+    // topmost one.
+    function getActiveScope() {
+        const backdrops = visibleBackdrops();
+        if (backdrops.length === 0) return document;
+        backdrops.sort(function (a, b) {
+            const za = parseInt(getComputedStyle(a).zIndex, 10) || 0;
+            const zb = parseInt(getComputedStyle(b).zIndex, 10) || 0;
+            return za - zb;
+        });
+        const panel = backdrops[backdrops.length - 1].nextElementSibling;
+        // Only treat it as a scope if the panel actually holds something
+        // focusable — a purely decorative scrim shouldn't trap focus in an
+        // empty box.
+        if (panel && panel.querySelector && panel.querySelector(FOCUSABLE_SELECTOR)) {
+            return panel;
+        }
+        return document;
+    }
+
+    function getFocusables(scope) {
+        const root = scope || getActiveScope();
+        return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR))
+            .filter(isVisible)
+            .filter(function (el) {
+                // Drop inner controls of a role="button" composite widget.
+                // The episode card is a focusable <div role="button"> wrapper
+                // (OK = play) that ALSO contains a focusable mark-watched eye
+                // button. Without this, pressing Right/Down from a card could
+                // land on its own (or a neighbour's) eye instead of the next
+                // card — focus felt like it "jumped into the middle of a
+                // tile". The composite is the single stop; the eye stays
+                // mouse/touch-clickable. role="dialog" groupings (the PIN
+                // keypad, whose digit buttons MUST stay navigable) are NOT
+                // affected — only role="button".
+                const btn = el.closest('[role="button"]');
+                if (btn && btn !== el && root.contains(btn)) return false;
+                return true;
+            });
     }
 
     /**
      * Direction one of "up" | "down" | "left" | "right".
      * Returns the best candidate element to move focus to, or null.
+     *
+     * Scoring model (overlap-first, the standard for TV spatial nav):
+     *   • Only candidates strictly AHEAD in the travel direction count
+     *     (their centre is past the source centre on that axis).
+     *   • A candidate whose cross-axis projection OVERLAPS the source's is
+     *     "in the beam" — pressing Down from a card lands on the card
+     *     directly below, never a diagonal one. In-beam candidates are
+     *     scored purely by travel-axis distance (nearest wins) with a tiny
+     *     cross-axis tiebreak, so focus never skips a row/column.
+     *   • Off-beam (diagonal) candidates get a large additive penalty, so
+     *     they're only ever chosen when the beam is empty (e.g. the last
+     *     partial row of a grid). Even then nearest + most-aligned wins.
+     *
+     * This replaces the previous `primary + 2×perpendicular` linear blend,
+     * which let a far-but-aligned element beat a near-but-offset one (and
+     * vice-versa) — the cause of focus jumping through 1-2 elements, landing
+     * at the end of a list, then snapping to the middle on the next press.
      */
     function findNeighbour(direction, from) {
-        const fromRect = from.getBoundingClientRect();
-        const fromCx = fromRect.left + fromRect.width  / 2;
-        const fromCy = fromRect.top  + fromRect.height / 2;
+        const fr  = from.getBoundingClientRect();
+        const fcx = fr.left + fr.width  / 2;
+        const fcy = fr.top  + fr.height / 2;
 
+        // Confine to the open modal when there is one.
         const cands = getFocusables().filter(el => el !== from);
+
+        // Additive penalty big enough that any in-beam candidate beats any
+        // off-beam one, regardless of raw pixel distances on a 4K panel.
+        const OFF_BEAM = 1e7;
+
         let best = null;
         let bestScore = Infinity;
 
         for (const el of cands) {
-            const r = el.getBoundingClientRect();
+            const r  = el.getBoundingClientRect();
             const cx = r.left + r.width  / 2;
             const cy = r.top  + r.height / 2;
-            const dx = cx - fromCx;
-            const dy = cy - fromCy;
 
-            let primary, perpendicular;
+            let ahead, primary, overlap, crossDist;
             switch (direction) {
                 case 'right':
-                    // Candidate must be to the right of the current element's
-                    // right edge (allow tiny overlap so adjacent cells count).
-                    if (r.left < fromRect.right - 4) continue;
-                    primary       = r.left - fromRect.right;
-                    perpendicular = Math.abs(dy);
+                    ahead     = cx > fcx + 1;
+                    primary   = Math.max(0, r.left - fr.right);
+                    overlap   = Math.min(fr.bottom, r.bottom) - Math.max(fr.top, r.top);
+                    crossDist = Math.abs(cy - fcy);
                     break;
                 case 'left':
-                    if (r.right > fromRect.left + 4) continue;
-                    primary       = fromRect.left - r.right;
-                    perpendicular = Math.abs(dy);
+                    ahead     = cx < fcx - 1;
+                    primary   = Math.max(0, fr.left - r.right);
+                    overlap   = Math.min(fr.bottom, r.bottom) - Math.max(fr.top, r.top);
+                    crossDist = Math.abs(cy - fcy);
                     break;
                 case 'down':
-                    if (r.top < fromRect.bottom - 4) continue;
-                    primary       = r.top - fromRect.bottom;
-                    perpendicular = Math.abs(dx);
+                    ahead     = cy > fcy + 1;
+                    primary   = Math.max(0, r.top - fr.bottom);
+                    overlap   = Math.min(fr.right, r.right) - Math.max(fr.left, r.left);
+                    crossDist = Math.abs(cx - fcx);
                     break;
                 case 'up':
-                    if (r.bottom > fromRect.top + 4) continue;
-                    primary       = fromRect.top - r.bottom;
-                    perpendicular = Math.abs(dx);
+                    ahead     = cy < fcy - 1;
+                    primary   = Math.max(0, fr.top - r.bottom);
+                    overlap   = Math.min(fr.right, r.right) - Math.max(fr.left, r.left);
+                    crossDist = Math.abs(cx - fcx);
                     break;
                 default: continue;
             }
-            // Score: orthogonal distance plus a penalty for being off-axis.
-            // The 2× weight on perpendicular biases toward straight-ahead
-            // candidates over far-out diagonal hits.
-            const score = primary + perpendicular * 2;
+            if (!ahead) continue;
+
+            let score;
+            if (overlap > 0) {
+                // In the beam: nearest along the travel axis wins. The tiny
+                // crossDist term only breaks ties between equidistant rows.
+                score = primary + crossDist * 0.05;
+            } else {
+                // Diagonal: only reachable when nothing's in the beam.
+                score = OFF_BEAM + primary + crossDist * 2;
+            }
             if (score < bestScore) {
                 bestScore = score;
                 best = el;
@@ -223,9 +317,12 @@
                 const cards = Array.from(grid.querySelectorAll('.md-episode-card'));
                 const target = cards[idx];
                 if (target) {
-                    const focusable = target.querySelector(FOCUSABLE_SELECTOR) || target;
+                    // The card wrapper is itself the focusable (role=button,
+                    // tabindex=0) — focus it directly. Targeting a descendant
+                    // would land on the inner eye button, which we exclude
+                    // from spatial nav anyway.
                     e.preventDefault();
-                    focusElement(focusable);
+                    focusElement(target);
                 }
             }
             return;
@@ -368,9 +465,15 @@
             const main = document.querySelector('main.animarr-main')
                 || document.querySelector('main')
                 || document.body;
-            // Priority 1: explicit autofocus marker.
+            // Priority 1: explicit autofocus marker. The element must
+            // ALSO be currently focusable — a marked but disabled / missing
+            // tabindex element (e.g. first episode card when the file
+            // isn't on disk) shouldn't trap focus, fall through to the
+            // next priority instead.
             const pinned = Array.from(document.querySelectorAll('[data-tv-autofocus]'))
-                .filter(isVisible)[0];
+                .filter(function (el) {
+                    return isVisible(el) && el.matches(FOCUSABLE_SELECTOR);
+                })[0];
             if (pinned) {
                 if (!force) {
                     const active = document.activeElement;
@@ -420,6 +523,71 @@
         window.dispatchEvent(new Event('Animarr:navigated'));
         return r;
     };
+
+    // ─────────────────────────────────────────────────────────────────
+    // Modal focus lifecycle.
+    //
+    // When a drawer / dialog opens, the D-pad must move INTO it (otherwise
+    // focus stays on whatever button opened it — now hidden behind the
+    // scrim — and the first arrow press jumps to a random visible element).
+    // When it closes, focus should return to the opener so the user picks
+    // up where they left off, exactly like a desktop modal.
+    //
+    // Detection rides the same scrim convention getActiveScope() uses: a
+    // [aria-hidden][class*=backdrop|overlay] node being added = a modal
+    // opened; the matching node being removed = it closed. We capture the
+    // opener synchronously (before focus moves) and restore it on close.
+    let _modalOpener = null;
+
+    function pickModalFocusTarget(scope) {
+        const pinned = scope.querySelector('[data-tv-autofocus]');
+        if (pinned && isVisible(pinned) && pinned.matches(FOCUSABLE_SELECTOR)) return pinned;
+        return getFocusables(scope)[0] || null;
+    }
+
+    const modalObserver = new MutationObserver(function (mutations) {
+        if (!document.documentElement.classList.contains('tv-mode')) return;
+        if (document.body.classList.contains('player-open')) return;
+
+        let opened = false, closed = false;
+        for (const m of mutations) {
+            for (const n of m.addedNodes)   if (n.nodeType === 1 && isBackdropEl(n)) opened = true;
+            for (const n of m.removedNodes) if (n.nodeType === 1 && isBackdropEl(n)) closed = true;
+        }
+        if (!opened && !closed) return;
+
+        if (opened) {
+            // Capture the opener NOW, before the panel paints + we move focus.
+            const opener = document.activeElement;
+            requestAnimationFrame(function () {
+                const scope = getActiveScope();
+                if (scope === document) return;          // panel had no focusable
+                const target = pickModalFocusTarget(scope);
+                if (!target) return;
+                if (opener && opener !== document.body && !scope.contains(opener)) {
+                    _modalOpener = opener;
+                }
+                focusElement(target);
+            });
+        } else if (closed) {
+            requestAnimationFrame(function () {
+                // Another modal may still be open (closed a stacked child like
+                // the PIN keypad over ProfilePanel) — if so, refocus into
+                // whatever scope remains rather than the original opener.
+                const scope = getActiveScope();
+                if (scope !== document) {
+                    const target = pickModalFocusTarget(scope);
+                    if (target) focusElement(target);
+                    return;
+                }
+                if (_modalOpener && document.contains(_modalOpener) && isVisible(_modalOpener)) {
+                    focusElement(_modalOpener);
+                }
+                _modalOpener = null;
+            });
+        }
+    });
+    try { modalObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
 
     // Expose a small API for components that want to programmatically focus
     // an element or refresh after DOM changes (Blazor re-renders).

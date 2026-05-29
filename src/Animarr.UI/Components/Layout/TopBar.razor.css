@@ -9,8 +9,8 @@
        bar / iOS dynamic island, then pad the inner content down by the
        safe-area inset so the buttons aren't covered. On TV both insets are
        0 so this collapses back to a flat 60px bar. */
-    height: calc(60px + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 24px 0;
+    height: calc(60px + var(--animarr-safe-top));
+    padding: var(--animarr-safe-top) 24px 0;
     z-index: 50;
     /* Fully transparent — no gradient, no blur, no border, no shadow. The
        interactive pills below also drop their backdrop-filter so the bar
@@ -217,6 +217,21 @@
 .d-topbar__profile:hover {
     background: rgba(15, 17, 21, 0.70);
     border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* Icon-only variant (name + role text removed). The base padding
+   (4px 10px 4px 4px) and gap:10px were sized for that text label, so the
+   28px avatar sat shoved to the left inside a ~42px-wide pill and the glass
+   ring read as an off-centre rounded-rect with a gap on the right — exactly
+   the "border not hugging the circle" artefact. Collapse to a true 36px
+   circle with the avatar centred: the ring now sits concentric around the
+   avatar and matches the 36px height of the search / LLM controls beside it. */
+.d-topbar__profile--icon-only {
+    width: 36px;
+    padding: 0;
+    gap: 0;
+    border-radius: 50%;
+    justify-content: center;
 }
 
 .d-topbar__profile-text {

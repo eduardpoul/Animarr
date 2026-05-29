@@ -1103,7 +1103,7 @@ select.emd-input option {
     }
     /* Stack the system-bar inset on top of the base header padding so the
        brand row sits below the notch / status indicator. */
-    .emd__header { padding: calc(20px + env(safe-area-inset-top, 0px)) 18px 12px; }
+    .emd__header { padding: calc(20px + var(--animarr-safe-top)) 18px 12px; }
     .emd__title  { font-size: 18px; }
     .emd__header-icon { width: 36px; height: 36px; }
     .emd__body   { padding: 14px 18px 130px; }
@@ -1121,8 +1121,11 @@ select.emd-input option {
     .emd-danger__confirm { flex-wrap: wrap; }
 
     /* Hide the horizontal tab strip on phone. The vertical drilldown list
-       takes its place. */
-    .emd__tabs--desktop { display: none; }
+       takes its place. !important because the base .emd__tabs--desktop
+       display was winning on-device (same cascade quirk as the profile /
+       server-settings drilldowns), leaving the tabs visible. tv-mode below
+       re-shows them with its own !important. */
+    .emd__tabs--desktop { display: none !important; }
 
     /* Mobile list (visible when not in detail), body (visible when in detail),
        toggled by data-mobile-detail set in Razor. */
@@ -1173,7 +1176,7 @@ select.emd-input option {
 
 /* TV: keep the horizontal tabs even if the viewport falls under the mobile
    breakpoint (cheap TVs that report 540px CSS pixels). */
-html.tv-mode .emd__tabs--desktop { display: flex; }
+html.tv-mode .emd__tabs--desktop { display: flex !important; }
 html.tv-mode .emd__mlist         { display: none; }
 html.tv-mode .emd__body          { display: block; }
 html.tv-mode .emd__footer        { display: flex; }

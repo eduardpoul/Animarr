@@ -158,8 +158,12 @@
         grid-template-columns: 1fr;
     }
     /* Hide the desktop rail entirely on phones — the drilldown list below
-       takes over. */
-    .d-server__rail { display: none; }
+       takes over. !important because the base .d-server__rail rule sets
+       display:flex and (depending on cascade/scoped-attr specificity) was
+       winning on-device, leaving the rail visible ABOVE the drilldown menu
+       ("сначала табы, потом меню"). The tv-mode override below re-shows it
+       with its own !important so remote DPad nav still gets the rail. */
+    .d-server__rail { display: none !important; }
 
     .d-server__mlist {
         display: flex;
@@ -234,7 +238,7 @@
 /* TV reverts to the desktop rail even though it may match the mobile media
    query (1280px viewport). The rail is fine on a remote because focus
    moves item-by-item with DPad up/down. */
-html.tv-mode .d-server__rail  { display: flex; }
+html.tv-mode .d-server__rail  { display: flex !important; }
 html.tv-mode .d-server__mlist { display: none; }
 html.tv-mode .d-server__mback { display: none; }
 html.tv-mode .d-server__content { display: block; }

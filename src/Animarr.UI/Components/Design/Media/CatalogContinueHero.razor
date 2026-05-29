@@ -17,7 +17,8 @@
 {
     var item = _active;
     var pager = PagerStyle; // f | g | h (computed below)
-    <section class="@($"d-chero d-chero--pager-{pager}")">
+    <section class="@($"d-chero d-chero--pager-{pager}")"
+             @ontouchstart="OnTouchStart" @ontouchend="OnTouchEnd">
         <div class="d-chero__bg">
             @if (!string.IsNullOrEmpty(item.FanartPath))
             {
@@ -48,8 +49,14 @@
             </div>
 
             <div class="d-chero__actions">
+                @* data-tv-autofocus parks the remote on Resume when Home mounts —
+                   for a returning user with something in progress, that's the
+                   headline action. Falls through to other auto-focus targets
+                   (CatalogHero's Open detail, or first focusable in main) when
+                   this hero isn't rendered. *@
                 <Btn Variant="primary" Size="lg"
-                     OnClick="@(() => Nav.NavigateTo($"/catalog/{item.MediaItemId}"))">
+                     OnClick="@(() => Nav.NavigateTo($"/catalog/{item.MediaItemId}"))"
+                     data-tv-autofocus="true">
                     <DIcon Name="play" Size="16" /> Resume
                 </Btn>
             </div>
@@ -148,21 +155,21 @@
     private ContinueWatchItemDto? _active;
     private System.Threading.Timer? _timer;
 
-    /// <summary>Lower-cased pager style: "f" (default) / "g" / "h". Read on every
+    /// <summary>Lower-cased pager style: "f" / "g" (default) / "h". Read on every
     /// render so a change to <c>UserCtx.Preferences.HeroPagerStyle</c> from
-    /// ProfilePanel takes effect without re-mounting the hero. Unknown values
-    /// fall back to "f" so a stale client can't render a missing markup branch.</summary>
+    /// ProfilePanel takes effect without re-mounting the hero. Unknown/empty values
+    /// fall back to "g" (Chevrons) so a stale client can't render a missing branch.</summary>
     private string PagerStyle
     {
         get
         {
             var s = UserCtx.Preferences?.HeroPagerStyle;
-            if (string.IsNullOrWhiteSpace(s)) return "f";
+            if (string.IsNullOrWhiteSpace(s)) return "g";
             return s.ToLowerInvariant() switch
             {
-                "g" => "g",
+                "f" => "f",
                 "h" => "h",
-                _   => "f",
+                _   => "g",
             };
         }
     }
@@ -234,6 +241,31 @@
         PushBackdrop();
         // Reset timer so manual click doesn't jump again immediately.
         _timer?.Change(TimeSpan.FromSeconds(IntervalSec), TimeSpan.FromSeconds(IntervalSec));
+    }
+
+    // ── Touch swipe (phones/tablets) ──────────────────────────────────
+    // Left swipe → next slot, right swipe → previous. Threshold + horizontal-
+    // dominance guard so a tap (Resume) and vertical page scroll still work.
+    private double _swipeStartX;
+    private double _swipeStartY;
+    private bool _swipeTracking;
+
+    private void OnTouchStart(TouchEventArgs e)
+    {
+        if (e.Touches.Length == 0) { _swipeTracking = false; return; }
+        _swipeStartX = e.Touches[0].ClientX;
+        _swipeStartY = e.Touches[0].ClientY;
+        _swipeTracking = true;
+    }
+
+    private void OnTouchEnd(TouchEventArgs e)
+    {
+        if (!_swipeTracking || Items.Length <= 1 || e.ChangedTouches.Length == 0) return;
+        _swipeTracking = false;
+        var dx = e.ChangedTouches[0].ClientX - _swipeStartX;
+        var dy = e.ChangedTouches[0].ClientY - _swipeStartY;
+        if (System.Math.Abs(dx) < 45 || System.Math.Abs(dx) <= System.Math.Abs(dy)) return;
+        if (dx < 0) NextSlideManual(); else PrevSlide();
     }
 
     private async void PushBackdrop()

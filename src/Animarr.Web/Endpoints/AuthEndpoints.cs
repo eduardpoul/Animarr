@@ -520,5 +520,5 @@ internal static class AuthEndpoints
 
     private static readonly HashSet<string> ValidPagerStyles = new(StringComparer.OrdinalIgnoreCase) { "f", "g", "h" };
     private static string ValidatePagerStyle(string s)
-        => ValidPagerStyles.Contains(s) ? s.ToLowerInvariant() : "f";
+        => ValidPagerStyles.Contains(s) ? s.ToLowerInvariant() : "g";
 }

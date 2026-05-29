@@ -1,0 +1,34 @@
+@*
+    PageBack — arrow-only "back" affordance for full pages that don't already
+    ship one (Downloads / Server settings). Placed at the start of the page
+    header so on the desktop/web layout it sits just under the TopBar logo,
+    top-left. Hidden below 960px (the mobile shell has its own nav / drilldown
+    back). /search has its own equivalent (.search-page__back).
+
+    Click → real browser-history back so the user returns wherever they came
+    from; falls back to the catalog root on a cold/deep-link load with no
+    history to pop.
+*@
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<button type="button" class="d-page-back tv-focus" @onclick="GoBackAsync"
+        aria-label="Back" title="Back">
+    <DIcon Name="chev-l" Size="18" />
+</button>
+
+@code {
+    /// <summary>Where to land when there's no history to pop (direct load).</summary>
+    [Parameter] public string Fallback { get; set; } = "/";
+
+    private async Task GoBackAsync()
+    {
+        try
+        {
+            var len = await JS.InvokeAsync<int>("eval", "history.length");
+            if (len > 1) { await JS.InvokeVoidAsync("history.back"); return; }
+        }
+        catch { /* JS unavailable — fall through to the fixed fallback route */ }
+        Nav.NavigateTo(Fallback);
+    }
+}

@@ -99,12 +99,10 @@
 
     @if (UserCtx.Me is { } me)
     {
-        <button type="button" class="d-topbar__profile tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
+        @* Avatar only — the name + role text beside it was visual noise; the
+           avatar alone opens the profile drawer where identity lives. *@
+        <button type="button" class="d-topbar__profile d-topbar__profile--icon-only tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
             <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
-            <span class="d-topbar__profile-text">
-                <span class="d-topbar__profile-name">@me.User.Name</span>
-                <span class="d-topbar__profile-role">@me.User.RoleName</span>
-            </span>
         </button>
     }
 </header>

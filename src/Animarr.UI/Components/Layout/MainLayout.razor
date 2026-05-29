@@ -254,6 +254,15 @@
             await RefreshIdentificationStatusAsync();
             StateHasChanged();
         }
+
+        // First render of MainLayout — Blazor's router doesn't push the
+        // initial URL, so tv-nav.js's history-API hook never sees it.
+        // Dispatch the synthetic nav event so the page's
+        // [data-tv-autofocus] target gets focused without the user
+        // having to press an arrow first.
+        try { await JS.InvokeVoidAsync("eval",
+            "window.dispatchEvent(new Event('Animarr:navigated'));"); }
+        catch { }
     }
 
     /// <summary>Recompute LLM popup counters (_llmDone, _llmTotal, recent list)

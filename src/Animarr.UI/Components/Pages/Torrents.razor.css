@@ -812,7 +812,9 @@
    buttons + the form had no spacing. Everything below is local. */
 .tor-add__segment {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* Three sources (Magnet / .torrent / Upload) — was 1fr 1fr which wrapped
+       the third onto a second row. All three now share one row evenly. */
+    grid-template-columns: repeat(3, 1fr);
     gap: 4px;
     padding: 4px;
     background: var(--bg-1);
@@ -826,16 +828,20 @@
     cursor: pointer;
     background: transparent;
     border: 0;
-    padding: 9px 12px;
+    /* Tighter horizontal padding + nowrap so all three labels fit one row
+       without clipping at three columns. */
+    padding: 9px 6px;
     border-radius: var(--radius-ctrl);
     font-family: var(--font-ui);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-dim);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 7px;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
     transition: color var(--motion-fast), background var(--motion-fast);
 }
 .tor-add__seg-item:hover { color: var(--text); }

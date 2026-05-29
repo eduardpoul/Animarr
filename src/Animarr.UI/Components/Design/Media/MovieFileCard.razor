@@ -99,8 +99,11 @@
         </div>
 
         <div class="d-mfc__actions">
-            @* Primary CTA — label matches the hero's "Continue / Play movie / Rewatch from start" CTA. *@
-            <Btn Variant="primary" Size="md" OnClick="OnPlay">
+            @* Primary CTA — label matches the hero's "Continue / Play movie / Rewatch from start" CTA.
+               data-tv-autofocus pins the default-focus target on TV. For an
+               un-watched movie the hero has no Continue CTA, so without this
+               the remote would land on the Back chip up top. *@
+            <Btn Variant="primary" Size="md" OnClick="OnPlay" data-tv-autofocus="true">
                 <DIcon Name="@PlayIcon" Size="14" />
                 <span class="d-mfc__action-label">@PlayLabel</span>
             </Btn>
