@@ -45,7 +45,12 @@
             </div>
 
             <div class="d-chero__progress" aria-hidden="true">
-                <div class="d-chero__progress-fill" style="@($"width: {item.Progress * 100:F1}%")"></div>
+                @* Invariant culture is REQUIRED: in ru-RU (and most non-en
+                   locales) {:F1} renders "43,0" with a comma, producing the
+                   invalid CSS `width: 43,0%`. The browser drops it and the
+                   block fill falls back to width:auto = 100% — so the bar
+                   looked full at 43%. Force a dot. *@
+                <div class="d-chero__progress-fill" style="@(System.FormattableString.Invariant($"width: {item.Progress * 100:F1}%"))"></div>
             </div>
 
             <div class="d-chero__actions">

@@ -11,6 +11,31 @@
     margin: 0 auto;
 }
 
+/* Delete-confirm drawer body (torrent only / torrent + files). */
+.tor-del__copy {
+    color: var(--text-dim);
+    font-size: 13.5px;
+    line-height: 1.5;
+    margin: 0 0 16px;
+}
+.tor-del__effects {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.tor-del__effects li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-dim);
+}
+.tor-del__effects li strong { color: var(--text); font-weight: 600; }
+
 /* Page header is now the global .d-page-header (Styles/components.css §3).
    The DOWN/UP stats panel below lives inside .d-page-header__right alongside
    the primary Add CTA. */

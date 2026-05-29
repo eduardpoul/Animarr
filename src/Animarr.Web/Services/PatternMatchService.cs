@@ -30,6 +30,7 @@ public partial class PatternMatchService(
         var ext = extension.ToLowerInvariant();
         if (_settings.VideoExtensions.Contains(ext)) return FileKind.Video;
         if (_settings.SubtitleExtensions.Contains(ext)) return FileKind.Subtitle;
+        if (_settings.AudioExtensions.Contains(ext)) return FileKind.Audio;
         if (_settings.ImageExtensions.Contains(ext)) return FileKind.Image;
         return FileKind.Unknown;
     }

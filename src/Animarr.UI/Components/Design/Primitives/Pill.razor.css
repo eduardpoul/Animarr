@@ -7,17 +7,25 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 7px;
+    /* Compact height to match the movie-detail hero chips (the look asked for
+       everywhere). */
+    padding: 2px 7px;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 9.5px;
     letter-spacing: 0.6px;
     text-transform: uppercase;
     border-radius: var(--radius-badge);
     border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-dim);
-    line-height: 1;
+    line-height: 1.15;
     white-space: nowrap;
+    /* Never let a flex/grid parent stretch the badge to the row height (that's
+       what blew "MASTER" up into a tall square in Users & Roles) or shrink it
+       below its label width (which clipped the text). */
+    align-self: center;
+    flex-shrink: 0;
+    width: fit-content;
 }
 
 /* Dense — used in title-block meta etc. Same height-ish, smaller font. */

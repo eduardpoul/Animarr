@@ -133,24 +133,25 @@
 /* ── Mobile drilldown list — replaces the rail on phones. ─────────── */
 .d-server__mlist { display: none; }
 
+/* Identical to the global .d-page-back (arrow-only glass square) so every
+   back affordance — page headers AND drilldown details — looks the same. */
 .d-server__mback {
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 6px 12px;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.4px;
     cursor: pointer;
-    display: none;
+    display: none;              /* shown via the ≤959 detail-mode rule */
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
     align-self: flex-start;
     margin-bottom: 8px;
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-server__mback:hover { background: rgba(255, 255, 255, 0.07); }
+.d-server__mback:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); color: var(--text); }
 
 /* ── Mobile collapse ─────────────────────────────────────── */
 @media (max-width: 959px) {
@@ -238,7 +239,11 @@
 /* TV reverts to the desktop rail even though it may match the mobile media
    query (1280px viewport). The rail is fine on a remote because focus
    moves item-by-item with DPad up/down. */
-html.tv-mode .d-server__rail  { display: flex !important; }
+/* NOT !important — a real TV lays out at 1500px (index.html viewport override)
+   so it never hits the ≤959 rail-hide and shows the rail naturally. If a PHONE
+   ends up with a stray tv-mode class at a phone viewport, the ≤959
+   `display:none !important` must win so the drilldown — not the rail — shows. */
+html.tv-mode .d-server__rail  { display: flex; }
 html.tv-mode .d-server__mlist { display: none; }
 html.tv-mode .d-server__mback { display: none; }
 html.tv-mode .d-server__content { display: block; }

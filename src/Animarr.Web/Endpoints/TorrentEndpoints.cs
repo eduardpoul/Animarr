@@ -163,7 +163,16 @@ internal static class TorrentEndpoints
             var entity = await db.TorrentRecords.FirstOrDefaultAsync(t => t.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
+            // Engine cleanup (stop + drop from MonoTorrent, optionally delete the
+            // downloaded files). For a torrent the engine isn't tracking anymore
+            // — e.g. a "Stopped" row left over after a restart, the "broken
+            // download" the user wants gone — RemoveAsync early-returns and, even
+            // for live torrents, only marks the row Stopped. So the record never
+            // left the list and Delete looked dead. HARD-delete the row here so
+            // the trash button always removes it regardless of engine state.
             await engine.RemoveAsync(entity.InfoHash, deleteFiles ?? false);
+            db.TorrentRecords.Remove(entity);
+            await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 

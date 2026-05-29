@@ -61,9 +61,15 @@ body[data-animarr-native="1"] .vp-backdrop * {
 
 /* ── HUD root ─────────────────────────────────────────────────────── */
 .vp-hud {
-    --hud-accent:      oklch(0.72 0.18 245);
-    --hud-accent-hi:   oklch(0.80 0.15 245);
-    --hud-accent-soft: oklch(0.72 0.18 245 / 0.16);
+    /* Accent follows the user's / theme's chosen hue (--accent-hue from
+       tokens.css), but keeps the player's OWN lightness + chroma: the app's
+       --accent is tuned for chrome on a dark page (some themes use a muted
+       chroma ~0.06) which reads dull over video, so the HUD pins a brighter,
+       more saturated L/C and only borrows the hue. Falls back to 245 (blue)
+       when no accent hue is set (plain browser before theme applies). */
+    --hud-accent:      oklch(0.72 0.18 var(--accent-hue, 245));
+    --hud-accent-hi:   oklch(0.80 0.15 var(--accent-hue, 245));
+    --hud-accent-soft: oklch(0.72 0.18 var(--accent-hue, 245) / 0.16);
     --hud-text:        #e8eaed;
     --hud-text-dim:    #9aa0a8;
     --hud-text-faint:  #5d636d;
@@ -461,7 +467,7 @@ body[data-animarr-native="1"] .vp-backdrop * {
 }
 .vp-hud-popup__slider-row input[type=range] {
     flex: 1;
-    accent-color: oklch(0.72 0.18 245);
+    accent-color: var(--hud-accent);
 }
 .vp-hud-popup__slider-value {
     min-width: 60px;

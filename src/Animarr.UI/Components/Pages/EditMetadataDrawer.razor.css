@@ -207,20 +207,23 @@
 /* ── Mobile drilldown — vertical list of section cards. Hidden on
    desktop (and on phone when the user has drilled into a section). */
 .emd__mlist { display: none; }
+/* Matches the global .d-page-back (arrow-only glass square) for a consistent
+   back affordance everywhere. */
 .emd__back {
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
     color: var(--text-dim);
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
     display: grid;
     place-items: center;
-    cursor: pointer;
     flex-shrink: 0;
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.emd__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.emd__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); }
 
 .emd-form {
     display: flex;
@@ -301,6 +304,15 @@
 }
 
 .emd-idfield__row .emd-input { flex: 1; }
+
+/* Action buttons in an ID row (Apply / Parse) share one fixed width so they
+   line up flush down the right edge — without this "Parse" (no icon) was
+   narrower than "⟳ Apply" and the column looked ragged. */
+.emd-idfield__row .emd__btn {
+    min-width: 104px;
+    justify-content: center;
+    flex-shrink: 0;
+}
 
 /* TV/Movie picker for the TMDB ID row. Two-button segmented control matching
    the design's other segmented patterns. Sits between the input and Search. */
@@ -1076,13 +1088,15 @@ select.emd-input option {
     .emd__tabs { padding: 10px 22px 0; }
 }
 
-/* ── Phone — full-screen drawer with the drilldown pattern.
-   Earlier this was a 92%-tall bottom sheet, but the slim peek of the
-   page behind only made the backdrop look like content while the user
-   tried to scroll inside the drawer. Going edge-to-edge (100dvh) plus
-   the drilldown list replaces what used to be a cramped 7-tab strip
-   with a clean vertical list, exactly like Settings on mobile. */
-@media (max-width: 639px) {
+/* ── Phone & small tablet — full-screen drawer with the drilldown pattern.
+   Breakpoint MUST match ProfilePanel / ServerSettings (959px), NOT 639px.
+   The device's WebView reports a CSS viewport between 640–959px, so at 639px
+   this whole block never engaged on-device: the desktop horizontal tab strip
+   stayed visible above the buttons while the profile/settings drilldowns (which
+   key off 959px) worked fine — exactly the inconsistency the user hit. Going
+   edge-to-edge (100dvh) + the vertical drilldown replaces the cramped 7-tab
+   strip, identical to Settings on mobile. */
+@media (max-width: 959px) {
     .emd {
         top: 0;
         right: 0;
@@ -1174,9 +1188,16 @@ select.emd-input option {
     .emd__mlist-label { flex: 1; }
 }
 
-/* TV: keep the horizontal tabs even if the viewport falls under the mobile
-   breakpoint (cheap TVs that report 540px CSS pixels). */
-html.tv-mode .emd__tabs--desktop { display: flex !important; }
+/* TV shows the horizontal tabs. NOTE: deliberately NOT !important (matches the
+   ProfilePanel pattern). A real TV lays out at 1500 CSS-px (set by index.html's
+   viewport override), so it never enters the ≤959 mobile block and the base
+   `.emd__tabs{display:flex}` already shows the tabs — this rule is just belt-
+   and-braces. Crucially, if a PHONE ends up with a stray `tv-mode` class (e.g.
+   a leftover localStorage override or an over-eager native TV-detect) while
+   still at a phone viewport, the ≤959 `display:none !important` MUST win so the
+   drilldown — not a cramped tab strip — is what shows. An !important here used
+   to beat that hide (higher specificity) and leak the tabs onto the phone. */
+html.tv-mode .emd__tabs--desktop { display: flex; }
 html.tv-mode .emd__mlist         { display: none; }
 html.tv-mode .emd__body          { display: block; }
 html.tv-mode .emd__footer        { display: flex; }

@@ -55,6 +55,13 @@
         }
     </nav>
 
+    @* LLM status pill — sits LEFT of the search button (swapped per request). *@
+    <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">
+        <span class="d-topbar__llm-dot"></span>
+        <DIcon Name="magic" Size="13" />
+        <span class="d-topbar__llm-count">@_llmCount</span>
+    </button>
+
     @* Search shortcut — goes to a dedicated /search page with realtime
        filtering of the entire library. Replaces the bulky "Filter by title"
        input + counter that used to live on the catalog. *@
@@ -64,13 +71,6 @@
             title="Search"
             aria-label="Search">
         <DIcon Name="search" Size="15" />
-    </button>
-
-    @* LLM status pill *@
-    <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">
-        <span class="d-topbar__llm-dot"></span>
-        <DIcon Name="magic" Size="13" />
-        <span class="d-topbar__llm-count">@_llmCount</span>
     </button>
 
     @if (UserCtx.Can(p => p.UploadContent))

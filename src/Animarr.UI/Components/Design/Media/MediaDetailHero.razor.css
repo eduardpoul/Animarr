@@ -51,7 +51,12 @@
 
 .d-mdhero__cjk {
     position: absolute;
-    top: var(--space-7);
+    /* Vertically centred on the right edge — was top-right (var(--space-7)),
+       which put the giant watermark directly behind the Favorite / Edit chips
+       and made the top-right corner look busy enough that the controls were
+       hard to spot. Centring clears the top-right for the action row. */
+    top: 50%;
+    transform: translateY(-50%);
     right: var(--space-9);
     font-family: var(--font-cjk);
     font-size: clamp(140px, 18vw, 320px);
@@ -82,25 +87,29 @@
     gap: var(--space-2);
     transition: background var(--motion-base), color var(--motion-base);
     z-index: 3;
+    /* Lift the chips off bright/busy fanart so they read as controls, not part
+       of the artwork — surface-glass alone could wash out over a light hero. */
+    box-shadow: 0 2px 16px -2px rgba(0, 0, 0, 0.6);
 }
 
 .d-mdhero__back {
     position: absolute;
-    /* Drop below the fixed TopBar (60px tall) — was var(--space-7) ≈ 16px
-       and the Back chip collided with the brand mark on the left. 72px
-       clears the bar with 12px of breathing room. */
+    /* Drop below the fixed TopBar (60px tall) — 72px clears the bar with 12px
+       of breathing room. Inset is var(--space-11) (36px), NOT space-9 (22px):
+       the hero bleeds -24px past each viewport edge (edge-to-edge fanart) and
+       is overflow:hidden, so a 22px inset lands the chip ~2px PAST the visible
+       edge where it gets clipped. 36px keeps it a clear 12px inside the screen. */
     top: 72px;
-    left: var(--space-9);
+    left: var(--space-11);
+    z-index: 3;
 }
 
-/* v5: a row of action buttons (favorite + edit) is anchored top-right
-   instead of just the edit button — favorite gets its own pill.
-   Matching top: 72px so favorite/edit chips also sit cleanly under the
-   TopBar's profile + LLM pills on the right. */
+/* v5: a row of action buttons (favorite + edit) anchored top-right. Same 72px
+   top + space-11 inset as the Back chip (see note above re: the -24px bleed). */
 .d-mdhero__top-actions {
     position: absolute;
     top: 72px;
-    right: var(--space-9);
+    right: var(--space-11);
     z-index: 3;
     display: inline-flex;
     gap: var(--space-3);

@@ -462,7 +462,26 @@ public class MetadataService(
         // and the same title should keep its tint even after switching source.
 
         bool ok = false;
-        if (source is "imdb_tv" or "imdb_movie" or "tvdb_tv")
+        // tmdb_* / mal arrive here as a NUMERIC STRING — the /resolve endpoint
+        // always calls this string overload (ResolveCandidateRequest.ExternalId
+        // is a string). Previously only imdb/tvdb were handled here, so clicking
+        // "Apply" on the TMDB or MAL field silently did nothing (the int overload
+        // that handles tmdb/mal is never reached from the UI). Parse + delegate.
+        if ((source is "tmdb_tv" or "tmdb_movie" or "mal") && int.TryParse(externalId, out var numId))
+        {
+            ok = source switch
+            {
+                "tmdb_tv"    => await PopulateTvFromTmdbAsync(item, folder, numId, true, null, ct),
+                "tmdb_movie" => await PopulateMovieFromTmdbAsync(item, folder, numId, true, null, ct),
+                "mal"        => await PopulateFromMalAsync(item, folder, numId, null, ct),
+                _            => false,
+            };
+            // tv <-> movie fallback (mirror of the int overload): a pasted TMDB id
+            // often doesn't tell whether the title is filed as TV or Movie.
+            if (!ok && source == "tmdb_tv")         ok = await PopulateMovieFromTmdbAsync(item, folder, numId, true, null, ct);
+            else if (!ok && source == "tmdb_movie") ok = await PopulateTvFromTmdbAsync(item, folder, numId, true, null, ct);
+        }
+        else if (source is "imdb_tv" or "imdb_movie" or "tvdb_tv")
         {
             var findSource = source.StartsWith("imdb") ? "imdb_id" : "tvdb_id";
             var findResult = await tmdb.FindByExternalIdAsync(externalId, findSource, ct);

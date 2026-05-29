@@ -237,19 +237,22 @@
 
 /* ── Mobile-only back arrow that swaps in place of the avatar when the
    user drilled into a detail. ──────────────────────────────────────────── */
+/* Matches the global .d-page-back (arrow-only glass square) for a consistent
+   back affordance across every page + drilldown. */
 .d-profile__back {
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
     color: var(--text-dim);
-    width: 36px; height: 36px;
-    border-radius: 50%;
     display: inline-grid;
     place-items: center;
-    cursor: pointer;
     flex-shrink: 0;
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-profile__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.d-profile__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); }
 
 /* Phone (≤720px): swap horizontal tabs for the drilldown list, then toggle
    list ⇄ body via the data-mobile-detail attribute set in Razor. TV stays
