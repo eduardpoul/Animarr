@@ -3,6 +3,14 @@
    The status dot + progress + speed cells reuse design tokens directly so
    accent-hue swaps from the Appearance panel still flow through. */
 
+/* Page width — match the Server settings shell (.d-server: max-width 1480px,
+   centred) so Downloads and Settings line up at the same measure instead of
+   the torrents list bleeding edge-to-edge. */
+.tor-page {
+    max-width: 1480px;
+    margin: 0 auto;
+}
+
 /* Page header is now the global .d-page-header (Styles/components.css §3).
    The DOWN/UP stats panel below lives inside .d-page-header__right alongside
    the primary Add CTA. */
@@ -90,9 +98,16 @@
 .tor-cell--dim  { color: var(--text-dim); }
 
 .tor-name {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
+    /* THE crooked-row-separator cause: this cell used `display: flex`, which
+       turns the <td> from a table-cell into a flex container. A non-table-cell
+       <td> drops out of the table's row-box layout, so border-collapse draws
+       its bottom border at a different Y than the sibling real table-cells —
+       the row divider stair-stepped right where the Name column met the rest.
+       (History's name column is a plain <td>, which is why it stayed straight.)
+       Keep this a real table-cell; use the standard `max-width: 0` trick so the
+       flexible Name column still clips long titles to an ellipsis without
+       expanding the table. */
+    max-width: 0;
     min-width: 0;
 }
 /* Was an <a href>; v5 panel refactor turns it into a <button> that opens
@@ -164,6 +179,9 @@
 .tor-progress .animarr-progress__track {
     height: 8px;
     border-radius: 4px;
+    /* Soft, low-contrast empty-track fill — distinct from the row-divider
+       token so a 0% bar doesn't read as a stray line. */
+    background: rgba(255, 255, 255, 0.06);
 }
 .tor-progress--info .animarr-progress__fill {
     background: linear-gradient(90deg, var(--accent), var(--accent-hi));
@@ -863,6 +881,127 @@
     margin-bottom: 8px;
 }
 
+/* ── .torrent contents tree ──────────────────────────────────────────────
+   Folder/file tree with cascading checkboxes. Replaces the old unstyled flat
+   list (which wrapped raw paths + sizes onto ragged lines). */
+.tor-tree__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+.tor-tree__head .tor-add__field-label { margin-bottom: 8px; }
+
+.tor-tree__head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.tor-tree__linkbtn {
+    appearance: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-hi);
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+.tor-tree__linkbtn:hover { background: var(--accent-soft); }
+.tor-tree__sep { color: var(--text-faint); font-size: 11px; }
+
+.tor-tree {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    max-height: 320px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px;
+}
+
+.tor-tree__row {
+    /* --depth drives the indent; caret + check + icon + name + size in a row. */
+    display: grid;
+    grid-template-columns: 18px 20px 18px 1fr auto;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px calc(6px + var(--depth, 0) * 16px);
+    border-radius: 8px;
+    min-width: 0;
+}
+.tor-tree__row:hover { background: rgba(255, 255, 255, 0.04); }
+
+.tor-tree__caret {
+    appearance: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-faint);
+    transition: transform var(--motion-fast), color var(--motion-fast);
+}
+.tor-tree__caret:hover { color: var(--text); }
+.tor-tree__caret.is-open { transform: rotate(90deg); }
+.tor-tree__caret--leaf { cursor: default; }
+
+/* Custom tri-state checkbox (check / dash / empty) — avoids JS interop for the
+   native indeterminate property and matches the accent token. */
+.tor-tree__check {
+    appearance: none;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border-strong, rgba(255, 255, 255, 0.25));
+    background: transparent;
+    display: inline-grid;
+    place-items: center;
+    color: #fff;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+    padding: 0;
+}
+.tor-tree__check:hover { border-color: var(--accent-hi); }
+.tor-tree__check.is-on,
+.tor-tree__check.is-partial {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.tor-tree__dash {
+    width: 8px;
+    height: 2px;
+    background: #fff;
+    border-radius: 1px;
+}
+
+.tor-tree__ficon {
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-faint);
+}
+.tor-tree__row:not(.tor-tree__row--file) .tor-tree__ficon { color: var(--accent-hi); }
+
+.tor-tree__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    color: var(--text);
+}
+.tor-tree__size {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 /* Spacing between successive form rows in the drawer body. */
 .tor-add__field { margin-bottom: 14px; }
 
@@ -1018,15 +1157,23 @@
 }
 
 .tor-table tbody td {
-    padding: var(--space-4) var(--space-4);
-    /* v5: the previous 1px on --border was so soft against the table body
-       that the row separator read as a fuzzy gradient when the progress
-       bar's gradient bled near it ("кривая линия"). Bumped to a clean
-       solid 1px on a deliberately-flat token + isolation so progress fill
-       glow can't shimmer over the join. */
-    border-bottom: 1px solid var(--border-strong);
+    /* 1:1 with TorrentHistory's .th-table td — identical padding, border token
+       and (crucially) NO `isolation: isolate`. The old isolation-per-cell hack
+       was meant to stop the progress-bar gradient bleeding onto the row join,
+       but under border-collapse it split the shared bottom border into per-cell
+       segments that rendered with sub-pixel seams — THAT was the "кривая линия"
+       the user kept seeing. The history table never had isolation and its rows
+       are clean, so we match it exactly here. */
+    /* Fixed 44px rows so the active table and the history table line up 1:1.
+       Equal padding alone wasn't enough — active rows carry 28px icon buttons
+       + an 8px progress bar, history rows carry only text, so the content
+       height (and thus row height) differed. A fixed height with centered
+       content (vertical-align: middle) makes both tables share the exact row
+       rhythm. Reset to auto on mobile, where cells become stacked blocks. */
+    height: 44px;
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--border);
     vertical-align: middle;
-    isolation: isolate;
 }
 
 .tor-table tbody tr:last-child td { border-bottom: 0; }
@@ -1458,13 +1605,16 @@
 
     .tor-table tbody td {
         display: block;
+        height: auto;          /* reset the desktop fixed row height */
         padding: 0;
         border-bottom: 0;
         min-width: 0;
     }
 
     /* 6-cell active table: name / state / progress / down / up / actions. */
-    .tor-table tbody tr td:nth-child(1) { grid-area: name; min-width: 0; }
+    /* Reset the desktop `max-width: 0` ellipsis hack — here the cell is a
+       display:block grid item, where max-width:0 would collapse it to zero. */
+    .tor-table tbody tr td:nth-child(1) { grid-area: name; min-width: 0; max-width: none; }
     .tor-table tbody tr td:nth-child(2) { grid-area: meta; font-size: 11px; color: var(--text-dim); }
     .tor-table tbody tr td:nth-child(3) { grid-area: progress; }
     .tor-table tbody tr td:nth-child(4),
