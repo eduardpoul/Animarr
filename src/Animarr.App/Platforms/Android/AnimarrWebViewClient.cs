@@ -55,42 +55,27 @@ internal sealed class AnimarrWebViewClient : WebViewClient
 
             // Resolve the real target URL one of two ways:
             //
-            //   1. `/_animarr_proxy_/<url-encoded-base>/path?query`
-            //      — same-origin shim from animarr-player.js's
-            //      animarrSetApiBase helper. Chromium would block a raw
-            //      http:// fetch from an HTTPS page (mixed-content gate
-            //      fires before us), so the JS rewrites to this same-origin
-            //      path. We undo the rewrite here.
+            //   1. `/_animarr_proxy_?u=<url-encoded-full-url>` — same-origin
+            //      shim from animarr-player.js's fetch/XHR wrappers. Chromium
+            //      blocks a raw http:// fetch from an HTTPS page (mixed-content
+            //      gate fires before us), so the JS rewrites the whole target
+            //      URL into the `u` query param (path-normalisation can't touch
+            //      query strings, unlike an embedded-in-path approach). We
+            //      decode `u` here to recover the real URL.
             //
             //   2. Plain `http://server/path` — direct cleartext URL, used
             //      by <img>/<audio> tags that Chromium classifies as
             //      "passive" mixed content and allows through to us.
             string? targetUri = null;
-            const string proxyPrefix = "/_animarr_proxy_/";
-            int prefixIdx = uri.IndexOf(proxyPrefix, System.StringComparison.Ordinal);
-            if (prefixIdx >= 0)
+            const string proxyMarker = "/_animarr_proxy_?u=";
+            int markerIdx = uri.IndexOf(proxyMarker, System.StringComparison.Ordinal);
+            if (markerIdx >= 0)
             {
-                var remainder = uri.Substring(prefixIdx + proxyPrefix.Length);
-                // Take the URL-encoded base up to the first '/' or '?'
-                // (whichever comes first); everything after is the path +
-                // query to append to the decoded base.
-                int slash = remainder.IndexOf('/');
-                int query = remainder.IndexOf('?');
-                int delim = (slash < 0) ? query
-                          : (query < 0) ? slash
-                          : System.Math.Min(slash, query);
-                string encodedBase, suffix;
-                if (delim >= 0)
-                {
-                    encodedBase = remainder.Substring(0, delim);
-                    suffix      = remainder.Substring(delim);
-                }
-                else
-                {
-                    encodedBase = remainder;
-                    suffix      = string.Empty;
-                }
-                targetUri = System.Uri.UnescapeDataString(encodedBase) + suffix;
+                // Everything after `u=` is the single URL-encoded target.
+                // encodeURIComponent escapes '&' to %26 so there's never a
+                // stray param after it — the rest of the string is all ours.
+                var enc = uri.Substring(markerIdx + proxyMarker.Length);
+                targetUri = System.Uri.UnescapeDataString(enc);
             }
             else if (uri.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
             {

@@ -48,8 +48,26 @@
                         only and swallowed click events. Default
                         touch-action (auto) keeps taps working; overscroll
                         alone is enough to kill the jelly bounce. */
-                     overscroll-behavior: none; }
-        .status-bar-safe-area { height: env(safe-area-inset-top); background: #14171b; }
+                     overscroll-behavior: none;
+                     /* Kill the residual horizontal "twitch": OverScrollMode
+                        .Never removed the stretch, but any element that's a
+                        hair wider than the viewport (full-bleed hero, a
+                        rounding overshoot) still lets the document scroll a
+                        few px sideways and snap back. `overflow-x: clip`
+                        makes horizontal scrolling impossible. `clip` (not
+                        `hidden`) so overflow-y stays `visible` and the body
+                        keeps scrolling vertically — `hidden` on one axis
+                        would force the other to `auto` and break that. */
+                     overflow-x: clip; }
+        /* Edge-to-edge: the hero bleeds UP under the status bar, so we do NOT
+           want an opaque spacer there. This div used to be height:0 on Android
+           because the WebView didn't fill env(safe-area-inset-top) — but on
+           Android 15 / Chromium 148 env() IS filled, turning it into a ~44px
+           #14171b strip that covered the top of the hero ("картинка не
+           доезжает до шапки"). Hidden outright; the status-bar clearance for
+           non-hero content is handled by .animarr-main's padding-top + the
+           fixed mobile-nav, not by this spacer. */
+        .status-bar-safe-area { display: none; }
 
         /* Boot placeholder — paints inside #app until Blazor mounts and
            swaps the children for Routes content. Mirrors the WASM client's
@@ -119,21 +137,34 @@
         // (50-200 KB each) that's a one-time hit on first paint; subsequent
         // renders pull from the browser's normal data-URL cache.
         (function () {
-            var pending = new WeakSet();   // imgs already in flight
-            var resolved = new WeakSet();  // imgs whose src is now data:
+            var pending = new WeakSet();    // imgs already in flight
+            var lastSrc = new WeakMap();    // img -> the http src we last proxied
 
             async function rewriteImg(img) {
-                if (!img || pending.has(img) || resolved.has(img)) return;
+                if (!img || pending.has(img)) return;
                 var src = img.getAttribute('src');
+                // Only http:// needs proxying. A data: / https: / relative src
+                // (incl. one WE just set) is already safe — bail.
                 if (!src || !src.toLowerCase().startsWith('http://')) return;
+                // Already proxied THIS exact http src? Skip. But if the src
+                // changed to a DIFFERENT http URL (the hero reuses the same
+                // <img> node and just swaps src on its 30s rotation), the
+                // WeakMap miss lets us re-proxy — otherwise the new URL stays
+                // an http:// src that Chromium blocks as mixed content and the
+                // hero image silently disappears.
+                if (lastSrc.get(img) === src) return;
                 if (!window.DotNet) return;  // not ready yet
                 pending.add(img);
                 try {
                     var dataUrl = await DotNet.invokeMethodAsync(
                         'Animarr.App', 'FetchImageAsDataUrl', src);
                     if (dataUrl && dataUrl.length > 0) {
-                        img.src = dataUrl;
-                        resolved.add(img);
+                        // Guard against a rotation that swapped src again while
+                        // we awaited — don't paint a stale image over a newer one.
+                        if (img.getAttribute('src') === src) {
+                            lastSrc.set(img, src);
+                            img.src = dataUrl;
+                        }
                     }
                 } catch (e) {
                     // Leave the broken-image icon visible — that's a
@@ -238,9 +269,17 @@
                 meta.setAttribute('name', 'viewport');
                 document.head.appendChild(meta);
             }
-            var scale = window.innerWidth / 1280;
+            // Virtual CSS width the TV lays out at. The page is then zoomed
+            // (initial-scale) to fit the real screen, so a BIGGER number
+            // means everything renders proportionally SMALLER on the panel
+            // and more poster columns fit per row. Bumped 1280 → 1500 because
+            // the 10-foot UI was "громадное" — 1500 shrinks all chrome ~15%
+            // and lets the catalog grid show ~7-8 cards/row (paired with the
+            // html.tv-mode .catalog-grid override in components.css).
+            var TV_VW = 1500;
+            var scale = window.innerWidth / TV_VW;
             meta.setAttribute('content',
-                'width=1280, initial-scale=' + scale.toFixed(3) +
+                'width=' + TV_VW + ', initial-scale=' + scale.toFixed(3) +
                 ', maximum-scale=' + scale.toFixed(3) +
                 ', user-scalable=no');
 
@@ -274,6 +313,70 @@
                     document.documentElement.classList.add('tv-mode');
                 }
             } catch (_) { /* method not wired (non-MAUI host) — silent */ }
+
+            // Pull the loopback media-proxy base from .NET (with retry — the
+            // call dispatcher can lag the DotNet global). animarr-player.js
+            // routes ALL server fetches through this (http://127.0.0.1:<port>)
+            // instead of the plain-HTTP LAN URL, so hls.js streams over loopback
+            // (no mixed content, no base64 bridge → no freeze). We PULL it here
+            // rather than relying on a pushed global, which was getting lost to
+            // the EvaluateJavascript-vs-document-load race. Empty string (non-
+            // Android / proxy off) leaves animarrLocalProxyBase unset → the web
+            // player uses the real server base directly (plain browser).
+            for (var pk = 0; pk < 60; pk++) {
+                try {
+                    var proxyBase = await window.DotNet.invokeMethodAsync('Animarr.App', 'GetLocalProxyBase');
+                    if (proxyBase) {
+                        window.animarrLocalProxyBase = proxyBase;
+                        // Re-point any apiBase already set before we landed.
+                        if (typeof window.animarrSetApiBase === 'function' && window.animarrApiBaseRaw)
+                            window.animarrSetApiBase(window.animarrApiBaseRaw);
+                    }
+                    console.info('animarr: local proxy base =', proxyBase || '(none)',
+                        'after ' + pk + ' retries');
+                    break;
+                } catch (e) {
+                    if (pk === 59) {
+                        console.info('animarr: proxy-base query gave up:', (e && e.message) || e);
+                        break;
+                    }
+                    await new Promise(function (r) { setTimeout(r, 100); });
+                }
+            }
+
+            // Cache the authoritative native-player availability (Android TV
+            // *and* phone/tablet) into a class so
+            // animarrNativePlayer.isAvailable() can answer synchronously from
+            // animarr-player.js attach(). On Android this flips the phone onto
+            // the native ExoPlayer path, bypassing the base64 mixed-content
+            // bridge that freezes WebView (hls.js) playback. The HUD overlay
+            // is identical on both paths, so the on-screen UI doesn't change.
+            // RETRY the probe: window.DotNet.invokeMethodAsync can EXIST a beat
+            // before Blazor's .NET call dispatcher is actually wired, so the
+            // first call(s) throw "No call dispatcher has been set". We retry
+            // for a few seconds until it succeeds. (attach() also re-probes via
+            // isAvailableAsync at play time, so this boot cache is just an
+            // early-warm; if it never lands, playback still gates correctly.)
+            for (var k = 0; k < 60; k++) {
+                try {
+                    var nativeOk = await window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable');
+                    if (nativeOk === true) {
+                        document.documentElement.classList.add('animarr-native-ok');
+                    }
+                    console.info('animarr: native player gate =', nativeOk,
+                        '(animarr-native-ok class '
+                        + (nativeOk === true ? 'ADDED' : 'not added')
+                        + ', after ' + k + ' retries)');
+                    break;
+                } catch (e) {
+                    if (k === 59) {
+                        console.info('animarr: native player gate gave up:',
+                            (e && e.message) || e);
+                        break;
+                    }
+                    await new Promise(function (r) { setTimeout(r, 100); });
+                }
+            }
         })();
 
         // Spatial D-pad navigation lives in _content/Animarr.UI/tv-nav.js
@@ -339,6 +442,18 @@
                 console.warn('animarrSubnetScan failed', e);
                 return [];
             }
+        };
+
+        // Player fullscreen / immersive bridges (Android). animarr-player.js
+        // calls these to rotate the device on the fullscreen button (YouTube
+        // style) and to hide the system status/nav bars in landscape. Defined
+        // only on the MAUI host — the plain browser player falls back to the
+        // Fullscreen API and skips immersive.
+        window.animarrSetOrientation = function (mode) {
+            try { DotNet.invokeMethodAsync('Animarr.App', 'SetOrientation', mode); } catch (e) {}
+        };
+        window.animarrSetImmersive = function (on) {
+            try { DotNet.invokeMethodAsync('Animarr.App', 'SetImmersive', !!on); } catch (e) {}
         };
 
         // Ask the MAUI host to grant the OS-level CAMERA permission ahead of
@@ -438,19 +553,43 @@
          long since mounted. -->
     <script>
         window.animarrNativePlayer = {
-            // Phase 2b gate. Returns true on Android TV (where MAUI's
-            // index.html boot script has stamped `.animarr-tv-host` on
-            // <html>), false on phones/desktop/iOS where the Artplayer
-            // path is the right choice. The class is set synchronously
-            // at boot time so this check is safe to call from
-            // animarr-player.js attach() — no async dance needed.
+            // Native-path gate. True on ANY Android host (TV and phone/tablet)
+            // — see NativePlayerService.IsAvailable for why the native ExoPlayer
+            // path is used everywhere (it bypasses the base64 mixed-content
+            // bridge that otherwise freezes WebView playback).
             //
-            // Note: this is a UA/viewport heuristic, not the authoritative
-            // FEATURE_LEANBACK signal. To verify from the C# side at
-            // runtime, call NativePlayerIsAvailable directly from devtools:
-            //   await DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable')
+            // SYNC variant: reads the cached `animarr-native-ok` class. Kept
+            // for any sync caller, but DON'T rely on it being set early — the
+            // boot-time probe that sets it can run before Blazor's .NET call
+            // dispatcher is ready ("No call dispatcher has been set"), in which
+            // case the class is absent until the ASYNC probe below populates it.
             isAvailable: function () {
-                return document.documentElement.classList.contains('animarr-tv-host');
+                return document.documentElement.classList.contains('animarr-native-ok');
+            },
+
+            // ASYNC variant — the AUTHORITATIVE gate. animarr-player.js attach()
+            // awaits this the moment the user starts playback, by which point
+            // the Blazor .NET call dispatcher is guaranteed ready, so the query
+            // actually succeeds (unlike the early boot probe, which races it).
+            // Caches the result into the class on success so the sync getter
+            // and subsequent calls are correct too. Returns a Promise<boolean>;
+            // resolves false on any error so the web player is the safe default.
+            isAvailableAsync: function () {
+                if (!window.DotNet || typeof window.DotNet.invokeMethodAsync !== 'function')
+                    return Promise.resolve(
+                        document.documentElement.classList.contains('animarr-native-ok'));
+                return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable')
+                    .then(function (ok) {
+                        if (ok === true)
+                            document.documentElement.classList.add('animarr-native-ok');
+                        console.info('animarr: native gate (async) =', ok);
+                        return ok === true;
+                    })
+                    .catch(function (e) {
+                        console.info('animarr: native gate (async) threw',
+                            (e && e.message) || e);
+                        return false;
+                    });
             },
 
             play: function (url, opts) {

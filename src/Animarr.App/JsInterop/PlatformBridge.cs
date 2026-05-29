@@ -68,6 +68,25 @@ public static class PlatformBridge
     }
 
     /// <summary>
+    /// Loopback media-proxy base URL (e.g. <c>http://127.0.0.1:49xxx</c>) the
+    /// WebView should route player/media fetches through, or empty string if the
+    /// proxy isn't running (non-Android, or start failed). The page PULLS this
+    /// on boot (with retry) rather than relying on a pushed global, because
+    /// EvaluateJavascript from BlazorWebViewInitialized races the document load
+    /// and the value was getting lost. See animarr-player.js apiBase().
+    /// </summary>
+    [JSInvokable("GetLocalProxyBase")]
+    public static string GetLocalProxyBase()
+    {
+#if ANDROID
+        var p = Services.LocalMediaProxyService.Instance;
+        return p is { Port: > 0 } ? p.BaseUrl : "";
+#else
+        return "";
+#endif
+    }
+
+    /// <summary>
     /// Drain any pending deep-link target captured by <see cref="MainActivity"/>'s
     /// Intent handling (Google TV's Continue Watching tile tap fires an
     /// <c>animarr://play/{mediaId}</c> Intent.ActionView at us). Returns the
@@ -153,6 +172,80 @@ public static class PlatformBridge
 #else
         await Task.CompletedTask;
         return true;
+#endif
+    }
+
+    /// <summary>
+    /// Lock the activity to a screen orientation (YouTube-style fullscreen
+    /// toggle on phones). <paramref name="mode"/>: "landscape" → SensorLandscape,
+    /// "portrait" → Portrait, anything else ("auto") → Unspecified (release the
+    /// lock, follow the manifest/sensor). No-op off Android.
+    /// </summary>
+    [JSInvokable("SetOrientation")]
+    public static void SetOrientation(string mode)
+    {
+#if ANDROID
+        try
+        {
+            var activity = Microsoft.Maui.ApplicationModel.Platform.CurrentActivity;
+            if (activity is null) return;
+            Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(() =>
+            {
+                try
+                {
+                    activity.RequestedOrientation = mode switch
+                    {
+                        "landscape" => Android.Content.PM.ScreenOrientation.SensorLandscape,
+                        "portrait"  => Android.Content.PM.ScreenOrientation.Portrait,
+                        _           => Android.Content.PM.ScreenOrientation.Unspecified,
+                    };
+                }
+                catch { }
+            });
+        }
+        catch { }
+#endif
+    }
+
+    /// <summary>
+    /// Hide (immersive) or show the system status / nav bars. The player calls
+    /// this with <c>true</c> while in landscape so video is truly full-screen,
+    /// and <c>false</c> in portrait / on close so the bars (and the portrait
+    /// HUD that sits below them) return. No-op off Android.
+    /// </summary>
+    [JSInvokable("SetImmersive")]
+    public static void SetImmersive(bool immersive)
+    {
+#if ANDROID
+        try
+        {
+            var activity = Microsoft.Maui.ApplicationModel.Platform.CurrentActivity;
+            var window = activity?.Window;
+            var decor = window?.DecorView;
+            if (window is null || decor is null) return;
+            Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(() =>
+            {
+                try
+                {
+                    var controller = global::AndroidX.Core.View.WindowCompat
+                        .GetInsetsController(window, decor);
+                    if (controller is null) return;
+                    var bars = global::AndroidX.Core.View.WindowInsetsCompat.Type.SystemBars();
+                    if (immersive)
+                    {
+                        controller.SystemBarsBehavior = global::AndroidX.Core.View
+                            .WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
+                        controller.Hide(bars);
+                    }
+                    else
+                    {
+                        controller.Show(bars);
+                    }
+                }
+                catch { }
+            });
+        }
+        catch { }
 #endif
     }
 }
