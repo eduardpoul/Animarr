@@ -278,7 +278,13 @@ public sealed class HlsSessionService : IDisposable
         // When below the source height it forces a re-encode (you can't shrink
         // a stream-copy). The HUD's Quality popup restarts the session with a
         // new cap, same as audio-track switching.
-        int maxHeight = 0)
+        int maxHeight = 0,
+        // Absolute path to an EXTERNAL audio file (a sideload dub track that
+        // isn't muxed in the source). When set, ffmpeg takes it as a second
+        // input and maps `1:a:{audioTrackIndex}` instead of the source's audio
+        // — see BuildFfmpegArgs. The video plan (TS vs fMP4) is unaffected; only
+        // the audio mapping changes. null = use the source's own audio.
+        string? externalAudioPath = null)
     {
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
         // 1) Kill EXISTING sessions for the same source file — a second Play
@@ -428,15 +434,23 @@ public sealed class HlsSessionService : IDisposable
         //   calibration test clip isn't representative of stream-copy timing).
         //   TS stream-copy → uses 0; PCR inside TS handles A/V sync natively
         //   and any -itsoffset would just throw it off.
-        var audioOffsetSec = plan switch
-        {
-            HlsPlan.Fmp4VaapiReencode    => audioOffsetHwSec,
-            HlsPlan.Fmp4NvencReencode    => audioOffsetHwSec,  // same -bf 0 sync profile as VAAPI
-            HlsPlan.Fmp4SoftwareReencode => audioOffsetHwSec,  // libx264 -bf 0, same profile
-            HlsPlan.Fmp4StreamCopy       => audioOffsetSwSec,
-            HlsPlan.TsStreamCopy         => 0.0,
-            _                            => 0.0,
-        };
+        var audioOffsetSec = externalAudioPath is not null
+            // External dub sync is a different problem from the source's own A/V
+            // wobble (it depends on how the dub was authored vs the video cut),
+            // so we route it through the manual SW slider for EVERY video plan —
+            // including TS, which otherwise applies no offset. The player forces
+            // the Sync control to the 'sw' channel whenever an external track is
+            // active so the user has a knob to nudge it.
+            ? audioOffsetSwSec
+            : plan switch
+            {
+                HlsPlan.Fmp4VaapiReencode    => audioOffsetHwSec,
+                HlsPlan.Fmp4NvencReencode    => audioOffsetHwSec,  // same -bf 0 sync profile as VAAPI
+                HlsPlan.Fmp4SoftwareReencode => audioOffsetHwSec,  // libx264 -bf 0, same profile
+                HlsPlan.Fmp4StreamCopy       => audioOffsetSwSec,
+                HlsPlan.TsStreamCopy         => 0.0,
+                _                            => 0.0,
+            };
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
@@ -446,7 +460,8 @@ public sealed class HlsSessionService : IDisposable
         var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
-            audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex);
+            audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
+            externalAudioPath: externalAudioPath);
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
@@ -473,7 +488,8 @@ public sealed class HlsSessionService : IDisposable
         }
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
-            probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight);
+            probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
+            externalAudioPath);
         _sessions[token] = session;
 
         // Drain stderr — visible at Warning level so genuine encoder issues
@@ -742,7 +758,8 @@ public sealed class HlsSessionService : IDisposable
                 reuseInit: true,
                 targetHeight: session.MaxHeight,
                 audioOffsetSec: session.AudioOffsetSec,
-                audioTrackIndex: session.AudioTrackIndex);
+                audioTrackIndex: session.AudioTrackIndex,
+                externalAudioPath: session.ExternalAudioPath);
 
             var psi = new ProcessStartInfo
             {
@@ -1040,7 +1057,14 @@ public sealed class HlsSessionService : IDisposable
         double audioOffsetSec = 0.04,
         // Audio stream index inside the source (0 = first). Threaded through
         // to each Build*Args branch which substitutes it in the `-map` arg.
-        int audioTrackIndex = 0)
+        // When externalAudioPath is set, this is the index WITHIN the external
+        // file instead (almost always 0 — dub files carry a single stream).
+        int audioTrackIndex = 0,
+        // External sideload audio file. When non-null, every plan takes it as a
+        // SECOND ffmpeg input and maps its audio (`-map 1:a:{audioTrackIndex}`)
+        // — re-encoded to browser-safe AAC — instead of the source's own audio.
+        // The video pipeline (TS copy / fMP4 / re-encode) is unchanged.
+        string? externalAudioPath = null)
     {
         var args = new List<string>();
         var videoCodec = probe?.VideoCodec;
@@ -1058,20 +1082,24 @@ public sealed class HlsSessionService : IDisposable
         switch (plan)
         {
             case HlsPlan.TsStreamCopy:
-                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex);
+                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex,
+                    externalAudioPath, audioOffsetSec);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
-                BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex);
+                BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
+                    externalAudioPath);
                 break;
             case HlsPlan.Fmp4NvencReencode:
-                BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex);
+                BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
+                    externalAudioPath);
                 break;
             case HlsPlan.Fmp4StreamCopy:
-                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex);
+                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
+                    externalAudioPath);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, probe?.Height ?? 0, audioTrackIndex);
+                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath);
                 break;
         }
 
@@ -1134,14 +1162,36 @@ public sealed class HlsSessionService : IDisposable
     /// absolute clock-time the player can chase. Audio gets AAC re-encoded
     /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
     private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        string? audioCodec, int startNumber, int audioTrackIndex)
+        string? audioCodec, int startNumber, int audioTrackIndex,
+        string? externalAudioPath = null, double audioOffsetSec = 0.0)
     {
+        bool ext = externalAudioPath is not null;
+
+        // Input #0 — source. Video always; its own audio too unless an external
+        // dub replaces it.
         if (seekSec > 0)
         {
             args.Add("-ss");
             args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
         }
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
+
+        // Input #1 — external dub audio (a second input), sync-shifted via
+        // -itsoffset exactly like the fMP4 paths. The TS path is normally
+        // single-input, so this is only wired in when a dub is selected.
+        if (ext)
+        {
+            if (seekSec > 0)
+            {
+                args.Add("-ss");
+                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            }
+            args.Add("-itsoffset");
+            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
+            args.Add("-i");
+            args.Add(externalAudioPath!);
+        }
+
         // -copyts so the output PCR carries the SOURCE position (= K*segDur
         // for a seg-K restart) instead of being rebased to 0. Without this,
         // a resume/scrub-restart writes seg-K with PCR=0 while the playlist
@@ -1156,17 +1206,15 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
-            "-map", $"0:a:{audioTrackIndex}?",
+            "-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
-        // Audio: passthrough when the browser can decode it inside MPEG-TS.
-        // Conservative — only AAC and MP3 actually decode in MSE across all
-        // major browsers. AC3/E-AC3 in TS technically works in Chrome but
-        // is blocked in Firefox and inconsistently in Safari; safer to
-        // transcode to AAC stereo for those. Was previously incorrectly
-        // allowing AC3/EAC3 through, which produced silent or stuttering
-        // playback in non-Chrome browsers.
-        if (IsBrowserCompatibleAudioInTs(audioCodec))
+        // Audio: an external dub is always AAC-transcoded — its codec is
+        // unknown here (.mka can hold FLAC/AC3/DTS/…) so we can't risk a copy.
+        // For the source's own audio, passthrough when the browser can decode
+        // it inside MPEG-TS (AAC/MP3 only across all browsers; AC3/E-AC3 work
+        // in Chrome but break Firefox/Safari, so those re-encode to AAC).
+        if (!ext && IsBrowserCompatibleAudioInTs(audioCodec))
         {
             args.AddRange(new[] { "-c:a", "copy" });
         }
@@ -1180,7 +1228,8 @@ public sealed class HlsSessionService : IDisposable
     /// Used for HEVC 8-bit on hosts with /dev/dri available. Combined with
     /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex)
+        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
+        string? externalAudioPath = null)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -1208,7 +1257,9 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
 
         // Input #1 — audio only, sync-offset baked in via -itsoffset. Software
-        // demuxes audio so we don't fight VAAPI's audio path.
+        // demuxes audio so we don't fight VAAPI's audio path. When an external
+        // dub is selected this input points at THAT file instead of the source
+        // (its audio is mapped below); the same -ss/-itsoffset apply.
         if (seekSec > 0)
         {
             args.Add("-ss");
@@ -1217,7 +1268,7 @@ public sealed class HlsSessionService : IDisposable
         args.Add("-itsoffset");
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
-        args.Add(fullPath);
+        args.Add(externalAudioPath ?? fullPath);
 
         if (startNumber > 0)
         {
@@ -1250,7 +1301,8 @@ public sealed class HlsSessionService : IDisposable
     /// NVIDIA hosts. -bf 0 still applied so B-frame reorder doesn't
     /// reintroduce the fMP4 TFDT sync wobble.</summary>
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex)
+        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
+        string? externalAudioPath = null)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -1268,6 +1320,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
 
         // Input #1 — audio with -itsoffset (same trick as VAAPI/SW paths).
+        // Points at the external dub file when one is selected.
         if (seekSec > 0)
         {
             args.Add("-ss");
@@ -1276,7 +1329,7 @@ public sealed class HlsSessionService : IDisposable
         args.Add("-itsoffset");
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
-        args.Add(fullPath);
+        args.Add(externalAudioPath ?? fullPath);
 
         if (startNumber > 0)
         {
@@ -1316,7 +1369,8 @@ public sealed class HlsSessionService : IDisposable
     /// than the source). HDR is flattened to SDR (no tonemap) — fine for a
     /// downscaled rung on a small screen.</summary>
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex)
+        double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex,
+        string? externalAudioPath = null)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -1327,6 +1381,7 @@ public sealed class HlsSessionService : IDisposable
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
 
         // Input #1 — audio with -itsoffset (same A/V-sync trick as the GPU paths).
+        // Points at the external dub file when one is selected.
         if (seekSec > 0)
         {
             args.Add("-ss");
@@ -1335,7 +1390,7 @@ public sealed class HlsSessionService : IDisposable
         args.Add("-itsoffset");
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
-        args.Add(fullPath);
+        args.Add(externalAudioPath ?? fullPath);
 
         if (startNumber > 0)
         {
@@ -1370,11 +1425,16 @@ public sealed class HlsSessionService : IDisposable
     /// input — same trick the VAAPI path uses. Without this knob the user
     /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex)
+        int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
+        string? externalAudioPath = null)
     {
-        bool useDualInput = audioOffsetSec != 0.0;
+        // A second input is needed either to shift the source's own audio
+        // (-itsoffset) OR to pull audio from an external dub file. The external
+        // case forces dual-input regardless of offset.
+        bool ext          = externalAudioPath is not null;
+        bool useDualInput = audioOffsetSec != 0.0 || ext;
 
-        // Input #0 — video (and audio when not using -itsoffset)
+        // Input #0 — video (and audio when not using a second input)
         if (seekSec > 0)
         {
             args.Add("-ss");
@@ -1382,9 +1442,8 @@ public sealed class HlsSessionService : IDisposable
         }
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
 
-        // Input #1 — same file, but with audio shifted by -itsoffset. Only
-        // wired in when the user has a non-zero offset; saves the extra
-        // demuxer pass otherwise.
+        // Input #1 — audio with -itsoffset. The source file itself for a pure
+        // sync nudge, or the external dub file when one is selected.
         if (useDualInput)
         {
             if (seekSec > 0)
@@ -1395,7 +1454,7 @@ public sealed class HlsSessionService : IDisposable
             args.Add("-itsoffset");
             args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
             args.Add("-i");
-            args.Add(fullPath);
+            args.Add(externalAudioPath ?? fullPath);
         }
         if (startNumber > 0)
         {
@@ -1712,6 +1771,10 @@ public sealed class HlsSessionService : IDisposable
         // Output height cap (0 = native). Carried so the seek-restart re-runs
         // ffmpeg with the same downscale instead of reverting to source res.
         public int     MaxHeight  { get; }
+        // External sideload audio file (null = use the source's own audio).
+        // Carried so a backward-scrub restart keeps muxing the same dub track
+        // instead of silently reverting to the source audio.
+        public string? ExternalAudioPath { get; }
         public DateTime CreatedAt  { get; }
         public DateTime LastActive { get; private set; }
 
@@ -1734,7 +1797,7 @@ public sealed class HlsSessionService : IDisposable
 
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
-            int audioTrackIndex, int maxHeight)
+            int audioTrackIndex, int maxHeight, string? externalAudioPath = null)
         {
             Token       = token;
             SourcePath  = source;
@@ -1748,6 +1811,7 @@ public sealed class HlsSessionService : IDisposable
             TotalDurationSec = totalDurationSec;
             AudioTrackIndex  = audioTrackIndex;
             MaxHeight   = maxHeight;
+            ExternalAudioPath = externalAudioPath;
             CreatedAt   = DateTime.UtcNow;
             LastActive  = DateTime.UtcNow;
         }

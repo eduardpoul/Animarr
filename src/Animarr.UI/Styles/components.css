@@ -2151,15 +2151,33 @@ html.tv-mode .d-mobile-nav {
        Higher specificity than `.d-mobile-nav{display:flex}` so it wins. */
     html:has(.d-mdhero) .d-mobile-nav { display: none; }
 
-    /* Page header — title scales down, right-side actions wrap below. */
+    /* Page header — title scales down, right-side actions wrap to their own
+       line. Use flex-WRAP (still a row), NOT flex-direction:column. Column
+       stacked every child vertically, so the PageBack arrow floated in its own
+       centred row ABOVE the title instead of sitting to its left. With wrap,
+       PageBack + the title block stay on row 1 and only .d-page-header__right
+       (width:100%) drops to row 2. */
     .d-page-header {
-        flex-direction: column;
-        align-items: stretch;
+        flex-wrap: wrap;
+        align-items: flex-start;
         gap: 14px;
     }
     .d-page-header__title { font-size: 30px; letter-spacing: -0.4px; }
     .d-page-header--big .d-page-header__title { font-size: 44px; letter-spacing: -0.8px; }
     .d-page-header__right { width: 100%; flex-wrap: wrap; }
+    /* Pin the back chip to the TOP of the header (a constant distance below the
+       logo) instead of vertically centring it. Centred, it slid up/down with
+       the header height — short title vs title+2-line subtitle — so it
+       "jumped" between pages. A small top nudge lines its centre up with the
+       overline/title cap. */
+    .d-page-header .d-page-back,
+    .d-page-header .d-server__mback {
+        align-self: flex-start;
+        margin-top: 2px;
+    }
+    /* Keep the title block's own top alignment tidy now that the row is
+       flex-start (the main column holds overline → title → sub top-down). */
+    .d-page-header__main { align-self: flex-start; }
 
     /* Containers shrink. */
     .d-container { padding: 0 20px; }

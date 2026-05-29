@@ -242,6 +242,20 @@
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[c]));
     }
+    /** Build the player accent colour from the active --accent-hue (set by the
+     *  theme / user accent picker), keeping the player's own bright L/C so it
+     *  reads well over video. Mirrors the --hud-accent token in
+     *  animarr-player.css. Falls back to hue 245 (blue) when unset. */
+    function accentThemeColor() {
+        let hue = 245;
+        try {
+            const v = getComputedStyle(document.documentElement)
+                .getPropertyValue('--accent-hue').trim();
+            const n = parseFloat(v);
+            if (Number.isFinite(n)) hue = n;
+        } catch {}
+        return `oklch(0.72 0.18 ${hue})`;
+    }
 
     // ─────────────────────────────────────────────────────────────────
     //  Player adapter abstraction (Phase 1, 2026-05-27)
@@ -596,6 +610,33 @@
         return 'hw';
     }
 
+    /** Merge in-file audio streams and discovered external dub files into one
+     *  ordered list for the Audio picker. Embedded streams come first (their
+     *  source index preserved); external entries follow, each labelled with its
+     *  file extension in parentheses (e.g. "Russian · AniLibria (mka)") so the
+     *  user can tell a sideload dub from a muxed track. Each option carries a
+     *  `current` flag so the popup highlights the active selection.
+     *  Shape: { kind:'embedded', index, label, current }
+     *       | { kind:'external', path,  label, current } */
+    function buildAudioOptions(entry) {
+        const opts = [];
+        const extActive = entry.currentExternalAudioPath || null;
+        (entry.audioList || []).forEach(a => {
+            opts.push({
+                kind: 'embedded', index: a.index, label: a.label,
+                current: !extActive && a.index === entry.currentAudIdx,
+            });
+        });
+        (entry.externalAudioList || []).forEach(t => {
+            opts.push({
+                kind: 'external', path: t.path,
+                label: t.label + ' (' + t.ext + ')',
+                current: extActive === t.path,
+            });
+        });
+        return opts;
+    }
+
     /** Read the user's HUD style preference. Defaults to "icons" (the
      *  minimal naked-icons variant) per user spec on 2026-05-27. */
     function readStylePref() {
@@ -855,7 +896,10 @@
     }
 
     // ── audio-offset slider popup ─────────────────────────────────────
-    function openOffsetPopup(root, anchor, channel) {
+    // `labelOverride` lets the caller relabel the slider (e.g. "External dub")
+    // when the 'sw' channel is being reused for external-audio sync rather than
+    // its usual HDR/10-bit stream-copy role.
+    function openOffsetPopup(root, anchor, channel, labelOverride) {
         const existing = root.querySelector('.vp-hud-popup');
         if (existing) {
             const wasFor = existing.getAttribute('data-anchor');
@@ -867,9 +911,9 @@
             ?? (channel === 'hw' ? 70 : 0);
         const min = -200;
         const max = channel === 'sw' ? 700 : 300;
-        const label = channel === 'sw'
+        const label = labelOverride || (channel === 'sw'
             ? 'HDR / 10-bit (stream-copy)'
-            : 'Standard (re-encode)';
+            : 'Standard (re-encode)');
 
         const popup = document.createElement('div');
         popup.className = 'vp-hud-popup vp-hud-popup--slider';
@@ -1472,6 +1516,11 @@
             ? Math.max(0, opts.maxHeight) : 0;
         const forceResumeSec  = (opts && Number.isFinite(opts.forceResumeSec))
             ? Math.max(0, opts.forceResumeSec)  : null;
+        // Absolute path to an external dub audio file to mux in place of the
+        // source's own audio. Carried across re-attaches by switchAudio /
+        // switchQuality so changing quality doesn't silently drop the dub.
+        const externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
+            ? opts.externalAudioPath : null;
         if (typeof window.Artplayer !== 'function') {
             console.error('animarrPlayer: Artplayer not loaded from CDN');
             return;
@@ -1489,6 +1538,12 @@
             mediaInfo: null, subtitleList: [], audioList: [],
             currentSubIdx: null, currentAudIdx: audioTrackIndex,
             currentMaxHeight: maxHeight,
+            // External-track state. currentExternalAudioPath != null means the
+            // active audio is a sideload dub (not an in-file stream); the two
+            // external lists are filled from /api/external-tracks below.
+            currentExternalAudioPath: externalAudioPath,
+            currentExtSubPath: null,
+            externalAudioList: [], externalSubList: [],
             // Captured so switchAudio() can re-attach with a new audio index
             // without needing the .NET-side parameters again.
             mediaPath, dotnetRef,
@@ -1536,7 +1591,8 @@
             + '&audioOffsetHwMs=' + audioOffsetMsHw
             + '&audioOffsetSwMs=' + audioOffsetMsSw
             + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
-            + (maxHeight > 0 ? '&maxHeight=' + maxHeight : ''));
+            + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
+            + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
@@ -1663,7 +1719,36 @@
         entry.subtitleList = subtitleList;
         entry.audioList    = audioList;
 
-        const offsetChannel = determineOffsetChannel(entry.output, mediaInfo);
+        // ── 4b) External (sideload) tracks ────────────────────────────
+        // Dubs / sidecar subs discovered next to the video (Tier 0/1 in
+        // ExternalTrackService). Non-fatal — any failure just means no
+        // external entries appear in the Audio / CC pickers.
+        let externalAudioList = [];
+        let externalSubList   = [];
+        if (mediaPath) {
+            try {
+                const extRes = await fetch(
+                    apiUrl('/api/external-tracks?path=' + encodeURIComponent(mediaPath)),
+                    { signal: abort.signal });
+                if (abort.signal.aborted) return;
+                if (extRes.ok) {
+                    const all = await extRes.json();
+                    externalAudioList = (all || []).filter(t => t.kind === 'audio');
+                    externalSubList   = (all || []).filter(t => t.kind === 'subtitle');
+                }
+            } catch (err) {
+                if (err.name !== 'AbortError') console.warn('external-tracks fetch failed', err);
+            }
+        }
+        entry.externalAudioList = externalAudioList;
+        entry.externalSubList   = externalSubList;
+
+        // External dub sync always rides the manual 'sw' slider channel (the
+        // server routes its -itsoffset through audioOffsetSwSec for every
+        // plan), so surface the Sync control whenever an external audio track
+        // is active — even on the TS path that otherwise has no offset knob.
+        let offsetChannel = determineOffsetChannel(entry.output, mediaInfo);
+        if (externalAudioPath) offsetChannel = 'sw';
 
         // ── 5) Instantiate player + adapter ───────────────────────────
         const playUrl = directPlayUrl
@@ -1813,7 +1898,9 @@
             // We do hotkeys ourselves so arrows = 10s (not Artplayer's 5s)
             // and TV-remote media keys all route through one handler.
             hotkey: false,
-            theme: 'oklch(0.72 0.18 245)',
+            // Match Artplayer's internal accent (loading spinner etc.) to the
+            // user's/theme's accent hue — same formula as the HUD's --hud-accent.
+            theme: accentThemeColor(),
             lang: 'en',
             moreVideoAttr: { crossorigin: 'anonymous' },
             subtitle: subtitleList.length > 0 ? {
@@ -1883,34 +1970,67 @@
             },
             offset: () => {
                 if (!offsetChannel || !window.animarrCalibrate) return;
-                openOffsetPopup(hudRoot, 'offset', offsetChannel);
+                openOffsetPopup(hudRoot, 'offset', offsetChannel,
+                    entry.currentExternalAudioPath ? 'External dub sync' : null);
             },
             audio: () => {
-                if (entry.audioList.length === 0) return;
+                const aopts = buildAudioOptions(entry);
+                if (aopts.length === 0) return;
+                const curIdx = Math.max(0, aopts.findIndex(o => o.current));
                 openPickerPopup(hudRoot, 'audio', 'Audio tracks',
-                    entry.audioList.map(a => a.label),
-                    entry.currentAudIdx,
+                    aopts.map(o => o.label), curIdx,
                     (i) => {
-                        if (i === entry.currentAudIdx) return;
-                        // HLS sessions transcode a single audio stream, so live
-                        // switching via hls.js / video.audioTracks is a no-op.
-                        // We tear down the session and start a fresh one with
-                        // `-map 0:a:{i}?` baked into ffmpeg, carrying current
-                        // position over as the resume seek.
-                        switchAudioTrack(elementId, i);
+                        const o = aopts[i];
+                        if (!o || o.current) return;
+                        // No live switching with our single-stream transcode —
+                        // tear the session down and restart, mapping either the
+                        // chosen in-file stream (`-map 0:a:N`) or the external
+                        // dub file (`-map 1:a:0`), carrying the position over.
+                        switchAudio(elementId, {
+                            audioTrackIndex:   o.kind === 'embedded' ? o.index : 0,
+                            externalAudioPath: o.kind === 'external' ? o.path : null,
+                        });
                     });
             },
             cc: () => {
-                const items = ['Off', ...entry.subtitleList.map(s => s.name)];
-                const cur = entry.currentSubIdx == null ? 0 : entry.currentSubIdx + 1;
+                // Embedded subtitle streams first, then sidecar subtitle files
+                // (labelled with their extension). Selection is tracked by
+                // currentSubIdx (embedded) OR currentExtSubPath (external).
+                const emb = entry.subtitleList   || [];
+                const ext = entry.externalSubList || [];
+                const items = ['Off',
+                    ...emb.map(s => s.name),
+                    ...ext.map(s => s.label + ' (' + s.ext + ')')];
+                let cur = 0;
+                if (entry.currentExtSubPath != null) {
+                    const ei = ext.findIndex(s => s.path === entry.currentExtSubPath);
+                    if (ei >= 0) cur = 1 + emb.length + ei;
+                } else if (entry.currentSubIdx != null) {
+                    cur = entry.currentSubIdx + 1;
+                }
                 openPickerPopup(hudRoot, 'cc', 'Subtitles', items, cur, (i) => {
                     if (i === 0) {
                         adapter.setSubtitle(null);
                         entry.currentSubIdx = null;
-                    } else {
-                        const s = entry.subtitleList[i - 1];
+                        entry.currentExtSubPath = null;
+                        return;
+                    }
+                    const idx = i - 1;
+                    if (idx < emb.length) {
+                        const s = emb[idx];
                         adapter.setSubtitle({ url: s.url, name: s.name, type: 'vtt' });
-                        entry.currentSubIdx = i - 1;
+                        entry.currentSubIdx = idx;
+                        entry.currentExtSubPath = null;
+                    } else {
+                        // Sidecar subtitle file → /api/subtitle converts it to
+                        // WebVTT on the fly (a standalone .srt/.ass exposes its
+                        // single subtitle stream as 0:s:0).
+                        const s = ext[idx - emb.length];
+                        const url = apiUrl('/api/subtitle?path=' + encodeURIComponent(s.path)
+                            + '&track=0&format=webvtt');
+                        adapter.setSubtitle({ url, name: s.label, type: 'vtt' });
+                        entry.currentSubIdx = null;
+                        entry.currentExtSubPath = s.path;
                     }
                 });
             },
@@ -1988,6 +2108,14 @@
                     let a = o.audioCodec.toUpperCase() + (chLabel ? ' ' + chLabel : '');
                     if (o.audioLanguage) a += ' (' + o.audioLanguage.toUpperCase() + ')';
                     lines.push('Audio: ' + a);
+                }
+                // When an external dub is muxed in, `o.audioCodec` still
+                // describes the SOURCE audio (the server probes the source),
+                // so add an explicit line for the active sideload track.
+                if (entry.currentExternalAudioPath) {
+                    const exo = (entry.externalAudioList || [])
+                        .find(t => t.path === entry.currentExternalAudioPath);
+                    lines.push('Dub: ' + (exo ? exo.label + ' (' + exo.ext + ')' : 'External file'));
                 }
                 const planTag = {
                     'directplay':     'Direct Play',
@@ -2183,13 +2311,16 @@
      * URL doesn't change but the HUD's currentAudIdx state and any future
      * audio-track-based logic should reflect the new selection.
      */
-    async function switchAudioTrack(elementId, audioTrackIndex) {
+    async function switchAudio(elementId, sel) {
         const entry = WIRED.get(elementId);
         if (!entry || !entry.adapter) return;
         const pos       = entry.adapter.currentTime || 0;
         const dotnetRef = entry.dotnetRef;
         const mediaPath = entry.mediaPath;
         if (!dotnetRef || !mediaPath) return;
+        // Preserve the current quality cap across an audio switch (the old
+        // by-index helper dropped it, reverting to source resolution).
+        const maxHeight = entry.currentMaxHeight || 0;
         // Tear down the old session synchronously — detach() handles HLS
         // DELETE + Artplayer destroy + WIRED cleanup.
         detach(elementId);
@@ -2198,9 +2329,17 @@
         // dedup-by-source-path step inside StartAsync).
         await new Promise(r => setTimeout(r, 100));
         await attach(elementId, dotnetRef, mediaPath, {
-            audioTrackIndex,
-            forceResumeSec: pos,
+            audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? sel.audioTrackIndex : 0,
+            externalAudioPath: (sel && sel.externalAudioPath) || null,
+            maxHeight,
+            forceResumeSec:    pos,
         });
+    }
+
+    // Back-compat thin wrapper: switch to an in-file audio stream by index
+    // (clears any active external dub).
+    async function switchAudioTrack(elementId, audioTrackIndex) {
+        return switchAudio(elementId, { audioTrackIndex, externalAudioPath: null });
     }
 
     /**
@@ -2221,6 +2360,8 @@
         await new Promise(r => setTimeout(r, 100));
         await attach(elementId, dotnetRef, mediaPath, {
             audioTrackIndex,
+            // Keep the active external dub across a quality change.
+            externalAudioPath: entry.currentExternalAudioPath || null,
             maxHeight,
             forceResumeSec: pos,
         });
@@ -2316,6 +2457,6 @@
     window.animarrPlayer = {
         attach, flush, detach,
         setMediaSession, setWatchNextMeta, togglePictureInPicture,
-        setStyle, switchAudioTrack,
+        setStyle, switchAudioTrack, switchAudio,
     };
 })();

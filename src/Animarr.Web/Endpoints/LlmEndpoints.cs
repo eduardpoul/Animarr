@@ -86,7 +86,12 @@ internal static class LlmEndpoints
                     Error: ex.Message));
             }
         })
-        .RequireAuthorization("manageSystem")
+        // Was .RequireAuthorization("manageSystem") — NO such policy is
+        // registered (Program.cs registers ViewContent / UploadContent /
+        // SystemSettings / ManageUsers). An unknown policy name makes ASP.NET
+        // throw "policy not found" BEFORE the handler runs → instant 500
+        // ("Failed after 0 ms"). Use the real systemSettings policy.
+        .RequireAuthorization(Animarr.Web.Services.Auth.AuthConstants.Policies.SystemSettings)
         .WithName("LlmTestPing");
 
         return app;

@@ -120,6 +120,10 @@ public static class ApiRoutes
     public const string HlsSessions    = "/api/hls/sessions";
     public const string Probe          = "/api/probe";
     public const string Subtitle       = "/api/subtitle";
+    /// <summary>GET <c>?path=&lt;video&gt;</c> — external (sideload) audio + subtitle
+    /// tracks discovered next to / under the video. Returns <c>ExternalTrackDto[]</c>.
+    /// Drives the player's external-track entries in the Audio / Subtitles pickers.</summary>
+    public const string ExternalTracks = "/api/external-tracks";
 
     // ─── Auth (v4) ───────────────────────────────────────────────────────
     public const string AuthLogin    = "/api/auth/login";

@@ -213,11 +213,23 @@
         return best;
     }
 
-    function focusElement(el) {
+    function focusElement(el, scroll = true) {
         if (!el) return;
         try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
         // After focus, smoothly scroll into the centre of the viewport. If the
         // element is already fully visible this is a no-op.
+        //
+        // scroll=false is used for the on-LANDING default-focus pick
+        // (focusFirstInMain). There the focus target may be a primary CTA that
+        // lives BELOW the fold — e.g. a movie with no Continue action pins
+        // autofocus on the bottom MovieFileCard's Play button. Centring that in
+        // the viewport scrolled the whole page down on mount, shoving the hero
+        // (with its Back / Favorite / Edit chrome) above the fold — the
+        // "hero flies off / favorite+edit buttons disappear" bug. On landing we
+        // keep the viewport at the top and only MOVE focus, never the page.
+        // D-pad navigation (arrow keys) still passes scroll=true so the newly
+        // focused neighbour is brought into view.
+        if (!scroll) return;
         try {
             el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
         } catch (_) {
@@ -479,7 +491,9 @@
                     const active = document.activeElement;
                     if (active && active !== document.body && active === pinned) return;
                 }
-                focusElement(pinned);
+                // scroll=false — keep the viewport at the top of the freshly
+                // mounted page; only move focus. (See focusElement.)
+                focusElement(pinned, false);
                 return;
             }
             // Priority 2: first focusable in main.
@@ -490,12 +504,38 @@
                 const active = document.activeElement;
                 if (active && active !== document.body && main.contains(active)) return;
             }
-            focusElement(cands[0]);
+            // scroll=false — landing focus never moves the viewport. (See focusElement.)
+            focusElement(cands[0], false);
         });
     }
     window.addEventListener('Animarr:navigated', focusFirstInMain);
     window.addEventListener('popstate',          focusFirstInMain);
     window.addEventListener('hashchange',        focusFirstInMain);
+
+    // Reset the main scroller to the top on every FORWARD SPA navigation.
+    // Blazor preserves scroll position across NavigateTo, so opening a movie
+    // from a scrolled-down catalog left the detail page scrolled into the
+    // MIDDLE of the hero — its top chrome (back chip + favorite / edit) sat
+    // above the fold and looked like the hero had "flown off". `.animarr-main`
+    // is the real scroll container (body is overflow:hidden). Not tv-gated —
+    // applies on web + TV. popstate (Back) is intentionally left alone.
+    function scrollMainToTop() {
+        // Reset every plausible scroll root — the scroller differs by build
+        // (document vs the .animarr-main / .animarr-shell containers) — and do
+        // it at THREE moments: immediately (old page still mounted), next frame
+        // (new page's first paint), and after a short delay (async data + hero
+        // image load can reflow and re-introduce a scroll offset).
+        const reset = () => {
+            try { window.scrollTo(0, 0); } catch (_) { /* no-op */ }
+            const se = document.scrollingElement;
+            if (se) se.scrollTop = 0;
+            document.querySelectorAll('.animarr-main, .animarr-shell').forEach(el => { el.scrollTop = 0; });
+        };
+        reset();
+        requestAnimationFrame(reset);
+        setTimeout(reset, 90);
+    }
+    window.addEventListener('Animarr:navigated', scrollMainToTop);
 
     // ─────────────────────────────────────────────────────────────────
     // History-API hook for SPA navigation.
@@ -604,5 +644,12 @@
         refocusAutofocus() { focusFirstInMain(true); },
         focusElement,
         findNeighbour,
+        /// Reset every plausible scroll root to the top. Pages call this from
+        /// their post-async-load OnAfterRenderAsync (MediaDetail) so the
+        /// viewport sits at the page top once the real (tall) content has
+        /// rendered — the navigation-time scrollMainToTop fires BEFORE the
+        /// async data arrives, so a Blazor-side call after load is the reliable
+        /// belt-and-suspenders reset.
+        scrollToTop() { scrollMainToTop(); },
     };
 })();

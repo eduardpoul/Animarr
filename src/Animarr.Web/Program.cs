@@ -97,6 +97,7 @@ builder.Services.AddSingleton<DlnaService>();
 // Settings UI can show what's actually usable on this host.
 builder.Services.AddSingleton<HardwareInfoService>();
 builder.Services.AddScoped<MediaFileResolver>();
+builder.Services.AddScoped<ExternalTrackService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
@@ -753,12 +754,32 @@ app.MapPost("/api/hls/start", async (
         // Below the source height it forces a re-encode/downscale. Surfaced via
         // the HUD's Quality popup, which restarts the session with a new cap.
         int? maxHeight,
+        // Absolute path to an external sideload audio file (a dub track that
+        // isn't muxed in the source). When set, the session muxes it as a
+        // second ffmpeg input and Direct Play is skipped (we must transcode to
+        // combine the foreign audio with the source video). Discovered by
+        // /api/external-tracks; re-validated here against the library roots.
+        string? externalAudio,
         IDbContextFactory<AppDbContext> dbFactory,
         HlsSessionService hls,
         ILoggerFactory loggerFactory) =>
 {
     var (ok, fullPath, earlyResult) = await ResolveAllowedPathAsync(path, dbFactory);
     if (!ok) return earlyResult!;
+
+    // Validate the external audio path the same way (must be inside a watched
+    // root + exist). On failure we DON'T fail playback — we just drop the dub
+    // and play the source's own audio, which is the least-surprising fallback
+    // for a stale path.
+    string? externalAudioFull = null;
+    if (!string.IsNullOrWhiteSpace(externalAudio))
+    {
+        var (extOk, extFull, _) = await ResolveAllowedPathAsync(externalAudio, dbFactory);
+        if (extOk) externalAudioFull = extFull;
+        else loggerFactory.CreateLogger("ApiHls")
+                 .LogWarning("HLS start: ignoring out-of-bounds external audio {Path}", externalAudio);
+    }
+
     try
     {
         var seekSec = seek is > 0 ? seek.Value : 0d;
@@ -768,7 +789,12 @@ app.MapPost("/api/hls/start", async (
         // player point at /api/file. Zero transcode, instant start, perfect
         // sync. This is Plex/Jellyfin's "Direct Play" tier — the first
         // choice the server makes before falling back to transcoding.
-        var decision = await hls.ChoosePlaybackAsync(fullPath!);
+        // Skip the Direct Play probe entirely when an external dub is in play:
+        // combining foreign audio with the source video requires the HLS mux
+        // path, so a direct file URL would silently drop the dub.
+        var decision = externalAudioFull is null
+            ? await hls.ChoosePlaybackAsync(fullPath!)
+            : new HlsSessionService.PlaybackDecision(false, null, 0, null);
         if (decision.DirectPlay && decision.DirectUrl is not null)
         {
             return Results.Ok(new
@@ -813,7 +839,8 @@ app.MapPost("/api/hls/start", async (
             audioOffsetHwSec: audioOffsetHwSec,
             audioOffsetSwSec: audioOffsetSwSec,
             audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
-            maxHeight:        Math.Max(0, maxHeight ?? 0));
+            maxHeight:        Math.Max(0, maxHeight ?? 0),
+            externalAudioPath: externalAudioFull);
         return Results.Ok(new
         {
             token        = result.Token,
@@ -1104,6 +1131,25 @@ app.MapGet("/api/probe", async (
     }
 })
 .WithName("GetProbe")
+.AllowAnonymous();
+
+// ─── /api/external-tracks — sideload audio/subtitle files for a video ─────
+// Deterministic Tier-0 (sidecar) + Tier-1 (episode bucket) discovery — see
+// ExternalTrackService. Returns ExternalTrackDto[]; the player merges audio
+// entries into the Audio picker (played via a second ffmpeg input) and
+// subtitle entries into the CC picker (converted by /api/subtitle).
+app.MapGet(Animarr.Shared.ApiRoutes.ExternalTracks, async (
+        string path,
+        IDbContextFactory<AppDbContext> dbFactory,
+        ExternalTrackService externalTracks,
+        CancellationToken ct) =>
+{
+    var (ok, fullPath, earlyResult) = await ResolveAllowedPathAsync(path, dbFactory);
+    if (!ok) return earlyResult!;
+    var tracks = await externalTracks.FindForVideoAsync(fullPath!, ct);
+    return Results.Ok(tracks);
+})
+.WithName("GetExternalTracks")
 .AllowAnonymous();
 
 // ─── /api/subtitle — extract one subtitle track as VTT (default) or ASS ───

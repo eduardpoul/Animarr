@@ -32,7 +32,7 @@
                 <button type="button" class="emd__back tv-focus"
                         @onclick="@(() => _mobileShowingDetail = false)"
                         aria-label="Back to metadata sections">
-                    <DIcon Name="arrow-l" Size="18" />
+                    <DIcon Name="chev-l" Size="18" />
                 </button>
             }
             else
@@ -392,8 +392,9 @@
             await Api.ResolveMediaCandidateAsync(Item.Id,
                 new ResolveCandidateRequest(source, externalId.Trim()));
             await OnSaved.InvokeAsync();
+            Toasts.ShowSuccess("Re-identified from the new source ID.");
         }
-        catch { /* swallow */ }
+        catch (Exception ex) { Toasts.ShowError($"Apply failed: {ex.Message}"); }
     }
 
     private Task ApplyTmdbAsync() => ApplySourceAsync(_tmdbIsTv ? "tmdb_tv" : "tmdb_movie", _tmdbIdInput ?? "");

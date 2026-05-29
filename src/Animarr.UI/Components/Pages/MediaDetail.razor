@@ -448,6 +448,16 @@ else
             _didAutoFocus = true;
             try { await JS.InvokeVoidAsync("animarrTvNav.refocusAutofocus"); }
             catch { /* non-tv host — no-op */ }
+
+            // Reset scroll to the page top now that the REAL (tall) content has
+            // rendered. Blazor preserves scroll position across SPA navigation,
+            // so opening a movie from a scrolled-down catalog otherwise lands
+            // mid-hero with the Back / Favorite / Edit chrome above the fold
+            // ("hero flew off / favorite+edit buttons gone"). The JS reset that
+            // fires at navigation time runs BEFORE this async load completes, so
+            // we re-assert it here — the reliable moment, post-render.
+            try { await JS.InvokeVoidAsync("animarrTvNav.scrollToTop"); }
+            catch { /* host without tv-nav.js — no-op */ }
         }
 
         if (_playerPath is not null && _playerSelfRef is null)

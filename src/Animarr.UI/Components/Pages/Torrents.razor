@@ -33,7 +33,9 @@
        menu in a follow-up (for now still reachable via /torrents/history). *@
     <div class="d-page-header__right">
         <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
-            <DIcon Name="archive" Size="13" /> History
+            @* "clock" — DIcon has no "archive", so it was rendering the missing-
+               icon "?" glyph. clock reads as "history/past". *@
+            <DIcon Name="clock" Size="13" /> History
         </Btn>
         <Btn Variant="primary" Size="md" OnClick="OpenAdd">
             <DIcon Name="plus" Size="14" /> Add
@@ -69,8 +71,11 @@
         <div class="tor-add__segment" role="tablist">
             @foreach (var (key, label, icon) in new[]
                 {
-                    ("magnet", "Magnet link", "link"),
-                    ("file",   ".torrent file", "paperclip"),
+                    // .torrent first, magnet second (per request). Icon was
+                    // "paperclip" — not in the DIcon set, so it rendered the
+                    // missing-icon "?"; use the real "torrent" glyph.
+                    ("file",   ".torrent file", "torrent"),
+                    ("magnet", "Magnet link",  "link"),
                     ("upload", "Upload files", "download"),
                 })
             {
@@ -111,7 +116,7 @@
                     <div class="tor-add__dropzone-content">
                         @if (_addFileName is null)
                         {
-                            <DIcon Name="paperclip" Size="20" />
+                            <DIcon Name="torrent" Size="20" />
                             <div class="tor-add__dropzone-prompt">
                                 Drop a .torrent file or <span class="tor-add__dropzone-browse">browse</span>
                             </div>
@@ -427,7 +432,7 @@ else
                             <div class="tor-progress tor-progress--info">
                                 <div class="animarr-progress">
                                     <div class="animarr-progress__track">
-                                        <div class="animarr-progress__fill" style="width:@(progress*100)%"></div>
+                                        <div class="animarr-progress__fill" style="@(System.FormattableString.Invariant($"width:{progress * 100:F1}%"))"></div>
                                     </div>
                                 </div>
                                 <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
@@ -437,6 +442,14 @@ else
                         <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.UploadRate ?? 0)</td>
                         <td class="tor-col-actions">
                             <div class="tor-actions">
+                                @* Edit (settings drawer): folder, file selection,
+                                   rate limits, etc. Every row here is a torrent or
+                                   magnet — plain uploads never create a record — so
+                                   the pencil shows on all of them. Clicking the name
+                                   opens the same drawer. *@
+                                <button class="tor-iconbtn" title="Edit" @onclick="@(() => OpenEdit(t.InfoHash))">
+                                    <DIcon Name="pencil" Size="13" />
+                                </button>
                                 @if (paused)
                                 {
                                     <button class="tor-iconbtn" title="Resume" @onclick="@(() => ResumeAsync(t.Id))">
@@ -449,7 +462,7 @@ else
                                         <DIcon Name="pause" Size="13" />
                                     </button>
                                 }
-                                <button class="tor-iconbtn tor-iconbtn--danger" title="Remove" @onclick="@(() => DeleteAsync(t.Id))">
+                                <button class="tor-iconbtn tor-iconbtn--danger" title="Remove" @onclick="@(() => _deleteTarget = t)">
                                     <DIcon Name="trash" Size="13" />
                                 </button>
                             </div>
@@ -469,6 +482,42 @@ else
                  OnDeleted="OnTorrentDeleted" />
 }
 
+@* Delete confirmation — the trash button no longer deletes instantly; it asks
+   whether to keep or wipe the downloaded files. *@
+@if (_deleteTarget is { } del)
+{
+    <SettingsEditDrawer IsOpen="true"
+                        Title="@($"Remove “{del.Name}”?")"
+                        Overline="DANGER"
+                        Hint="Stop this transfer and remove it from the list."
+                        Icon="warn"
+                        Tone="warn"
+                        OnClose="@(() => _deleteTarget = null)">
+        <Body>
+            <div class="tor-del">
+                <p class="tor-del__copy">Choose what to remove — this can't be undone.</p>
+                <ul class="tor-del__effects">
+                    <li><DIcon Name="check" Size="13" />
+                        <span><strong>Torrent only</strong> — removes the entry from the list; the downloaded files stay on disk.</span></li>
+                    <li><DIcon Name="trash" Size="13" />
+                        <span><strong>Torrent + files</strong> — also deletes the downloaded files from disk.</span></li>
+                </ul>
+            </div>
+        </Body>
+        <Footer>
+            <Btn Variant="danger" Size="md" Loading="@_deleting" OnClick="@(() => ConfirmDeleteAsync(true))">
+                <DIcon Name="trash" Size="13" /> Torrent + files
+            </Btn>
+            <Btn Variant="primary" Size="md" Disabled="@_deleting" OnClick="@(() => ConfirmDeleteAsync(false))">
+                Torrent only
+            </Btn>
+            <Btn Variant="ghost" Size="md" Disabled="@_deleting" OnClick="@(() => _deleteTarget = null)">
+                Cancel
+            </Btn>
+        </Footer>
+    </SettingsEditDrawer>
+}
+
 @code {
     private TorrentRecordDto[]? _records;
     private FolderWatcherDto[]? _folders;
@@ -482,7 +531,7 @@ else
     private HubConnection? _hub;
 
     private bool   _addOpen;
-    private string _addSource = "magnet";
+    private string _addSource = "file";   // .torrent tab is first / default
     private string _addMagnet = "";
     private string? _addFileName;
     private byte[]? _addFileBytes;
@@ -524,7 +573,7 @@ else
     /// cancelled session doesn't bleed into the next attempt.</summary>
     private void OpenAdd()
     {
-        _addSource     = "magnet";
+        _addSource     = "file";
         _addMagnet     = "";
         _addFileName   = null;
         _addFileBytes  = null;
@@ -906,10 +955,27 @@ else
         catch { /* swallow */ }
     }
 
-    private async Task DeleteAsync(Guid id)
+    // Torrent the delete-confirmation drawer is bound to. Null = closed.
+    private TorrentRecordDto? _deleteTarget;
+    private bool _deleting;
+
+    /// <summary>Commit the delete chosen in the confirm drawer. deleteFiles=false
+    /// keeps the downloaded media on disk (just drops the torrent + record);
+    /// true also wipes the files. Either way the row leaves the list (the server
+    /// hard-deletes the record).</summary>
+    private async Task ConfirmDeleteAsync(bool deleteFiles)
     {
-        try { await Api.DeleteTorrentAsync(id, deleteFiles: false); await LoadAsync(); }
-        catch { /* swallow */ }
+        if (_deleteTarget is null) return;
+        _deleting = true;
+        StateHasChanged();
+        try
+        {
+            await Api.DeleteTorrentAsync(_deleteTarget.Id, deleteFiles);
+            _deleteTarget = null;
+            await LoadAsync();
+        }
+        catch { /* swallow — drawer stays open so the user can retry */ }
+        finally { _deleting = false; StateHasChanged(); }
     }
 
     public async ValueTask DisposeAsync()
