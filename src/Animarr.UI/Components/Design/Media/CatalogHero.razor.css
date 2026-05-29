@@ -143,12 +143,12 @@
 /* ── Mobile / tablet — shrink hero. */
 @media (max-width: 959px) {
     .d-hero {
-        height: clamp(360px, 56vh, 520px);
+        height: clamp(400px, 54vh, 520px);
         /* Negate animarr-main's mobile top padding (which is now
            56px + safe-area-inset-top to clear the fixed mobile nav) +
            side padding so the hero bleeds edge-to-edge AND extends up
            behind the transparent nav. */
-        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
+        margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
     .d-hero__content {
         padding: var(--space-6) var(--space-7) var(--space-7);
@@ -163,7 +163,7 @@
 /* ── Phone — single-column title, hide oversized CJK watermark. */
 @media (max-width: 639px) {
     .d-hero {
-        height: clamp(320px, 52vh, 460px);
+        height: clamp(420px, 54vh, 500px);
     }
     .d-hero__content {
         padding: var(--space-5) var(--space-5) var(--space-6);

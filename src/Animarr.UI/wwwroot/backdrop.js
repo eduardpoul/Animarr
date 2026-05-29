@@ -30,7 +30,28 @@ window.restoreGlobalBackdrop = function () {
     }
 };
 
-window.initBackdrop = function (urls, intervalSec, blurPx, brightness) {
+// Resolve an image URL into something the renderer will actually paint as a
+// CSS background-image. Catalog/fanart URLs are plain http:// (LAN server),
+// but in the MAUI WebView the page is served from https://0.0.0.x/ and
+// Chromium blocks http:// CSS background-images as MIXED CONTENT. The in-page
+// proxy in index.html only rewrites <img src> (not background-image), so the
+// backdrop silently failed on phone/TV. Here we fetch the bytes through the
+// .NET bridge and hand back a data: URL on MAUI; on the web (https server) the
+// URL is same-scheme and used as-is.
+async function _resolveBgUrl(url) {
+    if (!url) return '';
+    try {
+        if (url.toLowerCase().startsWith('http://')
+            && window.DotNet && typeof window.DotNet.invokeMethodAsync === 'function') {
+            const dataUrl = await window.DotNet.invokeMethodAsync(
+                'Animarr.App', 'FetchImageAsDataUrl', url);
+            if (dataUrl && dataUrl.length > 0) return dataUrl;
+        }
+    } catch (_) { /* bridge missing / fetch failed — fall back to the raw URL */ }
+    return url;
+}
+
+window.initBackdrop = async function (urls, intervalSec, blurPx, brightness) {
     stopBackdrop();
     if (!urls || urls.length === 0) return;
 
@@ -48,15 +69,20 @@ window.initBackdrop = function (urls, intervalSec, blurPx, brightness) {
     const filter = `blur(${blurPx}px) brightness(${brightness / 100}) saturate(0.95)`;
     const style = `position:absolute;inset:0;background-size:cover;background-position:center;transition:opacity 1.2s ease;pointer-events:none;filter:${filter};`;
 
-    a.style.cssText = style + `background-image:url('${_encUrl(urls[0])}');opacity:1;`;
+    const first = _encUrl(await _resolveBgUrl(urls[0]));
+    // A newer init() may have superseded us while we awaited the proxy fetch —
+    // bail so we don't paint a stale backdrop over the current one.
+    if (_slideUrls !== urls) return;
+
+    a.style.cssText = style + `background-image:url('${first}');opacity:1;`;
     b.style.cssText = style + `opacity:0;`;
 
     if (urls.length < 2) return;
 
     let useA = true;
-    _backdropInterval = setInterval(() => {
+    _backdropInterval = setInterval(async () => {
         _slideIndex = (_slideIndex + 1) % _slideUrls.length;
-        const nextUrl = _encUrl(_slideUrls[_slideIndex]);
+        const nextUrl = _encUrl(await _resolveBgUrl(_slideUrls[_slideIndex]));
         if (useA) {
             b.style.backgroundImage = `url('${nextUrl}')`;
             b.style.opacity = '1';
@@ -83,6 +109,7 @@ window.stopBackdrop = function () {
 };
 
 function _encUrl(url) {
-    // Escape single quotes in URLs to avoid breaking CSS
+    // Escape single quotes in URLs to avoid breaking CSS. data: URLs (from the
+    // MAUI proxy) contain no quotes, so this is a no-op for them.
     return url ? url.replace(/'/g, "%27") : '';
 }

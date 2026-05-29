@@ -16,6 +16,7 @@
 *@
 
 <header class="d-page-header">
+    <PageBack />
     <div class="d-page-header__main">
         <div class="d-page-header__overline">TRANSFERS</div>
         <h1 class="d-page-header__title">TORRENTS</h1>
@@ -518,7 +519,12 @@ else
     /// child rows when files land, so a torrent pointed straight at a section
     /// would orphan its files. Keep only leaves.</summary>
     private IEnumerable<FolderWatcherDto> FolderOptions()
-        => (_folders ?? Array.Empty<FolderWatcherDto>()).Where(f => !f.IsSection);
+        => (_folders ?? Array.Empty<FolderWatcherDto>())
+            // Skip section CONTAINERS (not real download targets) and flat-section
+            // LEAF rows (SingleFilePath != null) — those point at an individual
+            // video file, not a folder, so they showed up as bogus "movies" in the
+            // destination picker. Only real, writable folders remain.
+            .Where(f => !f.IsSection && f.SingleFilePath is null);
 
     private async Task OnTorrentFilePicked(InputFileChangeEventArgs e)
     {

@@ -23,11 +23,9 @@
 
 <div class="search-page">
     <header class="search-page__head">
-        <button type="button" class="search-page__back tv-focus"
-                @onclick="@(() => Nav.NavigateTo("/"))"
-                aria-label="@L["search.btn_back"]">
-            <DIcon Name="chev-l" Size="14" />
-        </button>
+        @* Unified back affordance — same PageBack arrow as Downloads /
+           Server settings so the control is identical across pages. *@
+        <PageBack />
 
         <div class="search-page__input-wrap">
             <DIcon Name="search" Size="16" />

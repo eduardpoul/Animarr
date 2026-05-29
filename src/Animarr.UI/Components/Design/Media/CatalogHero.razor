@@ -23,7 +23,8 @@
 {
     var item = _active;
     var pager = PagerStyle;
-    <section class="@($"d-hero d-chero d-chero--pager-{pager}")" style="--hue: @(item.Hue ?? 0)">
+    <section class="@($"d-hero d-chero d-chero--pager-{pager}")" style="--hue: @(item.Hue ?? 0)"
+             @ontouchstart="OnTouchStart" @ontouchend="OnTouchEnd">
         <div class="d-hero__bg">
             @if (!string.IsNullOrEmpty(item.FanartPath))
             {
@@ -69,7 +70,13 @@
             }
 
             <div class="d-hero__actions">
-                <Btn Variant="primary" Size="lg" OnClick="@(() => Nav.NavigateTo($"/catalog/{item.Id}"))">
+                @* data-tv-autofocus parks the remote on Open detail when Home
+                   mounts and CatalogContinueHero isn't rendered (user has
+                   nothing in progress). Falls through to first focusable
+                   in main when neither hero is shown. *@
+                <Btn Variant="primary" Size="lg"
+                     OnClick="@(() => Nav.NavigateTo($"/catalog/{item.Id}"))"
+                     data-tv-autofocus="true">
                     <DIcon Name="play" Size="16" /> Open detail
                 </Btn>
             </div>
@@ -164,19 +171,19 @@
 
     /// <summary>Lower-cased pager style: "f" (default) / "g" / "h". Read on
     /// every render so a switch in ProfilePanel takes effect without
-    /// remounting the hero. Unknown values fall back to "f" so a stale
-    /// client can't render an unknown markup branch.</summary>
+    /// remounting the hero. Unknown/empty values fall back to "g" (Chevrons)
+    /// so a stale client can't render an unknown markup branch.</summary>
     private string PagerStyle
     {
         get
         {
             var s = UserCtx.Preferences?.HeroPagerStyle;
-            if (string.IsNullOrWhiteSpace(s)) return "f";
+            if (string.IsNullOrWhiteSpace(s)) return "g";
             return s.ToLowerInvariant() switch
             {
-                "g" => "g",
+                "f" => "f",
                 "h" => "h",
-                _   => "f",
+                _   => "g",
             };
         }
     }
@@ -248,6 +255,33 @@
     {
         if (Items.Count == 0) return;
         await SetIndex((_index - 1 + Items.Count) % Items.Count);
+    }
+
+    // ── Touch swipe (phones/tablets) ──────────────────────────────────
+    // Left swipe → next featured slot, right swipe → previous. Threshold +
+    // horizontal-dominance guard so a plain tap (Open detail) and vertical
+    // page scroll are untouched. Horizontal page scroll can't compete —
+    // index.html pins overflow-x:clip.
+    private double _swipeStartX;
+    private double _swipeStartY;
+    private bool _swipeTracking;
+
+    private void OnTouchStart(TouchEventArgs e)
+    {
+        if (e.Touches.Length == 0) { _swipeTracking = false; return; }
+        _swipeStartX = e.Touches[0].ClientX;
+        _swipeStartY = e.Touches[0].ClientY;
+        _swipeTracking = true;
+    }
+
+    private async Task OnTouchEnd(TouchEventArgs e)
+    {
+        if (!_swipeTracking || Items.Count <= 1 || e.ChangedTouches.Length == 0) return;
+        _swipeTracking = false;
+        var dx = e.ChangedTouches[0].ClientX - _swipeStartX;
+        var dy = e.ChangedTouches[0].ClientY - _swipeStartY;
+        if (System.Math.Abs(dx) < 45 || System.Math.Abs(dx) <= System.Math.Abs(dy)) return;
+        if (dx < 0) await NextManual(); else await PrevManual();
     }
 
     private async Task PushBackdropAsync(string path)

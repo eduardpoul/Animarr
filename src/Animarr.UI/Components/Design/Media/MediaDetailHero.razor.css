@@ -21,7 +21,7 @@
            padding so non-hero pages don't collide with the bar; the
            detail hero negates it so the fanart bleeds up behind the bar
            AND into the status-bar overlay area. */
-        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
+        margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
     /* Push the inner content (back chip, edit chip, poster, title block)
        down by the status-bar inset so they don't render under the
@@ -29,10 +29,10 @@
        filling the whole rect — only the foreground shifts. */
     .d-mdhero__back,
     .d-mdhero__top-actions {
-        top: calc(var(--space-4) + env(safe-area-inset-top, 0px)) !important;
+        top: calc(var(--space-4) + var(--animarr-safe-top)) !important;
     }
     .d-mdhero__content {
-        padding-top: calc(56px + env(safe-area-inset-top, 0px));
+        padding-top: calc(56px + var(--animarr-safe-top));
     }
 }
 
@@ -215,7 +215,7 @@
 /* ── Mobile / tablet — shrink hero, tighten poster, stack content. */
 @media (max-width: 959px) {
     .d-mdhero {
-        height: clamp(300px, 42vh, 420px);
+        height: clamp(400px, 54vh, 520px);
         margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-7);
     }
     .d-mdhero__content {
@@ -223,23 +223,40 @@
         gap: var(--space-5);
     }
     .d-mdhero__poster { width: 160px; }
-    .d-mdhero__back        { left:  var(--space-6); top: var(--space-5); }
-    .d-mdhero__top-actions { right: var(--space-6); top: var(--space-5); gap: var(--space-2); }
+    .d-mdhero__back        { left:  var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); }
+    .d-mdhero__top-actions { right: var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); gap: var(--space-2); }
     /* On tablets the Favorite chip drops its label and shows only the star
        so the action row stays compact. */
     .d-mdhero__fav span:not(.d-mdhero__fav-star) { display: none; }
+
+    /* Edit-metadata chip: drop the "Edit metadata" text on phone/tablet and
+       collapse to a square pencil-only button — the full label ate too much
+       of the cramped top-action row. */
+    .d-mdhero__edit-label { display: none; }
+    .d-mdhero__edit {
+        width: 32px;
+        padding: 0;
+        justify-content: center;
+        gap: 0;
+    }
 }
 
 /* ── Phone — stack poster above title, shrink everything. */
 @media (max-width: 639px) {
     .d-mdhero {
+        /* Match the home hero height (CatalogHero/CatalogContinueHero use the
+           same clamp at this breakpoint). min-height (not fixed height) so a
+           long 2-line title + poster never clips — it grows a touch instead. */
         height: auto;
-        min-height: 460px;
+        min-height: clamp(420px, 54vh, 500px);
     }
     .d-mdhero__content {
         flex-direction: column;
         align-items: flex-start;
-        padding: var(--space-5);
+        /* Push the poster/title down clear of the absolutely-positioned BACK +
+           fav/edit chrome (which sits at safe-top + ~12px, ~28px tall). Without
+           this the poster slid up UNDER the BACK button on long titles. */
+        padding: calc(var(--animarr-safe-top) + 52px) var(--space-5) var(--space-5);
         gap: var(--space-4);
     }
     .d-mdhero__poster { width: 110px; }
@@ -249,8 +266,8 @@
         right: 0;
         opacity: 0.7;
     }
-    .d-mdhero__back        { left:  var(--space-4); top: var(--space-4); height: 28px; padding: 0 var(--space-3); }
-    .d-mdhero__top-actions { right: var(--space-4); top: var(--space-4); gap: var(--space-2); }
+    .d-mdhero__back        { left:  var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); height: 28px; padding: 0 var(--space-3); }
+    .d-mdhero__top-actions { right: var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); gap: var(--space-2); }
     .d-mdhero__fav,
     .d-mdhero__edit { height: 28px; padding: 0 var(--space-3); }
 }

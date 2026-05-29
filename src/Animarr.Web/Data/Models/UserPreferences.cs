@@ -46,10 +46,10 @@ public class UserPreferences
     /// Stored as a slug so adding a new theme is a CSS-only change.</summary>
     public string Theme { get; set; } = "quietude";
 
-    /// <summary>Hero pager style — one of: f (transparent named pager, default),
-    /// g (hover chevrons + dash pager), h (numbered pills + chevrons). Applies
-    /// only on the Catalog hero. Spec: hero-nav-variants.html.</summary>
-    public string HeroPagerStyle { get; set; } = "f";
+    /// <summary>Hero pager style — one of: f (transparent named pager),
+    /// g (hover chevrons + dash pager, default), h (numbered pills + chevrons).
+    /// Applies only on the Catalog hero. Spec: hero-nav-variants.html.</summary>
+    public string HeroPagerStyle { get; set; } = "g";
 
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 

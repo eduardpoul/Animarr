@@ -58,10 +58,17 @@
         {
             <div class="d-discovery__found-label">@_found.Count server@(_found.Count == 1 ? "" : "s") found · pick one to sign in</div>
             <div class="d-discovery__server-list">
+                @{ var firstId = _found[0].ServerId; }
                 @foreach (var s in _found)
                 {
                     var server = s;
+                    var isFirst = server.ServerId == firstId;
+                    @* First card pinned as the default-focus target so a TV
+                       remote lands on it when the scan completes — the
+                       headline of the screen. Other cards are reachable
+                       via Down/Right from the first. *@
                     <button type="button" class="d-discovery__server tv-focus"
+                            data-tv-autofocus="@(isFirst ? "true" : null)"
                             @onclick="@(() => OnPickServer(server))">
                         <span class="d-discovery__server-ic">
                             <DIcon Name="server" Size="16" />
@@ -98,7 +105,11 @@
                 Tailscale magic DNS).
             </p>
             <div class="d-discovery__actions d-discovery__actions--centered">
-                <Btn Variant="primary" Size="md" OnClick="OpenManualAdd">
+                @* Empty state's headline action is "Add manually" — the
+                   manual URL input also auto-opens below. data-tv-autofocus
+                   parks the remote on this CTA so the user isn't stuck
+                   somewhere irrelevant when the scan returns nothing. *@
+                <Btn Variant="primary" Size="md" OnClick="OpenManualAdd" data-tv-autofocus="true">
                     <DIcon Name="plus" Size="13" /> Add manually
                 </Btn>
                 @if (_canScan)
@@ -335,6 +346,17 @@
         _state = _found.Count > 0 ? State.Found : State.Empty;
         if (_state == State.Empty) _manualOpen = true;
         StateHasChanged();
+
+        // Scanning was the headline before; now Found (first server card)
+        // or Empty (Add manually CTA) is. tv-nav.js's refocusAutofocus
+        // re-pins focus on the new [data-tv-autofocus] target — without
+        // this call the user's focus stays wherever they last poked
+        // (often the Cancel chip), which is no longer the obvious next
+        // action. Deferred via the InvokeAsync above implicitly because
+        // the StateHasChanged commit happens after the current synchronous
+        // section completes; the JS call is scheduled on the next tick.
+        try { await JS.InvokeVoidAsync("animarrTvNav.refocusAutofocus"); }
+        catch { /* function not loaded yet (non-tv host) — no-op */ }
     }
 
     /// <summary>Turn a JsServer (raw scan hit) into a RegisteredServerDto and

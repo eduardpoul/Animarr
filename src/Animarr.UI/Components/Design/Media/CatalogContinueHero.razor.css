@@ -23,7 +23,7 @@
    bleeds up behind the bar. */
 @media (max-width: 959px) {
     .d-chero {
-        margin: calc(-1 * (56px + env(safe-area-inset-top, 0px))) -16px var(--space-7);
+        margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
 }
 
@@ -115,12 +115,15 @@
    only carries the hero section's own responsive sizing (height + content
    padding) so the layout reflows correctly on narrow viewports. */
 @media (max-width: 959px) {
-    .d-chero { height: clamp(300px, 42vh, 380px); }
+    /* Taller than before (was 300/42vh/380) — the eyebrow + title + meta +
+       progress + Resume + pager stack is tall, and a 2-line title used to
+       overflow / push the layout. */
+    .d-chero { height: clamp(400px, 54vh, 520px); }
     .d-chero__content { padding: 0 var(--space-7); inset: auto 0 56px 0; }
 }
 
 @media (max-width: 639px) {
-    .d-chero { height: clamp(260px, 36vh, 320px); }
+    .d-chero { height: clamp(420px, 54vh, 500px); }
     .d-chero__title { font-size: clamp(26px, 7vw, 38px); }
     .d-chero__content { padding: 0 var(--space-5); inset: auto 0 48px 0; }
 }

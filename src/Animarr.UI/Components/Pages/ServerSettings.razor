@@ -25,6 +25,9 @@
                 <DIcon Name="arrow-l" Size="14" /> BACK
             </button>
         }
+        @* Desktop/web back-arrow (hidden <960px, where the mobile drilldown
+           mback above + the mobile nav handle navigation). *@
+        <PageBack />
         <div class="d-page-header__main">
             <div class="d-page-header__overline">ADMIN</div>
             <h1 class="d-page-header__title">@(_mobileShowingDetail ? CurrentTab.Label : "SERVER SETTINGS")</h1>
@@ -142,8 +145,8 @@
 
     private static readonly TabDef[] Tabs =
     {
-        new("users",      "Users & Roles",  "users",    "Manage user accounts and permission roles.", New: true),
-        new("categories", "Categories",     "sparkle",  "Catalog tags — chips above the grid. LLM auto-classifies; admin curates.", New: true),
+        new("users",      "Users & Roles",  "users",    "Manage user accounts and permission roles."),
+        new("categories", "Categories",     "sparkle",  "Catalog tags — chips above the grid. LLM auto-classifies; admin curates."),
         new("folders",    "Root folders",   "folder",   "Library source paths that the watcher monitors."),
         new("history",    "Rename history", "clock",    "Every rename the watcher / queue has executed."),
         new("llm",        "AI / LLM",       "magic",    "Configure the on-host LLM provider used for identification."),
@@ -151,7 +154,7 @@
         new("ignore",     "Ignore rules",   "filter",   "Filename patterns to skip during scans."),
         new("downloads",  "Downloads",      "download", "Torrent listen port, encryption, global Mbps caps, DHT / PEX / UPnP."),
         new("meta",       "Metadata",       "external", "TMDB / MAL / IMDb / AniDB order + API credentials."),
-        new("about",      "About",          "info",     "Version, build, runtime, license, GitHub link.", New: true),
+        new("about",      "About",          "info",     "Version, build, runtime, license, GitHub link."),
     };
 
     private string _active = "users";

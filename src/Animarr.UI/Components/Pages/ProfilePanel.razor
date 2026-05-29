@@ -43,7 +43,7 @@
 
         @* ── Header — on mobile + detail mode the close icon turns into a
              back arrow so the user can return to the category list without
-             closing the whole drawer. ────────────────────────────────── *@>
+             closing the whole drawer. ────────────────────────────────── *@
         <header class="d-profile__head">
             @if (_mobileShowingDetail)
             {
@@ -129,15 +129,20 @@
 
             @* Hoisted "Pair a TV" — runs the same handler the Identity tab's
                in-body button uses. Lives in the root list on phone so it's
-               one tap away (not three). *@
-            <button type="button" class="d-profile__mlist-row tv-focus"
-                    @onclick="OnPairTvClick">
-                <span class="d-profile__mlist-ic">
-                    <DIcon Name="qr-code" Size="14" />
-                </span>
-                <span class="d-profile__mlist-label">Pair a TV</span>
-                <DIcon Name="chev-r" Size="13" />
-            </button>
+               one tap away (not three). MAUI-app only: in a plain browser
+               (OperatingSystem.IsBrowser()) there's no TV-pairing host flow,
+               so the entry is hidden there. *@
+            @if (!OperatingSystem.IsBrowser())
+            {
+                <button type="button" class="d-profile__mlist-row tv-focus"
+                        @onclick="OnPairTvClick">
+                    <span class="d-profile__mlist-ic">
+                        <DIcon Name="qr-code" Size="14" />
+                    </span>
+                    <span class="d-profile__mlist-label">Pair a TV</span>
+                    <DIcon Name="chev-r" Size="13" />
+                </button>
+            }
 
             @* Server settings — same hoist, gated by the systemSettings
                permission so non-admin users don't see a row they can't open. *@
@@ -182,9 +187,6 @@
                 case "audio":
                     @RenderAudio();
                     break;
-                case "language":
-                    @RenderLanguage();
-                    break;
             }
         </div>
     </aside>
@@ -205,7 +207,9 @@
         new("servers",    "Servers",    "server"),
         new("appearance", "Appearance", "sparkle"),
         new("audio",      "Audio",      "audio"),
-        new("language",   "Language",   "globe"),
+        // Language used to be its own tab; it now lives at the bottom of the
+        // Appearance tab (it's a display preference like theme / accent, and
+        // a standalone tab for one dropdown was overkill on mobile drilldown).
     };
 
     private string _activeTab = "identity";
@@ -242,9 +246,9 @@
     private bool _normalize       = true;
     private string _language      = "en";
     private string _theme         = "quietude";
-    /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "f"
-    /// matches the transparent named pager that ships with v5.</summary>
-    private string _heroPagerStyle = "f";
+    /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "g"
+    /// (Chevrons) — the hover-revealed prev/next chevrons + dash pager.</summary>
+    private string _heroPagerStyle = "g";
 
     /// <summary>Player HUD style: "full" (icons + text + glass background)
     /// or "icons" (just icons, no background, no labels). Device-local only —
@@ -298,7 +302,7 @@
         _normalize       = p.NormalizeVolume;
         _language        = p.Language;
         _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
-        _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "f" : p.HeroPagerStyle.ToLowerInvariant();
+        _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
     }
 
     // ─── Edit profile / change password handlers ───────────────────────
@@ -738,20 +742,23 @@
                  truth. On desktop there's no root list (horizontal tabs
                  instead), so the rows stay visible inside the Identity tab. *@
             <div class="d-profile__desktop-actions">
-                @* ── Pair a TV — opens /login (the host page for the QR scanner
-                     modal). The button has nothing to do with admin
-                     capabilities; any signed-in user can pair their own TV. *@
-                <button type="button" class="d-profile__nav-row tv-focus"
-                        @onclick="OnPairTvClick">
-                    <span class="d-profile__nav-row__ic">
-                        <DIcon Name="qr-code" Size="14" />
-                    </span>
-                    <span class="d-profile__nav-row__body">
-                        <span class="d-profile__nav-row__name">Pair a TV</span>
-                        <span class="d-profile__nav-row__meta">Scan the QR shown on your TV's pairing screen.</span>
-                    </span>
-                    <DIcon Name="chev-r" Size="13" />
-                </button>
+                @* ── Pair a TV — opens the QR-scan / code-entry pairing flow.
+                     MAUI-app only: a desktop browser has no TV-pairing host
+                     use-case, so it's hidden when OperatingSystem.IsBrowser(). *@
+                @if (!OperatingSystem.IsBrowser())
+                {
+                    <button type="button" class="d-profile__nav-row tv-focus"
+                            @onclick="OnPairTvClick">
+                        <span class="d-profile__nav-row__ic">
+                            <DIcon Name="qr-code" Size="14" />
+                        </span>
+                        <span class="d-profile__nav-row__body">
+                            <span class="d-profile__nav-row__name">Pair a TV</span>
+                            <span class="d-profile__nav-row__meta">Scan the QR shown on your TV's pairing screen.</span>
+                        </span>
+                        <DIcon Name="chev-r" Size="13" />
+                    </button>
+                }
 
                 @* ── Server settings deep-link (gated by systemSettings).
                      Sits directly above SIGN OUT so admins can reach
@@ -1254,7 +1261,7 @@
                         var active = _accentHue == s.Hue;
                         <button type="button"
                                 class="@($"d-profile__swatch tv-focus {(active ? "is-active" : "")}")"
-                                style="@($"--swatch-color: oklch({s.L} {s.C} {s.Hue});")"
+                                style="@SwatchStyle(s)"
                                 title="@s.Label"
                                 @onclick="@(() => OnSelectAccent(s.Hue))"></button>
                     }
@@ -1392,6 +1399,28 @@
                     }
                 </div>
             </div>
+
+            @* ── Interface language — moved here from its own tab. It's a
+                 display preference like theme / accent, so it belongs in
+                 Appearance rather than a standalone tab that held one
+                 dropdown (especially awkward in the mobile drilldown). *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Interface language</div>
+                    <div class="d-profile__section-hint">
+                        Picking a different language reloads the app so every screen
+                        re-renders in the new locale. Your preferred audio + subtitle
+                        languages live in the <strong>Audio</strong> tab.
+                    </div>
+                </div>
+                <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
+                    <option value="en">English</option>
+                    <option value="ru">Русский</option>
+                    <option value="uk">Українська</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                </select>
+            </div>
         </div>
     };
 
@@ -1507,33 +1536,6 @@
         </div>
     };
 
-    private RenderFragment RenderLanguage() => __builder =>
-    {
-        <div class="d-profile__section">
-            @* Match the Theme / Accent / Hero pager section pattern — regular
-               title + hint above, control below. Was a tiny mono "INTERFACE
-               LANGUAGE" eyebrow before, which read as a different control
-               type than the rest of the Appearance settings. *@
-            <div class="d-profile__section-block">
-                <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Interface language</div>
-                    <div class="d-profile__section-hint">
-                        Picking a different language reloads the app so every screen
-                        re-renders in the new locale. Your preferred audio + subtitle
-                        languages live in the <strong>Audio</strong> tab.
-                    </div>
-                </div>
-                <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
-                    <option value="en">English</option>
-                    <option value="ru">Русский</option>
-                    <option value="uk">Українська</option>
-                    <option value="de">Deutsch</option>
-                    <option value="es">Español</option>
-                </select>
-            </div>
-        </div>
-    };
-
     private record SwatchDef(int Hue, double L, double C, string Label);
     private static readonly SwatchDef[] AccentSwatches =
     {
@@ -1543,6 +1545,14 @@
         new(240, 0.66, 0.16, "Blue"),
         new(290, 0.66, 0.20, "Violet"),
     };
+
+    /// <summary>Inline style for an accent swatch. Built with InvariantCulture
+    /// so a comma-decimal device locale (ru / uk) doesn't emit
+    /// <c>oklch(0,66 0,20 25)</c> — invalid CSS that makes the swatch
+    /// transparent (reported as "кружочки цветов не видно"). The default
+    /// interpolation uses the current culture, which is the bug.</summary>
+    private static string SwatchStyle(SwatchDef s) =>
+        System.FormattableString.Invariant($"--swatch-color: oklch({s.L} {s.C} {s.Hue});");
 
     private async Task OnSelectAccent(int hue)
     {

@@ -46,8 +46,9 @@
                 <span>Favorite</span>
             }
         </button>
-        <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit">
-            <DIcon Name="pencil" Size="14" /> Edit metadata
+        <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
+                aria-label="Edit metadata">
+            <DIcon Name="pencil" Size="14" /> <span class="d-mdhero__edit-label">Edit metadata</span>
         </button>
     </div>
 
@@ -101,11 +102,18 @@
 
             @* Primary CTA — label resolves per CHANGELOG §2 (7-state matrix).
                Click is a no-op until the inline player is wired up; the label
-               carrying the right user state is the point of this iteration. *@
+               carrying the right user state is the point of this iteration.
+
+               data-tv-autofocus pins the default-focus target on TV so the
+               remote lands here when MediaDetail mounts. When there's no
+               progress (Continue null), the hero CTA isn't rendered and
+               focus falls through to the first focusable in main — which
+               on a series is the Back chip, then Edit, then a first
+               episode card (also marked data-tv-autofocus). *@
             @if (Continue is not null)
             {
                 <div class="d-mdhero__cta">
-                    <Btn Variant="primary" Size="lg" OnClick="OnContinue">
+                    <Btn Variant="primary" Size="lg" OnClick="OnContinue" data-tv-autofocus="true">
                         <DIcon Name="@Continue.IconName" Size="14" />
                         @Continue.Label
                     </Btn>

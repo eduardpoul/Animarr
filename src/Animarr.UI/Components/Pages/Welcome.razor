@@ -28,7 +28,11 @@
             Self-hosted anime &amp; movie library, understood by an LLM.
         </p>
 
-        <Btn Variant="primary" Size="lg" OnClick="StartFlow">
+        @* data-tv-autofocus pins the default-focus target on TV. tv-nav.js
+           picks this element when the page mounts (and on every nav back
+           here), so the remote lands on the headline CTA instead of the
+           GitHub link in the corner. *@
+        <Btn Variant="primary" Size="lg" OnClick="StartFlow" data-tv-autofocus="true">
             Get started <DIcon Name="arrow-r" Size="13" />
         </Btn>
     </div>

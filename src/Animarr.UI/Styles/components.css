@@ -30,6 +30,43 @@
 
 /* ====== §1 Global helpers ====== */
 
+/* Safe-area inset variables. iOS WKWebView fills env(safe-area-inset-*)
+   correctly; Android WebView does NOT (returns 0 even in edge-to-edge
+   mode). So on Android, MainActivity reads the real status-bar / nav-bar
+   heights from WindowInsets and overrides --animarr-safe-top /
+   --animarr-safe-bottom as inline styles on <html> (which beat this
+   :root rule). On iOS / web the inline override never happens, so these
+   defaults resolve through env(). Everything that needs to clear the
+   notch / gesture bar reads var(--animarr-safe-top) instead of env()
+   directly. */
+:root {
+    /* MUST resolve to a real length on every platform — a self-reference here
+       (var(--animarr-safe-top)) is invalid, which silently kills every
+       `calc(... + var(--animarr-safe-top))` on the WEB build (no notch, no
+       Android injection) and collapses all the top margins. env() gives 0 on
+       desktop browsers, the real inset on iOS, and is harmlessly overridden by
+       MainActivity's inline `--animarr-safe-top: <px>` on Android. */
+    --animarr-safe-top: env(safe-area-inset-top, 0px);
+    --animarr-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Kill elastic / stretch overscroll (the "jelly" rubber-band). The native
+   WebView OverScrollMode=Never (MauiProgram, Android) handles the root
+   document — but Chromium-internal NESTED scrollers obey only CSS, so the
+   horizontal chip/folder/tab rails would still bounce at their ends without
+   this. `none` also stops scroll-chaining so a carousel swipe never bleeds
+   into a page-level bounce. Doubles as the web-build (WASM browser) fix where
+   there's no native OverScrollMode hook. Harmless on non-scrolling elements. */
+html, body,
+.animarr-main,
+.d-scroll, .d-scroll-x, .d-tabs-line,
+.d-drawer__body, .d-modal__body, .d-sheet__body, .emd__body,
+.d-hero__actions, .d-folder-chips, .catalog-folders,
+.settings-nav, .settings-tabs,
+.d-filter-bar > .d-tabs {
+    overscroll-behavior: none;
+}
+
 /* Custom-scrollbar in the design's tone. WebKit + Firefox. Applied
    to the main scroll containers; not the body (body is overflow-hidden). */
 .d-scroll,
@@ -179,8 +216,8 @@ button.d-pill:focus-visible {
        island, then pad the content row down by the inset so the brand +
        icons aren't covered. Status-bar height on most phones is ~24-32px;
        the gesture indicator on iPhones can land in the top 44px. */
-    height: calc(56px + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 16px 0;
+    height: calc(56px + var(--animarr-safe-top));
+    padding: var(--animarr-safe-top) 16px 0;
     flex-shrink: 0;
     align-items: center;
     gap: 12px;
@@ -206,10 +243,10 @@ button.d-pill:focus-visible {
    margin (CatalogHero / CatalogContinueHero), so they bleed up behind the
    bar; non-hero pages just respect the offset. */
 @media (max-width: 959px) {
-    .animarr-main { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; }
+    .animarr-main { padding-top: calc(56px + var(--animarr-safe-top)) !important; }
 }
 @media (max-width: 639px) {
-    .animarr-main { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; }
+    .animarr-main { padding-top: calc(56px + var(--animarr-safe-top)) !important; }
 }
 /* TV doesn't have a status bar — collapse back to the flat 56px so we don't
    leave a dead strip at the top of the screen. */
@@ -256,7 +293,7 @@ html.tv-mode .d-mobile-nav {
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--border);
     grid-template-columns: repeat(3, 1fr);
-    padding-bottom: max(18px, env(safe-area-inset-bottom));
+    padding-bottom: max(18px, var(--animarr-safe-bottom));
     z-index: 20;
 }
 
@@ -1802,7 +1839,7 @@ html.tv-mode .d-mobile-nav {
     flex-direction: column;
     overflow: hidden;
     animation: sheet-in 0.3s cubic-bezier(.16,1,.3,1);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--animarr-safe-bottom);
 }
 .d-sheet--short { height: 60%; }
 .d-sheet--tall  { height: 92%; }
@@ -1827,7 +1864,7 @@ html.tv-mode .d-mobile-nav {
     left: 0;
     right: 0;
     bottom: 0;
-    padding: 14px 18px calc(26px + env(safe-area-inset-bottom));
+    padding: 14px 18px calc(26px + var(--animarr-safe-bottom));
     background: linear-gradient(180deg, transparent, var(--surface-2) 30%);
     border-top: 1px solid var(--border);
     display: flex;
@@ -2106,6 +2143,14 @@ html.tv-mode .d-mobile-nav {
     .d-mobile-nav { display: flex; }
     .d-tabbar     { display: none; }
 
+    /* Media-detail pages carry their OWN top chrome on the hero (BACK +
+       favorite + edit-metadata), so the global mobile nav (brand + avatar)
+       is redundant there — and after the status-bar spacer was removed it
+       collided with the hero's BACK button right under the clock. Hide the
+       nav whenever a .d-mdhero is on the page; the hero chrome takes over.
+       Higher specificity than `.d-mobile-nav{display:flex}` so it wins. */
+    html:has(.d-mdhero) .d-mobile-nav { display: none; }
+
     /* Page header — title scales down, right-side actions wrap below. */
     .d-page-header {
         flex-direction: column;
@@ -2337,13 +2382,13 @@ html.tv-mode .d-mobile-nav {
         border-top-right-radius: var(--radius-modal);
         box-shadow: 0 -30px 60px -20px rgba(0,0,0,0.7);
         animation: sheet-in 0.3s cubic-bezier(.16,1,.3,1);
-        padding-bottom: env(safe-area-inset-bottom);
+        padding-bottom: var(--animarr-safe-bottom);
     }
     .d-drawer__body { padding: 18px 18px 130px; }
     .d-drawer__header { padding: 14px 18px 12px; }
     .d-drawer__header-title { font-size: 18px; }
     .d-drawer__header-icon { width: 36px; height: 36px; }
-    .d-drawer__footer { padding: 14px 18px calc(22px + env(safe-area-inset-bottom)); }
+    .d-drawer__footer { padding: 14px 18px calc(22px + var(--animarr-safe-bottom)); }
 
     /* Modal — full-width, slim margins. */
     .d-modal {
@@ -2651,6 +2696,69 @@ html.tv-mode .d-mobile-nav {
         grid-template-columns: repeat(2, 1fr);
         gap: var(--space-5);
     }
+}
+
+/* TV: the 10-foot grid was showing only ~4 huge posters per row. With the
+   bumped 1500px virtual viewport (index.html TV_VW) a smaller min-track
+   packs ~8 cards per row — a denser catalog wall that reads as a real TV
+   library, not a phone shell blown up to 55".
+   Scoped to `animarr-tv-host` (set ONLY by the MAUI TV index.html), NOT
+   `tv-mode` — otherwise a desktop browser that merely has the TV-mode
+   *preference* enabled would inherit this 160px grid and cram 8 tiny posters
+   at 1600px. On the web the base .catalog-grid (minmax 220px) stays in
+   effect → ~6 columns at 1600px. */
+html.animarr-tv-host .catalog-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-6);
+}
+
+/* Hero / detail genre chips (SERIES · MANUAL · SUICIDE · …) were too tall.
+   Compact them on EVERY width (was phone-only) — less vertical padding +
+   smaller text + tight line-height. Targets ONLY the hero/detail pill rails,
+   not every .d-pill. !important because the Pill component's own scoped
+   `.d-pill[b-x]` rule loads AFTER components.css and ties on specificity, so
+   it would otherwise win and keep the taller padding. */
+.d-mdhero__pills .d-pill,
+.d-hero__pills .d-pill {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    font-size: 9.5px !important;
+    line-height: 1.15 !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+
+/* Top-left page back-arrow (PageBack component on Downloads / Server settings).
+   Arrow-only square; sits at the start of .d-page-header so on the desktop/web
+   layout it lands just under the TopBar logo. Desktop-only (≥960px) — the
+   mobile shell has its own nav, and the user asked for it specifically on the
+   web. /search ships its own equivalent. */
+.d-page-back {
+    display: inline-flex;
+    appearance: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: center;
+    margin-right: 14px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+.d-page-back:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+/* On ServerSettings the mobile drilldown shows its own "BACK to list" pill in
+   detail mode — suppress this page-level back there so we don't stack two. */
+@media (max-width: 959px) {
+    .d-server[data-mobile-detail="true"] .d-page-back { display: none; }
 }
 
 /* ============================================================
@@ -3185,10 +3293,16 @@ table.d-table tbody td code {
    showing them under each dash is redundant on a small screen. */
 @media (max-width: 720px) {
     .d-chero__pager-name        { display: none; }
-    .d-chero__pager-slot        { max-width: none; }
-    .d-chero__pager-stroke      { width: 16px; }
-    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 28px; }
-    .d-chero__pager              { gap: var(--space-1); padding: 0 var(--space-4); }
+    /* Even, generous dashes — all inactive ones identical width, active one
+       clearly wider. The previous 16px / 28px pair read as ragged little
+       ticks; 22px / 44px gives a clean "▬ ▬ ▭ ▬ ▬" rhythm with the active
+       slot reading as a filled segment. Slot drops its name-driven width
+       cap so every tap target is just the stroke + padding, keeping the
+       row visually balanced. */
+    .d-chero__pager-slot        { max-width: none; padding: 8px 0 0; }
+    .d-chero__pager-stroke      { width: 22px; height: 3px; }
+    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 44px; }
+    .d-chero__pager              { gap: 8px; padding: 0 var(--space-4); inset: auto 0 var(--space-4) 0; }
 }
 
 /* G variant — hover-revealed chevrons + dash pager. Chevrons sit anchored
@@ -3300,9 +3414,14 @@ table.d-table tbody td code {
 }
 
 @media (max-width: 959px) {
-    .d-chero__pager      { gap: var(--space-2); padding: 0 var(--space-5); inset: auto 0 var(--space-5) 0; }
-    .d-chero__pager-stroke              { width: 22px; }
-    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 36px; }
+    /* Uniform, generous dashes. This block comes after the 720px rule in
+       source so it wins the cascade on phones too — keep the numbers in
+       sync (22px inactive / 44px active / 3px tall) so there's one clean
+       pager rhythm across every narrow viewport. */
+    .d-chero__pager      { gap: 8px; padding: 0 var(--space-5); inset: auto 0 var(--space-4) 0; }
+    .d-chero__pager-slot { max-width: none; padding: 8px 0 0; }
+    .d-chero__pager-stroke              { width: 22px; height: 3px; }
+    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 44px; }
     /* Tight viewports drop the per-slot caption altogether — the active
        title still lives in the hero's own headline above. */
     .d-chero__pager-name { display: none; }
