@@ -186,7 +186,9 @@ public sealed class HlsSessionService : IDisposable
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
-        bool isReencode = plan is HlsPlan.Fmp4VaapiReencode or HlsPlan.Fmp4NvencReencode;
+        bool isReencode = plan is HlsPlan.Fmp4VaapiReencode
+                               or HlsPlan.Fmp4NvencReencode
+                               or HlsPlan.Fmp4SoftwareReencode;
 
         var hdrFormats = new List<string>();
         if (!isReencode)
@@ -208,11 +210,12 @@ public sealed class HlsSessionService : IDisposable
         string planName = isDirectPlay ? "directplay"
             : plan switch
             {
-                HlsPlan.TsStreamCopy      => "ts-copy",
-                HlsPlan.Fmp4VaapiReencode => "vaapi-reencode",
-                HlsPlan.Fmp4NvencReencode => "nvenc-reencode",
-                HlsPlan.Fmp4StreamCopy    => "fmp4-copy",
-                _                          => "unknown",
+                HlsPlan.TsStreamCopy         => "ts-copy",
+                HlsPlan.Fmp4VaapiReencode    => "vaapi-reencode",
+                HlsPlan.Fmp4NvencReencode    => "nvenc-reencode",
+                HlsPlan.Fmp4SoftwareReencode => "sw-reencode",
+                HlsPlan.Fmp4StreamCopy       => "fmp4-copy",
+                _                            => "unknown",
             };
 
         string? reason = isDirectPlay ? null : plan switch
@@ -220,6 +223,7 @@ public sealed class HlsSessionService : IDisposable
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
             HlsPlan.Fmp4VaapiReencode => "HEVC 8-bit re-encoded to H.264 via VAAPI for browser compatibility (HDR lost)",
             HlsPlan.Fmp4NvencReencode => "HEVC re-encoded to H.264 via NVENC for browser compatibility (HDR lost)",
+            HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality (HDR lost)",
             HlsPlan.Fmp4StreamCopy    => "HEVC 10-bit / HDR / DV stream-copied to fMP4 (HDR preserved if browser can decode)",
             _                          => null,
         };
@@ -269,7 +273,12 @@ public sealed class HlsSessionService : IDisposable
         // restarts the session with a different index when the user picks
         // another track — there's no way to switch tracks live because our
         // HLS pipeline transcodes a single audio stream.
-        int audioTrackIndex = 0)
+        int audioTrackIndex = 0,
+        // Cap output to this height (e.g. 1080 / 720). 0 = native resolution.
+        // When below the source height it forces a re-encode (you can't shrink
+        // a stream-copy). The HUD's Quality popup restarts the session with a
+        // new cap, same as audio-track switching.
+        int maxHeight = 0)
     {
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
         // 1) Kill EXISTING sessions for the same source file — a second Play
@@ -333,13 +342,29 @@ public sealed class HlsSessionService : IDisposable
         //   • Fmp4StreamCopy      — HEVC 10-bit HDR/DV, fMP4 stream-copy
         // The plan affects ffmpeg argv, segment file extension, and what CODECS
         // attribute we advertise in master.m3u8.
-        var plan = probe is not null ? ChoosePlan(probe) : HlsPlan.Fmp4StreamCopy;
+        // Effective downscale target: only when the requested cap is BELOW the
+        // source height. 0 = native resolution (no scaling).
+        var targetHeight = (maxHeight > 0 && (probe?.Height ?? 0) > 0 && maxHeight < probe!.Height)
+            ? maxHeight : 0;
+        var plan = probe is not null ? ChoosePlan(probe, maxHeight) : HlsPlan.Fmp4StreamCopy;
         ProbeInfo? probeForPlaylist = probe;
-        if (probe is not null && plan == HlsPlan.Fmp4VaapiReencode)
+        if (probe is not null && plan is HlsPlan.Fmp4VaapiReencode
+                                      or HlsPlan.Fmp4NvencReencode
+                                      or HlsPlan.Fmp4SoftwareReencode)
         {
-            // VAAPI re-encode emits H.264 → master playlist must advertise avc1,
-            // not the source's hvc1. hls.js gates MSE capability checks on this.
-            probeForPlaylist = probe with { CodecsAttribute = "avc1.4d401f,mp4a.40.2" };
+            // All three re-encode to H.264 8-bit → master playlist must advertise
+            // avc1, not the source's hvc1 (hls.js gates MSE capability on this).
+            // Reflect the downscaled resolution too so the RESOLUTION hint is sane.
+            int outH = targetHeight > 0 ? targetHeight : probe.Height;
+            int outW = targetHeight > 0 && probe.Height > 0
+                ? (int)Math.Round((double)probe.Width * targetHeight / probe.Height / 2) * 2
+                : probe.Width;
+            probeForPlaylist = probe with
+            {
+                CodecsAttribute = "avc1.4d401f,mp4a.40.2",
+                Width  = outW,
+                Height = outH,
+            };
         }
         else if (probe is not null && plan == HlsPlan.TsStreamCopy)
         {
@@ -405,11 +430,12 @@ public sealed class HlsSessionService : IDisposable
         //   and any -itsoffset would just throw it off.
         var audioOffsetSec = plan switch
         {
-            HlsPlan.Fmp4VaapiReencode  => audioOffsetHwSec,
-            HlsPlan.Fmp4NvencReencode  => audioOffsetHwSec,  // same -bf 0 sync profile as VAAPI
-            HlsPlan.Fmp4StreamCopy     => audioOffsetSwSec,
-            HlsPlan.TsStreamCopy       => 0.0,
-            _                          => 0.0,
+            HlsPlan.Fmp4VaapiReencode    => audioOffsetHwSec,
+            HlsPlan.Fmp4NvencReencode    => audioOffsetHwSec,  // same -bf 0 sync profile as VAAPI
+            HlsPlan.Fmp4SoftwareReencode => audioOffsetHwSec,  // libx264 -bf 0, same profile
+            HlsPlan.Fmp4StreamCopy       => audioOffsetSwSec,
+            HlsPlan.TsStreamCopy         => 0.0,
+            _                            => 0.0,
         };
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
@@ -419,6 +445,7 @@ public sealed class HlsSessionService : IDisposable
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height);
         var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
+            targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex);
         var psi = new ProcessStartInfo
         {
@@ -446,7 +473,7 @@ public sealed class HlsSessionService : IDisposable
         }
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
-            probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex);
+            probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight);
         _sessions[token] = session;
 
         // Drain stderr — visible at Warning level so genuine encoder issues
@@ -524,8 +551,10 @@ public sealed class HlsSessionService : IDisposable
         // plashka. Built from probe + plan so re-encode paths correctly
         // report "h264 8-bit SDR" rather than echoing the source's HEVC HDR.
         // Falls back to a defaults block if probe was null (live mode).
+        // Use probeForPlaylist so a downscaled re-encode reports the OUTPUT
+        // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
-            ? BuildOutputInfo(probe, plan, isDirectPlay: false)
+            ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -711,6 +740,7 @@ public sealed class HlsSessionService : IDisposable
                 session.Plan,
                 startNumber: targetSegment,
                 reuseInit: true,
+                targetHeight: session.MaxHeight,
                 audioOffsetSec: session.AudioOffsetSec,
                 audioTrackIndex: session.AudioTrackIndex);
 
@@ -806,15 +836,56 @@ public sealed class HlsSessionService : IDisposable
         /// is available. Some residual A/V wobble; recommend DLNA cast or
         /// mpv for sync-critical HDR/DV playback.</summary>
         Fmp4StreamCopy,
+
+        /// <summary>Software (libx264) re-encode to H.264 + optional downscale.
+        /// The universal CPU fallback for the quality-ladder downscale path when
+        /// no usable GPU encoder is present (no NVENC, no VAAPI). CPU-heavy —
+        /// especially decoding 4K HEVC 10-bit in software — but it's the only
+        /// way to honour a "give me 1080p" request on a GPU-less host. Per the
+        /// project rule: GPU if present, else CPU, and if the box can't keep up
+        /// that's on the operator (don't downscale).</summary>
+        Fmp4SoftwareReencode,
     }
+
+    /// <summary>H.264 bitrate ladder by OUTPUT height (video / maxrate / bufsize).
+    /// Used by every re-encode plan so a 720p stream isn't shipped at 4K
+    /// bitrate (and vice-versa). Conservative-ish for LAN delivery.</summary>
+    private static (string V, string Max, string Buf) RateForHeight(int h) => h switch
+    {
+        <= 0    => ("5M",     "6500k",  "10M"),   // unknown → 1080-ish default
+        <= 480  => ("1200k",  "1600k",  "2400k"),
+        <= 576  => ("1800k",  "2400k",  "3600k"),
+        <= 720  => ("2800k",  "3600k",  "5600k"),
+        <= 1080 => ("5M",     "6500k",  "10M"),
+        <= 1440 => ("9M",     "11M",    "18M"),
+        _       => ("16M",    "20M",    "32M"),   // 2160p+
+    };
 
     /// <summary>Pick the playback plan from the probe + detected hardware.
     ///   • H.264 (any bit depth) → MPEG-TS stream-copy. Works without any GPU.
     ///   • HEVC + NVENC present  → NVIDIA path (handles 8 AND 10-bit decode).
     ///   • HEVC 8-bit + VAAPI    → AMD/Intel path (can encode 8-bit).
     ///   • HEVC 10-bit, no NVENC → fMP4 stream-copy fallback.</summary>
-    private HlsPlan ChoosePlan(ProbeInfo probe)
+    private HlsPlan ChoosePlan(ProbeInfo probe, int maxHeight = 0)
     {
+        // Quality-ladder downscale: the user picked a resolution below the
+        // source. Downscaling REQUIRES a re-encode (a stream-copy can't be
+        // shrunk), so pick the best available encoder regardless of source
+        // codec/bit-depth:
+        //   NVENC  — decodes H.264 + HEVC 8/10-bit, encodes H.264. Preferred.
+        //   VAAPI  — Vega/Intel decode H.264 + HEVC (incl. 10-bit on VCN); we
+        //            encode H.264 8-bit so the Main10-ENCODE limitation doesn't
+        //            apply. HDR is flattened to SDR (acceptable for a smaller
+        //            rung; proper tonemap is a later refinement).
+        //   libx264 — CPU fallback when no GPU encoder is present.
+        if (maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height)
+        {
+            if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
+            if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;
+            return HlsPlan.Fmp4SoftwareReencode;
+        }
+
+        // No downscale → original codec-driven choice.
         if (string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase))
             return HlsPlan.TsStreamCopy;
 
@@ -998,6 +1069,10 @@ public sealed class HlsSessionService : IDisposable
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex);
                 break;
+            case HlsPlan.Fmp4SoftwareReencode:
+                BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
+                    targetHeight, probe?.Height ?? 0, audioTrackIndex);
+                break;
         }
 
         // ── HLS muxer options ────────────────────────────────────────────
@@ -1151,6 +1226,7 @@ public sealed class HlsSessionService : IDisposable
         var vf = "format=nv12|vaapi,hwupload";
         if (targetHeight > 0)
             vf = $"scale_vaapi=w=-2:h={targetHeight}:format=nv12,{vf}";
+        var rate = RateForHeight(targetHeight);
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
@@ -1159,9 +1235,9 @@ public sealed class HlsSessionService : IDisposable
             "-c:v", "h264_vaapi",
             "-profile:v", "main",
             "-bf",     "0",
-            "-b:v",    "5M",
-            "-maxrate","6M",
-            "-bufsize","12M",
+            "-b:v",    rate.V,
+            "-maxrate",rate.Max,
+            "-bufsize",rate.Buf,
             "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
@@ -1211,6 +1287,7 @@ public sealed class HlsSessionService : IDisposable
         var vf = targetHeight > 0
             ? $"scale_cuda=w=-2:h={targetHeight}:format=nv12"
             : "scale_cuda=format=nv12";
+        var rate = RateForHeight(targetHeight);
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
@@ -1221,9 +1298,65 @@ public sealed class HlsSessionService : IDisposable
             "-tune", "hq",
             "-profile:v", "main",
             "-bf",     "0",           // no B-frames → tight A/V sync per segment
-            "-b:v",    "5M",
-            "-maxrate","6M",
-            "-bufsize","12M",
+            "-b:v",    rate.V,
+            "-maxrate",rate.Max,
+            "-bufsize",rate.Buf,
+            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
+            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
+        });
+    }
+
+    /// <summary>fMP4 HLS via SOFTWARE libx264 re-encode + optional downscale.
+    /// The CPU fallback for the quality-ladder when no GPU encoder is present.
+    /// Software-decodes the source (so it handles any codec incl. HEVC 10-bit),
+    /// scales with the CPU `scale` filter, and encodes H.264 8-bit (yuv420p) at
+    /// the ladder bitrate. -bf 0 + IDR-per-segment matches the GPU paths' A/V
+    /// sync. veryfast preset to give the best shot at real-time on a CPU; if the
+    /// box still can't keep up, that's on the operator (don't pick a lower rung
+    /// than the source). HDR is flattened to SDR (no tonemap) — fine for a
+    /// downscaled rung on a small screen.</summary>
+    private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
+        double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex)
+    {
+        // Input #0 — video (software decode).
+        if (seekSec > 0)
+        {
+            args.Add("-ss");
+            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+        }
+        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
+
+        // Input #1 — audio with -itsoffset (same A/V-sync trick as the GPU paths).
+        if (seekSec > 0)
+        {
+            args.Add("-ss");
+            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+        }
+        args.Add("-itsoffset");
+        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
+        args.Add("-i");
+        args.Add(fullPath);
+
+        if (startNumber > 0)
+        {
+            args.Add("-copyts");
+        }
+        var outH = targetHeight > 0 ? targetHeight : sourceHeight;
+        var rate = RateForHeight(outH);
+        var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+        args.AddRange(new[]
+        {
+            "-map", "0:v:0?",
+            "-map", $"1:a:{audioTrackIndex}?",
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-profile:v", "main",
+            "-pix_fmt", "yuv420p",    // 10-bit/HDR source → 8-bit SDR H.264
+            "-bf",     "0",
+            "-b:v",    rate.V,
+            "-maxrate",rate.Max,
+            "-bufsize",rate.Buf,
             "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
@@ -1576,6 +1709,9 @@ public sealed class HlsSessionService : IDisposable
         // Set once at session creation; the session restart logic (used for
         // backward scrub jumps) needs to keep mapping the same audio track.
         public int     AudioTrackIndex { get; }
+        // Output height cap (0 = native). Carried so the seek-restart re-runs
+        // ffmpeg with the same downscale instead of reverting to source res.
+        public int     MaxHeight  { get; }
         public DateTime CreatedAt  { get; }
         public DateTime LastActive { get; private set; }
 
@@ -1598,7 +1734,7 @@ public sealed class HlsSessionService : IDisposable
 
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
-            int audioTrackIndex)
+            int audioTrackIndex, int maxHeight)
         {
             Token       = token;
             SourcePath  = source;
@@ -1611,6 +1747,7 @@ public sealed class HlsSessionService : IDisposable
             AudioOffsetSec = audioOffsetSec;
             TotalDurationSec = totalDurationSec;
             AudioTrackIndex  = audioTrackIndex;
+            MaxHeight   = maxHeight;
             CreatedAt   = DateTime.UtcNow;
             LastActive  = DateTime.UtcNow;
         }

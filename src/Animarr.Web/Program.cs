@@ -8,8 +8,21 @@ using Animarr.Web.Services.Auth;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// JSON for minimal-API request/response bodies. The shared HttpAnimarrApiClient
+// (used by BOTH the MAUI app and the WASM web client) serialises enums AS NAMES
+// via JsonStringEnumConverter — e.g. a metadata save sends {"mediaType":"Series"}.
+// The minimal-API default (JsonSerializerDefaults.Web) has no string-enum
+// converter, so it can only read NUMBERS; a string enum value throws a
+// JsonException during model binding, which surfaces to the client as a bare
+// 400 Bad Request ("Save failed: …, 400, Bad Request"). Registering the same
+// converter here makes the server READ string enums (fixing the 400) and EMIT
+// them too — both clients already decode names, so the contract stays in sync.
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Bind AppSettings
 builder.Services.Configure<AppSettings>(
@@ -205,6 +218,34 @@ if (!app.Environment.IsDevelopment())
 // Map modern font MIME types — Kestrel's default for .ttf is the obsolete
 // `application/x-font-ttf` which some browsers refuse to apply. font/ttf is
 // the current standard (RFC 8081).
+// Never let the browser cache the HTML host page. It's the Blazor WASM
+// bootstrap document (index.html); if it's cached, a deploy's updated asset
+// references / inline cache-bust loader never reach the client until a manual
+// hard-refresh — exactly the "I redeployed but the player looks unchanged"
+// trap. With no-cache the browser revalidates index.html on every load, picks
+// up the fresh document, and its per-load `?v=` loader then pulls the current
+// player JS/CSS. Scoped to text/html only (set via OnStarting once the
+// response content-type is known) so static JS/CSS/wasm keep their normal
+// long-lived caching. Registered before UseStaticFiles so it wraps every
+// downstream response, including the SPA fallback.
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var ct = ctx.Response.ContentType;
+        if (!string.IsNullOrEmpty(ct) &&
+            ct.Contains("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.CacheControl] =
+                "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.Pragma] = "no-cache";
+            ctx.Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.Expires] = "0";
+        }
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 var contentTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
 contentTypes.Mappings[".ttf"]   = "font/ttf";
 contentTypes.Mappings[".woff"]  = "font/woff";
@@ -708,6 +749,10 @@ app.MapPost("/api/hls/start", async (
         // the user picks another track — there's no in-stream switching with
         // our single-stream transcode pipeline.
         int? audioTrackIndex,
+        // Cap output height (1080 / 720 / …). 0 or absent = native resolution.
+        // Below the source height it forces a re-encode/downscale. Surfaced via
+        // the HUD's Quality popup, which restarts the session with a new cap.
+        int? maxHeight,
         IDbContextFactory<AppDbContext> dbFactory,
         HlsSessionService hls,
         ILoggerFactory loggerFactory) =>
@@ -767,7 +812,8 @@ app.MapPost("/api/hls/start", async (
         var result = await hls.StartAsync(fullPath!, seekSec,
             audioOffsetHwSec: audioOffsetHwSec,
             audioOffsetSwSec: audioOffsetSwSec,
-            audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0));
+            audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
+            maxHeight:        Math.Max(0, maxHeight ?? 0));
         return Results.Ok(new
         {
             token        = result.Token,
