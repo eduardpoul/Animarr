@@ -80,7 +80,11 @@
     position: fixed;
     right: 22px;
     bottom: 22px;
-    z-index: 60;
+    /* Above the drawer tier (ProfilePanel / EditMetadata at 200/201) so a
+       toast fired from inside a drawer — e.g. "Applied TMDB ID" — isn't hidden
+       behind it. Still below the fullscreen player (9000) so playback toasts
+       don't stamp over the video. */
+    z-index: 250;
     display: flex;
     flex-direction: column;
     gap: 10px;
