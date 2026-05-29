@@ -2,6 +2,14 @@
    Status dot + mono numerics are duplicated here from Torrents.razor.css
    because scoped razor.css doesn't cross component boundaries. */
 
+/* Page width — match the active Downloads page (.tor-page) and Server settings
+   (.d-server), both capped at 1480px and centred. Without this the history
+   table bled full-width and looked wider than the active list. */
+.th-page {
+    max-width: 1480px;
+    margin: 0 auto;
+}
+
 /* Status dot — solid colored circle keyed off the row state. */
 .tor-dot {
     display: inline-block;
@@ -82,7 +90,13 @@
 }
 
 .th-table tbody td {
-    padding: var(--space-3) var(--space-4);
+    /* 1:1 with the active Downloads table (.tor-table) — same fixed 44px row
+       height so the two pages share the exact row rhythm. History rows are
+       text-only and would otherwise sit shorter than the active rows (which
+       carry 28px icon buttons + a progress bar). Reset to auto on phone, where
+       rows become stacked cards. */
+    height: 44px;
+    padding: 0 var(--space-4);
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
@@ -151,6 +165,7 @@
     .th-table tbody tr:hover { background: var(--surface); }
     .th-table tbody td {
         display: block;
+        height: auto;          /* reset the desktop fixed row height */
         padding: 0;
         border-bottom: 0;
         min-width: 0;

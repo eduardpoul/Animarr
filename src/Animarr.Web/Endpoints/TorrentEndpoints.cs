@@ -93,6 +93,17 @@ internal static class TorrentEndpoints
 
             var savePath = await ResolveSavePathAsync(dbFactory, request.FolderWatcherId, ct);
 
+            // Map the drawer's unchecked files to DoNotDownload (priority 0).
+            // Keys are the manifest paths (MonoTorrent Torrent.Files[].Path), so
+            // they match the engine's mgr.Files[].Path lookup exactly. Applied
+            // before StartAsync, so skipped files never download.
+            Dictionary<string, int>? initialPriorities = null;
+            if (request.ExcludedFiles is { Length: > 0 } excluded)
+                initialPriorities = excluded
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Distinct()
+                    .ToDictionary(p => p, _ => 0);
+
             var infoHash = await engine.AddTorrentFileAsync(
                 bytes,
                 savePath,
@@ -103,7 +114,7 @@ internal static class TorrentEndpoints
                 autoRename: request.AutoRename,
                 startPaused: false,
                 stopAfterDownload: request.StopAfterDownload,
-                initialPriorities: null,
+                initialPriorities: initialPriorities,
                 flattenSubfolders: request.SkipSubfolderStructure,
                 suppressRootFolder: request.SuppressRootFolder,
                 customRootFolderName: request.CustomRootFolderName);

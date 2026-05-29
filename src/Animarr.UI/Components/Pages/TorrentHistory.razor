@@ -4,12 +4,24 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<div class="th-header">
-    <h1 class="th-header__title">@L["torrent_history.title"]</h1>
-    <Btn Variant="ghost" Size="sm" OnClick="@(() => Nav.NavigateTo("/torrents"))">
-        <DIcon Name="chev-l" Size="14" /> @L["torrent_history.back_link"]
-    </Btn>
-</div>
+<div class="th-page">
+@* Header is 1:1 with the active Downloads page (.d-page-header + PageBack +
+   overline/title/sub + right-side action) so the two pages read as one
+   surface. PageBack gives the same arrow-under-the-logo back button every
+   other page has; the right-side button jumps to the active list. *@
+<header class="d-page-header">
+    <PageBack />
+    <div class="d-page-header__main">
+        <div class="d-page-header__overline">TRANSFERS</div>
+        <h1 class="d-page-header__title">@L["torrent_history.title"]</h1>
+        <div class="d-page-header__sub">Completed, stopped and errored transfers.</div>
+    </div>
+    <div class="d-page-header__right">
+        <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents"))">
+            <DIcon Name="chev-l" Size="13" /> @L["torrent_history.back_link"]
+        </Btn>
+    </div>
+</header>
 
 @if (_loading)
 {
@@ -73,6 +85,7 @@ else
         </div>
     }
 }
+</div>
 
 @code {
     private List<TorrentRecordDto> _records = new();

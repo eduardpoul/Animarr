@@ -179,6 +179,31 @@
             var sections = await Api.GetSectionFoldersAsync();
             _sections = sections.OrderBy(f => f.Label).ToList();
 
+            // Build the section → child-folder-id map HERE, right after _sections
+            // loads — NOT in OnAfterRenderAsync. OnAfterRenderAsync(firstRender)
+            // fires after the FIRST (loading-state) render, which happens at the
+            // first await in this method — long before _sections is populated. So
+            // the old code looped an empty _sections and left the map empty
+            // forever, which made every TopBar folder pill filter the grid down
+            // to ZERO items (the lookup fell back to an empty set). Populating it
+            // inline removes that lifecycle race. Defensive: include the section's
+            // own Id too, so an item filed directly under the section root (not a
+            // child folder) still matches.
+            try
+            {
+                var allFolders = await Api.GetFoldersAsync();
+                foreach (var sec in _sections)
+                {
+                    var ids = allFolders
+                        .Where(f => f.ParentSectionId == sec.Id)
+                        .Select(f => f.Id)
+                        .ToHashSet();
+                    ids.Add(sec.Id);
+                    _childFolderIdsBySection[sec.Id] = ids;
+                }
+            }
+            catch { /* section filter degrades to no-op */ }
+
             var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
             // Hide rows whose Folder is itself a section (those are containers,
             // not catalog entries). The /api/media endpoint already filters out
@@ -329,27 +354,10 @@
         }
     }
 
-    // Section → set of child FolderWatcher Ids. Populated lazily when the
-    // user clicks a section chip (avoids fetching N folders eagerly).
+    // Section → set of child FolderWatcher Ids. Built eagerly in
+    // OnInitializedAsync (right after _sections loads) — see the note there for
+    // why this must NOT live in OnAfterRenderAsync.
     private readonly Dictionary<Guid, HashSet<Guid>> _childFolderIdsBySection = new();
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        // Resolve every section's child folder set so the chip-filter is instant.
-        try
-        {
-            var folders = await Api.GetFoldersAsync();
-            foreach (var sec in _sections)
-            {
-                _childFolderIdsBySection[sec.Id] = folders
-                    .Where(f => f.ParentSectionId == sec.Id)
-                    .Select(f => f.Id)
-                    .ToHashSet();
-            }
-        }
-        catch { /* section filter degrades to no-op */ }
-    }
 
     public void Dispose()
     {

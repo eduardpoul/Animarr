@@ -28,7 +28,12 @@ public sealed record AddTorrentFileRequest(
     bool   SuppressRootFolder,
     string? CustomRootFolderName,
     int    DownloadLimitKBps = 0,
-    int    UploadLimitKBps   = 0);
+    int    UploadLimitKBps   = 0,
+    /// <summary>File paths (as listed in the parsed manifest — MonoTorrent's
+    /// <c>Torrent.Files[].Path</c>) the user UNCHECKED in the Add-drawer tree.
+    /// The engine stamps these DoNotDownload BEFORE starting, so skipped files
+    /// never hit disk. Null/empty = download everything (back-compat default).</summary>
+    string[]? ExcludedFiles = null);
 
 /// <summary>Body for <c>POST /api/torrents/parse</c>. Echo of the metadata
 /// inside a .torrent file (file list + total size) without touching the
