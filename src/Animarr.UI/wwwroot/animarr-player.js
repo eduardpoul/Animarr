@@ -21,49 +21,212 @@
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
 
-    const apiBase = () => (typeof window !== 'undefined' && window.animarrApiBase) || '';
+    // Prefer the MAUI loopback media-proxy base when present
+    // (window.animarrLocalProxyBase = http://127.0.0.1:<port>, published by the
+    // Android host). All WebView fetches then go to the proxy, which forwards to
+    // the real server — a trustworthy localhost origin Chromium won't
+    // mixed-content-block, so no base64 bridge and no freeze. In a plain browser
+    // the proxy base is absent and we use the real server base directly.
+    // Evaluated per-call so it's correct even if the proxy base lands after the
+    // first animarrSetApiBase().
+    const apiBase = () => (typeof window !== 'undefined' &&
+        (window.animarrLocalProxyBase || window.animarrApiBase)) || '';
     const apiUrl  = (path) => apiBase() + path;
+
+    // animarrSetApiBase — passthrough setter. The mixed-content workaround
+    // moved from "rewrite the base" to "wrap fetch + XHR" (see the IIFE
+    // below) because embedding the target URL inside the proxy PATH got
+    // mangled: Chromium normalises the path (collapses `//`, decodes `%2F`)
+    // before the request leaves the renderer, turning http://server into
+    // http:/server. Query-string params aren't path-normalised, so the
+    // wrappers stash the full URL in `?u=<encoded>` instead.
+    window.animarrSetApiBase = function (newBase) {
+        window.animarrApiBase    = newBase || '';
+        window.animarrApiBaseRaw = newBase || '';
+    };
 
     // Mixed-content shim for MAUI BlazorWebView (Android).
     //
-    // MAUI mounts the Razor bundle at https://0.0.0.x/ (a virtual host that's
-    // hardcoded by the framework). If the configured Animarr server lives at
-    // plain http://192.168.x.x:port, Chromium's renderer refuses every fetch
-    // from the HTTPS page as "active mixed content" — even with
-    // WebSettings.MixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW. The block
-    // happens before our AnimarrWebViewClient.ShouldInterceptRequest gets a
-    // crack at proxying the raw HTTP URL.
+    // MAUI mounts the Razor bundle at https://0.0.0.x/ (hardcoded virtual
+    // host). When the Animarr server lives at plain http://LAN-ip:port,
+    // Chromium's renderer refuses every fetch/XHR from the HTTPS page as
+    // "active mixed content" — even with MixedContentMode=ALWAYS_ALLOW.
     //
-    // Workaround: rewrite the api base to a same-origin proxy path of the
-    // form `/_animarr_proxy_/<url-encoded-base>`. JS fetches then go to
-    // https://0.0.0.x/_animarr_proxy_/... (same-origin, no mixed content);
-    // the WebViewClient on Android sees the prefix, decodes the real target,
-    // and proxies the call via native HttpClient — which has no
-    // mixed-content rules to enforce. End result is a transparent shim that
-    // lets HTTP-only LAN servers work from the MAUI HTTPS WebView.
+    // A custom Android WebViewClient can't fix it: MAUI re-installs its OWN
+    // WebViewClient after ours (it needs it to serve the bundle from the
+    // virtual host), so our ShouldInterceptRequest never runs. The reliable
+    // channel is plain JS↔.NET interop. So we monkey-patch window.fetch and
+    // XMLHttpRequest to route every http:// request through the
+    // HttpProxyBridge.ProxyFetch JSInvokable, which runs the request via
+    // native HttpClient (no mixed-content rules) and returns the bytes
+    // base64-encoded. hls.js uses XHR, so wrapping both covers the manifest +
+    // every segment fetch + our /api/* calls.
     //
-    // Schemes where the helper is a passthrough (no rewrite):
-    //   • Plain browser visiting an http://server/  (page already HTTP)
-    //   • HTTPS-page + HTTPS-server (Caddy in front)
-    // Only the HTTPS-page + HTTP-server combination triggers rewrite.
-    window.animarrSetApiBase = function (newBase) {
-        if (newBase && typeof newBase === 'string'
-            && newBase.toLowerCase().startsWith('http://')
-            && typeof window.location !== 'undefined'
-            && window.location.protocol === 'https:')
-        {
-            window.animarrApiBaseRaw = newBase;
-            window.animarrApiBase    = '/_animarr_proxy_/' + encodeURIComponent(newBase);
-            // eslint-disable-next-line no-console
-            console.info('animarr: api base rewritten through same-origin proxy '
-                + '(page is HTTPS, server is HTTP) — was', newBase);
+    // Only active on an HTTPS page where DotNet interop exists (MAUI). On a
+    // plain-HTTP browser host the wrappers are no-ops (needsProxy stays
+    // false because the page itself is HTTP, so direct fetch works).
+    (function installMixedContentProxy() {
+        if (typeof window === 'undefined') return;
+        if (typeof window.location === 'undefined' || window.location.protocol !== 'https:') return;
+        if (window.__animarrProxyInstalled) return;
+        window.__animarrProxyInstalled = true;
+
+        const needsProxy = (u) =>
+            typeof u === 'string'
+            && u.toLowerCase().startsWith('http://')
+            // Loopback IS the local media proxy — a trustworthy origin Chromium
+            // serves from the HTTPS page without mixed-content blocking, so let
+            // it through natively. Only genuinely-remote http:// (a server URL
+            // that somehow wasn't routed through the proxy) falls back to the
+            // base64 bridge.
+            && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(u);
+        const dotnetReady = () =>
+            typeof window.DotNet !== 'undefined'
+            && typeof window.DotNet.invokeMethodAsync === 'function';
+        const b64ToBytes = (b64) => {
+            const bin = atob(b64 || '');
+            const len = bin.length;
+            const arr = new Uint8Array(len);
+            for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+            return arr;
+        };
+        const headerObj = (h) => {
+            const out = {};
+            try {
+                if (!h) return out;
+                if (typeof h.forEach === 'function') {           // Headers instance
+                    h.forEach((v, k) => { out[k] = v; });
+                } else if (Array.isArray(h)) {
+                    h.forEach(([k, v]) => { out[k] = v; });
+                } else if (typeof h === 'object') {
+                    for (const k in h) out[k] = h[k];
+                }
+            } catch {}
+            return out;
+        };
+        const proxyFetch = (url, method, headers, body) =>
+            window.DotNet.invokeMethodAsync('Animarr.App', 'ProxyFetch',
+                url, method || 'GET', headers || {},
+                (typeof body === 'string') ? body : null);
+
+        // ── fetch ──────────────────────────────────────────────────────
+        if (typeof window.fetch === 'function') {
+            const origFetch = window.fetch.bind(window);
+            window.fetch = async function (input, init) {
+                const url = (typeof input === 'string') ? input
+                          : (input && input.url) || null;
+                if (!needsProxy(url) || !dotnetReady()) return origFetch(input, init);
+                const method  = (init && init.method) || (input && input.method) || 'GET';
+                const headers = headerObj((init && init.headers) || (input && input.headers));
+                const body    = (init && init.body) || null;
+                const r = await proxyFetch(url, method, headers, body);
+                const bytes = b64ToBytes(r.bodyBase64);
+                if (!r.status) {
+                    throw new TypeError('animarr proxy fetch failed: '
+                        + new TextDecoder().decode(bytes));
+                }
+                // 1xx/204/205/304 are "null body status" — the Response
+                // constructor throws if you hand it a body for these. Our
+                // keepalive endpoint returns 204, so guard it.
+                const nullBody = r.status === 101 || r.status === 204
+                              || r.status === 205 || r.status === 304;
+                return new Response(nullBody ? null : bytes, {
+                    status: r.status,
+                    headers: { 'Content-Type': r.contentType || 'application/octet-stream' },
+                });
+            };
         }
-        else
-        {
-            window.animarrApiBase    = newBase || '';
-            window.animarrApiBaseRaw = newBase || '';
+
+        // ── XMLHttpRequest (hls.js's XhrLoader) ────────────────────────
+        // We can't subclass XHR cleanly, so we shadow the instance props
+        // (status/readyState/response/...) with Object.defineProperty after
+        // the native object never gets opened/sent. hls.js reads these in its
+        // readystatechange handler — all the accessors below are what it
+        // touches.
+        if (typeof window.XMLHttpRequest === 'function') {
+            const P = XMLHttpRequest.prototype;
+            const origOpen   = P.open;
+            const origSend   = P.send;
+            const origHeader = P.setRequestHeader;
+            const origAbort  = P.abort;
+
+            P.open = function (method, url, ...rest) {
+                this.__animarr = (needsProxy(url) && dotnetReady())
+                    ? { method: method || 'GET', url, headers: {}, aborted: false }
+                    : null;
+                // ALWAYS call the native open — even for proxied URLs. open()
+                // doesn't touch the network (the mixed-content block happens
+                // at send()), but it transitions the XHR to OPENED state.
+                // hls.js sets `xhr.responseType = 'arraybuffer'` right after
+                // open(), and that setter throws InvalidStateError unless the
+                // object is OPENED. send() below skips the native send for
+                // proxied requests, so no cleartext fetch ever fires.
+                return origOpen.call(this, method, url, ...rest);
+            };
+            P.setRequestHeader = function (name, value) {
+                if (this.__animarr) {
+                    this.__animarr.headers[name] = value;
+                    // Don't forward to native — we're not sending the native
+                    // request, and some headers (Range etc.) on the dead
+                    // native request are pointless. The proxy call carries
+                    // them instead.
+                    return;
+                }
+                return origHeader.call(this, name, value);
+            };
+            P.abort = function () {
+                if (this.__animarr) { this.__animarr.aborted = true; return; }
+                return origAbort.call(this);
+            };
+            P.send = function (body) {
+                const ctx = this.__animarr;
+                if (!ctx) return origSend.call(this, body);
+                const self = this;
+                const wantBuffer = self.responseType === 'arraybuffer';
+                proxyFetch(ctx.url, ctx.method, ctx.headers, body)
+                    .then(function (r) {
+                        if (ctx.aborted) return;
+                        const bytes = b64ToBytes(r.bodyBase64);
+                        const resp  = wantBuffer ? bytes.buffer
+                                                 : new TextDecoder().decode(bytes);
+                        const def = (k, v) => Object.defineProperty(self, k, { configurable: true, get: () => v });
+                        def('readyState', 4);
+                        def('status', r.status || 0);
+                        def('statusText', r.status ? 'OK' : '');
+                        def('response', resp);
+                        if (!wantBuffer) def('responseText', resp);
+                        def('responseURL', ctx.url);
+                        self.getAllResponseHeaders = () => 'content-type: ' + (r.contentType || '') + '\r\n';
+                        self.getResponseHeader = (h) =>
+                            (String(h).toLowerCase() === 'content-type') ? (r.contentType || null) : null;
+                        const prog = { loaded: bytes.length, total: bytes.length, lengthComputable: true };
+                        const fire = (kind, evt) => {
+                            try { const cb = self['on' + kind]; if (typeof cb === 'function') cb(evt); } catch {}
+                            try { self.dispatchEvent(evt); } catch {}
+                        };
+                        if (!r.status) {
+                            fire('error', new ProgressEvent('error'));
+                            fire('loadend', new ProgressEvent('loadend'));
+                            return;
+                        }
+                        fire('readystatechange', new Event('readystatechange'));
+                        fire('progress', new ProgressEvent('progress', prog));
+                        fire('load', new ProgressEvent('load', prog));
+                        fire('loadend', new ProgressEvent('loadend', prog));
+                    })
+                    .catch(function () {
+                        if (ctx.aborted) return;
+                        Object.defineProperty(self, 'readyState', { configurable: true, get: () => 4 });
+                        Object.defineProperty(self, 'status', { configurable: true, get: () => 0 });
+                        try { if (typeof self.onerror === 'function') self.onerror(new ProgressEvent('error')); } catch {}
+                        try { self.dispatchEvent(new ProgressEvent('error')); } catch {}
+                    });
+            };
         }
-    };
+
+        // eslint-disable-next-line no-console
+        console.info('animarr: mixed-content proxy installed (fetch + XHR → ProxyFetch bridge)');
+    })();
 
     // ── formatting helpers ────────────────────────────────────────────
     function formatTime(sec) {
@@ -389,14 +552,24 @@
         }
     }
 
-    /** Availability gate for the future native (ExoPlayer/AVPlayer) adapter.
-     *  Phase 2 publishes `window.animarrNativePlayer` from the MAUI host on
-     *  platforms where a native player makes sense (Android TV initially).
-     *  Phase 1 has no such global, so this always returns false. */
-    // eslint-disable-next-line no-unused-vars
-    function isNativeAdapterAvailable() {
+    /** Availability gate for the native (ExoPlayer/AVPlayer) adapter.
+     *  The MAUI host publishes `window.animarrNativePlayer`; on a plain browser
+     *  there's no such global so this resolves false (web player is used).
+     *
+     *  Async on purpose: the authoritative answer comes from a .NET call
+     *  (NativePlayerIsAvailable), and the Blazor call dispatcher isn't ready
+     *  during early boot — a one-shot boot probe races it and throws "No call
+     *  dispatcher has been set", leaving the native gate permanently off. By
+     *  awaiting this at attach() time (user just hit play) the dispatcher is
+     *  guaranteed ready, so the probe succeeds. Falls back to the cached sync
+     *  getter if the async variant isn't present. */
+    async function isNativeAdapterAvailable() {
         const np = (typeof window !== 'undefined') ? window.animarrNativePlayer : null;
-        return !!(np && typeof np.isAvailable === 'function' && np.isAvailable());
+        if (!np) return false;
+        if (typeof np.isAvailableAsync === 'function') {
+            try { return !!(await np.isAvailableAsync()); } catch { /* fall through */ }
+        }
+        return !!(typeof np.isAvailable === 'function' && np.isAvailable());
     }
 
     /** Picks which audio-offset channel applies. Returns 'hw' / 'sw' / null.
@@ -455,17 +628,36 @@
         next:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
         play:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
         pause:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>',
-        fwd10:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 4 21 10 15 10"/><text x="12" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="currentColor" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
-        audio:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
-        cc:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9.5 10.5a2 2 0 1 0 0 3"/><path d="M16 10.5a2 2 0 1 0 0 3"/></svg>',
-        aspect: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 10v4M11 10v4M15 10v4"/></svg>',
-        offset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6"  x2="14" y2="6"/><line x1="10" y1="6"  x2="3"  y2="6"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8"  y1="12" x2="3"  y2="12"/><line x1="21" y1="18" x2="16" y2="18"/><line x1="12" y1="18" x2="3"  y2="18"/><circle cx="12" cy="6"  r="2" fill="currentColor"/><circle cx="10" cy="12" r="2" fill="currentColor"/><circle cx="14" cy="18" r="2" fill="currentColor"/></svg>',
+        fwd10:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-weight="800" fill="var(--hud-accent-hi)" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
+        back10: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-weight="800" fill="var(--hud-accent-hi)" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
+        audio:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+        cc:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M7 11h4"/><path d="M7 14.5h7"/><path d="M16 11h1"/></svg>',
+        aspect: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg>',
+        offset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 13V9.5"/><path d="M9.5 2.5h5"/><path d="M12 2.5v3"/><path d="M18.5 7l1.2-1.2"/></svg>',
         cast:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17a3 3 0 0 1 3 3"/><path d="M2 13a7 7 0 0 1 7 7"/><path d="M2 9 a11 11 0 0 1 11 11"/><path d="M2 5h17a2 2 0 0 1 2 2v9"/></svg>',
         volume: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>',
         mute:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>',
         fsEnter:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V5a2 2 0 0 1 2-2h4"/><path d="M15 3h4a2 2 0 0 1 2 2v4"/><path d="M21 15v4a2 2 0 0 1-2 2h-4"/><path d="M9 21H5a2 2 0 0 1-2-2v-4"/></svg>',
         fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
+        info:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5" stroke-width="2.2"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/></svg>',
+        quality:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.7 7.7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.5 6.5 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.5 6.5 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.9 6.9 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>',
     };
+
+    /** Fullscreen action. On the MAUI Android host this ROTATES the device
+     *  (YouTube-style): portrait → landscape to "go fullscreen", landscape →
+     *  portrait to exit. The orientation change in turn drives immersive mode
+     *  (status-bar hide) via the orientation listener in attachHud. On a plain
+     *  browser there's no orientation bridge, so we fall back to the real
+     *  Fullscreen API via the adapter. */
+    function toggleFullscreen(adapter) {
+        if (typeof window !== 'undefined' && typeof window.animarrSetOrientation === 'function') {
+            const landscape = !!(window.matchMedia &&
+                window.matchMedia('(orientation: landscape)').matches);
+            window.animarrSetOrientation(landscape ? 'portrait' : 'landscape');
+            return;
+        }
+        try { adapter.fullscreen = !adapter.fullscreen; } catch {}
+    }
 
     // ── HUD HTML ──────────────────────────────────────────────────────
     function buildHudHtml(style) {
@@ -480,6 +672,7 @@
         // mode so the action remains readable without a tooltip.
         return `
 <div class="vp-hud vp-hud--hidden" data-visible="false" data-style="${escapeHtml(style)}">
+  <div class="vp-hud__tap"></div>
   <div class="vp-hud__top">
     <button type="button" class="vp-btn vp-btn--g vp-btn--back" data-act="back"
             aria-label="Back" title="Back (Esc)">
@@ -503,9 +696,15 @@
       <span class="vp-hud__time" data-bind="dur">0:00</span>
     </div>
     <div class="vp-hud__controls">
-      <div class="vp-hud__cluster vp-hud__cluster--l">
+      <div class="vp-hud__cluster vp-hud__cluster--primary">
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="back10"
+                aria-label="Back 10 seconds" title="Back 10s (←)">
+          <span class="vp-glyph">${I.back10}</span>
+          <span class="vp-icon-text" aria-hidden="true">-10</span>
+          <span class="vp-label">-10s</span>
+        </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="prev"
-                aria-label="Previous episode" title="Previous episode (←|◄◄)">
+                aria-label="Previous episode" title="Previous episode (◄◄)">
           <span class="vp-glyph">${I.prev}</span><span class="vp-label">Prev</span>
         </button>
         <button class="vp-btn vp-btn--p vp-btn--tv" data-act="play"
@@ -524,40 +723,56 @@
           <span class="vp-label">+10s</span>
         </button>
       </div>
-      <div class="vp-hud__cluster vp-hud__cluster--r">
+      <div class="vp-hud__cluster vp-hud__cluster--secondary">
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="volume"
                 aria-label="Volume" title="Volume" data-bind="volume-btn">
           <span class="vp-glyph" data-bind="volume-icon">${I.volume}</span>
           <span class="vp-label">Volume</span>
         </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="quality"
+                aria-label="Quality" title="Quality (resolution)">
+          <span class="vp-glyph">${I.quality}</span><span class="vp-label">Quality</span>
+        </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="aspect"
                 aria-label="Aspect ratio" title="Aspect ratio">
           <span class="vp-glyph">${I.aspect}</span><span class="vp-label">Aspect</span>
-        </button>
-        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="offset"
-                aria-label="Audio sync" title="Audio sync offset"
-                data-bind="offset-btn">
-          <span class="vp-glyph">${I.offset}</span><span class="vp-label">Sync</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cast"
                 aria-label="Cast to TV" title="Send video to TV (DLNA)"
                 data-bind="cast-btn">
           <span class="vp-glyph">${I.cast}</span><span class="vp-label">Cast</span>
         </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="offset"
+                aria-label="Audio sync" title="Audio sync offset"
+                data-bind="offset-btn">
+          <span class="vp-glyph">${I.offset}</span>
+          <span class="vp-icon-text" aria-hidden="true">AS</span>
+          <span class="vp-label">Sync</span>
+        </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="audio"
                 aria-label="Audio tracks" title="Audio tracks">
-          <span class="vp-glyph">${I.audio}</span><span class="vp-label">Audio</span>
+          <span class="vp-glyph">${I.audio}</span>
+          <span class="vp-icon-text" aria-hidden="true">AT</span>
+          <span class="vp-label">Audio</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cc"
                 aria-label="Subtitles" title="Subtitles">
-          <span class="vp-glyph">${I.cc}</span><span class="vp-label">CC</span>
+          <span class="vp-glyph">${I.cc}</span>
+          <span class="vp-icon-text" aria-hidden="true">CC</span>
+          <span class="vp-label">CC</span>
         </button>
-        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="fullscreen"
-                aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
-          <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
-          <span class="vp-label" data-bind="fs-label">Fullscreen</span>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="info"
+                aria-label="Media info" title="Media info (codec, HDR, audio)">
+          <span class="vp-glyph">${I.info}</span>
+          <span class="vp-icon-text" aria-hidden="true">i</span>
+          <span class="vp-label">Info</span>
         </button>
       </div>
+      <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__fs" data-act="fullscreen"
+              aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
+        <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
+        <span class="vp-label" data-bind="fs-label">Fullscreen</span>
+      </button>
     </div>
   </div>
 </div>`.trim();
@@ -598,6 +813,39 @@
                 }
                 if (!popup.contains(e.target) &&
                     !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
+    }
+
+    // ── media-info popup (read-only) ──────────────────────────────────
+    // Shows the post-transcode video/audio details (resolution, codec, bit
+    // depth, HDR, audio, playback path) that used to live in the top-right meta
+    // line. Toggled by the bottom "Info" button.
+    function openInfoPopup(root, anchor, lines) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;  // same button → toggle closed
+        }
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--info';
+        popup.setAttribute('data-anchor', anchor);
+        const rows = (lines && lines.length) ? lines : ['No media info available'];
+        popup.innerHTML = `
+            <div class="vp-hud-popup__title">Media info</div>
+            <div class="vp-hud-popup__list">
+                ${rows.map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('')}
+            </div>`;
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) { document.removeEventListener('click', onDoc, true); return; }
+                if (!popup.contains(e.target) && !e.target.closest(`[data-act="${anchor}"]`)) {
                     popup.remove();
                     document.removeEventListener('click', onDoc, true);
                 }
@@ -902,12 +1150,62 @@
                 root.style.cursor = 'none';
             }, HIDE_MS);
         }
+        function hideNow() {
+            hud.classList.add('vp-hud--hidden');
+            hud.setAttribute('data-visible', 'false');
+            root.style.cursor = 'none';
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        }
+        // Tap-to-toggle: a tap/click on the bare video area reveals the HUD when
+        // hidden and hides it when shown (YouTube-style). Controls live in
+        // .vp-hud__top / .vp-hud__bottom (pointer-events:auto) and stopPropagation,
+        // so taps on buttons never reach this handler.
+        function toggleHud() {
+            if (hud.getAttribute('data-visible') === 'true') hideNow(); else show();
+        }
         hud.addEventListener('mouseenter', () => { hovering = true;  show(); });
         hud.addEventListener('mouseleave', () => { hovering = false; show(); });
         const onActivity = () => show();
-        root.addEventListener('mousemove',  onActivity);
-        root.addEventListener('pointermove', onActivity);
-        root.addEventListener('touchstart', onActivity, { passive: true });
+        // Desktop: mouse movement reveals the HUD (then it auto-hides).
+        root.addEventListener('mousemove', onActivity);
+        // Tap-catcher: a dedicated full-area layer (.vp-hud__tap — pointer-events
+        // auto even while the HUD is hidden) captures taps on the bare video so
+        // they (a) toggle the HUD and (b) do NOT fall through to Artplayer's
+        // built-in click-to-play, which previously paused playback and fought
+        // the toggle (so a single tap couldn't re-show the HUD). The control
+        // bars sit ABOVE this layer (later in the DOM) so buttons still work.
+        const tapEl = hud.querySelector('.vp-hud__tap');
+        if (tapEl) {
+            tapEl.addEventListener('click', () => {
+                const openPopup = root.querySelector('.vp-hud-popup');
+                if (openPopup) { openPopup.remove(); return; }  // first tap dismisses a popup
+                toggleHud();
+            });
+        }
+
+        // ── immersive (Android): hide the system status / nav bars while the
+        // player is in LANDSCAPE, restore them in portrait (where the HUD top
+        // bar sits below the status bar). Driven by orientation so a MANUAL
+        // rotate hides the bar too, not just the fullscreen button. No-op on
+        // hosts without the bridge (plain browser / desktop).
+        let immersiveMql = null, onOrient = null;
+        if (typeof window !== 'undefined'
+            && typeof window.animarrSetImmersive === 'function'
+            && window.matchMedia) {
+            immersiveMql = window.matchMedia('(orientation: landscape)');
+            onOrient = () => {
+                const landscape = immersiveMql.matches;
+                try { window.animarrSetImmersive(landscape); } catch {}
+                // On Android "fullscreen" is landscape (the button rotates the
+                // device), so reflect that on the FS button instead of the
+                // document-fullscreen state that syncFsIcon watches.
+                if (refs.fsIcon)  refs.fsIcon.innerHTML    = landscape ? I.fsExit  : I.fsEnter;
+                if (refs.fsLabel) refs.fsLabel.textContent = landscape ? 'Exit FS' : 'Fullscreen';
+            };
+            try { immersiveMql.addEventListener('change', onOrient); }
+            catch { try { immersiveMql.addListener(onOrient); } catch {} }  // old WebView
+            onOrient();  // apply current orientation immediately
+        }
 
         // ── keyboard / TV remote handling ─────────────────────────────
         // We do this ourselves (rather than letting Artplayer's `hotkey: true`
@@ -971,7 +1269,7 @@
                     break;
                 case 'f':
                 case 'F':
-                    adapter.fullscreen = !adapter.fullscreen;
+                    toggleFullscreen(adapter);
                     e.preventDefault();
                     break;
                 case 'm':
@@ -998,6 +1296,7 @@
                 case 'prev':   callbacks.prev(); break;
                 case 'next':   callbacks.next(); break;
                 case 'play':   togglePlay(); break;
+                case 'back10': seekBy(-10); break;
                 case 'fwd10':  seekBy(+10); break;
                 case 'aspect': callbacks.aspect(); break;
                 case 'offset': callbacks.offset(); break;
@@ -1005,8 +1304,10 @@
                 case 'volume': callbacks.volume(); break;
                 case 'audio':  callbacks.audio(); break;
                 case 'cc':     callbacks.cc(); break;
+                case 'quality': callbacks.quality(); break;
+                case 'info':   callbacks.info(); break;
                 case 'fullscreen':
-                    adapter.fullscreen = !adapter.fullscreen;
+                    callbacks.fullscreen();
                     break;
             }
             show();
@@ -1103,6 +1404,14 @@
             document.removeEventListener('keydown', onKey, { capture: true });
             document.removeEventListener('fullscreenchange', syncFsIcon);
             if (hideTimer) clearTimeout(hideTimer);
+            // Restore the system bars + drop the orientation listener so other
+            // (non-player) pages get the status bar back.
+            if (immersiveMql && onOrient) {
+                try { immersiveMql.removeEventListener('change', onOrient); }
+                catch { try { immersiveMql.removeListener(onOrient); } catch {} }
+            }
+            try { if (typeof window.animarrSetImmersive === 'function') window.animarrSetImmersive(false); } catch {}
+            try { if (typeof window.animarrSetOrientation === 'function') window.animarrSetOrientation('auto'); } catch {}
         };
 
         updateProgress();
@@ -1157,6 +1466,10 @@
         }
         const audioTrackIndex = (opts && Number.isFinite(opts.audioTrackIndex))
             ? Math.max(0, opts.audioTrackIndex) : 0;
+        // Output height cap (0 = original). Below source → server downscales.
+        // Carried across re-attaches by switchQuality (mirrors audioTrackIndex).
+        const maxHeight = (opts && Number.isFinite(opts.maxHeight))
+            ? Math.max(0, opts.maxHeight) : 0;
         const forceResumeSec  = (opts && Number.isFinite(opts.forceResumeSec))
             ? Math.max(0, opts.forceResumeSec)  : null;
         if (typeof window.Artplayer !== 'function') {
@@ -1175,6 +1488,7 @@
             totalDuration: 0, resumeOffset: 0, hud: null, clockTimer: null,
             mediaInfo: null, subtitleList: [], audioList: [],
             currentSubIdx: null, currentAudIdx: audioTrackIndex,
+            currentMaxHeight: maxHeight,
             // Captured so switchAudio() can re-attach with a new audio index
             // without needing the .NET-side parameters again.
             mediaPath, dotnetRef,
@@ -1221,7 +1535,8 @@
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + audioOffsetMsHw
             + '&audioOffsetSwMs=' + audioOffsetMsSw
-            + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : ''));
+            + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
+            + (maxHeight > 0 ? '&maxHeight=' + maxHeight : ''));
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
@@ -1355,6 +1670,13 @@
             ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
             : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
         const isHls   = !directPlayUrl;
+        // DIAGNOSTIC: surfaces in logcat (chromium CONSOLE) so we can confirm
+        // the player is actually routing through the loopback proxy and not the
+        // base64 bridge.
+        console.info('animarr: playUrl=' + playUrl
+            + ' | apiBase=' + apiBase()
+            + ' | proxyBase=' + (window.animarrLocalProxyBase || '(none)')
+            + ' | directPlay=' + (!!directPlayUrl));
         const fileExt = mediaPath.toLowerCase().split('.').pop();
         const stylePref = readStylePref();
 
@@ -1366,7 +1688,7 @@
         // fall through to Artplayer (which might still fail, but at least
         // gives us softare decode fallback through the WebView). Skipped
         // entirely on hosts where the native bridge isn't published.
-        let nativeAllowed = isNativeAdapterAvailable() && !opts?.forceWebPlayer;
+        let nativeAllowed = !opts?.forceWebPlayer && await isNativeAdapterAvailable();
         if (nativeAllowed && entry.output && typeof window.animarrNativePlayer.canDecode === 'function') {
             try {
                 const o = entry.output;
@@ -1423,6 +1745,13 @@
                         video.src = url;
                         return;
                     }
+                    // Buffer sizing. Segments stream from the loopback media proxy
+                    // (http://127.0.0.1) over a normal socket — NOT the old base64
+                    // JS↔.NET bridge — so the GC-storm-from-over-buffering problem
+                    // is gone, and we keep a generous forward buffer to ride out
+                    // transient segment-delivery / on-the-fly transcode hiccups.
+                    // backBufferLength stays modest so long episodes don't pin
+                    // unbounded memory.
                     const hls = new window.Hls({
                         fragLoadingTimeOut:     60000,
                         fragLoadingMaxRetry:    8,
@@ -1432,13 +1761,31 @@
                         maxFragLookUpTolerance: 2,
                         nudgeOffset:            0.5,
                         nudgeMaxRetry:          10,
-                        maxBufferLength:        60,
+                        // Generous forward buffer to absorb transient stalls.
+                        maxBufferLength:        90,
                         maxMaxBufferLength:     600,
+                        maxBufferSize:          120 * 1000 * 1000,
+                        // Keep ~60s of already-played media so small back-seeks
+                        // are instant, without holding the whole episode.
+                        backBufferLength:       60,
                     });
                     hls.loadSource(url);
                     hls.attachMedia(video);
                     art.hls = hls;
                     art.on('destroy', () => { try { hls.destroy(); } catch {} });
+                    // Autostart reliability: Artplayer's `autoplay` fires play()
+                    // ONCE at construction — but on the HLS path the manifest +
+                    // first segment may still be warming up on the server then, so
+                    // that single attempt no-ops and the user has to press play.
+                    // Re-kick play() the moment hls.js has parsed the manifest
+                    // (media genuinely ready). Swallow the promise rejection —
+                    // a NotAllowedError just means the browser's autoplay policy
+                    // blocked it, in which case the visible play button is the
+                    // fallback (nothing more we can do without a user gesture).
+                    hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                        const p = video.play();
+                        if (p && typeof p.catch === 'function') p.catch(() => {});
+                    });
                     hls.on(window.Hls.Events.ERROR, (evt, data) => {
                         if (data.fatal) {
                             console.error('animarr hls fatal:', data.type, data.details);
@@ -1493,6 +1840,24 @@
         entry.adapter = adapter;
         entry.currentSubIdx = subtitleList.findIndex(s => s.default);
         if (entry.currentSubIdx < 0 && subtitleList.length > 0) entry.currentSubIdx = 0;
+
+        // Autostart reliability (covers BOTH the HLS and Direct-Play paths).
+        // Artplayer's autoplay can lose the race against media readiness, so we
+        // also kick play() on the first `canplay` of the underlying <video>.
+        // One-shot; harmless if playback already started. Rejections (autoplay
+        // policy) are swallowed — the play button is the fallback.
+        try {
+            const vEl = adapter.rawVideoElement && adapter.rawVideoElement();
+            if (vEl && !vEl.__animarrAutostart) {
+                vEl.__animarrAutostart = true;
+                const kick = () => {
+                    const p = vEl.play();
+                    if (p && typeof p.catch === 'function') p.catch(() => {});
+                };
+                if (vEl.readyState >= 3) kick();        // already ready
+                else vEl.addEventListener('canplay', kick, { once: true });
+            }
+        } catch {}
 
         // ── 5b) Wire HUD ──────────────────────────────────────────────
         // Root element for HUD events: Artplayer's player wrapper on the web
@@ -1549,6 +1914,25 @@
                     }
                 });
             },
+            quality: () => {
+                // Build the ladder from the SOURCE height (never upscale): the
+                // probe's height is the ceiling; offer standard rungs below it.
+                const srcH = (entry.mediaInfo && entry.mediaInfo.height)
+                          || (entry.output && entry.output.height) || 0;
+                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0 }];
+                [1440, 1080, 720, 480].forEach(r => {
+                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p', h: r });
+                });
+                const curH = entry.currentMaxHeight || 0;
+                let curIdx = items.findIndex(o => o.h === curH);
+                if (curIdx < 0) curIdx = 0;
+                openPickerPopup(hudRoot, 'quality', 'Quality', items.map(o => o.label), curIdx, (i) => {
+                    if (items[i].h === (entry.currentMaxHeight || 0)) return;
+                    switchQuality(elementId, items[i].h);
+                });
+            },
+            info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || []),
+            fullscreen: () => toggleFullscreen(adapter),
         });
         entry.hud = hudCtl;
 
@@ -1577,48 +1961,51 @@
         // HEVC HDR DV source served via VAAPI reads "H.264 8-bit SDR" here).
         // Refreshed every 30s so the wall-clock stays current.
         function updateMeta() {
-            const now = new Date();
-            const hh = String(now.getHours()).padStart(2, '0');
-            const mm = String(now.getMinutes()).padStart(2, '0');
-            const bits = [`${hh}:${mm}`];
+            // Top-right meta line is now EMPTY — the wall-clock was removed per
+            // request, and the resolution / codec / bit-depth / HDR / audio /
+            // playback-path tags moved into the bottom "Info" button popup
+            // (entry.infoLines).
+            hudCtl.setMeta('');
+
             const o = entry.output;
+            const lines = [];
             if (o) {
-                if (o.height) bits.push(`${o.height}p`);
-                if (o.videoCodec) bits.push(o.videoCodec.toUpperCase());
-                if (o.bitDepth >= 10) bits.push('10-bit');
-                (o.hdrFormats || []).forEach(fmt => {
-                    bits.push(fmt === 'dolbyvision' ? 'DV'
-                            : fmt === 'hdr10' ? 'HDR10'
-                            : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
-                });
+                if (o.height) lines.push('Resolution: ' + o.height + 'p');
+                const vparts = [];
+                if (o.videoCodec) vparts.push(o.videoCodec.toUpperCase());
+                if (o.bitDepth >= 10) vparts.push('10-bit');
+                if (vparts.length) lines.push('Video: ' + vparts.join(' '));
+                const hdrs = (o.hdrFormats || []).map(fmt =>
+                    fmt === 'dolbyvision' ? 'Dolby Vision'
+                  : fmt === 'hdr10' ? 'HDR10'
+                  : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
+                if (hdrs.length) lines.push('HDR: ' + hdrs.join(', '));
                 if (o.audioCodec) {
                     const ch = o.audioChannels || 0;
                     const chLabel = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
                                   : ch === 6 ? '5.1' : ch === 8 ? '7.1'
-                                  : ch > 0 ? `${ch}ch` : '';
-                    bits.push(o.audioCodec.toUpperCase()
-                        + (chLabel ? ' ' + chLabel : ''));
+                                  : ch > 0 ? ch + 'ch' : '';
+                    let a = o.audioCodec.toUpperCase() + (chLabel ? ' ' + chLabel : '');
+                    if (o.audioLanguage) a += ' (' + o.audioLanguage.toUpperCase() + ')';
+                    lines.push('Audio: ' + a);
                 }
-                if (o.audioLanguage) bits.push(o.audioLanguage.toUpperCase());
-                // Playback path tag — what the server actually did with the
-                // source. "Direct" is best, the rest indicate transcoding.
                 const planTag = {
-                    'directplay':     'Direct',
-                    'ts-copy':        'TS-copy',
-                    'vaapi-reencode': 'VAAPI→H.264',
-                    'nvenc-reencode': 'NVENC→H.264',
-                    'fmp4-copy':      'fMP4-copy',
+                    'directplay':     'Direct Play',
+                    'ts-copy':        'HLS · TS stream-copy',
+                    'vaapi-reencode': 'HLS · VAAPI → H.264',
+                    'nvenc-reencode': 'HLS · NVENC → H.264',
+                    'fmp4-copy':      'HLS · fMP4 stream-copy',
                 }[o.plan] || 'HLS';
-                bits.push(planTag);
+                lines.push('Playback: ' + planTag);
+                if (o.transcoded && o.transcodeReason) lines.push('Reason: ' + o.transcodeReason);
             }
-            hudCtl.setMeta(bits.join(' · '));
-            // Hover tooltip with the server-supplied transcode reason — only
-            // when we actually transcoded. For Direct Play / unknown the
-            // attribute is cleared so no stale tooltip lingers.
-            const root2 = art?.template?.$player || art?.container;
-            const metaEl = root2 && root2.querySelector('[data-bind="meta"]');
-            if (metaEl) {
-                metaEl.title = (o && o.transcoded && o.transcodeReason) ? o.transcodeReason : '';
+            entry.infoLines = lines;
+            // If the Info popup is open, refresh its rows live (the 30s clock
+            // tick also re-runs this).
+            const openInfo = hudRoot.querySelector('.vp-hud-popup--info .vp-hud-popup__list');
+            if (openInfo) {
+                openInfo.innerHTML = (lines.length ? lines : ['No media info available'])
+                    .map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('');
             }
         }
         updateMeta();
@@ -1812,6 +2199,29 @@
         await new Promise(r => setTimeout(r, 100));
         await attach(elementId, dotnetRef, mediaPath, {
             audioTrackIndex,
+            forceResumeSec: pos,
+        });
+    }
+
+    /**
+     * Switch output quality (max height cap). Tears down + restarts the HLS
+     * session with a new `maxHeight` (server downscales/re-encodes below the
+     * source height), carrying current position + audio track over. 0 = original.
+     * Same teardown+resume dance as switchAudioTrack (1-3s warm-up gap).
+     */
+    async function switchQuality(elementId, maxHeight) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.adapter) return;
+        const pos       = entry.adapter.currentTime || 0;
+        const dotnetRef = entry.dotnetRef;
+        const mediaPath = entry.mediaPath;
+        const audioTrackIndex = entry.currentAudIdx || 0;
+        if (!dotnetRef || !mediaPath) return;
+        detach(elementId);
+        await new Promise(r => setTimeout(r, 100));
+        await attach(elementId, dotnetRef, mediaPath, {
+            audioTrackIndex,
+            maxHeight,
             forceResumeSec: pos,
         });
     }
