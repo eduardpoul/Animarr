@@ -215,6 +215,7 @@ else
                 <p class="md-season-overview">@active.Overview</p>
             }
 
+            @{ var didMarkAutofocusEp = false; }
             <div class="md-episode-grid">
                 @for (int i = 1; i <= loopEpCount; i++)
                 {
@@ -222,6 +223,13 @@ else
                     var hasFile   = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
                     var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
                     var epTitle   = $"Episode {ep}";
+                    // First on-disk episode becomes the default-focus target
+                    // when the hero has no Continue CTA (i.e. nothing in
+                    // progress yet). Series like Death's Game where every
+                    // episode is missing → no card gets the marker, focus
+                    // falls back to first-focusable-in-main (Back chip).
+                    var markEpAutofocus = hasFile && !didMarkAutofocusEp;
+                    if (markEpAutofocus) didMarkAutofocusEp = true;
                     // Design spec: on-disk shows runtime/codec/size; missing shows
                     // "Not downloaded" in warn color (the .d-ep--miss .d-ep__meta
                     // rule already tints it). Was hard-coded to runtime regardless,
@@ -247,6 +255,7 @@ else
                          role="button"
                          aria-label="@($"Play episode {ep}")"
                          aria-disabled="@(hasFile ? "false" : "true")"
+                         data-tv-autofocus="@(markEpAutofocus ? "true" : null)"
                          @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
                          @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
                         <EpisodeCard Number="ep"
@@ -318,6 +327,11 @@ else
     private int _activeSeason = 1;
     private bool _movieWatched;
     private bool _editOpen;
+    /// <summary>True once we've pushed default-focus to the hero CTA /
+    /// first episode after the initial async load. Subsequent re-renders
+    /// (toggled watched, edited metadata) skip the auto-focus so the
+    /// user's current focus doesn't get yanked back to the top.</summary>
+    private bool _didAutoFocus;
 
     // Player state — _playerPath drives the overlay render; _playerSelfRef
     // is the DotNetObjectReference passed to animarrPlayer.attach so the JS
@@ -423,6 +437,19 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Push default-focus to the hero Continue CTA (or first available
+        // episode card, or MovieFileCard's Play — whichever is the
+        // headline data-tv-autofocus target on this item) once the async
+        // load completes. Only runs once per page mount so subsequent
+        // toggles (mark watched, save edit) don't yank focus away from
+        // wherever the user is now.
+        if (!_loading && _item is not null && !_didAutoFocus)
+        {
+            _didAutoFocus = true;
+            try { await JS.InvokeVoidAsync("animarrTvNav.refocusAutofocus"); }
+            catch { /* non-tv host — no-op */ }
+        }
+
         if (_playerPath is not null && _playerSelfRef is null)
         {
             _playerSelfRef = DotNetObjectReference.Create(this);

@@ -25,6 +25,29 @@ body[data-animarr-native="1"] .vp-shell {
     background: transparent !important;
 }
 
+/* The rules above only clear the player's OWN containers. The page hosting
+   the player (MediaDetail — poster, synopsis: the whole "movie card") still
+   paints behind the now-transparent .vp-backdrop and OCCLUDES the TextureView,
+   so the user sees the card instead of the video (audio plays, no picture).
+   Fix: hide the entire Blazor app subtree, then re-show ONLY the player
+   overlay (.vp-backdrop + its HUD descendants). visibility:hidden elements
+   don't paint, so the WebView is fully transparent everywhere except the HUD —
+   exposing the ExoPlayer video underneath. The explicit visibility:visible on
+   the overlay subtree overrides the inherited hidden (standard show-one-branch
+   trick) and keeps the HUD interactive (hidden elements drop pointer events,
+   visible ones keep them). */
+/* The :has(.vp-backdrop) guard is a safety net: #app is only hidden while the
+   player overlay actually exists in the DOM. If data-animarr-native ever leaks
+   (attribute not cleared on some teardown path) the app won't be left blank —
+   it un-hides the moment the overlay is gone. */
+body[data-animarr-native="1"]:has(.vp-backdrop) #app {
+    visibility: hidden !important;
+}
+body[data-animarr-native="1"] .vp-backdrop,
+body[data-animarr-native="1"] .vp-backdrop * {
+    visibility: visible !important;
+}
+
 /* ── Hide Artplayer's built-in chrome ─────────────────────────────── */
 .vp-art .art-bottom,
 .vp-art .art-progress,
@@ -70,9 +93,17 @@ body[data-animarr-native="1"] .vp-shell {
     align-items: center;
     justify-content: space-between;
     gap: 24px;
-    padding: 28px 40px;
-    background: linear-gradient(180deg, rgba(15,17,21,0.7), transparent);
+    /* Base padding; orientation media queries at the bottom of this file refine
+       the top inset (portrait pushes the bar below the device status bar,
+       landscape keeps it tight to the top). */
+    padding: 28px 40px 48px;
+    background: linear-gradient(180deg,
+                rgba(8,10,13,0.85) 0%,
+                rgba(8,10,13,0.45) 55%,
+                transparent 100%);
     pointer-events: auto;
+    position: relative;
+    z-index: 2;
 }
 /* Title is absolute-centred so the meta plashka on the right doesn't pull
    it left when the meta line is long (HEVC · 10-bit · DV · HDR10 · …).
@@ -119,9 +150,21 @@ body[data-animarr-native="1"] .vp-shell {
 
 /* ── Bottom HUD ───────────────────────────────────────────────────── */
 .vp-hud__bottom {
-    padding: 32px 40px 28px;
-    background: linear-gradient(0deg, rgba(15,17,21,0.85), transparent);
+    /* Lowered ~10px (28→18 bottom) per request; orientation media queries add
+       the nav-bar safe inset back in portrait. */
+    padding: 56px 40px 18px;
+    /* Stronger, taller scrim so the whole control row sits on a darkened band
+       — white icons stay readable over ANY video frame WITHOUT per-button
+       chips (user rejected those). This is the standard video-player bottom
+       scrim (Netflix / YouTube). */
+    background: linear-gradient(0deg,
+                rgba(8,10,13,0.92) 0%,
+                rgba(8,10,13,0.72) 38%,
+                rgba(8,10,13,0.32) 70%,
+                transparent 100%);
     pointer-events: auto;
+    position: relative;
+    z-index: 2;
 }
 
 /* Progress row */
@@ -177,17 +220,35 @@ body[data-animarr-native="1"] .vp-shell {
         0 0 0 9px rgba(255,255,255,0.06);
 }
 
-/* Controls row */
+/* Controls row.
+   Landscape (default): one row — primary playback group on the left (margin-
+   right:auto pushes the rest right), then the secondary settings group and the
+   fullscreen button on the right. Portrait (media query at end of file) stacks
+   them into two centred rows with fullscreen pinned bottom-right. */
 .vp-hud__controls {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    gap: 10px 14px;
+    flex-wrap: wrap;
 }
 .vp-hud__cluster {
     display: flex;
+    align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+}
+.vp-hud__cluster--primary { margin-right: auto; }
+
+/* Tap-catcher — full-area transparent layer that captures bare-video taps so
+   they toggle the HUD instead of falling through to Artplayer's click-to-play.
+   Below the control bars (z-index 1 vs 2) but above the video; stays
+   pointer-events:auto even when the HUD is hidden so a tap can re-show it. */
+.vp-hud__tap {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: auto;
+    background: transparent;
 }
 
 /* ── Buttons ──────────────────────────────────────────────────────── */
@@ -253,20 +314,22 @@ body[data-animarr-native="1"] .vp-shell {
 }
 .vp-glyph svg { display: block; }
 
-/* ── Icons-only style (no labels, no background) ─────────────────── */
-/* Activated when .vp-hud has data-style="icons". Buttons become naked
-   icon hit-targets. Hover still shows a subtle background so it's
-   clear they're interactive. */
+/* ── Icons-only style ─────────────────────────────────────────────
+   Activated when .vp-hud has data-style="icons". Labels are hidden, but
+   each button keeps a subtle dark "chip" (translucent fill + faint border)
+   so the white glyphs stay readable + clearly separated over ANY video
+   frame — fully-transparent naked icons washed out to unreadable white
+   blobs on bright scenes. */
 .vp-hud[data-style="icons"] .vp-btn {
     background: transparent;
     border-color: transparent;
     padding: 10px;
     gap: 0;
     box-shadow: none;
-    color: var(--hud-text);
+    color: #fff;
 }
 .vp-hud[data-style="icons"] .vp-btn:hover {
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.12);
     border-color: transparent;
 }
 .vp-hud[data-style="icons"] .vp-btn--p {
@@ -282,12 +345,16 @@ body[data-animarr-native="1"] .vp-shell {
     backdrop-filter: none;
 }
 .vp-hud[data-style="icons"] .vp-btn--back:hover {
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.12);
 }
 .vp-hud[data-style="icons"] .vp-label { display: none; }
 .vp-hud[data-style="icons"] .vp-glyph svg {
-    width: 22px;
-    height: 22px;
+    width: 23px;
+    height: 23px;
+    /* No chip behind icons (user's call) — instead a crisp drop-shadow so the
+       white glyph stays readable over bright video. The bottom/top scrim
+       gradients carry most of the contrast; this shadow handles the rest. */
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.9));
 }
 
 /* +10s button is special — in icons mode we replace the SVG with literal
@@ -296,14 +363,33 @@ body[data-animarr-native="1"] .vp-shell {
    SVG + "+10s" label do the work. */
 .vp-icon-text {
     display: none;
-    font-weight: 700;
+    font-weight: 800;
     font-size: 13px;
     letter-spacing: -0.02em;
     line-height: 1;
     font-variant-numeric: tabular-nums;
+    /* White glyph-text by default (e.g. "CC"); shadow keeps it readable on any
+       frame. We use HTML spans rather than SVG <text> because SVG text injected
+       via innerHTML does NOT render in this WebView/Artplayer-layer context —
+       this span mechanism is the same one the ±10 buttons use, which renders. */
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
 }
-.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-glyph { display: none; }
-.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-icon-text { display: inline-block; }
+/* ±10 stay accent-blue (user asked for the numerals to be coloured). */
+.vp-btn[data-act="fwd10"] .vp-icon-text,
+.vp-btn[data-act="back10"] .vp-icon-text { color: var(--hud-accent-hi); }
+.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-glyph,
+.vp-hud[data-style="icons"] .vp-btn[data-act="back10"] .vp-glyph,
+.vp-hud[data-style="icons"] .vp-btn[data-act="cc"] .vp-glyph,
+.vp-hud[data-style="icons"] .vp-btn[data-act="info"] .vp-glyph,
+.vp-hud[data-style="icons"] .vp-btn[data-act="audio"] .vp-glyph,
+.vp-hud[data-style="icons"] .vp-btn[data-act="offset"] .vp-glyph { display: none; }
+.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-icon-text,
+.vp-hud[data-style="icons"] .vp-btn[data-act="back10"] .vp-icon-text,
+.vp-hud[data-style="icons"] .vp-btn[data-act="cc"] .vp-icon-text,
+.vp-hud[data-style="icons"] .vp-btn[data-act="info"] .vp-icon-text,
+.vp-hud[data-style="icons"] .vp-btn[data-act="audio"] .vp-icon-text,
+.vp-hud[data-style="icons"] .vp-btn[data-act="offset"] .vp-icon-text { display: inline-block; }
 
 /* ── Popup picker (CC / Audio / Aspect) ──────────────────────────── */
 .vp-hud-popup {
@@ -353,6 +439,15 @@ body[data-animarr-native="1"] .vp-shell {
     background: oklch(0.72 0.18 245 / 0.16);
     color: oklch(0.80 0.15 245);
 }
+/* Read-only rows for the media-info popup (Info button). */
+.vp-hud-popup__info {
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #e8eaed;
+    white-space: nowrap;
+}
+.vp-hud-popup--info { min-width: 220px; }
 
 /* Slider variant (audio-offset). Used by the .vp-hud-popup--slider class. */
 .vp-hud-popup--slider {
@@ -379,4 +474,43 @@ body[data-animarr-native="1"] .vp-shell {
     font-size: 11px;
     color: rgba(255,255,255,0.55);
     margin-top: 6px;
+}
+
+/* ── Orientation-specific layout (mobile) ─────────────────────────────
+   Portrait: the app is edge-to-edge so the device status bar overlaps the top
+   — push the player's top bar (back + title) well below it, and stack the
+   bottom controls into two centred rows (playback row 1, settings row 2 with
+   fullscreen pinned bottom-right). Landscape goes immersive (status bar hidden)
+   so the top bar can sit tight to the top. */
+@media (orientation: portrait) {
+    .vp-hud__top {
+        /* --animarr-safe-top = measured status-bar height (MainActivity);
+           +44px is the extra drop requested. env() is the newer-WebView
+           fallback. */
+        padding-top: max(calc(var(--animarr-safe-top, 0px) + 44px),
+                         calc(env(safe-area-inset-top, 0px) + 44px));
+    }
+    .vp-hud__bottom {
+        padding-bottom: max(18px, calc(var(--animarr-safe-bottom, 0px) + 14px));
+    }
+    .vp-hud__controls { justify-content: center; }
+    /* Row 1: playback controls, on their own line, centred. */
+    .vp-hud__cluster--primary {
+        flex: 1 0 100%;
+        justify-content: center;
+        margin-right: 0;
+    }
+    /* Row 2: settings group fills the line + centres its buttons; fullscreen
+       sits at the right edge. */
+    .vp-hud__cluster--secondary {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+    .vp-hud__fs { margin-left: 8px; flex: 0 0 auto; }
+}
+
+@media (orientation: landscape) {
+    .vp-hud__top {
+        padding-top: max(20px, env(safe-area-inset-top, 0px));
+    }
 }
