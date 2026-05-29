@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV launcher banner (320×180). The Leanback home row shows this
+     in place of the app icon; without an android:banner the app renders as a
+     blank/generic tile on the TV home. Brand-dark background (#181c24) + the
+     teal "A" mark + white sparkle — the same glyph as appiconfg.svg (a 72-unit
+     design grid), scaled ×1.667 and centred. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+        android:width="320dp"
+        android:height="180dp"
+        android:viewportWidth="320"
+        android:viewportHeight="180">
+    <!-- Brand background fills the whole banner. -->
+    <path android:fillColor="#181c24" android:pathData="M0,0h320v180h-320z" />
+    <!-- Logo: appiconfg.svg's mark (72-grid) scaled ×1.667 → ~73×77, centred. -->
+    <group android:translateX="100" android:translateY="32"
+           android:scaleX="1.667" android:scaleY="1.667">
+        <path android:fillColor="#84c0d2" android:fillType="evenOdd"
+              android:pathData="M14,58 L32,12 L40,12 L58,58 L48,58 L43,46 L29,46 L24,58 Z M31,39 L41,39 L36,24 Z" />
+        <path android:fillColor="#ffffff"
+              android:pathData="M58,14 L60,18 L64,19 L60,21 L58,25 L56,21 L52,19 L56,18 Z" />
+    </group>
+</vector>

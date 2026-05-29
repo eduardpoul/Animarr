@@ -11,9 +11,13 @@
          MainActivity.cs. Declaring it again here would create a duplicate
          entry in the merged manifest (XAAMM0000) so we keep only the
          <application> attributes that MAUI doesn't otherwise emit. -->
+    <!-- android:banner is the Android-TV launcher tile (320×180). Without it
+         the Leanback home row shows a blank/generic card for Animarr. Phones
+         ignore it and use android:icon. -->
     <application android:allowBackup="true"
                  android:icon="@mipmap/appicon"
                  android:roundIcon="@mipmap/appicon_round"
+                 android:banner="@drawable/tv_banner"
                  android:supportsRtl="true"
                  android:usesCleartextTraffic="true"
                  android:networkSecurityConfig="@xml/network_security_config"

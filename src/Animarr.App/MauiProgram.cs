@@ -66,8 +66,73 @@ public static class MauiProgram
                 if (webView.Settings is not null)
                 {
                     webView.Settings.MixedContentMode = global::Android.Webkit.MixedContentHandling.AlwaysAllow;
+
+                    // Disable the WebView HTTP cache. Our bundle (index.html,
+                    // animarr-player.js, CSS) is served LOCALLY from the APK via
+                    // BlazorWebView's WebViewAssetLoader, so caching buys almost
+                    // nothing — but it actively hurts: after an app update the
+                    // WebView kept serving the *previous* index.html from cache
+                    // while the JS sub-resources refreshed, so gate changes in
+                    // index.html (e.g. the native-player gate) silently never
+                    // took effect and we chased phantom bugs. LoadNoCache forces
+                    // every request through the asset loader, guaranteeing the
+                    // shipped assets are what actually run.
+                    webView.Settings.CacheMode = global::Android.Webkit.CacheModes.NoCache;
+
                     Android.Util.Log.Info("Animarr.WebView",
-                        $"Configured: MixedContentMode={webView.Settings.MixedContentMode}, chromeClient=AnimarrWebChromeClient");
+                        $"Configured: MixedContentMode={webView.Settings.MixedContentMode}, CacheMode={webView.Settings.CacheMode}, chromeClient=AnimarrWebChromeClient");
+                }
+
+                // CacheMode=NoCache stops NEW caching, but it does NOT evict
+                // what's already on disk. The WebViewAssetLoader sub-resources
+                // (the content-hashed scoped-CSS bundle + app.css, pulled via
+                // @import from the unhashed Animarr.App.styles.css) were cached
+                // by a PRIOR app version and kept being served stale: the main
+                // document (index.html) refreshed so inline-style changes landed
+                // — but CSS-only changes in the scoped bundle (mobile drilldown
+                // rail/tab hides) silently never did, because the cached
+                // Animarr.App.styles.css still @imported the old bundle hash.
+                // ClearCache(true) purges the disk cache on every WebView init,
+                // so each launch is guaranteed to load the assets we shipped.
+                webView.ClearCache(true);
+
+                // Inject the real status-bar / nav-bar heights as CSS custom
+                // properties NOW — this hook runs on BlazorWebViewInitialized,
+                // the one moment the WebView's JS context is guaranteed live.
+                // MainActivity computed them from resource dimens in OnCreate.
+                // Without this the TopBar / hero chips render under the status
+                // bar because Android WebView never fills env(safe-area-*).
+                try
+                {
+                    var snippet = MainActivity.SafeAreaCssSnippet();
+                    webView.EvaluateJavascript(snippet, null);
+                    Android.Util.Log.Info("Animarr.WebView", $"Safe-area pushed: {snippet}");
+                }
+                catch (Exception ex2)
+                {
+                    Android.Util.Log.Warn("Animarr.WebView", $"Safe-area push failed: {ex2.Message}");
+                }
+
+                // Publish the loopback media-proxy base into the page. The web
+                // player (animarr-player.js animarrSetApiBase) routes all its
+                // server fetches through this instead of the plain-HTTP LAN URL,
+                // so hls.js talks to http://127.0.0.1:<port> (no mixed content,
+                // no base64 bridge → no freeze). Set as early as possible; the
+                // page reads it when MainLayout applies the server base.
+                try
+                {
+                    var proxy = Services.LocalMediaProxyService.Instance;
+                    if (proxy is { Port: > 0 })
+                    {
+                        webView.EvaluateJavascript(
+                            $"window.animarrLocalProxyBase = '{proxy.BaseUrl}';", null);
+                        Android.Util.Log.Info("Animarr.WebView",
+                            $"Local proxy base pushed: {proxy.BaseUrl}");
+                    }
+                }
+                catch (Exception exP)
+                {
+                    Android.Util.Log.Warn("Animarr.WebView", $"Proxy-base push failed: {exP.Message}");
                 }
                 // Phase 2b (2026-05-27): make the WebView transparent so the
                 // TextureView MainActivity inserted at the bottom of DecorView
@@ -77,6 +142,54 @@ public static class MauiProgram
                 // attach()) adds a `native-playback` class to <body> that wipes
                 // the background, exposing the video underneath the HUD.
                 webView.SetBackgroundColor(global::Android.Graphics.Color.Transparent);
+
+                // …but a transparent WebView isn't enough on its own. The
+                // TextureView lives at DecorView index 0 (the very back); the
+                // WebView sits inside several parent ViewGroups (MAUI's layout +
+                // android.R.id.content) that default to the theme's OPAQUE dark
+                // background. Those intermediate layers paint BETWEEN the
+                // transparent WebView and the TextureView, so the decoded video
+                // (confirmed rendering — "VideoFormat decoded: h264 …" in
+                // logcat) was being occluded → user saw a dark screen with HUD +
+                // audio but no picture. Walk up the WebView's ancestor chain and
+                // clear each background so the back-most TextureView shows
+                // through during native playback. Safe in the non-playback case:
+                // the WebView body is opaque dark then, so transparent ancestors
+                // are never visible. We stop before DecorView (its background is
+                // BEHIND the TextureView, so it never occludes, and we don't
+                // want to disturb the window root).
+                try
+                {
+                    global::Android.Views.View? v =
+                        webView.Parent as global::Android.Views.View;
+                    for (int depth = 0; depth < 12 && v is not null; depth++)
+                    {
+                        if (v is global::Android.Views.ViewGroup)
+                            v.SetBackgroundColor(global::Android.Graphics.Color.Transparent);
+                        v = v.Parent as global::Android.Views.View;
+                    }
+                    Android.Util.Log.Info("Animarr.WebView",
+                        "Cleared WebView ancestor backgrounds for native-video passthrough");
+                }
+                catch (Exception exAnc)
+                {
+                    Android.Util.Log.Warn("Animarr.WebView",
+                        $"Ancestor-transparency walk failed: {exAnc.Message}");
+                }
+
+                // Kill the Android 12+ elastic "stretch" overscroll — the
+                // jelly / rubber-band the user feels when dragging a finger
+                // sideways (the catalog hero is NOT a horizontal scroller, so
+                // the drag hits the root document and Chromium stretches the
+                // whole page) or vertically on a short page with nothing to
+                // scroll. CSS `overscroll-behavior:none` on html/body does NOT
+                // reliably suppress this on Android WebView — the renderer's
+                // root overscroll honours the host View's OverScrollMode, so
+                // setting it to Never is the actual fix. Nested HTML carousels
+                // (chip rails, folder strips) keep their own
+                // `overscroll-behavior:none` in components.css for the
+                // end-of-list bounce. Result: a solid, non-jelly "monolith".
+                webView.OverScrollMode = global::Android.Views.OverScrollMode.Never;
             }
             catch (Exception ex)
             {
@@ -191,13 +304,19 @@ public static class MauiProgram
         // always resolves to the same instance across page reloads.
         builder.Services.AddSingleton<WatchNextService>();
 
-        // NativePlayerService (Phase 2 ExoPlayer-backed TV playback) is
-        // currently disabled — the AndroidX.Media3 binding 1.4.1.1 has a
-        // namespace/class name collision on ExoPlayer.Builder that breaks
-        // the build. The service file is removed from compilation via
-        // <Compile Remove> in the csproj. Once we pin a binding version
-        // where ExoPlayer.Builder resolves cleanly, re-enable both this
-        // line + the Compile Remove + the static-instance registration.
+        // NativePlayerService (Phase 2 ExoPlayer-backed native playback).
+        // Renders into the TextureView MainActivity inserts behind the
+        // transparent BlazorWebView. Used on ALL Android hosts now (TV *and*
+        // phone/tablet): inside the WebView the app is served from the
+        // https://0.0.0.1/ virtual host, so hls.js segment fetches to a
+        // plain-HTTP LAN server are "mixed content" and have to be proxied as
+        // base64 over the JS↔.NET bridge — that bridge's GC churn freezes
+        // playback. ExoPlayer fetches with its own native HTTP stack (no
+        // WebView, no bridge), so playback is smooth + HDR/DV passes through.
+        // The static Instance (set just below build()) is what the JS bridge
+        // NativePlayerBridge dispatches through. On non-Android targets the
+        // service is a harmless no-op shell (IsAvailable => false).
+        builder.Services.AddSingleton<NativePlayerService>();
 
         // Subnet probe — TCP fallback for when mDNS broadcasts can't cross
         // the home-WiFi AP's wired/wireless boundary (very common on consumer
@@ -205,6 +324,16 @@ public static class MauiProgram
         // back empty, so cheap setups still get a working "find my server"
         // flow without the user having to memorise an IP.
         builder.Services.AddSingleton<SubnetProbeService>();
+
+        // Loopback media proxy. The WebView (served from https://0.0.0.1) can't
+        // fetch the plain-HTTP LAN server directly (mixed content). Rather than
+        // base64 every segment over the JS bridge (which froze playback), we run
+        // a tiny reverse-proxy on http://127.0.0.1 — a "potentially trustworthy"
+        // origin Chromium does NOT mixed-content-block — and forward to the real
+        // server. hls.js streams from loopback over a normal socket, so the web
+        // player runs smoothly with the HUD overlaid, on phone AND TV, and the
+        // self-hoster needs no certs / no server HTTPS. See LocalMediaProxyService.
+        builder.Services.AddSingleton<LocalMediaProxyService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
@@ -234,9 +363,25 @@ public static class MauiProgram
         var subnet = app.Services.GetRequiredService<SubnetProbeService>();
         JsInterop.SubnetProbeBridge.RegisterStaticInstance(subnet);
 
-        // Native player (Phase 2) — registration commented out until the
-        // AndroidX.Media3.ExoPlayer binding is unpinned. See the comment
-        // above the (now-removed) builder.Services.AddSingleton<NativePlayerService>().
+        // Native player: publish the singleton's static accessor so the JS
+        // bridge (NativePlayerBridge JSInvokables → animarrNativePlayer.*) can
+        // dispatch to the live ExoPlayer service no matter which Blazor circuit
+        // made the call. WITHOUT this, NativePlayerService.Instance stays null,
+        // NativePlayerBridge.IsAvailable() returns false, and the JS gate falls
+        // back to the web (hls.js) player on every host — which is exactly the
+        // base64-bridge path that freezes phone playback. Resolved eagerly (the
+        // ctor only stashes the logger; ExoPlayer itself is built lazily on the
+        // first PlayAsync) so Instance is ready before the first navigation.
+        var nativePlayer = app.Services.GetRequiredService<NativePlayerService>();
+        NativePlayerService.RegisterStaticInstance(nativePlayer);
+
+        // Start the loopback media proxy NOW so its port is known before the
+        // WebView loads (ConfigureAndroidWebView pushes the proxy base URL into
+        // the page on init). Start() is a no-op-safe try/catch; the static
+        // accessor lets ConfigureAndroidWebView read the chosen port.
+        var mediaProxy = app.Services.GetRequiredService<LocalMediaProxyService>();
+        mediaProxy.Start();
+        LocalMediaProxyService.RegisterStaticInstance(mediaProxy);
 
         return app;
     }

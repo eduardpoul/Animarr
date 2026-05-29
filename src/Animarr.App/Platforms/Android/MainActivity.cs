@@ -105,6 +105,14 @@ public class MainActivity : MauiAppCompatActivity
                 // contrast — we don't need an opaque status bar overlay.
                 w.SetStatusBarColor(Android.Graphics.Color.Transparent);
                 w.SetNavigationBarColor(Android.Graphics.Color.Transparent);
+
+                // NOTE: an earlier attempt made the window translucent to let a
+                // BELOW-window video surface show through the transparent WebView
+                // — that never worked on this device (the WebView layer occluded
+                // it). The working approach renders the video ABOVE the window
+                // (SurfaceView.SetZOrderOnTop) in a centred letterbox band, with
+                // the HUD bars showing around it, so the window stays OPAQUE here
+                // (its black background paints the letterbox bars).
             }
         }
         catch
@@ -113,6 +121,49 @@ public class MainActivity : MauiAppCompatActivity
             // on older API levels — fall back to the default layout, the UI
             // still works just with a ~24px black strip at the top.
         }
+
+        // Android WebView (unlike iOS WKWebView) does NOT populate the CSS
+        // env(safe-area-inset-*) variables even in edge-to-edge mode — they
+        // resolve to 0, so padding-top: env(safe-area-inset-top) collapses and
+        // the TopBar / hero chips render UNDER the status-bar clock. We read
+        // the real status-bar + nav-bar heights and stash them in a static so
+        // MauiProgram's BlazorWebViewInitialized hook (which fires once the
+        // WebView JS context is guaranteed live) can inject them as CSS custom
+        // properties. Doing the push from the Initialized event — rather than
+        // from a window-insets listener that fires before the WebView exists —
+        // is what makes this actually stick.
+        try
+        {
+            // status_bar_height / navigation_bar_height are stable platform
+            // dimens. Reading them here is synchronous + reliable, no insets
+            // dispatch race. Convert device px → CSS px (÷ density).
+            var res = Resources;
+            float density = res?.DisplayMetrics?.Density ?? 1f;
+            if (density <= 0) density = 1f;
+
+            int statusId = res?.GetIdentifier("status_bar_height", "dimen", "android") ?? 0;
+            int navId    = res?.GetIdentifier("navigation_bar_height", "dimen", "android") ?? 0;
+            int statusPx = statusId > 0 ? res!.GetDimensionPixelSize(statusId) : 0;
+            int navPx    = navId > 0 ? res!.GetDimensionPixelSize(navId) : 0;
+
+            SafeTopCssPx    = statusPx / density;
+            SafeBottomCssPx = navPx / density;
+        }
+        catch { /* dimens unavailable — vars stay 0, env() fallback applies */ }
+
+        // Also keep a window-insets listener as a secondary updater so a
+        // rotation / gesture-bar change refreshes the vars live (the
+        // resource dimens above don't track a hidden nav bar, e.g. fullscreen
+        // immersive). Pushes through the same WebView path.
+        try
+        {
+            if (Window?.DecorView is { } decorView)
+            {
+                AndroidX.Core.View.ViewCompat.SetOnApplyWindowInsetsListener(decorView,
+                    new InsetsListener(this));
+            }
+        }
+        catch { /* insets unavailable — resource dimens above already applied */ }
 
         CaptureDeepLink(Intent);
 
@@ -142,21 +193,47 @@ public class MainActivity : MauiAppCompatActivity
         {
             if (Window?.DecorView is ViewGroup decor)
             {
-                var tv = new TextureView(this)
+                // Native video plane. On this device the only z-order that
+                // composites VISIBLY over the BlazorWebView is "on top"
+                // (SetZOrderOnTop) — a TextureView or a below-window SurfaceView
+                // both got occluded by the WebView layer (frames confirmed
+                // rendering, never visible). So we render the video ABOVE the
+                // window, but constrained to a CENTRED LETTERBOX BAND (sized by
+                // NativePlayerService to the video aspect) so the HUD's top/
+                // bottom bars — drawn by the WebView underneath — stay visible
+                // around it. Touch still reaches the HUD: SetZOrderOnTop only
+                // moves the SURFACE compositing up; the SurfaceView's VIEW stays
+                // at the back of the hierarchy, so the WebView gets touch events.
+                //
+                // The SurfaceView lives inside a FrameLayout container we own,
+                // because DecorView does not honour FrameLayout child gravity —
+                // our own FrameLayout does, making the centred band reliable.
+                var container = new Android.Widget.FrameLayout(this)
                 {
-                    Visibility = ViewStates.Gone,
                     LayoutParameters = new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MatchParent,
                         ViewGroup.LayoutParams.MatchParent),
                 };
-                decor.AddView(tv, 0);
-                Services.NativePlayerService.RegisterTextureView(tv);
+                var sv = new SurfaceView(this)
+                {
+                    Visibility = ViewStates.Gone,
+                    LayoutParameters = new Android.Widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MatchParent,
+                        ViewGroup.LayoutParams.MatchParent)
+                    {
+                        Gravity = Android.Views.GravityFlags.Center,
+                    },
+                };
+                sv.SetZOrderOnTop(true);
+                container.AddView(sv);
+                decor.AddView(container, 0);
+                Services.NativePlayerService.RegisterSurfaceView(sv);
             }
         }
         catch (System.Exception ex)
         {
             Android.Util.Log.Error("Animarr.NativePlayer",
-                $"Failed to insert TextureView: {ex.Message}");
+                $"Failed to insert SurfaceView: {ex.Message}");
         }
     }
 
@@ -213,6 +290,101 @@ public class MainActivity : MauiAppCompatActivity
         base.OnBackPressed();
     }
 #pragma warning restore CA1422
+
+    /// <summary>Status-bar / nav-bar heights in CSS px, in a static so the
+    /// JS string built in <see cref="SafeAreaCssSnippet"/> can be consumed
+    /// by MauiProgram's BlazorWebViewInitialized hook (the only place the
+    /// WebView JS context is guaranteed ready). Seeded from resource dimens
+    /// in OnCreate, refined by the window-insets listener afterwards.</summary>
+    public static float SafeTopCssPx { get; private set; }
+    public static float SafeBottomCssPx { get; private set; }
+
+    /// <summary>JS that sets the --animarr-safe-* CSS custom properties on
+    /// &lt;html&gt; from the current static inset values. MauiProgram evals
+    /// this once the WebView reports initialized; the activity also evals it
+    /// on every insets change.</summary>
+    public static string SafeAreaCssSnippet()
+    {
+        var top = SafeTopCssPx.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var bot = SafeBottomCssPx.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Inject a <style> with EXPLICIT px values rather than relying on a
+        // CSS custom property. Setting --animarr-safe-top late (after the
+        // BlazorWebView mounts) did update the var — getComputedStyle showed
+        // 44px — but the `padding: var(...) 16px 0` SHORTHAND on .d-mobile-nav
+        // never recomputed (computed padding-top stayed 0px on this Chromium
+        // WebView). A dedicated stylesheet with literal px sidesteps the
+        // shorthand-var recompute quirk entirely and is trivially overridable
+        // because it's the last <style> in <head>. Re-inject on a few timers
+        // so it survives Blazor's first renders + a server/theme swap.
+        var css =
+            "@media (max-width:959px){" +
+            "  .d-mobile-nav{padding-top:" + top + "px !important;height:calc(56px + " + top + "px) !important;}" +
+            "  .animarr-main{padding-top:calc(56px + " + top + "px) !important;}" +
+            "  .d-hero,.d-chero,.d-mdhero{margin-top:calc(-1 * (56px + " + top + "px)) !important;}" +
+            "  .d-tabbar{padding-bottom:max(18px," + bot + "px) !important;}" +
+            "}" +
+            ".d-topbar{padding-top:" + top + "px !important;height:calc(60px + " + top + "px) !important;}" +
+            // Drawer / panel headers that pin to the top also clear the notch.
+            ".d-profile__head,.emd__header{padding-top:calc(20px + " + top + "px) !important;}";
+        // JSON-encode the CSS string so quotes/newlines are safe inside the
+        // injected JS literal.
+        var json = System.Text.Json.JsonSerializer.Serialize(css);
+        return
+            "(function(){" +
+            "  function apply(){" +
+            "    var el=document.getElementById('animarr-safe-style');" +
+            "    if(!el){el=document.createElement('style');el.id='animarr-safe-style';document.head.appendChild(el);}" +
+            "    el.textContent=" + json + ";" +
+            "    var d=document.documentElement;" +
+            "    d.style.setProperty('--animarr-safe-top','" + top + "px');" +
+            "    d.style.setProperty('--animarr-safe-bottom','" + bot + "px');" +
+            "  }" +
+            "  apply();" +
+            "  setTimeout(apply,400);setTimeout(apply,1200);setTimeout(apply,2500);" +
+            "})();";
+    }
+
+    /// <summary>Push the cached inset heights into the live WebView. Used by
+    /// the insets listener for live updates; the first authoritative push
+    /// happens from MauiProgram's Initialized hook.</summary>
+    internal void PushSafeAreaVars()
+    {
+        try
+        {
+            var webView = FindWebView(Window?.DecorView);
+            webView?.EvaluateJavascript(SafeAreaCssSnippet(), null);
+        }
+        catch { /* WebView not ready — Initialized hook will push later */ }
+    }
+
+    /// <summary>Receives window-insets updates and refreshes the static inset
+    /// values + re-pushes them to the WebView. Returns the insets unconsumed
+    /// so MAUI's own layout still sees them.</summary>
+    private sealed class InsetsListener : Java.Lang.Object, AndroidX.Core.View.IOnApplyWindowInsetsListener
+    {
+        private readonly MainActivity _activity;
+        public InsetsListener(MainActivity activity) { _activity = activity; }
+
+        public AndroidX.Core.View.WindowInsetsCompat OnApplyWindowInsets(
+            global::Android.Views.View v, AndroidX.Core.View.WindowInsetsCompat insets)
+        {
+            try
+            {
+                var bars = insets.GetInsets(AndroidX.Core.View.WindowInsetsCompat.Type.SystemBars());
+                var density = _activity.Resources?.DisplayMetrics?.Density ?? 1f;
+                if (density <= 0) density = 1f;
+                // Only override the resource-dimen seed when the live inset is
+                // larger (handles devices where the dimen under-reports).
+                var topCss = bars.Top / density;
+                var botCss = bars.Bottom / density;
+                if (topCss > 0) SafeTopCssPx = topCss;
+                if (botCss > 0) SafeBottomCssPx = botCss;
+                _activity.PushSafeAreaVars();
+            }
+            catch { }
+            return insets;
+        }
+    }
 
     private global::Android.Webkit.WebView? _cachedWebView;
     internal global::Android.Webkit.WebView? FindWebView(global::Android.Views.View? root)
