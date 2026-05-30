@@ -55,6 +55,15 @@
             }
             else
             {
+                @* Root-level back arrow (phone only — hidden on desktop via
+                   .d-profile__back--home). Mirrors the sub-screen back button
+                   and every page's left-back so the profile root isn't the one
+                   place without it. Closes the drawer → back to the main grid. *@
+                <button type="button" class="d-profile__back d-profile__back--home tv-focus"
+                        @onclick="Close"
+                        aria-label="Back">
+                    <DIcon Name="chev-l" Size="18" />
+                </button>
                 <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue"
                         ImagePath="@me.User.AvatarPath" Size="lg" />
             }
@@ -244,6 +253,8 @@
     private int _volume           = 78;
     private bool _passthrough     = false;
     private bool _normalize       = true;
+    private bool _themeMusic       = false;
+    private int  _themeMusicVolume = 40;
     private string _language      = "en";
     private string _theme         = "quietude";
     /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "g"
@@ -300,6 +311,8 @@
         _volume          = p.DefaultVolume;
         _passthrough     = p.AudioPassthrough;
         _normalize       = p.NormalizeVolume;
+        _themeMusic       = p.ThemeMusicEnabled;
+        _themeMusicVolume = p.ThemeMusicVolume;
         _language        = p.Language;
         _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
         _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
@@ -506,6 +519,25 @@
         _normalize = v;
         await PatchAsync(new UpdatePreferencesRequest(
             null, null, null, null, null, null, null, null, null, null, null, NormalizeVolume: v, null));
+    }
+
+    private async Task OnThemeMusicToggle(bool v)
+    {
+        _themeMusic = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            ThemeMusicEnabled: v));
+    }
+
+    private async Task OnThemeMusicVolumeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _themeMusicVolume = n;
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                ThemeMusicVolume: n));
+        }
     }
 
     private async Task OnAudioPrefChanged(ChangeEventArgs e)
@@ -1533,6 +1565,27 @@
                 </div>
                 <Toggle Checked="@_normalize" CheckedChanged="OnNormalizeToggle" />
             </div>
+
+            @* ── Theme music (anime OP/ED) ─────────────────────────────────
+                 Soft autoplay of the title's opening theme when you open its
+                 detail page. Off by default. Only anime resolve a theme; never
+                 plays on Home/catalog. *@
+            <div class="d-profile__toggle-row d-profile__field--full">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">Theme music</div>
+                    <div class="d-profile__toggle-hint">Play a title's opening theme when you open it (anime only).</div>
+                </div>
+                <Toggle Checked="@_themeMusic" CheckedChanged="OnThemeMusicToggle" />
+            </div>
+
+            @if (_themeMusic)
+            {
+                <label class="d-profile__field d-profile__field--full">
+                    <span class="d-profile__field-label">THEME VOLUME · @_themeMusicVolume %</span>
+                    <input type="range" min="0" max="100" step="1" class="d-profile__range"
+                           value="@_themeMusicVolume" @onchange="OnThemeMusicVolumeChanged" />
+                </label>
+            }
         </div>
     };
 

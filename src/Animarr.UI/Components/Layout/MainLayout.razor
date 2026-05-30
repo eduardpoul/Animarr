@@ -73,6 +73,8 @@
                     Done="_llmDone" Total="_llmTotal"
                     AvgMs="480" HitRate="99.2"
                     Recent="_recentIdentifications"
+                    Paused="_llmPaused"
+                    OnTogglePause="OnToggleIdentPauseAsync"
                     OnClose="@(() => _llmOpen = false)" />
 </div>
 
@@ -94,6 +96,7 @@
     private int _activeDownloads;
     private int _llmDone;
     private int _llmTotal;
+    private bool _llmPaused;
     private bool _profileOpen;
     /// <summary>v5 multi-server: when the TopBar server pill opens the
     /// ProfilePanel we pre-focus the Identity tab (where the Server section
@@ -283,9 +286,30 @@
                 .Take(5)
                 .Select(e => new LLMStatusPopup.RecentItem(e.FolderLabel, 0.92))
                 .ToList();
+            try { _llmPaused = (await Api.GetIdentificationStatusAsync())?.IsPaused ?? _llmPaused; } catch { }
             await InvokeAsync(StateHasChanged);
         }
         catch { /* offline — popup just shows 0/0 */ }
+    }
+
+    /// <summary>Pause/resume the identification (AI parsing) queue from the popup
+    /// button. Optimistic flip; the QueueChanged hub broadcast that SetPaused fires
+    /// re-confirms the state on the next RefreshIdentificationStatusAsync.</summary>
+    private async Task OnToggleIdentPauseAsync()
+    {
+        var next = !_llmPaused;
+        _llmPaused = next;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            if (next) await Api.PauseIdentificationAsync();
+            else      await Api.ResumeIdentificationAsync();
+        }
+        catch
+        {
+            _llmPaused = !next;   // rollback on failure
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ApplyAccentHueToDomAsync()

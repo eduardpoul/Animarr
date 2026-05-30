@@ -25,30 +25,33 @@
         <div class="d-mdhero__cjk">@Item.CjkTitle</div>
     }
 
-    <button type="button" class="d-mdhero__back surface-glass tv-focus"
-            @onclick="@(() => Nav.NavigateTo(BackHref))">
-        <DIcon Name="chev-l" Size="14" /> Back
-    </button>
+    @* Unified back affordance — the SAME <PageBack> used on /search, Downloads
+       and Server settings, so "back" looks and behaves identically everywhere
+       (arrow-only glass square, top-left, history.back with a "/" fallback).
+       Positioned over the fanart via .d-mdhero__backwrap; shows on web AND
+       mobile. *@
+    <div class="d-mdhero__backwrap">
+        <PageBack Fallback="@BackHref" />
+    </div>
 
     <div class="d-mdhero__top-actions">
         <button type="button"
                 class="@($"d-mdhero__fav surface-glass tv-focus {(Item.IsFavorite ? "is-active" : "")}")"
                 @onclick="OnFavorite"
+                aria-label="@(Item.IsFavorite ? "Remove from favorites" : "Add to favorites")"
                 title="@(Item.IsFavorite ? "Remove from favorites" : "Add to favorites")">
             @if (Item.IsFavorite)
             {
                 <span class="d-mdhero__fav-star d-mdhero__fav-star--filled">★</span>
-                <span>Favorited</span>
             }
             else
             {
                 <span class="d-mdhero__fav-star">☆</span>
-                <span>Favorite</span>
             }
         </button>
         <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
-                aria-label="Edit metadata">
-            <DIcon Name="pencil" Size="14" /> <span class="d-mdhero__edit-label">Edit metadata</span>
+                aria-label="Edit metadata" title="Edit metadata">
+            <DIcon Name="pencil" Size="16" />
         </button>
     </div>
 

@@ -134,6 +134,7 @@ internal static class FolderEndpoints
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             FolderWatcherService watcher,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -142,9 +143,76 @@ internal static class FolderEndpoints
 
             // Section roots re-discover children; ordinary folders just restart the watcher.
             if (entity.IsSection)
-                await watcher.DiscoverChildrenAsync(id);
+            {
+                // Run discovery in the BACKGROUND and return 202 immediately: a large
+                // section registers many child folders + starts a FileSystemWatcher
+                // each, which on a slow (FUSE) media mount can exceed the HTTP timeout
+                // — the request would appear to fail even though the work completes.
+                //
+                // Crucially, ENQUEUE the newly-discovered folders for identification.
+                // DiscoverChildrenAsync only registers them (it fires SubfolderCreated,
+                // which is a UI-only notification); the live FileSystemWatcher Created
+                // path is what normally queues identification. So a bulk rescan must
+                // queue them itself, otherwise discovered folders sit unidentified.
+                _ = Task.Run(async () =>
+                {
+                    var log = loggerFactory.CreateLogger("FolderScan");
+                    try
+                    {
+                        // 1) Register any new on-disk folders.
+                        var newIds = await watcher.DiscoverChildrenAsync(id);
+
+                        // 2) Enqueue identification for every child under this section that
+                        //    still has no MediaItem — covers the just-discovered folders AND
+                        //    any previously-registered-but-never-identified ones — skipping
+                        //    anything already queued/processing. DiscoverChildrenAsync only
+                        //    REGISTERS folders (the live FileSystemWatcher Created path is what
+                        //    normally enqueues), so without this a rescan finds folders but
+                        //    never identifies them.
+                        await using var qdb = await dbFactory.CreateDbContextAsync();
+                        const Animarr.Web.Data.Models.IdentificationQueueStatus queued =
+                            Animarr.Web.Data.Models.IdentificationQueueStatus.Queued;
+
+                        var alreadyQueued = (await qdb.IdentificationQueues
+                            .Where(q => q.Status == Animarr.Web.Data.Models.IdentificationQueueStatus.Queued
+                                     || q.Status == Animarr.Web.Data.Models.IdentificationQueueStatus.Processing)
+                            .Select(q => q.FolderId)
+                            .ToListAsync()).ToHashSet();
+
+                        var unidentified = await qdb.FolderWatchers
+                            .Where(f => f.ParentSectionId == id && !f.IsSection && f.IdentifyEnabled
+                                     && !qdb.MediaItems.Any(m => m.FolderId == f.Id))
+                            .Select(f => f.Id)
+                            .ToListAsync();
+
+                        var toQueue = newIds.Concat(unidentified)
+                            .Distinct()
+                            .Where(fid => !alreadyQueued.Contains(fid))
+                            .ToList();
+
+                        foreach (var fid in toQueue)
+                            qdb.IdentificationQueues.Add(new IdentificationQueue
+                            {
+                                Id       = Guid.NewGuid(),
+                                FolderId = fid,
+                                Status   = queued,
+                                QueuedAt = DateTime.UtcNow,
+                            });
+                        if (toQueue.Count > 0) await qdb.SaveChangesAsync();
+                        log.LogInformation(
+                            "Rescan of section {Id}: {New} new folder(s) discovered, {Queued} queued for identification.",
+                            id, newIds.Count, toQueue.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.LogError(ex, "Background rescan failed for section {Id}", id);
+                    }
+                });
+            }
             else
+            {
                 await watcher.StartWatcherAsync(id);
+            }
             return Results.Accepted();
         });
 

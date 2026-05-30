@@ -254,12 +254,22 @@
 }
 .d-profile__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); }
 
+/* Root-level "back to main" arrow — sits to the LEFT of the avatar on the
+   phone so the profile root has the same left-back affordance as its
+   sub-screens and every other page. Closes the drawer (returns to the page
+   underneath = the main grid). Hidden on desktop, where the avatar + the
+   top-right close glyph already make the exit obvious and there's no
+   full-screen takeover to escape. */
+.d-profile__back--home { display: none; }
+
 /* Phone (≤720px): swap horizontal tabs for the drilldown list, then toggle
    list ⇄ body via the data-mobile-detail attribute set in Razor. TV stays
    in landscape so the horizontal strip continues to work — html.tv-mode
    below counteracts the mobile rules for it. */
 @media (max-width: 959px) {
     .d-profile__tabs--desktop { display: none !important; }
+    /* Show the root "back to main" arrow on phones (hidden on desktop). */
+    .d-profile__back--home { display: inline-grid; }
     .d-profile[data-mobile-detail="false"] .d-profile__mlist { display: flex; }
     .d-profile[data-mobile-detail="false"] .d-profile__body  { display: none; }
     .d-profile[data-mobile-detail="true"]  .d-profile__mlist { display: none; }

@@ -147,6 +147,8 @@ internal static class AuthEndpoints
             if (req.Language is string lang)              prefs.Language           = lang;
             if (req.Theme is string th)                   prefs.Theme              = ValidateTheme(th);
             if (req.HeroPagerStyle is string hps)         prefs.HeroPagerStyle     = ValidatePagerStyle(hps);
+            if (req.ThemeMusicEnabled is bool tme)        prefs.ThemeMusicEnabled  = tme;
+            if (req.ThemeMusicVolume is int tmv)          prefs.ThemeMusicVolume   = Math.Clamp(tmv, 0, 100);
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -504,7 +506,9 @@ internal static class AuthEndpoints
         p.NormalizeVolume,
         p.Language,
         p.Theme,
-        p.HeroPagerStyle);
+        p.HeroPagerStyle,
+        p.ThemeMusicEnabled,
+        p.ThemeMusicVolume);
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale

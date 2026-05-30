@@ -55,6 +55,11 @@
         }
     </nav>
 
+    @* Needs-review pill — top-right cluster, just left of the AI/LLM pill.
+       Renders only when there are items below the confidence threshold;
+       opens the same NeedsReview modal it did on Home. *@
+    <NeedsReviewChip Compact="true" />
+
     @* LLM status pill — sits LEFT of the search button (swapped per request). *@
     <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">
         <span class="d-topbar__llm-dot"></span>

@@ -41,6 +41,8 @@ internal static class MediaMappings
             PosterPath      = entity.PosterPath,
             FanartPath      = entity.FanartPath,
             LogoPath        = entity.LogoPath,
+            ThemePath       = entity.ThemePath,
+            ThemeTitle      = entity.ThemeTitle,
             Description     = entity.Description,
             Tagline         = entity.Tagline,
             Genres          = DeserialiseStrings(entity.GenresJson),

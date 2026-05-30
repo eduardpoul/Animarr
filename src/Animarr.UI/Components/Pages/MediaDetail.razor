@@ -3,6 +3,7 @@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject UserContextState UserCtx
 
 @*
     Media detail (v3 design — reused unchanged in v4 per CHANGELOG_3 §3).
@@ -333,6 +334,11 @@ else
     /// user's current focus doesn't get yanked back to the top.</summary>
     private bool _didAutoFocus;
 
+    /// <summary>True once the title's theme music has been started for this page
+    /// mount. Reset on player close so the theme resumes when the user returns to
+    /// the detail view from playback.</summary>
+    private bool _themeStarted;
+
     // Player state — _playerPath drives the overlay render; _playerSelfRef
     // is the DotNetObjectReference passed to animarrPlayer.attach so the JS
     // module can call back into our JSInvokable methods.
@@ -419,6 +425,9 @@ else
 
     private async Task PlayPathAsync(string path, int? season = null, int? episode = null)
     {
+        // The real player is taking over — silence the theme.
+        await StopThemeAsync();
+
         if (_playerSelfRef is not null)
         {
             try { await JS.InvokeVoidAsync("animarrPlayer.flush",  _playerElementId); } catch { }
@@ -458,6 +467,19 @@ else
             // we re-assert it here — the reliable moment, post-render.
             try { await JS.InvokeVoidAsync("animarrTvNav.scrollToTop"); }
             catch { /* host without tv-nav.js — no-op */ }
+        }
+
+        // Soft-autoplay the title's theme music once per mount — only when the
+        // user opted in and no real playback is active. Anime only (the endpoint
+        // 404s otherwise). Stopped when a video starts (PlayPathAsync) and resumed
+        // when the player closes (ClosePlayer resets _themeStarted).
+        // Guard on Preferences being loaded — otherwise a first render that beats
+        // the boot-time prefs fetch would latch _themeStarted=true and never start.
+        if (!_themeStarted && !_loading && _item is not null && _playerPath is null
+            && UserCtx.Preferences is not null)
+        {
+            _themeStarted = true;
+            await StartThemeAsync();
         }
 
         if (_playerPath is not null && _playerSelfRef is null)
@@ -599,6 +621,7 @@ else
         _playerPath = null;
         _playerSeason = null;
         _playerEpisode = null;
+        _themeStarted = false;   // resume theme music on return to the detail view
         StateHasChanged();
     }
 
@@ -719,9 +742,33 @@ else
         StateHasChanged();
     }
 
+    /// <summary>Start the soft theme-music autoplay when the user opted in and the
+    /// title is anime (the only kind that resolves a theme). Silent no-op otherwise,
+    /// including when autoplay is blocked until a user gesture — animarrTheme retries
+    /// on the next pointerdown/keydown.</summary>
+    private async Task StartThemeAsync()
+    {
+        if (_item is null) return;
+        var prefs = UserCtx.Preferences;
+        if (prefs is null || !prefs.ThemeMusicEnabled) return;
+        bool animeLike = _item.MediaType == MediaItemType.Anime
+            || _item.Genres.Any(g => string.Equals(g, "Animation", StringComparison.OrdinalIgnoreCase));
+        if (!animeLike) return;
+        var url = Animarr.UI.Services.MediaUrl.Theme(_item.Id);
+        try { await JS.InvokeVoidAsync("animarrTheme.play", url, prefs.ThemeMusicVolume); }
+        catch { /* host without animarrTheme — no-op */ }
+    }
+
+    private async Task StopThemeAsync()
+    {
+        try { await JS.InvokeVoidAsync("animarrTheme.stop"); }
+        catch { /* no-op */ }
+    }
+
     public async ValueTask DisposeAsync()
     {
         Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+        await StopThemeAsync();
         if (_playerSelfRef is not null)
         {
             try { await JS.InvokeVoidAsync("animarrPlayer.detach", _playerElementId); } catch { }

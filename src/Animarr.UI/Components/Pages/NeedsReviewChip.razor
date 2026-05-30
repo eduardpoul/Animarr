@@ -15,9 +15,10 @@
 
 @if (_count > 0)
 {
-    <button type="button" class="nr-chip" @onclick="@(() => _open = true)" title="@($"{_count} need review")">
+    <button type="button" class="@($"nr-chip {(Compact ? "nr-chip--compact" : "")}")" @onclick="@(() => _open = true)" title="@($"{_count} need review")">
         <DIcon Name="warn" Size="14" />
-        <span class="nr-chip__label">NEEDS REVIEW · @_count</span>
+        <span class="nr-chip__label">NEEDS REVIEW ·</span>
+        <span class="nr-chip__count">@_count</span>
         <span class="nr-chip__dot"></span>
     </button>
 }
@@ -25,6 +26,11 @@
 <NeedsReviewDialog IsOpen="_open" OnClose="OnDialogClose" />
 
 @code {
+    /// <summary>Compact topbar variant — hides the "NEEDS REVIEW" label + corner
+    /// dot and renders as a small amber pill (warn icon + count) so it can sit
+    /// next to the LLM pill. Default false = the full labelled chip.</summary>
+    [Parameter] public bool Compact { get; set; }
+
     private int  _count;
     private bool _open;
     private HubConnection? _hub;

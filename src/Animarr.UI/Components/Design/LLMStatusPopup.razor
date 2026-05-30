@@ -19,8 +19,8 @@
             <div class="d-llm-popup__head-tile"><DIcon Name="magic" Size="14" /></div>
             <div class="d-llm-popup__head-text">
                 <div class="d-llm-popup__head-status">
-                    <span class="d-llm-popup__head-dot"></span>
-                    <span>ONLINE</span>
+                    <span class="@($"d-llm-popup__head-dot {(Paused ? "is-paused" : "")}")"></span>
+                    <span>@(Paused ? "PAUSED" : "ONLINE")</span>
                 </div>
                 <div class="d-llm-popup__head-meta">@_provider · @_model</div>
             </div>
@@ -35,6 +35,13 @@
                 <div class="d-llm-popup__progress-fill" style="width: @($"{ProgressPct}%")"></div>
             </div>
             <span class="d-llm-popup__progress-text">@Done / @Total</span>
+            <button type="button"
+                    class="@($"d-llm-popup__pause tv-focus {(Paused ? "is-paused" : "")}")"
+                    @onclick="OnTogglePause"
+                    aria-label="@(Paused ? "Resume AI parsing" : "Pause AI parsing")"
+                    title="@(Paused ? "Resume parsing" : "Pause parsing")">
+                <DIcon Name="@(Paused ? "play" : "pause")" Size="11" />
+            </button>
         </div>
 
         <div class="d-llm-popup__stats">
@@ -74,6 +81,12 @@
     [Parameter] public int AvgMs { get; set; }
     [Parameter] public double HitRate { get; set; }
     [Parameter] public IReadOnlyList<RecentItem>? Recent { get; set; }
+    /// <summary>True when the identification queue is paused — flips the button to "resume"
+    /// and the header to PAUSED. Fed from MainLayout via the queue-status snapshot.</summary>
+    [Parameter] public bool Paused { get; set; }
+    /// <summary>Invoked when the user clicks the pause/resume button. MainLayout calls the
+    /// pause/resume API and refreshes.</summary>
+    [Parameter] public EventCallback OnTogglePause { get; set; }
 
     private string _provider = "ollama";
     private string _model    = "qwen2.5:1.5b";

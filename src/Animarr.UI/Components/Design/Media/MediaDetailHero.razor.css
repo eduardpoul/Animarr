@@ -27,7 +27,7 @@
        down by the status-bar inset so they don't render under the
        system clock / battery indicator. The .d-mdhero__bg layer keeps
        filling the whole rect — only the foreground shifts. */
-    .d-mdhero__back,
+    .d-mdhero__backwrap,
     .d-mdhero__top-actions {
         top: calc(var(--space-4) + var(--animarr-safe-top)) !important;
     }
@@ -69,53 +69,78 @@
     z-index: 1;
 }
 
-.d-mdhero__back,
 .d-mdhero__edit,
 .d-mdhero__fav {
     appearance: none;
     cursor: pointer;
-    height: 32px;
-    padding: 0 var(--space-5);
+    /* Square icon-only buttons sized to the TopBar icon buttons
+       (.d-topbar__icon-btn = 36x36) so the hero's top-right actions read as a
+       continuation of the navbar above them. Labels removed — icon only. */
+    width: 36px;
+    height: 36px;
+    padding: 0;
     border-radius: var(--radius-ctrl);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: var(--label-tracking, 0.1em);
-    text-transform: var(--label-casing, none);
     color: var(--text);
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
+    justify-content: center;
     transition: background var(--motion-base), color var(--motion-base);
     z-index: 3;
-    /* Lift the chips off bright/busy fanart so they read as controls, not part
+    /* Lift the buttons off bright/busy fanart so they read as controls, not part
        of the artwork — surface-glass alone could wash out over a light hero. */
     box-shadow: 0 2px 16px -2px rgba(0, 0, 0, 0.6);
 }
 
-.d-mdhero__back {
+/* Wrapper that positions the shared <PageBack> button over the fanart. The
+   button itself keeps its global .d-page-back look (40x40 glass square); we
+   only place it. top:72px drops it below the fixed 60px TopBar. left:24px lines
+   the back arrow up with the TopBar brand mark (.d-topbar has 24px padding-left)
+   — the hero bleeds to the viewport edge, so 24px here = the same left margin as
+   the logo above it. Pairs with .d-mdhero__top-actions right:24px on the other
+   side so the hero chrome sits on the same column grid as the navbar. */
+.d-mdhero__backwrap {
     position: absolute;
-    /* Drop below the fixed TopBar (60px tall) — 72px clears the bar with 12px
-       of breathing room. Inset is var(--space-11) (36px), NOT space-9 (22px):
-       the hero bleeds -24px past each viewport edge (edge-to-edge fanart) and
-       is overflow:hidden, so a 22px inset lands the chip ~2px PAST the visible
-       edge where it gets clipped. 36px keeps it a clear 12px inside the screen. */
     top: 72px;
-    left: var(--space-11);
+    left: 24px;
     z-index: 3;
+    /* The button has its own margin-right (header-flow spacing); kill it here
+       so the wrapper hugs the 40px square. */
+    line-height: 0;
 }
 
-/* v5: a row of action buttons (favorite + edit) anchored top-right. Same 72px
-   top + space-11 inset as the Back chip (see note above re: the -24px bleed). */
+/* Give the shared <PageBack> the SAME glass background as the Favorite / Edit
+   buttons (surface-glass) instead of .d-page-back's flat fill, so all three
+   hero controls read as one glass treatment over the fanart. ::deep reaches
+   into the child PageBack component's button. */
+.d-mdhero__backwrap ::deep .d-page-back {
+    background: rgba(20, 15, 12, 0.55);
+    backdrop-filter: blur(14px) saturate(0.95);
+    -webkit-backdrop-filter: blur(14px) saturate(0.95);
+    border-color: var(--border-strong);
+    box-shadow: 0 2px 16px -2px rgba(0, 0, 0, 0.6);
+    margin-right: 0;
+}
+.d-mdhero__backwrap ::deep .d-page-back:hover {
+    background: rgba(20, 15, 12, 0.75);
+    border-color: var(--border-strong);
+}
+
+/* Row of action buttons (favorite + edit) anchored top-right. right: 24px so
+   the buttons line up with the TopBar's icon buttons (.d-topbar has 24px
+   padding-right) — the hero bleeds to the viewport edge, so 24px here lands the
+   buttons at the same right margin as the navbar above. */
 .d-mdhero__top-actions {
     position: absolute;
     top: 72px;
-    right: var(--space-11);
+    right: 24px;
     z-index: 3;
     display: inline-flex;
-    gap: var(--space-3);
+    /* 16px to match the TopBar's inter-button gap (.d-topbar { gap: 16px }) so
+       the Favorite / Edit pair is spaced exactly like the download / settings /
+       profile cluster directly above it. */
+    gap: 16px;
 }
 
-.d-mdhero__back:hover,
 .d-mdhero__edit:hover,
 .d-mdhero__fav:hover {
     background: rgba(20, 15, 12, 0.75);
@@ -128,7 +153,7 @@
 }
 
 .d-mdhero__fav-star {
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1;
 }
 .d-mdhero__fav-star--filled {
@@ -232,22 +257,8 @@
         gap: var(--space-5);
     }
     .d-mdhero__poster { width: 160px; }
-    .d-mdhero__back        { left:  var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); }
+    .d-mdhero__backwrap    { left:  var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); }
     .d-mdhero__top-actions { right: var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); gap: var(--space-2); }
-    /* On tablets the Favorite chip drops its label and shows only the star
-       so the action row stays compact. */
-    .d-mdhero__fav span:not(.d-mdhero__fav-star) { display: none; }
-
-    /* Edit-metadata chip: drop the "Edit metadata" text on phone/tablet and
-       collapse to a square pencil-only button — the full label ate too much
-       of the cramped top-action row. */
-    .d-mdhero__edit-label { display: none; }
-    .d-mdhero__edit {
-        width: 32px;
-        padding: 0;
-        justify-content: center;
-        gap: 0;
-    }
 }
 
 /* ── Phone — stack poster above title, shrink everything. */
@@ -275,8 +286,6 @@
         right: 0;
         opacity: 0.7;
     }
-    .d-mdhero__back        { left:  var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); height: 28px; padding: 0 var(--space-3); }
+    .d-mdhero__backwrap    { left:  var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); }
     .d-mdhero__top-actions { right: var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); gap: var(--space-2); }
-    .d-mdhero__fav,
-    .d-mdhero__edit { height: 28px; padding: 0 var(--space-3); }
 }

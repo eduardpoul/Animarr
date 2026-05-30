@@ -85,6 +85,11 @@ public interface IAnimarrApiClient
     Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default);
     Task                          EnqueueIdentificationAsync(Guid folderId, bool forceRefresh, CancellationToken ct = default);
     Task                          CancelIdentificationAsync(Guid id, CancellationToken ct = default);
+    Task                          PauseIdentificationAsync(CancellationToken ct = default);
+    Task                          ResumeIdentificationAsync(CancellationToken ct = default);
+    Task<IdentificationQueueStatusDto?> GetIdentificationStatusAsync(CancellationToken ct = default);
+    Task<bool>                    RefreshThemeAsync(Guid mediaItemId, CancellationToken ct = default);
+    Task<bool>                    SetThemeUrlAsync(Guid mediaItemId, string url, CancellationToken ct = default);
 
     // ─── Patterns / ignore rules / tags ──────────────────────────────────
     Task<RenamePatternDto[]>  GetPatternsAsync(CancellationToken ct = default);

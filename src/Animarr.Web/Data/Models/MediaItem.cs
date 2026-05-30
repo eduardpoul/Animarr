@@ -58,6 +58,16 @@ public class MediaItem
     /// <summary>logo.png — transparent title logo (if available from TMDB)</summary>
     public string? LogoPath { get; set; }
 
+    // ─── Theme music (anime OP/ED) ───────────────────────────────────────────
+    /// <summary>theme.ogg — anime opening/ending theme. Absolute path under the
+    /// media folder's <c>.animarr/&lt;folderId&gt;/</c> dir — NOT the central image
+    /// cache: kept next to the media so the Docker data volume doesn't balloon
+    /// with audio. null = none / not fetched (or source had no theme).</summary>
+    public string? ThemePath { get; set; }
+    /// <summary>Theme song label for display ("Syoudou — Itou Kanako"). From
+    /// AnimeThemes <c>song.title</c> (+ artist). null when unknown.</summary>
+    public string? ThemeTitle { get; set; }
+
     // ─── Metadata ──────────────────────────────────────────────────────────
     public string? Description { get; set; }
     public string? Tagline { get; set; }

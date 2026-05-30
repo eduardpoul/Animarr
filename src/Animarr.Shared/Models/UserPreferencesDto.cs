@@ -20,4 +20,6 @@ public sealed record UserPreferencesDto(
     bool   NormalizeVolume,
     string Language,
     string Theme,
-    string HeroPagerStyle);
+    string HeroPagerStyle,
+    bool   ThemeMusicEnabled,
+    int    ThemeMusicVolume);

@@ -2460,3 +2460,101 @@
         setStyle, switchAudioTrack, switchAudio,
     };
 })();
+
+// ── Theme music (anime OP/ED) — soft autoplay on the detail page ─────────────
+// A tiny standalone controller (kept out of the Artplayer entry map): one
+// <audio> element, faded in/out. Driven by MediaDetail.razor via
+// animarrTheme.play(url, volumePct) / animarrTheme.stop(). Browsers gate
+// autoplay-with-sound behind a user gesture; entering a title is itself a
+// click, so it usually starts — and if the very first play() is blocked we
+// retry on the next pointerdown/keydown. Never throws into Blazor interop.
+(function () {
+    let audio = null;
+    let fadeTimer = null;
+    let curUrl = null;
+    let pendingResume = null;
+
+    function clearFade() {
+        if (fadeTimer) { clearInterval(fadeTimer); fadeTimer = null; }
+    }
+
+    function fadeTo(el, target, ms, onDone) {
+        if (!el) return;
+        clearFade();
+        const steps = Math.max(1, Math.round(ms / 50));
+        const start = el.volume;
+        const delta = (target - start) / steps;
+        let i = 0;
+        fadeTimer = setInterval(function () {
+            i++;
+            if (audio !== el) { clearFade(); return; }   // superseded by a newer theme
+            el.volume = Math.max(0, Math.min(1, start + delta * i));
+            if (i >= steps) {
+                clearFade();
+                el.volume = Math.max(0, Math.min(1, target));
+                if (onDone) onDone();
+            }
+        }, 50);
+    }
+
+    function detachResume() {
+        if (!pendingResume) return;
+        window.removeEventListener('pointerdown', pendingResume, true);
+        window.removeEventListener('keydown', pendingResume, true);
+        pendingResume = null;
+    }
+
+    window.animarrTheme = {
+        // Start (or keep) the theme. volumePct 0..100. Idempotent for the same url.
+        play: function (url, volumePct) {
+            try {
+                if (!url) return;
+                const target = Math.max(0, Math.min(1, (volumePct == null ? 40 : volumePct) / 100));
+                if (audio && curUrl === url) {           // already on this theme — just match volume
+                    fadeTo(audio, target, 400);
+                    return;
+                }
+                window.animarrTheme.stop();
+                curUrl = url;
+                const el = new Audio(url);                // no crossOrigin: plain media playback works cross-origin
+                el.loop = true;
+                el.volume = 0;
+                audio = el;
+                const tryPlay = function () {
+                    const p = el.play();
+                    if (p && p.then) {
+                        p.then(function () { detachResume(); fadeTo(el, target, 800); })
+                         .catch(function () {
+                             if (audio !== el) return;     // stopped meanwhile
+                             detachResume();
+                             pendingResume = function () {
+                                 detachResume();
+                                 if (audio === el) el.play().then(function () { fadeTo(el, target, 800); }).catch(function () {});
+                             };
+                             window.addEventListener('pointerdown', pendingResume, true);
+                             window.addEventListener('keydown', pendingResume, true);
+                         });
+                    }
+                };
+                tryPlay();
+            } catch (e) { /* never throw into Blazor interop */ }
+        },
+        // Fade out + tear down.
+        stop: function () {
+            curUrl = null;
+            clearFade();
+            detachResume();
+            const el = audio;
+            audio = null;
+            if (!el) return;
+            try {
+                const steps = 6, start = el.volume; let i = 0;
+                const t = setInterval(function () {
+                    i++;
+                    el.volume = Math.max(0, start - (start / steps) * i);
+                    if (i >= steps) { clearInterval(t); try { el.pause(); el.src = ''; } catch (e) {} }
+                }, 40);
+            } catch (e) { try { el.pause(); } catch (e2) {} }
+        }
+    };
+})();

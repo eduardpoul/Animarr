@@ -335,6 +335,34 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task PauseIdentificationAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.IdentificationPause, null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task ResumeIdentificationAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.IdentificationResume, null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<IdentificationQueueStatusDto?> GetIdentificationStatusAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<IdentificationQueueStatusDto>(ApiRoutes.IdentificationStatus, JsonOpts, ct);
+
+    public async Task<bool> RefreshThemeAsync(Guid mediaItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.MediaThemeRefreshFor(mediaItemId), null, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> SetThemeUrlAsync(Guid mediaItemId, string url, CancellationToken ct = default)
+    {
+        var u = $"{ApiRoutes.MediaThemeManualFor(mediaItemId)}?url={Uri.EscapeDataString(url)}";
+        using var resp = await _http.PostAsync(u, null, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     // ─── Patterns / ignore rules / tags ──────────────────────────────────
 
     public async Task<RenamePatternDto[]> GetPatternsAsync(CancellationToken ct = default)
