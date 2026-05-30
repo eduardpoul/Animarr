@@ -33,6 +33,11 @@ public sealed record MediaItemDto
     public string? FanartPath { get; init; }
     public string? LogoPath   { get; init; }
 
+    // ─── Theme music (anime OP/ED) — absolute path on disk, served via
+    //     /api/media/{id}/theme; ThemeTitle is the song label for display ──
+    public string? ThemePath  { get; init; }
+    public string? ThemeTitle { get; init; }
+
     // ─── Metadata ────────────────────────────────────────────────────────
     public string?  Description    { get; init; }
     public string?  Tagline        { get; init; }

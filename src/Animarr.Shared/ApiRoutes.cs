@@ -24,6 +24,9 @@ public static class ApiRoutes
     public const string MediaContinue     = "/api/media/{id}/continue";
     public const string MediaFiles        = "/api/media/{id}/files";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
+    public const string MediaTheme        = "/api/media/{id}/theme";
+    public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
+    public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
     public const string FoldersBrowse     = "/api/folders/browse";
 
     // ─── Folder watchers ──────────────────────────────────────────────────
@@ -70,6 +73,9 @@ public static class ApiRoutes
     public const string IdentificationQueue       = "/api/identification-queue";
     public const string IdentificationEnqueue     = "/api/identification-queue/enqueue";
     public const string IdentificationCancel      = "/api/identification-queue/{id}/cancel";
+    public const string IdentificationStatus      = "/api/identification-queue/status";
+    public const string IdentificationPause       = "/api/identification-queue/pause";
+    public const string IdentificationResume      = "/api/identification-queue/resume";
 
     // ─── Tags ────────────────────────────────────────────────────────────
     public const string MediaTags            = "/api/media-tags";
@@ -197,6 +203,9 @@ public static class ApiRoutes
     public static string MediaPosterAlternatives(Guid id)   => MediaPosterAlts.Replace("{id}", id.ToString());
     public static string MediaBackdropAlternatives(Guid id) => MediaBackdropAlts.Replace("{id}", id.ToString());
     public static string MediaContinueFor(Guid id)     => MediaContinue.Replace("{id}", id.ToString());
+    public static string MediaThemeFor(Guid id)        => MediaTheme.Replace("{id}", id.ToString());
+    public static string MediaThemeRefreshFor(Guid id) => MediaThemeRefresh.Replace("{id}", id.ToString());
+    public static string MediaThemeManualFor(Guid id)  => MediaThemeManual.Replace("{id}", id.ToString());
     public static string MediaFilesFor(Guid id)        => MediaFiles.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 

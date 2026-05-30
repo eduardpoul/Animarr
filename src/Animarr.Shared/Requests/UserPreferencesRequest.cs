@@ -18,8 +18,10 @@ public sealed record UpdatePreferencesRequest(
     bool?   AudioPassthrough,
     bool?   NormalizeVolume,
     string? Language,
-    string? Theme           = null,
-    string? HeroPagerStyle  = null);
+    string? Theme             = null,
+    string? HeroPagerStyle    = null,
+    bool?   ThemeMusicEnabled = null,
+    int?    ThemeMusicVolume  = null);
 
 /// <summary>POST body for <c>/api/me/password</c>. Requires the current
 /// password as an anti-CSRF measure on top of the auth cookie.</summary>

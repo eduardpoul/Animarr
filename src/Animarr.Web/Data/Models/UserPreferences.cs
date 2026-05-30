@@ -77,6 +77,14 @@ public class UserPreferences
     /// useful for late-night anime watching but loses cinematic mixing.</summary>
     public bool NormalizeVolume { get; set; } = true;
 
+    /// <summary>Play the title's theme music (anime OP/ED) when you open its
+    /// detail page. Default off — autoplaying audio is intrusive, and browsers
+    /// gate sound behind a user gesture anyway. Never plays on Home/catalog.</summary>
+    public bool ThemeMusicEnabled { get; set; }
+
+    /// <summary>Theme music playback volume 0..100 — plays softly under the hero.</summary>
+    public int ThemeMusicVolume { get; set; } = 40;
+
     // ─── Language ────────────────────────────────────────────────────────────
 
     /// <summary>Interface language code (en/ru/uk/de/es). UI fetches

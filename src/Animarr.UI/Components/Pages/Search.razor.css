@@ -15,31 +15,11 @@
     padding-top: var(--space-3);
 }
 
-.search-page__back {
-    appearance: none;
-    cursor: pointer;
-    flex-shrink: 0;
-    /* Square, sized to match the input wrap's 48px height so the back
-       chip and the search field read as one horizontal row instead of
-       two controls at different scales. */
-    width: 48px;
-    height: 48px;
-    border-radius: var(--radius-ctrl);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    color: var(--text-dim);
-    display: grid;
-    place-items: center;
-    transition: background var(--motion-fast), color var(--motion-fast),
-                border-color var(--motion-fast);
-}
-.search-page__back:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.16);
-    color: var(--text);
-}
+/* NB: the back control is the shared <PageBack> component (.d-page-back,
+   a 40x40 glass square) — there is no .search-page__back element, so the
+   old custom-button rule that used to live here was dead and has been
+   removed. The input wrap below matches PageBack's 40px height so the back
+   chip and the search field read as one horizontal row. */
 
 .search-page__input-wrap {
     flex: 1;
@@ -47,7 +27,9 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    height: 48px;
+    /* Match the <PageBack> button height (.d-page-back = 40px) so the two
+       controls sit flush on one row instead of at different scales. */
+    height: 40px;
     padding: 0 16px;
     border-radius: var(--radius-ctrl);
     background: rgba(255, 255, 255, 0.05);

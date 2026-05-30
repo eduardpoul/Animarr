@@ -242,8 +242,16 @@ html[data-theme="cinematic"] {
 html.tv-mode {
     font-size: 15px;
 }
+/* Enlarge INTERACTIVE controls for TV (D-pad focus / 10-foot tap targets):
+   buttons, toggles, and clickable filter chips (button.d-pill). Deliberately
+   NOT bare `.d-pill` — a plain Pill is a static LABEL (role badge "MASTER",
+   genre/type tags) that must never balloon to 40px. That stray min-height was
+   why those tags rendered as tall chips on any host carrying a tv-mode class
+   (incl. a desktop browser with a leftover animarr_tv_mode override), while
+   the hero rail escaped only via its own min-height:0 !important. Dropping it
+   here makes every static tag compact — matching the movie-detail pills — on
+   web AND real TVs, with no !important arms race. */
 html.tv-mode .d-btn,
-html.tv-mode .d-pill,
 html.tv-mode .d-toggle,
 html.tv-mode button.d-pill {
     min-height: 40px;

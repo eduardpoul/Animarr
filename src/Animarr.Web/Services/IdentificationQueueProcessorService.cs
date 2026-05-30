@@ -28,6 +28,21 @@ public class IdentificationQueueProcessorService(
     public int  QueueProcessedSinceStart { get; private set; }
     public Guid? CurrentlyProcessingFolderId { get; private set; }
 
+    /// <summary>When true the processor keeps polling/refreshing depth but does NOT
+    /// start new jobs — the AI-status popup's Pause button flips this. In-memory only:
+    /// a process restart resumes (and RecoverInterruptedJobsAsync re-queues). A job
+    /// already mid-flight is allowed to finish; pause only blocks picking up the next.</summary>
+    public bool IsPaused { get; private set; }
+
+    /// <summary>Pause/resume the queue. Fires <see cref="QueueChanged"/> so the hub
+    /// broadcasts the new state to the AI popup.</summary>
+    public void SetPaused(bool paused)
+    {
+        if (IsPaused == paused) return;
+        IsPaused = paused;
+        QueueChanged?.Invoke();
+    }
+
     /// <summary>Count of items the pipeline finished as Identified | Manual since process start.</summary>
     public int HitCount  { get; private set; }
     /// <summary>Count of items that ended up NeedsReview | Failed since process start.</summary>
@@ -66,7 +81,10 @@ public class IdentificationQueueProcessorService(
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollMs));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            await ProcessNextJobAsync(stoppingToken);
+            // Paused → don't pick up the next job, but keep refreshing depth so the
+            // popup still reflects newly-queued items piling up behind the pause.
+            if (!IsPaused)
+                await ProcessNextJobAsync(stoppingToken);
             await RefreshQueueDepthAsync(stoppingToken);
         }
     }

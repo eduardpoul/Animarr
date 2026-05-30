@@ -42,7 +42,7 @@
                     <div class="nrm-row">
                         <div class="nrm-row__folder"><code>@mi.Title</code></div>
                         <div class="nrm-row__candidates">
-                            @foreach (var c in mi.Candidates)
+                            @foreach (var c in mi.Candidates ?? Array.Empty<IdentificationCandidateDto>())
                             {
                                 var cand = c;
                                 var key = $"{mi.Id}|{cand.Source}|{cand.ExternalId}";
@@ -60,11 +60,14 @@
                                     <div class="nrm-card__body">
                                         <div>
                                             <div class="nrm-card__title">@cand.Title</div>
-                                            <div class="nrm-card__meta">@(cand.Year?.ToString() ?? "—") · @cand.Source.ToUpperInvariant()</div>
+                                            <div class="nrm-card__meta">@(cand.Year?.ToString() ?? "—")@(string.IsNullOrEmpty(cand.Source) ? "" : " · " + cand.Source.ToUpperInvariant())</div>
                                         </div>
                                         <div class="nrm-card__foot">
                                             <span class="@($"nrm-card__conf {(cand.Confidence > 0.7 ? "nrm-card__conf--ok" : "nrm-card__conf--warn")}")">
-                                                @($"{cand.Confidence:P0}")
+                                                @* Clamp to 0..1 for display — the server's candidate Score is a
+                                                   0..1 base with additive boosts (year match, source weight) so it
+                                                   can exceed 1.0; :P0 on a raw 2.0 would render "200%". *@
+                                                @($"{Math.Clamp(cand.Confidence, 0d, 1d):P0}")
                                             </span>
                                             <button type="button"
                                                     class="@($"nrm-card__use {(_busyKey == key ? "nrm-card__use--loading" : "")}")"

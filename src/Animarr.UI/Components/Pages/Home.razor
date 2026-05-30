@@ -26,10 +26,8 @@
         <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
     }
 
-    @* NeedsReview pulse-chip — surfaces when titles are below confidence.
-       Free-text search now lives on /search (magnifier in TopBar); the bulky
-       Filter-by-title input + N/M counter that used to sit here are gone. *@
-    <NeedsReviewChip />
+    @* NeedsReview pulse-chip moved to the TopBar (top-right, next to the AI
+       pill) — it read as out of place above the category strip. *@
 
     @* ── Category chip strip (replaces v3 type tabs + folder chips) ────── *@
     @* Categories come from /api/categories (admin manages them in
@@ -310,15 +308,13 @@
                 .Contains(m.FolderId));
         }
 
-        // Free-text search moved to /search — Home only filters by category +
-        // section now. Hide hero items unless one of those filters is active.
-        var hasActiveFilter = !string.IsNullOrWhiteSpace(activeCat)
-                          || _activeSection.HasValue;
-        if (!hasActiveFilter && _featured.Count > 0)
-        {
-            var featuredIds = _featured.Select(f => f.Id).ToHashSet();
-            src = src.Where(m => !featuredIds.Contains(m.Id));
-        }
+        // NOTE: we used to drop the Featured hero titles from the grid when no
+        // category/section filter was active ("All"), to avoid showing them
+        // twice. But that made high-rated titles (e.g. Bleach: TYBW, rating 10)
+        // silently vanish from "All" — the user reads "All" as "everything is
+        // here", and a title rotating in the hero isn't an obvious substitute.
+        // So the grid now always lists every item; the hero is an additional
+        // highlight on top, not a replacement for the grid rows.
 
         // Belt-and-braces dedup: if the API ever returns the same MediaItem
         // twice (rare, but folder rescans during the request can race), keep

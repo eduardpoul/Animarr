@@ -93,8 +93,12 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
         ),
         new(
             "Universal S##E##",
-            // any_name.S01E05.mkv  /  Show.s2e12.mkv
-            @"(?i)[._\s\-]s(?<season>\d{1,2})e(?<episode>\d{2,3})[._\s\-]",
+            // any_name.S01E05.mkv  /  Show.s2e12.mkv  /  S02E01.mkv
+            // The leading (?:^|…) is load-bearing: a bare "S02E01.mkv" with no
+            // show prefix is exactly what our own renamer emits, so the parser
+            // MUST round-trip it. The old `[._\s\-]s…` required a separator
+            // before `s` and silently dropped the episode for prefix-less names.
+            @"(?i)(?:^|[._\s\-])s(?<season>\d{1,2})e(?<episode>\d{2,3})(?:[._\s\-]|$)",
             Priority: 60
         ),
         new(

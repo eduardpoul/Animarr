@@ -27,6 +27,18 @@
     border-color: oklch(0.60 0.16 75 / 0.60);
 }
 
+/* Compact topbar variant — small amber pill (warn icon + count), no verbose
+   label or corner dot, so it sits cleanly next to the LLM pill. */
+.nr-chip--compact {
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 999px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.nr-chip--compact .nr-chip__label,
+.nr-chip--compact .nr-chip__dot { display: none; }
+
 .nr-chip__label {
     text-transform: uppercase;
 }

@@ -259,6 +259,23 @@ internal static class RenameEndpoints
             return Results.NoContent();
         });
 
+        // ─── Pause / resume / status (AI popup controls) ─────────────────
+        // The processor is a singleton hosted service, so we can flip its in-memory
+        // pause flag directly. Pausing only blocks picking up the NEXT job.
+        app.MapPost(ApiRoutes.IdentificationPause, (IdentificationQueueProcessorService proc) =>
+        {
+            proc.SetPaused(true);
+            return Results.NoContent();
+        });
+        app.MapPost(ApiRoutes.IdentificationResume, (IdentificationQueueProcessorService proc) =>
+        {
+            proc.SetPaused(false);
+            return Results.NoContent();
+        });
+        app.MapGet(ApiRoutes.IdentificationStatus, (IdentificationQueueProcessorService proc) =>
+            Results.Ok(new Animarr.Shared.Models.IdentificationQueueStatusDto(
+                proc.IsPaused, proc.QueueDepth, proc.QueueProcessedSinceStart, proc.HitRate)));
+
         return app;
     }
 }

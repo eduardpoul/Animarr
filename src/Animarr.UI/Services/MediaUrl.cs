@@ -59,4 +59,11 @@ public static class MediaUrl
             ? $"/api/image{query}"
             : $"{_base}/api/image{query}";
     }
+
+    /// <summary>Build the <c>/api/media/{id}/theme</c> URL for a title's theme
+    /// audio (anime OP/ED). Used as the <c>&lt;audio&gt;</c> src on the detail page.</summary>
+    public static string Theme(System.Guid id)
+        => string.IsNullOrEmpty(_base)
+            ? $"/api/media/{id}/theme"
+            : $"{_base}/api/media/{id}/theme";
 }

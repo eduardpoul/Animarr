@@ -313,6 +313,68 @@ internal static class MediaEndpoints
             }
         });
 
+        // ── Theme music ────────────────────────────────────────────────────────
+        // Serves the cached anime OP/ED theme for the detail page's soft autoplay.
+        // Lazy: on a cache miss for an anime-like item it fetches from AnimeThemes
+        // on the fly (first hit is slow, then cached next to the media in .animarr/),
+        // which backfills the existing library without a full re-identify. 404 when
+        // the title has no theme. Range-enabled for seeking; AllowAnonymous so the
+        // <audio> element loads cross-origin under MAUI like /api/image does. The
+        // file path comes from the DB (not the client) so there's no path-injection.
+        app.MapGet(ApiRoutes.MediaTheme, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MetadataService metadata,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+
+            var path = item.ThemePath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                path = await metadata.EnsureThemeMusicAsync(id, ct);   // lazy backfill
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return Results.NotFound();
+
+            var mime = Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".ogg" or ".oga" => "audio/ogg",
+                ".mp3"           => "audio/mpeg",
+                ".m4a" or ".aac" => "audio/mp4",
+                ".webm"          => "audio/webm",
+                ".opus"          => "audio/opus",
+                _                => "application/octet-stream",
+            };
+            return Results.File(path, mime, enableRangeProcessing: true);
+        })
+        .WithName("GetMediaTheme")
+        .AllowAnonymous();
+
+        // Re-fetch the theme from AnimeThemes (Edit Metadata → THEME MUSIC → Rescan).
+        // Forces a fresh lookup and bypasses the global enabled-gate (explicit action).
+        app.MapPost(ApiRoutes.MediaThemeRefresh, async (
+            Guid id, MetadataService metadata, CancellationToken ct) =>
+        {
+            var path = await metadata.RefreshThemeMusicAsync(id, ct);
+            return path is null
+                ? Results.NotFound(new { error = "No theme found for this title on AnimeThemes." })
+                : Results.NoContent();
+        });
+
+        // Manual override (THEME MUSIC → Add): download a user-supplied direct audio URL.
+        app.MapPost(ApiRoutes.MediaThemeManual, async (
+            Guid id, string? url, MetadataService metadata, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return Results.BadRequest(new { error = "A 'url' query parameter is required." });
+            var path = await metadata.SetThemeFromUrlAsync(id, url, ct);
+            return path is null
+                ? Results.BadRequest(new { error = "Couldn't download audio from that URL." })
+                : Results.NoContent();
+        });
+
         app.MapGet(ApiRoutes.MediaBackdropList, async (
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>

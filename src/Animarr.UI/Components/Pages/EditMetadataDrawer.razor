@@ -183,6 +183,16 @@
     private int?    _bRuntime;
     private int?    _bHue;
 
+    // ── Source provenance (read-only) — the original on-disk name the resolver
+    //    parsed, so a wrong match is obvious. Primary = the per-title FOLDER
+    //    name (what the scanner reads for BOTH series and movies); only a flat
+    //    section (files dumped straight under a watched root) falls back to the
+    //    file name. _sourceDetail carries a sample file + count so e.g. a
+    //    17-episode folder mis-typed as a Movie is instantly recognisable. ──
+    private string? _sourceName;
+    private string? _sourceDetail;
+    private bool    _sourceIsFile;
+
     // ── Tags ──
     private List<string> _tags = new();
     private string _newTag = "";
@@ -201,6 +211,10 @@
     private string? _imdbIdInput;
     private string  _pasteUrl = "";
     private bool _tmdbIsTv = true;
+
+    // ── Theme music (AnimeThemes) ──
+    private string _themeUrlInput = "";
+    private bool   _themeBusy;
 
     private static readonly string[] _suggestedTags =
     [
@@ -237,6 +251,86 @@
         if (Item.CategoryIds is { Length: > 0 } ids)
             foreach (var id in ids) _selectedCategoryIds.Add(id);
         _categoriesDirty = false;
+    }
+
+    /// <summary>Resolve the on-disk provenance once the drawer mounts. Primary
+    /// is the per-title FOLDER name (what the scanner parses for series AND
+    /// movies — e.g. "Beyond Time's Gaze (2025)"); a flat section root falls
+    /// back to the file name. The detail line adds a sample file + count, so a
+    /// folder full of episodes that got mis-typed as a Movie is obvious. Best-
+    /// effort — failure just hides the read-only row, never blocks editing.</summary>
+    protected override async Task OnInitializedAsync()
+    {
+        if (Item is null) return;
+        try
+        {
+            MediaFileDto[] files;
+            try { files = await Api.GetMediaFilesAsync(Item.Id); }
+            catch { files = Array.Empty<MediaFileDto>(); }
+
+            var folder     = await ResolveFolderAsync();
+            var folderLeaf = folder is not null ? LeafName(folder.Path) : null;
+            // A per-title folder (not a watched-section root) is the meaningful
+            // "what was scanned" name. A flat section dumps files at its root,
+            // so there the file name is the unit the resolver keys off.
+            var folderIsTitle = folder is not null && !folder.IsSection
+                             && !string.IsNullOrEmpty(folderLeaf);
+
+            if (folderIsTitle)
+            {
+                _sourceName   = folderLeaf;
+                _sourceIsFile = false;
+            }
+            else
+            {
+                _sourceName   = files.FirstOrDefault()?.FileName
+                             ?? folderLeaf
+                             ?? ParentDirLeaf(files.FirstOrDefault()?.FilePath);
+                _sourceIsFile = true;
+            }
+
+            // Detail: sample file + count when the primary is a folder; just a
+            // count when the primary is already the file name.
+            if (files.Length > 0)
+            {
+                var first = files[0].FileName;
+                _sourceDetail = _sourceIsFile
+                    ? (files.Length > 1 ? $"{files.Length} files on disk" : null)
+                    : (files.Length > 1 ? $"{first} · {files.Length} files" : first);
+            }
+        }
+        catch { /* provenance is a debug aid — swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task<FolderWatcherDto?> ResolveFolderAsync()
+    {
+        if (Item is null) return null;
+        try
+        {
+            var folders = await Api.GetFoldersAsync();
+            return folders.FirstOrDefault(f => f.Id == Item.FolderId);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Last path segment, separator-agnostic ('/' on the Linux server,
+    /// '\\' on a Windows host).</summary>
+    private static string? LeafName(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        var p = path.Replace('\\', '/').TrimEnd('/');
+        var i = p.LastIndexOf('/');
+        return i >= 0 && i < p.Length - 1 ? p[(i + 1)..] : p;
+    }
+
+    /// <summary>Leaf name of the directory that CONTAINS the given file path.</summary>
+    private static string? ParentDirLeaf(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return null;
+        var p = filePath.Replace('\\', '/').TrimEnd('/');
+        var lastSlash = p.LastIndexOf('/');
+        return lastSlash > 0 ? LeafName(p[..lastSlash]) : null;
     }
 
     private async Task OnCloseAsync() => await OnClose.InvokeAsync();
@@ -401,6 +495,35 @@
     private Task ApplyMalAsync()  => ApplySourceAsync("mal", _malIdInput ?? "");
     private Task ApplyImdbAsync() => ApplySourceAsync("imdb_tv", _imdbIdInput ?? "");
 
+    // ── Theme-music handlers ──
+    private async Task RescanThemeAsync()
+    {
+        if (Item is null) return;
+        _themeBusy = true; StateHasChanged();
+        try
+        {
+            var ok = await Api.RefreshThemeAsync(Item.Id);
+            if (ok) { Toasts.ShowSuccess("Theme re-fetched from AnimeThemes."); await OnSaved.InvokeAsync(); }
+            else    { Toasts.ShowError("No theme found for this title on AnimeThemes."); }
+        }
+        catch (Exception ex) { Toasts.ShowError($"Theme rescan failed: {ex.Message}"); }
+        finally { _themeBusy = false; StateHasChanged(); }
+    }
+
+    private async Task ApplyThemeUrlAsync()
+    {
+        if (Item is null || string.IsNullOrWhiteSpace(_themeUrlInput)) return;
+        _themeBusy = true; StateHasChanged();
+        try
+        {
+            var ok = await Api.SetThemeUrlAsync(Item.Id, _themeUrlInput.Trim());
+            if (ok) { Toasts.ShowSuccess("Theme set from URL."); _themeUrlInput = ""; await OnSaved.InvokeAsync(); }
+            else    { Toasts.ShowError("Couldn't download audio from that URL."); }
+        }
+        catch (Exception ex) { Toasts.ShowError($"Set theme failed: {ex.Message}"); }
+        finally { _themeBusy = false; StateHasChanged(); }
+    }
+
     private void ParsePastedUrl()
     {
         var u = _pasteUrl.Trim();
@@ -497,6 +620,40 @@
             </div>
         </div>
 
+        @* Theme music (anime OP/ED) — source = AnimeThemes. Shows the current
+           track + a play link; Rescan re-fetches automatically, or paste a
+           direct audio URL and Add to set it manually. *@
+        <div class="emd-idfield">
+            <div class="emd-idfield__head">
+                <span class="emd-idfield__label">THEME MUSIC</span>
+                @if (!string.IsNullOrEmpty(Item.ThemePath))
+                {
+                    <a href="@Animarr.UI.Services.MediaUrl.Theme(Item.Id)" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="play" Size="10" /> play theme</a>
+                }
+            </div>
+            <div class="emd-idfield__row">
+                <input class="emd-input emd-input--mono" placeholder="paste a direct audio URL (manual add)"
+                       value="@_themeUrlInput"
+                       @oninput="@(e => _themeUrlInput = e.Value?.ToString() ?? "")" />
+                <button class="emd__btn emd__btn--solid" disabled="@_themeBusy" @onclick="RescanThemeAsync" title="Re-fetch the OP/ED from AnimeThemes">
+                    <DIcon Name="refresh" Size="13" /> Rescan
+                </button>
+                <button class="emd__btn emd__btn--solid" disabled="@(_themeBusy || string.IsNullOrWhiteSpace(_themeUrlInput))" @onclick="ApplyThemeUrlAsync">
+                    <DIcon Name="check" Size="13" /> Add
+                </button>
+            </div>
+            <div class="emd__hint" style="margin-top: 6px;">
+                @if (!string.IsNullOrEmpty(Item.ThemeTitle))
+                {
+                    <text>♪ @Item.ThemeTitle · AnimeThemes</text>
+                }
+                else
+                {
+                    <text>No theme set. Rescan tries AnimeThemes (anime only); or paste a direct audio URL to add manually.</text>
+                }
+            </div>
+        </div>
+
         <div class="emd-idfield">
             <div class="emd-idfield__head">
                 <span class="emd-idfield__label">Paste URL</span>
@@ -511,6 +668,20 @@
     </div>;
 
     private RenderFragment BasicsTab() => @<div class="emd-form">
+        @* Provenance — the original on-disk name the scanner parsed. Lets the
+           user see WHAT was matched (folder for a series, file for a movie) so a
+           wrong auto-identification is debuggable at a glance. Read-only. *@
+        @if (!string.IsNullOrEmpty(_sourceName))
+        {
+            <div class="emd-field">
+                <span class="emd-field__label">@(_sourceIsFile ? "Source file (on disk)" : "Source folder (on disk)")</span>
+                <div class="emd-source" title="What the scanner parsed for identification">@_sourceName</div>
+                @if (!string.IsNullOrEmpty(_sourceDetail))
+                {
+                    <span class="emd-source__detail">@_sourceDetail</span>
+                }
+            </div>
+        }
         <label class="emd-field">
             <span class="emd-field__label">Title</span>
             <input class="emd-input" value="@_bTitle" @oninput="@(e => _bTitle = e.Value?.ToString() ?? "")" />

@@ -303,6 +303,12 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("TagsJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ThemePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThemeTitle")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -845,6 +851,12 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("Theme")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("ThemeMusicEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ThemeMusicVolume")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("TvMode")
                         .HasColumnType("INTEGER");

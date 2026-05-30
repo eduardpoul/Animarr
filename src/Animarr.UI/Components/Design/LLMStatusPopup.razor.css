@@ -177,3 +177,33 @@
 }
 .d-llm-popup__recent-conf.is-success { color: var(--success); }
 .d-llm-popup__recent-conf.is-warn    { color: var(--warn); }
+
+/* ── Pause / resume button (AI parsing control) ──────────── */
+.d-llm-popup__pause {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.d-llm-popup__pause:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.d-llm-popup__pause.is-paused {
+    color: var(--accent-hi);
+    border-color: var(--accent-soft);
+    background: var(--accent-soft);
+}
+
+/* Paused state: dot turns amber + stops pulsing; header label follows. */
+.d-llm-popup__head-dot.is-paused {
+    background: var(--warn);
+    box-shadow: 0 0 8px var(--warn);
+    animation: none;
+}
+.d-llm-popup__head-status:has(.d-llm-popup__head-dot.is-paused) { color: var(--warn); }

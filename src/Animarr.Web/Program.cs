@@ -84,11 +84,31 @@ builder.Services.AddHttpClient("imdb_search", c =>
     c.BaseAddress = new Uri("https://api.imdbapi.dev");
     c.DefaultRequestHeaders.Add("Accept", "application/json");
 });
+// AnimeThemes.moe — anime OP/ED theme audio (free, no auth). NOTE: its WAF
+// returns 403 for requests with no/default User-Agent. .NET's HttpClient sends
+// no UA by default, so an explicit one is REQUIRED here (curl only worked
+// because it sends "curl/x.y"). Confirmed: blank UA → 403, any UA → 200.
+builder.Services.AddHttpClient("animethemes", c =>
+{
+    c.BaseAddress = new Uri("https://api.animethemes.moe");
+    c.DefaultRequestHeaders.Add("Accept", "application/json");
+    c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+});
+// AniList GraphQL — title→MAL-id bridge for theme lookup (free, no auth).
+// AniList doesn't require a UA today, but set one defensively (same WAF risk).
+builder.Services.AddHttpClient("anilist", c =>
+{
+    c.BaseAddress = new Uri("https://graphql.anilist.co");
+    c.DefaultRequestHeaders.Add("Accept", "application/json");
+    c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+});
 
 // Metadata & LLM services
 builder.Services.AddScoped<TmdbClient>();
 builder.Services.AddScoped<MalClient>();
 builder.Services.AddScoped<ImdbSearchClient>();
+builder.Services.AddScoped<AnimeThemesClient>();
+builder.Services.AddScoped<AniListClient>();
 builder.Services.AddScoped<MetadataService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
 builder.Services.AddSingleton<HlsSessionService>();

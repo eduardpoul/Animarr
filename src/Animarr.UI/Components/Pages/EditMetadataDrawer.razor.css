@@ -239,6 +239,14 @@
     gap: 18px;
 }
 
+/* Field-pair wrappers (Year/Type, Language/Studio, Runtime/Hue) had no rule at
+   all → they rendered as a plain block, stacking their two fields with ZERO
+   gap while the standalone fields above used the form's 18px gap — so the
+   vertical rhythm was uneven. display:contents dissolves the wrapper so every
+   field becomes a direct flex child of .emd-form and inherits the same 18px
+   gap, top to bottom. */
+.emd-grid-2 { display: contents; }
+
 /* ── Source IDs ───────────────────────────────────────────── */
 .emd-automatch {
     display: flex;
@@ -405,6 +413,33 @@ select.emd-input option {
 }
 
 .emd-field--full { grid-column: 1 / -1; }
+
+/* Read-only provenance value — the original on-disk file / folder name the
+   scanner parsed. Styled like a disabled input (mono, muted, framed) so it
+   reads as "info, not editable". Selectable so the user can copy it. */
+.emd-source {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    word-break: break-all;
+    user-select: text;
+}
+/* Secondary line under the source value — a sample file + count (e.g.
+   "01.mp4 · 17 files"). Surfaces that a Movie-typed item actually has many
+   episode files, i.e. it's a mis-typed series. */
+.emd-source__detail {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 5px;
+    word-break: break-all;
+    user-select: text;
+}
 
 /* Read-only original-name field — visually subdued so the user reads it
    as a reference (not an input). Click-to-select still works for copy/paste. */
