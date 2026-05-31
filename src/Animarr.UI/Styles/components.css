@@ -2932,6 +2932,183 @@ html.animarr-tv-host .catalog-grid {
     color: var(--accent-hi);
 }
 
+/* ── Embedded llama.cpp provider panel (Settings → AI / LLM) ──────────────
+   Shown when Provider = "embedded": runtime status, model picker, download
+   progress, installed-model list, and the all-options docs block.          */
+.settings-llm-embedded {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.settings-llm-gpu {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    font-size: 12.5px;
+}
+.settings-llm-gpu__badge {
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: oklch(0.55 0.12 155 / 0.16);
+    color: var(--accent-hi);
+}
+.settings-llm-gpu__meta { color: var(--text-faint); }
+.settings-llm-gpu__restart {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+.settings-llm-gpu__restart:disabled { opacity: 0.5; cursor: not-allowed; }
+.settings-llm-gpu__err {
+    flex-basis: 100%;
+    color: oklch(0.74 0.15 70);
+    font-size: 11.5px;
+    line-height: 1.5;
+}
+
+.settings-llm-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    max-width: 480px;
+}
+.settings-llm-progress__bar {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+.settings-llm-progress__fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s ease;
+}
+.settings-llm-progress__text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-faint);
+}
+.settings-llm-progress__text .is-ok   { color: oklch(0.72 0.13 155); }
+.settings-llm-progress__text .is-warn { color: oklch(0.80 0.13 80); }
+.settings-llm-progress__text .is-err  { color: oklch(0.70 0.18 25); }
+.settings-llm-progress__cancel {
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-faint);
+    border-radius: 7px;
+    padding: 2px 9px;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+.settings-llm-progress__cancel:hover { color: var(--text); }
+
+.settings-llm-models {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.settings-llm-models__label {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin-bottom: 2px;
+}
+.settings-llm-models__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+.settings-llm-models__name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-llm-models__size {
+    margin-left: auto;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+.settings-llm-models__del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.settings-llm-models__del:hover:not(:disabled) {
+    color: oklch(0.70 0.18 25);
+    border-color: oklch(0.66 0.20 25 / 0.55);
+}
+.settings-llm-models__del:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.settings-llm-docs {
+    margin-top: var(--space-4);
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+}
+.settings-llm-docs h3 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--text);
+}
+.settings-llm-docs ul {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+.settings-llm-docs li {
+    font-size: 12.5px;
+    color: var(--text-faint);
+    line-height: 1.55;
+}
+.settings-llm-docs li strong { color: var(--text); }
+.settings-llm-docs code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--accent-hi);
+    background: var(--surface-3);
+    padding: 1px 5px;
+    border-radius: 5px;
+}
+
 .settings-hint {
     font-size: 12px;
     color: var(--text-faint);

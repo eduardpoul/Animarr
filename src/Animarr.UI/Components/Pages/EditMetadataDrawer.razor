@@ -642,16 +642,33 @@
                     <DIcon Name="check" Size="13" /> Add
                 </button>
             </div>
-            <div class="emd__hint" style="margin-top: 6px;">
-                @if (!string.IsNullOrEmpty(Item.ThemeTitle))
-                {
-                    <text>♪ @Item.ThemeTitle · AnimeThemes</text>
-                }
-                else
-                {
-                    <text>No theme set. Rescan tries AnimeThemes (anime only); or paste a direct audio URL to add manually.</text>
-                }
-            </div>
+            @* Provenance — keyed off ThemePath (a theme can be set without a song
+               title, in which case the old "No theme set" text was wrong). Shows
+               the song, an AnimeThemes lookup link, and the on-disk file path so
+               the user can see WHERE a wrong theme came from. *@
+            @if (!string.IsNullOrEmpty(Item.ThemePath))
+            {
+                <div class="emd__hint" style="margin-top: 6px;">
+                    @if (!string.IsNullOrEmpty(Item.ThemeTitle)) { <text>♪ @Item.ThemeTitle</text> }
+                    else { <text>♪ Theme set (untitled)</text> }
+                    <text> · </text>
+                    <a href="@($"https://animethemes.moe/search?q={Uri.EscapeDataString(Item.Title)}")"
+                       target="_blank" rel="noopener" class="emd-idfield__link">
+                        <DIcon Name="external" Size="10" /> find on AnimeThemes
+                    </a>
+                </div>
+                <div class="emd-source" style="margin-top: 6px;">@Item.ThemePath</div>
+                <div class="emd__hint" style="margin-top: 4px;">
+                    On-disk file. The exact remote source URL isn't stored yet — use
+                    "find on AnimeThemes" above to verify the match.
+                </div>
+            }
+            else
+            {
+                <div class="emd__hint" style="margin-top: 6px;">
+                    No theme set. Rescan tries AnimeThemes (anime only); or paste a direct audio URL to add manually.
+                </div>
+            }
         </div>
 
         <div class="emd-idfield">

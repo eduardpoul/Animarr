@@ -1,11 +1,10 @@
 @*
     ServerSettingsScreen — admin-only /server route.
 
-    Phase A stub: shell + 240px vertical tab rail + content card. The 9 tab
-    bodies (Users & Roles, Folders, History, LLM, Patterns, Ignore,
-    Downloads-config, Metadata, About) get filled in over the next
-    iterations. Tab buttons switch the active tab in local state — no
-    persistence, no real data yet.
+    Phase A stub: shell + 240px vertical tab rail + content card. The tab
+    bodies (Users & Roles, Folders, LLM, Parsing, Downloads-config,
+    Metadata, About) get filled in over the next iterations. Tab buttons
+    switch the active tab in local state — no persistence, no real data yet.
 
     Spec: screens-v4.jsx → ServerSettingsScreen lines 651-704.
 *@
@@ -110,17 +109,11 @@
                 case "folders":
                     <Settings EmbeddedTab="root_folders" />
                     break;
-                case "history":
-                    <Settings EmbeddedTab="rename_history" />
-                    break;
                 case "llm":
                     <Settings EmbeddedTab="ai" />
                     break;
                 case "patterns":
                     <Settings EmbeddedTab="patterns" />
-                    break;
-                case "ignore":
-                    <Settings EmbeddedTab="rules" />
                     break;
                 case "downloads":
                     <Settings EmbeddedTab="torrent" />
@@ -148,10 +141,8 @@
         new("users",      "Users & Roles",  "users",    "Manage user accounts and permission roles."),
         new("categories", "Categories",     "sparkle",  "Catalog tags — chips above the grid. LLM auto-classifies; admin curates."),
         new("folders",    "Root folders",   "folder",   "Library source paths that the watcher monitors."),
-        new("history",    "Rename history", "clock",    "Every rename the watcher / queue has executed."),
         new("llm",        "AI / LLM",       "magic",    "Configure the on-host LLM provider used for identification."),
-        new("patterns",   "Patterns",       "pencil",   "Regex rules that parse season / episode from filenames."),
-        new("ignore",     "Ignore rules",   "filter",   "Filename patterns to skip during scans."),
+        new("patterns",   "Parsing",        "pencil",   "Regex rules that parse season / episode from filenames."),
         new("downloads",  "Downloads",      "download", "Torrent listen port, encryption, global Mbps caps, DHT / PEX / UPnP."),
         new("meta",       "Metadata",       "external", "TMDB / MAL / IMDb / AniDB order + API credentials."),
         new("about",      "About",          "info",     "Version, build, runtime, license, GitHub link."),

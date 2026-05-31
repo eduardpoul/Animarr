@@ -10,6 +10,11 @@
       - "6881:6881/udp"  # Torrent (UDP)
     environment:
       - TZ=UTC        # e.g. America/New_York, Europe/London, Asia/Tokyo
+      # ── Built-in LLM on GPU (optional) ───────────────────────────────────
+      # Let the embedded llama.cpp provider use the GPU via Vulkan. On first
+      # boot the container installs Vulkan drivers (cached on the data volume).
+      # Also uncomment the `devices:` + `group_add:` block below.
+      # - ANIMARR_LLM_VULKAN=1
     volumes:
       # Persistent data: SQLite database + MonoTorrent fastresume state
       - animarr-data:/app/data
@@ -18,6 +23,15 @@
       # Use the same right-side path when configuring a folder in Animarr.
       - /your/media/path:/media:rw
       # - /another/path:/media2:rw
+
+    # ── GPU passthrough for the embedded LLM (AMD/Intel via Vulkan) ──────────
+    # Uncomment together with ANIMARR_LLM_VULKAN=1 above. NVIDIA users instead
+    # add the nvidia-container-toolkit + `--gpus all` (or a deploy device
+    # reservation) and ensure the NVIDIA Vulkan ICD is exposed.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - video
 
 volumes:
   animarr-data:

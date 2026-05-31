@@ -288,7 +288,6 @@ internal static class TorrentEndpoints
             entity.EnableUPnP                = cfg.EnableUPnP;
             entity.StopSeedingAfterDone      = cfg.StopSeedingAfterDone;
             entity.StopSeedingRatio          = cfg.StopSeedingRatio;
-            entity.AutoRenameAfterDownload   = cfg.AutoRenameAfterDownload;
             entity.DefaultStopAfterDownload  = cfg.DefaultStopAfterDownload;
             entity.CacheDirectory            = cfg.CacheDirectory;
             await db.SaveChangesAsync(ct);

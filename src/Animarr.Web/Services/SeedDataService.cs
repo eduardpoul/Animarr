@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Animarr.Web.Services;
 
 /// <summary>
-/// Seeds built-in rename patterns and global ignore rules on first run.
+/// Seeds built-in filename-parsing patterns on first run.
 /// Idempotent — safe to call on every startup.
 /// </summary>
 public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<SeedDataService> logger)
@@ -13,42 +13,7 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
     public async Task SeedAsync()
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        await RecoverPendingHistoryAsync(db);
         await SeedPatternsAsync(db);
-        await SeedIgnoreRulesAsync(db);
-    }
-
-    // ─── Crash recovery ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Resolves RenameHistory records left in Pending state by a previous crash.
-    /// If NewPath exists on disk, the rename completed — mark Renamed.
-    /// Otherwise the rename did not execute — mark Error.
-    /// </summary>
-    private async Task RecoverPendingHistoryAsync(AppDbContext db)
-    {
-        var stuck = await db.RenameHistories
-            .Where(h => h.Status == RenameStatus.Pending)
-            .ToListAsync();
-
-        if (stuck.Count == 0) return;
-
-        foreach (var h in stuck)
-        {
-            if (!File.Exists(h.OriginalPath) && File.Exists(h.NewPath))
-            {
-                h.Status       = RenameStatus.Renamed;
-                h.ErrorMessage = "Recovered: rename completed before crash";
-            }
-            else
-            {
-                h.Status       = RenameStatus.Error;
-                h.ErrorMessage = "Interrupted by service restart — file not renamed";
-            }
-        }
-
-        await db.SaveChangesAsync();
-        logger.LogInformation("Recovered {Count} pending rename history entries.", stuck.Count);
     }
 
     // ─── Patterns ───────────────────────────────────────────────────────────
@@ -69,26 +34,26 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
         ),
         new(
             "AniVault",
-            // [AniLibria] Attack on Titan - 05.mkv  /  [AniLibria.TV] Show - 12.mkv
-            @"(?i)\[AniLibria(?:\.TV)?\]\s*[^\[\]-]+-\s*(?<episode>\d+)",
+            // [AniLilia] Attack on Titan - 05.mkv  /  [AniLilia.TV] Show - 12.mkv
+            @"(?i)\[AniLilia(?:\.TV)?\]\s*[^\[\]-]+-\s*(?<episode>\d+)",
             Priority: 20
         ),
         new(
             "AwfulSubs",
-            // [HorribleSubs] Show - 05 [1080p].mkv
-            @"(?i)\[HorribleSubs\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[\d+p\]",
+            // [HorrorSubs] Show - 05 [1080p].mkv
+            @"(?i)\[HorrorSubs\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[\d+p\]",
             Priority: 30
         ),
         new(
             "RawBox",
-            // [Erai-raws] Show - 05 [1080p].mkv
-            @"(?i)\[Erai-raws\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[",
+            // [Erao-raws] Show - 05 [1080p].mkv
+            @"(?i)\[Erao-raws\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\[",
             Priority: 40
         ),
         new(
             "SubsYes",
-            // [SubsPlease] Show - 05 (1080p).mkv
-            @"(?i)\[SubsPlease\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\(",
+            // [SubsKindly] Show - 05 (1080p).mkv
+            @"(?i)\[SubsKindly\]\s*[^\[\]-]+-\s*(?<episode>\d+)\s*\(",
             Priority: 50
         ),
         new(
@@ -143,6 +108,23 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
             logger.LogInformation("Removed {Count} stale built-in rename pattern(s): {Names}",
                 removed, string.Join(", ", RemovedBuiltInPatternNames));
 
+        // Keep built-in pattern rows in lockstep with the current seed text.
+        // Built-in patterns are read-only at the API (pattern writes Forbid()
+        // when IsBuiltIn), so existing rows can be force-synced by Name without
+        // clobbering anyone — user customisations live as separate IsBuiltIn=
+        // false rows. This heals older installs whose built-ins carry an
+        // out-of-date regex (bug fixes, de-branding, …) and needs no real-name
+        // match keys in source.
+        var healed = 0;
+        foreach (var seed in BuiltInPatterns)
+        {
+            healed += await db.RenamePatterns
+                .Where(p => p.IsBuiltIn && p.Name == seed.Name && p.Pattern != seed.Pattern)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Pattern, seed.Pattern));
+        }
+        if (healed > 0)
+            logger.LogInformation("Synced {Count} built-in pattern(s) to current seed regex.", healed);
+
         var existingNames = await db.RenamePatterns
             .Where(p => p.IsBuiltIn)
             .Select(p => p.Name)
@@ -171,58 +153,6 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
         db.RenamePatterns.AddRange(toAdd);
         await db.SaveChangesAsync();
         logger.LogInformation("Seeded {Count} new built-in rename patterns.", toAdd.Count);
-    }
-
-    // ─── Ignore rules ────────────────────────────────────────────────────────
-
-    // These are Plex/Emby metadata files that must never be renamed.
-    // Masks use simple glob syntax: * = any sequence of characters.
-    private static readonly string[] BuiltInIgnoreMasks =
-    [
-        // Cover/artwork files
-        "fanart*",
-        "poster*",
-        "backdrop*",
-        "banner*",
-        "logo*",
-        "clearart*",
-        "clearlogo*",
-        "discart*",
-        "landscape*",
-        "keyart*",
-        // Season-level images
-        "season-poster*",
-        "season-fanart*",
-        "season-banner*",
-        "season-landscape*",
-        "season-specials*",
-        // Metadata sidecar files
-        "*.nfo",
-        "*.xml",
-        "*.srt.bak",
-    ];
-
-    private async Task SeedIgnoreRulesAsync(AppDbContext db)
-    {
-        var existingMasks = await db.IgnoreRules
-            .Where(r => r.Scope == RuleScope.Global && r.FolderId == null)
-            .Select(r => r.Mask)
-            .ToHashSetAsync();
-
-        var toAdd = BuiltInIgnoreMasks
-            .Where(mask => !existingMasks.Contains(mask))
-            .Select(mask => new IgnoreRule { Id = Guid.NewGuid(), Mask = mask, Scope = RuleScope.Global })
-            .ToList();
-
-        if (toAdd.Count == 0)
-        {
-            logger.LogDebug("Built-in ignore rules already up to date, skipping.");
-            return;
-        }
-
-        db.IgnoreRules.AddRange(toAdd);
-        await db.SaveChangesAsync();
-        logger.LogInformation("Seeded {Count} new built-in ignore rules.", toAdd.Count);
     }
 
     // ─── Private record ──────────────────────────────────────────────────────

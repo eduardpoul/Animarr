@@ -17,7 +17,6 @@ public sealed record FolderWatcherDto
 
     public bool       WatchEnabled    { get; init; } = true;
     public FolderType FolderType      { get; init; } = FolderType.Auto;
-    public bool       RenameEnabled   { get; init; } = true;
     public bool       IdentifyEnabled { get; init; } = true;
 
     /// <summary>True for section-root rows (children get auto-created underneath).</summary>

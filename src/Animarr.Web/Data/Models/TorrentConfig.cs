@@ -20,8 +20,6 @@ public class TorrentConfig
     public bool StopSeedingAfterDone { get; set; } = false;
     public double StopSeedingRatio { get; set; } = 2.0;
 
-    public bool AutoRenameAfterDownload { get; set; } = true;
-
     public bool DefaultStopAfterDownload { get; set; } = false;
 
     public string CacheDirectory { get; set; } = "/app/data/torrent-cache";

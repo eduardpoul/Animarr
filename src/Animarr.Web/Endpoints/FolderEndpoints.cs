@@ -60,7 +60,6 @@ internal static class FolderEndpoints
                 Label           = string.IsNullOrWhiteSpace(request.Label) ? Path.GetFileName(request.Path.TrimEnd('/', '\\')) : request.Label,
                 FolderType      = (Animarr.Web.Data.Models.FolderType)(int)request.FolderType,
                 WatchEnabled    = request.WatchEnabled,
-                RenameEnabled   = request.RenameEnabled,
                 IdentifyEnabled = request.IdentifyEnabled,
                 IsSection       = request.IsSection,
                 FlatSection     = request.FlatSection,
@@ -93,7 +92,6 @@ internal static class FolderEndpoints
             entity.Label           = request.Label;
             entity.FolderType      = (Animarr.Web.Data.Models.FolderType)(int)request.FolderType;
             entity.WatchEnabled    = request.WatchEnabled;
-            entity.RenameEnabled   = request.RenameEnabled;
             entity.IdentifyEnabled = request.IdentifyEnabled;
             entity.Hue             = request.Hue;
             entity.BackdropPath    = request.BackdropPath;

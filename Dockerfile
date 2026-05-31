@@ -53,6 +53,15 @@ RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 FROM build AS publish
 RUN dotnet publish "Animarr.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
+# llama.cpp server binaries for the built-in ("embedded") LLM provider. We copy
+# just the llama-server executable from the official images:
+#   • CPU build — no Vulkan link, so it always runs (default, lean).
+#   • Vulkan build — only invoked after the entrypoint installs libvulkan1 at
+#     runtime (ANIMARR_LLM_VULKAN=1). The binaries cost only tens of MB; the
+#     heavy Vulkan userspace (mesa) is NOT baked in — it's installed on demand.
+FROM ghcr.io/ggml-org/llama.cpp:server        AS llama-cpu
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan AS llama-vulkan
+
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
@@ -92,7 +101,9 @@ RUN apt-get update && \
         mesa-va-drivers \
         intel-media-va-driver \
         vainfo \
-        libva-drm2 libva2 && \
+        libva-drm2 libva2 \
+        libgomp1 \
+        ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Create data directory for SQLite
@@ -100,8 +111,23 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 
 COPY --from=publish /app/publish .
 
+# Built-in llama.cpp servers for the "embedded" LLM provider (see FROM aliases).
+# The official llama-server is a thin launcher that dynamically loads sibling
+# .so files in /app (libllama, libggml-*, libllama-server-impl, …), so we copy
+# the WHOLE /app dir, not just the binary. CPU build always runs; the Vulkan
+# build is only invoked after the entrypoint installs libvulkan1 at boot
+# (ANIMARR_LLM_VULKAN=1). The app sets LD_LIBRARY_PATH to these dirs at launch.
+COPY --from=llama-cpu    /app/ /opt/llama/cpu/
+COPY --from=llama-vulkan /app/ /opt/llama/vulkan/
+RUN chmod +x /opt/llama/cpu/llama-server /opt/llama/vulkan/llama-server
+
+# Entrypoint wrapper: optionally installs the Vulkan userspace at boot, then
+# execs the app as PID 1 so SIGTERM reaches it (clean llama-server shutdown).
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8080
 
 ENV ASPNETCORE_URLS=http://+:8080
 
-ENTRYPOINT ["dotnet", "Animarr.Web.dll"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -100,6 +100,33 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<MediaFileDto[]>(ApiRoutes.MediaFilesFor(mediaItemId), JsonOpts, ct)
             ?? Array.Empty<MediaFileDto>();
 
+    public async Task SetEpisodeMappingAsync(Guid mediaItemId, EpisodeMappingRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PutAsJsonAsync(ApiRoutes.MediaFileMappingFor(mediaItemId), request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task ClearEpisodeMappingAsync(Guid mediaItemId, string filePath, CancellationToken ct = default)
+    {
+        var url = $"{ApiRoutes.MediaFileMappingFor(mediaItemId)}?path={Uri.EscapeDataString(filePath)}";
+        using var resp = await _http.DeleteAsync(url, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<int> ResolveEpisodesWithLlmAsync(Guid mediaItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.MediaResolveEpisodesFor(mediaItemId), null, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<int>(JsonOpts, ct);
+    }
+
+    public async Task<Dictionary<int, int>> ResolveSeasonOffsetsAsync(Guid mediaItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.MediaResolveSeasonsFor(mediaItemId), null, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<Dictionary<int, int>>(JsonOpts, ct) ?? new();
+    }
+
     public async Task ApplyImageAsync(Guid mediaItemId, ApplyImageRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.MediaApplyImageFor(mediaItemId), request, JsonOpts, ct);
@@ -288,35 +315,7 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         resp.EnsureSuccessStatusCode();
     }
 
-    // ─── Rename + identification queues ──────────────────────────────────
-
-    public async Task<RenameQueueEntryDto[]> GetRenameQueueAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<RenameQueueEntryDto[]>(ApiRoutes.RenameQueue, JsonOpts, ct)
-            ?? Array.Empty<RenameQueueEntryDto>();
-
-    public async Task<RenameHistoryEntryDto[]> GetRenameHistoryAsync(int? take, CancellationToken ct = default)
-    {
-        var url = take is null ? ApiRoutes.RenameHistory : $"{ApiRoutes.RenameHistory}?take={take}";
-        var page = await _http.GetFromJsonAsync<PagedResult<RenameHistoryEntryDto>>(url, JsonOpts, ct);
-        return page?.Items ?? Array.Empty<RenameHistoryEntryDto>();
-    }
-
-    public async Task<PagedResult<RenameHistoryEntryDto>> GetRenameHistoryPageAsync(
-        int skip, int take, Guid? folderId, RenameStatus? status, CancellationToken ct = default)
-    {
-        var args = new List<string> { $"skip={skip}", $"take={take}" };
-        if (folderId is not null) args.Add($"folderId={folderId}");
-        if (status is not null)   args.Add($"status={status}");
-        var url = $"{ApiRoutes.RenameHistory}?{string.Join('&', args)}";
-        return await _http.GetFromJsonAsync<PagedResult<RenameHistoryEntryDto>>(url, JsonOpts, ct)
-            ?? new PagedResult<RenameHistoryEntryDto>(Array.Empty<RenameHistoryEntryDto>(), 0);
-    }
-
-    public async Task RevertRenameAsync(Guid id, CancellationToken ct = default)
-    {
-        using var resp = await _http.PostAsync(ApiRoutes.RenameHistoryRevertFor(id), null, ct);
-        resp.EnsureSuccessStatusCode();
-    }
+    // ─── Identification queue ────────────────────────────────────────────
 
     public async Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<IdentificationQueueEntryDto[]>(ApiRoutes.IdentificationQueue, JsonOpts, ct)
@@ -363,7 +362,7 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return resp.IsSuccessStatusCode;
     }
 
-    // ─── Patterns / ignore rules / tags ──────────────────────────────────
+    // ─── Patterns / tags ─────────────────────────────────────────────────
 
     public async Task<RenamePatternDto[]> GetPatternsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<RenamePatternDto[]>(ApiRoutes.Patterns, JsonOpts, ct)
@@ -382,26 +381,6 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task DeletePatternAsync(Guid id, CancellationToken ct = default)
     {
         using var resp = await _http.DeleteAsync(ApiRoutes.Pattern(id), ct);
-        resp.EnsureSuccessStatusCode();
-    }
-
-    public async Task<IgnoreRuleDto[]> GetIgnoreRulesAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<IgnoreRuleDto[]>(ApiRoutes.IgnoreRules, JsonOpts, ct)
-            ?? Array.Empty<IgnoreRuleDto>();
-
-    public async Task<IgnoreRuleDto> UpsertIgnoreRuleAsync(Guid? id, UpsertIgnoreRuleRequest request, CancellationToken ct = default)
-    {
-        var url = id is null ? ApiRoutes.IgnoreRules : ApiRoutes.IgnoreRule(id.Value);
-        using var resp = id is null
-            ? await _http.PostAsJsonAsync(url, request, JsonOpts, ct)
-            : await _http.PutAsJsonAsync(url, request, JsonOpts, ct);
-        resp.EnsureSuccessStatusCode();
-        return (await resp.Content.ReadFromJsonAsync<IgnoreRuleDto>(JsonOpts, ct))!;
-    }
-
-    public async Task DeleteIgnoreRuleAsync(Guid id, CancellationToken ct = default)
-    {
-        using var resp = await _http.DeleteAsync(ApiRoutes.IgnoreRule(id), ct);
         resp.EnsureSuccessStatusCode();
     }
 
@@ -577,6 +556,43 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         }
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<LlmTestResponse>(JsonOpts, ct))!;
+    }
+
+    // ─── Embedded llama.cpp provider ─────────────────────────────────────
+
+    public async Task<LlamaCatalogResponse> GetLlamaCatalogAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<LlamaCatalogResponse>(ApiRoutes.LlmEmbeddedCatalog, JsonOpts, ct)
+           ?? new LlamaCatalogResponse(Array.Empty<LlamaCatalogEntryDto>(), Array.Empty<InstalledModelDto>(), 0);
+
+    public async Task StartLlamaDownloadAsync(StartDownloadRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.LlmEmbeddedDownload, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<DownloadProgressDto?> GetLlamaDownloadStatusAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<DownloadProgressDto>(ApiRoutes.LlmEmbeddedDownload, JsonOpts, ct);
+
+    public async Task CancelLlamaDownloadAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.LlmEmbeddedDownload, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task DeleteLlamaModelAsync(string fileName, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.LlmEmbeddedModel(fileName), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<EmbeddedStatusDto> GetEmbeddedStatusAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<EmbeddedStatusDto>(ApiRoutes.LlmEmbeddedStatus, JsonOpts, ct))!;
+
+    public async Task<EmbeddedStatusDto> RestartEmbeddedAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.LlmEmbeddedRestart, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<EmbeddedStatusDto>(JsonOpts, ct))!;
     }
 
     // ─── Auth + per-user (v4) ────────────────────────────────────────────

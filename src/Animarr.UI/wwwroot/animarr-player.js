@@ -613,7 +613,7 @@
     /** Merge in-file audio streams and discovered external dub files into one
      *  ordered list for the Audio picker. Embedded streams come first (their
      *  source index preserved); external entries follow, each labelled with its
-     *  file extension in parentheses (e.g. "Russian · AniLibria (mka)") so the
+     *  file extension in parentheses (e.g. "Russian · AniLilia (mka)") so the
      *  user can tell a sideload dub from a muxed track. Each option carries a
      *  `current` flag so the popup highlights the active selection.
      *  Shape: { kind:'embedded', index, label, current }

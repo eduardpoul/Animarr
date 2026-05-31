@@ -60,11 +60,9 @@ builder.Services.AddScoped<CategorySeedService>();
 // IServiceScopeFactory on each call.
 builder.Services.AddSingleton<CategoryClassifierService>();
 builder.Services.AddSingleton<IPatternMatchService, PatternMatchService>();
-builder.Services.AddScoped<IRenameService, RenameService>();
 builder.Services.AddScoped<IAppConfigService, AppConfigService>();
 builder.Services.AddSingleton<FolderWatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderWatcherService>());
-builder.Services.AddHostedService<RenameQueueProcessorService>();
 builder.Services.AddSingleton<TorrentEngineService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentEngineService>());
 
@@ -117,11 +115,28 @@ builder.Services.AddSingleton<DlnaService>();
 // Settings UI can show what's actually usable on this host.
 builder.Services.AddSingleton<HardwareInfoService>();
 builder.Services.AddScoped<MediaFileResolver>();
+builder.Services.AddScoped<EpisodeLlmResolver>();
+builder.Services.AddScoped<SeasonOffsetResolver>();
 builder.Services.AddScoped<ExternalTrackService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
 builder.Services.AddScoped<ILlmService, MicrosoftAiLlmService>();
+
+// Built-in ("embedded") llama.cpp provider: ModelPaths resolves the on-disk
+// models dir; EmbeddedLlamaService supervises the in-container llama-server
+// child + downloads GGUF weights. Singleton (one child per container) + hosted.
+builder.Services.AddSingleton<ModelPaths>();
+builder.Services.AddSingleton<EmbeddedLlamaService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EmbeddedLlamaService>());
+// Long-lived, UA-stamped client for Hugging Face GGUF downloads (streamed; we
+// cancel via token, so no overall timeout).
+builder.Services.AddHttpClient("llama-hf", c =>
+{
+    c.Timeout = Timeout.InfiniteTimeSpan;
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+});
+
 // Dual-registration: same instance available for DI into Blazor components
 // (so the sidebar LLM status card + NeedsReview chip can subscribe to events)
 // AND runs as a hosted service.

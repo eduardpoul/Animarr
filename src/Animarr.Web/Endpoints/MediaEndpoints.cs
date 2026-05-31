@@ -415,6 +415,78 @@ internal static class MediaEndpoints
             return Results.Ok(files);
         });
 
+        // Tier 2 — manual (season, episode) override for one file. Upserts a
+        // "manual" row the resolver overlays on top of its deterministic parse;
+        // manual is never clobbered by re-scans. Null season/episode keeps the
+        // deterministic value for that field.
+        app.MapPut(ApiRoutes.MediaFileMapping, async (
+            Guid id,
+            EpisodeMappingRequest req,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.FilePath))
+                return Results.BadRequest("FilePath is required.");
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (!await db.MediaItems.AnyAsync(m => m.Id == id, ct))
+                return Results.NotFound();
+
+            var row = await db.EpisodeFileMappings
+                .FirstOrDefaultAsync(m => m.MediaItemId == id && m.FilePath == req.FilePath, ct);
+            if (row is null)
+            {
+                row = new EfModels.EpisodeFileMapping { MediaItemId = id, FilePath = req.FilePath };
+                db.EpisodeFileMappings.Add(row);
+            }
+            row.Season     = req.Season;
+            row.Episode    = req.Episode;
+            row.Source     = EfModels.MappingSource.Manual;
+            row.Confidence = 1.0;
+            row.UpdatedAt  = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Clear a stored override (?path=…) — reverts that file to the
+        // deterministic parse. No-op if no row exists.
+        app.MapDelete(ApiRoutes.MediaFileMapping, async (
+            Guid id,
+            string path,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            await db.EpisodeFileMappings
+                .Where(m => m.MediaItemId == id && m.FilePath == path)
+                .ExecuteDeleteAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Tier 1 — ask the LLM to place files the deterministic parser left
+        // unmatched. Stores Source="llm" overrides; returns the count placed
+        // (0 when the LLM is disabled or unreachable — never an error).
+        app.MapPost(ApiRoutes.MediaResolveEpisodes, async (
+            Guid id,
+            EpisodeLlmResolver llmResolver,
+            CancellationToken ct) =>
+        {
+            var placed = await llmResolver.ResolveAsync(id, ct);
+            return Results.Ok(placed);
+        });
+
+        // Compute per-season absolute offsets from TMDB air-date gaps (donghua:
+        // TMDB one season, disk split). Stores MediaItem.SeasonOffsetsJson;
+        // returns the diskSeason→offset map ({} when not applicable).
+        app.MapPost(ApiRoutes.MediaResolveSeasons, async (
+            Guid id,
+            SeasonOffsetResolver seasonResolver,
+            CancellationToken ct) =>
+        {
+            var offsets = await seasonResolver.ResolveAsync(id, ct);
+            return Results.Ok(offsets ?? new Dictionary<int, int>());
+        });
+
         // Lightweight continue-watching hint built straight from WatchState
         // rows. The full Razor MediaDetail page also has a ContinueAction
         // built by ContinueResolver — but that resolver needs the on-disk

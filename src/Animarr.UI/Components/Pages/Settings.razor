@@ -6,6 +6,7 @@
 *@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@implements IDisposable
 
 @*
     Settings — 11-tab layout mirroring Animarr.Web's structure.
@@ -43,13 +44,11 @@
 
 @if      (_activeTab == "general")        { @GeneralTab()       }
 else if  (_activeTab == "root_folders")   { @RootFoldersTab()   }
-else if  (_activeTab == "rename_history") { @HistoryTab()       }
 else if  (_activeTab == "appearance")     { @AppearanceTab()    }
 else if  (_activeTab == "audio")          { @AudioTab()         }
 else if  (_activeTab == "hardware")       { @HardwareTab()      }
 else if  (_activeTab == "ai")             { @AiTab()            }
 else if  (_activeTab == "patterns")       { @PatternsTab()      }
-else if  (_activeTab == "rules")          { @RulesTab()         }
 else if  (_activeTab == "torrent")        { @TorrentTab()       }
 else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
@@ -101,13 +100,11 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     [
         ("general",        "General"),
         ("root_folders",   "Root folders"),
-        ("rename_history", "Rename history"),
         ("appearance",     "Appearance"),
         ("audio",          "Audio"),
         ("hardware",       "Hardware"),
         ("ai",             "AI / LLM"),
-        ("patterns",       "Patterns"),
-        ("rules",          "Ignore rules"),
+        ("patterns",       "Parsing"),
         ("torrent",        "Torrent"),
         ("metadata",       "Metadata"),
     ];
@@ -116,7 +113,6 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private Dictionary<string, string?> _config = new();
     private HardwareReportDto? _hw;
     private RenamePatternDto[]? _patterns;
-    private IgnoreRuleDto[]? _ignoreRules;
     private TorrentConfigDto? _torrentCfg;
 
     // ── Dialog state ──
@@ -166,8 +162,8 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     {
         "hardware" when _hw is null         => LoadHardwareAsync(),
         "patterns" when _patterns is null   => LoadPatternsAsync(),
-        "rules"    when _ignoreRules is null => LoadIgnoreAsync(),
         "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
+        "ai"       when _catalog is null    => LoadEmbeddedAsync(),
         _ => Task.CompletedTask,
     });
 
@@ -233,12 +229,6 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         _foldersReloadToken++;
         StateHasChanged();
     }
-
-    // ── Rename history tab ──
-    private RenderFragment HistoryTab() => @<section class="settings-section">
-        <HistoryKpiTiles />
-        <HistoryView />
-    </section>;
 
     // ── Appearance tab ──
     private RenderFragment AppearanceTab()
@@ -396,26 +386,34 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmProvider, e.Value?.ToString()))">
                     <option value="openai">openai (api.openai.com)</option>
                     <option value="compatible">compatible (Ollama / LM Studio / Groq …)</option>
+                    <option value="embedded">embedded (built-in llama.cpp — downloads a local model)</option>
                 </select>
             </label>
-            <label class="settings-field">
-                <span class="settings-field__label">Base URL</span>
-                <input class="settings-field__input" placeholder="http://ollama:11434/v1"
-                       value="@baseUrl"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmBaseUrl, e.Value?.ToString()))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">API key</span>
-                <input class="settings-field__input" type="password" placeholder="sk-…"
-                       value="@apiKey"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmApiKey, e.Value?.ToString()))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">Model</span>
-                <input class="settings-field__input" placeholder="qwen2.5:1.5b"
-                       value="@model"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmModel, e.Value?.ToString()))" />
-            </label>
+            @if (provider != "embedded")
+            {
+                <label class="settings-field">
+                    <span class="settings-field__label">Base URL</span>
+                    <input class="settings-field__input" placeholder="http://ollama:11434/v1"
+                           value="@baseUrl"
+                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmBaseUrl, e.Value?.ToString()))" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">API key</span>
+                    <input class="settings-field__input" type="password" placeholder="sk-…"
+                           value="@apiKey"
+                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmApiKey, e.Value?.ToString()))" />
+                </label>
+                <label class="settings-field">
+                    <span class="settings-field__label">Model</span>
+                    <input class="settings-field__input" placeholder="qwen2.5:1.5b"
+                           value="@model"
+                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmModel, e.Value?.ToString()))" />
+                </label>
+            }
+            else
+            {
+                @EmbeddedBlock()
+            }
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@epMap"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEpisodeMapping, v ? "true" : "false"))" />
@@ -464,11 +462,238 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                     </div>
                 }
             </div>
+
+            @LlmDocs()
         </section>;
     }
 
     private bool _llmTesting;
     private LlmTestResponse? _llmTestResult;
+
+    // ── Embedded llama.cpp (provider = "embedded") ──────────────────────────
+    private LlamaCatalogResponse? _catalog;
+    private EmbeddedStatusDto?    _embeddedStatus;
+    private DownloadProgressDto?  _download;
+    private string _customRepo = "";
+    private string _customFile = "";
+    private bool   _embeddedBusy;
+    private CancellationTokenSource? _pollCts;
+
+    private async Task LoadEmbeddedAsync()
+    {
+        try
+        {
+            _catalog        = await Api.GetLlamaCatalogAsync();
+            _embeddedStatus = await Api.GetEmbeddedStatusAsync();
+            _download       = await Api.GetLlamaDownloadStatusAsync();
+            if (_download is { Phase: "downloading" }) _ = PollDownloadAsync();
+        }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task StartDownloadAsync()
+    {
+        if (_embeddedBusy) return;
+        var id = _config.GetValueOrDefault(AppConfigKeys.LlmEmbeddedModelId) ?? "";
+        if (string.IsNullOrEmpty(id)) return;
+        _embeddedBusy = true; StateHasChanged();
+        try
+        {
+            await Api.StartLlamaDownloadAsync(new StartDownloadRequest(id, _customRepo, _customFile));
+            _ = PollDownloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _download = new DownloadProgressDto(id, null, 0, null, 0, "error", ex.Message);
+        }
+        finally { _embeddedBusy = false; StateHasChanged(); }
+    }
+
+    private async Task PollDownloadAsync()
+    {
+        _pollCts?.Cancel();
+        _pollCts = new CancellationTokenSource();
+        var ct = _pollCts.Token;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(750, ct);
+                _download = await Api.GetLlamaDownloadStatusAsync();
+                await InvokeAsync(StateHasChanged);
+                if (_download is null || _download.Phase != "downloading")
+                {
+                    _catalog        = await Api.GetLlamaCatalogAsync();
+                    _embeddedStatus = await Api.GetEmbeddedStatusAsync();
+                    await InvokeAsync(StateHasChanged);
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* navigated away / superseded */ }
+        catch { /* swallow */ }
+    }
+
+    private async Task CancelDownloadAsync()
+    {
+        try { await Api.CancelLlamaDownloadAsync(); } catch { /* swallow */ }
+    }
+
+    private async Task DeleteModelAsync(string file)
+    {
+        try
+        {
+            await Api.DeleteLlamaModelAsync(file);
+            _catalog = await Api.GetLlamaCatalogAsync();
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task RestartEmbeddedAsync()
+    {
+        if (_embeddedBusy) return;
+        _embeddedBusy = true; StateHasChanged();
+        try { _embeddedStatus = await Api.RestartEmbeddedAsync(); }
+        catch { /* swallow */ }
+        finally { _embeddedBusy = false; StateHasChanged(); }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "—";
+        double mb = bytes / 1024d / 1024d;
+        return mb >= 1024 ? $"{mb / 1024:F1} GB" : $"{mb:F0} MB";
+    }
+
+    public void Dispose()
+    {
+        try { _pollCts?.Cancel(); _pollCts?.Dispose(); } catch { /* ignore */ }
+    }
+
+    // The embedded-provider panel: runtime status, model picker (curated +
+    // custom HF), download progress, and installed-model management.
+    private RenderFragment EmbeddedBlock() => @<div class="settings-llm-embedded">
+        @{
+            var selId       = _config.GetValueOrDefault(AppConfigKeys.LlmEmbeddedModelId) ?? "";
+            var selCurated  = _catalog?.Curated.FirstOrDefault(c => c.Id == selId);
+            var dl          = _download;
+            var downloading = dl is { Phase: "downloading" };
+        }
+
+        @if (_embeddedStatus is { } st)
+        {
+            <div class="settings-llm-gpu">
+                <span class="settings-llm-gpu__badge">@st.State</span>
+                @if (!string.IsNullOrEmpty(st.ModelFile)) { <span class="settings-llm-gpu__meta">@st.ModelFile</span> }
+                <span class="settings-llm-gpu__meta">@(st.GpuActive ? $"GPU · {st.GpuMode}" : "CPU")</span>
+                <button type="button" class="settings-llm-gpu__restart tv-focus"
+                        @onclick="RestartEmbeddedAsync" disabled="@_embeddedBusy">
+                    <DIcon Name="refresh" Size="12" /> Restart
+                </button>
+                @if (!string.IsNullOrEmpty(st.Error))
+                {
+                    <div class="settings-llm-gpu__err">@st.Error</div>
+                }
+            </div>
+        }
+
+        <label class="settings-field">
+            <span class="settings-field__label">Model</span>
+            <select class="settings-field__select" value="@selId"
+                    @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmEmbeddedModelId, e.Value?.ToString()))">
+                <option value="">— select a model —</option>
+                @if (_catalog is { } cat)
+                {
+                    @foreach (var m in cat.Curated)
+                    {
+                        <option value="@m.Id">@m.DisplayName · @FormatBytes(m.ApproxBytes) @(m.GpuRecommended ? "· GPU" : "· CPU")@(m.Installed ? " ✓" : "")</option>
+                    }
+                }
+                <option value="custom">Custom Hugging Face repo…</option>
+            </select>
+        </label>
+
+        @if (selId == "custom")
+        {
+            <label class="settings-field">
+                <span class="settings-field__label">HF repo</span>
+                <input class="settings-field__input" placeholder="Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+                       value="@_customRepo" @oninput="@(e => _customRepo = e.Value?.ToString() ?? "")" />
+            </label>
+            <label class="settings-field">
+                <span class="settings-field__label">GGUF file</span>
+                <input class="settings-field__input" placeholder="qwen2.5-1.5b-instruct-q4_k_m.gguf"
+                       value="@_customFile" @oninput="@(e => _customFile = e.Value?.ToString() ?? "")" />
+            </label>
+            <p class="settings-hint">Only public <code>*.gguf</code> files on huggingface.co. Repo must look like <code>Owner/Name</code>.</p>
+        }
+        else if (selCurated is { } sc)
+        {
+            <p class="settings-hint">@sc.Notes · needs ~@(sc.RecommendedRamMb) MB RAM.</p>
+        }
+
+        <div class="settings-llm-test">
+            <button type="button" class="settings-section-head__new tv-focus"
+                    @onclick="StartDownloadAsync"
+                    disabled="@(_embeddedBusy || string.IsNullOrEmpty(selId) || downloading)">
+                <DIcon Name="download" Size="13" />
+                @(downloading ? "Downloading…" : "Download model")
+            </button>
+
+            @if (dl is { } d && d.Phase != "idle")
+            {
+                <div class="settings-llm-progress">
+                    <div class="settings-llm-progress__bar">
+                        <div class="settings-llm-progress__fill" style="width:@((int)d.Percent)%"></div>
+                    </div>
+                    <div class="settings-llm-progress__text">
+                        @if (d.Phase == "downloading")
+                        {
+                            <span>@FormatBytes(d.BytesReceived) / @(d.TotalBytes is { } t ? FormatBytes(t) : "?") (@((int)d.Percent)%)</span>
+                            <button type="button" class="settings-llm-progress__cancel tv-focus" @onclick="CancelDownloadAsync">Cancel</button>
+                        }
+                        else if (d.Phase == "done")      { <span class="is-ok">Downloaded ✓ — loading model…</span> }
+                        else if (d.Phase == "cancelled") { <span class="is-warn">Cancelled.</span> }
+                        else if (d.Phase == "error")     { <span class="is-err">Error: @d.Error</span> }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (_catalog is { Installed.Length: > 0 } c2)
+        {
+            <div class="settings-llm-models">
+                <div class="settings-llm-models__label">INSTALLED</div>
+                @foreach (var m in c2.Installed)
+                {
+                    <div class="settings-llm-models__row">
+                        <span class="settings-llm-models__name">@m.FileName @(m.IsActive ? "· active" : "")</span>
+                        <span class="settings-llm-models__size">@FormatBytes(m.Bytes)</span>
+                        <button type="button" class="settings-llm-models__del tv-focus"
+                                disabled="@m.IsActive" @onclick="@(() => DeleteModelAsync(m.FileName))"
+                                title="@(m.IsActive ? "Active model — switch first" : "Delete")">
+                            <DIcon Name="trash" Size="12" />
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    </div>;
+
+    // Documentation block shown under every provider — explains all four ways
+    // to run the LLM and how to enable each.
+    private RenderFragment LlmDocs() => @<section class="settings-llm-docs">
+        <h3>How to use the LLM — all options</h3>
+        <ul>
+            <li><strong>Embedded — CPU (easiest):</strong> Provider = <code>embedded</code>, pick a model (e.g. Qwen2.5 1.5B), click <em>Download model</em>. Runs inside the Animarr container, no GPU needed. Best for models up to ~3B.</li>
+            <li><strong>Embedded — GPU (Vulkan):</strong> set <code>ANIMARR_LLM_VULKAN=1</code> in the compose <code>environment:</code>, add <code>--device /dev/dri</code> and <code>group_add: [video]</code> (AMD/Intel), then restart. Vulkan is installed on first boot and layers are offloaded; it falls back to CPU automatically if the GPU isn't usable.</li>
+            <li><strong>Remote — compatible (Ollama / LM Studio):</strong> run your own server (see <code>deploy/ollama/</code>), Provider = <code>compatible</code>, Base URL = <code>http://ollama:11434</code>, Model = the tag you pulled. Nothing is downloaded into Animarr.</li>
+            <li><strong>Remote — OpenAI:</strong> Provider = <code>openai</code>, paste an API key, Model = e.g. <code>gpt-4o-mini</code>.</li>
+        </ul>
+        <p class="settings-hint">Embedded models are stored on the data volume (<code>/app/data/models</code>) and survive restarts. A bigger model = more accurate identification but more RAM/time — match it to your hardware.</p>
+    </section>;
 
     // ─── Metadata sources — enable flags ─────────────────────────────
     // Backend MetadataService.GatherCandidatesAsync reads
@@ -550,7 +775,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     // ── Patterns tab ──
     private RenderFragment PatternsTab() => @<section class="settings-section">
         <div class="settings-section-head">
-            <h2>Rename patterns</h2>
+            <h2>Filename parsing patterns</h2>
             <Btn Variant="primary" Size="sm" OnClick="LoadPatternsAsync">Reload</Btn>
         </div>
         @if (_patterns is null)
@@ -584,35 +809,6 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private async Task LoadPatternsAsync()
     {
         try { _patterns = await Api.GetPatternsAsync(); }
-        catch { /* offline */ }
-        StateHasChanged();
-    }
-
-    // ── Ignore rules tab ──
-    private RenderFragment RulesTab() => @<section class="settings-section">
-        <div class="settings-section-head">
-            <h2>Ignore rules</h2>
-            <Btn Variant="primary" Size="sm" OnClick="LoadIgnoreAsync">Reload</Btn>
-        </div>
-        @if (_ignoreRules is null) { <p>Loading…</p> }
-        else if (_ignoreRules.Length == 0) { <p>No ignore rules.</p> }
-        else
-        {
-            <table class="d-table">
-                <thead><tr><th>Mask</th><th>Scope</th></tr></thead>
-                <tbody>
-                    @foreach (var r in _ignoreRules)
-                    {
-                        <tr><td><code>@r.Mask</code></td><td>@r.Scope</td></tr>
-                    }
-                </tbody>
-            </table>
-        }
-    </section>;
-
-    private async Task LoadIgnoreAsync()
-    {
-        try { _ignoreRules = await Api.GetIgnoreRulesAsync(); }
         catch { /* offline */ }
         StateHasChanged();
     }
@@ -659,11 +855,6 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 <Toggle Checked="@cfg.EnableUPnP"
                         CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableUPnP = v }))" />
                 <span class="settings-field__label">UPnP port forwarding</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@cfg.AutoRenameAfterDownload"
-                        CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { AutoRenameAfterDownload = v }))" />
-                <span class="settings-field__label">Auto-rename completed downloads</span>
             </label>
         }
     </section>;

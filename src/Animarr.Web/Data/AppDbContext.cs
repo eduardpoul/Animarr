@@ -7,12 +7,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<FolderWatcher> FolderWatchers => Set<FolderWatcher>();
     public DbSet<RenamePattern> RenamePatterns => Set<RenamePattern>();
-    public DbSet<IgnoreRule> IgnoreRules => Set<IgnoreRule>();
-    public DbSet<RenameHistory> RenameHistories => Set<RenameHistory>();
     public DbSet<TorrentRecord> TorrentRecords => Set<TorrentRecord>();
     public DbSet<TorrentFileSelection> TorrentFileSelections => Set<TorrentFileSelection>();
     public DbSet<TorrentConfig> TorrentConfig => Set<TorrentConfig>();
-    public DbSet<RenameQueue> RenameQueues => Set<RenameQueue>();
 
     // ─── Catalog / Media ──────────────────────────────────────────────────────
     public DbSet<AppConfig> AppConfigs => Set<AppConfig>();
@@ -21,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
     public DbSet<WatchState> WatchStates => Set<WatchState>();
+    public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
 
     // ─── Multi-user (v4) ──────────────────────────────────────────────────────
     public DbSet<User> Users => Set<User>();
@@ -57,27 +55,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<IgnoreRule>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Id).ValueGeneratedOnAdd();
-            e.HasOne(x => x.Folder)
-             .WithMany(f => f.IgnoreRules)
-             .HasForeignKey(x => x.FolderId)
-             .IsRequired(false)
-             .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<RenameHistory>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Id).ValueGeneratedOnAdd();
-            e.HasOne(x => x.Folder)
-             .WithMany(f => f.History)
-             .HasForeignKey(x => x.FolderId)
-             .OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<TorrentRecord>(e =>
         {
             e.HasKey(x => x.Id);
@@ -104,17 +81,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).ValueGeneratedNever();
-        });
-
-        modelBuilder.Entity<RenameQueue>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Id).ValueGeneratedOnAdd();
-            e.HasOne(x => x.Folder)
-             .WithMany()
-             .HasForeignKey(x => x.FolderId)
-             .OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => new { x.FilePath, x.Status });
         });
 
         // ─── Catalog / Media ─────────────────────────────────────────────────
@@ -194,6 +160,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.MediaItemId);
             e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.LastSeenAt);
+        });
+
+        modelBuilder.Entity<EpisodeFileMapping>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Source).HasMaxLength(16).IsRequired();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One override per (item, file). Upserts target this key.
+            e.HasIndex(x => new { x.MediaItemId, x.FilePath }).IsUnique();
         });
 
         // ─── Multi-user (v4) ────────────────────────────────────────────────

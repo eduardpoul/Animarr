@@ -129,13 +129,18 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
 
     // ── All images for a given TMDB entity ───────────────────────────────────
 
-    /// <summary>Returns all posters, backdrops and logos for a TV series.</summary>
+    /// <summary>Returns ALL posters, backdrops and logos for a TV series, in
+    /// every language. No include_image_language / language filter — the manual
+    /// poster/backdrop picker in Edit Metadata shows the full set so the user
+    /// chooses whichever they like (TMDB returns the complete set when neither
+    /// language param is sent).</summary>
     public Task<TmdbImages?> GetTvImagesAsync(int tmdbId, CancellationToken ct = default)
-        => GetJsonAsync<TmdbImages>($"{BaseUrl}/tv/{tmdbId}/images?include_image_language=en,ja,ru,null", ct);
+        => GetJsonAsync<TmdbImages>($"{BaseUrl}/tv/{tmdbId}/images", ct);
 
-    /// <summary>Returns all posters, backdrops and logos for a movie.</summary>
+    /// <summary>Returns ALL posters, backdrops and logos for a movie, in every
+    /// language (no language filter — see <see cref="GetTvImagesAsync"/>).</summary>
     public Task<TmdbImages?> GetMovieImagesAsync(int tmdbId, CancellationToken ct = default)
-        => GetJsonAsync<TmdbImages>($"{BaseUrl}/movie/{tmdbId}/images?include_image_language=en,ja,ru,null", ct);
+        => GetJsonAsync<TmdbImages>($"{BaseUrl}/movie/{tmdbId}/images", ct);
 
     // ── Image download helper ────────────────────────────────────────────────
 

@@ -11,7 +11,6 @@ namespace Animarr.Web.Services;
 /// <summary>
 /// Background service that manages FileSystemWatcher instances for all enabled folders.
 /// Supports dynamic start/stop without app restart.
-/// Notifies Blazor components via the FileRenamed event.
 /// </summary>
 public class FolderWatcherService(
     IDbContextFactory<AppDbContext> dbFactory,
@@ -29,9 +28,6 @@ public class FolderWatcherService(
     private readonly ConcurrentDictionary<string, long> _suppressedPaths = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>H-2: periodic GC of expired _suppressedPaths entries that never got matched by a watcher event.</summary>
     private Timer? _suppressedGcTimer;
-
-    /// <summary>Raised when a file is auto-renamed. Payload: (folderId, originalName, newName).</summary>
-    public event Action<Guid, string, string>? FileRenamed;
 
     /// <summary>Raised when a new subdirectory is auto-registered inside a section. Payload: (sectionId, newFolderId).</summary>
     public event Action<Guid, Guid>? SubfolderCreated;
@@ -135,8 +131,8 @@ public class FolderWatcherService(
             EnableRaisingEvents = true,
         };
 
-        watcher.Created += (_, e) => OnFileCreated(e.FullPath, folderId);
-        watcher.Renamed += (_, e) => OnFileCreated(e.FullPath, folderId);
+        // Renaming was removed — the per-folder watcher now only surfaces errors.
+        // Section-level dir/file watchers (below) still drive auto-registration.
         watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
 
         // Sections always get both watchers: directories (for new subfolder per-title
@@ -219,7 +215,6 @@ public class FolderWatcherService(
                     Path            = dirPath,
                     Label           = Path.GetFileName(dirPath),
                     WatchEnabled    = section.WatchEnabled,
-                    RenameEnabled   = section.RenameEnabled,
                     IdentifyEnabled = section.IdentifyEnabled,
                     FolderType      = section.FolderType,
                     IsSection       = false,
@@ -296,7 +291,6 @@ public class FolderWatcherService(
                     SingleFilePath  = filePath,
                     Label           = Path.GetFileNameWithoutExtension(filePath),
                     WatchEnabled    = false,   // flat entries don't need their own watcher
-                    RenameEnabled   = section.RenameEnabled,
                     IdentifyEnabled = section.IdentifyEnabled,
                     FolderType      = FolderType.Movie,
                     IsSection       = false,
@@ -336,55 +330,6 @@ public class FolderWatcherService(
             }
         });
     }
-
-    private void OnFileCreated(string filePath, Guid folderId)
-    {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // Skip paths suppressed by intentional renames/flattens
-                if (_suppressedPaths.TryGetValue(filePath, out var expiry))
-                {
-                    if (Environment.TickCount64 < expiry)
-                    {
-                        _suppressedPaths.TryRemove(filePath, out _);
-                        return;
-                    }
-                    _suppressedPaths.TryRemove(filePath, out _);
-                }
-
-                await using var db = await dbFactory.CreateDbContextAsync();
-
-                // Dedup: skip if this file is already queued or being processed
-                var alreadyQueued = await db.RenameQueues.AnyAsync(q =>
-                    q.FilePath == filePath &&
-                    q.FolderId == folderId &&
-                    q.Status < RenameQueueStatus.Done);
-
-                if (alreadyQueued) return;
-
-                db.RenameQueues.Add(new Data.Models.RenameQueue
-                {
-                    Id       = Guid.NewGuid(),
-                    FolderId = folderId,
-                    FilePath = filePath,
-                    Source   = Data.Models.RenameQueueSource.Watcher,
-                    QueuedAt = DateTime.UtcNow,
-                });
-                await db.SaveChangesAsync();
-                logger.LogDebug("Queued file for rename: {Path}", filePath);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to enqueue file {Path}", filePath);
-            }
-        });
-    }
-
-    /// <summary>Called by RenameQueueProcessorService after a file has been processed.</summary>
-    public void NotifyFileRenamed(Guid folderId, string originalName, string newName)
-        => FileRenamed?.Invoke(folderId, originalName, newName);
 
     /// <summary>Suppresses the next watcher event for <paramref name="filePath"/> for up to 15 seconds.
     /// Call this before intentionally moving a file so the resulting FSW event is ignored.</summary>
@@ -529,7 +474,6 @@ public class FolderWatcherService(
                 Path            = dirPath,
                 Label           = Path.GetFileName(dirPath),
                 WatchEnabled    = section.WatchEnabled,
-                RenameEnabled   = section.RenameEnabled,
                 IdentifyEnabled = section.IdentifyEnabled,
                 FolderType      = section.FolderType,
                 IsSection       = false,
@@ -555,7 +499,6 @@ public class FolderWatcherService(
                 SingleFilePath  = filePath,
                 Label           = Path.GetFileNameWithoutExtension(filePath),
                 WatchEnabled    = false,
-                RenameEnabled   = section.RenameEnabled,
                 IdentifyEnabled = section.IdentifyEnabled,
                 FolderType      = FolderType.Movie,
                 IsSection       = false,

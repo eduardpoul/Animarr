@@ -85,7 +85,6 @@ internal static class TorrentMappings
             EnableUPnP          = cfg.EnableUPnP,
             StopSeedingAfterDone= cfg.StopSeedingAfterDone,
             StopSeedingRatio    = cfg.StopSeedingRatio,
-            AutoRenameAfterDownload = cfg.AutoRenameAfterDownload,
             DefaultStopAfterDownload = cfg.DefaultStopAfterDownload,
             CacheDirectory      = cfg.CacheDirectory,
         };

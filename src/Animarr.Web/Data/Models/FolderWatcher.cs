@@ -16,13 +16,6 @@ public class FolderWatcher
     public FolderType FolderType { get; set; } = FolderType.Auto;
 
     /// <summary>
-    /// When true, files downloaded into this folder will be auto-renamed
-    /// using the configured RenameService after download completes.
-    /// Also controls whether FileSystemWatcher triggers renames on new files.
-    /// </summary>
-    public bool RenameEnabled { get; set; } = true;
-
-    /// <summary>
     /// When true this record is a "section" — a parent folder whose immediate
     /// subdirectories have been (or will be) auto-imported as individual child
     /// FolderWatcher entries.
@@ -70,6 +63,4 @@ public class FolderWatcher
     public string? BackdropPath { get; set; }
 
     public ICollection<RenamePattern> Patterns { get; set; } = [];
-    public ICollection<IgnoreRule> IgnoreRules { get; set; } = [];
-    public ICollection<RenameHistory> History { get; set; } = [];
 }

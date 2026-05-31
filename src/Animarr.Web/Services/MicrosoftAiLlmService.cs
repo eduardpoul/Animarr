@@ -14,6 +14,7 @@ namespace Animarr.Web.Services;
 /// </summary>
 public class MicrosoftAiLlmService(
     IAppConfigService appConfig,
+    EmbeddedLlamaService embedded,
     ILogger<MicrosoftAiLlmService> logger) : ILlmService
 {
     private static readonly JsonSerializerOptions _json = new()
@@ -407,7 +408,16 @@ public class MicrosoftAiLlmService(
         // ── Build OpenAI client ────────────────────────────────────────────────
         OpenAIClientOptions? options = null;
 
-        if (provider == "compatible")
+        if (provider == "embedded")
+        {
+            // Built-in llama.cpp: make sure the in-container child server is up,
+            // then point the OpenAI-compatible client at its loopback port.
+            var ready = await embedded.EnsureRunningAsync(TimeSpan.FromSeconds(60), ct);
+            if (!ready) return (null, "");
+            options = new OpenAIClientOptions { Endpoint = new Uri($"http://127.0.0.1:{embedded.Port}/v1") };
+            model   = "embedded"; // matches the llama-server -a alias
+        }
+        else if (provider == "compatible")
         {
             var baseUrl = await appConfig.GetAsync(AppConfigKeys.LlmBaseUrl, "", ct) ?? "";
 

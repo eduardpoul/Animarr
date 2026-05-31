@@ -141,6 +141,21 @@
     gap: 16px;
 }
 
+/* Web/desktop: pin the back + favorite/edit controls so they stay reachable
+   while scrolling the detail page — they read as a secondary toolbar under the
+   fixed TopBar instead of scrolling away with the hero. fixed = viewport-relative
+   (they keep the same top:72 / left:24 / right:24 insets the base rules set);
+   z-index 40 keeps them above page content yet below the TopBar (50) and any
+   drawer/player. Mobile keeps them absolute — there the hero chrome scrolls with
+   the fanart (and the mobile shell owns the top bar). */
+@media (min-width: 960px) {
+    .d-mdhero__backwrap,
+    .d-mdhero__top-actions {
+        position: fixed;
+        z-index: 40;
+    }
+}
+
 .d-mdhero__edit:hover,
 .d-mdhero__fav:hover {
     background: rgba(20, 15, 12, 0.75);
