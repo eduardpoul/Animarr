@@ -304,6 +304,7 @@ public static class AppConfigKeys
     public const string LlmEmbeddedPort        = "llm.embedded_port";
     public const string LlmEmbeddedGpuLayers   = "llm.embedded_gpu_layers";
     public const string LlmEmbeddedContextSize = "llm.embedded_ctx";
+    public const string LlmEmbeddedIdleTimeout = "llm.embedded_idle_timeout_sec";
 
     // ─── Backdrop / appearance ────────────────────────────────────────────
     public const string BackdropEnabled    = "appearance.backdrop_enabled";

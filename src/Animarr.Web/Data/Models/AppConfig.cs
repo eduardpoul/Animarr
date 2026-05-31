@@ -66,6 +66,8 @@ public static class AppConfigKeys
     public const string LlmEmbeddedGpuLayers   = "llm.embedded_gpu_layers";
     /// <summary>Context size (-c) for the embedded server. Default 4096.</summary>
     public const string LlmEmbeddedContextSize = "llm.embedded_ctx";
+    /// <summary>Auto-stop the embedded server after this many seconds of no LLM activity (0 = never). Default 120.</summary>
+    public const string LlmEmbeddedIdleTimeout = "llm.embedded_idle_timeout_sec";
 
     // ─── Legacy Ollama keys (kept for backward-compat migration reference) ────
     [Obsolete("Use LlmEnabled instead")]  public const string OllamaEnabled = "llm.ollama_enabled";
