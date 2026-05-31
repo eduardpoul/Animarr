@@ -72,6 +72,44 @@ namespace Animarr.Web.Migrations
                     b.ToTable("Categories");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Confidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "FilePath")
+                        .IsUnique();
+
+                    b.ToTable("EpisodeFileMappings");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -112,9 +150,6 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<bool>("RenameEnabled")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SingleFilePath")
                         .HasColumnType("TEXT");
@@ -170,29 +205,6 @@ namespace Animarr.Web.Migrations
                     b.HasIndex("FolderId", "Status");
 
                     b.ToTable("IdentificationQueues");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.IgnoreRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("FolderId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Mask")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Scope")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FolderId");
-
-                    b.ToTable("IgnoreRules");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.MediaItem", b =>
@@ -286,6 +298,9 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("SeasonLabel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeasonOffsetsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SeasonsJson")
@@ -408,42 +423,6 @@ namespace Animarr.Web.Migrations
                     b.ToTable("MediaTags");
                 });
 
-            modelBuilder.Entity("Animarr.Web.Data.Models.RenameHistory", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("FolderId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsReverted")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("NewPath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OriginalPath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("ProcessedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FolderId");
-
-                    b.ToTable("RenameHistories");
-                });
-
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
                 {
                     b.Property<Guid>("Id")
@@ -484,46 +463,6 @@ namespace Animarr.Web.Migrations
                     b.HasIndex("FolderId");
 
                     b.ToTable("RenamePatterns");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.RenameQueue", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("FolderId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ProcessedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("QueuedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FolderId");
-
-                    b.HasIndex("FilePath", "Status");
-
-                    b.ToTable("RenameQueues");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.Role", b =>
@@ -572,9 +511,6 @@ namespace Animarr.Web.Migrations
             modelBuilder.Entity("Animarr.Web.Data.Models.TorrentConfig", b =>
                 {
                     b.Property<int>("Id")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("AutoRenameAfterDownload")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("CacheDirectory")
@@ -925,6 +861,17 @@ namespace Animarr.Web.Migrations
                     b.ToTable("WatchStates");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.IdentificationQueue", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
@@ -932,16 +879,6 @@ namespace Animarr.Web.Migrations
                         .HasForeignKey("FolderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Folder");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.IgnoreRule", b =>
-                {
-                    b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
-                        .WithMany("IgnoreRules")
-                        .HasForeignKey("FolderId")
-                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Folder");
                 });
@@ -995,34 +932,12 @@ namespace Animarr.Web.Migrations
                     b.Navigation("MediaTag");
                 });
 
-            modelBuilder.Entity("Animarr.Web.Data.Models.RenameHistory", b =>
-                {
-                    b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
-                        .WithMany("History")
-                        .HasForeignKey("FolderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Folder");
-                });
-
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
                         .WithMany("Patterns")
                         .HasForeignKey("FolderId")
                         .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("Folder");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.RenameQueue", b =>
-                {
-                    b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
-                        .WithMany()
-                        .HasForeignKey("FolderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
 
                     b.Navigation("Folder");
                 });
@@ -1114,10 +1029,6 @@ namespace Animarr.Web.Migrations
 
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
-                    b.Navigation("History");
-
-                    b.Navigation("IgnoreRules");
-
                     b.Navigation("Patterns");
                 });
 

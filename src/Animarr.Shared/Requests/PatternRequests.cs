@@ -11,8 +11,3 @@ public sealed record UpsertPatternRequest(
     int Priority,
     FolderType? ApplicableTo,
     Guid? FolderId);
-
-public sealed record UpsertIgnoreRuleRequest(
-    string Mask,
-    RuleScope Scope,
-    Guid? FolderId);

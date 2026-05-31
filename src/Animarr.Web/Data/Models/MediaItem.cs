@@ -108,6 +108,15 @@ public class MediaItem
     /// </summary>
     public string? SeasonsJson { get; set; }
     /// <summary>
+    /// JSON map diskSeason→absoluteOffset for donghua/anime where TMDB lists the
+    /// whole run as one absolute season but the disk is split into seasons.
+    /// e.g. {"3":106} means disk Season 3 Episode 1 = TMDB absolute episode 107.
+    /// Computed by SeasonOffsetResolver from TMDB air-date gaps; applied on the
+    /// fly in MediaFileResolver to fill MediaFileDto.AbsoluteEpisode. Null when
+    /// not applicable (TMDB already multi-season, or single-season disk).
+    /// </summary>
+    public string? SeasonOffsetsJson { get; set; }
+    /// <summary>
     /// JSON array of top-3 search candidates when status is NeedsReview.
     /// Cleared after user picks one.
     /// </summary>

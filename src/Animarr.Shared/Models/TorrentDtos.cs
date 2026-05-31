@@ -120,7 +120,6 @@ public sealed record TorrentConfigDto
 
     public bool   StopSeedingAfterDone     { get; init; }
     public double StopSeedingRatio         { get; init; } = 2.0;
-    public bool   AutoRenameAfterDownload  { get; init; } = true;
     public bool   DefaultStopAfterDownload { get; init; }
 
     public string CacheDirectory { get; init; } = "/app/data/torrent-cache";

@@ -40,7 +40,7 @@ public static class AppConfigKeys
     // ─── LLM / AI provider ────────────────────────────────────────────────────
     /// <summary>Master switch — enables AI features.</summary>
     public const string LlmEnabled  = "llm.enabled";
-    /// <summary>"openai" = api.openai.com  |  "compatible" = custom OpenAI-compatible URL (Ollama, LM Studio, Groq, …)</summary>
+    /// <summary>"openai" = api.openai.com  |  "compatible" = custom OpenAI-compatible URL (Ollama, LM Studio, Groq, …)  |  "embedded" = built-in llama.cpp running in-container against a downloaded GGUF model</summary>
     public const string LlmProvider = "llm.provider";
     /// <summary>Base URL for "compatible" provider, e.g. http://ollama:11434/v1 or http://localhost:1234/v1</summary>
     public const string LlmBaseUrl  = "llm.base_url";
@@ -52,6 +52,20 @@ public static class AppConfigKeys
     // Phase 3.3: opt-in — use the LLM as a last-resort fallback for
     // file→episode mapping when regex patterns and natural ordering both miss.
     public const string LlmEpisodeMapping = "llm.episode_mapping";
+
+    // ─── Embedded llama.cpp provider (provider = "embedded") ──────────────────
+    /// <summary>Catalog id of the selected built-in model, or "custom".</summary>
+    public const string LlmEmbeddedModelId     = "llm.embedded_model_id";
+    /// <summary>Resolved GGUF filename under the models dir (/app/data/models) that the embedded llama-server loads.</summary>
+    public const string LlmEmbeddedModelFile   = "llm.embedded_model_file";
+    /// <summary>For "custom": Hugging Face repo "Org/Name-GGUF" the model file was/should be fetched from.</summary>
+    public const string LlmEmbeddedHfRepo      = "llm.embedded_hf_repo";
+    /// <summary>Loopback port the embedded llama-server listens on. Default 8091.</summary>
+    public const string LlmEmbeddedPort        = "llm.embedded_port";
+    /// <summary>GPU layers to offload (-ngl). 0 = CPU. Default 999 when Vulkan is active.</summary>
+    public const string LlmEmbeddedGpuLayers   = "llm.embedded_gpu_layers";
+    /// <summary>Context size (-c) for the embedded server. Default 4096.</summary>
+    public const string LlmEmbeddedContextSize = "llm.embedded_ctx";
 
     // ─── Legacy Ollama keys (kept for backward-compat migration reference) ────
     [Obsolete("Use LlmEnabled instead")]  public const string OllamaEnabled = "llm.ollama_enabled";

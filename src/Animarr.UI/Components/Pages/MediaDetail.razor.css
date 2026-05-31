@@ -937,3 +937,51 @@
     .md-actions { gap: var(--space-3); }
     .md-actions > * { flex: 1 1 auto; min-width: 0; }
 }
+
+/* ── Unmatched files (episode-resolution Tiers 1–2) ──────────────────────── */
+.md-unmatched {
+    margin-top: var(--space-6);
+    padding: var(--space-5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.md-unmatched__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+}
+.md-unmatched__title { font-size: 18px; font-weight: 600; margin: 0; }
+.md-unmatched__count {
+    display: inline-block; margin-left: 6px; padding: 1px 8px;
+    border-radius: 999px; font-size: 12px; background: rgba(255, 255, 255, 0.1);
+}
+.md-unmatched__ai {
+    padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer;
+    font-size: 13px; font-weight: 600; color: #fff;
+    background: var(--accent, #6c5ce7); white-space: nowrap;
+}
+.md-unmatched__ai:disabled { opacity: 0.6; cursor: default; }
+.md-unmatched__hint { font-size: 13px; opacity: 0.7; margin: 0 0 var(--space-3); }
+.md-unmatched__status { font-size: 13px; margin: 0 0 var(--space-3); color: var(--accent, #6c5ce7); }
+.md-unmatched__row {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.md-unmatched__name {
+    flex: 1 1 auto; min-width: 0; font-size: 13px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.md-unmatched__field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.8; }
+.md-unmatched__num {
+    width: 56px; padding: 6px 8px; font-size: 13px;
+    border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.2); color: inherit;
+}
+.md-unmatched__save {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; font-size: 13px;
+}
+.md-unmatched__save:hover { background: rgba(255, 255, 255, 0.12); }

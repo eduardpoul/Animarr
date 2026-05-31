@@ -334,24 +334,6 @@ public class TorrentEngineService : BackgroundService
                 record.CompletedAt = DateTime.UtcNow;
                 record.State = TorrentRecordState.Seeding;
                 await ctx.SaveChangesAsync();
-
-                if (cfg.AutoRenameAfterDownload && record.FolderWatcher?.RenameEnabled == true)
-                {
-                    try
-                    {
-                        var renameService = scope.ServiceProvider.GetRequiredService<IRenameService>();
-                        var items = await renameService.ScanFolderAsync(record.FolderWatcher.Id);
-                        var toApply = items.Where(i => i.Status == PreviewStatus.WillRename && i.IsSelected).ToList();
-                        if (toApply.Count > 0)
-                            await renameService.ApplyRenamesAsync(record.FolderWatcher.Id, toApply);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Auto-rename failed for {Path}", record.SavePath);
-                    }
-                }
-
-
             }
 
             // Stop seeding check
@@ -987,7 +969,6 @@ public class TorrentEngineService : BackgroundService
             existing.ListenPort             = cfg.ListenPort;
             existing.StopSeedingAfterDone   = cfg.StopSeedingAfterDone;
             existing.StopSeedingRatio       = cfg.StopSeedingRatio;
-            existing.AutoRenameAfterDownload = cfg.AutoRenameAfterDownload;
         }
         await ctx.SaveChangesAsync();
 

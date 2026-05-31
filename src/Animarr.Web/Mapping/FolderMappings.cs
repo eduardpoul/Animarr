@@ -13,7 +13,6 @@ internal static class FolderMappings
             Label           = entity.Label,
             WatchEnabled    = entity.WatchEnabled,
             FolderType      = (Animarr.Shared.FolderType)(int)entity.FolderType,
-            RenameEnabled   = entity.RenameEnabled,
             IdentifyEnabled = entity.IdentifyEnabled,
             IsSection       = entity.IsSection,
             FlatSection     = entity.FlatSection,

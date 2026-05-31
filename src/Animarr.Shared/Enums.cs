@@ -58,31 +58,6 @@ public enum TorrentRecordState
     Hashing     = 6,
 }
 
-// ─── Rename queue / history ───────────────────────────────────────────────
-
-public enum RenameQueueStatus
-{
-    Queued     = 0,
-    Processing = 1,
-    Done       = 2,
-    Error      = 3,
-}
-
-public enum RenameQueueSource
-{
-    Watcher      = 0,
-    AutoDownload = 1,
-}
-
-public enum RenameStatus
-{
-    Pending  = 0,
-    Renamed  = 1,
-    Skipped  = 2,
-    Error    = 3,
-    Reverted = 4,
-}
-
 // ─── Identification queue ─────────────────────────────────────────────────
 
 public enum IdentificationQueueStatus
@@ -93,15 +68,9 @@ public enum IdentificationQueueStatus
     Failed     = 3,
 }
 
-// ─── Patterns / ignore rules ──────────────────────────────────────────────
+// ─── Patterns ─────────────────────────────────────────────────────────────
 
 public enum PatternScope
-{
-    Global         = 0,
-    FolderOverride = 1,
-}
-
-public enum RuleScope
 {
     Global         = 0,
     FolderOverride = 1,

@@ -8,7 +8,6 @@ public sealed record CreateFolderRequest(
     bool IsSection,
     bool FlatSection,
     bool WatchEnabled,
-    bool RenameEnabled,
     bool IdentifyEnabled,
     int? Hue,
     string? BackdropPath);
@@ -19,7 +18,6 @@ public sealed record UpdateFolderRequest(
     string Label,
     FolderType FolderType,
     bool WatchEnabled,
-    bool RenameEnabled,
     bool IdentifyEnabled,
     int? Hue,
     string? BackdropPath);

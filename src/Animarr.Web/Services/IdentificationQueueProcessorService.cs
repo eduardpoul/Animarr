@@ -247,6 +247,57 @@ public class IdentificationQueueProcessorService(
                 Log($"[Categories] Classification error: {catEx.Message}");
             }
 
+            // Step 4: optional LLM episode mapping (Tier 1) — only when the user
+            // opted in via llm.episode_mapping. Best-effort; failures never block
+            // identification, and files the LLM skips just stay deterministic.
+            try
+            {
+                var mapEpisodes = await appCfg.GetAsync<bool>(AppConfigKeys.LlmEpisodeMapping, false, ct);
+                if (mapEpisodes)
+                {
+                    await using var epDb = await dbFactory.CreateDbContextAsync(ct);
+                    var epItemId = await epDb.MediaItems
+                        .Where(m => m.FolderId == job.FolderId)
+                        .Select(m => (Guid?)m.Id)
+                        .FirstOrDefaultAsync(ct);
+                    if (epItemId is Guid emid)
+                    {
+                        var epResolver = scope.ServiceProvider.GetRequiredService<EpisodeLlmResolver>();
+                        var placed = await epResolver.ResolveAsync(emid, ct);
+                        if (placed > 0) Log($"[LLM] Mapped {placed} file(s) to episodes.");
+                    }
+                }
+            }
+            catch (Exception epEx)
+            {
+                logger.LogWarning(epEx, "LLM episode mapping failed for folder {FolderId} — continuing.", job.FolderId);
+                Log($"[LLM] Episode mapping error: {epEx.Message}");
+            }
+
+            // Step 5: per-season absolute offsets (donghua where TMDB lists the
+            // whole run as one season but the disk is split). Deterministic +
+            // keyless + self-no-op when not applicable, so it runs always. Best-
+            // effort; failures never block identification.
+            try
+            {
+                await using var soDb = await dbFactory.CreateDbContextAsync(ct);
+                var soItemId = await soDb.MediaItems
+                    .Where(m => m.FolderId == job.FolderId)
+                    .Select(m => (Guid?)m.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (soItemId is Guid smid)
+                {
+                    var offsetResolver = scope.ServiceProvider.GetRequiredService<SeasonOffsetResolver>();
+                    var offsets = await offsetResolver.ResolveAsync(smid, ct);
+                    if (offsets is { Count: > 0 })
+                        Log($"[Seasons] Computed absolute offsets for {offsets.Count} season(s).");
+                }
+            }
+            catch (Exception soEx)
+            {
+                logger.LogWarning(soEx, "Season-offset resolve failed for folder {FolderId} — continuing.", job.FolderId);
+            }
+
             job.Status      = IdentificationQueueStatus.Done;
             job.ProcessedAt = DateTime.UtcNow;
             job.ErrorMessage = null;

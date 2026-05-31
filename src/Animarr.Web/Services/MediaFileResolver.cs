@@ -93,6 +93,21 @@ public sealed class MediaFileResolver
         int declaredSeasons = CountSeasonsInJson(item.SeasonsJson);
         bool defaultToSeasonOne = !isMovie && declaredSeasons <= 1;
 
+        // Overlay: stored overrides (manual corrections + LLM verdicts) for this
+        // item, keyed by absolute path. Applied on top of the deterministic parse
+        // in the loop below — see EpisodeFileMapping. Movies never bucket by
+        // episode, so we skip the query for them.
+        var overrides = isMovie
+            ? new Dictionary<string, EpisodeFileMapping>()
+            : await db.EpisodeFileMappings
+                .Where(m => m.MediaItemId == item.Id)
+                .ToDictionaryAsync(m => m.FilePath, ct);
+
+        // Per-season absolute offsets (donghua: TMDB one season, disk multi).
+        // diskSeason → offset, so AbsoluteEpisode = offset + episode. Empty when
+        // not applicable. See SeasonOffsetResolver / MediaItem.SeasonOffsetsJson.
+        var seasonOffsets = ParseSeasonOffsets(item.SeasonOffsetsJson);
+
         var results = new List<MediaFileDto>();
         foreach (var filePath in Directory.EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories))
         {
@@ -123,9 +138,28 @@ public sealed class MediaFileResolver
             // Movies have no season/episode bucket — leave both null.
             if (isMovie) { season = null; episode = null; }
 
+            // Overlay a stored override (manual / LLM) if one exists for this
+            // file. A null field on the override means "keep deterministic", so
+            // a partial correction (e.g. season only) composes cleanly.
+            string? source = null;
+            if (!isMovie && overrides.TryGetValue(filePath, out var ov))
+            {
+                if (ov.Season.HasValue)  season  = ov.Season;
+                if (ov.Episode.HasValue) episode = ov.Episode;
+                source = ov.Source;
+            }
+
+            // Absolute (TMDB single-season) episode number when a per-season
+            // offset exists for this disk season — lets the UI pull the right
+            // TMDB episode metadata while keeping the disk's season grouping.
+            int? absoluteEp = null;
+            if (season is not null && episode is not null &&
+                seasonOffsets.TryGetValue(season.Value, out var off))
+                absoluteEp = off + episode.Value;
+
             FileInfo fi;
             try { fi = new FileInfo(filePath); } catch { continue; }
-            results.Add(new MediaFileDto(filePath, fileName, season, episode, fi.Length));
+            results.Add(new MediaFileDto(filePath, fileName, season, episode, fi.Length, source, absoluteEp));
         }
 
         // Sort: by season → episode → filename so the catalog renders in a
@@ -152,6 +186,25 @@ public sealed class MediaFileResolver
         }
         catch { /* malformed — treat as zero */ }
         return 0;
+    }
+
+    /// <summary>Parse MediaItem.SeasonOffsetsJson (a JSON object {"3":106,…})
+    /// into a diskSeason→offset map. Returns an empty map on null/malformed
+    /// input. Keys are season numbers as strings; values are absolute offsets.</summary>
+    private static Dictionary<int, int> ParseSeasonOffsets(string? json)
+    {
+        var map = new Dictionary<int, int>();
+        if (string.IsNullOrWhiteSpace(json)) return map;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                foreach (var p in doc.RootElement.EnumerateObject())
+                    if (int.TryParse(p.Name, out var s) && p.Value.TryGetInt32(out var off))
+                        map[s] = off;
+        }
+        catch { /* malformed — treat as no offsets */ }
+        return map;
     }
 
     /// <summary>Last-resort episode extraction for filenames that no rename

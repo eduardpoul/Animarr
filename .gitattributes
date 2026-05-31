@@ -1,0 +1,3 @@
+# Keep shell scripts LF so they run inside the Linux container regardless of the
+# host OS that checked them out (a CRLF shebang breaks the container entrypoint).
+*.sh text eol=lf

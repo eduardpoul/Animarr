@@ -148,12 +148,26 @@ else
     var isMultiEpisode = item.MediaType == MediaItemType.Series
                       || item.MediaType == MediaItemType.Anime
                       || item.MediaType == MediaItemType.Multserials;
-    var hasSeasonMeta  = item.Seasons.Length > 0;
+    // Trust the stored season list ONLY when a real season source backs it
+    // (TMDB or MAL — the only providers that give a season/episode breakdown).
+    // Without one, item.Seasons is unreliable: switching a title to an IMDb-only
+    // id (imdbapi.dev carries no seasons) leaves the OLD match's season list
+    // behind, and the manual-apply "clean slate" doesn't wipe SeasonsJson. So a
+    // TMDB/MAL-less title ignores those stale seasons and falls back to the
+    // file-derived grid below (or, for unmatched files, the "Unmatched files"
+    // section). Normal series keep a TMDB/MAL id, so this never touches them.
+    var hasMetaSeasonSource = item.TmdbId is not null || item.MalId is not null;
+    var hasSeasonMeta  = hasMetaSeasonSource && item.Seasons.Length > 0;
     // Fallback "synthetic" season list built from on-disk files when no
     // metadata seasons are available (anime OVAs identified without TMDB).
+    // Treat a file's season as 1 when the parser found an episode number but no
+    // season (flat folders like "Show/01.mkv" → S?? E1). Without this, episodic
+    // files with a null season fell through every branch — no grid (fileSeasons
+    // was empty) and the "Unmatched files" section only catches null-EPISODE
+    // files — so they rendered nowhere.
     var fileSeasons    = _files
-        .Where(f => f.Season is not null)
-        .Select(f => f.Season!.Value)
+        .Where(f => f.Season is not null || f.Episode is not null)
+        .Select(f => f.Season ?? 1)
         .Distinct()
         .OrderBy(n => n)
         .ToArray();
@@ -174,17 +188,29 @@ else
                             @($"Season {n}") <span class="md-season-tab__count">@s.EpisodeCount</span>
                         </button>
                     }
+                    @* Disk-only seasons TMDB metadata doesn't list — chiefly
+                       Specials (season 0). Without a tab they'd stay hidden. *@
+                    @foreach (var n in fileSeasons.Where(fs => !item.Seasons.Any(s => s.Number == fs)))
+                    {
+                        var nn = n;
+                        var epCount = _files.Count(f => (f.Season ?? 1) == nn);
+                        <button type="button"
+                                class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
+                                @onclick="@(() => _activeSeason = nn)">
+                            @(nn == 0 ? "Specials" : $"Season {nn}") <span class="md-season-tab__count">@epCount</span>
+                        </button>
+                    }
                 }
                 else
                 {
                     @foreach (var n in fileSeasons)
                     {
                         var nn = n;
-                        var epCount = _files.Count(f => f.Season == nn);
+                        var epCount = _files.Count(f => (f.Season ?? 1) == nn);
                         <button type="button"
                                 class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
                                 @onclick="@(() => _activeSeason = nn)">
-                            @($"Season {nn}") <span class="md-season-tab__count">@epCount</span>
+                            @(nn == 0 ? "Specials" : $"Season {nn}") <span class="md-season-tab__count">@epCount</span>
                         </button>
                     }
                 }
@@ -197,7 +223,7 @@ else
                 // on-disk file episode for this season) so cards aren't lost
                 // when TMDB underreports the season length (common for ongoing
                 // donghua / continuing series).
-                var maxFileEp = _files.Where(f => f.Season == _activeSeason)
+                var maxFileEp = _files.Where(f => (f.Season ?? 1) == _activeSeason)
                                        .Max(f => (int?)f.Episode) ?? 0;
                 var loopEpCount = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
                 if (loopEpCount == 0) loopEpCount = 1;
@@ -221,9 +247,17 @@ else
                 @for (int i = 1; i <= loopEpCount; i++)
                 {
                     var ep        = i;
-                    var hasFile   = _files.Any(f => f.Season == _activeSeason && f.Episode == ep);
+                    var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
+                    var hasFile   = epFile is not null;
                     var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
-                    var epTitle   = $"Episode {ep}";
+                    // Season 0 = Specials; a donghua season-offset surfaces the
+                    // TMDB absolute number so the user sees which TMDB episode
+                    // their disk file maps to ("Episode 1 · TMDB #107").
+                    var epTitle   = _activeSeason == 0
+                        ? $"Special {ep}"
+                        : epFile?.AbsoluteEpisode is int absEp
+                            ? $"Episode {ep} · TMDB #{absEp}"
+                            : $"Episode {ep}";
                     // First on-disk episode becomes the default-focus target
                     // when the hero has no Continue CTA (i.e. nothing in
                     // progress yet). Series like Death's Game where every
@@ -298,6 +332,54 @@ else
                            OnToggleWatched="OnMovieToggleWatched" />
         </section>
     }
+
+    @* ── Unmatched files ───────────────────────────────────────────────
+         Series files on disk that the deterministic parser couldn't place
+         (Episode == null). They're invisible in the episode grid above, so
+         surface them here: set (season, episode) by hand — Tier 2 manual
+         override — or hit "Resolve with AI" to run the LLM (Tier 1). *@
+    @if (item.MediaType == MediaItemType.Series && _files.Any(f => f.Episode is null))
+    {
+        var unmatched = _files.Where(f => f.Episode is null)
+                              .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
+                              .ToList();
+        <section class="md-unmatched">
+            <div class="md-unmatched__head">
+                <h3 class="md-unmatched__title">
+                    Unmatched files <span class="md-unmatched__count">@unmatched.Count</span>
+                </h3>
+                <button class="md-unmatched__ai tv-focus" disabled="@_aiBusy" @onclick="ResolveWithAiAsync">
+                    @(_aiBusy ? "Resolving…" : "✨ Resolve with AI")
+                </button>
+            </div>
+            <p class="md-unmatched__hint">
+                On disk, but no season/episode could be read from the name. Set them
+                by hand, or let the AI match against the episode list.
+            </p>
+            @if (_aiStatus is not null)
+            {
+                <p class="md-unmatched__status">@_aiStatus</p>
+            }
+            @foreach (var f in unmatched)
+            {
+                var path = f.FilePath;
+                <div class="md-unmatched__row">
+                    <span class="md-unmatched__name" title="@path">@f.FileName</span>
+                    <label class="md-unmatched__field">S
+                        <input type="number" min="1" class="md-unmatched__num"
+                               value="@EditSeason(path, f)"
+                               @onchange="@(e => SetEditSeason(path, e.Value?.ToString()))" />
+                    </label>
+                    <label class="md-unmatched__field">E
+                        <input type="number" min="1" class="md-unmatched__num"
+                               value="@EditEpisode(path, f)"
+                               @onchange="@(e => SetEditEpisode(path, e.Value?.ToString()))" />
+                    </label>
+                    <button class="md-unmatched__save tv-focus" @onclick="@(() => SaveMappingAsync(path, f))">Save</button>
+                </div>
+            }
+        </section>
+    }
 }
 
 @* Player overlay — Artplayer mounts into the .vp-art container. *@
@@ -328,6 +410,62 @@ else
     private int _activeSeason = 1;
     private bool _movieWatched;
     private bool _editOpen;
+
+    // ─── Unmatched-file resolution (episode-resolution Tiers 1–2) ─────────
+    // Pending per-file edits keyed by absolute path; falls back to the file's
+    // current (deterministic) values until the user types something.
+    private bool _aiBusy;
+    private string? _aiStatus;
+    private readonly Dictionary<string, (int? Season, int? Episode)> _edit = new();
+
+    private int? EditSeason(string path, MediaFileDto f)
+        => _edit.TryGetValue(path, out var e) ? e.Season : f.Season;
+    private int? EditEpisode(string path, MediaFileDto f)
+        => _edit.TryGetValue(path, out var e) ? e.Episode : f.Episode;
+
+    private void SetEditSeason(string path, string? raw)
+    {
+        var cur = _edit.TryGetValue(path, out var e) ? e : default;
+        _edit[path] = (ParseNum(raw), cur.Episode);
+    }
+
+    private void SetEditEpisode(string path, string? raw)
+    {
+        var cur = _edit.TryGetValue(path, out var e) ? e : default;
+        _edit[path] = (cur.Season, ParseNum(raw));
+    }
+
+    private static int? ParseNum(string? raw)
+        => int.TryParse(raw, out var n) && n > 0 ? n : null;
+
+    private async Task SaveMappingAsync(string path, MediaFileDto f)
+    {
+        await Api.SetEpisodeMappingAsync(Id, new EpisodeMappingRequest(path, EditSeason(path, f), EditEpisode(path, f)));
+        _edit.Remove(path);
+        await ReloadFilesAsync();
+    }
+
+    private async Task ResolveWithAiAsync()
+    {
+        if (_aiBusy) return;
+        _aiBusy = true; _aiStatus = null; StateHasChanged();
+        try
+        {
+            var n = await Api.ResolveEpisodesWithLlmAsync(Id);
+            _aiStatus = n > 0
+                ? $"AI matched {n} file(s)."
+                : "AI matched nothing (LLM off, or no confident match).";
+            await ReloadFilesAsync();
+        }
+        catch (Exception ex) { _aiStatus = $"AI error: {ex.Message}"; }
+        finally { _aiBusy = false; StateHasChanged(); }
+    }
+
+    private async Task ReloadFilesAsync()
+    {
+        _files = await Api.GetMediaFilesAsync(Id);
+        StateHasChanged();
+    }
     /// <summary>True once we've pushed default-focus to the hero CTA /
     /// first episode after the initial async load. Subsequent re-renders
     /// (toggled watched, edited metadata) skip the auto-focus so the
@@ -373,18 +511,23 @@ else
             _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
             _files = await Api.GetMediaFilesAsync(Id);
 
-            if (_item is not null && _item.Seasons.Length > 0)
+            // Mirror the render's gate: only seed the active season from the
+            // stored Seasons list when a real source (TMDB/MAL) backs it —
+            // otherwise prefer on-disk file seasons so a stale list left over
+            // from a removed match doesn't pin the tab to a phantom season.
+            var hasMetaSeasonSource = _item is not null
+                && (_item.TmdbId is not null || _item.MalId is not null);
+            if (hasMetaSeasonSource && _item!.Seasons.Length > 0)
             {
                 _activeSeason = _item.Seasons.OrderBy(s => s.Number).First().Number;
             }
-            else if (_files.Length > 0 && _files.Any(f => f.Season is not null))
+            else if (_files.Length > 0)
             {
-                // No metadata seasons but we do have files with season numbers
-                // (anime OVA / un-identified series). Pick the lowest season
-                // number so the synthetic season tab focuses there. Pairs with
-                // the file-derived `fileSeasons` branch in the render block.
-                _activeSeason = _files.Where(f => f.Season is not null)
-                                       .Min(f => f.Season!.Value);
+                // No metadata season source — focus the lowest file-derived
+                // season. Null-season files (flat folders) count as Season 1, so
+                // a numbered-but-seasonless folder still lands on a real tab.
+                // Pairs with the `fileSeasons` (Season ?? 1) branch in render.
+                _activeSeason = _files.Min(f => f.Season ?? 1);
             }
         }
         catch { _item = null; }
@@ -418,7 +561,9 @@ else
 
     private async Task PlayEpisodeAsync(int season, int episode)
     {
-        var file = _files.FirstOrDefault(f => f.Season == season && f.Episode == episode);
+        // (f.Season ?? 1) so a null-season-but-numbered file (flat folder) is
+        // found when the grid plays it under its effective Season 1.
+        var file = _files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == episode);
         if (file is null) return;
         await PlayPathAsync(file.FilePath, season, episode);
     }

@@ -34,6 +34,20 @@ public interface IAnimarrApiClient
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Tier 2 — set a manual (season, episode) override for one file of
+    /// this item. Null season/episode keeps the deterministic value for that
+    /// field. The override survives re-scans and AI re-resolution.</summary>
+    Task SetEpisodeMappingAsync(Guid mediaItemId, EpisodeMappingRequest request, CancellationToken ct = default);
+    /// <summary>Clear a stored override for <paramref name="filePath"/> — revert
+    /// that file to the deterministic parse.</summary>
+    Task ClearEpisodeMappingAsync(Guid mediaItemId, string filePath, CancellationToken ct = default);
+    /// <summary>Tier 1 — ask the LLM to place files the deterministic parser
+    /// couldn't. Returns the number of files newly assigned an episode (0 when
+    /// the LLM is disabled/unreachable).</summary>
+    Task<int> ResolveEpisodesWithLlmAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Compute &amp; store per-season absolute offsets (donghua: TMDB
+    /// one season, disk split). Returns the diskSeason→offset map.</summary>
+    Task<Dictionary<int, int>> ResolveSeasonOffsetsAsync(Guid mediaItemId, CancellationToken ct = default);
     Task ApplyImageAsync(Guid mediaItemId, ApplyImageRequest request, CancellationToken ct = default);
 
     // ─── Folder browsing (server-side filesystem) ────────────────────────
@@ -76,12 +90,7 @@ public interface IAnimarrApiClient
     Task<WatchStateDto>   ToggleWatchedAsync(ToggleWatchedRequest request, CancellationToken ct = default);
     Task                  ResetProgressAsync(ResetProgressRequest request, CancellationToken ct = default);
 
-    // ─── Rename + identification queues ──────────────────────────────────
-    Task<RenameQueueEntryDto[]>   GetRenameQueueAsync(CancellationToken ct = default);
-    Task<RenameHistoryEntryDto[]> GetRenameHistoryAsync(int? take, CancellationToken ct = default);
-    Task<PagedResult<RenameHistoryEntryDto>> GetRenameHistoryPageAsync(
-        int skip, int take, Guid? folderId, RenameStatus? status, CancellationToken ct = default);
-    Task                          RevertRenameAsync(Guid id, CancellationToken ct = default);
+    // ─── Identification queue ────────────────────────────────────────────
     Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default);
     Task                          EnqueueIdentificationAsync(Guid folderId, bool forceRefresh, CancellationToken ct = default);
     Task                          CancelIdentificationAsync(Guid id, CancellationToken ct = default);
@@ -91,13 +100,10 @@ public interface IAnimarrApiClient
     Task<bool>                    RefreshThemeAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<bool>                    SetThemeUrlAsync(Guid mediaItemId, string url, CancellationToken ct = default);
 
-    // ─── Patterns / ignore rules / tags ──────────────────────────────────
+    // ─── Patterns / tags ─────────────────────────────────────────────────
     Task<RenamePatternDto[]>  GetPatternsAsync(CancellationToken ct = default);
     Task<RenamePatternDto>    UpsertPatternAsync(Guid? id, UpsertPatternRequest request, CancellationToken ct = default);
     Task                      DeletePatternAsync(Guid id, CancellationToken ct = default);
-    Task<IgnoreRuleDto[]>     GetIgnoreRulesAsync(CancellationToken ct = default);
-    Task<IgnoreRuleDto>       UpsertIgnoreRuleAsync(Guid? id, UpsertIgnoreRuleRequest request, CancellationToken ct = default);
-    Task                      DeleteIgnoreRuleAsync(Guid id, CancellationToken ct = default);
     Task<MediaTagDto[]>       GetMediaTagsAsync(CancellationToken ct = default);
     Task<MediaTagDto>         UpsertMediaTagAsync(Guid? id, UpsertMediaTagRequest request, CancellationToken ct = default);
     Task                      DeleteMediaTagAsync(Guid id, CancellationToken ct = default);
@@ -133,6 +139,22 @@ public interface IAnimarrApiClient
     /// identification job. Saved AppConfig is what gets exercised — Save
     /// pending changes before calling this.</summary>
     Task<LlmTestResponse>   TestLlmAsync(CancellationToken ct = default);
+
+    // ─── Embedded llama.cpp provider ─────────────────────────────────────
+    /// <summary>Curated model catalog + installed files + free disk for the AI tab.</summary>
+    Task<LlamaCatalogResponse> GetLlamaCatalogAsync(CancellationToken ct = default);
+    /// <summary>Start downloading a GGUF model (curated id, or "custom" + repo/file).</summary>
+    Task StartLlamaDownloadAsync(StartDownloadRequest request, CancellationToken ct = default);
+    /// <summary>Progress of the single in-flight download (Phase="idle" when none).</summary>
+    Task<DownloadProgressDto?> GetLlamaDownloadStatusAsync(CancellationToken ct = default);
+    /// <summary>Cancel the in-flight download.</summary>
+    Task CancelLlamaDownloadAsync(CancellationToken ct = default);
+    /// <summary>Delete an installed model file (must not be the active one).</summary>
+    Task DeleteLlamaModelAsync(string fileName, CancellationToken ct = default);
+    /// <summary>Embedded llama-server runtime status (state/model/gpu/port).</summary>
+    Task<EmbeddedStatusDto> GetEmbeddedStatusAsync(CancellationToken ct = default);
+    /// <summary>Restart the embedded llama-server child; returns the new status.</summary>
+    Task<EmbeddedStatusDto> RestartEmbeddedAsync(CancellationToken ct = default);
 
     // ─── Auth + per-user (v4) ────────────────────────────────────────────
     Task<AuthStatusDto>     GetAuthStatusAsync(CancellationToken ct = default);

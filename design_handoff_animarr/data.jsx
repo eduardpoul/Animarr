@@ -77,7 +77,7 @@ const TORRENTS = [
   { id:"t3", name:"[Anistar.org] Swallowed Star [TV-1] - 224 [1080p].mp4",  dest:"Swallowed Star (2020)",      progress: 1.00, dn: 0,    up: 2.4,  peers: "3/14", eta:"—",       state:"seeding",    size:"781 MB" },
   { id:"t4", name:"[Anistar.org] Xian Ni [TV-1] - 141 [1080p].mp4",         dest:"Xian Ni",                    progress: 0.62, dn: 14.2, up: 0.4,  peers: "11/52",eta:"4m 12s",  state:"downloading",size:"758 MB" },
   { id:"t5", name:"[Anistar.org] Shrouding the Heavens [TV-1] - 162 [1080p].mp4", dest:"Shrouding the Heavens", progress: 0.34, dn: 18.7, up: 0.1, peers: "23/64",eta:"7m 41s", state:"downloading",size:"812 MB" },
-  { id:"t6", name:"[SubsPlease] Mobile Suit Gundam SEED FREEDOM [BD].mkv",  dest:"— Needs identification —",   progress: 0.00, dn: 0,    up: 0,    peers: "0/0",   eta:"queued",  state:"queued",     size:"24.6 GB" },
+  { id:"t6", name:"[SubsKindly] Mobile Suit Gundam SEED FREEDOM [BD].mkv",  dest:"— Needs identification —",   progress: 0.00, dn: 0,    up: 0,    peers: "0/0",   eta:"queued",  state:"queued",     size:"24.6 GB" },
   { id:"t7", name:"Ne Zha 2 2025 1080p WEB-DL.mkv",                          dest:"Ne Zha 2",                   progress: 0.91, dn: 22.1, up: 0.0,  peers: "47/188",eta:"38s",    state:"downloading",size:"6.1 GB" },
 ];
 
@@ -86,7 +86,7 @@ const HISTORY = [
   { id:"h1", at:"15:42:08", date:"2026-05-22", file:"[Anistar.org] Perfect World [TV-1] - 270 [1080p].mp4", to:"Perfect World - S01E270 - 1080p.mp4", pattern:"Anime Episode (anistar)", folder:"Perfect World (2018)", reverted:false },
   { id:"h2", at:"15:42:08", date:"2026-05-22", file:"[Anistar.org] Perfect World [TV-1] - 269 [1080p].mp4", to:"Perfect World - S01E269 - 1080p.mp4", pattern:"Anime Episode (anistar)", folder:"Perfect World (2018)", reverted:false },
   { id:"h3", at:"14:18:33", date:"2026-05-22", file:"Ne.Zha.2.2025.1080p.WEB-DL.x265.mkv", to:"Ne Zha 2 (2025).mkv", pattern:"Movie + Year",      folder:"Ne Zha 2",            reverted:false },
-  { id:"h4", at:"11:02:11", date:"2026-05-22", file:"[Erai-raws] Mobile Suit Gundam SEED FREEDOM - 01.mkv", to:"Mobile Suit Gundam SEED FREEDOM - S01E01.mkv", pattern:"Anime Episode (erai)", folder:"Mobile Suit Gundam SEED FREEDOM", reverted:true },
+  { id:"h4", at:"11:02:11", date:"2026-05-22", file:"[Erao-raws] Mobile Suit Gundam SEED FREEDOM - 01.mkv", to:"Mobile Suit Gundam SEED FREEDOM - S01E01.mkv", pattern:"Anime Episode (erao)", folder:"Mobile Suit Gundam SEED FREEDOM", reverted:true },
   { id:"h5", at:"22:51:00", date:"2026-05-21", file:"Arcane.S02E09.WEB-DL.1080p.mkv",                  to:"Arcane - S02E09 - 1080p.mkv",                pattern:"Series (S/E)",       folder:"Arcane (2021)",       reverted:false },
   { id:"h6", at:"22:50:59", date:"2026-05-21", file:"Arcane.S02E08.WEB-DL.1080p.mkv",                  to:"Arcane - S02E08 - 1080p.mkv",                pattern:"Series (S/E)",       folder:"Arcane (2021)",       reverted:false },
   { id:"h7", at:"19:08:14", date:"2026-05-21", file:"[Anistar.org] Xian Ni [TV-1] - 140 [1080p].mp4",  to:"Xian Ni - S01E140 - 1080p.mp4",              pattern:"Anime Episode (anistar)", folder:"Xian Ni",        reverted:false },
@@ -104,7 +104,7 @@ const FOLDERS = [
 // patterns & ignore rules
 const PATTERNS = [
   { id:"p1", name:"Anime Episode (anistar)", regex:"\\[Anistar\\.org\\] (?<title>.+?) \\[(?<season>TV-\\d+)\\] - (?<episode>\\d+).*", scope:"Global", priority: 100, enabled:true },
-  { id:"p2", name:"Anime Episode (erai)",    regex:"\\[Erai-raws\\] (?<title>.+?) - (?<episode>\\d+) \\[.*",                       scope:"Global", priority: 95,  enabled:true },
+  { id:"p2", name:"Anime Episode (erao)",    regex:"\\[Erao-raws\\] (?<title>.+?) - (?<episode>\\d+) \\[.*",                       scope:"Global", priority: 95,  enabled:true },
   { id:"p3", name:"Movie + Year",            regex:"(?<title>.+?)\\.?(?<year>(19|20)\\d{2}).*",                                       scope:"Global", priority: 80,  enabled:true },
   { id:"p4", name:"Series (S/E)",            regex:"(?<title>.+?)\\.S(?<season>\\d{2})E(?<episode>\\d{2}).*",                         scope:"Global", priority: 75,  enabled:true },
   { id:"p5", name:"Strip .torrent extras",   regex:".*\\[(?<group>.+?)\\].*",                                                          scope:"Exclusion", priority: 10, enabled:false },

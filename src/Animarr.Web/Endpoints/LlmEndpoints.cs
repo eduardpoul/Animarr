@@ -94,6 +94,120 @@ internal static class LlmEndpoints
         .RequireAuthorization(Animarr.Web.Services.Auth.AuthConstants.Policies.SystemSettings)
         .WithName("LlmTestPing");
 
+        // ─── Embedded llama.cpp provider ──────────────────────────────────────
+        const string adminPolicy = Animarr.Web.Services.Auth.AuthConstants.Policies.SystemSettings;
+
+        // Curated catalog + installed files + free disk for the AI tab.
+        app.MapGet(ApiRoutes.LlmEmbeddedCatalog, (
+            [FromServices] EmbeddedLlamaService embedded,
+            [FromServices] ModelPaths paths) =>
+        {
+            var installed = paths.ListInstalled();
+            var bySize = installed.ToDictionary(i => i.FileName, i => i.Bytes, StringComparer.OrdinalIgnoreCase);
+            var activeFile = embedded.Status.ModelFile;
+
+            var curated = LlamaModelCatalog.Entries.Select(e => new LlamaCatalogEntryDto(
+                e.Id, e.DisplayName, e.HfRepo, e.FileName, e.ApproxBytes, e.RecommendedRamMb,
+                e.CpuFriendly, e.GpuRecommended, e.Notes,
+                Installed: bySize.ContainsKey(e.FileName),
+                InstalledBytes: bySize.TryGetValue(e.FileName, out var b) ? b : null)).ToArray();
+
+            var installedDtos = installed.Select(i => new InstalledModelDto(
+                i.FileName, i.Bytes,
+                IsActive: string.Equals(i.FileName, activeFile, StringComparison.OrdinalIgnoreCase))).ToArray();
+
+            return Results.Json(new LlamaCatalogResponse(curated, installedDtos, paths.FreeBytes()));
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedCatalog");
+
+        // Start a download (curated id, or "custom" + repo/file). 400 bad input, 409 busy.
+        app.MapPost(ApiRoutes.LlmEmbeddedDownload, async (
+            [FromBody] StartDownloadRequest req,
+            [FromServices] EmbeddedLlamaService embedded,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await embedded.StartDownloadAsync(req.ModelId, req.CustomRepo, req.CustomFile, ct);
+                return Results.Accepted();
+            }
+            catch (ArgumentException ex)        { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedDownloadStart");
+
+        // In-flight download progress (Phase="idle" when nothing is downloading).
+        app.MapGet(ApiRoutes.LlmEmbeddedDownload, ([FromServices] EmbeddedLlamaService embedded) =>
+        {
+            var d = embedded.CurrentDownload;
+            return Results.Json(new DownloadProgressDto(
+                d.ModelId, d.FileName, d.BytesReceived, d.TotalBytes, d.Percent, d.Phase, d.Error));
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedDownloadStatus");
+
+        // Cancel the in-flight download.
+        app.MapDelete(ApiRoutes.LlmEmbeddedDownload, ([FromServices] EmbeddedLlamaService embedded) =>
+        {
+            embedded.CancelDownload();
+            return Results.NoContent();
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedDownloadCancel");
+
+        // Installed model files.
+        app.MapGet(ApiRoutes.LlmEmbeddedModels, (
+            [FromServices] EmbeddedLlamaService embedded,
+            [FromServices] ModelPaths paths) =>
+        {
+            var active = embedded.Status.ModelFile;
+            var list = paths.ListInstalled().Select(i => new InstalledModelDto(
+                i.FileName, i.Bytes,
+                string.Equals(i.FileName, active, StringComparison.OrdinalIgnoreCase))).ToArray();
+            return Results.Json(list);
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedModels");
+
+        // Delete an installed model file. Refuses the active one (switch/stop first).
+        app.MapDelete(ApiRoutes.LlmEmbeddedModelByFile, (
+            string file,
+            [FromServices] EmbeddedLlamaService embedded,
+            [FromServices] ModelPaths paths) =>
+        {
+            var full = paths.ResolveModelFile(file);
+            if (full is null) return Results.BadRequest(new { error = "Invalid file name." });
+            if (string.Equals(file, embedded.Status.ModelFile, StringComparison.OrdinalIgnoreCase))
+                return Results.Conflict(new { error = "Cannot delete the active model. Switch model or restart first." });
+            try
+            {
+                if (File.Exists(full)) File.Delete(full);
+                return Results.NoContent();
+            }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        })
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedModelDelete");
+
+        // Embedded runtime status (state/model/gpu/port).
+        app.MapGet(ApiRoutes.LlmEmbeddedStatus, ([FromServices] EmbeddedLlamaService embedded) =>
+            Results.Json(ToStatusDto(embedded.Status)))
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedStatus");
+
+        // Restart the embedded child (e.g. after changing context/GPU settings).
+        app.MapPost(ApiRoutes.LlmEmbeddedRestart, async (
+            [FromServices] EmbeddedLlamaService embedded,
+            CancellationToken ct) =>
+            Results.Json(ToStatusDto(await embedded.RestartAsync(ct))))
+        .RequireAuthorization(adminPolicy)
+        .WithName("LlmEmbeddedRestart");
+
         return app;
     }
+
+    private static EmbeddedStatusDto ToStatusDto(EmbeddedRuntimeStatus s)
+        => new(s.State.ToString(), s.ModelId, s.ModelFile, s.Port, s.GpuActive, s.GpuMode, s.Error, s.ReadyAt);
 }

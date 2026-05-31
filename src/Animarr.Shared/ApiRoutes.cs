@@ -23,6 +23,18 @@ public static class ApiRoutes
     public const string MediaNeedsReview  = "/api/media/needs-review";
     public const string MediaContinue     = "/api/media/{id}/continue";
     public const string MediaFiles        = "/api/media/{id}/files";
+    /// <summary>PUT a manual (season, episode) override for one file of this
+    /// item; DELETE (?path=…) clears it back to deterministic. Tier 2 of the
+    /// episode-resolution model — the server stores it as Source="manual".</summary>
+    public const string MediaFileMapping  = "/api/media/{id}/files/mapping";
+    /// <summary>POST — Tier 1: ask the LLM to place files the deterministic
+    /// parser left without an episode. Stores Source="llm" overrides; returns
+    /// the count placed. No-op when the LLM is disabled/unreachable.</summary>
+    public const string MediaResolveEpisodes = "/api/media/{id}/resolve-episodes";
+    /// <summary>POST — compute per-season absolute offsets from TMDB air-date
+    /// gaps (donghua where TMDB is one season but the disk is split). Stores
+    /// MediaItem.SeasonOffsetsJson; returns the map. No-op when not applicable.</summary>
+    public const string MediaResolveSeasons = "/api/media/{id}/resolve-seasons";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
@@ -60,14 +72,9 @@ public static class ApiRoutes
     public const string WatchStateToggle    = "/api/watch-states/toggle";
     public const string WatchStateReset     = "/api/watch-states/reset";
 
-    // ─── Rename queue / history / patterns / ignore rules ────────────────
-    public const string RenameQueue        = "/api/rename-queue";
-    public const string RenameHistory      = "/api/rename-history";
-    public const string RenameHistoryRevert= "/api/rename-history/{id}/revert";
+    // ─── Patterns ────────────────────────────────────────────────────────
     public const string Patterns           = "/api/patterns";
     public const string PatternById        = "/api/patterns/{id}";
-    public const string IgnoreRules        = "/api/ignore-rules";
-    public const string IgnoreRuleById     = "/api/ignore-rules/{id}";
 
     // ─── Identification queue ────────────────────────────────────────────
     public const string IdentificationQueue       = "/api/identification-queue";
@@ -101,6 +108,23 @@ public static class ApiRoutes
     /// without restarting identification. Saved config is used — Save before
     /// hitting Test.</summary>
     public const string LlmTest            = "/api/llm/test";
+
+    // ─── Embedded llama.cpp provider (provider = "embedded") ──────────────
+    /// <summary>GET — curated model catalog + installed files + free disk.</summary>
+    public const string LlmEmbeddedCatalog  = "/api/llm/embedded/catalog";
+    /// <summary>POST start / GET status / DELETE cancel the single in-flight download.</summary>
+    public const string LlmEmbeddedDownload = "/api/llm/embedded/download";
+    /// <summary>GET installed model files.</summary>
+    public const string LlmEmbeddedModels   = "/api/llm/embedded/models";
+    /// <summary>Route template for DELETE of one installed model file.</summary>
+    public const string LlmEmbeddedModelByFile = "/api/llm/embedded/models/{file}";
+    /// <summary>GET embedded runtime status (state/model/gpu/port).</summary>
+    public const string LlmEmbeddedStatus   = "/api/llm/embedded/status";
+    /// <summary>POST — restart the embedded llama-server child.</summary>
+    public const string LlmEmbeddedRestart  = "/api/llm/embedded/restart";
+    /// <summary>Builds the DELETE URL for a single installed model file.</summary>
+    public static string LlmEmbeddedModel(string file) => $"/api/llm/embedded/models/{Uri.EscapeDataString(file)}";
+
     public const string HardwareInfo       = "/api/hardware-info";
 
     // ─── Metadata / search ───────────────────────────────────────────────
@@ -207,6 +231,9 @@ public static class ApiRoutes
     public static string MediaThemeRefreshFor(Guid id) => MediaThemeRefresh.Replace("{id}", id.ToString());
     public static string MediaThemeManualFor(Guid id)  => MediaThemeManual.Replace("{id}", id.ToString());
     public static string MediaFilesFor(Guid id)        => MediaFiles.Replace("{id}", id.ToString());
+    public static string MediaFileMappingFor(Guid id)  => MediaFileMapping.Replace("{id}", id.ToString());
+    public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
+    public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
@@ -222,11 +249,9 @@ public static class ApiRoutes
     public static string WatchStatesFor(Guid mediaItemId) => WatchStatesForMedia.Replace("{mediaItemId}", mediaItemId.ToString());
 
     public static string Pattern(Guid id)              => PatternById.Replace("{id}", id.ToString());
-    public static string IgnoreRule(Guid id)           => IgnoreRuleById.Replace("{id}", id.ToString());
     public static string MediaTag(Guid id)             => MediaTagById.Replace("{id}", id.ToString());
     public static string AppConfigKey(string key)      => AppConfigByKey.Replace("{key}", Uri.EscapeDataString(key));
 
-    public static string RenameHistoryRevertFor(Guid id) => RenameHistoryRevert.Replace("{id}", id.ToString());
     public static string IdentificationCancelFor(Guid id) => IdentificationCancel.Replace("{id}", id.ToString());
 
     public static string HlsSegmentUrl(string token, string file)
@@ -271,6 +296,14 @@ public static class AppConfigKeys
     public const string LlmApiKey          = "llm.api_key";
     public const string LlmModel           = "llm.model";
     public const string LlmEpisodeMapping  = "llm.episode_mapping";
+
+    // Embedded llama.cpp provider (provider = "embedded")
+    public const string LlmEmbeddedModelId     = "llm.embedded_model_id";
+    public const string LlmEmbeddedModelFile   = "llm.embedded_model_file";
+    public const string LlmEmbeddedHfRepo      = "llm.embedded_hf_repo";
+    public const string LlmEmbeddedPort        = "llm.embedded_port";
+    public const string LlmEmbeddedGpuLayers   = "llm.embedded_gpu_layers";
+    public const string LlmEmbeddedContextSize = "llm.embedded_ctx";
 
     // ─── Backdrop / appearance ────────────────────────────────────────────
     public const string BackdropEnabled    = "appearance.backdrop_enabled";
