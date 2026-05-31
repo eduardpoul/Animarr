@@ -274,7 +274,6 @@
 
             await Api.UpdateTorrentAsync(_record.Id, new UpdateTorrentRequest(
                 FolderWatcherId:        _record.FolderWatcherId,
-                AutoRename:             _record.AutoRename,
                 StopAfterDownload:      _stopAfterDownload,
                 DownloadLimit:          _dlLimit * 125_000,
                 UploadLimit:            _ulLimit * 125_000,

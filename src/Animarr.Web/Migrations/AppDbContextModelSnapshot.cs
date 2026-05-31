@@ -587,9 +587,6 @@ namespace Animarr.Web.Migrations
                     b.Property<DateTime>("AddedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("AutoRename")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("TEXT");
 

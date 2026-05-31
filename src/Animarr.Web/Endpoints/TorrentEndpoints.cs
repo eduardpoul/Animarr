@@ -65,7 +65,6 @@ internal static class TorrentEndpoints
                 // stores these on the record so they survive restart.
                 dlLimit: Math.Max(0, request.DownloadLimitKBps) * 1024,
                 ulLimit: Math.Max(0, request.UploadLimitKBps)   * 1024,
-                autoRename: request.AutoRename,
                 startPaused: false,
                 stopAfterDownload: request.StopAfterDownload,
                 flattenSubfolders: request.SkipSubfolderStructure,
@@ -111,7 +110,6 @@ internal static class TorrentEndpoints
                 // Same rate-limit plumbing as add-magnet (v5).
                 dlLimit: Math.Max(0, request.DownloadLimitKBps) * 1024,
                 ulLimit: Math.Max(0, request.UploadLimitKBps)   * 1024,
-                autoRename: request.AutoRename,
                 startPaused: false,
                 stopAfterDownload: request.StopAfterDownload,
                 initialPriorities: initialPriorities,
@@ -137,7 +135,6 @@ internal static class TorrentEndpoints
             if (entity is null) return Results.NotFound();
 
             entity.FolderWatcherId        = request.FolderWatcherId;
-            entity.AutoRename             = request.AutoRename;
             entity.StopAfterDownload      = request.StopAfterDownload;
             entity.DownloadLimit          = request.DownloadLimit;
             entity.UploadLimit            = request.UploadLimit;

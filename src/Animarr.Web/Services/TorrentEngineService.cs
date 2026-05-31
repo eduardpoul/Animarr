@@ -20,7 +20,6 @@ public class TorrentEngineService : BackgroundService
     private readonly ConcurrentDictionary<string, string> _names = new();
     /// <summary>FolderWatcherId per torrent (populated on add, available in stats).</summary>
     private readonly ConcurrentDictionary<string, Guid?> _folderWatchers = new();
-    private readonly ConcurrentDictionary<string, bool> _autoRename = new();
     /// <summary>Tracks ("hash:relPath") keys already marked IsDownloaded in DB to avoid redundant writes.</summary>
     private readonly ConcurrentDictionary<string, byte> _markedDownloaded = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Per-torrent lock that serializes MetadataReceived and StateChanged handlers (avoids concurrent SaveChanges on the same record).</summary>
@@ -244,7 +243,6 @@ public class TorrentEngineService : BackgroundService
 
                 _names[record.InfoHash] = record.Name;
                 _folderWatchers[record.InfoHash] = record.FolderWatcherId;
-                _autoRename[record.InfoHash] = record.AutoRename;
 
                 await ApplyFileSelectionsAsync(mgr, record.FileSelections);
 
@@ -434,8 +432,7 @@ public class TorrentEngineService : BackgroundService
                 DownloadLimit:    mgr.Settings.MaximumDownloadRate,
                 UploadLimit:      mgr.Settings.MaximumUploadRate,
                 MetadataReceived: mgr.Torrent is not null,
-                FolderWatcherId:  _folderWatchers.GetValueOrDefault(hash),
-                AutoRename:       _autoRename.GetValueOrDefault(hash)
+                FolderWatcherId:  _folderWatchers.GetValueOrDefault(hash)
             );
         }
 
@@ -707,7 +704,7 @@ public class TorrentEngineService : BackgroundService
 
     public async Task<string> AddMagnetAsync(
         string magnetUri, string savePath, Guid? folderWatcherId,
-        int dlLimit, int ulLimit, bool autoRename, bool startPaused, bool stopAfterDownload = false,
+        int dlLimit, int ulLimit, bool startPaused, bool stopAfterDownload = false,
         bool flattenSubfolders = false, bool suppressRootFolder = false, string? customRootFolderName = null)
     {
         var magnetLink = MagnetLink.Parse(magnetUri);
@@ -738,7 +735,6 @@ public class TorrentEngineService : BackgroundService
         record.State           = startPaused ? TorrentRecordState.Paused : TorrentRecordState.Metadata;
         record.DownloadLimit   = dlLimit;
         record.UploadLimit     = ulLimit;
-        record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
         record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
@@ -749,7 +745,6 @@ public class TorrentEngineService : BackgroundService
 
         _names[infoHash] = name;
         _folderWatchers[infoHash] = folderWatcherId;
-        _autoRename[infoHash] = autoRename;
 
         SubscribeEvents(mgr, infoHash);
         _managers[infoHash] = mgr;
@@ -764,7 +759,7 @@ public class TorrentEngineService : BackgroundService
     public async Task<string> AddTorrentFileAsync(
 
         byte[] torrentData, string savePath, Guid? folderWatcherId,
-        int dlLimit, int ulLimit, bool autoRename, bool startPaused, bool stopAfterDownload = false,
+        int dlLimit, int ulLimit, bool startPaused, bool stopAfterDownload = false,
         Dictionary<string, int>? initialPriorities = null, bool flattenSubfolders = false,
         bool suppressRootFolder = false, string? customRootFolderName = null)
     {
@@ -811,7 +806,6 @@ public class TorrentEngineService : BackgroundService
         record.TotalSize       = torrent.Size;
         record.DownloadLimit   = dlLimit;
         record.UploadLimit     = ulLimit;
-        record.AutoRename        = autoRename;
         record.StopAfterDownload  = stopAfterDownload;
         record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
@@ -832,7 +826,6 @@ public class TorrentEngineService : BackgroundService
 
         _names[infoHash] = torrent.Name;
         _folderWatchers[infoHash] = folderWatcherId;
-        _autoRename[infoHash] = autoRename;
 
         SubscribeEvents(mgr, infoHash);
         _managers[infoHash] = mgr;
@@ -891,7 +884,6 @@ public class TorrentEngineService : BackgroundService
         _liveStats.TryRemove(infoHash, out _);
         _names.TryRemove(infoHash, out _);
         _folderWatchers.TryRemove(infoHash, out _);
-        _autoRename.TryRemove(infoHash, out _);
 
         // C-1: dispose per-torrent semaphore so it doesn't leak across add/remove cycles.
         if (_torrentLocks.TryRemove(infoHash, out var sem))
