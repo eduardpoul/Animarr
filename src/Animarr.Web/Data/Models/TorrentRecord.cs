@@ -53,8 +53,6 @@ public class TorrentRecord
     /// <summary>If true, stop torrent immediately after download completes (skip seeding).</summary>
     public bool StopAfterDownload { get; set; } = false;
 
-    public bool AutoRename { get; set; } = true;
-
     /// <summary>If true, files are downloaded directly to SavePath root without subfolder structure.</summary>
     [Column("FlattenSubfolders")]
     public bool SkipSubfolderStructure { get; set; } = false;

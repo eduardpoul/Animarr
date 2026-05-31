@@ -8,7 +8,6 @@ namespace Animarr.Shared.Requests;
 public sealed record AddMagnetRequest(
     string MagnetLink,
     Guid?  FolderWatcherId,
-    bool   AutoRename,
     bool   StopAfterDownload,
     bool   SkipSubfolderStructure,
     bool   SuppressRootFolder,
@@ -22,7 +21,6 @@ public sealed record AddTorrentFileRequest(
     string Filename,
     string Base64Content,
     Guid?  FolderWatcherId,
-    bool   AutoRename,
     bool   StopAfterDownload,
     bool   SkipSubfolderStructure,
     bool   SuppressRootFolder,
@@ -49,7 +47,6 @@ public sealed record UploadFilePart(string FileName, byte[] Content);
 /// <summary>User-edited fields on the TorrentEdit page.</summary>
 public sealed record UpdateTorrentRequest(
     Guid?   FolderWatcherId,
-    bool    AutoRename,
     bool    StopAfterDownload,
     int     DownloadLimit,
     int     UploadLimit,

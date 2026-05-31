@@ -328,13 +328,6 @@
             <div class="tor-add__toggles">
                 <div class="tor-add__toggle-row">
                     <div class="tor-add__toggle-text">
-                        <div class="tor-add__toggle-title">Auto-rename files via patterns</div>
-                        <div class="tor-add__toggle-hint">After download finishes, apply the global rename rules (S01E03 etc.).</div>
-                    </div>
-                    <Toggle Checked="@_addAutoRename" CheckedChanged="@((bool v) => _addAutoRename = v)" />
-                </div>
-                <div class="tor-add__toggle-row">
-                    <div class="tor-add__toggle-text">
                         <div class="tor-add__toggle-title">Stop after download (no seed)</div>
                         <div class="tor-add__toggle-hint">Skip the seeding phase once 100% is reached.</div>
                     </div>
@@ -360,8 +353,7 @@
         {
             <div class="tor-add__upload-note">
                 Files are copied straight into the chosen folder — no torrent /
-                seeding involved. Pick the destination above; the auto-rename
-                step still applies when the FolderWatcher runs.
+                seeding involved. Pick the destination above.
             </div>
         }
     </Body>
@@ -538,7 +530,6 @@ else
     private long   _addFileSize;
     private Guid?  _addFolderId;
     private string _addSubfolder  = "";   // → CustomRootFolderName
-    private bool   _addAutoRename = true;
     private bool   _addStopAfter;
     private bool   _addFlatten;           // → SkipSubfolderStructure
     private bool   _addStripRoot;         // → SuppressRootFolder
@@ -580,7 +571,6 @@ else
         _addFileSize   = 0;
         _addFolderId   = null;
         _addSubfolder  = "";
-        _addAutoRename = true;
         _addStopAfter  = false;
         _addFlatten    = false;
         _addStripRoot  = false;
@@ -744,7 +734,6 @@ else
                 await Api.AddMagnetAsync(new AddMagnetRequest(
                     MagnetLink:             _addMagnet.Trim(),
                     FolderWatcherId:        _addFolderId,
-                    AutoRename:             _addAutoRename,
                     StopAfterDownload:      _addStopAfter,
                     SkipSubfolderStructure: _addFlatten,
                     SuppressRootFolder:     _addStripRoot,
@@ -758,7 +747,6 @@ else
                     Filename:               _addFileName ?? "torrent.torrent",
                     Base64Content:          Convert.ToBase64String(_addFileBytes),
                     FolderWatcherId:        _addFolderId,
-                    AutoRename:             _addAutoRename,
                     StopAfterDownload:      _addStopAfter,
                     SkipSubfolderStructure: _addFlatten,
                     SuppressRootFolder:     _addStripRoot,

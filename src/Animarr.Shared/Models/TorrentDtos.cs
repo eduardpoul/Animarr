@@ -31,7 +31,6 @@ public sealed record TorrentRecordDto
 
     public double? StopSeedingRatio { get; init; }
     public bool    StopAfterDownload { get; init; }
-    public bool    AutoRename { get; init; } = true;
 
     public bool    SkipSubfolderStructure { get; init; }
     public bool    SuppressRootFolder { get; init; }
@@ -65,8 +64,7 @@ public sealed record TorrentLiveStatsDto(
     int  DownloadLimit,
     int  UploadLimit,
     bool MetadataReceived,
-    Guid? FolderWatcherId,
-    bool AutoRename);
+    Guid? FolderWatcherId);
 
 /// <summary>
 /// Node in the torrent's file tree shown in TorrentEdit. <c>Children</c> is

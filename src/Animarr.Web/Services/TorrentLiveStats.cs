@@ -22,8 +22,7 @@ public record TorrentLiveStats(
     int DownloadLimit,
     int UploadLimit,
     bool MetadataReceived,
-    Guid? FolderWatcherId,
-    bool AutoRename
+    Guid? FolderWatcherId
 );
 
 /// <summary>

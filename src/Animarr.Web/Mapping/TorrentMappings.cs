@@ -28,7 +28,6 @@ internal static class TorrentMappings
             UploadLimit     = entity.UploadLimit,
             StopSeedingRatio = entity.StopSeedingRatio,
             StopAfterDownload = entity.StopAfterDownload,
-            AutoRename      = entity.AutoRename,
             SkipSubfolderStructure = entity.SkipSubfolderStructure,
             SuppressRootFolder = entity.SuppressRootFolder,
             CustomRootFolderName = entity.CustomRootFolderName,
@@ -58,8 +57,7 @@ internal static class TorrentMappings
             DownloadLimit: live.DownloadLimit,
             UploadLimit:   live.UploadLimit,
             MetadataReceived: live.MetadataReceived,
-            FolderWatcherId:  live.FolderWatcherId,
-            AutoRename:   live.AutoRename);
+            FolderWatcherId:  live.FolderWatcherId);
 
     public static TorrentFileNodeDto ToDto(this TorrentFileNode node)
         => new()
