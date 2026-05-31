@@ -13,7 +13,7 @@
 set -e
 
 if [ "$ANIMARR_LLM_VULKAN" = "1" ]; then
-    if ! dpkg -s libvulkan1 >/dev/null 2>&1; then
+    if ! dpkg -s mesa-vulkan-drivers >/dev/null 2>&1; then
         CACHE=/app/data/vulkan-debs
         mkdir -p "$CACHE"
         echo "[entrypoint] ANIMARR_LLM_VULKAN=1 — ensuring Vulkan userspace drivers…"

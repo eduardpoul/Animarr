@@ -98,6 +98,17 @@ public class IdentificationQueueProcessorService(
             var enabled = await appCfg.GetAsync<bool>(AppConfigKeys.LlmEnabled, false);
             if (!enabled) return;
 
+            // The embedded provider starts the in-container llama-server on demand
+            // and idle-stops when not in use — don't probe here, or we'd spin it up
+            // (loading the model into RAM/VRAM) at boot for nothing. The first real
+            // job lazily starts it.
+            var provider = await appCfg.GetAsync(AppConfigKeys.LlmProvider, "compatible") ?? "compatible";
+            if (provider == "embedded")
+            {
+                logger.LogInformation("LLM warm-up: embedded provider — starts on demand.");
+                return;
+            }
+
             var llm = scope.ServiceProvider.GetRequiredService<ILlmService>();
             var available = await llm.IsAvailableAsync();
             if (available)

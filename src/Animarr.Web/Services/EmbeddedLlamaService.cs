@@ -42,6 +42,8 @@ public sealed class EmbeddedLlamaService : IHostedService
     private const int    MaxRestarts  = 5;           // consecutive crash cap before parking Failed
     private const int    DefaultPort  = 8091;
     private const int    ReadyTimeoutSec = 180;
+    private const int    DefaultIdleTimeoutSec = 120;  // stop the child after this much LLM inactivity (0 = never)
+    private const int    IdleCheckIntervalSec  = 20;
 
     private static readonly Regex RepoRx = new(@"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", RegexOptions.Compiled);
     private static readonly Regex FileRx = new(@"^[A-Za-z0-9._-]+\.gguf$",          RegexOptions.Compiled);
@@ -65,6 +67,7 @@ public sealed class EmbeddedLlamaService : IHostedService
     private bool   _gpuActive;
     private bool   _userStopRequested;
     private int    _consecutiveFailures;
+    private DateTime _lastActivityAt = DateTime.UtcNow;
 
     private readonly object _stderrLock = new();
     private readonly Queue<string> _stderrRing = new();
@@ -104,6 +107,7 @@ public sealed class EmbeddedLlamaService : IHostedService
         DecideGpu();
         // Non-blocking: never delay app startup on a 60s model load.
         _ = Task.Run(BootAsync);
+        _ = Task.Run(IdleMonitorAsync);
         return Task.CompletedTask;
     }
 
@@ -121,15 +125,63 @@ public sealed class EmbeddedLlamaService : IHostedService
         try
         {
             var cfg = await ReadConfigAsync(_lifetimeCts.Token);
-            if (cfg.Provider == "embedded" && cfg.ModelFile is not null)
-                await EnsureRunningAsync(TimeSpan.FromSeconds(ReadyTimeoutSec), _lifetimeCts.Token);
-            else if (cfg.Provider == "embedded")
+            // Lazy lifecycle: do NOT launch at boot. The child starts on the first
+            // LLM request (EnsureRunningAsync) and idle-stops afterwards, so it
+            // never holds RAM/VRAM/CPU while no LLM work is running.
+            if (cfg.Provider == "embedded" && cfg.ModelFile is null)
                 SetState(EmbeddedState.Stopped, "No model selected — pick & download one in Settings → AI / LLM.");
+            else
+                SetState(EmbeddedState.Stopped, null);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Embedded llama boot failed");
+            _logger.LogWarning(ex, "Embedded llama boot check failed");
         }
+    }
+
+    /// <summary>Background loop: stops the child after a stretch of no LLM activity
+    /// so it frees model RAM / GPU memory while idle. The next LLM request lazily
+    /// relaunches it. Set llm.embedded_idle_timeout_sec to 0 to disable.</summary>
+    private async Task IdleMonitorAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(IdleCheckIntervalSec));
+            while (await timer.WaitForNextTickAsync(_lifetimeCts.Token))
+            {
+                if (_state != EmbeddedState.Ready) continue;
+                if (_currentDownload is { Phase: "downloading" }) continue;
+
+                int idleSec;
+                try { idleSec = await ReadIdleTimeoutAsync(_lifetimeCts.Token); }
+                catch { continue; }
+                if (idleSec <= 0) continue;                                        // disabled
+                if ((DateTime.UtcNow - _lastActivityAt).TotalSeconds < idleSec) continue;
+
+                await _procLock.WaitAsync(_lifetimeCts.Token);
+                try
+                {
+                    // Re-check under the lock — a request may have arrived meanwhile.
+                    if (_state == EmbeddedState.Ready
+                        && _currentDownload is not { Phase: "downloading" }
+                        && (DateTime.UtcNow - _lastActivityAt).TotalSeconds >= idleSec)
+                    {
+                        _logger.LogInformation("Embedded llama idle {Sec}s — stopping to free RAM/GPU.", idleSec);
+                        KillLocked();   // → Stopped; the next LLM call relaunches lazily
+                    }
+                }
+                finally { _procLock.Release(); }
+            }
+        }
+        catch (OperationCanceledException) { /* app shutdown */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Idle monitor stopped"); }
+    }
+
+    private async Task<int> ReadIdleTimeoutAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var cfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+        return await cfg.GetAsync<int>(AppConfigKeys.LlmEmbeddedIdleTimeout, DefaultIdleTimeoutSec, ct);
     }
 
     // ── Lifecycle used by MicrosoftAiLlmService + endpoints ─────────────────────
@@ -139,6 +191,7 @@ public sealed class EmbeddedLlamaService : IHostedService
     /// the server reports healthy within <paramref name="timeout"/>.</summary>
     public async Task<bool> EnsureRunningAsync(TimeSpan timeout, CancellationToken ct)
     {
+        _lastActivityAt = DateTime.UtcNow;  // touch: every LLM request resets the idle clock
         if (_state == EmbeddedState.Ready && IsProcAlive()) return true;
 
         await _procLock.WaitAsync(ct);
