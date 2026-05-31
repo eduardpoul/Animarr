@@ -107,7 +107,7 @@ public class TorrentEngineService : BackgroundService
             {
                 h = h * 31 + s.InfoHash.GetHashCode();
                 h = h * 31 + (long)s.State;
-                h = h * 31 + (long)(s.Progress * 10);        // 0.1% resolution
+                h = h * 31 + (long)(s.Progress * 1000);      // 0.1% resolution (Progress is a 0–1 fraction)
                 h = h * 31 + s.DownloadRate;
                 h = h * 31 + s.UploadRate;
                 h = h * 31 + s.Downloaded;
@@ -421,7 +421,7 @@ public class TorrentEngineService : BackgroundService
                 Name:             mgr.Torrent?.Name ?? _names.GetValueOrDefault(hash, hash[..Math.Min(8, hash.Length)]),
                 SavePath:         mgr.SavePath,
                 State:            mgr.State,
-                Progress:         mgr.Progress,
+                Progress:         mgr.Progress / 100.0,   // MonoTorrent reports 0–100; the UI wants a 0–1 fraction
                 DownloadRate:     mgr.Monitor.DownloadRate,
                 UploadRate:       mgr.Monitor.UploadRate,
                 Downloaded:       mgr.Monitor.DataBytesReceived,
