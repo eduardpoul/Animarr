@@ -958,29 +958,24 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 }
 
 /* ── PIN keypad overlay ─────────────────────────────────────
-   Sits above the drawer (z 32 vs 31). Same backdrop tint as the
-   drawer's backdrop so the layers compose visually. The card is
-   centered on the viewport, not anchored to the drawer. */
-.d-pin-overlay {
+   One full-screen shell that BOTH tints the backdrop and catches outside
+   clicks (→ cancel). Must sit ABOVE the drawer + its backdrop (z 200/201),
+   else the drawer's backdrop tints the keypad out and swallows its taps —
+   the bug where the keypad showed dimmed behind the panel. 211 clears it.
+   The card wrapper stops click propagation so taps on the keys don't reach
+   this shell's cancel handler (see the .razor — stopPropagation, not a
+   pointer-events trick, because the keypad lives in a child component). */
+.d-pin-shell {
     position: fixed;
     inset: 0;
-    z-index: 32;
+    z-index: 211;
+    display: grid;
+    place-items: center;
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     animation: d-profile-fade 0.2s ease;
 }
-
-.d-pin-shell {
-    position: fixed;
-    inset: 0;
-    z-index: 33;
-    display: grid;
-    place-items: center;
-    pointer-events: none;
-    animation: d-profile-fade 0.2s ease;
-}
-.d-pin-shell > * { pointer-events: auto; }
 
 /* ── Inline forms: Edit profile + Change password ─────────────
    Both forms sit directly inside the Identity tab below the KV

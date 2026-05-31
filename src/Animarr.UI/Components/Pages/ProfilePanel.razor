@@ -20,19 +20,27 @@
 @inject LocalizationService Loc
 @inject ServerRegistryState ServerReg
 @inject ToastService Toasts
+@inject DeviceProfilesState DeviceProfiles
 
 @if (_keypadOpen && _keypadTarget is { } kt)
 {
     @* ── PIN keypad overlay (v5 fast switch) ──
-         Rendered above the drawer so it captures focus + obscures the user
-         strip while the dialog is open. Same backdrop tint as the drawer
-         itself, sits on z-index 32 (drawer is 31). *@
-    <div class="d-pin-overlay" @onclick="OnKeypadCancel" aria-hidden="true"></div>
-    <div class="d-pin-shell" role="dialog" aria-modal="true" aria-label="Enter PIN">
-        <PinKeypad UserName="@kt.Name"
-                   Error="@_keypadError"
-                   OnSubmit="OnKeypadSubmit"
-                   OnCancel="OnKeypadCancel" />
+         Full-screen shell at z-index 211 — ABOVE the drawer + its backdrop
+         (200/201) so the keypad isn't tinted out or click-blocked. Clicking
+         the shell's empty area cancels; the card wrapper stops propagation so
+         taps on the digits keep the dialog open.
+         We use stopPropagation (NOT a pointer-events trick) on purpose: the
+         keypad is a CHILD component, so a scoped `pointer-events:auto` rule
+         can't reach into its element — which is exactly why mouse taps used
+         to fall through to the backdrop and close the dialog. *@
+    <div class="d-pin-shell" @onclick="OnKeypadCancel">
+        <div class="d-pin-card" @onclick:stopPropagation="true"
+             role="dialog" aria-modal="true" aria-label="Enter PIN">
+            <PinKeypad UserName="@kt.Name"
+                       Error="@_keypadError"
+                       OnSubmit="OnKeypadSubmit"
+                       OnCancel="OnKeypadCancel" />
+        </div>
     </div>
 }
 
@@ -282,6 +290,16 @@
     private string _pwNew     = "";
     private string _pwRepeat  = "";
 
+    // ─── Set / change / remove a DEVICE-LOCAL PIN ─────────────────────
+    // The PIN locks fast-switching INTO this profile on THIS device. It's
+    // stored + verified locally (DeviceProfilesState), never on the server —
+    // so a PIN set here doesn't follow the account onto other devices.
+    private bool   _pinOpen;
+    private bool   _pinBusy;
+    private string _pinError = "";
+    private string _pinValue = "";      // the new 4-digit PIN (device-local)
+    private bool   _myHasDevicePin;     // does the CURRENT user have a device-local PIN here?
+
     private Task Close() => OnCloseEvent.InvokeAsync();
 
     protected override void OnParametersSet()
@@ -348,7 +366,68 @@
             _pwCurrent = _pwNew = _pwRepeat = "";
             _changePwError = "";
             _editProfileOpen = false;
+            _pinOpen = false;
         }
+    }
+
+    private void ToggleSetPin()
+    {
+        _pinOpen = !_pinOpen;
+        if (_pinOpen)
+        {
+            _pinValue = ""; _pinError = "";
+            _editProfileOpen = false;
+            _changePwOpen = false;
+        }
+    }
+
+    /// <summary>Keep only the first <paramref name="max"/> digits of raw input —
+    /// the PIN is numeric and fixed-length (matches the switch-user keypad).</summary>
+    private static string DigitsOnly(string? raw, int max)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        var sb = new System.Text.StringBuilder(max);
+        foreach (var ch in raw)
+        {
+            if (ch is >= '0' and <= '9') { sb.Append(ch); if (sb.Length >= max) break; }
+        }
+        return sb.ToString();
+    }
+
+    private async Task SubmitSetPinAsync()
+    {
+        _pinError = "";
+        if (_pinValue.Length < 4) { _pinError = "PIN must be 4 digits."; return; }
+        if (UserCtx.Me is not { } me) return;
+        _pinBusy = true; StateHasChanged();
+        try
+        {
+            // Device-local: store the hashed PIN on THIS device only.
+            await DeviceProfiles.SetPinAsync(me.User.Id, _pinValue);
+            _myHasDevicePin = true;
+            await LoadProfilesAsync();        // refresh the strip's lock badge
+            _pinOpen = false; _pinValue = "";
+            Toasts.ShowSuccess("PIN saved on this device");
+        }
+        catch (Exception ex) { _pinError = $"Couldn't save PIN: {ex.Message}"; }
+        finally { _pinBusy = false; StateHasChanged(); }
+    }
+
+    private async Task RemovePinAsync()
+    {
+        _pinError = "";
+        if (UserCtx.Me is not { } me) return;
+        _pinBusy = true; StateHasChanged();
+        try
+        {
+            await DeviceProfiles.SetPinAsync(me.User.Id, null);
+            _myHasDevicePin = false;
+            await LoadProfilesAsync();
+            _pinOpen = false; _pinValue = "";
+            Toasts.ShowSuccess("PIN removed");
+        }
+        catch (Exception ex) { _pinError = $"Couldn't remove PIN: {ex.Message}"; }
+        finally { _pinBusy = false; StateHasChanged(); }
     }
 
     private async Task SubmitEditProfileAsync()
@@ -608,67 +687,62 @@
                Identity tab is purely user-focused (current user header +
                switch-user roster + edit profile / change password). *@
 
-            @* ── SWITCH USER block (v5 PIN per-user-per-device) ──
-                 Lists every user that exists on this server. Tapping a card:
-                   • current user → no-op
-                   • no PIN       → POST /api/auth/switch-user with null pin
-                   • has PIN      → opens the keypad dialog
-                 The strip is hidden entirely if GetUsersAsync fails (403 for
-                 non-admin viewers — only Master sees the roster).  *@
-            @if (_users.Length > 0)
-            {
-                <div class="d-profile__users-block">
-                    <div class="d-profile__field-label">
-                        @(string.Format(L["profile.switch_user_label"], ServerReg.Current?.Name ?? "this server"))
-                    </div>
-                    <div class="d-profile__users-strip" role="list">
-                        @foreach (var u in _users)
-                        {
-                            var user = u;
-                            var isMe = user.Id == me.User.Id;
-                            <button type="button"
-                                    class="@($"d-profile__user-card tv-focus {(isMe ? "is-me" : "")}")"
-                                    role="listitem"
-                                    title="@user.Name"
-                                    disabled="@(_switchBusy || isMe)"
-                                    @onclick="@(() => OnUserCardClick(user))">
-                                <span class="d-profile__user-card-avatar">
-                                    <Avatar Name="@user.Name" HueOverride="user.AvatarHue"
-                                            ImagePath="@user.AvatarPath" Size="md" />
-                                    @if (user.HasPin)
-                                    {
-                                        <span class="d-profile__user-card-pin-badge" aria-label="PIN required">
-                                            <DIcon Name="lock" Size="9" />
-                                        </span>
-                                    }
-                                </span>
-                                <span class="d-profile__user-card-name">@user.Name</span>
-                                <span class="d-profile__user-card-meta">
-                                    @if (isMe)
-                                    {
-                                        <span>you</span>
-                                    }
-                                    else
-                                    {
-                                        @user.RoleName
-                                    }
-                                </span>
-                            </button>
-                        }
-                        @if (UserCtx.Can(p => p.ManageUsers))
-                        {
-                            <button type="button"
-                                    class="d-profile__user-card d-profile__user-card--add tv-focus"
-                                    @onclick="OnAddUserClick">
-                                <span class="d-profile__user-card-avatar d-profile__user-card-avatar--dashed">+</span>
-                                <span class="d-profile__user-card-name d-profile__user-card-name--dim">
-                                    @L["profile.add_user"]
-                                </span>
-                            </button>
-                        }
-                    </div>
+            @* ── SWITCH PROFILE block (v5.1 device-local) ──
+                 Lists only the profiles that have signed in on THIS device
+                 (server roster ∩ this device's registry). Tapping a card:
+                   • current user → no-op (disabled)
+                   • no device PIN → switch immediately
+                   • device PIN set → keypad, verified locally
+                 "+ Add account" signs another existing account into this
+                 device. Always shown — you're always on your own device. *@
+            <div class="d-profile__users-block">
+                <div class="d-profile__field-label">
+                    @(string.Format(L["profile.switch_user_label"], ServerReg.Current?.Name ?? "this server"))
                 </div>
-            }
+                <div class="d-profile__users-strip" role="list">
+                    @foreach (var p in _profiles)
+                    {
+                        var prof = p;
+                        var isMe = prof.User.Id == me.User.Id;
+                        <button type="button"
+                                class="@($"d-profile__user-card tv-focus {(isMe ? "is-me" : "")}")"
+                                role="listitem"
+                                title="@prof.User.Name"
+                                disabled="@(_switchBusy || isMe)"
+                                @onclick="@(() => OnUserCardClick(prof))">
+                            <span class="d-profile__user-card-avatar">
+                                <Avatar Name="@prof.User.Name" HueOverride="prof.User.AvatarHue"
+                                        ImagePath="@prof.User.AvatarPath" Size="md" />
+                                @if (prof.HasPin)
+                                {
+                                    <span class="d-profile__user-card-pin-badge" aria-label="PIN required">
+                                        <DIcon Name="lock" Size="9" />
+                                    </span>
+                                }
+                            </span>
+                            <span class="d-profile__user-card-name">@prof.User.Name</span>
+                            <span class="d-profile__user-card-meta">
+                                @if (isMe)
+                                {
+                                    <span>you</span>
+                                }
+                                else
+                                {
+                                    @prof.User.RoleName
+                                }
+                            </span>
+                        </button>
+                    }
+                    <button type="button"
+                            class="d-profile__user-card d-profile__user-card--add tv-focus"
+                            @onclick="OnAddAccountClick">
+                        <span class="d-profile__user-card-avatar d-profile__user-card-avatar--dashed">+</span>
+                        <span class="d-profile__user-card-name d-profile__user-card-name--dim">
+                            Add account
+                        </span>
+                    </button>
+                </div>
+            </div>
 
             <div class="d-profile__kv">
                 <span class="d-profile__kv-key">USERNAME</span>
@@ -761,6 +835,42 @@
                         <Btn Variant="primary" Size="sm" Loading="@_changePwBusy"
                              OnClick="SubmitChangePasswordAsync">Update password</Btn>
                         <Btn Variant="ghost" Size="sm" OnClick="@(() => _changePwOpen = false)">Cancel</Btn>
+                    </div>
+                </div>
+            }
+
+            @* ── PIN (device-local) ──────────────────────────────
+                 A 4-digit PIN locks fast-switching INTO this profile on THIS
+                 device (the switch-user picker asks for it when set). Stored +
+                 verified locally — it does NOT travel to the server or to your
+                 other devices. *@
+            <button type="button" class="d-profile__inline-btn tv-focus"
+                    @onclick="@(() => ToggleSetPin())">
+                <DIcon Name="lock" Size="13" />
+                @(_pinOpen ? "Cancel" : (_myHasDevicePin ? "Change or remove PIN (this device)" : "Set a PIN (this device)"))
+            </button>
+            @if (_pinOpen)
+            {
+                <div class="d-profile__inline-form">
+                    @if (!string.IsNullOrEmpty(_pinError))
+                    {
+                        <div class="d-profile__inline-error">@_pinError</div>
+                    }
+                    <label class="d-profile__field">
+                        <span class="d-profile__field-label">@(_myHasDevicePin ? "NEW PIN (4 DIGITS)" : "PIN (4 DIGITS)")</span>
+                        <input class="d-profile__inline-input" type="password"
+                               inputmode="numeric" autocomplete="off" maxlength="4"
+                               value="@_pinValue"
+                               @oninput="@((ChangeEventArgs e) => _pinValue = DigitsOnly(e.Value?.ToString(), 4))" />
+                    </label>
+                    <div class="d-profile__inline-actions">
+                        <Btn Variant="primary" Size="sm" Loading="@_pinBusy" OnClick="SubmitSetPinAsync">
+                            @(_myHasDevicePin ? "Update PIN" : "Set PIN")
+                        </Btn>
+                        @if (_myHasDevicePin)
+                        {
+                            <Btn Variant="ghost" Size="sm" OnClick="RemovePinAsync">Remove PIN</Btn>
+                        }
                     </div>
                 </div>
             }
@@ -919,7 +1029,7 @@
     // ─── v5 PIN per-user-per-device: switch-user helpers ──────────────
     //
     // Lifecycle:
-    //   • drawer opens → OnAfterRender fetches /api/users (no-op if 403).
+    //   • drawer opens → OnAfterRender fetches /api/auth/roster (any user).
     //   • user taps card →
     //         current user → ignored (button is disabled but defence in depth)
     //         no PIN       → SwitchUserAsync(target, null) directly
@@ -928,17 +1038,16 @@
     //                       PIN, set _keypadError and let the keypad shake.
     //   • success → UserCtx.RefreshMeAsync + close drawer + reload root.
     //
-    // We keep _users locally rather than calling GetUsersAsync each click —
-    // the roster doesn't churn while the drawer is open. Reloaded on every
-    // drawer open via OnParametersSet so a freshly-created user appears
-    // after the admin returns from /server.
-
-    private UserDto[] _users = Array.Empty<UserDto>();
+    // Device-local switch strip: the server roster intersected with the
+    // profiles that have signed in on THIS device. Reloaded on every drawer
+    // open. The PIN lives on the device (DeviceProfilesState), not the account.
+    private sealed record Prof(RosterUserDto User, bool HasPin);
+    private List<Prof> _profiles = new();
     private bool _usersLoaded;
     private bool _switchBusy;
 
     private bool _keypadOpen;
-    private UserDto? _keypadTarget;
+    private RosterUserDto? _keypadTarget;
     private string? _keypadError;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -947,23 +1056,11 @@
         // so the Appearance tab's preview reflects the saved choice.
         if (firstRender) await LoadPlayerStyleAsync();
 
-        // Refresh the roster every time the drawer opens (not just first
-        // render). The cheap branch — already loaded and drawer wasn't
-        // re-opened — is the common case.
+        // Refresh the device-local profile strip every time the drawer opens.
         if (IsOpen && !_usersLoaded)
         {
             _usersLoaded = true;
-            try
-            {
-                _users = await Api.GetUsersAsync();
-            }
-            catch
-            {
-                // 403 from non-admin viewers, or transport failure — hide
-                // the strip entirely rather than show a broken card. Stays
-                // empty until the drawer is closed and re-opened.
-                _users = Array.Empty<UserDto>();
-            }
+            await LoadProfilesAsync();
             StateHasChanged();
         }
         else if (!IsOpen && _usersLoaded)
@@ -973,27 +1070,57 @@
         }
     }
 
-    private async Task OnUserCardClick(UserDto target)
+    /// <summary>Build the strip = server roster ∩ this device's profiles, with
+    /// the device-local PIN flag attached to each.</summary>
+    private async Task LoadProfilesAsync()
     {
-        if (UserCtx.Me is not { } me || target.Id == me.User.Id) return;
+        try
+        {
+            if (UserCtx.Me is { } cur) await DeviceProfiles.EnsureAsync(cur.User.Id);
+            var deviceIds = await DeviceProfiles.GetIdsAsync();
+            var roster = await Api.GetRosterAsync();
+            var list = new List<Prof>();
+            foreach (var u in roster)
+            {
+                if (!deviceIds.Contains(u.Id)) continue;
+                list.Add(new Prof(u, await DeviceProfiles.HasPinAsync(u.Id)));
+            }
+            _profiles = list;
+            _myHasDevicePin = UserCtx.Me is { } m && await DeviceProfiles.HasPinAsync(m.User.Id);
+        }
+        catch
+        {
+            // Transport failure — leave whatever we had rather than blanking.
+        }
+    }
+
+    private async Task OnUserCardClick(Prof prof)
+    {
+        if (UserCtx.Me is not { } me || prof.User.Id == me.User.Id) return;
         if (_switchBusy) return;
 
-        if (target.HasPin)
+        if (prof.HasPin)
         {
-            _keypadTarget = target;
+            // Device-local PIN — prompt + verify on the CLIENT before switching.
+            _keypadTarget = prof.User;
             _keypadError = null;
             _keypadOpen  = true;
             return;
         }
-
-        // No PIN configured on the target — switch immediately.
-        await TrySwitchAsync(target, pin: null);
+        await TrySwitchAsync(prof.User);
     }
 
     private async Task OnKeypadSubmit(string pin)
     {
-        if (_keypadTarget is null) return;
-        await TrySwitchAsync(_keypadTarget, pin);
+        if (_keypadTarget is not { } t) return;
+        if (!await DeviceProfiles.VerifyPinAsync(t.Id, pin))
+        {
+            // Wrong PIN — keypad shakes + clears via its OnParametersSet.
+            _keypadError = L["pin.invalid"];
+            StateHasChanged();
+            return;
+        }
+        await TrySwitchAsync(t);
     }
 
     private void OnKeypadCancel()
@@ -1003,42 +1130,40 @@
         _keypadError = null;
     }
 
-    private async Task TrySwitchAsync(UserDto target, string? pin)
+    private async Task TrySwitchAsync(RosterUserDto target)
     {
         _switchBusy = true;
         StateHasChanged();
         try
         {
-            var newMe = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, pin));
+            // Server no longer gates by PIN — the device verified it above.
+            var newMe = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, null));
             if (newMe is null)
             {
-                // Wrong PIN — the keypad shakes via OnParametersSet reading
-                // a fresh Error value. Stay on the dialog so the user can
-                // retype without dismissing.
-                _keypadError = L["pin.invalid"];
+                _keypadError = "Couldn't switch — try again.";
                 _switchBusy = false;
                 StateHasChanged();
                 return;
             }
 
             // Success: refresh the global me cache so the topbar + sidebar
-            // re-paint with the new identity. Drop the registered users
-            // cache so the next open reflects updated LastSeenAt etc.
+            // re-paint with the new identity; ensure the target is registered
+            // on this device.
             await UserCtx.RefreshMeAsync();
+            await DeviceProfiles.EnsureAsync(target.Id);
+            UserCtx.SwitchGatePassed = true;
             _keypadOpen = false;
             _keypadTarget = null;
             _keypadError = null;
-            _users = Array.Empty<UserDto>();
+            _profiles = new();
             _usersLoaded = false;
             await Close();
-            // Force a hard nav to / so any page-scoped state (folder scope,
-            // hue, language pack) re-resolves against the new user's
-            // preferences. forceLoad:false keeps WASM happy.
+            // Soft nav to / so page-scoped state re-resolves for the new user.
             Nav.NavigateTo("/", replace: true);
         }
         catch
         {
-            _keypadError = L["pin.invalid"];
+            _keypadError = "Couldn't switch — try again.";
         }
         finally
         {
@@ -1060,6 +1185,18 @@
     {
         await Close();
         Nav.NavigateTo("/server?panel=users&openForm=user");
+    }
+
+    /// <summary>Add another EXISTING account to this device by signing in with
+    /// its own credentials. Available to everyone (you prove the account's
+    /// password). After login that account joins this device's profile strip,
+    /// so you can fast-switch into it later (with its device-local PIN if set).
+    /// This is distinct from <see cref="OnAddUserClick"/>, which is the admin
+    /// "create a brand-new account" deep-link.</summary>
+    private async Task OnAddAccountClick()
+    {
+        await Close();
+        Nav.NavigateTo("/login");
     }
 
     // ─── Servers tab ────────────────────────────────────────────────

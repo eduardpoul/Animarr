@@ -37,6 +37,14 @@ public sealed class UserContextState
     /// chrome before the cookie probe completes.</summary>
     public bool Loaded { get; private set; }
 
+    /// <summary>Latch for the native "who's watching" startup gate. False on a
+    /// fresh app launch; MainLayout flips it true the first time it evaluates
+    /// the gate (and an explicit login sets it too) so the profile picker is
+    /// shown at most once per app session — never re-prompting after the user
+    /// has already identified themselves. A cold relaunch resets it (the field
+    /// lives only for the app's process lifetime). v5.</summary>
+    public bool SwitchGatePassed { get; set; }
+
     public bool IsAuthenticated => Me is not null;
     public bool Can(Func<PermissionsDto, bool> selector) =>
         Me is not null && selector(Me.Permissions);
@@ -88,7 +96,7 @@ public sealed class UserContextState
                 catch { Preferences = null; }
                 AuthStatus = AuthStatus is null
                     ? new AuthStatusDto(false, true)
-                    : new AuthStatusDto(AuthStatus.SetupRequired, true);
+                    : new AuthStatusDto(AuthStatus.SetupRequired, true, AuthStatus.UserCount);
             }
         }
         catch { }
@@ -101,7 +109,7 @@ public sealed class UserContextState
         Me = null;
         Preferences = null;
         if (AuthStatus is not null)
-            AuthStatus = new AuthStatusDto(AuthStatus.SetupRequired, false);
+            AuthStatus = new AuthStatusDto(AuthStatus.SetupRequired, false, AuthStatus.UserCount);
         OnChange?.Invoke();
     }
 

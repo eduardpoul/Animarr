@@ -113,7 +113,10 @@
          WebView shares the device network, so the CDN loads inside the
          native app just like in a browser. -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
+    <!-- Pinned to 5.4.0 — floating artplayer@5 shipped a newer 5.x that
+         tightened option validation (option.subtitle must be an object) and
+         broke playback on media without subtitles. Pin to avoid CDN drift. -->
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js"></script>
 
     <!-- v5 Phase 7: html5-qrcode for TV-pairing QR scan. Same CDN as WASM. -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>

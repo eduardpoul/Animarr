@@ -161,6 +161,10 @@ public interface IAnimarrApiClient
     Task<UserDto?>          LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task                    LogoutAsync(CancellationToken ct = default);
     Task<UserDto?>          SetupInitialMasterAsync(SetupRequest request, CancellationToken ct = default);
+    /// <summary>Minimal roster of every local profile for the switch-user /
+    /// "who's watching" picker. Readable by ANY authenticated user (that's how
+    /// non-admins switch profiles); exposes no username/email. v5.</summary>
+    Task<RosterUserDto[]>   GetRosterAsync(CancellationToken ct = default);
 
     // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
     /// <summary>TV mints a fresh 6-char code + QR payload. Anonymous —

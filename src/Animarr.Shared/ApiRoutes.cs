@@ -164,6 +164,11 @@ public static class ApiRoutes
     /// the target user's PIN when their <c>HasPin</c> is true. v5 per-user-
     /// per-device fast switch.</summary>
     public const string AuthSwitchUser = "/api/auth/switch-user";
+    /// <summary>GET — minimal roster (<c>RosterUserDto[]</c>) of every local
+    /// user for the switch-user / "who's watching" picker. Readable by ANY
+    /// authenticated user (that's how non-admins switch profiles); carries no
+    /// username/email. v5.</summary>
+    public const string AuthRoster   = "/api/auth/roster";
     public const string Me           = "/api/me";
     public const string MePreferences = "/api/me/preferences";
     public const string MePassword   = "/api/me/password";

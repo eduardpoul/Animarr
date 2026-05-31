@@ -11,6 +11,7 @@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
+@inject DeviceProfilesState DeviceProfiles
 
 <PageTitle>Animarr — Set up your master account</PageTitle>
 
@@ -109,6 +110,8 @@
                 return;
             }
             await UserCtx.RefreshMeAsync();
+            try { await DeviceProfiles.EnsureAsync(created.Id); } catch { }
+            UserCtx.SwitchGatePassed = true;
             Nav.NavigateTo("/", replace: true);
         }
         catch (Exception ex)

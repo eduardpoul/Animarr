@@ -27,6 +27,7 @@
 @inject LocalizationService Loc
 @inject ServerAddressProvider ServerAddr
 @inject ServerRegistryState ServerReg
+@inject DeviceProfilesState DeviceProfiles
 
 @using Microsoft.AspNetCore.SignalR.Client
 
@@ -249,6 +250,23 @@
 
         if (UserCtx.IsAuthenticated)
         {
+            // Register the signed-in account on THIS device, then run the
+            // DEVICE-LOCAL "who's watching" startup gate: native app + ≥2
+            // profiles that have actually signed in on this device → show the
+            // picker once per app session. Web stays frictionless (IsBrowser →
+            // skip); a personal phone with a single account skips it too
+            // (count < 2). Soft-nav so the latch survives the hop into /switch.
+            await DeviceProfiles.EnsureAsync(UserCtx.Me!.User.Id);
+            if (!UserCtx.SwitchGatePassed)
+            {
+                UserCtx.SwitchGatePassed = true;
+                if (!OperatingSystem.IsBrowser() && (await DeviceProfiles.GetIdsAsync()).Count >= 2)
+                {
+                    Nav.NavigateTo("/switch", replace: true);
+                    return;
+                }
+            }
+
             await ApplyAccentHueToDomAsync();
             await StartBackdropAsync();
             await LoadFolderNamesAsync();
