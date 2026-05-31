@@ -59,7 +59,11 @@
 
     <!-- Artplayer + hls.js. -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/artplayer@5/dist/artplayer.js"></script>
+    <!-- Pinned to 5.4.0 (the version Animarr was built/tested against). The
+         floating `artplayer@5` tag silently shipped a newer 5.x that tightened
+         option validation (option.subtitle must be an object) and broke
+         playback on media without subtitles — pin to avoid surprise CDN drift. -->
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js"></script>
 
     <!-- v5 Phase 7: html5-qrcode for the Login → "Scan QR from TV" modal.
          Loaded on every page so the Pair flow works in either WASM or MAUI. -->

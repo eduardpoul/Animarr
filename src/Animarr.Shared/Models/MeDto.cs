@@ -21,4 +21,9 @@ public sealed record AuthStatusDto(
     /// <summary>True iff the <c>Users</c> table is empty — first-run wizard required.</summary>
     bool SetupRequired,
     /// <summary>True iff the current request carries a valid auth cookie.</summary>
-    bool Authenticated);
+    bool Authenticated,
+    /// <summary>Total number of user accounts on the server. Drives the native
+    /// "who's watching" startup gate (shown only when ≥2 profiles exist). 0 on
+    /// anonymous / unreachable probes. Trailing default keeps older 2-arg
+    /// constructions compiling. v5.</summary>
+    int UserCount = 0);

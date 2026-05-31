@@ -724,6 +724,10 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
     }
 
+    public async Task<RosterUserDto[]> GetRosterAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<RosterUserDto[]>(ApiRoutes.AuthRoster, JsonOpts, ct))
+            ?? Array.Empty<RosterUserDto>();
+
     // ─── Per-user favorites + continue watching (v5) ─────────────────────
 
     public async Task AddFavoriteAsync(Guid mediaItemId, CancellationToken ct = default)

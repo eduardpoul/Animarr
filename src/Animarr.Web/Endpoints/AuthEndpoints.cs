@@ -23,12 +23,23 @@ internal static class AuthEndpoints
         app.MapGet(ApiRoutes.AuthStatus, async (
             AuthService auth,
             IUserContext user,
+            IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
         {
             var setupRequired = await auth.IsSetupRequiredAsync(ct);
+            // Profile count drives the native "who's watching" startup gate
+            // (shown only when ≥2 profiles exist). Cheap COUNT; skipped while
+            // setup is still pending (no users yet).
+            int userCount = 0;
+            if (!setupRequired)
+            {
+                await using var db = await dbFactory.CreateDbContextAsync(ct);
+                userCount = await db.Users.CountAsync(ct);
+            }
             return Results.Ok(new AuthStatusDto(
                 SetupRequired: setupRequired,
-                Authenticated: user.IsAuthenticated));
+                Authenticated: user.IsAuthenticated,
+                UserCount: userCount));
         }).AllowAnonymous();
 
         // ─── First-run Setup ─────────────────────────────────────────────
@@ -306,15 +317,6 @@ internal static class AuthEndpoints
             CancellationToken ct) =>
         {
             if (userCtx.CurrentUserId is null) return Results.Unauthorized();
-            // No-op when target == current. Don't bother re-issuing the cookie.
-            if (userCtx.CurrentUserId == req.UserId)
-            {
-                await using var db1 = await dbFactory.CreateDbContextAsync(ct);
-                var self = await db1.Users
-                    .Include(u => u.Role)
-                    .FirstOrDefaultAsync(u => u.Id == req.UserId, ct);
-                return self is null ? Results.Unauthorized() : Results.Ok(AuthService.ToDto(self));
-            }
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var target = await db.Users
@@ -322,13 +324,14 @@ internal static class AuthEndpoints
                 .FirstOrDefaultAsync(u => u.Id == req.UserId, ct);
             if (target is null) return Results.NotFound(new { error = "User not found" });
 
-            // PIN check — only when the target opted in. Use Unauthorized
-            // (401) so the keypad UI can shake + clear and let the user retry.
-            if (!string.IsNullOrEmpty(target.PinHash))
-            {
-                if (string.IsNullOrEmpty(req.Pin) || !AuthService.VerifyPin(req.Pin, target.PinHash))
-                    return Results.Json(new { error = "Invalid PIN" }, statusCode: StatusCodes.Status401Unauthorized);
-            }
+            // No server-side PIN gate (v5.1): fast-switching is protected on the
+            // DEVICE — a device-local PIN, verified client-side — not as a global
+            // account property. The caller is already authenticated on a trusted
+            // household device, so switching just swaps the cookie. req.Pin is
+            // accepted for wire-compat but ignored. (target == current is a
+            // harmless no-op: the cookie is already that user.)
+            if (userCtx.CurrentUserId == req.UserId)
+                return Results.Ok(AuthService.ToDto(target));
 
             // Reset LastSeenAt opportunistically so the strip's "last active"
             // hint stays useful across switches.
@@ -343,6 +346,34 @@ internal static class AuthEndpoints
             await auth.SignOutCookieAsync(http);
             await auth.SignInCookieAsync(http, target);
             return Results.Ok(AuthService.ToDto(target));
+        }).RequireAuthorization();
+
+        // ─── Roster (any authenticated user) ─────────────────────────────
+        // The switch-user picker + native "who's watching" gate need the list
+        // of local profiles, and a NON-admin must be able to switch too — so
+        // unlike GET /api/users (ManageUsers-only) this is readable by anyone
+        // signed in. It returns a slim RosterUserDto with NO username/email —
+        // just what the picker paints (name, role, avatar, PIN flag).
+        app.MapGet(ApiRoutes.AuthRoster, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // Materialise then project in memory (mirrors UsersEndpoints) so we
+            // never lean on EF translating the role join / PIN flag.
+            var rows = await db.Users
+                .AsNoTracking()
+                .Include(u => u.Role)
+                .OrderBy(u => u.Name)
+                .ToListAsync(ct);
+            var roster = rows.Select(u => new RosterUserDto(
+                u.Id,
+                u.Name,
+                u.Role?.Name ?? "",
+                u.AvatarHue,
+                u.AvatarPath,
+                !string.IsNullOrEmpty(u.PinHash))).ToArray();
+            return Results.Ok(roster);
         }).RequireAuthorization();
 
         // ─── Per-user favorites (v5) ─────────────────────────────────────

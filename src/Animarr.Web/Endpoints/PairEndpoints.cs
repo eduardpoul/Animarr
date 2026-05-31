@@ -24,8 +24,11 @@ namespace Animarr.Web.Endpoints;
 /// The next /pair/poll response carries Set-Cookie for the same identity, so
 /// when the TV refreshes / it's authenticated.
 ///
-/// Storage: <see cref="IMemoryCache"/> — codes expire after 5 minutes and the
+/// Storage: <see cref="IMemoryCache"/> — codes expire after 10 minutes and the
 /// data is tiny (one record per pending pair). Single-server only by design.
+/// The TV rotates its code ~1 minute before this TTL (see Pair.razor) so an
+/// on-screen code is never stale; the rotated-out code stays valid for the
+/// remaining overlap, so a code someone just read still confirms.
 /// </summary>
 internal static class PairEndpoints
 {
@@ -33,15 +36,16 @@ internal static class PairEndpoints
     /// other in-process cache consumers.</summary>
     private const string CacheKeyPrefix = "pair:";
 
-    /// <summary>How long a generated code stays valid. After this the TV needs
-    /// to click "Refresh" (or remount) to mint a new one.</summary>
-    private static readonly TimeSpan PairTtl = TimeSpan.FromMinutes(5);
+    /// <summary>How long a generated code stays valid. The TV mints a fresh
+    /// code ~1 minute before this elapses, so the displayed code is always
+    /// live; this TTL is the hard cap for a code nobody refreshed.</summary>
+    private static readonly TimeSpan PairTtl = TimeSpan.FromMinutes(10);
 
     /// <summary>Code alphabet — digits only. We used to ship a 31-char
     /// alphanumeric alphabet but the phone-side confirm UX wants a numeric
     /// keyboard (much less fiddly than switching keyboards mid-code on
     /// mobile), so the codespace narrowed to 0-9. Six digits = 1M permutations
-    /// with a 5-minute TTL is plenty for a LAN-scoped pairing flow.</summary>
+    /// with a 10-minute TTL is plenty for a LAN-scoped pairing flow.</summary>
     private const string CodeAlphabet = "0123456789";
 
     public static IEndpointRouteBuilder MapPairEndpoints(this IEndpointRouteBuilder app)
@@ -205,7 +209,7 @@ internal static class PairEndpoints
 
     /// <summary>
     /// 6-digit numeric code, stored canonically without any separators.
-    /// 10⁶ permutations × 5-minute TTL is well above brute-force budget on a
+    /// 10⁶ permutations × 10-minute TTL is well above brute-force budget on a
     /// LAN-scoped pairing flow. The TV renders the digits with a soft
     /// "123 456" or "123-456" presentation purely for legibility.
     /// </summary>

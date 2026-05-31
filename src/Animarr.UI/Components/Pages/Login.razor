@@ -14,6 +14,7 @@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
+@inject DeviceProfilesState DeviceProfiles
 @inject IJSRuntime JS
 
 <PageTitle>Animarr — Sign in</PageTitle>
@@ -126,6 +127,10 @@
     private bool _qrModalOpen;
     private string? _qrStatus;
     private string? _toast;
+    // The QR scanner calls OnQrDecoded on every decoded frame; latch so only
+    // the first confirm fires (the next would hit the consumed code → 410 →
+    // a bogus "code expired" right after the TV actually signed in).
+    private bool _confirmingPair;
     private DotNetObjectReference<Login>? _selfRef;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -138,13 +143,16 @@
             return;
         }
 
-        // TV remote can't realistically type usernames + passwords. When the
-        // platform is a TV (html.tv-mode is set by the MAUI host's startup
-        // script or by the native IsTelevision DotNet check) AND the user
-        // isn't already authenticated, send them straight to /pair — they
-        // scan the QR with their phone and the TV's cookie lands via the
-        // pair poll loop. Stays on /login for non-TV / already-authed cases.
-        if (!UserCtx.IsAuthenticated)
+        // A TV remote can't realistically type usernames + passwords, so a TV
+        // is sent straight to /pair (scan the QR / read the code on a phone).
+        // BUT only the *native TV app* should auto-redirect — a plain WEB
+        // BROWSER must always get the username/password form (it has a keyboard),
+        // even if it happens to carry a stray `tv-mode` class (e.g. a leftover
+        // localStorage override from testing TV mode). OperatingSystem.IsBrowser()
+        // is true on the WASM web client and false in the native MAUI app, so we
+        // gate the redirect on "native AND tv-mode". The login form already
+        // offers a "Sign in via phone QR" button for anyone who'd rather pair.
+        if (!UserCtx.IsAuthenticated && !OperatingSystem.IsBrowser())
         {
             try
             {
@@ -178,6 +186,11 @@
                 return;
             }
             await UserCtx.RefreshMeAsync();
+            // Register this account on the device so it joins the switch picker.
+            try { await DeviceProfiles.EnsureAsync(user.Id); } catch { }
+            // Explicit sign-in already identified the user — don't bounce them
+            // through the native "who's watching" picker on the next render.
+            UserCtx.SwitchGatePassed = true;
             Nav.NavigateTo("/", replace: true);
         }
         catch (Exception ex)
@@ -220,6 +233,7 @@
     public async Task OnQrDecoded(string payload)
     {
         if (string.IsNullOrWhiteSpace(payload)) return;
+        if (_confirmingPair) return;            // ignore the scanner's repeat decodes
         var code = ExtractCode(payload);
         if (code is null)
         {
@@ -228,6 +242,7 @@
             return;
         }
 
+        _confirmingPair = true;
         _qrStatus = "Confirming…";
         await InvokeAsync(StateHasChanged);
 
@@ -237,6 +252,7 @@
             if (!ok)
             {
                 _qrStatus = "Code expired or unknown";
+                _confirmingPair = false;        // let a fresh code be scanned
                 await InvokeAsync(StateHasChanged);
                 return;
             }

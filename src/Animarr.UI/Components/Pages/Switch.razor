@@ -1,0 +1,187 @@
+@*
+    Switch — the device-local "who's watching?" gate (v5.1).
+
+    Shown on NATIVE app launch (TV + phone) when ≥2 profiles have signed in on
+    THIS device (MainLayout's boot gate redirects here once per app session).
+    The roster is the SERVER's user list intersected with this device's local
+    profile registry (DeviceProfilesState) — so it only lists accounts that
+    actually signed in here, NOT every account on the server.
+
+    PIN is device-local: the lock badge + the keypad check read/verify the PIN
+    stored on THIS device (never the server). A profile with no device PIN
+    switches straight through.
+
+    Auth gate: signed-in only (we switch FROM the current cookie). With <2
+    device profiles there's nothing to choose → go straight home.
+*@
+
+@page "/switch"
+@layout AuthLayout
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject DeviceProfilesState DeviceProfiles
+
+<PageTitle>Animarr — Who's watching</PageTitle>
+
+<div class="d-who">
+    @if (_pinTarget is { } pt)
+    {
+        @* Device-local PIN entry for the chosen profile. *@
+        <div class="d-who__pin">
+            <PinKeypad UserName="@pt.User.Name"
+                       Error="@_pinError"
+                       OnSubmit="OnPinSubmit"
+                       OnCancel="OnPinCancel" />
+        </div>
+    }
+    else
+    {
+        <header class="d-who__head">
+            <BrandMark Size="34" />
+            <h1 class="d-who__title">Who's watching?</h1>
+        </header>
+
+        @if (_loading)
+        {
+            <div class="d-who__loading"><Spinner Size="26" /></div>
+        }
+        else
+        {
+            <div class="d-who__grid" role="list">
+                @foreach (var p in _profiles)
+                {
+                    var prof = p;
+                    <button type="button" class="d-who__card tv-focus" role="listitem"
+                            disabled="@_busy" title="@prof.User.Name"
+                            @onclick="@(() => OnPick(prof))">
+                        <span class="d-who__avatar">
+                            <Avatar Name="@prof.User.Name" HueOverride="prof.User.AvatarHue"
+                                    ImagePath="@prof.User.AvatarPath" Size="lg" />
+                            @if (prof.HasPin)
+                            {
+                                <span class="d-who__pin-badge" aria-label="PIN required">
+                                    <DIcon Name="lock" Size="11" />
+                                </span>
+                            }
+                        </span>
+                        <span class="d-who__name">@prof.User.Name</span>
+                        <span class="d-who__role">
+                            @(prof.User.Id == _meId ? "you" : prof.User.RoleName)
+                        </span>
+                    </button>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private sealed record Profile(RosterUserDto User, bool HasPin);
+
+    private List<Profile> _profiles = new();
+    private bool _loading = true;
+    private bool _busy;
+    private Profile? _pinTarget;
+    private string? _pinError;
+    private Guid _meId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+        if (!UserCtx.IsAuthenticated)
+        {
+            Nav.NavigateTo("/welcome", replace: true);
+            return;
+        }
+        UserCtx.SwitchGatePassed = true;
+        _meId = UserCtx.Me!.User.Id;
+        await DeviceProfiles.EnsureAsync(_meId);   // current user is always on this device
+
+        try
+        {
+            var deviceIds = await DeviceProfiles.GetIdsAsync();
+            var roster = await Api.GetRosterAsync();
+            var list = new List<Profile>();
+            foreach (var u in roster)
+            {
+                if (!deviceIds.Contains(u.Id)) continue;
+                list.Add(new Profile(u, await DeviceProfiles.HasPinAsync(u.Id)));
+            }
+            _profiles = list;
+        }
+        catch { _profiles = new(); }
+        _loading = false;
+
+        // Nothing to choose between — skip straight to the catalog.
+        if (_profiles.Count < 2)
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnPick(Profile prof)
+    {
+        if (_busy) return;
+        if (prof.HasPin)
+        {
+            _pinTarget = prof;
+            _pinError = null;
+            StateHasChanged();
+            return;
+        }
+        await SwitchAsync(prof.User.Id);
+    }
+
+    private async Task OnPinSubmit(string pin)
+    {
+        if (_pinTarget is not { } pt) return;
+        if (!await DeviceProfiles.VerifyPinAsync(pt.User.Id, pin))
+        {
+            _pinError = L["pin.invalid"];   // wrong PIN — keypad shakes + clears
+            StateHasChanged();
+            return;
+        }
+        await SwitchAsync(pt.User.Id);
+    }
+
+    private void OnPinCancel()
+    {
+        _pinTarget = null;
+        _pinError = null;
+        StateHasChanged();
+    }
+
+    private async Task SwitchAsync(Guid userId)
+    {
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var me = await Api.SwitchUserAsync(new SwitchUserRequest(userId, null));
+            if (me is null)
+            {
+                _pinError = "Couldn't switch — try again.";
+                _busy = false;
+                StateHasChanged();
+                return;
+            }
+            await UserCtx.RefreshMeAsync();
+            await DeviceProfiles.EnsureAsync(userId);
+            UserCtx.SwitchGatePassed = true;
+            // Soft nav so the latch survives — a hard reload would reset it and
+            // bounce us back to /switch.
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            _pinError = "Couldn't switch — try again.";
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+}

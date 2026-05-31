@@ -150,12 +150,44 @@
 
             _pollCts = new CancellationTokenSource();
             _ = PollLoopAsync(_init.Code, _pollCts.Token);
+            _ = ScheduleRefreshAsync(_init.ExpiresAt, _pollCts.Token);
         }
         catch
         {
             _loading = false;
             _expired = true;
             StateHasChanged();
+        }
+    }
+
+    /// <summary>Mint a fresh code ~1 minute before the current one expires, so
+    /// the code on screen is always live (the user never lands on the "expired"
+    /// panel mid-scan). The OLD code's poll loop keeps running until that code
+    /// actually expires, so a code someone read just before the rotation still
+    /// confirms during the ~1-minute overlap. Every loop shares <c>_pollCts</c>,
+    /// so a manual "NEW CODE" / dispose cancels them all.</summary>
+    private async Task ScheduleRefreshAsync(DateTime expiresAt, CancellationToken ct)
+    {
+        // Refresh one minute before the server-side TTL elapses. Clock skew on
+        // a LAN is negligible at this granularity; the floor guards weird cases.
+        var delay = expiresAt - DateTime.UtcNow - TimeSpan.FromMinutes(1);
+        if (delay < TimeSpan.FromSeconds(10)) delay = TimeSpan.FromSeconds(10);
+        try { await Task.Delay(delay, ct); }
+        catch (TaskCanceledException) { return; }
+        if (ct.IsCancellationRequested || _expired) return;
+
+        try
+        {
+            var fresh = await Api.InitPairAsync(new PairInitRequest(_deviceName));
+            _init = fresh;
+            await InvokeAsync(StateHasChanged);              // swap displayed QR + digits
+            _ = PollLoopAsync(fresh.Code, ct);               // poll the new code (same CTS)
+            _ = ScheduleRefreshAsync(fresh.ExpiresAt, ct);   // chain the next rotation
+        }
+        catch
+        {
+            // Network blip — leave the old code/poll alive; it'll surface
+            // "expired" at its TTL and the user can press NEW CODE.
         }
     }
 
@@ -184,16 +216,22 @@
                 }
                 if (poll.Status == "expired")
                 {
-                    _expired = true;
-                    await InvokeAsync(StateHasChanged);
+                    // Only surface the "expired" panel when THIS is still the
+                    // code on screen. A rotated-out code (we minted a fresh one
+                    // ~1 min early) just exits quietly — its overlap is over.
+                    if (code == _init?.Code)
+                    {
+                        _expired = true;
+                        await InvokeAsync(StateHasChanged);
+                    }
                     return;
                 }
             }
             catch (TaskCanceledException) { return; }
             catch
             {
-                // Network blip — keep polling. The 5-minute TTL guarantees
-                // we won't loop forever.
+                // Network blip — keep polling. The 10-minute TTL + 1-min-early
+                // rotation guarantee we won't loop forever.
             }
         }
     }

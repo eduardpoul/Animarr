@@ -1903,6 +1903,10 @@
             theme: accentThemeColor(),
             lang: 'en',
             moreVideoAttr: { crossorigin: 'anonymous' },
+            // MUST be an object — newer Artplayer 5.x validates `option.subtitle`
+            // and throws "require 'object' type, but got 'undefined'" when it's
+            // undefined (i.e. media with NO subtitle tracks). Use {} for the
+            // no-subtitle case instead of undefined.
             subtitle: subtitleList.length > 0 ? {
                 url: (subtitleList.find(s => s.default) || subtitleList[0]).url,
                 // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
@@ -1912,7 +1916,7 @@
                 type: 'vtt',
                 encoding: 'utf-8',
                 escape: false,
-            } : undefined,
+            } : {},
             layers: [{
                 name: 'animarr-hud',
                 html: buildHudHtml(stylePref),

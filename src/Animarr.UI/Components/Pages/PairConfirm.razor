@@ -118,6 +118,13 @@
     private string? _status;
     private string? _toast;
     private bool _submitting;
+    // Latches that kill the "code expired right after it worked" bug: the QR
+    // scanner fires OnQrDecoded on every decoded frame (and manual submit can
+    // double-fire), so the first confirm succeeds and the next hits a now-
+    // consumed code → 410. _confirming blocks a second in-flight confirm;
+    // _paired blocks any further attempt once one has succeeded.
+    private bool _confirming;
+    private bool _paired;
     private bool _scannerStarted;
     private DotNetObjectReference<PairConfirm>? _selfRef;
 
@@ -229,6 +236,11 @@
 
     private async Task SubmitCodeAsync(string code)
     {
+        // One confirm only — ignore the scanner's repeat decodes and any
+        // double submit. Without this latch the second attempt hits the just-
+        // consumed code (410) and showed a bogus "expired" after success.
+        if (_paired || _confirming) return;
+        _confirming = true;
         _status = "Confirming…";
         await InvokeAsync(StateHasChanged);
         try
@@ -237,9 +249,11 @@
             if (!ok)
             {
                 _status = "Code expired or unknown — refresh the TV and try again.";
+                _confirming = false;   // allow a retry with a fresh code
                 await InvokeAsync(StateHasChanged);
                 return;
             }
+            _paired = true;            // latch success — drop any further decodes
             // Stop the scanner so the camera light goes out immediately, then
             // bounce back to the catalog so the user knows we're done.
             try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
@@ -254,6 +268,7 @@
         catch (Exception ex)
         {
             _status = $"Confirm failed: {ex.Message}";
+            _confirming = false;   // transient failure — let the user retry
             await InvokeAsync(StateHasChanged);
         }
     }

@@ -41,6 +41,10 @@ public static class AnimarrUiServiceCollectionExtensions
     public static IServiceCollection AddAnimarrUiState(this IServiceCollection services)
     {
         services.AddScoped<UserContextState>();
+        // v5.1: device-local profile registry (which accounts have signed in on
+        // THIS device + their device-local PINs). Drives the switch-user picker
+        // and the "who's watching" startup gate.
+        services.AddScoped<DeviceProfilesState>();
         services.AddScoped<FolderJumpService>();
         // v5: category-strip selection state shared between TopBar (writer) and
         // Home.razor (reader). Replaces FolderJumpService for the primary
