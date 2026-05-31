@@ -1,31 +1,58 @@
 # Animarr
 
-**Animarr** is a self-hosted web app for organizing anime, donghua, films and series. It watches your media folders, identifies content via TMDB / MAL / IMDb, renames files according to configurable patterns, and includes a built-in BitTorrent client.
+**Animarr is a personal media library for your own collection of anime, donghua, films and series.** Point it at the folders where your files already live and it turns that pile of cryptically‑named downloads into a polished, browsable library — a wall of posters, fanart backdrops, Continue Watching, season and episode lists — that you actually *watch* from, in the browser, on your phone, or on the TV.
 
-## ⚡ AI is almost mandatory
+Think of it as your own streaming service over your own files: nothing moves on disk, but on screen you get covers, descriptions, ratings, episode grids and one‑click playback instead of a file manager.
 
-Animarr is built around an LLM as the **primary identification engine**, not as an optional add-on. The LLM extracts a canonical title and year out of messy folder/filename strings (pinyin, romaji, Cyrillic, scene release names) **before** the TMDB/MAL/IMDb search runs. Without it, identification of anything non‑English (most Chinese donghua, untranslated Japanese anime, transliterated Russian dubs) tends to fall apart — the title search hits noise instead of the right work.
+## Where the metadata comes from
 
-You can technically run Animarr without an LLM, and it will still match cleanly named English shows like `Breaking Bad (2008)`. For everything else, set up an LLM endpoint — it takes ~5 minutes and is by far the highest‑leverage configuration step. **Minimum recommended model:** `qwen2.5:1.5b` (1 GB RAM, runs comfortably CPU‑only). `qwen2.5:0.5b` works in a pinch but is too small to reliably handle CJK titles. See [AI / LLM setup](#ai--llm-setup) below.
+To turn a folder into a real catalog entry, Animarr identifies each title against three sources in parallel and cross‑checks them against each other:
+
+- **TMDB** — posters, backdrops, descriptions, seasons & episodes, ratings. The primary source for films and series.
+- **MAL** (MyAnimeList) — anime‑focused matching and episode counts.
+- **IMDb** — extra cross‑validation and a fallback when TMDB/MAL come up short.
+
+On top of that it pulls **anime opening/ending themes** from AnimeThemes.moe, and discovers **sideloaded dub / subtitle tracks** sitting next to your videos.
+
+## Why there's an LLM
+
+Real folder and file names are a mess — `[SubsPlease] Doupo.Cangqiong.S05.1080p`, pinyin, romaji, Cyrillic dub tags, scene‑release soup. A plain title search chokes on all of that. So Animarr puts a language model in front of the search to:
+
+1. **Read the real title and year** out of the noise and produce a clean, searchable name (e.g. a canonical English title for a Chinese or Japanese show).
+2. **Pick the right match** when the sources return several plausible candidates.
+3. **Place loose files into episodes** when their names don't follow any recognizable pattern.
+
+This is what makes non‑English content — most donghua, untranslated anime, transliterated Russian dubs — actually identify. Cleanly‑named English shows like `Breaking Bad (2008)` work fine without it.
+
+## Use it your way
+
+- **LLM: built‑in, external, or none.** Run the bundled **llama.cpp** model right inside the container (downloads once, CPU‑only by default, optional GPU) — no extra service to install. Or point Animarr at any **OpenAI‑compatible endpoint** (Ollama, LM Studio, Groq, OpenAI, …). Or skip the LLM entirely and rely on plain regex parsing for cleanly‑named files. See [AI / LLM setup](#ai--llm-setup).
+- **Watch anywhere.** A Docker **web app**, plus **native apps** for Android phone, **Android TV** (D‑pad / leanback) and Windows. The apps auto‑discover your server on the LAN and pair to the TV by QR code or a 6‑digit code.
+- **Get media in.** A built‑in **BitTorrent client** (magnet or `.torrent`) drops finished downloads straight into the right library folder.
+- **Safe by default.** Animarr **never renames or moves your files.** Every match updates the database only — your folder tree stays exactly as you laid it out.
 
 ## Features
 
-- **AI-driven identification** — LLM normalises the title, then cross-validates results across **TMDB**, **MAL** and **IMDb** in parallel. Confidence below the auto-apply threshold drops the entry into a **NeedsReview** banner with poster thumbnails + "Open source" links so you can pick the right match in one click.
-- **Folder monitoring** — watches one or more directories and auto-renames new files as they arrive, including subtitle pairing.
-- **Pattern engine** — regex-based naming rules with named capture groups (`season`, `episode`, `title`); global patterns plus per-folder overrides and exclusions.
-- **Media catalog** — poster grid with fanart backdrop slideshow, detail page with seasons, episodes, tags, and ratings.
-- **Section folders** — point Animarr at a root directory and it auto-imports each subdirectory as a separately-watched media folder. Flat sections (one video file per movie) are supported too.
-- **Torrent client** — built on MonoTorrent; add by magnet link or `.torrent` file, per-file priority, per-torrent speed limits (Mbps). Destination folder picker shows your **identified library titles** rather than raw on-disk names.
-- **Safe by default** — Animarr **never** renames folders on disk based on identification. All identification work updates DB associations only; your library tree stays exactly as you laid it out.
-- **Ignore rules** — glob masks (`*.nfo`, `fanart*`, …) that skip files from renaming; global or per-folder.
-- **Rename history** — full log with one-click revert per file.
-- **Recovery tools** — "Restore deleted" rebuilds the catalog after accidental cleanup; orphan FolderWatcher records (whose disk path is gone) are pruned automatically on every Rescan.
-- **Multi-language UI** — English and Russian, switchable in Settings.
-- **Persistent state** — SQLite database + MonoTorrent fastresume + image cache (lives in `/app/data/image-cache`, **never inside your media tree**) survive container restarts.
+- **AI‑driven identification** — LLM normalises the title, then cross‑validates across **TMDB**, **MAL** and **IMDb** in parallel. Matches below the auto‑apply threshold drop into a **Needs Review** banner with poster thumbnails + "open source" links so you pick the right one in a click.
+- **Built‑in LLM** — embedded llama.cpp server with a curated model catalog (Qwen2.5 0.5B/1.5B/3B, Llama 3.2 3B, or any custom Hugging Face GGUF). Downloads on demand, runs in‑container, optional Vulkan GPU offload. Or use any external OpenAI‑compatible endpoint.
+- **Never touches your files** — identification only updates DB associations; nothing on disk is renamed or moved.
+- **Smart episode resolution** — files are mapped to (season, episode) by a layered resolver: deterministic regex/path parsing → optional one‑click **Resolve with AI** for files that don't parse → manual per‑file override. Split‑season donghua (one absolute TMDB season spread across several disk folders) is handled with automatic season offsets.
+- **Media catalog** — poster grid with a fanart backdrop hero, **Continue Watching**, detail pages with seasons/episodes, ratings, tags and external links.
+- **Categories** — items are auto‑classified by the LLM at identification time into category chips on the home screen; you can pin categories manually per title.
+- **Full‑text search** — instant client‑side filter across title / original / English / CJK names.
+- **Theme music** — fetches the anime OP/ED from [AnimeThemes.moe](https://animethemes.moe) and plays it on the detail page (per‑user opt‑in + volume).
+- **External audio / subtitle tracks** — discovers sideloaded dubs and subtitle files (`.mka`, `.srt`, `.ass`) sitting next to your video and offers them alongside the embedded tracks.
+- **Section folders** — point Animarr at a root directory and each subfolder is auto‑imported as a separately‑watched media folder. **Flat sections** (one video file per movie, no subfolder) are supported too.
+- **Torrent client** — MonoTorrent‑based: add by magnet or `.torrent`, per‑file priority (incl. skip), per‑torrent + global speed limits (Mbps), create‑subfolder, flatten subfolders, strip/rename the root folder. The destination picker shows your **identified library titles**, not raw on‑disk names.
+- **Native apps** — Android phone, **Android TV** (D‑pad / leanback), and Windows (.NET MAUI). Auto‑discovers servers on your LAN (mDNS + subnet probe) and pairs a TV to your account by **QR code or 6‑digit code**.
+- **Multi‑user** — roles & permissions (view / upload / system settings / manage users), fast per‑device user switch with optional PIN.
+- **Multi‑server** — register several Animarr servers and switch between them from the profile menu.
+- **Themeable, multi‑language UI** — English & Russian, five palettes + accent colour, animated backdrop toggle.
+- **Persistent state** — SQLite DB, MonoTorrent fastresume, image cache and encryption keys live in `/app/data` and survive restarts. Images stay **out of your media tree**.
 
 ## Quick start
 
-### 1. Copy `docker-compose.yml`
+### 1. `docker-compose.yml`
 
 ```yaml
 services:
@@ -34,7 +61,7 @@ services:
     container_name: animarr
     restart: unless-stopped
     ports:
-      - "8450:8080"
+      - "8450:8080"      # Web UI
       - "6881:6881"      # Torrent (TCP)
       - "6881:6881/udp"  # Torrent (UDP)
     environment:
@@ -47,7 +74,7 @@ volumes:
   animarr-data:
 ```
 
-Or copy the `docker-compose.yml` from the root of this repo and adjust it.
+Or copy `docker-compose.yml` from the repo root and adjust the media bind mount.
 
 ### 2. Start
 
@@ -55,133 +82,129 @@ Or copy the `docker-compose.yml` from the root of this repo and adjust it.
 docker compose up -d
 ```
 
-### 3. Set up an LLM (highly recommended — see [below](#ai--llm-setup))
-
-### 4. Open the UI
+### 3. Open the UI
 
 ```
 http://localhost:8450
 ```
 
-## Volume explanation
+### 4. Set up the LLM
+
+In **Server settings → AI / LLM**, either pick a **built‑in** model (downloads automatically) or point at an external OpenAI‑compatible endpoint. See [below](#ai--llm-setup). This is the single highest‑leverage step for anything non‑English.
+
+### 5. Add a media folder
+
+In **Server settings → Folders**, add a watched folder (use the **container‑side** path, e.g. `/media/Anime`). Mark it a **section** to auto‑import each subfolder as its own title.
+
+## Volumes
 
 | Mount | Purpose |
 |-------|---------|
-| `animarr-data:/app/data` | SQLite database, MonoTorrent fastresume cache, image cache, DataProtection keys. **Required for persistence.** Image cache lives here too — never inside your media folders. |
-| `/your/media/path:/media:rw` | Your media library. Add as many bind mounts as you need — use the container-side path when configuring a folder in Animarr. |
+| `animarr-data:/app/data` | SQLite database, downloaded LLM models (`/app/data/models`), image cache (`/app/data/image-cache`), MonoTorrent fastresume, DataProtection keys. **Required for persistence.** |
+| `/your/media/path:/media:rw` | Your media library. Add as many bind mounts as you like — use the container‑side path when configuring a folder in Animarr. Per‑title assets (theme music, etc.) are written to a hidden `.animarr/` subfolder next to the media; posters/backdrops stay in `/app/data/image-cache`, never in your tree. |
 
 ## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TZ` | `UTC` | Timezone for log timestamps. E.g. `Europe/Moscow`, `America/New_York` |
-| `AppSettings__WatcherDelayMs` | `2000` | Milliseconds the watcher waits after a file appears before processing it |
+| `TZ` | `UTC` | Timezone for log timestamps, e.g. `Europe/Moscow`, `America/New_York`. |
+| `ANIMARR_LLM_VULKAN` | *(unset)* | Set to `1` to let the built‑in LLM use the GPU via Vulkan. On first boot the container installs the Vulkan userspace drivers (cached on the data volume). Pair with a `/dev/dri` device mount + `video` group (see compose comments). NVIDIA: use the nvidia‑container‑toolkit. |
+| `AppSettings__WatcherDelayMs` | `2000` | Milliseconds the folder watcher waits after a file appears before processing it. |
+
+Any `AppSettings__*` key can be overridden via environment (standard ASP.NET configuration).
 
 ## AI / LLM setup
 
-Animarr connects to **any OpenAI-compatible chat-completions endpoint**. The provider, model and base URL are configured in **Settings → Metadata → AI / LLM** at runtime — no restart needed.
+Configured at runtime in **Server settings → AI / LLM** — no restart needed.
 
-Supported providers (anything with a `/v1/chat/completions` endpoint):
+### Option A — Built‑in model (recommended, zero external setup)
+
+Animarr ships a llama.cpp runtime. Choose a model from the catalog and it downloads once to `/app/data/models` and runs inside the container.
+
+| Model | Size on disk | RAM | Notes |
+|---|---|---|---|
+| Qwen2.5 0.5B (Q4) | ~0.5 GB | ~1 GB | Fallback only — misses many CJK / transliterated titles. |
+| **Qwen2.5 1.5B (Q4)** | ~1 GB | ~2 GB | **Recommended.** Reliable on pinyin/romaji, clean JSON, solid year extraction. |
+| Qwen2.5 3B (Q4) | ~1.9 GB | ~4 GB | Better on ambiguous franchise names; happier on a GPU. |
+| Llama 3.2 3B (Q4) | ~2 GB | ~4 GB | Strong multilingual handling. |
+| *Custom* | — | — | Paste any Hugging Face `org/repo` + `.gguf` filename. |
+
+CPU‑only works out of the box. For GPU, set `ANIMARR_LLM_VULKAN=1` and expose `/dev/dri` (AMD/Intel) — see the compose comments. The embedded server starts on demand and stops after an idle timeout to free memory.
+
+### Option B — External OpenAI‑compatible endpoint
+
+Point Animarr at any `/v1/chat/completions` endpoint:
 
 | Provider | Notes |
 |---|---|
-| **Ollama** (local) | Free, runs on your hardware, no API key needed. **Recommended for self-hosting.** |
-| **OpenAI** | Requires API key from platform.openai.com |
-| **Groq** | Fast cloud inference, free tier available |
-| **LM Studio** | Local GUI app, OpenAI-compatible server |
-| **Together AI**, **Perplexity**, … | Any OpenAI-compatible endpoint |
+| **Ollama** (local) | Free, runs on your hardware, no API key. `ollama pull qwen2.5:1.5b`, base URL `http://<host>:11434/v1`. |
+| **LM Studio** | Local GUI, OpenAI‑compatible server. |
+| **OpenAI / Groq / Together / …** | Any compatible cloud endpoint (API key required). |
 
-### Recommended setup: Ollama on the same machine
+Fields: **Base URL**, **Model**, **API Key** (leave empty for local).
 
-```bash
-# Start Ollama via the included docker-compose (deploy/ollama/)
-cd deploy/ollama
-docker compose up -d
+### What the LLM does
 
-# Pull the recommended minimum model
-docker exec -it ollama ollama pull qwen2.5:1.5b
-```
+1. **Normalises titles** — `Doupo Gangqiong` → `Battle Through the Heavens`. Search runs against the English form when present.
+2. **Extracts year & type** from the path; a year‑anchored filter stops a 1968 film matching a 2025 file.
+3. **Picks the best candidate** when TMDB/MAL/IMDb return several plausible results.
+4. **Maps loose files to episodes** on demand when filenames don't parse (the "Resolve with AI" button).
 
-Then in **Settings → Metadata → AI / LLM**:
+Without an LLM, Animarr falls back to pure regex/path parsing — fine for `Show.Name.S01E02.1080p.mkv`, weak on anything non‑Latin.
 
-| Field | Value |
-|---|---|
-| Provider | OpenAI-compatible URL |
-| Base URL | `http://localhost:11434` (or your Ollama server's IP) |
-| Model | `qwen2.5:1.5b` |
-| API Key | *(leave empty)* |
+## How files become episodes
 
-### Model picker
+Animarr **reads** season/episode from your files; it never rewrites them. Resolution is layered, highest precedence last:
 
-| Model | RAM | CPU speed | Identification quality |
-|---|---|---|---|
-| `qwen2.5:0.5b` | ~400 MB | Fast (~8 tok/s on Ryzen 5) | **Fallback only.** Misses many CJK/transliterated titles, sometimes hallucinates years. Use only if RAM is severely constrained. |
-| **`qwen2.5:1.5b`** | ~1 GB | Moderate (~3 tok/s on CPU) | **Recommended minimum.** Reliably handles pinyin/romaji, returns clean JSON with `english_title` for CJK inputs, year extraction is solid. |
-| `qwen2.5:3b` | ~2 GB | Slow on CPU, OK on GPU | Better edge-case handling for ambiguous franchise names. |
-| `gemma3:4b` | ~3 GB | Slow on CPU, fast on GPU | Highest quality on this list, best for messy untagged inputs. |
+1. **Deterministic parse** — regex patterns with named groups, season folders (`Season 2`, `S02`, `Part 3`, `Specials` → S0), and bare‑number filenames (`12.mkv` → episode 12). Single‑season shows default a seasonless‑but‑numbered file to Season 1.
+2. **AI resolution** *(optional)* — for files the parser can't place, **Resolve with AI** matches them against the TMDB episode list.
+3. **Manual override** — set season/episode by hand per file in the detail page's **Unmatched files** panel.
+4. **Season offsets** — when a donghua is one long TMDB season but split into `Season 1/2/3…` folders on disk, Animarr aligns them automatically and shows the absolute episode number.
 
-`qwen2.5:1.5b` is the sweet spot — it understands Japanese anime / Chinese donghua / Russian transliterations, returns the canonical English title alongside, and runs without a GPU on any modern x86/ARM CPU.
+### Parsing patterns
 
-### What the LLM actually does
-
-1. **Normalises titles**: `Doupo Gangqiong` → title `Doupo Cangqiong`, english_title `Battle Through the Heavens`. Search runs against the English form when present.
-2. **Extracts year and type** from filename / folder path. Year-anchored candidate filter prevents picking a 1968 film when the file clearly says 2025.
-3. **Picks the best match** from candidate lists when multiple plausible results come back from TMDB/MAL/IMDb (e.g. "Renegade Immortal" 2023 series vs "Renegade Immortal: Battle of Gods" 2025 movie).
-4. **Maps loose files to episodes** when filenames don't match any regex pattern.
-
-When LLM is disabled or unreachable, Animarr falls back to pure regex parsing of folder/file names — works fine for `Show.Name.S01E02.1080p.mkv`, breaks on anything non-Latin.
-
-## Pattern engine
-
-Patterns are regular expressions with named capture groups. Animarr uses them to extract season/episode numbers and build the new filename.
-
-Useful named groups:
+Patterns are .NET regular expressions with named capture groups, used purely to **extract** numbers (never to rename):
 
 | Group | Meaning |
 |-------|---------|
 | `season` | Season number (optional) |
 | `episode` | Episode number |
-| `title` | Override show title extracted from the filename |
+| `title` | Override show title from the filename (optional) |
 
-Example pattern matching `[Group] Show Name - 12 [1080p].mkv`:
+Example for `[Group] Show Name - 12 [1080p].mkv`:
 ```
 \[.+?\]\s*(?P<title>.+?)\s*-\s*(?P<episode>\d+)
 ```
 
-Patterns have a **priority** (lower = checked first) and a **scope**:
-- **Global** — applies to all folders of the matching type
-- **Folder override** — applies only to one specific folder; can also be set to *exclude* (suppress the global match for that folder)
+Patterns have a **priority** (lower = checked first) and a **scope**: **global** (all folders of a type) or a **per‑folder override** (which can also *exclude* a global pattern for that folder). Managed in **Server settings → Parsing**.
 
-### Bare-number filenames
+## Library & catalog
 
-Files named with a plain number (e.g. `1.mp4`, `12.mkv`) are automatically recognized as episode files even when no pattern matches. The number is used directly as the episode number and the file is renamed to the standard format (`01.mp4`, `S01E12.mkv` if a season folder is detected).
-
-## Explorer
-
-The **Explorer** page provides a folder-by-folder view of your library.
-
-- Section header has **Rescan**, **Restore deleted** (recovers accidentally-dismissed folders), **Identify**, **Edit**, **Delete** buttons.
-- Click any folder row to expand an inline file scan panel.
-- Files are displayed as a **tree**: season subdirectories are shown as collapsible nodes; files inside each subdirectory are listed within their folder.
-- Select individual files or use the header checkbox to bulk-select; apply renames with one click.
-- Delete dialog has a **"Also delete files from disk"** checkbox (off by default).
+- **Home** — fanart hero (Continue Watching, falling back to top‑rated), category chips, poster grid.
+- **Categories** — LLM‑assigned at identification; curate the list in **Server settings → Categories**, or pin per title in **Edit metadata → Categories**.
+- **Search** (`/search`) — instant filter across all title forms.
+- **Detail page** — hero, season tabs + episode grid (or a movie card), studio/runtime/rating/tags, TMDB/MAL/IMDb links, theme music, and the **Unmatched files** resolver.
+- **Edit metadata** drawer — tabs for **Source IDs** (paste a TMDB/MAL/IMDb URL or id and re‑identify), **Basics**, **Poster** & **Backdrop** (all‑language galleries — pick any artwork you like), **Tags**, **Categories**, and **Manage** (re‑identify / delete from catalog). A read‑only line shows the original on‑disk folder/file the scanner matched, so a wrong match is easy to spot.
 
 ## Torrent client
 
-- Add by magnet link or `.torrent` file — the add panel has a **File / Magnet** toggle at the top (default: File).
-- Destination folder picker shows your **identified library titles** ("Bleach", "Cowboy Bebop") rather than raw on-disk folder names. Manually-edited labels are honoured over auto-identified titles.
-- Per-file priority: Normal / High / Low / Skip.
-- **Create subfolder** (`+` button) — instantly create a new subdirectory inside a destination folder without leaving the add panel.
-- **Flatten subfolders** — after download completes, all files from nested subdirectories are moved to the destination root.
-- **Rename / strip root folder** — when a torrent contains a top-level folder, you can rename it or strip it entirely before files land in the destination.
-- Speed limits in **Mbps**, globally in Settings and per-torrent in the details panel.
-- Auto-rename on completion — when a torrent finishes, the destination folder is scanned and renamed according to the folder's pattern (file-level, never folder-level).
+- Add by **magnet** or **.torrent** (File / Magnet toggle, File first).
+- The destination picker shows your **identified library titles** ("Bleach", "Cowboy Bebop"), not raw folder names.
+- **Per‑file priority** — Normal / High / Low / Skip, choose what to download before it starts.
+- **Create subfolder** (`+`) inside a destination without leaving the panel.
+- **Flatten subfolders** and **strip / rename the root folder** so files land where you want.
+- Speed limits in **Mbps** — global (Server settings → Downloads) and per‑torrent.
+- On completion the destination folder is rescanned and identified — **no files are renamed**.
 
-## Ignore rules
+## Native apps (Android phone / TV / Windows)
 
-Glob masks that tell Animarr to skip certain filenames during renaming. Supports `*` and `?` wildcards. Common examples: `*.nfo`, `*.txt`, `fanart*`, `poster*`.
+The native build adds, over the browser app:
 
-Rules can be **global** (apply everywhere) or scoped to a specific folder. Managed in **Settings → Ignore Rules**.
+- **Server discovery** — finds Animarr servers on your LAN via mDNS, with a subnet TCP probe fallback for tricky home networks; or add a server by IP / hostname / Tailscale name.
+- **TV mode** — leanback layout, full **D‑pad spatial navigation**, and a sign‑in flow that **pairs the TV to your account** by scanning a QR code or typing a 6‑digit code from your phone.
+- Built for `android-arm64`, `android-arm` (32‑bit budget TV boxes), Windows, and Apple targets.
+
+TV mode is also available in the browser (toggle in Profile → Appearance) and is auto‑detected on leanback devices.
 
 ## Building from source
 
@@ -192,13 +215,23 @@ docker build -t animarr:latest .
 docker compose up -d
 ```
 
-Or with .NET 10 SDK installed:
+Or with the .NET 10 SDK + Node.js (for the Tailwind build):
 
 ```bash
 cd src/Animarr.Web
 dotnet run
 ```
 
+Solution layout:
+
+| Project | Role |
+|---------|------|
+| `Animarr.Web` | ASP.NET Core server — API, identification pipeline, torrent engine, embedded LLM, static hosting. |
+| `Animarr.UI` | Blazor Razor Class Library — all shared UI (pages, components, styles). |
+| `Animarr.Web.Client` | Blazor WebAssembly host for the browser app. |
+| `Animarr.App` | .NET MAUI native app (Android / TV / Windows). |
+| `Animarr.Shared` | DTOs, enums and API route constants shared by client and server. |
+
 ## License
 
-Apache-2.0
+Apache‑2.0
