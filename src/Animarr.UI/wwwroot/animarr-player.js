@@ -5,7 +5,7 @@
 // inside the player DOM tree so it survives browser fullscreen and doesn't
 // fight Artplayer's chrome for z-index.
 //
-// HUD layout matches design_handoff_animarr/design-system/04-tv.html § T-03
+// HUD layout matches design_v2/animarr/project/design-system/04-tv.html § T-03
 // plus the additions from the iteration on 2026-05-27:
 //   • Bottom row buttons share the same height (Play not enlarged).
 //   • Audio / Subtitles buttons show only the label, no current selection.
