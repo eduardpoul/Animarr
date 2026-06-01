@@ -295,7 +295,7 @@ else
                          @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
                         <EpisodeCard Number="ep"
                                      Title="@epTitle"
-                                     ThumbUrl="@seasonThumb"
+                                     ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
                                      Meta="@epMeta"
                                      Have="hasFile"
                                      WatchStateDto="@watchDto"

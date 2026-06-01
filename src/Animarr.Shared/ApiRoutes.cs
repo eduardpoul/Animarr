@@ -35,6 +35,9 @@ public static class ApiRoutes
     /// gaps (donghua where TMDB is one season but the disk is split). Stores
     /// MediaItem.SeasonOffsetsJson; returns the map. No-op when not applicable.</summary>
     public const string MediaResolveSeasons = "/api/media/{id}/resolve-seasons";
+    /// <summary>GET — per-episode thumbnail: TMDB episode still when available,
+    /// else an ffmpeg frame grabbed from the local video. Lazy + cached.</summary>
+    public const string MediaEpisodeThumb = "/api/media/{id}/episode-thumb";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
@@ -239,6 +242,7 @@ public static class ApiRoutes
     public static string MediaFileMappingFor(Guid id)  => MediaFileMapping.Replace("{id}", id.ToString());
     public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
     public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
+    public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
