@@ -1014,28 +1014,37 @@ public class TorrentEngineService : BackgroundService
     {
         if (mgr.Files.Count == 0) return;
 
-        // ContainingDirectory == SavePath for single-file torrents — nothing to rename
-        if (string.Equals(mgr.ContainingDirectory, mgr.SavePath, StringComparison.OrdinalIgnoreCase)) return;
-
         var targetDir = Path.Combine(mgr.SavePath, customName);
-        if (string.Equals(mgr.ContainingDirectory, targetDir, StringComparison.OrdinalIgnoreCase)) return;
 
-        // MonoTorrent's file.Path is relative to SavePath and INCLUDES the
-        // torrent's own root folder (e.g. "(1998) Initial D/ep1.mkv"). Strip that
-        // root so we REPLACE it with customName instead of nesting the original
-        // inside it (the old code combined the full file.Path onto targetDir,
-        // which is why the custom folder ended up empty and data stayed put).
-        var rootRel = mgr.ContainingDirectory.Length > mgr.SavePath.Length
+        // Idempotent: already living under the custom folder (the remap re-runs on
+        // every restore — this stops it doing pointless moves).
+        var firstFull = mgr.Files[0].FullPath;
+        if (!string.IsNullOrEmpty(firstFull) &&
+            firstFull.StartsWith(targetDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // The wrapping folder we want renamed to customName. When the torrent has
+        // data on disk it's ContainingDirectory's last segment; at a FRESH add
+        // ContainingDirectory still equals SavePath, so fall back to the torrent's
+        // NAME (MonoTorrent names the containing dir after it). The old code keyed
+        // off ContainingDirectory and so no-op'd at fresh add. We can't derive the
+        // wrapper from file.Path: when the .torrent has no top-level folder (files
+        // at the root, e.g. episodes + RUS Sound/ RUS Subs/), MonoTorrent
+        // synthesises the wrapper and file.Path carries no root segment.
+        var wrapper = !string.Equals(mgr.ContainingDirectory, mgr.SavePath, StringComparison.OrdinalIgnoreCase)
             ? mgr.ContainingDirectory[mgr.SavePath.Length..]
                  .Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                 .Replace(Path.DirectorySeparatorChar, '/')
-            : string.Empty;
+            : (_names.TryGetValue(infoHash, out var tn) ? tn : string.Empty);
+        var wrapperRel = wrapper.Replace(Path.DirectorySeparatorChar, '/');
 
         foreach (var file in mgr.Files)
         {
+            // Strip the wrapper (when file.Path actually carries it — metadata-root
+            // torrents) so we REPLACE it with customName; files MonoTorrent
+            // synthesised a wrapper for keep their Path and land directly under it.
             var rel = file.Path.Replace(Path.DirectorySeparatorChar, '/');
-            if (rootRel.Length > 0 && rel.StartsWith(rootRel + "/", StringComparison.OrdinalIgnoreCase))
-                rel = rel[(rootRel.Length + 1)..];
+            if (wrapperRel.Length > 0 && rel.StartsWith(wrapperRel + "/", StringComparison.OrdinalIgnoreCase))
+                rel = rel[(wrapperRel.Length + 1)..];
 
             var newAbsPath = Path.Combine(targetDir, rel.Replace('/', Path.DirectorySeparatorChar));
             var dir = Path.GetDirectoryName(newAbsPath);
@@ -1051,8 +1060,8 @@ public class TorrentEngineService : BackgroundService
             }
         }
 
-        _logger.LogInformation("RootFolderRemap [rename] {Hash}: \"{OldDir}\" -> \"{NewName}\"",
-            infoHash, mgr.ContainingDirectory, customName);
+        _logger.LogInformation("RootFolderRemap [rename] {Hash}: \"{Root}\" -> \"{NewName}\"",
+            infoHash, wrapper, customName);
     }
 
     // -------------------------------------------------------------------------
