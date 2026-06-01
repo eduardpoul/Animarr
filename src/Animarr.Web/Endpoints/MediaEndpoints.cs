@@ -542,6 +542,103 @@ internal static class MediaEndpoints
                 RuntimeMs:  null));
         });
 
+        // Per-episode thumbnail. Order: cache → TMDB episode still → ffmpeg frame
+        // from the local video → the show's own art (so the card is never broken).
+        // Lazy (the EpisodeCard <img loading="lazy">) + cached under the folder's
+        // image-cache, so a 200-episode donghua stops repeating one season poster.
+        app.MapGet(ApiRoutes.MediaEpisodeThumb, async (
+            Guid id, int season, int episode,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MediaFileResolver resolver,
+            TmdbClient tmdb,
+            MediaCachePaths cachePaths,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+
+            static bool Ok(string p) => File.Exists(p) && new FileInfo(p).Length > 0;
+            var cache = Path.Combine(cachePaths.ForFolder(item.FolderId), $"ep-s{season}e{episode}.jpg");
+            if (Ok(cache))
+                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+
+            var files = await resolver.ResolveAsync(id, ct);
+            var f = files.FirstOrDefault(x => (x.Season ?? 1) == season && x.Episode == episode);
+
+            // 1) TMDB episode still. For donghua absolute/re-split layouts the
+            //    matching TMDB episode is the absolute one (single TMDB season).
+            if (item.TmdbId is int tmdbId && tmdbId > 0)
+            {
+                var tmdbSeason = f?.AbsoluteEpisode is not null ? 1 : season;
+                var tmdbEp     = f?.AbsoluteEpisode ?? episode;
+                try
+                {
+                    var detail = await tmdb.GetSeasonDetailAsync(tmdbId, tmdbSeason, ct);
+                    var still  = detail?.Episodes?.FirstOrDefault(e => e.EpisodeNumber == tmdbEp)?.StillPath;
+                    if (!string.IsNullOrEmpty(still)
+                        && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
+                        && Ok(cache))
+                        return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+                }
+                catch { /* network/TMDB hiccup — fall through to ffmpeg */ }
+            }
+
+            // 2) ffmpeg frame from the on-disk video.
+            if (f?.FilePath is string fp && File.Exists(fp)
+                && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
+                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+
+            // 3) Last resort: the show's own art, so the card is never broken.
+            var fallback = item.FanartPath ?? item.PosterPath;
+            if (!string.IsNullOrEmpty(fallback) && File.Exists(fallback))
+                return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
+
+            return Results.NotFound();
+        });
+
         return app;
+    }
+
+    // Cap concurrent ffmpeg frame-grabs: opening a season fires a burst of lazy
+    // <img> loads, and each cache miss would otherwise spawn its own encoder.
+    private static readonly SemaphoreSlim _frameGrabGate = new(3);
+
+    /// <summary>Best-effort: grab one ~480px-wide jpeg frame from <paramref name="file"/>
+    /// into <paramref name="outPath"/>. Seeks 90s in (past the OP); retries near
+    /// the start for very short clips.</summary>
+    private static async Task<bool> GrabVideoFrameAsync(string file, string outPath, CancellationToken ct)
+    {
+        await _frameGrabGate.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            foreach (var ss in new[] { "90", "3" })
+            {
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "ffmpeg",
+                        RedirectStandardError  = true,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow  = true,
+                    };
+                    foreach (var a in new[] { "-nostdin", "-ss", ss, "-i", file,
+                                              "-frames:v", "1", "-vf", "scale=480:-1",
+                                              "-q:v", "4", "-y", outPath })
+                        psi.ArgumentList.Add(a);
+
+                    using var p = System.Diagnostics.Process.Start(psi);
+                    if (p is null) continue;
+                    await p.WaitForExitAsync(ct);
+                    if (File.Exists(outPath) && new FileInfo(outPath).Length > 0) return true;
+                }
+                catch { /* try the next seek offset */ }
+            }
+            return false;
+        }
+        finally { _frameGrabGate.Release(); }
     }
 }

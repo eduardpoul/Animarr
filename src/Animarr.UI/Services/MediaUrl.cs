@@ -66,4 +66,13 @@ public static class MediaUrl
         => string.IsNullOrEmpty(_base)
             ? $"/api/media/{id}/theme"
             : $"{_base}/api/media/{id}/theme";
+
+    /// <summary>Per-episode thumbnail URL (TMDB still or an ffmpeg frame). Used
+    /// as the &lt;EpisodeCard&gt; ThumbUrl so each episode shows a distinct image
+    /// instead of the same season poster repeated.</summary>
+    public static string EpisodeThumb(System.Guid id, int season, int episode)
+    {
+        var path = $"/api/media/{id}/episode-thumb?season={season}&episode={episode}";
+        return string.IsNullOrEmpty(_base) ? path : $"{_base}{path}";
+    }
 }
