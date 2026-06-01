@@ -52,7 +52,14 @@ internal static class MediaEndpoints
             q = q.ApplyRoleFolderFilter(me?.Role);
 
             if (type is not null)
-                q = q.Where(m => (int)m.MediaType == (int)type.Value);
+            {
+                // Compare entity-enum to entity-enum. The old `(int)m.MediaType
+                // == (int)type.Value` cast across two different MediaItemType
+                // enums (entity vs Shared) — EF Core 10 fails to sanitise the
+                // parameter for the Shared enum → 500 on every ?type= filter.
+                var mt = (EfModels.MediaItemType)(int)type.Value;
+                q = q.Where(m => m.MediaType == mt);
+            }
             if (folderId is not null)
                 q = q.Where(m => m.FolderId == folderId.Value);
             if (!string.IsNullOrWhiteSpace(search))
