@@ -26,6 +26,14 @@ public partial class CatalogNativePage : ContentPage
         set => SetValue(ArtHeightProperty, value);
     }
 
+    public static readonly BindableProperty HeroProperty =
+        BindableProperty.Create(nameof(Hero), typeof(HeroVm), typeof(CatalogNativePage));
+    public HeroVm? Hero { get => (HeroVm?)GetValue(HeroProperty); set => SetValue(HeroProperty, value); }
+
+    public static readonly BindableProperty ChipsProperty =
+        BindableProperty.Create(nameof(Chips), typeof(System.Collections.IList), typeof(CatalogNativePage));
+    public System.Collections.IList? Chips { get => (System.Collections.IList?)GetValue(ChipsProperty); set => SetValue(ChipsProperty, value); }
+
     public CatalogNativePage()
     {
         InitializeComponent();
@@ -84,15 +92,44 @@ public partial class CatalogNativePage : ContentPage
                 .ToList();
 
             PostersView.ItemsSource = posters;
-            CountLabel.Text = $"Animarr — native catalog POC · {posters.Count} posters";
+            BuildHero(items);
+            BuildChips(items);
 #if ANDROID
             PreloadImages(posters);
 #endif
         }
-        catch (Exception ex)
+        catch { /* POC: leave the screen empty on failure */ }
+    }
+
+    private void BuildHero(ApiItem[] items)
+    {
+        var h = items.Where(i => !string.IsNullOrEmpty(i.FanartPath))
+                     .OrderByDescending(i => i.Rating ?? 0)
+                     .FirstOrDefault();
+        if (h is null) return;
+        var meta = new[] { h.Year?.ToString(), h.Rating is > 0 ? $"★ {h.Rating:F1}" : null }
+            .Where(s => !string.IsNullOrEmpty(s));
+        Hero = new HeroVm
         {
-            CountLabel.Text = "POC load failed: " + ex.Message;
-        }
+            Backdrop = $"{ServerBase}/api/image?path={Uri.EscapeDataString(h.FanartPath!)}&w=1280",
+            Eyebrow  = "FEATURED",
+            Title    = (h.Title ?? "").ToUpperInvariant(),
+            Meta     = string.Join("   ·   ", meta),
+        };
+    }
+
+    private void BuildChips(ApiItem[] items)
+    {
+        var groups = items
+            .SelectMany(i => i.CategoryNames ?? Array.Empty<string>())
+            .GroupBy(n => n)
+            .Select(g => (Name: g.Key, Count: g.Count()))
+            .OrderByDescending(g => g.Count)
+            .ToList();
+
+        var chips = new List<ChipVm> { new("All", items.Length.ToString(), active: true) };
+        chips.AddRange(groups.Select(g => new ChipVm(g.Name, g.Count.ToString(), active: false)));
+        Chips = chips;
     }
 
 #if ANDROID
@@ -198,7 +235,8 @@ public partial class CatalogNativePage : ContentPage
 
     private sealed record ApiItem(
         string? Title, string? PosterPath, string? FanartPath, string? CjkTitle,
-        int? Year, string? MediaType, double? Rating, int? EpisodeCount, int? Hue);
+        int? Year, string? MediaType, double? Rating, int? EpisodeCount, int? Hue,
+        string[]? CategoryNames);
 
     public sealed class PosterItem
     {
@@ -208,5 +246,31 @@ public partial class CatalogNativePage : ContentPage
         public string Meta      { get; init; } = "";
         public string Cjk       { get; init; } = "";
         public Brush? HueGlow   { get; init; }
+    }
+
+    public sealed class HeroVm
+    {
+        public string Backdrop { get; init; } = "";
+        public string Eyebrow  { get; init; } = "";
+        public string Title    { get; init; } = "";
+        public string Meta     { get; init; } = "";
+    }
+
+    public sealed class ChipVm
+    {
+        public string Label   { get; }
+        public string Count   { get; }
+        public Color  Bg      { get; }
+        public Color  Fg      { get; }
+        public Color  CountFg { get; }
+
+        public ChipVm(string label, string count, bool active)
+        {
+            Label   = label;
+            Count   = count;
+            Bg      = active ? Color.FromArgb("#e8772e")  : Color.FromArgb("#1a1d24");
+            Fg      = active ? Colors.White               : Color.FromArgb("#c7ccd4");
+            CountFg = active ? Color.FromArgb("#ffe0c8")  : Color.FromArgb("#6b7280");
+        }
     }
 }

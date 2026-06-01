@@ -4,59 +4,124 @@
              x:Class="Animarr.App.CatalogNativePage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <!-- POC: native MAUI catalog rebuilt to match the Blazor Poster card 1:1.
-         8-column grid + true 2:3 art (ArtHeight is computed from the column
-         width so cards never look stretched). CollectionView → RecyclerView for
-         native recycling + D-pad focus (no tv-nav.js). -->
-    <Grid RowDefinitions="Auto,*">
-        <Label x:Name="CountLabel" Grid.Row="0"
-               Text="Animarr — native catalog POC (loading…)"
-               TextColor="White" FontFamily="GeistMono" FontSize="13" Padding="20,10" />
+    <!-- POC: native MAUI catalog matching the Blazor web — cinematic hero +
+         category chips (CollectionView.Header, scrolls with the grid) + an
+         8-column 2:3 poster grid. RecyclerView gives native recycling + D-pad
+         focus (no tv-nav.js). -->
+    <CollectionView x:Name="PostersView" SelectionMode="None">
 
-        <CollectionView Grid.Row="1" x:Name="PostersView" SelectionMode="None">
-            <CollectionView.ItemsLayout>
-                <GridItemsLayout Orientation="Vertical" Span="8"
-                                 HorizontalItemSpacing="16" VerticalItemSpacing="20" />
-            </CollectionView.ItemsLayout>
-            <CollectionView.ItemTemplate>
-                <DataTemplate>
-                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            Padding="0" BackgroundColor="#15171d" Margin="2">
-                        <!-- True 2:3 art: height bound to the page's computed value. -->
-                        <Grid HeightRequest="{Binding ArtHeight, Source={x:Reference Root}}">
-                            <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
-                            <BoxView Background="{Binding HueGlow}" InputTransparent="True" />
-                            <BoxView InputTransparent="True">
-                                <BoxView.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                        <GradientStop Color="Transparent" Offset="0.45" />
-                                        <GradientStop Color="#D90A0807" Offset="1.0" />
-                                    </LinearGradientBrush>
-                                </BoxView.Background>
-                            </BoxView>
-                            <Label Text="{Binding Cjk}" InputTransparent="True"
-                                   HorizontalOptions="End" VerticalOptions="Start"
-                                   Margin="0,6,8,0" FontSize="22" TextColor="#30FFFFFF"
-                                   MaxLines="1" LineBreakMode="TailTruncation" />
-                            <Border InputTransparent="True" HorizontalOptions="Start"
-                                    VerticalOptions="Start" Margin="8" Padding="6,2"
-                                    StrokeThickness="1" Stroke="#1FFFFFFF"
-                                    StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
-                                <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
-                                       FontSize="8" TextColor="White" CharacterSpacing="1.4" />
-                            </Border>
-                            <VerticalStackLayout InputTransparent="True" VerticalOptions="End"
-                                                 Spacing="2" Padding="10,8,10,10">
-                                <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
-                                       FontSize="12" TextColor="White" MaxLines="2"
-                                       LineBreakMode="TailTruncation" />
-                                <Label Text="{Binding Meta}" FontFamily="GeistMono"
-                                       FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
-                            </VerticalStackLayout>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
-        </CollectionView>
-    </Grid>
+        <CollectionView.Header>
+            <Grid RowDefinitions="Auto,Auto">
+
+                <!-- ── HERO ───────────────────────────────────────────── -->
+                <Grid Grid.Row="0" HeightRequest="320">
+                    <Image Source="{Binding Hero.Backdrop, Source={x:Reference Root}}"
+                           Aspect="AspectFill" />
+                    <!-- left→right scrim for text legibility -->
+                    <BoxView InputTransparent="True">
+                        <BoxView.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#F00a0c10" Offset="0" />
+                                <GradientStop Color="#000a0c10" Offset="0.75" />
+                            </LinearGradientBrush>
+                        </BoxView.Background>
+                    </BoxView>
+                    <!-- bottom fade into the page -->
+                    <BoxView InputTransparent="True">
+                        <BoxView.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="Transparent" Offset="0.45" />
+                                <GradientStop Color="#FF0a0c10" Offset="1" />
+                            </LinearGradientBrush>
+                        </BoxView.Background>
+                    </BoxView>
+                    <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
+                                         Padding="40,0,0,34" Spacing="8"
+                                         MaximumWidthRequest="780">
+                        <Label Text="{Binding Hero.Eyebrow, Source={x:Reference Root}}"
+                               TextColor="#e8a33d" FontFamily="GeistMono" FontSize="11"
+                               CharacterSpacing="2.5" />
+                        <Label Text="{Binding Hero.Title, Source={x:Reference Root}}"
+                               TextColor="White" FontFamily="ArchivoBlack" FontSize="40"
+                               MaxLines="2" LineBreakMode="TailTruncation" />
+                        <Label Text="{Binding Hero.Meta, Source={x:Reference Root}}"
+                               TextColor="#cfd3da" FontFamily="GeistMono" FontSize="13"
+                               CharacterSpacing="0.5" Margin="0,2,0,0" />
+                        <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
+                                BackgroundColor="#e8772e" Padding="24,11"
+                                HorizontalOptions="Start" Margin="0,10,0,0">
+                            <Label Text="▶   Play" TextColor="White"
+                                   FontFamily="Geist" FontSize="15" />
+                        </Border>
+                    </VerticalStackLayout>
+                </Grid>
+
+                <!-- ── CATEGORY CHIPS ──────────────────────────────────── -->
+                <ScrollView Grid.Row="1" Orientation="Horizontal" Padding="20,14,20,18"
+                            HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout Spacing="10"
+                            BindableLayout.ItemsSource="{Binding Chips, Source={x:Reference Root}}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
+                                        Padding="15,7" BackgroundColor="{Binding Bg}">
+                                    <HorizontalStackLayout Spacing="7">
+                                        <Label Text="{Binding Label}" TextColor="{Binding Fg}"
+                                               FontFamily="Geist" FontSize="13" />
+                                        <Label Text="{Binding Count}" TextColor="{Binding CountFg}"
+                                               FontFamily="GeistMono" FontSize="11"
+                                               VerticalOptions="Center" />
+                                    </HorizontalStackLayout>
+                                </Border>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </HorizontalStackLayout>
+                </ScrollView>
+            </Grid>
+        </CollectionView.Header>
+
+        <CollectionView.ItemsLayout>
+            <GridItemsLayout Orientation="Vertical" Span="8"
+                             HorizontalItemSpacing="16" VerticalItemSpacing="20" />
+        </CollectionView.ItemsLayout>
+
+        <CollectionView.ItemTemplate>
+            <DataTemplate>
+                <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                        Padding="0" BackgroundColor="#15171d" Margin="2">
+                    <Grid HeightRequest="{Binding ArtHeight, Source={x:Reference Root}}">
+                        <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
+                        <BoxView Background="{Binding HueGlow}" InputTransparent="True" />
+                        <BoxView InputTransparent="True">
+                            <BoxView.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="Transparent" Offset="0.45" />
+                                    <GradientStop Color="#D90A0807" Offset="1.0" />
+                                </LinearGradientBrush>
+                            </BoxView.Background>
+                        </BoxView>
+                        <Label Text="{Binding Cjk}" InputTransparent="True"
+                               HorizontalOptions="End" VerticalOptions="Start"
+                               Margin="0,6,8,0" FontSize="22" TextColor="#30FFFFFF"
+                               MaxLines="1" LineBreakMode="TailTruncation" />
+                        <Border InputTransparent="True" HorizontalOptions="Start"
+                                VerticalOptions="Start" Margin="8" Padding="6,2"
+                                StrokeThickness="1" Stroke="#1FFFFFFF"
+                                StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
+                            <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
+                                   FontSize="8" TextColor="White" CharacterSpacing="1.4" />
+                        </Border>
+                        <VerticalStackLayout InputTransparent="True" VerticalOptions="End"
+                                             Spacing="2" Padding="10,8,10,10">
+                            <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
+                                   FontSize="12" TextColor="White" MaxLines="2"
+                                   LineBreakMode="TailTruncation" />
+                            <Label Text="{Binding Meta}" FontFamily="GeistMono"
+                                   FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
+                        </VerticalStackLayout>
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </CollectionView.ItemTemplate>
+    </CollectionView>
 </ContentPage>
