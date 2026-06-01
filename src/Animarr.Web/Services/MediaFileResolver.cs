@@ -108,7 +108,12 @@ public sealed class MediaFileResolver
         // not applicable. See SeasonOffsetResolver / MediaItem.SeasonOffsetsJson.
         var seasonOffsets = ParseSeasonOffsets(item.SeasonOffsetsJson);
 
-        var results = new List<MediaFileDto>();
+        // TMDB season structure (number → episode count), for distributing a
+        // flat absolute-numbered disk into seasons. See AbsoluteToSeasonEpisode.
+        var seasonStructure = ParseSeasonList(item.SeasonsJson);
+
+        // ── Pass 1: deterministic (season, episode) per file ──────────────────
+        var raw = new List<(string FilePath, string FileName, int? Season, int? Episode, long Size)>();
         foreach (var filePath in Directory.EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories))
         {
             if (!VideoExts.Contains(Path.GetExtension(filePath))) continue;
@@ -121,27 +126,63 @@ public sealed class MediaFileResolver
             int? episode = parse.IsMatched ? parse.Episode : null;
 
             // Bare-numeric filename fallback: `7.mkv`, `08.mkv`, `ep12.mkv`.
-            // Triggered only when no pattern matched — the default global
-            // patterns require ≥2 digits + a separator, which excludes the
-            // single-digit naming common in Korean / Chinese releases.
             if (episode is null)
-            {
                 episode = TryParseBareNumericEpisode(fileName);
-            }
 
-            // Season fallback for single-season series — see note above.
+            // Season fallback for single-season series.
             if (episode is not null && season is null && defaultToSeasonOne)
-            {
                 season = 1;
-            }
 
             // Movies have no season/episode bucket — leave both null.
             if (isMovie) { season = null; episode = null; }
 
-            // Overlay a stored override (manual / LLM) if one exists for this
-            // file. A null field on the override means "keep deterministic", so
-            // a partial correction (e.g. season only) composes cleanly.
+            long size;
+            try { size = new FileInfo(filePath).Length; } catch { continue; }
+            raw.Add((filePath, fileName, season, episode, size));
+        }
+
+        // Absolute-numbering distribution applies ONLY to a genuinely FLAT disk —
+        // no "Season N" folder (no file resolved to a season ≥ 1) — whose files
+        // run straight past season 1. That separates a flat absolute release
+        // (Stellar Transformation: 50 files numbered 1..50 → S1-S4) from a
+        // season-foldered disk with a few stray un-parsed files, which must NOT
+        // be redistributed.
+        int s1Count = seasonStructure.Count > 0 ? seasonStructure[0].Count : 0;
+        int maxFlatEp = raw.Where(r => r.Season is null && r.Episode is > 0)
+                           .Select(r => r.Episode!.Value).DefaultIfEmpty(0).Max();
+        bool applyAbsolute = !isMovie
+            && seasonStructure.Count > 1
+            && raw.All(r => r.Season is null or 0)   // no numbered season folders
+            && maxFlatEp > s1Count;                  // genuinely spans past S1
+
+        // ── Pass 2: distribution → overrides → absolute number → DTO ──────────
+        var results = new List<MediaFileDto>(raw.Count);
+        foreach (var (filePath, fileName, season0, episode0, size) in raw)
+        {
+            int? season = season0, episode = episode0;
             string? source = null;
+            int? absoluteEp = null;
+
+            // Map a flat absolute number into the TMDB seasons (abs 13 → S2E1
+            // when S1 has 12). Numbers within S1 just belong to season 1.
+            if (applyAbsolute && season is null && episode is > 0)
+            {
+                var (s, e) = AbsoluteToSeasonEpisode(episode.Value, seasonStructure);
+                if (s > 1)
+                {
+                    absoluteEp = episode;   // the bare number IS the TMDB absolute episode
+                    season  = s;
+                    episode = e;
+                    source  = "absolute";
+                }
+                else
+                {
+                    season = 1;
+                }
+            }
+
+            // Overlay a stored override (manual / LLM) — a null field keeps the
+            // deterministic value, so a partial correction composes cleanly.
             if (!isMovie && overrides.TryGetValue(filePath, out var ov))
             {
                 if (ov.Season.HasValue)  season  = ov.Season;
@@ -149,17 +190,13 @@ public sealed class MediaFileResolver
                 source = ov.Source;
             }
 
-            // Absolute (TMDB single-season) episode number when a per-season
-            // offset exists for this disk season — lets the UI pull the right
-            // TMDB episode metadata while keeping the disk's season grouping.
-            int? absoluteEp = null;
-            if (season is not null && episode is not null &&
+            // Season-offset absolute number (the donghua case: TMDB one season,
+            // disk split) — only when not already set by the distribution above.
+            if (absoluteEp is null && season is not null && episode is not null &&
                 seasonOffsets.TryGetValue(season.Value, out var off))
                 absoluteEp = off + episode.Value;
 
-            FileInfo fi;
-            try { fi = new FileInfo(filePath); } catch { continue; }
-            results.Add(new MediaFileDto(filePath, fileName, season, episode, fi.Length, source, absoluteEp));
+            results.Add(new MediaFileDto(filePath, fileName, season, episode, size, source, absoluteEp));
         }
 
         // Sort: by season → episode → filename so the catalog renders in a
@@ -205,6 +242,38 @@ public sealed class MediaFileResolver
         }
         catch { /* malformed — treat as no offsets */ }
         return map;
+    }
+
+    /// <summary>Parse MediaItem.SeasonsJson (TMDB season list) into ordered
+    /// (number, episodeCount) pairs. Case-insensitive — stored casing varies.</summary>
+    private static List<(int Number, int Count)> ParseSeasonList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<SeasonListEntry>>(json, SeasonListOpts);
+            return list?.Select(s => (s.Number, s.EpisodeCount)).OrderBy(x => x.Number).ToList() ?? [];
+        }
+        catch { return []; }
+    }
+
+    private sealed record SeasonListEntry(int Number, int EpisodeCount);
+    private static readonly JsonSerializerOptions SeasonListOpts = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Map an absolute episode number to (season, episode) using the
+    /// cumulative TMDB season episode counts: abs 13 with seasons [12,12,…] →
+    /// (2, 1). Numbers past the last known season stay in the last season.</summary>
+    private static (int Season, int Episode) AbsoluteToSeasonEpisode(
+        int abs, List<(int Number, int Count)> seasons)
+    {
+        int cum = 0;
+        foreach (var (number, count) in seasons)
+        {
+            if (abs <= cum + count) return (number, abs - cum);
+            cum += count;
+        }
+        var last = seasons[^1];
+        return (last.Number, abs - (cum - last.Count));
     }
 
     /// <summary>Last-resort episode extraction for filenames that no rename

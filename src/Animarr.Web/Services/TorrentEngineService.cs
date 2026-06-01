@@ -253,6 +253,15 @@ public class TorrentEngineService : BackgroundService
                 SubscribeEvents(mgr, record.InfoHash);
                 _managers[record.InfoHash] = mgr;
 
+                // Re-apply root-folder remap / flatten on restore. These are
+                // runtime-only in MonoTorrent (NOT persisted), so without this
+                // every container restart reverts the torrent to its own folder
+                // name — the custom destination ("Initial D/First Stage") is lost.
+                if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
+                    await ApplyRootFolderRemapAsync(mgr, record.InfoHash, record.CustomRootFolderName);
+                if (record.SkipSubfolderStructure)
+                    await ApplyFlattenAsync(mgr, record.InfoHash);
+
                 if (record.State != TorrentRecordState.Paused)
                     await mgr.StartAsync();
             }
@@ -873,12 +882,28 @@ public class TorrentEngineService : BackgroundService
     {
         if (!_managers.TryGetValue(infoHash, out var mgr)) return;
         if (mgr.State != TorrentState.Stopped && mgr.State != TorrentState.Stopping)
-            await mgr.StopAsync();
-        while (mgr.State == TorrentState.Stopping)
+        {
+            try { await mgr.StopAsync(); } catch { /* removing anyway */ }
+        }
+        // BOUNDED wait — a torrent that can't reach Stopped cleanly (e.g. stuck
+        // "Stopping" while hung connecting with 0 peers) must NOT hang the delete
+        // forever. The old unbounded `while (Stopping)` spun indefinitely, so the
+        // HTTP request never returned and the trash button looked dead. Cap it at
+        // ~5s and drop it from the engine regardless of state.
+        for (int i = 0; i < 50 && mgr.State == TorrentState.Stopping; i++)
             await Task.Delay(100);
 
-        await _engine.RemoveAsync(mgr,
-            deleteFiles ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly);
+        try
+        {
+            await _engine.RemoveAsync(mgr,
+                deleteFiles ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly);
+        }
+        catch (Exception ex)
+        {
+            // Never let engine cleanup block the record removal — the endpoint
+            // hard-deletes the DB row after this returns.
+            _logger.LogWarning(ex, "Engine RemoveAsync failed for {Hash} — continuing.", infoHash);
+        }
 
         _managers.TryRemove(infoHash, out _);
         _liveStats.TryRemove(infoHash, out _);
@@ -995,10 +1020,24 @@ public class TorrentEngineService : BackgroundService
         var targetDir = Path.Combine(mgr.SavePath, customName);
         if (string.Equals(mgr.ContainingDirectory, targetDir, StringComparison.OrdinalIgnoreCase)) return;
 
+        // MonoTorrent's file.Path is relative to SavePath and INCLUDES the
+        // torrent's own root folder (e.g. "(1998) Initial D/ep1.mkv"). Strip that
+        // root so we REPLACE it with customName instead of nesting the original
+        // inside it (the old code combined the full file.Path onto targetDir,
+        // which is why the custom folder ended up empty and data stayed put).
+        var rootRel = mgr.ContainingDirectory.Length > mgr.SavePath.Length
+            ? mgr.ContainingDirectory[mgr.SavePath.Length..]
+                 .Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                 .Replace(Path.DirectorySeparatorChar, '/')
+            : string.Empty;
+
         foreach (var file in mgr.Files)
         {
-            // file.Path is relative to ContainingDirectory (e.g. "ep1.mkv" or "Season1/ep1.mkv")
-            var newAbsPath = Path.Combine(targetDir, file.Path.Replace('/', Path.DirectorySeparatorChar));
+            var rel = file.Path.Replace(Path.DirectorySeparatorChar, '/');
+            if (rootRel.Length > 0 && rel.StartsWith(rootRel + "/", StringComparison.OrdinalIgnoreCase))
+                rel = rel[(rootRel.Length + 1)..];
+
+            var newAbsPath = Path.Combine(targetDir, rel.Replace('/', Path.DirectorySeparatorChar));
             var dir = Path.GetDirectoryName(newAbsPath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
