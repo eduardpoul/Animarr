@@ -1176,7 +1176,10 @@
         };
 
         // ── auto-hide ─────────────────────────────────────────────────
-        const HIDE_MS = 3500;
+        // Hide the controls after 3s with no mouse/remote activity (during
+        // playback). Any mouse move, tap, button press or remote key calls
+        // show(), which resets this timer.
+        const HIDE_MS = 3000;
         let hideTimer = null;
         let hovering = false;
         let dragging = false;
@@ -1185,10 +1188,18 @@
             hud.setAttribute('data-visible', 'true');
             root.style.cursor = '';
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-            if (!adapter.playing || hovering || dragging) return;
+            // Arm the hide timer unless the user is actively interacting. We do
+            // NOT gate arming on adapter.playing: play() is async, so right
+            // after a click adapter.playing is still false — gating here meant
+            // the timer never armed and the controls stayed forever. Instead we
+            // re-check playing when the timer FIRES (3s later it's reliably
+            // true), so paused playback keeps the controls up while active
+            // playback hides them.
+            if (hovering || dragging) return;
             hideTimer = setTimeout(() => {
-                if (hovering || dragging || !adapter.playing) return;
+                if (hovering || dragging) return;
                 if (root.querySelector('.vp-hud-popup')) return;  // popup open
+                if (!adapter.playing) return;                     // keep visible while paused
                 hud.classList.add('vp-hud--hidden');
                 hud.setAttribute('data-visible', 'false');
                 root.style.cursor = 'none';
@@ -1207,23 +1218,45 @@
         function toggleHud() {
             if (hud.getAttribute('data-visible') === 'true') hideNow(); else show();
         }
-        hud.addEventListener('mouseenter', () => { hovering = true;  show(); });
-        hud.addEventListener('mouseleave', () => { hovering = false; show(); });
+        // "hovering" must mean "mouse is over the CONTROL BARS" (so the auto-hide
+        // timer doesn't yank them away mid-aim) — NOT "mouse is anywhere over the
+        // player". Binding to .vp-hud was the bug: the full-screen tap-catcher is
+        // a pointer-events:auto descendant of .vp-hud, so .vp-hud's mouseenter
+        // fired for the whole video and hovering stuck true forever on desktop,
+        // which blocked the hide timer from ever arming. Bind to the bars only.
+        [hud.querySelector('.vp-hud__top'), hud.querySelector('.vp-hud__bottom')]
+            .filter(Boolean)
+            .forEach((bar) => {
+                bar.addEventListener('mouseenter', () => { hovering = true;  show(); });
+                bar.addEventListener('mouseleave', () => { hovering = false; show(); });
+            });
         const onActivity = () => show();
         // Desktop: mouse movement reveals the HUD (then it auto-hides).
         root.addEventListener('mousemove', onActivity);
-        // Tap-catcher: a dedicated full-area layer (.vp-hud__tap — pointer-events
-        // auto even while the HUD is hidden) captures taps on the bare video so
-        // they (a) toggle the HUD and (b) do NOT fall through to Artplayer's
-        // built-in click-to-play, which previously paused playback and fought
-        // the toggle (so a single tap couldn't re-show the HUD). The control
-        // bars sit ABOVE this layer (later in the DOM) so buttons still work.
+        // Tap-catcher: a dedicated full-area layer (.vp-hud__tap, pointer-events
+        // auto even while the HUD is hidden) captures taps/clicks on the bare
+        // video so they don't fall through to Artplayer's built-in click-to-play.
+        // The control bars sit ABOVE this layer (later in the DOM) so buttons
+        // still work. Behaviour is pointer-type aware:
+        //   • touch / pen (PHONE)   → tap shows/hides the controls (YouTube mobile)
+        //   • mouse (DESKTOP / WEB) → click anywhere = play/pause (YouTube desktop);
+        //                             the controls reveal via show() and then
+        //                             auto-hide after the 3s inactivity timeout.
+        // A small movement threshold ignores drags/swipes so they don't count
+        // as taps.
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
-            tapEl.addEventListener('click', () => {
+            let downX = 0, downY = 0;
+            tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+            tapEl.addEventListener('pointerup', (e) => {
+                if (Math.hypot((e.clientX || 0) - downX, (e.clientY || 0) - downY) > 12) return;
                 const openPopup = root.querySelector('.vp-hud-popup');
                 if (openPopup) { openPopup.remove(); return; }  // first tap dismisses a popup
-                toggleHud();
+                if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                    toggleHud();      // phone: tap toggles the controls
+                } else {
+                    togglePlay();     // desktop/web: click toggles play/pause (togglePlay also calls show())
+                }
             });
         }
 
