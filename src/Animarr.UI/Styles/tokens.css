@@ -242,6 +242,55 @@ html[data-theme="cinematic"] {
 html.tv-mode {
     font-size: 15px;
 }
+
+/* ── TV performance: drop backdrop blur ─────────────────────────────────
+   backdrop-filter: blur() is by far the most GPU-expensive thing the UI
+   does — 60+ instances (top/bottom bars, chips, sheets, modal scrims, the
+   hero scrim). On the weak GPUs in Android-TV boxes / sticks it tanks the
+   framerate of every scroll and D-pad focus move — the "дико лагает" the
+   catalog shows. The surfaces it sits on are already dark translucent fills
+   (rgba ~0.55–0.92 on a dark theme), so dropping the blur keeps text legible;
+   we just lose the frosted look the TV can't afford. Universal + !important
+   to beat the Blazor scoped-CSS [b-xxx] specificity on per-component rules. */
+html.tv-mode *,
+html.tv-mode *::before,
+html.tv-mode *::after {
+    -webkit-backdrop-filter: none !important;
+}
+/* Standard property in a SECOND rule: the minifier (Lightning CSS) de-dupes a
+   prefixed+unprefixed pair inside ONE block down to a single declaration, so a
+   separate rule is what keeps the unprefixed `backdrop-filter` too. On Chromium
+   (the Android-TV WebView) `-webkit-backdrop-filter` is an alias and the rule
+   above already wins via !important, but emitting both keeps it correct on
+   WebKit/WebView2 and obvious to read. Selector order varied so the minifier
+   treats it as a distinct rule and doesn't merge it back. */
+html.tv-mode *::after,
+html.tv-mode *::before,
+html.tv-mode * {
+    backdrop-filter: none !important;
+}
+
+/* ── TV performance: freeze the always-on full-screen motion ─────────────
+   THE big one. The catalog hero runs `hero-pan-v3` — a Ken-Burns pan that
+   scale()+translate()s a FULL-SCREEN image every single frame, forever — and
+   backdrop.js blurs two full-screen backdrop layers. Together they recomposite
+   the whole screen continuously, so even an idle catalog renders at ~15fps on
+   the TV's Mali-G52 (gfxinfo: 65ms/frame on 6 cards). It's not the 2D content —
+   it's the perpetual full-screen animation. Freeze the pan and drop the
+   full-screen blur on TV: a static, dimmed backdrop looks fine at 10 feet and
+   lets the GPU/compositor idle between actual interactions. */
+html.tv-mode *,
+html.tv-mode *::before,
+html.tv-mode *::after {
+    animation: none !important;        /* kill ALL infinite/decorative motion on TV (pan, pulses, shimmers) */
+}
+html.tv-mode .d-hero__image {
+    transform: none !important;        /* also drop the Ken-Burns static scale offset */
+}
+html.tv-mode #backdrop-slide-a,
+html.tv-mode #backdrop-slide-b {
+    filter: brightness(0.5) !important;   /* keep the dimming, lose the full-screen blur */
+}
 /* Enlarge INTERACTIVE controls for TV (D-pad focus / 10-foot tap targets):
    buttons, toggles, and clickable filter chips (button.d-pill). Deliberately
    NOT bare `.d-pill` — a plain Pill is a static LABEL (role badge "MASTER",

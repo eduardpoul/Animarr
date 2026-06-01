@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Animarr.App.CatalogNativePage"
+             x:Name="Root"
+             BackgroundColor="#0a0c10">
+    <!-- POC: native MAUI catalog rebuilt to match the Blazor Poster card 1:1.
+         8-column grid + true 2:3 art (ArtHeight is computed from the column
+         width so cards never look stretched). CollectionView → RecyclerView for
+         native recycling + D-pad focus (no tv-nav.js). -->
+    <Grid RowDefinitions="Auto,*">
+        <Label x:Name="CountLabel" Grid.Row="0"
+               Text="Animarr — native catalog POC (loading…)"
+               TextColor="White" FontFamily="GeistMono" FontSize="13" Padding="20,10" />
+
+        <CollectionView Grid.Row="1" x:Name="PostersView" SelectionMode="None">
+            <CollectionView.ItemsLayout>
+                <GridItemsLayout Orientation="Vertical" Span="8"
+                                 HorizontalItemSpacing="16" VerticalItemSpacing="20" />
+            </CollectionView.ItemsLayout>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                            Padding="0" BackgroundColor="#15171d" Margin="2">
+                        <!-- True 2:3 art: height bound to the page's computed value. -->
+                        <Grid HeightRequest="{Binding ArtHeight, Source={x:Reference Root}}">
+                            <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
+                            <BoxView Background="{Binding HueGlow}" InputTransparent="True" />
+                            <BoxView InputTransparent="True">
+                                <BoxView.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="Transparent" Offset="0.45" />
+                                        <GradientStop Color="#D90A0807" Offset="1.0" />
+                                    </LinearGradientBrush>
+                                </BoxView.Background>
+                            </BoxView>
+                            <Label Text="{Binding Cjk}" InputTransparent="True"
+                                   HorizontalOptions="End" VerticalOptions="Start"
+                                   Margin="0,6,8,0" FontSize="22" TextColor="#30FFFFFF"
+                                   MaxLines="1" LineBreakMode="TailTruncation" />
+                            <Border InputTransparent="True" HorizontalOptions="Start"
+                                    VerticalOptions="Start" Margin="8" Padding="6,2"
+                                    StrokeThickness="1" Stroke="#1FFFFFFF"
+                                    StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
+                                <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
+                                       FontSize="8" TextColor="White" CharacterSpacing="1.4" />
+                            </Border>
+                            <VerticalStackLayout InputTransparent="True" VerticalOptions="End"
+                                                 Spacing="2" Padding="10,8,10,10">
+                                <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
+                                       FontSize="12" TextColor="White" MaxLines="2"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Text="{Binding Meta}" FontFamily="GeistMono"
+                                       FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
+                            </VerticalStackLayout>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>
