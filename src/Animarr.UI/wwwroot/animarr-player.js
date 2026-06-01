@@ -1788,13 +1788,6 @@
             ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
             : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
         const isHls   = !directPlayUrl;
-        // DIAGNOSTIC: surfaces in logcat (chromium CONSOLE) so we can confirm
-        // the player is actually routing through the loopback proxy and not the
-        // base64 bridge.
-        console.info('animarr: playUrl=' + playUrl
-            + ' | apiBase=' + apiBase()
-            + ' | proxyBase=' + (window.animarrLocalProxyBase || '(none)')
-            + ' | directPlay=' + (!!directPlayUrl));
         const fileExt = mediaPath.toLowerCase().split('.').pop();
         const stylePref = readStylePref();
 

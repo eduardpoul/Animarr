@@ -168,35 +168,15 @@ public sealed class LocalMediaProxyService
             if (len.HasValue) resp.ContentLength64 = len.Value;
             else              resp.SendChunked = true;
 
-            // Stream with a large buffer (fewer syscalls → better throughput for
-            // big 4K segments) and time it, so logcat shows the effective
-            // per-segment Mbps. If a segment transfers fast here but playback
-            // still hitches, the bottleneck is network/decode (content too heavy
-            // for the device), not the proxy.
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            long total = 0;
+            // Stream with a large buffer — fewer syscalls → better throughput for
+            // big 4K segments than the default CopyToAsync chunk size.
             await using (var body = await upstream.Content.ReadAsStreamAsync().ConfigureAwait(false))
             {
                 var buf = new byte[256 * 1024];
                 int n;
                 while ((n = await body.ReadAsync(buf).ConfigureAwait(false)) > 0)
-                {
                     await resp.OutputStream.WriteAsync(buf.AsMemory(0, n)).ConfigureAwait(false);
-                    total += n;
-                }
             }
-            sw.Stop();
-#if ANDROID
-            // Log EVERY proxied request so we can see exactly what the WebView
-            // pulls through the proxy (manifest / segments / direct-play file)
-            // and the throughput. If playback happens with NO lines here, the
-            // segments are bypassing the proxy (e.g. still hitting the base64
-            // bridge) — which would explain residual GC/freeze.
-            double mbps = total > 0 ? total * 8.0 / 1e6 / Math.Max(0.001, sw.Elapsed.TotalSeconds) : 0;
-            Android.Util.Log.Info("Animarr.Proxy",
-                $"{req.HttpMethod} {req.Url?.AbsolutePath} -> {resp.StatusCode} " +
-                $"{total / 1024}KB {sw.ElapsedMilliseconds}ms {mbps:F1}Mbps");
-#endif
         }
         catch (Exception ex)
         {
