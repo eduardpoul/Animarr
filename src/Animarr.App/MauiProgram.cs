@@ -26,6 +26,11 @@ public static class MauiProgram
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+                // Native-catalog POC: match the web design system's display +
+                // mono faces so the XAML card reads like the Blazor one.
+                fonts.AddFont("archivo-black-400.ttf", "ArchivoBlack");
+                fonts.AddFont("geist-mono-400.ttf",   "GeistMono");
+                fonts.AddFont("geist-600.ttf",         "Geist");
             });
 
         // BlazorWebView host plumbing.
@@ -92,9 +97,18 @@ public static class MauiProgram
                 // — but CSS-only changes in the scoped bundle (mobile drilldown
                 // rail/tab hides) silently never did, because the cached
                 // Animarr.App.styles.css still @imported the old bundle hash.
-                // ClearCache(true) purges the disk cache on every WebView init,
-                // so each launch is guaranteed to load the assets we shipped.
-                webView.ClearCache(true);
+                // ClearCache(true) purges that lingering disk cache — but only
+                // ONCE per installed build, not on every launch. The per-launch
+                // purge was disk I/O on the cold-start path; gating it to a
+                // build-stamp change keeps the stale-asset guarantee (a freshly
+                // installed APK always purges first) while dropping the cost
+                // from every later launch of the SAME build — the end-user's
+                // daily case on the TV.
+                if (ShouldPurgeWebViewCacheForThisBuild())
+                {
+                    webView.ClearCache(true);
+                    Android.Util.Log.Info("Animarr.WebView", "WebView cache purged for new build stamp");
+                }
 
                 // Inject the real status-bar / nav-bar heights as CSS custom
                 // properties NOW — this hook runs on BlazorWebViewInitialized,
@@ -195,6 +209,33 @@ public static class MauiProgram
             {
                 Android.Util.Log.Error("Animarr.WebView", $"ConfigureAndroidWebView failed: {ex.Message}");
             }
+        }
+
+        // True exactly once per installed build: compares the compile-time
+        // AnimarrBuildStamp (assembly metadata, see csproj) against the last
+        // value we persisted. New build → purge + remember. DEBUG always
+        // purges so hot dev iterations never serve stale assets. Any failure
+        // falls back to the old always-purge so correctness never regresses.
+        static bool ShouldPurgeWebViewCacheForThisBuild()
+        {
+#if DEBUG
+            return true;
+#else
+            try
+            {
+                var stamp = "";
+                foreach (var a in typeof(MauiProgram).Assembly
+                             .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false))
+                    if (a is System.Reflection.AssemblyMetadataAttribute m && m.Key == "AnimarrBuildStamp")
+                    { stamp = m.Value ?? ""; break; }
+
+                const string key = "animarr_webview_cache_stamp";
+                if (Microsoft.Maui.Storage.Preferences.Get(key, "") == stamp) return false;
+                Microsoft.Maui.Storage.Preferences.Set(key, stamp);
+                return true;
+            }
+            catch { return true; }
+#endif
         }
 
         void OnBlazorWebViewInitialized(object? sender,

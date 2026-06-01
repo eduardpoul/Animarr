@@ -9,6 +9,9 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		return new Window(new MainPage()) { Title = "Animarr.App" };
+		// POC: boot straight into the native CollectionView catalog to A/B its
+		// scroll vs the Blazor-WebView grid. Swap back to new MainPage() to
+		// restore the real app.
+		return new Window(new CatalogNativePage()) { Title = "Animarr.App" };
 	}
 }

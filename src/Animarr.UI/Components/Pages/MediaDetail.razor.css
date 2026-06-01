@@ -111,7 +111,14 @@
     margin-top: var(--space-7);
 }
 
-.md-episode-card { cursor: pointer; }
+.md-episode-card {
+    cursor: pointer;
+    /* Same render-virtualization as the catalog poster (see Poster.razor.css):
+       a 200-episode donghua grid otherwise lays out + decodes every card at
+       once. DOM stays intact so D-pad navigation still reaches every episode. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+}
 
 @media (max-width: 959px) {
     .md-episode-grid {

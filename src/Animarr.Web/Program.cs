@@ -333,7 +333,7 @@ app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification);
 // Security: path must resolve inside one of the registered FolderWatcher paths,
 // OR inside the dedicated image cache (which lives next to the database, away
 // from the user's media tree).
-app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbContext> dbFactory, MediaCachePaths cachePaths, HttpContext ctx) =>
+app.MapGet("/api/image", async (string path, long? t, int? w, IDbContextFactory<AppDbContext> dbFactory, MediaCachePaths cachePaths, HttpContext ctx) =>
 {
     if (string.IsNullOrWhiteSpace(path))
         return Results.BadRequest();
@@ -396,10 +396,22 @@ app.MapGet("/api/image", async (string path, long? t, IDbContextFactory<AppDbCon
     // Cache-busting: if a version timestamp was supplied (t != 0), the URL is
     // unique per file version → cache immutably for 1 year.
     // If t is absent or 0, use no-cache so the browser always revalidates.
+    // Optional width cap (?w=): serve a downscaled, disk-cached variant so the
+    // client doesn't decode a full-size poster for a ~220px card — the texture
+    // thrash that janks weak Android-TV GPUs. Best-effort: returns the original
+    // on any failure or when w >= the source width.
+    var servePath = fullPath;
+    var serveMime = mime;
+    if (w is > 0)
+    {
+        servePath = await ImageResizer.GetResizedAsync(fullPath, w.Value, cachePaths.CacheRoot, ctx.RequestAborted);
+        if (!string.Equals(servePath, fullPath, StringComparison.OrdinalIgnoreCase)) serveMime = "image/jpeg";
+    }
+
     ctx.Response.Headers.CacheControl = (t is > 0)
         ? "public, max-age=31536000, immutable"
         : "no-cache";
-    return Results.File(fullPath, mime);
+    return Results.File(servePath, serveMime);
 })
 .WithName("GetMediaImage")
 .AllowAnonymous();

@@ -66,7 +66,11 @@
             // so without this the browser keeps serving the stale image even after
             // a rescan downloads a new poster.
             var v = Item.LastMetadataRefreshedAt?.Ticks ?? 0;
-            return Animarr.UI.Services.MediaUrl.Image(path, v);
+            // Cap to ~card width (grid track ≈ 220px, ×1.5 for sharpness) so the
+            // client decodes a ~330px bitmap instead of the full w500 poster —
+            // the catalog's 240 cards otherwise thrash GPU texture memory on
+            // weak TV boxes. Server caches the resized variant per (path,width).
+            return Animarr.UI.Services.MediaUrl.Image(path, v, 330);
         }
     }
 
