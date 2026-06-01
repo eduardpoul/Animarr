@@ -2,7 +2,7 @@
    Animarr custom HUD — variant B.
    Companion to wwwroot/animarr-player.js. Hides Artplayer's built-in
    chrome and styles the .vp-hud overlay rendered as an Artplayer layer.
-   Matches design_handoff_animarr/design-system/04-tv.html § T-03 with
+   Matches design_v2/animarr/project/design-system/04-tv.html § T-03 with
    the additions iterated on 2026-05-27.
    Tokens scoped to .vp-hud so the rest of the app keeps its own accent.
    ───────────────────────────────────────────────────────────────── */
