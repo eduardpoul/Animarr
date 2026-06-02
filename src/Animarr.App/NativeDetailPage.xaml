@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Animarr.App.NativeDetailPage"
+             x:Name="Root"
+             BackgroundColor="#0a0c10">
+    <!-- Native detail: backdrop hero + native episode grid (16:9 cards, thumbs
+         from /api/media/{id}/episode-thumb). Proves the second heavy screen is
+         smooth + D-pad-navigable natively too. -->
+    <CollectionView x:Name="EpisodesView" SelectionMode="None">
+        <CollectionView.Header>
+            <Grid>
+                <Grid HeightRequest="300">
+                    <Image x:Name="BackdropImage" Aspect="AspectFill" />
+                    <BoxView InputTransparent="True">
+                        <BoxView.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#700a0c10" Offset="0" />
+                                <GradientStop Color="#FF0a0c10" Offset="1" />
+                            </LinearGradientBrush>
+                        </BoxView.Background>
+                    </BoxView>
+                    <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
+                                         Padding="40,0,40,18" Spacing="6">
+                        <Label x:Name="TitleLabel" TextColor="White"
+                               FontFamily="ArchivoBlack" FontSize="34" MaxLines="2"
+                               LineBreakMode="TailTruncation" />
+                        <Label Text="EPISODES" TextColor="#e8a33d" FontFamily="GeistMono"
+                               FontSize="11" CharacterSpacing="2.5" Margin="0,4,0,0" />
+                    </VerticalStackLayout>
+                </Grid>
+            </Grid>
+        </CollectionView.Header>
+
+        <CollectionView.ItemsLayout>
+            <GridItemsLayout Orientation="Vertical" Span="5"
+                             HorizontalItemSpacing="14" VerticalItemSpacing="16" />
+        </CollectionView.ItemsLayout>
+
+        <CollectionView.ItemTemplate>
+            <DataTemplate>
+                <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
+                        Padding="0" BackgroundColor="#15171d" Margin="2">
+                    <Grid HeightRequest="130">
+                        <Image Source="{Binding ThumbUrl}" Aspect="AspectFill" />
+                        <BoxView InputTransparent="True">
+                            <BoxView.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="Transparent" Offset="0.4" />
+                                    <GradientStop Color="#E60A0807" Offset="1.0" />
+                                </LinearGradientBrush>
+                            </BoxView.Background>
+                        </BoxView>
+                        <Label Text="{Binding Label}" InputTransparent="True"
+                               VerticalOptions="End" Margin="10,0,0,8"
+                               FontFamily="GeistMono" FontSize="11" TextColor="White"
+                               CharacterSpacing="0.5" />
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentPage>

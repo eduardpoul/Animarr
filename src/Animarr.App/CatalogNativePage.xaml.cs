@@ -5,10 +5,10 @@ namespace Animarr.App;
 
 /// <summary>
 /// POC native catalog. Self-contained (own HttpClient, hard-coded LAN server)
-/// so it doesn't depend on Blazor DI / cookie plumbing — the point is to judge
-/// native CollectionView look + scroll + D-pad on the Mi TV. Card matches the
-/// Blazor Poster (poster + hue glow + wash + type ribbon + CJK + title/meta);
-/// art is a true 2:3 (height computed from the column width).
+/// so it doesn't depend on Blazor DI / cookie plumbing — judges native
+/// CollectionView look + scroll + D-pad on the Mi TV. Web-matching hero +
+/// category chips (functional) + 8-column true-2:3 poster grid. Card tap pushes
+/// a native detail page.
 /// </summary>
 public partial class CatalogNativePage : ContentPage
 {
@@ -19,12 +19,7 @@ public partial class CatalogNativePage : ContentPage
 
     public static readonly BindableProperty ArtHeightProperty =
         BindableProperty.Create(nameof(ArtHeight), typeof(double), typeof(CatalogNativePage), 300.0);
-
-    public double ArtHeight
-    {
-        get => (double)GetValue(ArtHeightProperty);
-        set => SetValue(ArtHeightProperty, value);
-    }
+    public double ArtHeight { get => (double)GetValue(ArtHeightProperty); set => SetValue(ArtHeightProperty, value); }
 
     public static readonly BindableProperty HeroProperty =
         BindableProperty.Create(nameof(Hero), typeof(HeroVm), typeof(CatalogNativePage));
@@ -34,16 +29,37 @@ public partial class CatalogNativePage : ContentPage
         BindableProperty.Create(nameof(Chips), typeof(System.Collections.IList), typeof(CatalogNativePage));
     public System.Collections.IList? Chips { get => (System.Collections.IList?)GetValue(ChipsProperty); set => SetValue(ChipsProperty, value); }
 
+    public Command<PosterItem> OpenCommand { get; }
+    public Command<string>     ChipCommand { get; }
+
+    private List<PosterItem> _all = new();
+    private (string Name, int Count)[] _chipGroups = Array.Empty<(string, int)>();
+    private int _total;
+
     public CatalogNativePage()
     {
         InitializeComponent();
-        ComputeArtHeight(0);                 // seed from the screen so first paint is 2:3
+        NavigationPage.SetHasNavigationBar(this, false);
+        OpenCommand = new Command<PosterItem>(OpenDetail);
+        ChipCommand = new Command<string>(FilterByCategory);
+        ComputeArtHeight(0);
         PostersView.Loaded += OnCollectionLoaded;
+        PostersView.SelectionChanged += OnPosterSelected;
+        TvFocus.Attach(PostersView);
         _ = LoadAsync();
     }
 
+    // D-pad OK on a focused card fires CollectionView selection → open detail.
+    private void OnPosterSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (e.CurrentSelection.FirstOrDefault() is PosterItem p) OpenDetail(p);
+        PostersView.SelectedItem = null;   // allow re-selecting the same card
+    }
+
+    private void OnCollectionLoaded(object? sender, EventArgs e)
+        => ComputeArtHeight(PostersView.Width);
+
     // True 2:3 art: card width = (avail - gaps) / span, height = width * 1.5.
-    // Prefer the CollectionView's real width; fall back to the display metrics.
     private void ComputeArtHeight(double viewWidth)
     {
         try
@@ -57,24 +73,22 @@ public partial class CatalogNativePage : ContentPage
             var cardW = (avail - (Span - 1) * Spacing - 16) / Span;
             if (cardW > 20) ArtHeight = Math.Round(cardW * 1.5);
         }
-        catch { /* keep the default */ }
+        catch { }
     }
 
-    private void OnCollectionLoaded(object? sender, EventArgs e)
+    private async void OpenDetail(PosterItem? p)
     {
-        ComputeArtHeight(PostersView.Width);
-#if ANDROID
-        if (PostersView.Handler?.PlatformView is AndroidX.RecyclerView.Widget.RecyclerView rv)
-        {
-            rv.SetItemViewCacheSize(28);
-            rv.SetClipChildren(false);       // let a focused card's scale-up overflow
-            rv.SetClipToPadding(false);
-            // MAUI doesn't expose per-item D-pad focus, so wire it natively: make
-            // each RecyclerView item view focusable and draw the focus ring + zoom
-            // + elevation on it. This is what native Android-TV apps do.
-            rv.AddOnChildAttachStateChangeListener(new CardFocusListener());
-        }
-#endif
+        if (p is null || string.IsNullOrEmpty(p.Id)) return;
+        await Navigation.PushAsync(new NativeDetailPage(p.Id, p.Title, p.BackdropUrl));
+    }
+
+    private void FilterByCategory(string? cat)
+    {
+        cat ??= "All";
+        PostersView.ItemsSource = (cat == "All")
+            ? _all
+            : _all.Where(p => p.Categories.Contains(cat)).ToList();
+        RebuildChips(cat);
     }
 
     private async Task LoadAsync()
@@ -82,23 +96,20 @@ public partial class CatalogNativePage : ContentPage
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-            var items = await http.GetFromJsonAsync<ApiItem[]>(
-                            $"{ServerBase}/api/media?take=500", Json)
+            var items = await http.GetFromJsonAsync<ApiItem[]>($"{ServerBase}/api/media?take=500", Json)
                         ?? Array.Empty<ApiItem>();
 
-            var posters = items
-                .Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
-                .Select(ToPoster)
-                .ToList();
+            _all = items.Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
+                        .Select(ToPoster).ToList();
 
-            PostersView.ItemsSource = posters;
+            PostersView.ItemsSource = _all;
             BuildHero(items);
             BuildChips(items);
 #if ANDROID
-            PreloadImages(posters);
+            PreloadImages(_all);
 #endif
         }
-        catch { /* POC: leave the screen empty on failure */ }
+        catch { /* POC: leave empty on failure */ }
     }
 
     private void BuildHero(ApiItem[] items)
@@ -120,73 +131,32 @@ public partial class CatalogNativePage : ContentPage
 
     private void BuildChips(ApiItem[] items)
     {
-        var groups = items
+        _chipGroups = items
             .SelectMany(i => i.CategoryNames ?? Array.Empty<string>())
             .GroupBy(n => n)
-            .Select(g => (Name: g.Key, Count: g.Count()))
-            .OrderByDescending(g => g.Count)
-            .ToList();
+            .Select(g => (g.Key, g.Count()))
+            .OrderByDescending(g => g.Item2)
+            .ToArray();
+        _total = items.Length;
+        RebuildChips("All");
+    }
 
-        var chips = new List<ChipVm> { new("All", items.Length.ToString(), active: true) };
-        chips.AddRange(groups.Select(g => new ChipVm(g.Name, g.Count.ToString(), active: false)));
+    private void RebuildChips(string active)
+    {
+        var chips = new List<ChipVm> { new("All", _total.ToString(), active == "All") };
+        chips.AddRange(_chipGroups.Select(g => new ChipVm(g.Name, g.Count.ToString(), active == g.Name)));
         Chips = chips;
     }
 
 #if ANDROID
-    // MAUI Android loads images via Glide; preloading the URLs warms the shared
-    // Glide cache so each card is a cache hit when it scrolls in.
     private static void PreloadImages(IEnumerable<PosterItem> posters)
     {
         try
         {
             var rm = Bumptech.Glide.Glide.With(Android.App.Application.Context);
-            foreach (var p in posters)
-            {
-                try { rm.Load(p.ImageUrl).Preload(); } catch { }
-            }
+            foreach (var p in posters) { try { rm.Load(p.ImageUrl).Preload(); } catch { } }
         }
-        catch { /* best-effort */ }
-    }
-
-    // Native D-pad focus + highlight for the RecyclerView items.
-    private sealed class CardFocusListener : Java.Lang.Object,
-        AndroidX.RecyclerView.Widget.RecyclerView.IOnChildAttachStateChangeListener
-    {
-        public void OnChildViewAttachedToWindow(Android.Views.View view)
-        {
-            view.Focusable = true;
-            view.FocusableInTouchMode = false;
-            view.FocusChange -= OnFocus;
-            view.FocusChange += OnFocus;
-        }
-
-        public void OnChildViewDetachedFromWindow(Android.Views.View view)
-            => view.FocusChange -= OnFocus;
-
-        private static void OnFocus(object? sender, Android.Views.View.FocusChangeEventArgs e)
-        {
-            if (sender is not Android.Views.View v) return;
-            var d = v.Resources?.DisplayMetrics?.Density ?? 2f;
-
-            v.Animate()?.ScaleX(e.HasFocus ? 1.10f : 1f)?.ScaleY(e.HasFocus ? 1.10f : 1f)?
-                .SetDuration(120)?.Start();
-
-            if (e.HasFocus)
-            {
-                var ring = new Android.Graphics.Drawables.GradientDrawable();
-                ring.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
-                ring.SetCornerRadius(12 * d);
-                ring.SetStroke((int)(3 * d), Android.Graphics.Color.ParseColor("#84c0d2"));
-                v.Foreground = ring;
-                v.Elevation = 12 * d;
-                v.BringToFront();
-            }
-            else
-            {
-                v.Foreground = null;
-                v.Elevation = 0;
-            }
-        }
+        catch { }
     }
 #endif
 
@@ -200,12 +170,16 @@ public partial class CatalogNativePage : ContentPage
 
         return new PosterItem
         {
-            Title     = (i.Title ?? "").ToUpperInvariant(),
-            ImageUrl  = $"{ServerBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
-            TypeLabel = TypeLabel(i.MediaType),
-            Meta      = string.Join("   ·   ", parts),
-            Cjk       = i.CjkTitle ?? "",
-            HueGlow   = HueGlow(i.Hue),
+            Id          = i.Id ?? "",
+            Title       = (i.Title ?? "").ToUpperInvariant(),
+            ImageUrl    = $"{ServerBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
+            BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
+                        : $"{ServerBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
+            TypeLabel   = TypeLabel(i.MediaType),
+            Meta        = string.Join("   ·   ", parts),
+            Cjk         = i.CjkTitle ?? "",
+            HueGlow     = HueGlow(i.Hue),
+            Categories  = i.CategoryNames ?? Array.Empty<string>(),
         };
     }
 
@@ -234,18 +208,21 @@ public partial class CatalogNativePage : ContentPage
     }
 
     private sealed record ApiItem(
-        string? Title, string? PosterPath, string? FanartPath, string? CjkTitle,
+        string? Id, string? Title, string? PosterPath, string? FanartPath, string? CjkTitle,
         int? Year, string? MediaType, double? Rating, int? EpisodeCount, int? Hue,
         string[]? CategoryNames);
 
     public sealed class PosterItem
     {
-        public string Title     { get; init; } = "";
-        public string ImageUrl  { get; init; } = "";
-        public string TypeLabel { get; init; } = "";
-        public string Meta      { get; init; } = "";
-        public string Cjk       { get; init; } = "";
-        public Brush? HueGlow   { get; init; }
+        public string   Id          { get; init; } = "";
+        public string   Title       { get; init; } = "";
+        public string   ImageUrl    { get; init; } = "";
+        public string?  BackdropUrl { get; init; }
+        public string   TypeLabel   { get; init; } = "";
+        public string   Meta        { get; init; } = "";
+        public string   Cjk         { get; init; } = "";
+        public Brush?   HueGlow     { get; init; }
+        public string[] Categories  { get; init; } = Array.Empty<string>();
     }
 
     public sealed class HeroVm
@@ -258,19 +235,21 @@ public partial class CatalogNativePage : ContentPage
 
     public sealed class ChipVm
     {
-        public string Label   { get; }
-        public string Count   { get; }
-        public Color  Bg      { get; }
-        public Color  Fg      { get; }
-        public Color  CountFg { get; }
+        public string Label    { get; }
+        public string Count    { get; }
+        public string Category { get; }
+        public Color  Bg       { get; }
+        public Color  Fg       { get; }
+        public Color  CountFg  { get; }
 
         public ChipVm(string label, string count, bool active)
         {
-            Label   = label;
-            Count   = count;
-            Bg      = active ? Color.FromArgb("#e8772e")  : Color.FromArgb("#1a1d24");
-            Fg      = active ? Colors.White               : Color.FromArgb("#c7ccd4");
-            CountFg = active ? Color.FromArgb("#ffe0c8")  : Color.FromArgb("#6b7280");
+            Label    = label;
+            Count    = count;
+            Category = label;
+            Bg       = active ? Color.FromArgb("#e8772e")  : Color.FromArgb("#1a1d24");
+            Fg       = active ? Colors.White               : Color.FromArgb("#c7ccd4");
+            CountFg  = active ? Color.FromArgb("#ffe0c8")  : Color.FromArgb("#6b7280");
         }
     }
 }

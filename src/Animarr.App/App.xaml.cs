@@ -12,6 +12,6 @@ public partial class App : Application
 		// POC: boot straight into the native CollectionView catalog to A/B its
 		// scroll vs the Blazor-WebView grid. Swap back to new MainPage() to
 		// restore the real app.
-		return new Window(new CatalogNativePage()) { Title = "Animarr.App" };
+		return new Window(new NavigationPage(new CatalogNativePage())) { Title = "Animarr.App" };
 	}
 }
