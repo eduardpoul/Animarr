@@ -1,6 +1,8 @@
 #if ANDROID
+using System.Linq;
 using AndroidX.RecyclerView.Widget;
 using Microsoft.Maui.Controls;
+using AView = Android.Views.View;
 
 namespace Animarr.App;
 
@@ -26,10 +28,37 @@ public static class TvFocus
         };
     }
 
+    // Shared focus visual: scale, sky-blue ring, elevation — used by both the
+    // recycled cards and the standalone TvFocusBehavior controls so every
+    // focusable surface highlights identically.
+    internal static void ApplyFocusVisual(AView v, bool hasFocus, float cornerDp = 12f)
+    {
+        var d = v.Resources?.DisplayMetrics?.Density ?? 2f;
+
+        v.Animate()?.ScaleX(hasFocus ? 1.10f : 1f)?.ScaleY(hasFocus ? 1.10f : 1f)?
+            .SetDuration(120)?.Start();
+
+        if (hasFocus)
+        {
+            var ring = new Android.Graphics.Drawables.GradientDrawable();
+            ring.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
+            ring.SetCornerRadius(cornerDp * d);
+            ring.SetStroke((int)(3 * d), Android.Graphics.Color.ParseColor("#84c0d2"));
+            v.Foreground = ring;
+            v.Elevation = 12 * d;
+            v.BringToFront();
+        }
+        else
+        {
+            v.Foreground = null;
+            v.Elevation = 0;
+        }
+    }
+
     private sealed class CardFocusListener : Java.Lang.Object,
         RecyclerView.IOnChildAttachStateChangeListener
     {
-        public void OnChildViewAttachedToWindow(Android.Views.View view)
+        public void OnChildViewAttachedToWindow(AView view)
         {
             view.Focusable = true;
             view.FocusableInTouchMode = false;
@@ -37,33 +66,107 @@ public static class TvFocus
             view.FocusChange += OnFocus;
         }
 
-        public void OnChildViewDetachedFromWindow(Android.Views.View view)
+        public void OnChildViewDetachedFromWindow(AView view)
             => view.FocusChange -= OnFocus;
 
-        private static void OnFocus(object? sender, Android.Views.View.FocusChangeEventArgs e)
+        private static void OnFocus(object? sender, AView.FocusChangeEventArgs e)
         {
-            if (sender is not Android.Views.View v) return;
-            var d = v.Resources?.DisplayMetrics?.Density ?? 2f;
-
-            v.Animate()?.ScaleX(e.HasFocus ? 1.10f : 1f)?.ScaleY(e.HasFocus ? 1.10f : 1f)?
-                .SetDuration(120)?.Start();
-
-            if (e.HasFocus)
-            {
-                var ring = new Android.Graphics.Drawables.GradientDrawable();
-                ring.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
-                ring.SetCornerRadius(12 * d);
-                ring.SetStroke((int)(3 * d), Android.Graphics.Color.ParseColor("#84c0d2"));
-                v.Foreground = ring;
-                v.Elevation = 12 * d;
-                v.BringToFront();
-            }
-            else
-            {
-                v.Foreground = null;
-                v.Elevation = 0;
-            }
+            if (sender is AView v) ApplyFocusVisual(v, e.HasFocus);
         }
+    }
+}
+
+/// <summary>
+/// Makes a single MAUI control (Border button, chip, season tab…) a native
+/// D-pad focus target: focusable, the shared focus ring on FocusChange, and —
+/// crucially — DPAD_CENTER/OK runs the control's TapGestureRecognizer Command
+/// (with its CommandParameter), so a remote can actually activate it. Touch
+/// still flows through MAUI's gesture, so no double-fire. Drop
+/// <c>&lt;local:TvFocusBehavior/&gt;</c> on any Border to make it remote-reachable.
+/// </summary>
+public sealed class TvFocusBehavior : Behavior<View>
+{
+    /// <summary>Corner radius (dp) of the focus ring, to match the control.</summary>
+    public float Radius { get; set; } = 12f;
+
+    private View? _view;
+    private AView? _native;
+
+    protected override void OnAttachedTo(View view)
+    {
+        base.OnAttachedTo(view);
+        _view = view;
+        view.HandlerChanged += OnHandlerChanged;
+        if (view.Handler is not null) Wire();
+    }
+
+    protected override void OnDetachingFrom(View view)
+    {
+        view.HandlerChanged -= OnHandlerChanged;
+        Unwire();
+        _view = null;
+        base.OnDetachingFrom(view);
+    }
+
+    private void OnHandlerChanged(object? sender, EventArgs e)
+    {
+        Unwire();
+        Wire();
+    }
+
+    private void Wire()
+    {
+        if (_view?.Handler?.PlatformView is not AView v) return;
+        _native = v;
+        v.Focusable = true;
+        v.FocusableInTouchMode = false;
+        v.FocusChange += OnFocus;
+        v.KeyPress += OnKey;
+    }
+
+    private void Unwire()
+    {
+        if (_native is null) return;
+        _native.FocusChange -= OnFocus;
+        _native.KeyPress -= OnKey;
+        _native = null;
+    }
+
+    private void OnFocus(object? sender, AView.FocusChangeEventArgs e)
+    {
+        if (sender is AView v) TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius);
+    }
+
+    // Fire once, on key-up, for the OK / center / enter family. Touch is left to
+    // MAUI's own TapGestureRecognizer handler, so the command never double-runs.
+    private void OnKey(object? sender, AView.KeyEventArgs e)
+    {
+        var ev = e.Event;
+        if (ev is null || ev.Action != Android.Views.KeyEventActions.Up)
+        {
+            e.Handled = false;
+            return;
+        }
+
+        if (e.KeyCode is Android.Views.Keycode.DpadCenter
+                      or Android.Views.Keycode.Enter
+                      or Android.Views.Keycode.NumpadEnter
+                      or Android.Views.Keycode.ButtonA)
+        {
+            Activate();
+            e.Handled = true;
+        }
+        else
+        {
+            e.Handled = false;
+        }
+    }
+
+    private void Activate()
+    {
+        var tap = _view?.GestureRecognizers?.OfType<TapGestureRecognizer>().FirstOrDefault();
+        if (tap?.Command is { } cmd && cmd.CanExecute(tap.CommandParameter))
+            cmd.Execute(tap.CommandParameter);
     }
 }
 #else
@@ -74,5 +177,11 @@ namespace Animarr.App;
 public static class TvFocus
 {
     public static void Attach(CollectionView cv) { }
+}
+
+// No-op on non-Android targets so the XAML still compiles everywhere.
+public sealed class TvFocusBehavior : Behavior<View>
+{
+    public float Radius { get; set; } = 12f;
 }
 #endif

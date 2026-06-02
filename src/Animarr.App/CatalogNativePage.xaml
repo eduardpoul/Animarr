@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Animarr.App"
              x:Class="Animarr.App.CatalogNativePage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
@@ -50,6 +51,12 @@
                         <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
                                 BackgroundColor="#e8772e" Padding="24,11"
                                 HorizontalOptions="Start" Margin="0,10,0,0">
+                            <Border.Behaviors>
+                                <local:TvFocusBehavior Radius="8" />
+                            </Border.Behaviors>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding HeroPlayCommand, Source={x:Reference Root}}" />
+                            </Border.GestureRecognizers>
                             <Label Text="▶   Play" TextColor="White"
                                    FontFamily="Geist" FontSize="15" />
                         </Border>
@@ -60,16 +67,22 @@
                                            Margin="0,18,22,0" Spacing="12">
                         <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
                                 StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                            <Border.Behaviors>
+                                <local:TvFocusBehavior Radius="10" />
+                            </Border.Behaviors>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnSearch" />
+                                <TapGestureRecognizer Command="{Binding SearchCommand, Source={x:Reference Root}}" />
                             </Border.GestureRecognizers>
                             <Label Text="🔍" FontSize="17" HorizontalOptions="Center"
                                    VerticalOptions="Center" />
                         </Border>
                         <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
                                 StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                            <Border.Behaviors>
+                                <local:TvFocusBehavior Radius="10" />
+                            </Border.Behaviors>
                             <Border.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnSettings" />
+                                <TapGestureRecognizer Command="{Binding SettingsCommand, Source={x:Reference Root}}" />
                             </Border.GestureRecognizers>
                             <Label Text="⚙" FontSize="20" TextColor="White"
                                    HorizontalOptions="Center" VerticalOptions="Center" />
@@ -86,6 +99,9 @@
                             <DataTemplate>
                                 <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
                                         Padding="15,7" BackgroundColor="{Binding Bg}">
+                                    <Border.Behaviors>
+                                        <local:TvFocusBehavior Radius="16" />
+                                    </Border.Behaviors>
                                     <Border.GestureRecognizers>
                                         <TapGestureRecognizer
                                             Command="{Binding ChipCommand, Source={x:Reference Root}}"
