@@ -4,7 +4,7 @@
              x:Class="Animarr.App.NativeDetailPage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <CollectionView x:Name="EpisodesView" SelectionMode="None">
+    <CollectionView x:Name="EpisodesView" SelectionMode="Single">
 
         <CollectionView.Header>
             <VerticalStackLayout>
@@ -71,6 +71,9 @@
                             <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
                                     BackgroundColor="#e8772e" Padding="24,11" HorizontalOptions="Start"
                                     Margin="0,10,0,0">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPlayHero" />
+                                </Border.GestureRecognizers>
                                 <Label Text="▶   Play" TextColor="White" FontFamily="Geist" FontSize="15" />
                             </Border>
                         </VerticalStackLayout>

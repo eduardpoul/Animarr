@@ -52,11 +52,40 @@ public partial class NativeDetailPage : ContentPage
         SeasonCommand = new Command<int>(SwitchSeason);
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         if (!string.IsNullOrEmpty(backdropUrl)) BackdropImage.Source = backdropUrl;
+        EpisodesView.SelectionChanged += OnEpisodeSelected;
         TvFocus.Attach(EpisodesView);
         _ = LoadAsync();
     }
 
     private void OnBack(object? sender, EventArgs e) => Navigation.PopAsync();
+
+    private void OnPlayHero(object? sender, EventArgs e)
+        => Play(_files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath);
+
+    // D-pad OK on an episode (CollectionView selection) → play it.
+    private void OnEpisodeSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (e.CurrentSelection.FirstOrDefault() is EpisodeVm ep && ep.Have) Play(ep.FilePath);
+        EpisodesView.SelectedItem = null;
+    }
+
+    // Raw passthrough (/api/file, designed for external native players) launched
+    // via ACTION_VIEW — the device's video player streams it with range support.
+    private void Play(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return;
+#if ANDROID
+        try
+        {
+            var url = $"{ServerBase}/api/file?path={Uri.EscapeDataString(filePath)}";
+            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView);
+            intent.SetDataAndType(Android.Net.Uri.Parse(url), "video/*");
+            intent.AddFlags(Android.Content.ActivityFlags.NewTask);
+            Android.App.Application.Context!.StartActivity(intent);
+        }
+        catch { }
+#endif
+    }
 
     private async Task LoadAsync()
     {
@@ -172,6 +201,27 @@ public partial class NativeDetailPage : ContentPage
     private void BuildEpisodes()
     {
         var it = _item!;
+
+        // Movie / single flat file → one "Play movie" card (no episode grid).
+        if (it.MediaType == "Movie" || (_files.Length == 1 && _files[0].Episode is null))
+        {
+            var mf = _files.FirstOrDefault();
+            Episodes = new List<EpisodeVm>
+            {
+                new()
+                {
+                    Number   = "▶",
+                    Title    = "Play movie",
+                    Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Movie",
+                    ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
+                        ? $"{ServerBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
+                    Have     = mf is not null,
+                    FilePath = mf?.FilePath,
+                },
+            };
+            return;
+        }
+
         var active    = it.Seasons?.FirstOrDefault(s => s.Number == _activeSeason);
         var maxFileEp = _files.Where(f => (f.Season ?? 1) == _activeSeason)
                               .Select(f => f.Episode ?? 0).DefaultIfEmpty(0).Max();
@@ -193,6 +243,7 @@ public partial class NativeDetailPage : ContentPage
                 Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "On disk") : "Not downloaded",
                 ThumbUrl = have ? $"{ServerBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
                 Have     = have,
+                FilePath = f?.FilePath,
             });
         }
         Episodes = eps;
@@ -224,7 +275,7 @@ public partial class NativeDetailPage : ContentPage
         string? PosterPath, string? FanartPath, SeasonDto[]? Seasons);
 
     private sealed record SeasonDto(int Number, int EpisodeCount, string? PosterPath, string? Overview);
-    private sealed record FileDto(int? Season, int? Episode, int? AbsoluteEpisode);
+    private sealed record FileDto(int? Season, int? Episode, int? AbsoluteEpisode, string? FilePath);
 
     public sealed record KvVm(string Key, string Value);
     public sealed record IdVm(string Src, string Id);
@@ -258,6 +309,7 @@ public partial class NativeDetailPage : ContentPage
         public string Meta     { get; init; } = "";
         public string ThumbUrl { get; init; } = "";
         public bool   Have     { get; init; }
+        public string? FilePath { get; init; }
 
         public Color  Strip    => Have ? Color.FromArgb("#56c596") : Color.FromArgb("#e8a33d");
         public string ChipText => Have ? "✓" : "!";
