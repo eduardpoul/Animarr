@@ -4,13 +4,13 @@
              x:Class="Animarr.App.NativeDetailPage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <!-- Native detail: backdrop hero + native episode grid (16:9 cards, thumbs
-         from /api/media/{id}/episode-thumb). Proves the second heavy screen is
-         smooth + D-pad-navigable natively too. -->
     <CollectionView x:Name="EpisodesView" SelectionMode="None">
+
         <CollectionView.Header>
-            <Grid>
-                <Grid HeightRequest="300">
+            <VerticalStackLayout>
+
+                <!-- ── HERO ─────────────────────────────────────────────── -->
+                <Grid HeightRequest="330">
                     <Image x:Name="BackdropImage" Aspect="AspectFill" />
                     <BoxView InputTransparent="True">
                         <BoxView.Background>
@@ -20,42 +20,195 @@
                             </LinearGradientBrush>
                         </BoxView.Background>
                     </BoxView>
-                    <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
-                                         Padding="40,0,40,18" Spacing="6">
-                        <Label x:Name="TitleLabel" TextColor="White"
-                               FontFamily="ArchivoBlack" FontSize="34" MaxLines="2"
-                               LineBreakMode="TailTruncation" />
-                        <Label Text="EPISODES" TextColor="#e8a33d" FontFamily="GeistMono"
-                               FontSize="11" CharacterSpacing="2.5" Margin="0,4,0,0" />
+
+                    <Label x:Name="CjkLabel" InputTransparent="True" HorizontalOptions="End"
+                           VerticalOptions="Start" Margin="0,14,18,0" FontSize="40"
+                           TextColor="#20FFFFFF" MaxLines="1" />
+
+                    <!-- back -->
+                    <Border HorizontalOptions="Start" VerticalOptions="Start" Margin="20,18,0,0"
+                            WidthRequest="46" HeightRequest="46" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnBack" />
+                        </Border.GestureRecognizers>
+                        <Label Text="‹" TextColor="White" FontSize="26" HorizontalOptions="Center"
+                               VerticalOptions="Center" />
+                    </Border>
+
+                    <!-- poster + title block -->
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24" VerticalOptions="End"
+                          Padding="40,0,40,26">
+                        <Border Grid.Column="0" StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                                BackgroundColor="#15171d" VerticalOptions="End">
+                            <Image x:Name="PosterImage" WidthRequest="150" HeightRequest="225"
+                                   Aspect="AspectFill" />
+                        </Border>
+
+                        <VerticalStackLayout Grid.Column="1" VerticalOptions="End" Spacing="6">
+                            <Label x:Name="TitleLabel" TextColor="White" FontFamily="ArchivoBlack"
+                                   FontSize="34" MaxLines="2" LineBreakMode="TailTruncation" />
+                            <Label x:Name="AltLabel" TextColor="#9aa3b2" FontFamily="GeistMono"
+                                   FontSize="13" IsVisible="False" />
+
+                            <HorizontalStackLayout Spacing="7" Margin="0,4,0,0"
+                                    BindableLayout.ItemsSource="{Binding Pills, Source={x:Reference Root}}">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border StrokeThickness="0" StrokeShape="RoundRectangle 12"
+                                                Padding="9,3" BackgroundColor="#241c14">
+                                            <Label Text="{Binding .}" TextColor="#e8a33d"
+                                                   FontFamily="GeistMono" FontSize="10"
+                                                   CharacterSpacing="0.8" />
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </HorizontalStackLayout>
+
+                            <Label x:Name="MetaLabel" TextColor="#cfd3da" FontFamily="GeistMono"
+                                   FontSize="12" CharacterSpacing="0.4" Margin="0,4,0,0" />
+
+                            <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
+                                    BackgroundColor="#e8772e" Padding="24,11" HorizontalOptions="Start"
+                                    Margin="0,10,0,0">
+                                <Label Text="▶   Play" TextColor="White" FontFamily="Geist" FontSize="15" />
+                            </Border>
+                        </VerticalStackLayout>
+                    </Grid>
+                </Grid>
+
+                <!-- ── 3-COLUMN BODY ────────────────────────────────────── -->
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="40" Padding="40,22,40,6">
+                    <VerticalStackLayout Grid.Column="0" Spacing="8">
+                        <Label Text="SYNOPSIS" TextColor="#6b7280" FontFamily="GeistMono"
+                               FontSize="10" CharacterSpacing="2" />
+                        <Label x:Name="SynopsisLabel" TextColor="#b8bcc4" FontSize="13"
+                               LineHeight="1.45" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Grid.Column="1" Spacing="8">
+                        <Label Text="DETAILS" TextColor="#6b7280" FontFamily="GeistMono"
+                               FontSize="10" CharacterSpacing="2" />
+                        <VerticalStackLayout Spacing="6"
+                                BindableLayout.ItemsSource="{Binding DetailRows, Source={x:Reference Root}}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="100,*" ColumnSpacing="10">
+                                        <Label Grid.Column="0" Text="{Binding Key}" TextColor="#6b7280"
+                                               FontFamily="GeistMono" FontSize="11" />
+                                        <Label Grid.Column="1" Text="{Binding Value}" TextColor="#cfd3da"
+                                               FontSize="12" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Grid.Column="2" Spacing="8">
+                        <Label x:Name="IdentTitle" Text="IDENTIFICATION" TextColor="#6b7280"
+                               FontFamily="GeistMono" FontSize="10" CharacterSpacing="2" />
+                        <VerticalStackLayout Spacing="7"
+                                BindableLayout.ItemsSource="{Binding IdentRows, Source={x:Reference Root}}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <HorizontalStackLayout Spacing="10">
+                                        <Border StrokeThickness="0" StrokeShape="RoundRectangle 4"
+                                                Padding="7,2" BackgroundColor="#1a1d24">
+                                            <Label Text="{Binding Src}" TextColor="#9aa3b2"
+                                                   FontFamily="GeistMono" FontSize="10" />
+                                        </Border>
+                                        <Label Text="{Binding Id}" TextColor="#84c0d2" FontSize="12"
+                                               VerticalOptions="Center" />
+                                    </HorizontalStackLayout>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
                     </VerticalStackLayout>
                 </Grid>
-            </Grid>
+
+                <!-- ── SEASON TABS ──────────────────────────────────────── -->
+                <VerticalStackLayout x:Name="SeasonsSection" Padding="40,14,40,4" IsVisible="False">
+                    <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                        <HorizontalStackLayout Spacing="10"
+                                BindableLayout.ItemsSource="{Binding SeasonTabs, Source={x:Reference Root}}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
+                                            Padding="15,7" BackgroundColor="{Binding Bg}">
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer
+                                                Command="{Binding SeasonCommand, Source={x:Reference Root}}"
+                                                CommandParameter="{Binding Number}" />
+                                        </Border.GestureRecognizers>
+                                        <HorizontalStackLayout Spacing="7">
+                                            <Label Text="{Binding Label}" TextColor="{Binding Fg}"
+                                                   FontFamily="Geist" FontSize="13" />
+                                            <Label Text="{Binding Count}" TextColor="{Binding CountFg}"
+                                                   FontFamily="GeistMono" FontSize="11"
+                                                   VerticalOptions="Center" />
+                                        </HorizontalStackLayout>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </HorizontalStackLayout>
+                    </ScrollView>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
         </CollectionView.Header>
 
+        <CollectionView.ItemsSource>
+            <Binding Path="Episodes" Source="{x:Reference Root}" />
+        </CollectionView.ItemsSource>
+
         <CollectionView.ItemsLayout>
-            <GridItemsLayout Orientation="Vertical" Span="5"
+            <GridItemsLayout Orientation="Vertical" Span="6"
                              HorizontalItemSpacing="14" VerticalItemSpacing="16" />
         </CollectionView.ItemsLayout>
 
         <CollectionView.ItemTemplate>
             <DataTemplate>
-                <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
-                        Padding="0" BackgroundColor="#15171d" Margin="2">
-                    <Grid HeightRequest="130">
-                        <Image Source="{Binding ThumbUrl}" Aspect="AspectFill" />
-                        <BoxView InputTransparent="True">
-                            <BoxView.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                    <GradientStop Color="Transparent" Offset="0.4" />
-                                    <GradientStop Color="#E60A0807" Offset="1.0" />
-                                </LinearGradientBrush>
-                            </BoxView.Background>
-                        </BoxView>
-                        <Label Text="{Binding Label}" InputTransparent="True"
-                               VerticalOptions="End" Margin="10,0,0,8"
-                               FontFamily="GeistMono" FontSize="11" TextColor="White"
-                               CharacterSpacing="0.5" />
-                    </Grid>
+                <Border StrokeThickness="0" StrokeShape="RoundRectangle 8" Padding="0"
+                        BackgroundColor="#15171d" Margin="2" Opacity="{Binding ArtOpacity}">
+                    <VerticalStackLayout>
+                        <!-- 16:9 thumb -->
+                        <Grid HeightRequest="165">
+                            <Image Source="{Binding ThumbUrl}" Aspect="AspectFill" />
+                            <BoxView InputTransparent="True">
+                                <BoxView.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="Transparent" Offset="0.3" />
+                                        <GradientStop Color="#C7000000" Offset="1.0" />
+                                    </LinearGradientBrush>
+                                </BoxView.Background>
+                            </BoxView>
+                            <!-- left status strip -->
+                            <BoxView HorizontalOptions="Start" WidthRequest="3"
+                                     Color="{Binding Strip}" InputTransparent="True" />
+                            <!-- big episode number -->
+                            <Label Text="{Binding Number}" InputTransparent="True"
+                                   HorizontalOptions="Start" VerticalOptions="Start"
+                                   Margin="12,8,0,0" FontFamily="ArchivoBlack" FontSize="26"
+                                   TextColor="White" />
+                            <!-- disk-status chip (top-right) -->
+                            <Border InputTransparent="True" HorizontalOptions="End"
+                                    VerticalOptions="Start" Margin="0,8,8,0"
+                                    WidthRequest="26" HeightRequest="26" StrokeThickness="1"
+                                    Stroke="{Binding ChipFg}" StrokeShape="RoundRectangle 6"
+                                    BackgroundColor="#66000000">
+                                <Label Text="{Binding ChipText}" TextColor="{Binding ChipFg}"
+                                       FontSize="13" HorizontalOptions="Center"
+                                       VerticalOptions="Center" />
+                            </Border>
+                        </Grid>
+                        <!-- caption -->
+                        <VerticalStackLayout Padding="12,8,12,10" Spacing="1">
+                            <Label Text="{Binding Title}" TextColor="{Binding TitleFg}"
+                                   FontFamily="Geist" FontSize="12" MaxLines="1"
+                                   LineBreakMode="TailTruncation" />
+                            <Label Text="{Binding Meta}" TextColor="{Binding MetaFg}"
+                                   FontFamily="GeistMono" FontSize="9" />
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
                 </Border>
             </DataTemplate>
         </CollectionView.ItemTemplate>
