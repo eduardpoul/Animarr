@@ -29,8 +29,11 @@ public partial class CatalogNativePage : ContentPage
         BindableProperty.Create(nameof(Chips), typeof(System.Collections.IList), typeof(CatalogNativePage));
     public System.Collections.IList? Chips { get => (System.Collections.IList?)GetValue(ChipsProperty); set => SetValue(ChipsProperty, value); }
 
-    public Command<PosterItem> OpenCommand { get; }
-    public Command<string>     ChipCommand { get; }
+    public Command<PosterItem> OpenCommand     { get; }
+    public Command<string>     ChipCommand     { get; }
+    public Command             SearchCommand   { get; }
+    public Command             SettingsCommand { get; }
+    public Command             HeroPlayCommand { get; }
 
     private List<PosterItem> _all = new();
     private (string Name, int Count)[] _chipGroups = Array.Empty<(string, int)>();
@@ -40,8 +43,12 @@ public partial class CatalogNativePage : ContentPage
     {
         InitializeComponent();
         NavigationPage.SetHasNavigationBar(this, false);
-        OpenCommand = new Command<PosterItem>(OpenDetail);
-        ChipCommand = new Command<string>(FilterByCategory);
+        OpenCommand     = new Command<PosterItem>(OpenDetail);
+        ChipCommand     = new Command<string>(FilterByCategory);
+        // Long-tail screens reuse the existing Blazor UI in a pushed WebView host.
+        SearchCommand   = new Command(() => Navigation.PushAsync(new BlazorHostPage("/search")));
+        SettingsCommand = new Command(() => Navigation.PushAsync(new BlazorHostPage("/settings")));
+        HeroPlayCommand = new Command(OpenHero);
         ComputeArtHeight(0);
         PostersView.Loaded += OnCollectionLoaded;
         PostersView.SelectionChanged += OnPosterSelected;
@@ -56,12 +63,12 @@ public partial class CatalogNativePage : ContentPage
         PostersView.SelectedItem = null;   // allow re-selecting the same card
     }
 
-    // Long-tail screens reuse the existing Blazor UI in a pushed WebView host.
-    private async void OnSettings(object? sender, EventArgs e)
-        => await Navigation.PushAsync(new BlazorHostPage("/settings"));
-
-    private async void OnSearch(object? sender, EventArgs e)
-        => await Navigation.PushAsync(new BlazorHostPage("/search"));
+    // Hero "Play" opens the featured title's detail page (where Play streams it).
+    private async void OpenHero()
+    {
+        if (Hero?.Id is { Length: > 0 } id)
+            await Navigation.PushAsync(new NativeDetailPage(id, Hero.Title, Hero.Backdrop));
+    }
 
     private void OnCollectionLoaded(object? sender, EventArgs e)
         => ComputeArtHeight(PostersView.Width);
@@ -129,6 +136,7 @@ public partial class CatalogNativePage : ContentPage
             .Where(s => !string.IsNullOrEmpty(s));
         Hero = new HeroVm
         {
+            Id       = h.Id ?? "",
             Backdrop = $"{ServerBase}/api/image?path={Uri.EscapeDataString(h.FanartPath!)}&w=1280",
             Eyebrow  = "FEATURED",
             Title    = (h.Title ?? "").ToUpperInvariant(),
@@ -234,6 +242,7 @@ public partial class CatalogNativePage : ContentPage
 
     public sealed class HeroVm
     {
+        public string Id       { get; init; } = "";
         public string Backdrop { get; init; } = "";
         public string Eyebrow  { get; init; } = "";
         public string Title    { get; init; } = "";

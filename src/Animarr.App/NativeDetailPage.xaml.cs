@@ -42,30 +42,30 @@ public partial class NativeDetailPage : ContentPage
         BindableProperty.Create(nameof(Episodes), typeof(System.Collections.IList), typeof(NativeDetailPage));
     public System.Collections.IList? Episodes { get => (System.Collections.IList?)GetValue(EpisodesProperty); set => SetValue(EpisodesProperty, value); }
 
-    public Command<int> SeasonCommand { get; }
+    // Commands (not Tapped events) so TvFocusBehavior can run them from D-pad OK.
+    public Command<int> SeasonCommand   { get; }
+    public Command      BackCommand     { get; }
+    public Command      EditCommand     { get; }
+    public Command      PlayHeroCommand { get; }
 
     public NativeDetailPage(string id, string? title, string? backdropUrl)
     {
         InitializeComponent();
         NavigationPage.SetHasNavigationBar(this, false);
         _id = id;
-        SeasonCommand = new Command<int>(SwitchSeason);
+        SeasonCommand   = new Command<int>(SwitchSeason);
+        BackCommand     = new Command(() => Navigation.PopAsync());
+        // Edit metadata isn't rebuilt natively — open the full Blazor detail
+        // (which carries the edit drawer) for this item in a pushed WebView host.
+        EditCommand     = new Command(() => Navigation.PushAsync(new BlazorHostPage($"/catalog/{_id}")));
+        PlayHeroCommand = new Command(() =>
+            Play(_files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath));
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         if (!string.IsNullOrEmpty(backdropUrl)) BackdropImage.Source = backdropUrl;
         EpisodesView.SelectionChanged += OnEpisodeSelected;
         TvFocus.Attach(EpisodesView);
         _ = LoadAsync();
     }
-
-    private void OnBack(object? sender, EventArgs e) => Navigation.PopAsync();
-
-    // Edit metadata isn't rebuilt natively — open the full Blazor detail (which
-    // carries the edit-metadata drawer) for this item in a pushed WebView host.
-    private async void OnEdit(object? sender, EventArgs e)
-        => await Navigation.PushAsync(new BlazorHostPage($"/catalog/{_id}"));
-
-    private void OnPlayHero(object? sender, EventArgs e)
-        => Play(_files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath);
 
     // D-pad OK on an episode (CollectionView selection) → play it.
     private void OnEpisodeSelected(object? sender, SelectionChangedEventArgs e)
