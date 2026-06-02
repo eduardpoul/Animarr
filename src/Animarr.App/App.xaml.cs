@@ -9,9 +9,15 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		// POC: boot straight into the native CollectionView catalog to A/B its
-		// scroll vs the Blazor-WebView grid. Swap back to new MainPage() to
-		// restore the real app.
-		return new Window(new NavigationPage(new CatalogNativePage())) { Title = "Animarr.App" };
+		// Device-gated shell. TV (Leanback / UI_MODE_TYPE_TELEVISION) boots the
+		// native CollectionView catalog — tuned for 10-foot + D-pad, and the
+		// reason the native UI exists (weak-GPU WebView scroll lag). Phone /
+		// tablet keep the mature, responsive Blazor app (touch-first, every
+		// screen) via MainPage — they never had the scroll problem. One APK,
+		// the right front-end per device.
+		Page root = DeviceKind.IsTv
+			? new NavigationPage(new CatalogNativePage())
+			: new MainPage();
+		return new Window(root) { Title = "Animarr.App" };
 	}
 }
