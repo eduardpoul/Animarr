@@ -8,7 +8,7 @@
          category chips (CollectionView.Header, scrolls with the grid) + an
          8-column 2:3 poster grid. RecyclerView gives native recycling + D-pad
          focus (no tv-nav.js). -->
-    <CollectionView x:Name="PostersView" SelectionMode="None">
+    <CollectionView x:Name="PostersView" SelectionMode="Single">
 
         <CollectionView.Header>
             <Grid RowDefinitions="Auto,Auto">
@@ -65,6 +65,11 @@
                             <DataTemplate>
                                 <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
                                         Padding="15,7" BackgroundColor="{Binding Bg}">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer
+                                            Command="{Binding ChipCommand, Source={x:Reference Root}}"
+                                            CommandParameter="{Binding Category}" />
+                                    </Border.GestureRecognizers>
                                     <HorizontalStackLayout Spacing="7">
                                         <Label Text="{Binding Label}" TextColor="{Binding Fg}"
                                                FontFamily="Geist" FontSize="13" />
