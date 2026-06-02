@@ -54,6 +54,27 @@
                                    FontFamily="Geist" FontSize="15" />
                         </Border>
                     </VerticalStackLayout>
+
+                    <!-- top-right: search + settings → existing Blazor screens -->
+                    <HorizontalStackLayout HorizontalOptions="End" VerticalOptions="Start"
+                                           Margin="0,18,22,0" Spacing="12">
+                        <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
+                                StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnSearch" />
+                            </Border.GestureRecognizers>
+                            <Label Text="🔍" FontSize="17" HorizontalOptions="Center"
+                                   VerticalOptions="Center" />
+                        </Border>
+                        <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
+                                StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnSettings" />
+                            </Border.GestureRecognizers>
+                            <Label Text="⚙" FontSize="20" TextColor="White"
+                                   HorizontalOptions="Center" VerticalOptions="Center" />
+                        </Border>
+                    </HorizontalStackLayout>
                 </Grid>
 
                 <!-- ── CATEGORY CHIPS ──────────────────────────────────── -->

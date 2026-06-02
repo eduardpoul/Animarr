@@ -36,6 +36,17 @@
                                VerticalOptions="Center" />
                     </Border>
 
+                    <!-- edit → full Blazor detail (edit-metadata drawer) -->
+                    <Border HorizontalOptions="End" VerticalOptions="Start" Margin="0,18,20,0"
+                            WidthRequest="46" HeightRequest="46" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnEdit" />
+                        </Border.GestureRecognizers>
+                        <Label Text="✎" TextColor="White" FontSize="18" HorizontalOptions="Center"
+                               VerticalOptions="Center" />
+                    </Border>
+
                     <!-- poster + title block -->
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24" VerticalOptions="End"
                           Padding="40,0,40,26">

@@ -59,6 +59,11 @@ public partial class NativeDetailPage : ContentPage
 
     private void OnBack(object? sender, EventArgs e) => Navigation.PopAsync();
 
+    // Edit metadata isn't rebuilt natively — open the full Blazor detail (which
+    // carries the edit-metadata drawer) for this item in a pushed WebView host.
+    private async void OnEdit(object? sender, EventArgs e)
+        => await Navigation.PushAsync(new BlazorHostPage($"/catalog/{_id}"));
+
     private void OnPlayHero(object? sender, EventArgs e)
         => Play(_files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath);
 

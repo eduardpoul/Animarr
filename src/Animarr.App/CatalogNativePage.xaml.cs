@@ -56,6 +56,13 @@ public partial class CatalogNativePage : ContentPage
         PostersView.SelectedItem = null;   // allow re-selecting the same card
     }
 
+    // Long-tail screens reuse the existing Blazor UI in a pushed WebView host.
+    private async void OnSettings(object? sender, EventArgs e)
+        => await Navigation.PushAsync(new BlazorHostPage("/settings"));
+
+    private async void OnSearch(object? sender, EventArgs e)
+        => await Navigation.PushAsync(new BlazorHostPage("/search"));
+
     private void OnCollectionLoaded(object? sender, EventArgs e)
         => ComputeArtHeight(PostersView.Width);
 
