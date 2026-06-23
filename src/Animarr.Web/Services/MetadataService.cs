@@ -139,7 +139,7 @@ public class MetadataService(
             log?.Invoke($"[Search] Preferring English/romanised title for search: \"{searchTitle}\"");
         logger.LogInformation("Identifying folder '{Path}' with title '{Title}' type={Type}", folder.Path, searchTitle, typeHint);
 
-        var tmdbKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
+        var tmdbKey = await appConfig.GetTmdbApiKeyAsync(ct);
         var malKey  = await appConfig.GetAsync(AppConfigKeys.MalClientId, ct);
 
         // ── Shortcut: if a stored ImdbId exists on the item, use it directly ─
@@ -542,7 +542,7 @@ public class MetadataService(
     /// </summary>
     private async Task<string> BuildTmdbErrorHintAsync(string idStr, string source, CancellationToken ct)
     {
-        var apiKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
+        var apiKey = await appConfig.GetTmdbApiKeyAsync(ct);
         if (string.IsNullOrWhiteSpace(apiKey))
             return $"ID «{idStr}»: TMDB API key is not configured (go to Settings → API Keys).";
 

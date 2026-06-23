@@ -18,9 +18,26 @@ internal static class AppConfigEndpoints
             CancellationToken ct) =>
         {
             var all = await config.GetAllAsync(prefix: null, ct);
-            return Results.Ok(all
+            var entries = all
                 .Select(kv => new AppConfigEntryDto(kv.Key, kv.Value))
-                .ToArray());
+                .ToList();
+
+            // Surface the built-in TMDB key (appsettings: Metadata:TmdbApiKey) as the
+            // default shown in the Settings input when the user hasn't set their own.
+            // A user-entered key is left untouched and still wins everywhere.
+            if (!string.IsNullOrWhiteSpace(TmdbDefaults.BuiltInApiKey))
+            {
+                var idx = entries.FindIndex(e => e.Key == AppConfigKeys.TmdbApiKey);
+                var userKey = idx >= 0 ? entries[idx].Value : null;
+                if (string.IsNullOrWhiteSpace(userKey))
+                {
+                    var dflt = new AppConfigEntryDto(AppConfigKeys.TmdbApiKey, TmdbDefaults.BuiltInApiKey);
+                    if (idx >= 0) entries[idx] = dflt;
+                    else entries.Add(dflt);
+                }
+            }
+
+            return Results.Ok(entries.ToArray());
         });
 
         app.MapGet(ApiRoutes.AppConfigByKey, async (
