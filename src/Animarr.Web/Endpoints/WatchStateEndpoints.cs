@@ -1,4 +1,5 @@
 using Animarr.Shared;
+using Animarr.Shared.Models;
 using Animarr.Shared.Requests;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
@@ -146,6 +147,60 @@ internal static class WatchStateEndpoints
             row.LastSeenAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
+        }).RequireAuthorization();
+
+        // Retroactive "mark previous episodes (un)watched" in one shot — drives
+        // the MediaDetail "you skipped earlier episodes, mark them too?" popup.
+        // Upserts a row per (season, episode) under the current user. Returns
+        // the affected rows so the client patches its WatchStates list in place.
+        app.MapPost(ApiRoutes.WatchStateMarkBulk, async (
+            MarkBulkWatchedRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
+            CancellationToken ct) =>
+        {
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
+            if (request.Episodes is null || request.Episodes.Length == 0)
+                return Results.Ok(Array.Empty<WatchStateDto>());
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // One read of every row for this (user, item); upsert in memory so
+            // the per-episode loop never round-trips the DB.
+            var existing = await db.WatchStates
+                .Where(w => w.UserId == uid && w.MediaItemId == request.MediaItemId)
+                .ToListAsync(ct);
+
+            var now     = DateTime.UtcNow;
+            var touched = new List<WatchState>(request.Episodes.Length);
+            foreach (var epRef in request.Episodes)
+            {
+                var row = existing.FirstOrDefault(w => w.Season == epRef.Season && w.Episode == epRef.Episode);
+                if (row is null)
+                {
+                    row = new WatchState
+                    {
+                        Id          = Guid.NewGuid(),
+                        UserId      = uid,
+                        MediaItemId = request.MediaItemId,
+                        Season      = epRef.Season,
+                        Episode     = epRef.Episode,
+                        CreatedAt   = now,
+                    };
+                    db.WatchStates.Add(row);
+                    existing.Add(row); // dedup: a repeated (s,e) in the payload reuses this row
+                }
+                row.IsWatched  = request.IsWatched;
+                row.LastSeenAt = now;
+                // Match the single-toggle convention: watched pins progress to
+                // the end (bar matches the chip); unwatched clears it.
+                if (request.IsWatched && row.RuntimeMs is > 0) row.ProgressMs = row.RuntimeMs;
+                else if (!request.IsWatched) row.ProgressMs = null;
+                touched.Add(row);
+            }
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(touched.Select(r => r.ToDto()).ToArray());
         }).RequireAuthorization();
 
         return app;

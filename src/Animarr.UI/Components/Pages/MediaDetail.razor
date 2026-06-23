@@ -398,8 +398,24 @@ else
     <EditMetadataDrawer Item="_item" OnClose="@(() => _editOpen = false)" OnSaved="OnEditSaved" />
 }
 
+@* "Mark earlier episodes watched too?" confirm — fired from the episode grid. *@
+@if (_showMarkPrev)
+{
+    <MarkPreviousDialog Count="_markPrevTargets.Count"
+                        OnConfirm="ConfirmMarkPrevious"
+                        OnCancel="CancelMarkPrevious" />
+}
+
 @code {
     [Parameter] public Guid Id { get; set; }
+
+    // Auto-play target from the Home "Up next" rail. ?s=&e= opens the player
+    // straight on that episode; ?play=1 resumes/plays a movie. One-shot
+    // (guarded by _autoPlayHandled) so closing the player doesn't replay it.
+    [Parameter, SupplyParameterFromQuery(Name = "s")]    public int? AutoPlaySeason  { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "e")]    public int? AutoPlayEpisode { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "play")] public int? AutoPlayMovie  { get; set; }
+    private bool _autoPlayHandled;
 
     private MediaItemDto? _item;
     private MediaFileDto[] _files = Array.Empty<MediaFileDto>();
@@ -410,6 +426,11 @@ else
     private int _activeSeason = 1;
     private bool _movieWatched;
     private bool _editOpen;
+
+    // "Mark previous episodes watched" popup — set when the user marks an
+    // episode watched and earlier on-disk episodes are still unwatched.
+    private bool _showMarkPrev;
+    private List<(int Season, int Episode)> _markPrevTargets = new();
 
     // ─── Unmatched-file resolution (episode-resolution Tiers 1–2) ─────────
     // Pending per-file edits keyed by absolute path; falls back to the file's
@@ -496,6 +517,25 @@ else
         await LoadAsync();
     }
 
+    /// <summary>Honour the Home rail's auto-play query params once the item +
+    /// files have loaded. Episode → open the player on it; play=1 → resume/play
+    /// the movie via the same path the hero Continue CTA uses. Runs once, from
+    /// OnAfterRenderAsync so JS interop (player attach) is guaranteed live.</summary>
+    private async Task MaybeAutoPlayAsync()
+    {
+        if (_autoPlayHandled || _item is null) return;
+        if (AutoPlaySeason is int s && AutoPlayEpisode is int e)
+        {
+            _autoPlayHandled = true;
+            await PlayEpisodeAsync(s, e);
+        }
+        else if (AutoPlayMovie is 1)
+        {
+            _autoPlayHandled = true;
+            await HandleContinueClick();
+        }
+    }
+
     private void OnBaseChanged() => InvokeAsync(StateHasChanged);
 
     private async Task LoadAsync()
@@ -540,10 +580,12 @@ else
     private async Task HandleContinueClick()
     {
         if (_item is null || _continue is null) return;
-        string? path = null;
-        if (_continue.Season is int s && _continue.Episode is int ep)
+        // Prefer the file path the server resolved (the next-unwatched episode),
+        // then fall back to a (season, episode) lookup, then the first file.
+        string? path = _continue.FilePath;
+        if (path is null && _continue.Season is int s && _continue.Episode is int ep)
         {
-            var f = _files.FirstOrDefault(x => x.Season == s && x.Episode == ep);
+            var f = _files.FirstOrDefault(x => (x.Season ?? 1) == s && x.Episode == ep);
             path = f?.FilePath;
         }
         path ??= _files.FirstOrDefault()?.FilePath;
@@ -614,6 +656,13 @@ else
             catch { /* host without tv-nav.js — no-op */ }
         }
 
+        // Honour the Home "Up next" rail's auto-play query params (?s=&e= /
+        // ?play=1) once loaded. Post-render so the player JS attach is live.
+        if (!_autoPlayHandled && !_loading && _item is not null && _playerPath is null)
+        {
+            await MaybeAutoPlayAsync();
+        }
+
         // Soft-autoplay the title's theme music once per mount — only when the
         // user opted in and no real playback is active. Anime only (the endpoint
         // 404s otherwise). Stopped when a video starts (PlayPathAsync) and resumed
@@ -654,8 +703,24 @@ else
                     // browser resolves it against the page origin which is
                     // exactly what MediaSession's artwork field needs.
                     var artwork = _item.PosterPath ?? _item.FanartPath ?? string.Empty;
-                    var hasNext = _playerEpisode is not null;  // best-effort flag
-                    var hasPrev = _playerEpisode is > 1;
+                    // Accurate adjacency: only offer prev/next when a real file
+                    // for that episode exists on disk (rolls across season
+                    // boundaries). Drives the lock-screen buttons AND the
+                    // end-of-episode auto-advance overlay's `nextAvailable` gate.
+                    var nextEp  = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
+                    var prevEp  = PrevEpisodeOnDisk(_playerSeason, _playerEpisode);
+                    var hasNext = nextEp is not null;
+                    var hasPrev = prevEp is not null;
+                    // Up-next card label, e.g. "S1 · EP 6" (season hidden for
+                    // flat/seasonless items where it's 0).
+                    var upNextName = "";
+                    if (nextEp is { } ne)
+                    {
+                        var neBits = new List<string>();
+                        if (ne.Season > 0) neBits.Add($"S{ne.Season}");
+                        neBits.Add($"EP {ne.Episode}");
+                        upNextName = string.Join(" · ", neBits);
+                    }
                     // HUD-specific kicker. Design (§T-03 in 04-tv.html) shows
                     // "Now playing · S1 · EP 5" — no zero-pad, space before
                     // the episode number. Plain "Now playing" for movies.
@@ -674,6 +739,11 @@ else
                         // top-bar title block. Falls back to `title` if absent.
                         hudKicker,
                         hudName       = _item.Title,
+                        // End-of-episode "Up next" autoplay card labels.
+                        upNextEyebrow = L["player.up_next"],
+                        upNextName,
+                        upNextPlay    = L["player.up_next_play"],
+                        upNextDismiss = L["player.up_next_dismiss"],
                     };
                     try
                     {
@@ -713,48 +783,62 @@ else
         }
     }
 
-    /// <summary>Lock-screen / Bluetooth "Previous track" — try the previous
-    /// episode in the same season. No-op if we're already at E01 or this is
-    /// a movie.</summary>
+    /// <summary>"Previous episode" — lock-screen / Bluetooth prev-track, the HUD
+    /// Prev button, and the MediaTrackPrevious remote key. Jumps to the nearest
+    /// EARLIER on-disk episode (rolls back across a season boundary). No-op for
+    /// movies or when nothing precedes the current episode.</summary>
     [JSInvokable]
     public Task InvokePrev()
     {
-        if (_item is null || _playerEpisode is not > 1) return Task.CompletedTask;
-        var prev = _playerEpisode.Value - 1;
-        return PlayEpisodeAsync(_playerSeason, prev);
+        if (_item is null) return Task.CompletedTask;
+        var prev = PrevEpisodeOnDisk(_playerSeason, _playerEpisode);
+        return prev is { } p ? PlayEpisodeAsync(p.Season, p.Episode) : Task.CompletedTask;
     }
 
-    /// <summary>Lock-screen / Bluetooth "Next track" — try the next episode
-    /// in the same season. No-op if no episode after this one exists in the
-    /// loaded watch-state.</summary>
+    /// <summary>"Next episode" — lock-screen / Bluetooth next-track, the HUD Next
+    /// button, the MediaTrackNext remote key, AND the end-of-episode auto-advance
+    /// overlay. Jumps to the nearest LATER on-disk episode (rolls forward into
+    /// the next season). No-op for movies or at the last available episode.</summary>
     [JSInvokable]
     public Task InvokeNext()
     {
-        if (_item is null || _playerEpisode is null) return Task.CompletedTask;
-        var next = _playerEpisode.Value + 1;
-        return PlayEpisodeAsync(_playerSeason, next);
+        if (_item is null) return Task.CompletedTask;
+        var next = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
+        return next is { } n ? PlayEpisodeAsync(n.Season, n.Episode) : Task.CompletedTask;
     }
 
-    private async Task PlayEpisodeAsync(int? season, int? episode)
+    /// <summary>Nearest on-disk episode AFTER (season, episode), ordered by
+    /// (season, episode) so it rolls into the next season's first file. Null when
+    /// the current item is a movie (episode == null) or this is the last file.
+    /// A file's null season counts as season 1 to match the episode grid.</summary>
+    private (int Season, int Episode)? NextEpisodeOnDisk(int? season, int? episode)
     {
-        if (_item is null) return;
-        // Best-effort lookup of the matching file via /api/media/{id}/files.
-        // If the file doesn't exist (we passed the season finale) we silently
-        // stop — Artplayer keeps the current playback paused.
-        try
-        {
-            var files = await Api.GetMediaFilesAsync(_item.Id);
-            var match = files.FirstOrDefault(f =>
-                (season is null || f.Season == season) &&
-                (episode is null || f.Episode == episode));
-            if (match is null) return;
-            await ClosePlayer();
-            _playerSeason  = season;
-            _playerEpisode = episode;
-            _playerPath    = match.FilePath;
-            StateHasChanged();
-        }
-        catch { /* swallow — UI keeps current playback */ }
+        if (episode is null) return null;
+        var curS = season ?? 1;
+        var curE = episode.Value;
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => x.Season > curS || (x.Season == curS && x.Episode > curE))
+            .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+            .Select(x => ((int Season, int Episode)?)x)
+            .FirstOrDefault();
+    }
+
+    /// <summary>Nearest on-disk episode BEFORE (season, episode). Mirror of
+    /// <see cref="NextEpisodeOnDisk"/> for the Prev action.</summary>
+    private (int Season, int Episode)? PrevEpisodeOnDisk(int? season, int? episode)
+    {
+        if (episode is null) return null;
+        var curS = season ?? 1;
+        var curE = episode.Value;
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => x.Season < curS || (x.Season == curS && x.Episode < curE))
+            .OrderByDescending(x => x.Season).ThenByDescending(x => x.Episode)
+            .Select(x => ((int Season, int Episode)?)x)
+            .FirstOrDefault();
     }
 
     private async Task ClosePlayer()
@@ -767,6 +851,18 @@ else
         _playerSeason = null;
         _playerEpisode = null;
         _themeStarted = false;   // resume theme music on return to the detail view
+
+        // Playback may have auto-marked an episode watched (≥90%) or moved the
+        // resume point — refresh so the episode grid eyes + hero Continue CTA
+        // reflect it without a full page reload.
+        try { _watchStates = (await Api.GetWatchStatesAsync(Id)).ToList(); } catch { }
+        try
+        {
+            _continue       = await Api.GetContinueAsync(Id);
+            _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
+        }
+        catch { }
+
         StateHasChanged();
     }
 
@@ -853,9 +949,68 @@ else
                 IsWatched:   watched));
             _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
             _watchStates.Add(updated);
+
+            // Marking an episode watched while earlier on-disk episodes are still
+            // unwatched is almost always "I watched up to here" — offer to mark
+            // the gap. Only on mark-watched (not un-mark), and only when there's
+            // actually a gap to fill.
+            if (watched)
+            {
+                _markPrevTargets = PreviousUnwatchedOnDisk(season, episode);
+                _showMarkPrev    = _markPrevTargets.Count > 0;
+            }
         }
         catch { }
         StateHasChanged();
+    }
+
+    /// <summary>Earlier on-disk episodes (across ALL seasons) that have no
+    /// watched row yet, relative to the just-watched (season, episode). Ordered
+    /// by (season, episode). Drives the "mark previous too?" popup. A file's
+    /// null season counts as season 1 to match the episode grid's grouping.</summary>
+    private List<(int Season, int Episode)> PreviousUnwatchedOnDisk(int season, int episode)
+    {
+        bool IsBefore(int s, int e) => s < season || (s == season && e < episode);
+
+        var watched = _watchStates
+            .Where(w => w.IsWatched && w.Episode is not null)
+            .Select(w => (Season: w.Season ?? 1, Episode: w.Episode!.Value))
+            .ToHashSet();
+
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => IsBefore(x.Season, x.Episode) && !watched.Contains(x))
+            .Distinct()
+            .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+            .ToList();
+    }
+
+    private async Task ConfirmMarkPrevious()
+    {
+        if (_item is null || _markPrevTargets.Count == 0) { CancelMarkPrevious(); return; }
+        try
+        {
+            var updated = await Api.MarkBulkWatchedAsync(new MarkBulkWatchedRequest(
+                MediaItemId: _item.Id,
+                Episodes:    _markPrevTargets.Select(t => new EpisodeRef(t.Season, t.Episode)).ToArray(),
+                IsWatched:   true));
+            foreach (var u in updated)
+            {
+                _watchStates.RemoveAll(w => w.Season == u.Season && w.Episode == u.Episode);
+                _watchStates.Add(u);
+            }
+        }
+        catch { }
+        _showMarkPrev    = false;
+        _markPrevTargets = new();
+        StateHasChanged();
+    }
+
+    private void CancelMarkPrevious()
+    {
+        _showMarkPrev    = false;
+        _markPrevTargets = new();
     }
 
     /// <summary>Primary-CTA label for the MovieFileCard.</summary>
@@ -875,12 +1030,18 @@ else
         if (_item is null) return;
         try
         {
-            await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
+            var updated = await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
                 MediaItemId: _item.Id,
                 Season:      null,
                 Episode:     null,
                 FilePath:    null,
                 IsWatched:   watched));
+            // Patch the movie's WatchState row so the card's eye + CTA label
+            // reflect the new state immediately. The card binds to the row from
+            // _watchStates (movieWatchDto), NOT _movieWatched — updating only the
+            // latter left the button visually inert ("doesn't click").
+            _watchStates.RemoveAll(w => w.Season is null && w.Episode is null);
+            _watchStates.Add(updated);
             _movieWatched = watched;
         }
         catch { }

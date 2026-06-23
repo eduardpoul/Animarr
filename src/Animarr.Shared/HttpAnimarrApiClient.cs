@@ -309,6 +309,14 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
             ?? new WatchStateDto();
     }
 
+    public async Task<WatchStateDto[]> MarkBulkWatchedAsync(MarkBulkWatchedRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.WatchStateMarkBulk, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<WatchStateDto[]>(JsonOpts, ct)
+            ?? Array.Empty<WatchStateDto>();
+    }
+
     public async Task ResetProgressAsync(ResetProgressRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.WatchStateReset, request, JsonOpts, ct);
@@ -753,6 +761,11 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default)
         => (await _http.GetFromJsonAsync<ContinueWatchItemDto[]>(
                 $"{ApiRoutes.MeContinue}?take={take}", JsonOpts, ct))
+            ?? Array.Empty<ContinueWatchItemDto>();
+
+    public async Task<ContinueWatchItemDto[]> GetNextUpAsync(int take = 12, CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<ContinueWatchItemDto[]>(
+                $"{ApiRoutes.MeNextUp}?take={take}", JsonOpts, ct))
             ?? Array.Empty<ContinueWatchItemDto>();
 
     // ─── User + Role admin ──────────────────────────────────────────────

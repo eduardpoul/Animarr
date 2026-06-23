@@ -1,0 +1,118 @@
+/* Next Up rail — horizontal scroller of "what to watch next" cards, sits
+   directly under the Home hero. Mirrors the catalog's dark-card language. */
+
+.nur {
+    margin: 0 0 8px;
+}
+
+.nur__title {
+    margin: 0 0 12px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: var(--label-tracking);
+    text-transform: var(--label-casing);
+    color: var(--text);
+}
+
+.nur__row {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+.nur__row::-webkit-scrollbar { height: 6px; }
+.nur__row::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: var(--radius-pill);
+}
+
+.nur__card {
+    flex: 0 0 auto;
+    width: 220px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    scroll-snap-align: start;
+    font-family: inherit;
+}
+
+.nur__thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: var(--surface-2);
+    box-shadow: var(--shadow-card);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
+}
+.nur__card:hover .nur__thumb,
+.nur__card:focus-visible .nur__thumb {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hi);
+}
+
+.nur__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.nur__ph {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: var(--text-faint);
+}
+
+.nur__badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border-radius: var(--radius-badge);
+    color: #0f1115;
+    background: var(--accent-hi);
+}
+
+/* Play affordance, revealed on hover/focus — matches the episode card. */
+.nur__play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: rgba(8, 10, 13, 0.32);
+    opacity: 0;
+    transition: opacity var(--motion-fast);
+}
+.nur__card:hover .nur__play,
+.nur__card:focus-visible .nur__play { opacity: 1; }
+
+.nur__name {
+    margin-top: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.nur__sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+@media (max-width: 560px) {
+    .nur__card { width: 168px; }
+}

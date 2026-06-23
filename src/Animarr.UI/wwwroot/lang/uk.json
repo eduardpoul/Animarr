@@ -568,6 +568,20 @@
   "catalog.delete_dialog_confirm": "Прибрати",
   "catalog.delete_toast": "\"{0}\" прибрано з бібліотеки.",
 
+  "mark_prev.title": "Позначити попередні серії також?",
+  "mark_prev.body": "Попередніх серій на диску без позначки: {0}. Позначити їх переглянутими?",
+  "mark_prev.yes": "Так, позначити переглянутими",
+  "mark_prev.no": "Ні, лише цю",
+
+  "player.up_next": "Наступна серія",
+  "player.up_next_play": "Дивитися",
+  "player.up_next_dismiss": "Закрити",
+
+  "home.continue_watching": "Продовжити перегляд",
+  "home.new_episode": "Нова серія",
+  "home.next_up": "Дивитися далі",
+  "home.new_badge": "Нове",
+
   "media_detail.not_found": "Медіа не знайдено.",
   "media_detail.btn_back": "Назад",
   "media_detail.seasons_title": "Сезони",

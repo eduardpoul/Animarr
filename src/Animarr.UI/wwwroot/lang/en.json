@@ -567,6 +567,20 @@
   "catalog.delete_dialog_confirm": "Remove",
   "catalog.delete_toast": "\"{0}\" removed from library.",
 
+  "mark_prev.title": "Mark earlier episodes too?",
+  "mark_prev.body": "{0} earlier episode(s) on disk are still unwatched. Mark them watched as well?",
+  "mark_prev.yes": "Yes, mark them watched",
+  "mark_prev.no": "No, just this one",
+
+  "player.up_next": "Up next",
+  "player.up_next_play": "Play next",
+  "player.up_next_dismiss": "Dismiss",
+
+  "home.continue_watching": "Continue watching",
+  "home.new_episode": "New episode",
+  "home.next_up": "Up next",
+  "home.new_badge": "NEW",
+
   "media_detail.not_found": "Media not found.",
   "media_detail.btn_back": "Back",
   "media_detail.seasons_title": "Seasons",
