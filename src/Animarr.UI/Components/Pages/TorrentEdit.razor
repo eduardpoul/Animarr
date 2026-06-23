@@ -18,6 +18,7 @@
 @implements IAsyncDisposable
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 
 @using Microsoft.AspNetCore.SignalR.Client
 @using Animarr.UI.Components.Design.Layout
@@ -53,6 +54,12 @@
                                 <span class="@($"tor-dot tor-dot--{StateColorClass()}")"></span>
                                 @_live.State
                             </span>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(rec.ErrorMessage))
+                    {
+                        <div class="te-stats__error" title="@rec.ErrorMessage">
+                            <DIcon Name="x" Size="12" /> @rec.ErrorMessage
                         </div>
                     }
                     <div class="te-stats__row">
@@ -95,27 +102,23 @@
             @* ── FILE SELECTIONS ───────────────────────────────────── *@
             <div class="te-card">
                 <h3 class="te-card__title">
-                    @L["torrent_edit.files_title"] (@rec.FileSelections.Length)
+                    @L["torrent_edit.files_title"] (@_files.Count)
                 </h3>
-                <div class="te-tree">
-                    @foreach (var sel in rec.FileSelections.OrderBy(s => s.FilePath))
-                    {
-                        var path = sel.FilePath;
-                        var prio = _priorities.GetValueOrDefault(path, sel.Priority);
-                        <div class="te-tree__file" style="--depth:0">
-                            <input type="checkbox" checked="@(prio != 0)"
-                                   @onchange="@(e => { _priorities[path] = (bool)e.Value! ? 1 : 0; StateHasChanged(); })" />
-                            <span class="te-tree__file-name" title="@path">@System.IO.Path.GetFileName(path)</span>
-                            <select class="te-tree__priority @(prio == 0 ? "te-tree__priority--skip" : "")"
-                                    value="@prio"
-                                    @onchange="@(e => _priorities[path] = int.TryParse(e.Value?.ToString(), out var p) ? p : 1)">
-                                <option value="0">@L["file_priority.skip"]</option>
-                                <option value="1">@L["file_priority.normal"]</option>
-                                <option value="2">@L["file_priority.high"]</option>
-                            </select>
-                        </div>
-                    }
-                </div>
+                @if (_files.Count == 0)
+                {
+                    <div class="te-files-empty">
+                        Files will appear here once the torrent's metadata has downloaded.
+                    </div>
+                }
+                else
+                {
+                    <div class="te-tree">
+                        <TorrentFileTreeEditor Files="@_fileItems"
+                                               Priorities="@_priorities"
+                                               Progress="@_fileProgress"
+                                               OnChanged="StateHasChanged" />
+                    </div>
+                }
             </div>
 
             @* ── SPEED LIMITS ──────────────────────────────────────── *@
@@ -160,6 +163,9 @@
         <div class="te-footer__spacer"></div>
         @if (_record is not null)
         {
+            <Btn Variant="ghost" Size="md" Loading="@_rechecking" OnClick="RecheckTorrentAsync">
+                <DIcon Name="refresh" Size="13" /> Recheck
+            </Btn>
             <Btn Variant="danger" Size="md" OnClick="DeleteAsync">
                 <DIcon Name="trash" Size="13" /> Remove
             </Btn>
@@ -181,11 +187,16 @@
     private TorrentLiveStatsDto? _live;
     private bool _loading = true;
     private bool _saving;
+    private bool _rechecking;
     private bool _stopAfterDownload;
     private bool _skipSubfolderStructure;
     private int _dlLimit;
     private int _ulLimit;
     private Dictionary<string, int> _priorities = new();
+    private List<TorrentFileNodeDto> _files = new();
+    private List<TorrentFileTreeEditor.FileItem> _fileItems = new();
+    private Dictionary<string, double> _fileProgress = new();
+    private bool _refreshingProgress;
     private HubConnection? _hub;
     private string? _loadedHash;
 
@@ -194,9 +205,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await ConnectHubAsync();
+        // Load the record + file tree FIRST. The live-stats hub connects in the
+        // background — never block the drawer on it. (Under MAUI the hub could
+        // hang/slow on a bad origin; the drawer must still open + show data.)
         await LoadAsync();
         _loadedHash = Hash;
+        _ = ConnectHubAsync();
     }
 
     protected override async Task OnParametersSetAsync()
@@ -227,7 +241,19 @@
                 _skipSubfolderStructure  = _record.SkipSubfolderStructure;
                 _dlLimit                 = _record.DownloadLimit / 125_000;
                 _ulLimit                 = _record.UploadLimit / 125_000;
-                _priorities              = _record.FileSelections.ToDictionary(s => s.FilePath, s => s.Priority);
+                // Load the FULL file list (every file + size + current priority)
+                // from the file-tree endpoint. _record.FileSelections only holds
+                // files with a persisted non-default selection — empty for most
+                // torrents — which is why the list used to show nothing.
+                try
+                {
+                    var tree = await Api.GetTorrentFileTreeAsync(_record.Id);
+                    _files = tree.Children ?? new();
+                }
+                catch { _files = new(); }
+                _priorities   = _files.ToDictionary(f => f.Path, f => f.Priority);
+                _fileItems    = _files.Select(f => new TorrentFileTreeEditor.FileItem(f.Path, f.Size)).ToList();
+                _fileProgress = _files.ToDictionary(f => f.Path, f => f.Progress);
             }
         }
         catch { /* offline */ }
@@ -235,9 +261,37 @@
         StateHasChanged();
     }
 
+    /// <summary>Re-pull just the per-file progress while a torrent downloads.
+    /// Touches ONLY <see cref="_fileProgress"/> so the user's unsaved priority
+    /// edits in the tree survive each live tick. Guarded against overlap.</summary>
+    private async Task RefreshFileProgressAsync()
+    {
+        if (_refreshingProgress || _record is null) return;
+        _refreshingProgress = true;
+        try
+        {
+            var tree = await Api.GetTorrentFileTreeAsync(_record.Id);
+            var map = (tree.Children ?? new()).ToDictionary(f => f.Path, f => f.Progress);
+            if (map.Count > 0)
+            {
+                _fileProgress = map;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch { /* transient — keep the last good progress */ }
+        finally { _refreshingProgress = false; }
+    }
+
     private async Task ConnectHubAsync()
     {
-        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
+        // Build from the REAL server authority (ServerAddressProvider), not
+        // Nav.BaseUri — under MAUI the BlazorWebView origin is https://0.0.0.0/
+        // (Android) / 0.0.0.1 (Windows) and never reaches the hub, so StartAsync
+        // would hang/fail there. Fall back to the current page authority on WASM.
+        var authority = ServerAddr.Current?.GetLeftPart(UriPartial.Authority);
+        if (string.IsNullOrEmpty(authority))
+            authority = new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority);
+        var hubUri = new Uri(authority.TrimEnd('/') + ApiRoutes.HubTorrents);
         _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
         {
@@ -247,6 +301,11 @@
             {
                 _live = live;
                 InvokeAsync(StateHasChanged);
+                // Live per-file progress while downloading. Updates ONLY the
+                // progress map (not _priorities/_fileItems) so unsaved priority
+                // edits survive the tick.
+                if (live.State is "Downloading" or "Metadata")
+                    _ = RefreshFileProgressAsync();
             }
         });
         try { await _hub.StartAsync(); } catch { /* hub unavailable */ }
@@ -285,6 +344,22 @@
         }
         catch { /* swallow */ }
         finally { _saving = false; StateHasChanged(); }
+    }
+
+    private async Task RecheckTorrentAsync()
+    {
+        if (_record is null) return;
+        _rechecking = true;
+        StateHasChanged();
+        try
+        {
+            // Re-hash against on-disk data + resume. Fixes a stuck Error torrent
+            // and corrects stale per-file progress.
+            await Api.RecheckTorrentAsync(_record.Id);
+            await LoadAsync();
+        }
+        catch { /* swallow — state will refresh from the hub */ }
+        finally { _rechecking = false; StateHasChanged(); }
     }
 
     private async Task DeleteAsync()

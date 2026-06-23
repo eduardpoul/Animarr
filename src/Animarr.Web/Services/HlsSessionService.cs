@@ -58,7 +58,11 @@ public sealed class HlsSessionService : IDisposable
     // segment but no one is listening. Keep both in sync so a real
     // server-side give-up only happens when ffmpeg genuinely can't deliver.
     public static readonly TimeSpan SegmentWaitTimeout = TimeSpan.FromSeconds(60);
-    private const double SegmentDurationSec = 6.0;
+    // 4s (was 6s) so the FIRST playable segment exists ~33% sooner → faster
+    // startup. All segment math (playlist EXTINF, segCount, seek-restart, the
+    // -force_key_frames GOP expr) derives from this constant, so they stay in
+    // sync. 4s keeps per-segment overhead modest while shaving start latency.
+    private const double SegmentDurationSec = 4.0;
     /// <summary>Hard cap on concurrent active sessions across the whole host.
     /// Single-user Animarr realistically has 1-2 (one main player + maybe a
     /// background tab); anything past this is almost certainly leaked sessions
@@ -550,12 +554,17 @@ public sealed class HlsSessionService : IDisposable
             }
             await Task.Delay(150, ct);
         }
-        // Phase B — grace period for two more segments so player has buffer.
-        var thirdSegPath = Path.Combine(dir, $"seg-{(startSegment + 2):D5}.{segExt}");
-        var graceDeadline = DateTime.UtcNow.AddSeconds(5);
+        // Phase B — short grace period for ONE more segment so the player has a
+        // little buffer beyond seg-0. Cut from 5s/2-segments to 2s/1-segment:
+        // with the loopback proxy + hls.js's generous forward buffer, returning
+        // as soon as a second segment exists (or 2s, whichever first) starts
+        // playback ~3-5s sooner without re-introducing the cold-cache stall the
+        // old grace guarded against (hls.js keeps fetching ahead while playing).
+        var secondSegPath = Path.Combine(dir, $"seg-{(startSegment + 1):D5}.{segExt}");
+        var graceDeadline = DateTime.UtcNow.AddSeconds(2);
         while (DateTime.UtcNow < graceDeadline)
         {
-            if (File.Exists(thirdSegPath)) break;
+            if (File.Exists(secondSegPath)) break;
             if (proc.HasExited) break;  // ffmpeg done early — fine, return with what we have
             await Task.Delay(100, ct);
         }

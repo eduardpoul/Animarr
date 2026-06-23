@@ -1626,6 +1626,16 @@
             + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
             + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
             + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
+
+        // Kick the probe off IN PARALLEL with /api/hls/start. The probe is a
+        // second ffprobe on the source and is NOT needed to start playback —
+        // only to populate the audio-track / subtitle menus — so overlapping it
+        // with the (longer) start wait keeps its latency off the critical path.
+        const probePromise = mediaPath
+            ? fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)), { signal: abort.signal })
+                .then(r => (r.ok ? r.json() : null)).catch(() => null)
+            : Promise.resolve(null);
+
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
@@ -1670,11 +1680,11 @@
         let mediaInfo = null;
         if (mediaPath) {
             try {
-                const probeRes = await fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)),
-                    { signal: abort.signal });
+                // Awaits the probe fetch already in flight (started in parallel
+                // with /api/hls/start above) — by now it's usually done.
+                const data = await probePromise;
                 if (abort.signal.aborted) return;
-                if (probeRes.ok) {
-                    const data = await probeRes.json();
+                if (data) {
                     const streams = data.streams || [];
 
                     // Subtitles

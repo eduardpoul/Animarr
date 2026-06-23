@@ -92,12 +92,18 @@ internal static class TorrentEndpoints
 
             var savePath = await ResolveSavePathAsync(dbFactory, request.FolderWatcherId, ct);
 
-            // Map the drawer's unchecked files to DoNotDownload (priority 0).
-            // Keys are the manifest paths (MonoTorrent Torrent.Files[].Path), so
-            // they match the engine's mgr.Files[].Path lookup exactly. Applied
-            // before StartAsync, so skipped files never download.
+            // Per-file priorities chosen in the add drawer (0=skip / 1=normal /
+            // 2=high). Keys are the manifest paths (MonoTorrent Torrent.Files[].
+            // Path), matching the engine's mgr.Files[].Path lookup exactly;
+            // applied before StartAsync so skips never download. FilePriorities
+            // is the full map from the flat file list; ExcludedFiles is the
+            // legacy skip-only form, still honoured for older clients.
             Dictionary<string, int>? initialPriorities = null;
-            if (request.ExcludedFiles is { Length: > 0 } excluded)
+            if (request.FilePriorities is { Count: > 0 } prios)
+                initialPriorities = prios
+                    .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+            else if (request.ExcludedFiles is { Length: > 0 } excluded)
                 initialPriorities = excluded
                     .Where(p => !string.IsNullOrWhiteSpace(p))
                     .Distinct()
@@ -199,6 +205,21 @@ internal static class TorrentEndpoints
             return Results.Accepted();
         });
 
+        // Recheck — re-hash the torrent against on-disk data, then resume.
+        // Recovers an errored torrent and corrects stale per-file progress.
+        app.MapPost(ApiRoutes.TorrentRecheck, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            TorrentEngineService engine,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var entity = await db.TorrentRecords.FirstOrDefaultAsync(t => t.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            await engine.RecheckAsync(entity.InfoHash);
+            return Results.Accepted();
+        });
+
         // File tree is built from MonoTorrent's metadata cache held by the
         // engine; we re-shape it into the DTO recursively.
         app.MapGet(ApiRoutes.TorrentFileTree, async (
@@ -213,27 +234,65 @@ internal static class TorrentEndpoints
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
-            // Build a flat list of (path, size) — file tree shape is rebuilt
-            // client-side from selections + priorities since the engine's
-            // running-manager file list isn't exposed as a public API yet.
-            var leaves = entity.FileSelections
-                .Select(s => new TorrentFileNodeDto
+            // Persisted priorities keyed by normalised ('/') path. UI scale is
+            // 0=skip / 1=normal / 2=high; a file absent here defaults to Normal.
+            static string Norm(string p) => p.Replace('\\', '/');
+            var byPath = new Dictionary<string, int>();
+            foreach (var s in entity.FileSelections) byPath[Norm(s.FilePath)] = s.Priority;
+
+            // Prefer the LIVE file list from the engine — EVERY file in the
+            // torrent, with sizes — so the edit drawer can list/pick any file,
+            // not just the few that happen to have a persisted selection (which
+            // is why the files list used to be empty for normally-added
+            // torrents). Fall back to the persisted selections when the engine
+            // has no files yet (magnet metadata not arrived / not loaded).
+            // Per-file download progress from the engine, keyed by the same
+            // normalised path so each row can show a background fill. NOTE the
+            // engine returns 0..100 (percent) — normalise to 0..1 here so the
+            // DTO/UI use one scale (the UI multiplies by 100 to render width).
+            var progressRaw = engine.GetFileProgress(entity.InfoHash);
+            var progByPath = new Dictionary<string, double>();
+            if (progressRaw is not null)
+                foreach (var kv in progressRaw) progByPath[Norm(kv.Key)] = kv.Value / 100.0;
+
+            var engineFiles = engine.GetFiles(entity.InfoHash);
+            List<TorrentFileNodeDto> leaves;
+            if (engineFiles is { Count: > 0 })
+            {
+                leaves = engineFiles.Select(f =>
                 {
-                    Path     = s.FilePath,
+                    var path = Norm(f.Path);
+                    return new TorrentFileNodeDto
+                    {
+                        Path     = path,
+                        Name     = Path.GetFileName(path),
+                        IsDir    = false,
+                        Size     = f.Length,
+                        Depth    = path.Count(c => c == '/'),
+                        Priority = byPath.TryGetValue(path, out var p) ? p : 1,
+                        Progress = progByPath.GetValueOrDefault(path, 0),
+                    };
+                }).ToList();
+            }
+            else
+            {
+                leaves = entity.FileSelections.Select(s => new TorrentFileNodeDto
+                {
+                    Path     = Norm(s.FilePath),
                     Name     = Path.GetFileName(s.FilePath),
                     IsDir    = false,
                     Size     = 0,
-                    Depth    = s.FilePath.Count(c => c is '/' or '\\'),
+                    Depth    = Norm(s.FilePath).Count(c => c == '/'),
                     Priority = s.Priority,
-                })
-                .ToArray();
+                }).ToList();
+            }
 
             return Results.Ok(new TorrentFileNodeDto
             {
                 Path = string.Empty,
                 Name = entity.Name,
                 IsDir = true,
-                Children = leaves.ToList(),
+                Children = leaves,
             });
         });
 
