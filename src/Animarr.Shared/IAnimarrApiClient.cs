@@ -72,6 +72,9 @@ public interface IAnimarrApiClient
     Task                     DeleteTorrentAsync(Guid id, bool deleteFiles, CancellationToken ct = default);
     Task                     PauseTorrentAsync(Guid id, CancellationToken ct = default);
     Task                     ResumeTorrentAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Re-hash the torrent against on-disk data, then resume — recovers
+    /// an errored torrent and corrects stale per-file progress.</summary>
+    Task                     RecheckTorrentAsync(Guid id, CancellationToken ct = default);
     Task<TorrentFileNodeDto> GetTorrentFileTreeAsync(Guid id, CancellationToken ct = default);
     Task                     UpdateTorrentFileSelectionsAsync(Guid id, UpdateFileSelectionsRequest request, CancellationToken ct = default);
     Task<TorrentConfigDto>   GetTorrentConfigAsync(CancellationToken ct = default);

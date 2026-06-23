@@ -146,69 +146,23 @@
                         <span class="tor-add__field-label">
                             Contents · @SelectedCount / @_parsed.Files.Length file(s) · @FormatBytesShort(SelectedSize)
                         </span>
-                        @if (_treeRoot is not null && _parsed.Files.Length > 1)
+                        @if (_parsed.Files.Length > 1)
                         {
                             <div class="tor-tree__head-actions">
                                 <button type="button" class="tor-tree__linkbtn" @onclick="SelectAllFiles">All</button>
                                 <span class="tor-tree__sep">·</span>
-                                <button type="button" class="tor-tree__linkbtn" @onclick="SelectNoneFiles">None</button>
+                                <button type="button" class="tor-tree__linkbtn" @onclick="SelectNoneFiles">Skip all</button>
                             </div>
                         }
                     </div>
 
-                    @* Folder TREE with per-node checkboxes. Checking/clearing a
-                       folder cascades to every file under it; a folder shows a
-                       dash when only some of its children are selected. Unchecked
-                       files are sent as ExcludedFiles → engine stamps them
-                       DoNotDownload before the torrent starts. *@
+                    @* Folder tree with tri-state checkboxes (cascade) + a
+                       priority dropdown on each file AND folder. Shared with the
+                       per-torrent edit drawer via TorrentFileTreeEditor. *@
                     <div class="tor-tree">
-                        @foreach (var row in FlattenTree())
-                        {
-                            var node  = row.Node;
-                            var stateN = NodeCheckState(node);
-                            @* @key by node identity — without it Blazor diffs the
-                               rows by position and can bind a row's checkbox /
-                               @onclick delegate to the wrong node after a cascade
-                               toggle, so some children's checkboxes wouldn't flip
-                               ("дети не всегда реагируют"). Keying to the node
-                               object (stable across renders) makes each row track
-                               its own state. *@
-                            <div @key="node" class="@($"tor-tree__row {(node.IsFile ? "tor-tree__row--file" : "")}")" style="--depth:@row.Depth">
-                                @if (!node.IsFile)
-                                {
-                                    <button type="button"
-                                            class="@($"tor-tree__caret {(node.Expanded ? "is-open" : "")}")"
-                                            @onclick="@(() => ToggleExpand(node))"
-                                            aria-label="Expand folder">
-                                        <DIcon Name="chev-r" Size="12" />
-                                    </button>
-                                }
-                                else
-                                {
-                                    <span class="tor-tree__caret tor-tree__caret--leaf"></span>
-                                }
-
-                                <button type="button"
-                                        class="@($"tor-tree__check {(stateN == 1 ? "is-on" : stateN == 2 ? "is-partial" : "")}")"
-                                        @onclick="@(() => ToggleNode(node))"
-                                        aria-label="Select">
-                                    @if (stateN == 1)
-                                    {
-                                        <DIcon Name="check" Size="11" />
-                                    }
-                                    else if (stateN == 2)
-                                    {
-                                        <span class="tor-tree__dash"></span>
-                                    }
-                                </button>
-
-                                <span class="tor-tree__ficon">
-                                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="13" />
-                                </span>
-                                <span class="tor-tree__name" title="@node.Name">@node.Name</span>
-                                <span class="tor-tree__size">@FormatBytesShort(node.Size)</span>
-                            </div>
-                        }
+                        <TorrentFileTreeEditor Files="@_fileItems"
+                                               Priorities="@_filePriorities"
+                                               OnChanged="StateHasChanged" />
                     </div>
                 </div>
             }
@@ -421,14 +375,27 @@ else
                         </td>
                         <td class="tor-cell tor-cell--dim">@state</td>
                         <td>
-                            <div class="tor-progress tor-progress--info">
-                                <div class="animarr-progress">
-                                    <div class="animarr-progress__track">
-                                        <div class="animarr-progress__fill" style="@(System.FormattableString.Invariant($"width:{progress * 100:F1}%"))"></div>
-                                    </div>
+                            @if (!string.IsNullOrEmpty(t.ErrorMessage))
+                            {
+                                @* Surface WHY a torrent is stuck instead of a silent 0% bar.
+                                   Most common cause is a disk read error (ReadFailure / I/O)
+                                   on a file — the user must see it, not guess. Full text on hover. *@
+                                <div class="tor-progress" title="@t.ErrorMessage"
+                                     style="display:flex;align-items:center;gap:6px;color:#e5534b;font-size:12px;">
+                                    <span>⚠ @ShortError(t.ErrorMessage)</span>
                                 </div>
-                                <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
-                            </div>
+                            }
+                            else
+                            {
+                                <div class="tor-progress tor-progress--info">
+                                    <div class="animarr-progress">
+                                        <div class="animarr-progress__track">
+                                            <div class="animarr-progress__fill" style="@(System.FormattableString.Invariant($"width:{progress * 100:F1}%"))"></div>
+                                        </div>
+                                    </div>
+                                    <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
+                                </div>
+                            }
                         </td>
                         <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.DownloadRate ?? 0)</td>
                         <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.UploadRate ?? 0)</td>
@@ -541,12 +508,12 @@ else
     private ParsedTorrentDto? _parsed;
     private string?           _parseError;
 
-    // ── File-selection tree (built from _parsed.Files) ──
-    // _treeRoot's Children are the top-level nodes; the root itself isn't drawn.
-    // _deselected holds the FullPath of every UNCHECKED file — sent to the
-    // server as ExcludedFiles so the engine skips them before download starts.
-    private TorNode? _treeRoot;
-    private readonly HashSet<string> _deselected = new(StringComparer.Ordinal);
+    // ── Per-file priority (flat list, built from _parsed.Files) ──
+    // path → 0=skip / 1=normal / 2=high. Files absent default to Normal. Sent
+    // to the server as FilePriorities so the engine applies them (incl. skips)
+    // before the download starts. Replaces the old folder tree + checkboxes.
+    private readonly Dictionary<string, int> _filePriorities = new(StringComparer.Ordinal);
+    private List<TorrentFileTreeEditor.FileItem> _fileItems = new();
 
     // v5 upload-tab state — list of staged files waiting for "Start upload".
     private readonly List<UploadFilePart> _uploadFiles = new();
@@ -578,8 +545,7 @@ else
         _addUploadKBps   = 0;
         _parsed        = null;
         _parseError    = null;
-        _treeRoot      = null;
-        _deselected.Clear();
+        _filePriorities.Clear();
         _uploadFiles.Clear();
         _addOpen       = true;
     }
@@ -678,8 +644,7 @@ else
         _addFileSize  = file.Size;
         _parsed       = null;
         _parseError   = null;
-        _treeRoot     = null;
-        _deselected.Clear();
+        _filePriorities.Clear();
         StateHasChanged();
 
         // v5: ask the server for the file manifest so the dropzone can
@@ -691,7 +656,7 @@ else
             var b64 = Convert.ToBase64String(_addFileBytes);
             _parsed = await Api.ParseTorrentAsync(new ParseTorrentRequest(b64));
             if (_parsed is null) _parseError = "Couldn't read the .torrent file.";
-            else BuildTree();
+            else _fileItems = _parsed.Files.Select(f => new TorrentFileTreeEditor.FileItem(f.Path, f.Length)).ToList();
         }
         catch (Exception ex)
         {
@@ -753,8 +718,11 @@ else
                     CustomRootFolderName:   subfolder,
                     DownloadLimitKBps:      _addDownloadKBps,
                     UploadLimitKBps:        _addUploadKBps,
-                    // Unchecked files in the tree → engine skips them at add.
-                    ExcludedFiles:          _deselected.Count > 0 ? _deselected.ToArray() : null));
+                    // Full per-file priority map from the flat list (skip=0 is
+                    // applied as DoNotDownload before the torrent starts).
+                    FilePriorities:         _parsed is { } p
+                        ? p.Files.ToDictionary(f => f.Path, f => FilePrio(f.Path))
+                        : null));
             }
             else if (_addSource == "upload" && _addFolderId is Guid folder && _uploadFiles.Count > 0)
             {
@@ -766,8 +734,7 @@ else
             _addFileName  = null;
             _parsed       = null;
             _parseError   = null;
-            _treeRoot     = null;
-            _deselected.Clear();
+            _filePriorities.Clear();
             _uploadFiles.Clear();
             _addOpen = false;
             await LoadAsync();
@@ -783,153 +750,52 @@ else
         return $"{bytes} B";
     }
 
-    // ─── File-selection tree ──────────────────────────────────────────────
-
-    /// <summary>One node in the .torrent contents tree — a folder (Children)
-    /// or a file (IsFile). FilePaths holds every descendant file path so a
-    /// folder can cascade-select and report its check state in O(1)-ish.</summary>
-    private sealed class TorNode
+    /// <summary>Condense a raw engine error into a short cell label; the full
+    /// text shows on hover (title). A disk read failure (ReadFailure / I/O
+    /// error on a file) is the common case, so we name the offending file and
+    /// flag it as a disk issue rather than dumping the whole path.</summary>
+    private static string ShortError(string? raw)
     {
-        public string Name = "";
-        public string FullPath = "";          // manifest path (files only)
-        public bool   IsFile;
-        public long   Size;                   // file size, or folder aggregate
-        public bool   Expanded = true;
-        public List<TorNode> Children = new();
-        public List<string>  FilePaths = new();
-    }
-
-    /// <summary>Turn the flat manifest (paths with '/' or '\' separators) into a
-    /// nested folder tree. Re-runs whenever a new .torrent is parsed.</summary>
-    private void BuildTree()
-    {
-        _deselected.Clear();
-        var root = new TorNode();
-        if (_parsed is null) { _treeRoot = root; return; }
-
-        foreach (var f in _parsed.Files)
+        if (string.IsNullOrWhiteSpace(raw)) return "Error";
+        var io = raw.Contains("I/O error", StringComparison.OrdinalIgnoreCase)
+              || raw.Contains("ReadFailure", StringComparison.OrdinalIgnoreCase)
+              || raw.Contains("WriteFailure", StringComparison.OrdinalIgnoreCase);
+        // Pull the file name out of a quoted path if present.
+        var q1 = raw.IndexOf('\'');
+        var q2 = q1 >= 0 ? raw.IndexOf('\'', q1 + 1) : -1;
+        if (q1 >= 0 && q2 > q1)
         {
-            var parts = f.Path.Split('/', '\\').Where(p => p.Length > 0).ToArray();
-            if (parts.Length == 0) continue;
-            var cur = root;
-            for (var i = 0; i < parts.Length; i++)
-            {
-                if (i == parts.Length - 1)
-                {
-                    cur.Children.Add(new TorNode
-                    {
-                        Name = parts[i], FullPath = f.Path, IsFile = true, Size = f.Length,
-                    });
-                }
-                else
-                {
-                    var next = cur.Children.FirstOrDefault(c => !c.IsFile && c.Name == parts[i]);
-                    if (next is null)
-                    {
-                        next = new TorNode { Name = parts[i] };
-                        cur.Children.Add(next);
-                    }
-                    cur = next;
-                }
-            }
+            var path = raw.Substring(q1 + 1, q2 - q1 - 1);
+            var name = path.Replace('\\', '/');
+            var slash = name.LastIndexOf('/');
+            if (slash >= 0) name = name[(slash + 1)..];
+            return io ? $"Disk read error · {name}" : $"Error · {name}";
         }
-
-        ComputeAndSort(root);
-
-        // If the torrent has NO single wrapping folder — multiple entries at the
-        // top level, e.g. a "RUS Subs" folder sitting NEXT TO the episode files —
-        // there's no one folder the user can uncheck to skip the whole download.
-        // Unchecking "RUS Subs" then only clears the subs (correct: the episodes
-        // are its siblings, not its children), which reads as a cascade bug.
-        // Synthesize a root named after the torrent so everything nests under one
-        // parent; unchecking it cascades to every file. A torrent that already
-        // has one natural top folder is left untouched.
-        if (root.Children.Count > 1)
-        {
-            var wrap = new TorNode
-            {
-                Name      = string.IsNullOrWhiteSpace(_parsed.Name) ? "(torrent)" : _parsed.Name,
-                Size      = root.Size,
-                FilePaths = root.FilePaths,
-                Children  = root.Children,
-                Expanded  = true,
-            };
-            var wrappedRoot = new TorNode { Size = root.Size, FilePaths = root.FilePaths };
-            wrappedRoot.Children.Add(wrap);
-            _treeRoot = wrappedRoot;
-        }
-        else
-        {
-            _treeRoot = root;
-        }
+        var s = raw.Length > 70 ? raw[..70] + "…" : raw;
+        return io ? $"Disk I/O error — {s}" : s;
     }
 
-    /// <summary>Bottom-up: aggregate folder sizes + descendant file paths, then
-    /// order each level folders-first, name-ascending.</summary>
-    private static void ComputeAndSort(TorNode node)
-    {
-        if (node.IsFile) { node.FilePaths = new List<string> { node.FullPath }; return; }
-        foreach (var c in node.Children) ComputeAndSort(c);
-        node.Size      = node.Children.Sum(c => c.Size);
-        node.FilePaths = node.Children.SelectMany(c => c.FilePaths).ToList();
-        node.Children  = node.Children
-            .OrderByDescending(c => !c.IsFile)
-            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+    // ─── File-selection (flat priority list) ──────────────────────────────
 
-    /// <summary>Depth-first list of VISIBLE nodes (children of collapsed folders
-    /// are omitted) with their indent depth — drives the flat render loop.</summary>
-    private IEnumerable<(TorNode Node, int Depth)> FlattenTree()
-    {
-        var list = new List<(TorNode, int)>();
-        if (_treeRoot is null) return list;
-        void Walk(TorNode n, int depth)
-        {
-            foreach (var c in n.Children)
-            {
-                list.Add((c, depth));
-                if (!c.IsFile && c.Expanded) Walk(c, depth + 1);
-            }
-        }
-        Walk(_treeRoot, 0);
-        return list;
-    }
+    /// <summary>Current priority for a file path — 1 (Normal) unless the user
+    /// changed it. 0=skip / 1=normal / 2=high.</summary>
+    private int FilePrio(string path) => _filePriorities.GetValueOrDefault(path, 1);
 
-    /// <summary>0 = none of this node's files selected, 1 = all, 2 = partial.</summary>
-    private int NodeCheckState(TorNode n)
-    {
-        if (n.IsFile) return _deselected.Contains(n.FullPath) ? 0 : 1;
-        var total = n.FilePaths.Count;
-        if (total == 0) return 1;
-        var selected = n.FilePaths.Count(p => !_deselected.Contains(p));
-        return selected == 0 ? 0 : selected == total ? 1 : 2;
-    }
+    private void SetFilePrio(string path, int prio) => _filePriorities[path] = prio;
 
-    /// <summary>Toggle a node: a fully-selected node clears; a partial/empty
-    /// node selects. Cascades to every descendant file.</summary>
-    private void ToggleNode(TorNode n)
-    {
-        var turnOn = NodeCheckState(n) != 1;
-        foreach (var p in n.FilePaths)
-        {
-            if (turnOn) _deselected.Remove(p);
-            else        _deselected.Add(p);
-        }
-    }
+    /// <summary>Reset every file to Normal (download all) — clearing the map
+    /// means FilePrio falls back to 1 for every file.</summary>
+    private void SelectAllFiles() => _filePriorities.Clear();
 
-    private void ToggleExpand(TorNode n) => n.Expanded = !n.Expanded;
-
-    private void SelectAllFiles() => _deselected.Clear();
-
+    /// <summary>Mark every file Skip so nothing downloads until re-enabled.</summary>
     private void SelectNoneFiles()
     {
         if (_parsed is null) return;
-        foreach (var f in _parsed.Files) _deselected.Add(f.Path);
+        foreach (var f in _parsed.Files) _filePriorities[f.Path] = 0;
     }
 
-    private int  SelectedCount => (_parsed?.Files.Length ?? 0) - _deselected.Count;
-    private long SelectedSize  => _parsed?.Files.Where(f => !_deselected.Contains(f.Path)).Sum(f => f.Length) ?? 0;
+    private int  SelectedCount => _parsed?.Files.Count(f => FilePrio(f.Path) != 0) ?? 0;
+    private long SelectedSize  => _parsed?.Files.Where(f => FilePrio(f.Path) != 0).Sum(f => f.Length) ?? 0;
 
     private async Task PauseAsync(Guid id)
     {

@@ -58,6 +58,7 @@ public static class ApiRoutes
     public const string TorrentAddFile         = "/api/torrents/add-file";
     public const string TorrentPause           = "/api/torrents/{id}/pause";
     public const string TorrentResume          = "/api/torrents/{id}/resume";
+    public const string TorrentRecheck         = "/api/torrents/{id}/recheck";
     public const string TorrentFileTree        = "/api/torrents/{id}/file-tree";
     public const string TorrentFileSelections  = "/api/torrents/{id}/file-selections";
     public const string TorrentConfig          = "/api/torrent-config";
@@ -252,6 +253,7 @@ public static class ApiRoutes
     public static string Torrent(Guid id)              => TorrentById.Replace("{id}", id.ToString());
     public static string TorrentPauseFor(Guid id)      => TorrentPause.Replace("{id}", id.ToString());
     public static string TorrentResumeFor(Guid id)     => TorrentResume.Replace("{id}", id.ToString());
+    public static string TorrentRecheckFor(Guid id)    => TorrentRecheck.Replace("{id}", id.ToString());
     public static string TorrentFileTreeFor(Guid id)   => TorrentFileTree.Replace("{id}", id.ToString());
     public static string TorrentFileSelectionsFor(Guid id) => TorrentFileSelections.Replace("{id}", id.ToString());
 
