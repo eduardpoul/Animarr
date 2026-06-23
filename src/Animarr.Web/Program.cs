@@ -28,6 +28,10 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("AppSettings"));
 
+// Built-in TMDB key for out-of-the-box metadata (see TmdbDefaults). Read once at
+// startup; Metadata__TmdbApiKey env var overrides appsettings.json.
+TmdbDefaults.BuiltInApiKey = builder.Configuration["Metadata:TmdbApiKey"];
+
 // EF Core — SQLite
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=Animarr.db";
