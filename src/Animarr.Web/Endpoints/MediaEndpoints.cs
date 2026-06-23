@@ -5,6 +5,7 @@ using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 using SharedEnums = Animarr.Shared;
 using EfModels    = Animarr.Web.Data.Models;
@@ -494,52 +495,115 @@ internal static class MediaEndpoints
             return Results.Ok(offsets ?? new Dictionary<int, int>());
         });
 
-        // Lightweight continue-watching hint built straight from WatchState
-        // rows. The full Razor MediaDetail page also has a ContinueAction
-        // built by ContinueResolver — but that resolver needs the on-disk
-        // episode layout, which lives in the page. The API stays simple:
-        // resume the most-recently-touched in-progress row.
+        // Continue-watching hint for the MediaDetail hero CTA. Resolution order:
+        //   1) Resume the most-recently-touched in-progress episode/movie.
+        //   2) Series/anime with no in-progress row → the next UNWATCHED episode
+        //      on disk after the highest watched one (so "watched 1..228, only
+        //      229 left" yields "Continue · EP 229", not "Play first episode").
+        //   3) Nothing watched → play first; everything watched → rewatch.
+        // User-scoped: only the current user's watch state counts.
         app.MapGet(ApiRoutes.MediaContinue, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
+            MediaFileResolver resolver,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var entity = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
+            var uid = userCtx.CurrentUserId;
             var states = await db.WatchStates
-                .Where(w => w.MediaItemId == id)
+                .Where(w => w.MediaItemId == id && (uid == null || w.UserId == uid))
                 .OrderByDescending(w => w.LastSeenAt)
                 .ToListAsync(ct);
 
+            // 1) Resume an in-progress row (mid-episode / mid-movie).
             var resume = states.FirstOrDefault(w => !w.IsWatched && w.ProgressMs is > 0);
             if (resume is not null)
             {
-                var label = resume.Episode is null
-                    ? "Continue"
-                    : $"Continue · EP {resume.Episode:D2}";
+                var label = resume.Episode is null ? "Continue" : $"Continue · EP {resume.Episode:D2}";
                 return Results.Ok(new ContinueWatchDto(
-                    Kind:       "continue",
-                    Label:      label,
-                    MediaItemId: id,
-                    Season:     resume.Season,
-                    Episode:    resume.Episode,
-                    FilePath:   resume.FilePath,
-                    ProgressMs: resume.ProgressMs,
-                    RuntimeMs:  resume.RuntimeMs));
+                    Kind: "continue", Label: label, MediaItemId: id,
+                    Season: resume.Season, Episode: resume.Episode, FilePath: resume.FilePath,
+                    ProgressMs: resume.ProgressMs, RuntimeMs: resume.RuntimeMs));
             }
 
-            // No in-progress row — fall back to "play first" hint.
+            var watchedAny = states.Any(w => w.IsWatched);
+
+            // Movies have no episode layout: watched → rewatch, else → play.
+            if (entity.MediaType == EfModels.MediaItemType.Movie)
+            {
+                return Results.Ok(new ContinueWatchDto(
+                    Kind: watchedAny ? "rewatch" : "first",
+                    Label: watchedAny ? "Rewatch from start" : "Play movie",
+                    MediaItemId: id, Season: null, Episode: null, FilePath: null,
+                    ProgressMs: null, RuntimeMs: null));
+            }
+
+            // 2) Series/anime — find the next unwatched episode on disk.
+            var watchedKeys = states
+                .Where(w => w.IsWatched && w.Episode != null)
+                .Select(w => (Season: w.Season ?? 1, Episode: w.Episode!.Value))
+                .ToHashSet();
+
+            MediaFileDto[] files;
+            try { files = await resolver.ResolveAsync(id, ct); }
+            catch { files = Array.Empty<MediaFileDto>(); }
+            var onDisk = files
+                .Where(f => f.Episode is not null)
+                .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+                .Distinct()
+                .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+                .ToList();
+
+            (int Season, int Episode)? target = null;
+            if (onDisk.Count > 0)
+            {
+                if (watchedKeys.Count > 0)
+                {
+                    var maxW = watchedKeys.OrderByDescending(x => x.Season).ThenByDescending(x => x.Episode).First();
+                    // First on-disk episode after the highest watched one that's unwatched…
+                    target = onDisk
+                        .Where(k => (k.Season > maxW.Season || (k.Season == maxW.Season && k.Episode > maxW.Episode)) && !watchedKeys.Contains(k))
+                        .Select(k => ((int Season, int Episode)?)k)
+                        .FirstOrDefault();
+                    // …else the earliest unwatched gap (skipped middle episodes).
+                    target ??= onDisk
+                        .Where(k => !watchedKeys.Contains(k))
+                        .Select(k => ((int Season, int Episode)?)k)
+                        .FirstOrDefault();
+                }
+                else
+                {
+                    // Nothing watched yet → first on-disk episode.
+                    target = onDisk[0];
+                }
+            }
+
+            if (target is { } t)
+            {
+                var file = files.FirstOrDefault(f => (f.Season ?? 1) == t.Season && f.Episode == t.Episode);
+                var firstEver = watchedKeys.Count == 0;
+                return Results.Ok(new ContinueWatchDto(
+                    Kind:       firstEver ? "first" : "next",
+                    Label:      firstEver ? "Play first episode" : $"Continue · EP {t.Episode:D2}",
+                    MediaItemId: id,
+                    Season:     t.Season,
+                    Episode:    t.Episode,
+                    FilePath:   file?.FilePath,
+                    ProgressMs: null,
+                    RuntimeMs:  null));
+            }
+
+            // 3) No unwatched episode on disk: rewatch if anything was watched,
+            //    else a bare "play first" (no files resolved yet).
             return Results.Ok(new ContinueWatchDto(
-                Kind:       "first",
-                Label:      entity.MediaType == EfModels.MediaItemType.Movie ? "Play movie" : "Play first episode",
-                MediaItemId: id,
-                Season:     null,
-                Episode:    null,
-                FilePath:   null,
-                ProgressMs: null,
-                RuntimeMs:  null));
+                Kind:       watchedAny ? "rewatch" : "first",
+                Label:      watchedAny ? "Play again from start" : "Play first episode",
+                MediaItemId: id, Season: null, Episode: null, FilePath: null,
+                ProgressMs: null, RuntimeMs: null));
         });
 
         // Per-episode thumbnail. Order: cache → TMDB episode still → ffmpeg frame

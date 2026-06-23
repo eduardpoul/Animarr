@@ -569,6 +569,20 @@
   "catalog.delete_dialog_confirm": "Убрать",
   "catalog.delete_toast": "\"{0}\" убрано из медиатеки.",
 
+  "mark_prev.title": "Отметить предыдущие серии тоже?",
+  "mark_prev.body": "Предыдущих серий на диске без отметки: {0}. Отметить их просмотренными?",
+  "mark_prev.yes": "Да, отметить просмотренными",
+  "mark_prev.no": "Нет, только эту",
+
+  "player.up_next": "Следующая серия",
+  "player.up_next_play": "Смотреть",
+  "player.up_next_dismiss": "Закрыть",
+
+  "home.continue_watching": "Продолжить просмотр",
+  "home.new_episode": "Новая серия",
+  "home.next_up": "Смотреть дальше",
+  "home.new_badge": "Новое",
+
   "media_detail.not_found": "Медиа не найдено.",
   "media_detail.btn_back": "Назад",
   "media_detail.seasons_title": "Сезоны",

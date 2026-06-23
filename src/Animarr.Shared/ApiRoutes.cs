@@ -74,6 +74,7 @@ public static class ApiRoutes
     public const string WatchStateProgress  = "/api/watch-states/progress";
     public const string WatchStateToggle    = "/api/watch-states/toggle";
     public const string WatchStateReset     = "/api/watch-states/reset";
+    public const string WatchStateMarkBulk  = "/api/watch-states/mark-bulk";
 
     // ─── Patterns ────────────────────────────────────────────────────────
     public const string Patterns           = "/api/patterns";
@@ -191,6 +192,7 @@ public static class ApiRoutes
     /// joined to their MediaItem rows. Drives the v5 Continue Watching
     /// hero on Home.</summary>
     public const string MeContinue   = "/api/me/continue";
+    public const string MeNextUp     = "/api/me/next-up";
 
     // ─── Server identity (v5 multi-server) ───────────────────────────────
     /// <summary>Anonymous probe — returns <c>ServerInfoDto</c>. Hit by the

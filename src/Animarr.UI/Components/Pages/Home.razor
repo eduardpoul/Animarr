@@ -17,13 +17,21 @@
        Both bind to the section-filtered slice (_filteredContinue /
        _filteredFeatured) so a TopBar folder pill narrows the hero to
        that folder's items, not the global library. *@
-    @if (_filteredContinue.Length > 0)
+    @if (_heroItems.Length > 0)
     {
-        <CatalogContinueHero Items="@_filteredContinue" IntervalSec="@_heroInterval" />
+        <CatalogContinueHero Items="@_heroItems" IntervalSec="@_heroInterval" />
     }
     else if (_filteredFeatured.Count > 0)
     {
         <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
+    }
+
+    @* ── Next Up rail — "continue / new episodes" under the hero. Shows the
+       next episode to watch per engaged series (next-in-line or freshly
+       landed). Section pill narrows it alongside the hero + grid. *@
+    @if (_filteredNextUp.Length > 0)
+    {
+        <NextUpRail Items="@_filteredNextUp" />
     }
 
     @* NeedsReview pulse-chip moved to the TopBar (top-right, next to the AI
@@ -124,6 +132,14 @@
     /// <summary>Featured-by-rating slice after section + category filters.
     /// Same rationale as <see cref="_filteredContinue"/>.</summary>
     private List<MediaItemDto>      _filteredFeatured = new();
+    /// <summary>Next-up feed (next episode per engaged series) — raw, then the
+    /// section-filtered rail slice. Rail = next-up minus items already shown as
+    /// a Continue resume in the hero.</summary>
+    private ContinueWatchItemDto[]  _nextUpItems    = Array.Empty<ContinueWatchItemDto>();
+    private ContinueWatchItemDto[]  _filteredNextUp = Array.Empty<ContinueWatchItemDto>();
+    /// <summary>Hero feed = in-progress continue items + freshly-landed episodes
+    /// (IsNew next-up). What <see cref="CatalogContinueHero"/> rotates through.</summary>
+    private ContinueWatchItemDto[]  _heroItems      = Array.Empty<ContinueWatchItemDto>();
     private bool   _loading = true;
     private Guid?  _activeSection;     // legacy v3 folder filter (fallback)
     // v5: source of truth for catalog filter is CategoryNavService.ActiveCategoryName
@@ -170,6 +186,11 @@
             // user hasn't started anything (Home falls back to Featured).
             try { _continueItems = await Api.GetContinueWatchingAsync(take: 5); }
             catch { _continueItems = Array.Empty<ContinueWatchItemDto>(); }
+
+            // Next Up — next episode per engaged series. Folds "new episode"
+            // items into the hero and fills the rail under it.
+            try { _nextUpItems = await Api.GetNextUpAsync(take: 12); }
+            catch { _nextUpItems = Array.Empty<ContinueWatchItemDto>(); }
 
             // One wide fetch — server query is a single SELECT with eager
             // Tags include; client-side filtering is cheap on the resulting
@@ -335,19 +356,39 @@
         {
             _filteredFeatured = _featured.Where(m => secChildIds.Contains(m.FolderId)).ToList();
 
-            // Continue items don't carry FolderId on the DTO, so resolve via
-            // _allItems by mediaId (fast — _allItems is already in memory and
-            // dictionary-friendly by Id).
+            // Continue / next-up items don't carry FolderId on the DTO, so
+            // resolve via _allItems by mediaId (fast — _allItems is already in
+            // memory and dictionary-friendly by Id).
             var folderByMediaId = _allItems.ToDictionary(m => m.Id, m => m.FolderId);
-            _filteredContinue = _continueItems
-                .Where(c => folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid))
-                .ToArray();
+            bool InSection(ContinueWatchItemDto c) =>
+                folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid);
+            _filteredContinue = _continueItems.Where(InSection).ToArray();
+            _filteredNextUp   = _nextUpItems.Where(InSection).ToArray();
         }
         else
         {
             _filteredFeatured = _featured;
             _filteredContinue = _continueItems;
+            _filteredNextUp   = _nextUpItems;
         }
+
+        // One merged feed drives BOTH the hero (rotates through it) and the
+        // rail below (lists it) so the two always show the SAME titles in the
+        // SAME order — no confusing partial overlap. In-progress "continue"
+        // items come first and win on dedup (they carry real progress + a
+        // resume position); next-up items (next-in-line / freshly-landed)
+        // follow. Capped so the hero pager stays sane.
+        const int feedCap = 12;
+        var feed     = new List<ContinueWatchItemDto>();
+        var seenFeed = new HashSet<Guid>();
+        foreach (var c in _filteredContinue)
+            if (seenFeed.Add(c.MediaItemId)) feed.Add(c);
+        foreach (var n in _filteredNextUp)
+            if (seenFeed.Add(n.MediaItemId)) feed.Add(n);
+
+        var feedArr     = feed.Take(feedCap).ToArray();
+        _heroItems      = feedArr;   // hero rotates the same list…
+        _filteredNextUp = feedArr;   // …the rail shows it.
     }
 
     // Section → set of child FolderWatcher Ids. Built eagerly in

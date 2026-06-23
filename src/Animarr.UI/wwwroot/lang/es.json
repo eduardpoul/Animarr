@@ -568,6 +568,20 @@
   "catalog.delete_dialog_confirm": "Quitar",
   "catalog.delete_toast": "\"{0}\" quitado de la biblioteca.",
 
+  "mark_prev.title": "¿Marcar también los episodios anteriores?",
+  "mark_prev.body": "Quedan {0} episodio(s) anteriores en disco sin ver. ¿Marcarlos como vistos también?",
+  "mark_prev.yes": "Sí, marcarlos como vistos",
+  "mark_prev.no": "No, solo este",
+
+  "player.up_next": "A continuación",
+  "player.up_next_play": "Reproducir",
+  "player.up_next_dismiss": "Cerrar",
+
+  "home.continue_watching": "Seguir viendo",
+  "home.new_episode": "Nuevo episodio",
+  "home.next_up": "A continuación",
+  "home.new_badge": "NUEVO",
+
   "media_detail.not_found": "Medio no encontrado.",
   "media_detail.btn_back": "Atrás",
   "media_detail.seasons_title": "Temporadas",

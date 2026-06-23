@@ -57,4 +57,9 @@ public sealed record ContinueWatchItemDto(
     /// <summary>0..1 progress fraction. Convenience so the hero renders the
     /// progress bar without dividing in Razor.</summary>
     double  Progress,
-    DateTime LastSeenAt);
+    DateTime LastSeenAt,
+    /// <summary>True for "Next Up" rows where the user has finished the run and
+    /// a fresh episode landed (the next-up episode is the on-disk finale with
+    /// everything before it watched). Drives the hero's "New episode" eyebrow.
+    /// Always false for the in-progress continue-watching feed.</summary>
+    bool    IsNew = false);

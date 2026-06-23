@@ -1426,6 +1426,89 @@
         refs.track.addEventListener('pointerup',     endDrag);
         refs.track.addEventListener('pointercancel', endDrag);
 
+        // ── up-next overlay (end-of-episode autoplay card) ────────────
+        // Appended to the player root (a sibling of .vp-hud) so it stays
+        // visible while the HUD controls fade out near the end — Netflix
+        // style. Shows once playback crosses 90% (the same threshold the
+        // server uses to auto-mark "watched") AND a next episode exists on
+        // disk. In the last few seconds it shows a countdown and auto-advances;
+        // "Dismiss" cancels that for the rest of this episode.
+        const upNextEl = document.createElement('div');
+        upNextEl.className = 'vp-upnext vp-upnext--hidden';
+        upNextEl.innerHTML = `
+            <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
+            <div class="vp-upnext__name" data-bind="un-name"></div>
+            <div class="vp-upnext__actions">
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
+                <span data-bind="un-play">Play next</span>
+              </button>
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--dismiss tv-focus" data-act="un-dismiss">
+                <span data-bind="un-dismiss">Dismiss</span>
+              </button>
+            </div>`;
+        root.appendChild(upNextEl);
+        const unRefs = {
+            eyebrow: upNextEl.querySelector('[data-bind="un-eyebrow"]'),
+            name:    upNextEl.querySelector('[data-bind="un-name"]'),
+            play:    upNextEl.querySelector('[data-bind="un-play"]'),
+            dismiss: upNextEl.querySelector('[data-bind="un-dismiss"]'),
+        };
+        const UP_NEXT_PCT = 0.9;        // show threshold (matches auto-watched)
+        const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
+        let upNextShown = false, upNextDismissed = false, upNextDone = false;
+
+        function upNextLabels() { return entry.upNext || {}; }
+        function showUpNext() {
+            if (upNextShown) return;
+            upNextShown = true;
+            const m = upNextLabels();
+            unRefs.eyebrow.textContent = m.eyebrow || 'Up next';
+            unRefs.name.textContent    = m.name || '';
+            unRefs.play.textContent    = m.play || 'Play next';
+            unRefs.dismiss.textContent = m.dismiss || 'Dismiss';
+            upNextEl.classList.remove('vp-upnext--hidden');
+        }
+        function hideUpNext() {
+            if (!upNextShown) return;
+            upNextShown = false;
+            upNextEl.classList.add('vp-upnext--hidden');
+        }
+        function dismissUpNext() { upNextDismissed = true; hideUpNext(); }
+        function triggerUpNext() {
+            if (upNextDone) return;
+            upNextDone = true;
+            hideUpNext();
+            try { callbacks.next(); } catch {}
+        }
+        // Called from updateProgress on every timeupdate (smooth countdown).
+        function updateUpNext(cTime, dTime) {
+            if (upNextDone || upNextDismissed) return;
+            if (!entry.nextAvailable || !(dTime > 0)) { hideUpNext(); return; }
+            const pct = cTime / dTime;
+            if (pct < UP_NEXT_PCT) { hideUpNext(); return; }  // seeked back out of the zone
+            showUpNext();
+            const remaining = dTime - cTime;
+            const baseLabel = upNextLabels().play || 'Play next';
+            if (remaining <= UP_NEXT_COUNTDOWN) {
+                unRefs.play.textContent = baseLabel + ' · ' + Math.max(0, Math.ceil(remaining));
+                if (remaining <= 0.4) triggerUpNext();
+            } else {
+                unRefs.play.textContent = baseLabel;
+            }
+        }
+        upNextEl.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-act]');
+            if (!b) return;
+            e.stopPropagation();
+            if (b.dataset.act === 'un-next') triggerUpNext();
+            else if (b.dataset.act === 'un-dismiss') dismissUpNext();
+        });
+        // Belt-and-braces: timeupdate can stop firing right at EOF, so the
+        // genuine end also advances (unless the user dismissed the card).
+        adapter.on('ended', () => {
+            if (!upNextDismissed && entry.nextAvailable) triggerUpNext();
+        });
+
         // ── adapter events ────────────────────────────────────────────
         function updateProgress() {
             const cTime = adapter.currentTime || 0;
@@ -1437,6 +1520,8 @@
                 refs.cur.textContent   = formatTime(cTime);
             }
             refs.dur.textContent = formatTime(dTime);
+            // End-of-episode autoplay card (90% → show; last 10s → countdown).
+            updateUpNext(cTime, dTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
@@ -1481,6 +1566,7 @@
             document.removeEventListener('keydown', onKey, { capture: true });
             document.removeEventListener('fullscreenchange', syncFsIcon);
             if (hideTimer) clearTimeout(hideTimer);
+            try { upNextEl.remove(); } catch {}
             // Restore the system bars + drop the orientation listener so other
             // (non-player) pages get the status bar back.
             if (immersiveMql && onOrient) {
@@ -2405,6 +2491,16 @@
             const name   = meta?.hudName   || meta?.title || '';
             entry.hud.setTitle(kicker, name);
         }
+        // Up-next overlay data (end-of-episode autoplay card). Read live by the
+        // HUD's updateUpNext on each timeupdate; stored on the entry so it
+        // survives until the next setMediaSession call (i.e. the next episode).
+        entry.nextAvailable = !!(meta && meta.nextAvailable);
+        entry.upNext = {
+            eyebrow: (meta && meta.upNextEyebrow) || 'Up next',
+            name:    (meta && meta.upNextName)    || '',
+            play:    (meta && meta.upNextPlay)    || 'Play next',
+            dismiss: (meta && meta.upNextDismiss) || 'Dismiss',
+        };
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;

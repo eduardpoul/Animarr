@@ -1,0 +1,52 @@
+@*
+    Retroactive "mark previous episodes watched" confirm.
+
+    Pops on MediaDetail when the user flips an episode's watched-eye and there
+    are still-unwatched on-disk episodes BEFORE it (any earlier season/episode).
+    Yes → MediaDetail bulk-marks them via /api/watch-states/mark-bulk; No leaves
+    them as they were. Centered glass modal — the only centered modal in the app
+    (everything else is the right-edge SettingsEditDrawer), justified because
+    this is a quick yes/no that interrupts the episode-grid flow in place.
+*@
+
+<div class="mpd-backdrop" @onclick="OnCancelClick">
+    <div class="mpd-card" @onclick:stopPropagation="true"
+         role="dialog" aria-modal="true" aria-labelledby="mpd-title">
+        <div class="mpd-icon"><DIcon Name="eye-off" Size="22" /></div>
+        <h2 class="mpd-title" id="mpd-title">@L["mark_prev.title"]</h2>
+        <p class="mpd-body">@L.Get("mark_prev.body", Count)</p>
+        <div class="mpd-actions">
+            <Btn Variant="primary" Size="lg" OnClick="OnConfirmClick" Loading="@_busy">
+                @L["mark_prev.yes"]
+            </Btn>
+            <Btn Variant="ghost" Size="lg" OnClick="OnCancelClick" Disabled="@_busy">
+                @L["mark_prev.no"]
+            </Btn>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>How many earlier episodes will be marked watched on confirm.</summary>
+    [Parameter] public int Count { get; set; }
+
+    /// <summary>User chose "Yes" — parent does the bulk call, then removes us.</summary>
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    /// <summary>User chose "No" / clicked the backdrop — parent removes us.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool _busy;
+
+    private async Task OnConfirmClick()
+    {
+        if (_busy) return;
+        _busy = true;
+        StateHasChanged();
+        // Parent owns the dialog lifetime — it tears us down once the bulk call
+        // returns, so we never need to reset _busy.
+        await OnConfirm.InvokeAsync();
+    }
+
+    private Task OnCancelClick() => _busy ? Task.CompletedTask : OnCancel.InvokeAsync();
+}

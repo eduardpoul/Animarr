@@ -568,6 +568,20 @@
   "catalog.delete_dialog_confirm": "Entfernen",
   "catalog.delete_toast": "\"{0}\" aus Bibliothek entfernt.",
 
+  "mark_prev.title": "Frühere Folgen auch markieren?",
+  "mark_prev.body": "{0} frühere Folge(n) auf der Festplatte sind noch ungesehen. Auch als gesehen markieren?",
+  "mark_prev.yes": "Ja, als gesehen markieren",
+  "mark_prev.no": "Nein, nur diese",
+
+  "player.up_next": "Als Nächstes",
+  "player.up_next_play": "Weiter",
+  "player.up_next_dismiss": "Schließen",
+
+  "home.continue_watching": "Weiterschauen",
+  "home.new_episode": "Neue Folge",
+  "home.next_up": "Als Nächstes",
+  "home.new_badge": "NEU",
+
   "media_detail.not_found": "Medium nicht gefunden.",
   "media_detail.btn_back": "Zurück",
   "media_detail.seasons_title": "Staffeln",

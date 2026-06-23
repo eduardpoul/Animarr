@@ -75,8 +75,13 @@
     color: var(--text);
 }
 
+/* Block-level flex (NOT inline-flex): the meta row must always own its line so
+   the actions sit BELOW it. When a slot has no progress bar (a brand-new
+   episode at 0%), an inline-flex meta + inline-flex actions with no block
+   between them collapsed onto the SAME line ("E229  [Resume]"). */
 .d-chero__meta {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-3);
     color: var(--text-dim);

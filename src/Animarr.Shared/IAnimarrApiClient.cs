@@ -89,6 +89,9 @@ public interface IAnimarrApiClient
     Task<WatchStateDto>   RecordProgressAsync(RecordProgressRequest request, CancellationToken ct = default);
     Task<WatchStateDto>   ToggleWatchedAsync(ToggleWatchedRequest request, CancellationToken ct = default);
     Task                  ResetProgressAsync(ResetProgressRequest request, CancellationToken ct = default);
+    /// <summary>Bulk (un)mark a set of (season, episode) rows — the "mark
+    /// earlier episodes too?" popup. Returns the affected rows.</summary>
+    Task<WatchStateDto[]> MarkBulkWatchedAsync(MarkBulkWatchedRequest request, CancellationToken ct = default);
 
     // ─── Identification queue ────────────────────────────────────────────
     Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default);
@@ -205,6 +208,9 @@ public interface IAnimarrApiClient
     Task                    RemoveFavoriteAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<Guid[]>            GetFavoriteIdsAsync(CancellationToken ct = default);
     Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default);
+    /// <summary>"Next Up" feed — the next episode to watch per engaged series
+    /// (next-in-line or a freshly-landed episode flagged <c>IsNew</c>).</summary>
+    Task<ContinueWatchItemDto[]> GetNextUpAsync(int take = 12, CancellationToken ct = default);
 
     // ─── User + Role admin (v4, manageUsers permission required) ────────
     Task<UserDto[]>         GetUsersAsync(CancellationToken ct = default);
