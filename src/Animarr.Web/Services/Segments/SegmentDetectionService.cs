@@ -19,6 +19,7 @@ public sealed class SegmentDetectionService(
     IDbContextFactory<AppDbContext> dbFactory,
     MediaFileResolver resolver,
     IEnumerable<ISegmentProvider> providers,
+    IAppConfigService appConfig,
     ILogger<SegmentDetectionService> logger)
 {
     private readonly ISegmentProvider[] _providers = providers.OrderBy(p => p.Order).ToArray();
@@ -108,10 +109,18 @@ public sealed class SegmentDetectionService(
             SeasonFiles = seasonFiles,
         };
 
+        // Config-gated provider set (BlackFrame off by default — it decodes video).
+        var enabled = new HashSet<SegmentSource>();
+        if (await appConfig.GetAsync<bool>(AppConfigKeys.SegmentsAniSkipEnabled,     true,  ct)) enabled.Add(SegmentSource.AniSkip);
+        if (await appConfig.GetAsync<bool>(AppConfigKeys.SegmentsChaptersEnabled,    true,  ct)) enabled.Add(SegmentSource.Chapter);
+        if (await appConfig.GetAsync<bool>(AppConfigKeys.SegmentsChromaprintEnabled, true,  ct)) enabled.Add(SegmentSource.Chromaprint);
+        if (await appConfig.GetAsync<bool>(AppConfigKeys.SegmentsBlackFrameEnabled,  false, ct)) enabled.Add(SegmentSource.BlackFrame);
+
         // First provider (highest cascade priority) to supply a kind wins this run.
         var detected = new Dictionary<SegmentKind, (DetectedSegment Seg, SegmentSource Source)>();
         foreach (var provider in _providers)
         {
+            if (!enabled.Contains(provider.Source)) continue;
             if (cheapOnly && !provider.Cheap) continue;
             if (detected.ContainsKey(SegmentKind.Intro) && detected.ContainsKey(SegmentKind.Credits)) break;
             if (!provider.CanRun(ctx)) continue;

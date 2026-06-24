@@ -139,6 +139,7 @@ builder.Services.AddScoped<AniSkipClient>();
 builder.Services.AddScoped<ISegmentProvider, AniSkipProvider>();     // Order 0  — network, by MAL id
 builder.Services.AddScoped<ISegmentProvider, ChapterProvider>();     // Order 10 — embedded chapters
 builder.Services.AddScoped<ISegmentProvider, ChromaprintProvider>(); // Order 20 — audio fingerprint
+builder.Services.AddScoped<ISegmentProvider, BlackFrameProvider>();  // Order 30 — video black-frame (opt-in)
 builder.Services.AddScoped<SegmentDetectionService>();
 // Heavy detection (chromaprint) over identified titles, one at a time.
 builder.Services.AddHostedService<SegmentDetectionBackgroundService>();

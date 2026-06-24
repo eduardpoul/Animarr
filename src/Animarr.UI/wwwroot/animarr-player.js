@@ -1614,29 +1614,37 @@
         const skipEl = document.createElement('button');
         skipEl.type = 'button';
         skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
-        skipEl.textContent = entry.skipIntroLabel || 'Skip intro';
         root.appendChild(skipEl);
-        let skipShown = false;
-        function showSkip() {
-            if (skipShown) return;
-            skipShown = true;
-            skipEl.textContent = entry.skipIntroLabel || 'Skip intro';
-            skipEl.classList.remove('vp-skip--hidden');
+        let skipShown = false, skipTarget = 0;
+        function setSkip(label, target) {
+            skipTarget = target;
+            if (skipEl.textContent !== label) skipEl.textContent = label;
+            if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
         }
         function hideSkip() {
             if (!skipShown) return;
             skipShown = false;
             skipEl.classList.add('vp-skip--hidden');
         }
-        function updateSkipIntro(cTime) {
+        // One button, two roles: Skip intro inside [introStart,introEnd], and
+        // Skip credits inside [creditsStart,creditsEnd] when there's content
+        // after the credits to jump to (e.g. a next-episode preview).
+        function updateSkip(cTime, dTime) {
             const s = entry.segments;
-            const inIntro = !!(s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd);
-            if (inIntro) showSkip(); else hideSkip();
+            if (!s) { hideSkip(); return; }
+            if (s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
+                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
+            } else if (s.creditsStart > 0 && s.creditsEnd > s.creditsStart
+                       && (dTime - s.creditsEnd) > 5
+                       && cTime >= s.creditsStart && cTime < s.creditsEnd) {
+                setSkip(entry.skipCreditsLabel || 'Skip credits', s.creditsEnd);
+            } else {
+                hideSkip();
+            }
         }
         skipEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            const s = entry.segments;
-            if (s && s.introEnd > 0) { adapter.currentTime = s.introEnd; hideSkip(); }
+            if (skipTarget > 0) { adapter.currentTime = skipTarget; hideSkip(); }
         });
 
         // ── adapter events ────────────────────────────────────────────
@@ -1652,7 +1660,7 @@
             refs.dur.textContent = formatTime(dTime);
             // End-of-episode autoplay card (credits start → show; last 10s → countdown).
             updateUpNext(cTime, dTime);
-            updateSkipIntro(cTime);
+            updateSkip(cTime, dTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
@@ -2710,7 +2718,8 @@
         // timeupdate. null → no detected segments: Skip stays hidden and the
         // next-up card falls back to 95% of the runtime.
         entry.segments = (meta && meta.segments) || null;
-        entry.skipIntroLabel = (meta && meta.skipIntroLabel) || entry.skipIntroLabel || 'Skip intro';
+        entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || 'Skip intro';
+        entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || 'Skip credits';
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;
