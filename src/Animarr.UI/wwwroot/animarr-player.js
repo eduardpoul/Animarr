@@ -1715,14 +1715,20 @@
         // it to H.264. Constant per browser → memoize on window. hls.js gates on
         // MediaSource.isTypeSupported; Safari/native HLS via canPlayType.
         if (window.__animarrHevcOk === undefined) {
-            let ok = false;
+            let ok = false, ok10 = false;
             try {
-                const t = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
-                ok = (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(t))
-                  || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(t))
-                  || document.createElement('video').canPlayType(t) !== '';
-            } catch (e) { ok = false; }
-            window.__animarrHevcOk = ok;
+                const t   = 'video/mp4; codecs="hvc1.1.6.L93.B0"';   // HEVC Main (8-bit)
+                const t10 = 'video/mp4; codecs="hvc1.2.4.L153.B0"';  // HEVC Main10 (HDR10)
+                const v = document.createElement('video');
+                const can = (s) =>
+                       (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(s))
+                    || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(s))
+                    || v.canPlayType(s) !== '';
+                ok   = can(t);
+                ok10 = can(t10);
+            } catch (e) { ok = false; ok10 = false; }
+            window.__animarrHevcOk   = ok;
+            window.__animarrHevc10Ok = ok10;
         }
         const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
@@ -1732,6 +1738,7 @@
             + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
             + (window.__animarrHevcOk ? '&clientHevc=1' : '')
+            + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '')
             + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
