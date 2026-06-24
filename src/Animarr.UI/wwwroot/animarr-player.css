@@ -621,9 +621,11 @@ body[data-animarr-native="1"] .vp-backdrop * {
     transform: translateY(8px);
     pointer-events: none;
 }
-/* Lifted above the Up-Next card when Skip credits + next-episode show together. */
-.vp-skip--raised { bottom: 244px; }
+/* In the credits, sit the Skip pill to the LEFT of the Up-Next card (same row).
+   The card is right:40 + up to 360 wide, so clear it with right:416. */
+.vp-skip--beside { right: 416px; bottom: 120px; }
 @media (max-width: 560px) {
     .vp-skip { right: 16px; bottom: 96px; }
-    .vp-skip--raised { bottom: 208px; }
+    /* Card goes full-width here, so stack the pill above it instead. */
+    .vp-skip--beside { right: 16px; bottom: 192px; }
 }
