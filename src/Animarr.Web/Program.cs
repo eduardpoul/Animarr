@@ -845,7 +845,13 @@ app.MapPost("/api/hls/start", async (
         // path, so a direct file URL would silently drop the dub.
         bool wantHevc   = clientHevc   == "1" || string.Equals(clientHevc,   "true", StringComparison.OrdinalIgnoreCase);
         bool wantHevc10 = clientHevc10 == "1" || string.Equals(clientHevc10, "true", StringComparison.OrdinalIgnoreCase);
-        var decision = externalAudioFull is null
+        // A height/bitrate cap (the HUD's Quality menu) forces a re-encode —
+        // you can't shrink a stream-copy — so it must bypass BOTH native paths
+        // (Direct Play AND Direct Stream) and fall through to the HLS pipeline
+        // where maxHeight/maxBitrate actually apply. Same for an external dub,
+        // which needs the HLS mux to combine foreign audio with the video.
+        bool wantCap = (maxHeight ?? 0) > 0 || (maxBitrate ?? 0) > 0;
+        var decision = externalAudioFull is null && !wantCap
             ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10)
             : new HlsSessionService.PlaybackDecision(false, null, 0, null);
         if (decision.DirectPlay && decision.DirectUrl is not null)
@@ -862,6 +868,22 @@ app.MapPost("/api/hls/start", async (
                 // Direct Play means source passes through unchanged, so HDR
                 // tags etc. are preserved here.
                 output        = decision.Output,
+            });
+        }
+
+        if (decision.DirectStream && decision.DirectUrl is not null)
+        {
+            return Results.Ok(new
+            {
+                // Direct Stream response: /api/video remuxes the source to
+                // progressive fMP4 on the fly (video copy + audio→AAC). The
+                // client plays it on a native <video> — no HLS session, no
+                // keepalive — and seeks by re-requesting at ?seek=N. Video
+                // bitstream + HDR pass through unchanged.
+                directStreamUrl = decision.DirectUrl,
+                totalDuration   = decision.DurationSec,
+                resumeSec       = seekSec,
+                output          = decision.Output,
             });
         }
 
