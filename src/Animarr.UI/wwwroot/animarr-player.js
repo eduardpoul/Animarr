@@ -303,6 +303,10 @@
     class ArtplayerAdapter {
         constructor(art) {
             this.art = art;
+            // Set by enableDirectStream() when the source is a progressive
+            // /api/video remux (no byte-Range → seek = reload). Null = a
+            // normal seekable source (Direct Play / HLS).
+            this._ds = null;
         }
 
         // Bridge map between abstract event names and Artplayer's. Anything
@@ -322,9 +326,31 @@
 
         // ── Properties ────────────────────────────────────────────────
         get playing()      { return !!this.art.playing; }
-        get currentTime()  { return this.art.currentTime || 0; }
-        set currentTime(t) { try { this.art.currentTime = t; } catch {} }
-        get duration()     { return this.art.duration || 0; }
+        get currentTime()  {
+            // Direct Stream: while a seek-reload is in flight, report the
+            // target so the scrub bar doesn't snap to the old position before
+            // the reloaded stream's PTS-shifted timeline catches up. Release
+            // only once the video actually lands NEAR the target — by absolute
+            // distance, NOT ">=": a backward seek's old position is already
+            // past the target, so ">=" cleared it instantly and the reload
+            // (which then read a null target) never fired.
+            if (this._ds && this._ds.target != null) {
+                const ct = this.art.currentTime || 0;
+                if (Math.abs(ct - this._ds.target) < 1.5) this._ds.target = null;
+                else return this._ds.target;
+            }
+            return this.art.currentTime || 0;
+        }
+        set currentTime(t) {
+            if (this._ds) { this._directStreamSeek(t); return; }
+            try { this.art.currentTime = t; } catch {}
+        }
+        get duration()     {
+            // Progressive remux has no Content-Length → video.duration is
+            // often Infinity. Report the server-probed total instead.
+            if (this._ds) return this._ds.dur || 0;
+            return this.art.duration || 0;
+        }
         get volume()       { return this.art.volume ?? 1; }
         set volume(v)      { try { this.art.volume = v; } catch {} }
         get muted()        { return !!this.art.muted; }
@@ -335,6 +361,73 @@
         // ── Playback ──────────────────────────────────────────────────
         play()  { try { return this.art.play();  } catch {} }
         pause() { try { this.art.pause(); } catch {} }
+
+        // ── Direct Stream (progressive remux) ─────────────────────────
+        // Turns on seek-by-reload for an /api/video source. baseUrl is the
+        // remux URL WITHOUT any ?seek (we append it per seek); totalDuration
+        // is the server-probed length the bar/clock read off.
+        enableDirectStream(baseUrl, totalDuration) {
+            this._ds = { base: baseUrl, dur: totalDuration || 0, target: null };
+        }
+        // True only when the browser will satisfy a seek to `t` instantly —
+        // the position is both already buffered AND inside a reported seekable
+        // range. For a no-Range progressive stream Chrome often exposes
+        // seekable = the buffered window, so most ±10s skips land here. When it
+        // doesn't (seekable empty), we fall back to a remux-reload — no regress.
+        _dsCanNativeSeek(v, t) {
+            try {
+                const s = v.seekable;
+                let inSeekable = false;
+                for (let i = 0; i < s.length; i++)
+                    if (t >= s.start(i) && t <= s.end(i)) { inSeekable = true; break; }
+                if (!inSeekable) return false;
+                const b = v.buffered;
+                for (let j = 0; j < b.length; j++)
+                    if (t >= b.start(j) && t <= b.end(j) - 0.5) return true;
+            } catch {}
+            return false;
+        }
+        _directStreamSeek(t) {
+            const ds = this._ds;
+            if (!ds) return;
+            const dur = ds.dur || 0;
+            t = Math.max(0, dur > 1 ? Math.min(t, dur - 1) : t);
+            const v = this.art.video;
+            // Fast path: already-buffered + seekable → native instant seek, no
+            // remux reload. Cancels any pending reload and clears the hold.
+            if (v && this._dsCanNativeSeek(v, t)) {
+                if (this._dsTimer) { clearTimeout(this._dsTimer); this._dsTimer = null; }
+                ds.target = null;
+                try { v.currentTime = t; } catch {}
+                return;
+            }
+            ds.target = t;
+            // Debounce the remux-reload: a scrub drag fires currentTime= on
+            // every pointermove and each reload spawns a fresh ffmpeg. The
+            // getter reports ds.target meanwhile so the bar tracks the drag —
+            // we only re-request once the user settles (~280ms).
+            if (this._dsTimer) clearTimeout(this._dsTimer);
+            this._dsTimer = setTimeout(() => {
+                this._dsTimer = null;
+                if (!this._ds) return;
+                const seekTo = this._ds.target;
+                if (seekTo == null) return;
+                const v = this.art.video;
+                if (!v) return;
+                const url = this._ds.base + (this._ds.base.includes('?') ? '&' : '?')
+                          + 'seek=' + seekTo.toFixed(3);
+                try {
+                    const wasPlaying = !v.paused;
+                    v.src = url;
+                    v.load();
+                    const onMeta = () => {
+                        v.removeEventListener('loadedmetadata', onMeta);
+                        if (wasPlaying) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+                    };
+                    v.addEventListener('loadedmetadata', onMeta);
+                } catch (e) { console.warn('direct-stream reload failed', e); }
+            }, 280);
+        }
 
         // ── Events ────────────────────────────────────────────────────
         on(event, fn) {
@@ -1710,6 +1803,7 @@
         // ── 3) Start session ──────────────────────────────────────────
         let manifestUrl = null;
         let directPlayUrl = null;
+        let directStreamUrl = null;
         // HEVC decode capability — tell the server it can ship HEVC as a
         // stream-copy (Direct Stream, original quality) rather than re-encoding
         // it to H.264. Constant per browser → memoize on window. hls.js gates on
@@ -1761,6 +1855,9 @@
                 entry.output = data.output || null;
                 if (data.directPlayUrl) {
                     directPlayUrl = data.directPlayUrl;
+                } else if (data.directStreamUrl) {
+                    // Progressive remux (MKV → native fMP4). No HLS session.
+                    directStreamUrl = data.directStreamUrl;
                 } else {
                     entry.sessionToken = data.token;
                     manifestUrl = data.manifestUrl;
@@ -1775,7 +1872,7 @@
                 await new Promise(r => setTimeout(r, 500));
             }
         }
-        if (!manifestUrl && !directPlayUrl) return;
+        if (!manifestUrl && !directPlayUrl && !directStreamUrl) return;
         if (abort.signal.aborted) return;
 
         // ── 4) Probe ──────────────────────────────────────────────────
@@ -1852,7 +1949,7 @@
                             audioCodec:    a ? (a.codec_name || '') : '',
                             audioChannels: a ? (a.channels || 0) : 0,
                             audioLang:     audioList[0]?.lang || '',
-                            playbackTier:  directPlayUrl ? 'directplay' : 'hls',
+                            playbackTier:  directPlayUrl ? 'directplay' : (directStreamUrl ? 'directstream' : 'hls'),
                         };
                         dotnetRef.invokeMethodAsync('OnPlayerMediaInfo', mediaInfo)
                             .catch(() => {});
@@ -1898,10 +1995,19 @@
         if (externalAudioPath) offsetChannel = 'sw';
 
         // ── 5) Instantiate player + adapter ───────────────────────────
+        // Direct Stream base (no ?seek — the adapter appends one per seek). The
+        // initial load seeks straight to the resume point so playback starts
+        // there without spawning a second remux.
+        const directStreamBase = directStreamUrl
+            ? (directStreamUrl.startsWith('/') ? apiUrl(directStreamUrl) : directStreamUrl)
+            : null;
         const playUrl = directPlayUrl
             ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
+            : directStreamBase
+            ? directStreamBase + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(3) : '')
             : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
-        const isHls   = !directPlayUrl;
+        const isHls          = !directPlayUrl && !directStreamUrl;
+        const isDirectStream = !!directStreamUrl;
         const fileExt = mediaPath.toLowerCase().split('.').pop();
         const stylePref = readStylePref();
 
@@ -1963,7 +2069,9 @@
             art = new window.Artplayer({
             container: el,
             url: playUrl,
-            type: isHls ? 'm3u8' : (fileExt || 'mp4'),
+            // Direct Stream is served as fMP4 by /api/video regardless of the
+            // source extension (.mkv), so force 'mp4' — never the source ext.
+            type: isHls ? 'm3u8' : (isDirectStream ? 'mp4' : (fileExt || 'mp4')),
             customType: isHls ? {
                 m3u8: (video, url) => {
                     if (!window.Hls || !window.Hls.isSupported()) {
@@ -2065,6 +2173,10 @@
             }],
             });
             adapter = new ArtplayerAdapter(art);
+            // Direct Stream: route seeks through a remux-reload (the source has
+            // no Range) and read duration off the server total, not the live
+            // stream (whose video.duration is Infinity).
+            if (isDirectStream) adapter.enableDirectStream(directStreamBase, entry.totalDuration);
         }
 
         entry.art = art;
@@ -2089,19 +2201,6 @@
                 else vEl.addEventListener('canplay', kick, { once: true });
             }
         } catch {}
-
-        // RTX VSR / Video HDR (Direct Play only): Chrome won't promote a
-        // <video> to a hardware overlay — where NVIDIA RTX VSR/HDR run — while
-        // Artplayer's `.art-video` styling is in effect. A plain <video> engages
-        // them; overriding single CSS props doesn't, so we tag the element and
-        // reset Artplayer's video styling wholesale in CSS (.vp-directplay-video).
-        // HLS plays via MSE, which never gets the overlay anyway — leave it.
-        if (directPlayUrl) {
-            try {
-                const vsrVid = adapter.rawVideoElement && adapter.rawVideoElement();
-                if (vsrVid) vsrVid.classList.add('vp-directplay-video');
-            } catch {}
-        }
 
         // ── 5b) Wire HUD ──────────────────────────────────────────────
         // Root element for HUD events: Artplayer's player wrapper on the web
@@ -2289,6 +2388,7 @@
                 }
                 const planTag = {
                     'directplay':     'Direct Play',
+                    'directstream':   'Direct Stream · remux',
                     'ts-copy':        'HLS · TS stream-copy',
                     'vaapi-reencode': 'HLS · VAAPI → H.264',
                     'nvenc-reencode': 'HLS · NVENC → H.264',
@@ -2362,7 +2462,9 @@
         } catch {}
 
         // ── 6) Resume seek + progress reporting ───────────────────────
-        if (resumeSec > 0) {
+        // Direct Stream bakes the resume point into the initial URL (?seek=),
+        // so seeking again here would spawn a redundant remux — skip it.
+        if (resumeSec > 0 && !isDirectStream) {
             adapter.once('loadedmetadata', () => {
                 adapter.currentTime = resumeSec;
             });

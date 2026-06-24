@@ -109,13 +109,20 @@ public sealed class HlsSessionService : IDisposable
         PlayerOutputInfo Output);
 
     /// <summary>
-    /// Returned from <see cref="ChoosePlaybackAsync"/>. When <c>DirectPlay</c>
-    /// is true, the client should set the player's src to <c>DirectUrl</c>
-    /// directly and skip the HLS session entirely. Otherwise the caller falls
-    /// through to <see cref="StartAsync"/> for the HLS path.
+    /// Returned from <see cref="ChoosePlaybackAsync"/>. Two native paths and an
+    /// HLS fallback:
+    ///   • <c>DirectPlay</c> — raw file via /api/file (Range-seekable). MP4 +
+    ///     browser codec + AAC. Client sets src to <c>DirectUrl</c> directly.
+    ///   • <c>DirectStream</c> — on-the-fly remux to progressive fMP4 via
+    ///     /api/video (video stream-copy, audio→AAC). Non-MP4 containers (MKV)
+    ///     whose video the browser decodes. Original video + HDR preserved;
+    ///     plays on a real &lt;video&gt; (better HDR output than MSE). No Range,
+    ///     so the client seeks by re-requesting at ?seek=N. <c>DirectUrl</c>
+    ///     holds the /api/video URL.
+    ///   • Neither — caller falls through to <see cref="StartAsync"/> (HLS).
     /// </summary>
     public sealed record PlaybackDecision(bool DirectPlay, string? DirectUrl, double DurationSec,
-        PlayerOutputInfo? Output);
+        PlayerOutputInfo? Output, bool DirectStream = false);
 
     /// <summary>
     /// Describes what the player actually receives — NOT what's on disk. The
@@ -166,15 +173,29 @@ public sealed class HlsSessionService : IDisposable
         if (probe is null) return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
-        if (!IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
-            return new PlaybackDecision(false, null, duration, null);
+        if (IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
+        {
+            // /api/file serves the raw bytes with Range support — exactly what
+            // <video> needs for native seek. URL-escape the path so spaces and
+            // unicode survive (file paths frequently have both).
+            var directUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
+            var output = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
+            return new PlaybackDecision(true, directUrl, duration, output);
+        }
 
-        // /api/file serves the raw bytes with Range support — exactly what
-        // <video> needs for native seek. URL-escape the path so spaces and
-        // unicode survive (file paths frequently have both).
-        var directUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
-        var output = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
-        return new PlaybackDecision(true, directUrl, duration, output);
+        if (IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
+        {
+            // /api/video remuxes the source to progressive fMP4 (video copy,
+            // audio→AAC). The browser plays it as a native <video>, which is
+            // why we route MKV here instead of HLS: original video bitstream +
+            // HDR are preserved, and native playback outputs HDR more reliably
+            // than MSE. The client owns the seek-reload dance (?seek=N).
+            var streamUrl = "/api/video?path=" + Uri.EscapeDataString(fullPath);
+            var output = BuildOutputInfo(probe, plan: null, isDirectPlay: false, isDirectStream: true);
+            return new PlaybackDecision(false, streamUrl, duration, output, DirectStream: true);
+        }
+
+        return new PlaybackDecision(false, null, duration, null);
     }
 
     /// <summary>
@@ -183,7 +204,8 @@ public sealed class HlsSessionService : IDisposable
     /// direct play and stream-copy paths it mirrors the source; for re-encode
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
-    private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay)
+    private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
+        bool isDirectStream = false)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -204,11 +226,12 @@ public sealed class HlsSessionService : IDisposable
         string videoCodec = isReencode ? "h264" : (probe.VideoCodec ?? "");
         int    bitDepth   = isReencode ? 8       : (probe.Is10Bit ? 10 : 8);
 
-        string container = isDirectPlay      ? "mp4"
-                         : plan == HlsPlan.TsStreamCopy ? "mpegts"
-                         :                                "fmp4";
+        string container = isDirectPlay || isDirectStream ? "mp4"
+                         : plan == HlsPlan.TsStreamCopy   ? "mpegts"
+                         :                                  "fmp4";
 
-        string planName = isDirectPlay ? "directplay"
+        string planName = isDirectPlay   ? "directplay"
+            : isDirectStream             ? "directstream"
             : plan switch
             {
                 HlsPlan.TsStreamCopy         => "ts-copy",
@@ -219,7 +242,7 @@ public sealed class HlsSessionService : IDisposable
                 _                            => "unknown",
             };
 
-        string? reason = isDirectPlay ? null : plan switch
+        string? reason = isDirectPlay || isDirectStream ? null : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
             HlsPlan.Fmp4VaapiReencode => "HEVC 8-bit re-encoded to H.264 via VAAPI for browser compatibility (HDR lost)",
@@ -238,10 +261,13 @@ public sealed class HlsSessionService : IDisposable
             HdrFormats:      hdrFormats.ToArray(),
             Width:           probe.Width,
             Height:          probe.Height,
-            AudioCodec:      probe.AudioCodec ?? "",
-            AudioChannels:   probe.AudioChannels,
+            // Direct Stream downmixes audio to AAC stereo in the remux; video is
+            // copied untouched, so we report "not transcoded" (the plashka is
+            // video-centric) but surface the real output audio codec/channels.
+            AudioCodec:      isDirectStream ? "aac" : (probe.AudioCodec ?? ""),
+            AudioChannels:   isDirectStream ? 2      : probe.AudioChannels,
             AudioLanguage:   probe.AudioLanguage ?? "",
-            Transcoded:      !isDirectPlay,
+            Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason);
     }
 
@@ -276,6 +302,32 @@ public sealed class HlsSessionService : IDisposable
         if (ac != "aac" && ac != "mp3" && ac != "mp4a") return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Direct Stream eligibility — the file the browser can't open as a raw
+    /// &lt;video src&gt; (non-MP4 container, e.g. MKV/AVI) but whose VIDEO codec
+    /// it CAN decode. /api/video remuxes it to progressive fMP4 (video copy,
+    /// audio→AAC), so the only gate is the video codec/bit-depth vs the client's
+    /// reported HEVC support. Audio codec is irrelevant (always transcoded),
+    /// which makes this wider than Direct Play. Dolby Vision is allowed here
+    /// (unlike Direct Play): the remux tags HEVC as hvc1 and DV profile 8.1
+    /// plays as HDR10 — exactly the "keep the HDR" case we want native.
+    /// </summary>
+    private static bool IsDirectStreamEligible(string container, ProbeInfo probe,
+        bool clientHevc, bool clientHevc10)
+    {
+        // Browser-native containers never come here: they're either Direct Play
+        // (raw, Range-seekable) or HLS. Only non-native containers need a remux.
+        if (container is "mp4" or "m4v" or "mov" or "webm") return false;
+
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        return vc switch
+        {
+            "h264" => !probe.Is10Bit,                              // 8-bit H.264 plays everywhere
+            "hevc" => probe.Is10Bit ? clientHevc10 : clientHevc,   // gate on browser HEVC support
+            _      => false,                                       // VP9/AV1/MPEG-2/… → HLS
+        };
     }
 
     public async Task<StartResult> StartAsync(string fullPath, double seekSec, CancellationToken ct = default,
