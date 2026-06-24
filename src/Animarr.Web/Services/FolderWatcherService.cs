@@ -50,6 +50,20 @@ public class FolderWatcherService(
 
         logger.LogInformation("Started {Count} folder watchers.", _watchers.Count);
 
+        // Startup reconcile: drop FolderWatcher rows whose folder/file vanished
+        // from disk while we were down. Per-section + skips unreachable roots, so
+        // a temporary unmount can't wipe the library. Fire-and-forget so a slow
+        // mount doesn't delay startup.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var removed = await CleanupOrphanedChildrenAllAsync();
+                if (removed > 0) logger.LogInformation("Startup reconcile removed {Count} orphaned folder rows.", removed);
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "startup orphan cleanup failed"); }
+        });
+
         // H-2: prune expired _suppressedPaths every 60s
         _suppressedGcTimer = new Timer(_ =>
         {
@@ -420,6 +434,12 @@ public class FolderWatcherService(
             logger.LogWarning("DiscoverChildrenAsync: section path missing — {Path}", section.Path);
             return [];
         }
+
+        // Prune children whose folder/file vanished from disk BEFORE discovering
+        // new ones, so a scan both adds and removes. Safe: CleanupOrphanedChildren
+        // bails when the section root itself is unreachable (temporary unmount).
+        try { await CleanupOrphanedChildrenAsync(sectionId); }
+        catch (Exception ex) { logger.LogWarning(ex, "orphan cleanup failed for {Path}", section.Path); }
 
         string[] dirs;
         string[] files;
