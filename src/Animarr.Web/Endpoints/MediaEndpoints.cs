@@ -6,6 +6,7 @@ using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
+using Animarr.Web.Services.Segments;
 using Microsoft.EntityFrameworkCore;
 using SharedEnums = Animarr.Shared;
 using EfModels    = Animarr.Web.Data.Models;
@@ -661,7 +662,127 @@ internal static class MediaEndpoints
             return Results.NotFound();
         });
 
+        // ── Skip intro / credits segments ────────────────────────────────────
+        // GET with ?season=&episode= returns one episode's segments and lazily
+        // detects them via the cheap providers (AniSkip) on a first-watch miss,
+        // so the player gets times immediately. Without params it returns every
+        // segment already known for the item (no detection). AllowAnonymous to
+        // match the other playback endpoints the player calls directly.
+        app.MapGet(ApiRoutes.MediaSegments, async (
+            Guid id,
+            int? season,
+            int? episode,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MediaFileResolver resolver,
+            SegmentDetectionService detector,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+
+            if (season is int s && episode is int e)
+            {
+                var have = await db.EpisodeSegments.AsNoTracking()
+                    .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
+                    .ToListAsync(ct);
+
+                // Lazy detect on a miss using cheap providers only (a single
+                // AniSkip call). Best-effort — the player falls back to 95%.
+                if (have.Count == 0 && item.MalId is > 0)
+                {
+                    try
+                    {
+                        var files = await resolver.ResolveAsync(id, ct);
+                        var fp = files.FirstOrDefault(f => (f.Season ?? 1) == s && f.Episode == e)?.FilePath;
+                        if (!string.IsNullOrEmpty(fp) &&
+                            await detector.DetectForEpisodeAsync(item, s, e, fp!, cheapOnly: true, ct))
+                        {
+                            have = await db.EpisodeSegments.AsNoTracking()
+                                .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
+                                .ToListAsync(ct);
+                        }
+                    }
+                    catch { /* best-effort lazy detection */ }
+                }
+                return Results.Ok(ToSegmentsDto(s, e, have));
+            }
+
+            var all = await db.EpisodeSegments.AsNoTracking()
+                .Where(x => x.MediaItemId == id)
+                .ToListAsync(ct);
+            var dtos = all
+                .GroupBy(x => (x.Season, x.Episode))
+                .OrderBy(g => g.Key.Season).ThenBy(g => g.Key.Episode)
+                .Select(g => ToSegmentsDto(g.Key.Season, g.Key.Episode, g.ToList()))
+                .ToArray();
+            return Results.Ok(dtos);
+        })
+        .AllowAnonymous();
+
+        // Manual override — Source=Manual, never clobbered by detection. Null
+        // start/end clears that kind's override.
+        app.MapPut(ApiRoutes.MediaSegments, async (
+            Guid id,
+            SegmentOverrideRequest req,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            SegmentKind? kind = req.Kind?.ToLowerInvariant() switch
+            {
+                "intro"   => SegmentKind.Intro,
+                "credits" => SegmentKind.Credits,
+                "recap"   => SegmentKind.Recap,
+                _         => null,
+            };
+            if (kind is null) return Results.BadRequest(new { error = "Kind must be intro, credits or recap." });
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (!await db.MediaItems.AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+
+            var row = await db.EpisodeSegments.FirstOrDefaultAsync(
+                x => x.MediaItemId == id && x.Season == req.Season && x.Episode == req.Episode && x.Kind == kind.Value, ct);
+
+            if (req.StartSec is null || req.EndSec is null)
+            {
+                if (row is not null) { db.EpisodeSegments.Remove(row); await db.SaveChangesAsync(ct); }
+                return Results.NoContent();
+            }
+            if (req.EndSec <= req.StartSec)
+                return Results.BadRequest(new { error = "EndSec must be greater than StartSec." });
+
+            if (row is null)
+            {
+                row = new EfModels.EpisodeSegment
+                {
+                    MediaItemId = id, Season = req.Season, Episode = req.Episode, Kind = kind.Value,
+                };
+                db.EpisodeSegments.Add(row);
+            }
+            row.StartSec      = req.StartSec.Value;
+            row.EndSec        = req.EndSec.Value;
+            row.Source        = SegmentSource.Manual;
+            row.DetectedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
         return app;
+    }
+
+    /// <summary>Collapse the per-(season,episode) segment rows into the flat DTO
+    /// the player consumes.</summary>
+    private static EpisodeSegmentsDto ToSegmentsDto(int season, int episode, List<EfModels.EpisodeSegment> segs)
+    {
+        EfModels.EpisodeSegment? Pick(SegmentKind k) => segs.FirstOrDefault(x => x.Kind == k);
+        var intro   = Pick(SegmentKind.Intro);
+        var credits = Pick(SegmentKind.Credits);
+        var recap   = Pick(SegmentKind.Recap);
+        return new EpisodeSegmentsDto(
+            season, episode,
+            intro?.StartSec,   intro?.EndSec,
+            credits?.StartSec, credits?.EndSec,
+            recap?.StartSec,   recap?.EndSec);
     }
 
     // Cap concurrent ffmpeg frame-grabs: opening a season fires a burst of lazy

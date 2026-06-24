@@ -100,6 +100,10 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<MediaFileDto[]>(ApiRoutes.MediaFilesFor(mediaItemId), JsonOpts, ct)
             ?? Array.Empty<MediaFileDto>();
 
+    public Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default)
+        => GetOrNullAsync<EpisodeSegmentsDto>(
+            ApiRoutes.MediaSegmentsFor(mediaItemId) + $"?season={season}&episode={episode}", ct);
+
     public async Task SetEpisodeMappingAsync(Guid mediaItemId, EpisodeMappingRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PutAsJsonAsync(ApiRoutes.MediaFileMappingFor(mediaItemId), request, JsonOpts, ct);

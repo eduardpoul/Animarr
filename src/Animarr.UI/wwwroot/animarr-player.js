@@ -1546,7 +1546,9 @@
             play:    upNextEl.querySelector('[data-bind="un-play"]'),
             dismiss: upNextEl.querySelector('[data-bind="un-dismiss"]'),
         };
-        const UP_NEXT_PCT = 0.9;        // show threshold (matches auto-watched)
+        // Next-up appears at the detected credits start; with no detection it
+        // falls back to this fraction of the runtime.
+        const UP_NEXT_FALLBACK_PCT = 0.95;
         const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
         let upNextShown = false, upNextDismissed = false, upNextDone = false;
 
@@ -1577,8 +1579,10 @@
         function updateUpNext(cTime, dTime) {
             if (upNextDone || upNextDismissed) return;
             if (!entry.nextAvailable || !(dTime > 0)) { hideUpNext(); return; }
-            const pct = cTime / dTime;
-            if (pct < UP_NEXT_PCT) { hideUpNext(); return; }  // seeked back out of the zone
+            // Show at the detected end-credits start; otherwise fall back to 95%.
+            const cs = entry.segments && entry.segments.creditsStart;
+            const triggerAt = (cs > 0 && cs < dTime) ? cs : dTime * UP_NEXT_FALLBACK_PCT;
+            if (cTime < triggerAt) { hideUpNext(); return; }  // not at credits / fallback yet
             showUpNext();
             const remaining = dTime - cTime;
             const baseLabel = upNextLabels().play || 'Play next';
@@ -1602,6 +1606,39 @@
             if (!upNextDismissed && entry.nextAvailable) triggerUpNext();
         });
 
+        // ── skip-intro button ─────────────────────────────────────────
+        // Floating button shown only while currentTime is inside the detected
+        // intro [introStart, introEnd]; clicking seeks past it. Sibling of the
+        // HUD so it stays put while the controls fade. Stays hidden entirely
+        // when no intro was detected for this episode.
+        const skipEl = document.createElement('button');
+        skipEl.type = 'button';
+        skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
+        skipEl.textContent = entry.skipIntroLabel || 'Skip intro';
+        root.appendChild(skipEl);
+        let skipShown = false;
+        function showSkip() {
+            if (skipShown) return;
+            skipShown = true;
+            skipEl.textContent = entry.skipIntroLabel || 'Skip intro';
+            skipEl.classList.remove('vp-skip--hidden');
+        }
+        function hideSkip() {
+            if (!skipShown) return;
+            skipShown = false;
+            skipEl.classList.add('vp-skip--hidden');
+        }
+        function updateSkipIntro(cTime) {
+            const s = entry.segments;
+            const inIntro = !!(s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd);
+            if (inIntro) showSkip(); else hideSkip();
+        }
+        skipEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const s = entry.segments;
+            if (s && s.introEnd > 0) { adapter.currentTime = s.introEnd; hideSkip(); }
+        });
+
         // ── adapter events ────────────────────────────────────────────
         function updateProgress() {
             const cTime = adapter.currentTime || 0;
@@ -1613,8 +1650,9 @@
                 refs.cur.textContent   = formatTime(cTime);
             }
             refs.dur.textContent = formatTime(dTime);
-            // End-of-episode autoplay card (90% → show; last 10s → countdown).
+            // End-of-episode autoplay card (credits start → show; last 10s → countdown).
             updateUpNext(cTime, dTime);
+            updateSkipIntro(cTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
@@ -2667,6 +2705,12 @@
             play:    (meta && meta.upNextPlay)    || 'Play next',
             dismiss: (meta && meta.upNextDismiss) || 'Dismiss',
         };
+        // Skip-intro/credits segment times (seconds). Read live by updateUpNext
+        // (credits → next-up trigger) and updateSkipIntro (Skip button) on each
+        // timeupdate. null → no detected segments: Skip stays hidden and the
+        // next-up card falls back to 95% of the runtime.
+        entry.segments = (meta && meta.segments) || null;
+        entry.skipIntroLabel = (meta && meta.skipIntroLabel) || entry.skipIntroLabel || 'Skip intro';
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;

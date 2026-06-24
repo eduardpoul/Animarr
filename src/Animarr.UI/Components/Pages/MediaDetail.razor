@@ -728,6 +728,27 @@ else
                     if (_playerSeason is > 0)  hudKickerBits.Add($"S{_playerSeason}");
                     if (_playerEpisode is > 0) hudKickerBits.Add($"EP {_playerEpisode}");
                     var hudKicker = string.Join(" · ", hudKickerBits);
+
+                    // Skip-intro/credits times for the player. Best-effort: null →
+                    // the player hides Skip Intro and uses its 95% next-up fallback.
+                    // The server lazily detects (AniSkip) on a first-watch miss.
+                    object? segments = null;
+                    if (_playerEpisode is > 0)
+                    {
+                        try
+                        {
+                            var seg = await Api.GetEpisodeSegmentsAsync(_item.Id, _playerSeason ?? 1, _playerEpisode.Value);
+                            if (seg is not null)
+                                segments = new {
+                                    introStart   = seg.IntroStart,
+                                    introEnd     = seg.IntroEnd,
+                                    creditsStart = seg.CreditsStart,
+                                    creditsEnd   = seg.CreditsEnd,
+                                };
+                        }
+                        catch { /* segments are optional decoration */ }
+                    }
+
                     var meta = new {
                         title,
                         artist,
@@ -744,6 +765,8 @@ else
                         upNextName,
                         upNextPlay    = L["player.up_next_play"],
                         upNextDismiss = L["player.up_next_dismiss"],
+                        // Skip-intro/credits segment times (seconds) for the player.
+                        segments,
                     };
                     try
                     {
