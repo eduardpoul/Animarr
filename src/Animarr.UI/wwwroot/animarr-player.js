@@ -1633,6 +1633,10 @@
         // Carried across re-attaches by switchQuality (mirrors audioTrackIndex).
         const maxHeight = (opts && Number.isFinite(opts.maxHeight))
             ? Math.max(0, opts.maxHeight) : 0;
+        // Output bitrate cap in Mbps (0 = no cap / original). Below source it
+        // forces a re-encode at the chosen bitrate; carried by switchQuality.
+        const maxBitrate = (opts && Number.isFinite(opts.maxBitrate))
+            ? Math.max(0, opts.maxBitrate) : 0;
         const forceResumeSec  = (opts && Number.isFinite(opts.forceResumeSec))
             ? Math.max(0, opts.forceResumeSec)  : null;
         // Absolute path to an external dub audio file to mux in place of the
@@ -1657,6 +1661,7 @@
             mediaInfo: null, subtitleList: [], audioList: [],
             currentSubIdx: null, currentAudIdx: audioTrackIndex,
             currentMaxHeight: maxHeight,
+            currentMaxBitrate: maxBitrate,
             // External-track state. currentExternalAudioPath != null means the
             // active audio is a sideload dub (not an in-file stream); the two
             // external lists are filled from /api/external-tracks below.
@@ -1705,12 +1710,28 @@
         // ── 3) Start session ──────────────────────────────────────────
         let manifestUrl = null;
         let directPlayUrl = null;
+        // HEVC decode capability — tell the server it can ship HEVC as a
+        // stream-copy (Direct Stream, original quality) rather than re-encoding
+        // it to H.264. Constant per browser → memoize on window. hls.js gates on
+        // MediaSource.isTypeSupported; Safari/native HLS via canPlayType.
+        if (window.__animarrHevcOk === undefined) {
+            let ok = false;
+            try {
+                const t = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
+                ok = (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(t))
+                  || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(t))
+                  || document.createElement('video').canPlayType(t) !== '';
+            } catch (e) { ok = false; }
+            window.__animarrHevcOk = ok;
+        }
         const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + audioOffsetMsHw
             + '&audioOffsetSwMs=' + audioOffsetMsSw
             + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
             + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
+            + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
+            + (window.__animarrHevcOk ? '&clientHevc=1' : '')
             + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
@@ -2151,20 +2172,33 @@
                 });
             },
             quality: () => {
-                // Build the ladder from the SOURCE height (never upscale): the
-                // probe's height is the ceiling; offer standard rungs below it.
+                // One list, three kinds of entries (single-select picker):
+                //   • Original — stream-copy, no re-encode (lossless).
+                //   • Resolution rungs below source — downscale + re-encode at
+                //     the auto bitrate (shown in the label).
+                //   • Bitrate caps — re-encode at SOURCE resolution, capped at
+                //     N Mbps (trim bandwidth without dropping resolution).
                 const srcH = (entry.mediaInfo && entry.mediaInfo.height)
                           || (entry.output && entry.output.height) || 0;
-                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0 }];
+                const autoMbps = (h) => h <= 480 ? 2.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: 0 }];
                 [1440, 1080, 720, 480].forEach(r => {
-                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p', h: r });
+                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p · ~' + autoMbps(r) + ' Mbps', h: r, b: 0 });
+                });
+                // Bitrate-cap presets; ceiling scaled to the source resolution so
+                // a 1080p file doesn't offer 200 Mbps but a 4K file does.
+                const brCeil = srcH >= 2160 ? 200 : srcH >= 1440 ? 120 : srcH >= 1080 ? 40 : srcH >= 720 ? 25 : srcH > 0 ? 16 : 200;
+                [6, 10, 16, 25, 40, 80, 120, 200].forEach(b => {
+                    if (b <= brCeil) items.push({ label: '≤ ' + b + ' Mbps' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: b });
                 });
                 const curH = entry.currentMaxHeight || 0;
-                let curIdx = items.findIndex(o => o.h === curH);
+                const curB = entry.currentMaxBitrate || 0;
+                let curIdx = items.findIndex(o => o.h === curH && o.b === curB);
                 if (curIdx < 0) curIdx = 0;
                 openPickerPopup(hudRoot, 'quality', 'Quality', items.map(o => o.label), curIdx, (i) => {
-                    if (items[i].h === (entry.currentMaxHeight || 0)) return;
-                    switchQuality(elementId, items[i].h);
+                    const it = items[i];
+                    if (it.h === (entry.currentMaxHeight || 0) && it.b === (entry.currentMaxBitrate || 0)) return;
+                    switchQuality(elementId, it.h, it.b);
                 });
             },
             info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || []),
@@ -2437,6 +2471,7 @@
         // Preserve the current quality cap across an audio switch (the old
         // by-index helper dropped it, reverting to source resolution).
         const maxHeight = entry.currentMaxHeight || 0;
+        const maxBitrate = entry.currentMaxBitrate || 0;
         // Tear down the old session synchronously — detach() handles HLS
         // DELETE + Artplayer destroy + WIRED cleanup.
         detach(elementId);
@@ -2448,6 +2483,7 @@
             audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? sel.audioTrackIndex : 0,
             externalAudioPath: (sel && sel.externalAudioPath) || null,
             maxHeight,
+            maxBitrate,
             forceResumeSec:    pos,
         });
     }
@@ -2464,7 +2500,7 @@
      * source height), carrying current position + audio track over. 0 = original.
      * Same teardown+resume dance as switchAudioTrack (1-3s warm-up gap).
      */
-    async function switchQuality(elementId, maxHeight) {
+    async function switchQuality(elementId, maxHeight, maxBitrate) {
         const entry = WIRED.get(elementId);
         if (!entry || !entry.adapter) return;
         const pos       = entry.adapter.currentTime || 0;
@@ -2479,6 +2515,7 @@
             // Keep the active external dub across a quality change.
             externalAudioPath: entry.currentExternalAudioPath || null,
             maxHeight,
+            maxBitrate: maxBitrate || 0,
             forceResumeSec: pos,
         });
     }

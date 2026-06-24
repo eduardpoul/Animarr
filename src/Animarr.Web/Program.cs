@@ -799,6 +799,13 @@ app.MapPost("/api/hls/start", async (
         // combine the foreign audio with the source video). Discovered by
         // /api/external-tracks; re-validated here against the library roots.
         string? externalAudio,
+        // Set by the client (MediaSource.isTypeSupported) when the browser can
+        // decode HEVC. Lets the server Direct-Stream HEVC (stream-copy, original
+        // quality) instead of re-encoding it to H.264. Absent/false → re-encode.
+        bool? clientHevc,
+        // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
+        // at this bitrate; absent/0 = no cap.
+        int? maxBitrate,
         IDbContextFactory<AppDbContext> dbFactory,
         HlsSessionService hls,
         ILoggerFactory loggerFactory) =>
@@ -879,7 +886,9 @@ app.MapPost("/api/hls/start", async (
             audioOffsetSwSec: audioOffsetSwSec,
             audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
             maxHeight:        Math.Max(0, maxHeight ?? 0),
-            externalAudioPath: externalAudioFull);
+            externalAudioPath: externalAudioFull,
+            clientHevc:       clientHevc == true,
+            maxBitrate:       Math.Max(0, maxBitrate ?? 0));
         return Results.Ok(new
         {
             token        = result.Token,
