@@ -786,6 +786,33 @@ internal static class MediaEndpoints
             return Results.NoContent();
         });
 
+        // Skip-intro/credits scan progress for the Settings indicator.
+        app.MapGet(ApiRoutes.SegmentsStatus, async (
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var total = await db.MediaItems.CountAsync(
+                m => m.IdentificationStatus == EfModels.IdentificationStatus.Identified
+                  || m.IdentificationStatus == EfModels.IdentificationStatus.Manual, ct);
+            var scanned = await db.MediaItems.CountAsync(
+                m => (m.IdentificationStatus == EfModels.IdentificationStatus.Identified
+                   || m.IdentificationStatus == EfModels.IdentificationStatus.Manual)
+                  && m.LastSegmentScanAt != null, ct);
+            var withSegs = await db.EpisodeSegments.Select(s => s.MediaItemId).Distinct().CountAsync(ct);
+            return Results.Ok(new SegmentScanStatusDto(total, scanned, withSegs));
+        });
+
+        // Reset scan flags → background pass reprocesses every title. Existing
+        // detected segments stay (precedence lets a better source overwrite).
+        app.MapPost(ApiRoutes.SegmentsRescan, async (
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            await db.MediaItems.ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.LastSegmentScanAt, (DateTime?)null), ct);
+            return Results.Accepted();
+        });
+
         return app;
     }
 

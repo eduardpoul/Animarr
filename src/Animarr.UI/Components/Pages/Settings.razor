@@ -114,6 +114,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private HardwareReportDto? _hw;
     private RenamePatternDto[]? _patterns;
     private TorrentConfigDto? _torrentCfg;
+    private SegmentScanStatusDto? _segStatus;
 
     // ── Dialog state ──
     private bool _folderDialogOpen;
@@ -164,6 +165,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         "patterns" when _patterns is null   => LoadPatternsAsync(),
         "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
         "ai"       when _catalog is null    => LoadEmbeddedAsync(),
+        "metadata" when _segStatus is null  => LoadSegStatusAsync(),
         _ => Task.CompletedTask,
     });
 
@@ -173,6 +175,24 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         {
             await Api.SetAppConfigValueAsync(key, value);
             _config[key] = value;
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task LoadSegStatusAsync()
+    {
+        try { _segStatus = await Api.GetSegmentScanStatusAsync(); }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task RescanSegmentsAsync()
+    {
+        try
+        {
+            await Api.RescanSegmentsAsync();
+            _segStatus = await Api.GetSegmentScanStatusAsync();
         }
         catch { /* swallow */ }
         StateHasChanged();
@@ -1034,6 +1054,19 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsBlackFrameEnabled, v ? "true" : "false"))" />
                 <span class="settings-field__label">Black-frame credits guess — slow, decodes video</span>
             </label>
+            <div class="settings-field settings-field--inline" style="justify-content: space-between; gap: 12px;">
+                <span class="settings-hint">
+                    @if (_segStatus is { } seg)
+                    {
+                        @($"Analysed {seg.ScannedTitles}/{seg.TotalTitles} titles · {seg.TitlesWithSegments} with segments")
+                    }
+                    else
+                    {
+                        @("Analysis progress —")
+                    }
+                </span>
+                <button type="button" class="settings-section-head__new tv-focus" @onclick="RescanSegmentsAsync">Rescan all</button>
+            </div>
         </section>;
     }
 
