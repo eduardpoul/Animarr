@@ -5,6 +5,7 @@ using Animarr.Web.Endpoints;
 using Animarr.Web.Hubs;
 using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
+using Animarr.Web.Services.Segments;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -122,6 +123,22 @@ builder.Services.AddScoped<MediaFileResolver>();
 builder.Services.AddScoped<EpisodeLlmResolver>();
 builder.Services.AddScoped<SeasonOffsetResolver>();
 builder.Services.AddScoped<ExternalTrackService>();
+
+// ─── Skip intro/credits — segment detection ───────────────────────────────
+// AniSkip: crowd-sourced OP/ED timestamps by MAL id (free, no auth). Needs an
+// explicit User-Agent for the same WAF reason as AnimeThemes/AniList above.
+builder.Services.AddHttpClient(AniSkipClient.ClientName, c =>
+{
+    c.BaseAddress = new Uri("https://api.aniskip.com");
+    c.DefaultRequestHeaders.Add("Accept", "application/json");
+    c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+});
+builder.Services.AddScoped<AniSkipClient>();
+// Providers are resolved as an IEnumerable<ISegmentProvider> by the orchestrator,
+// ordered by their cascade Order. Add new providers (chapter/chromaprint/…) here.
+builder.Services.AddScoped<ISegmentProvider, AniSkipProvider>();
+builder.Services.AddScoped<SegmentDetectionService>();
+
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();

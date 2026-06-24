@@ -34,6 +34,9 @@ public interface IAnimarrApiClient
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Skip-intro/credits segment times for one episode (lazy-detected
+    /// via AniSkip on a miss). Null when the item is unknown or has none.</summary>
+    Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default);
     /// <summary>Tier 2 — set a manual (season, episode) override for one file of
     /// this item. Null season/episode keeps the deterministic value for that
     /// field. The override survives re-scans and AI re-resolution.</summary>

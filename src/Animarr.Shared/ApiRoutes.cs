@@ -39,6 +39,11 @@ public static class ApiRoutes
     /// else an ffmpeg frame grabbed from the local video. Lazy + cached.</summary>
     public const string MediaEpisodeThumb = "/api/media/{id}/episode-thumb";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
+    /// <summary>GET — skip-intro/credits segments. With <c>?season=&amp;episode=</c>
+    /// returns one <c>EpisodeSegmentsDto</c> (lazy-detecting via AniSkip on a
+    /// miss); without, returns all known <c>EpisodeSegmentsDto[]</c> for the item.
+    /// PUT writes a manual override (Source=Manual, never clobbered by detection).</summary>
+    public const string MediaSegments     = "/api/media/{id}/segments";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -245,6 +250,7 @@ public static class ApiRoutes
     public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
     public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
     public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
+    public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
