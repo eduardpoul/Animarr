@@ -2364,7 +2364,14 @@
                 if (o.videoCodec) vparts.push(o.videoCodec.toUpperCase());
                 if (o.bitDepth >= 10) vparts.push('10-bit');
                 if (vparts.length) lines.push('Video: ' + vparts.join(' '));
-                const hdrs = (o.hdrFormats || []).map(fmt =>
+                // The Info block reports what's actually ON SCREEN, not the
+                // source's flags. No browser renders Dolby Vision — the web
+                // player plays the HDR10/HLG base layer — so drop the DV tag on
+                // the Artplayer path. Native ExoPlayer (art == null) keeps it:
+                // DV-capable TVs do render it.
+                let hdrFormats = o.hdrFormats || [];
+                if (art) hdrFormats = hdrFormats.filter(f => f !== 'dolbyvision');
+                const hdrs = hdrFormats.map(fmt =>
                     fmt === 'dolbyvision' ? 'Dolby Vision'
                   : fmt === 'hdr10' ? 'HDR10'
                   : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
