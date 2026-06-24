@@ -801,8 +801,10 @@ app.MapPost("/api/hls/start", async (
         string? externalAudio,
         // Set by the client (MediaSource.isTypeSupported) when the browser can
         // decode HEVC. Lets the server Direct-Stream HEVC (stream-copy, original
-        // quality) instead of re-encoding it to H.264. Absent/false → re-encode.
-        bool? clientHevc,
+        // quality) instead of re-encoding it to H.264. Absent → re-encode.
+        // NB: bound as string, not bool — the client sends "1", which minimal
+        // API's bool binder rejects with a 400 (it only accepts true/false).
+        string? clientHevc,
         // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
         // at this bitrate; absent/0 = no cap.
         int? maxBitrate,
@@ -887,7 +889,7 @@ app.MapPost("/api/hls/start", async (
             audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
             maxHeight:        Math.Max(0, maxHeight ?? 0),
             externalAudioPath: externalAudioFull,
-            clientHevc:       clientHevc == true,
+            clientHevc:       clientHevc == "1" || string.Equals(clientHevc, "true", StringComparison.OrdinalIgnoreCase),
             maxBitrate:       Math.Max(0, maxBitrate ?? 0));
         return Results.Ok(new
         {
