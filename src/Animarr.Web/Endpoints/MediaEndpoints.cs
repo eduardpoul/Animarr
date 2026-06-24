@@ -705,7 +705,25 @@ internal static class MediaEndpoints
                     }
                     catch { /* best-effort lazy detection */ }
                 }
-                return Results.Ok(ToSegmentsDto(s, e, have));
+                // Smart credits fallback: this episode has no detected credits →
+                // use the median credits start of the season's other episodes, so
+                // the next-episode card appears at the ending instead of at the
+                // player's blunt 95%-of-runtime guess.
+                double? creditsFallback = null;
+                if (!have.Any(x => x.Kind == SegmentKind.Credits))
+                {
+                    var others = await db.EpisodeSegments.AsNoTracking()
+                        .Where(x => x.MediaItemId == id && x.Season == s
+                                 && x.Kind == SegmentKind.Credits && x.Episode != e)
+                        .Select(x => x.StartSec)
+                        .ToListAsync(ct);
+                    if (others.Count > 0)
+                    {
+                        others.Sort();
+                        creditsFallback = others[others.Count / 2];
+                    }
+                }
+                return Results.Ok(ToSegmentsDto(s, e, have, creditsFallback));
             }
 
             var all = await db.EpisodeSegments.AsNoTracking()
@@ -772,16 +790,19 @@ internal static class MediaEndpoints
 
     /// <summary>Collapse the per-(season,episode) segment rows into the flat DTO
     /// the player consumes.</summary>
-    private static EpisodeSegmentsDto ToSegmentsDto(int season, int episode, List<EfModels.EpisodeSegment> segs)
+    private static EpisodeSegmentsDto ToSegmentsDto(int season, int episode, List<EfModels.EpisodeSegment> segs,
+        double? creditsStartFallback = null)
     {
         EfModels.EpisodeSegment? Pick(SegmentKind k) => segs.FirstOrDefault(x => x.Kind == k);
         var intro   = Pick(SegmentKind.Intro);
         var credits = Pick(SegmentKind.Credits);
         var recap   = Pick(SegmentKind.Recap);
+        // No detected credits → use the season-median fallback the caller passed,
+        // so the next-episode card still lands at the ending (not at 95%).
         return new EpisodeSegmentsDto(
             season, episode,
             intro?.StartSec,   intro?.EndSec,
-            credits?.StartSec, credits?.EndSec,
+            credits?.StartSec ?? creditsStartFallback, credits?.EndSec,
             recap?.StartSec,   recap?.EndSec);
     }
 

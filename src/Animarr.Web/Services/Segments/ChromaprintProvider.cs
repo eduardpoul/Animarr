@@ -31,7 +31,7 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
     private const double TailWindowSec = 300;   // analyse the last 5 min for the credits
 
     private const int    BitThreshold  = 8;     // max differing bits for two points to "match"
-    private static readonly int MaxShiftPoints  = (int)(10.0 / SampleDuration);  // ±10 s alignment search
+    private static readonly int MaxShiftPoints  = (int)(15.0 / SampleDuration);  // ±15 s alignment search
     private static readonly int MinIntroPoints  = (int)(15.0 / SampleDuration);  // ≥15 s run to count
     private static readonly int MinCreditsPoints = (int)(15.0 / SampleDuration);
 
@@ -47,7 +47,7 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
     {
         var peers = ctx.SeasonFiles
             .Where(f => !string.Equals(f, ctx.FilePath, StringComparison.OrdinalIgnoreCase) && File.Exists(f))
-            .Take(2)
+            .Take(3)
             .ToList();
         if (peers.Count == 0) return Array.Empty<DetectedSegment>();
 
