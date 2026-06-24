@@ -252,6 +252,14 @@ public sealed class HlsSessionService : IDisposable
             _                          => null,
         };
 
+        // Audio output reflects what the player actually receives, not the
+        // source. Audio is copied as-is only on Direct Play (raw file) and the
+        // TS path with a browser-native source codec; every other path — Direct
+        // Stream, fMP4 copy/reencode, TS with incompatible audio — transcodes to
+        // AAC stereo, so the Info block reports AAC 2.0 there, not e.g. TrueHD 7.1.
+        bool audioCopied = isDirectPlay
+            || (plan == HlsPlan.TsStreamCopy && IsBrowserCompatibleAudioInTs(probe.AudioCodec));
+
         return new PlayerOutputInfo(
             Plan:            planName,
             Container:       container,
@@ -261,11 +269,8 @@ public sealed class HlsSessionService : IDisposable
             HdrFormats:      hdrFormats.ToArray(),
             Width:           probe.Width,
             Height:          probe.Height,
-            // Direct Stream downmixes audio to AAC stereo in the remux; video is
-            // copied untouched, so we report "not transcoded" (the plashka is
-            // video-centric) but surface the real output audio codec/channels.
-            AudioCodec:      isDirectStream ? "aac" : (probe.AudioCodec ?? ""),
-            AudioChannels:   isDirectStream ? 2      : probe.AudioChannels,
+            AudioCodec:      audioCopied ? (probe.AudioCodec ?? "") : "aac",
+            AudioChannels:   audioCopied ? probe.AudioChannels      : 2,
             AudioLanguage:   probe.AudioLanguage ?? "",
             Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason);
