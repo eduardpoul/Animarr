@@ -28,31 +28,28 @@
    shadow-card, font-display, etc. work.
    ──────────────────────────────────────────────────────── */
 @theme {
-    /* Font tokens — Quietude (default) values.
+    /* Font tokens — default (Quietude) values.
 
        Tailwind v4's @theme block emits these as a `:root, :host` rule
        that lands in the compiled output AFTER tokens.css's `:root`
        block AND AFTER `@import "tailwindcss/theme"`. The latter sets
        Tailwind's own default --font-mono = ui-monospace, which would
-       otherwise wipe out our 'JetBrains Mono'. Keeping the literals
-       here ensures Quietude's typography survives the cascade.
+       otherwise wipe out our 'Hanken Grotesk'. Keeping the literals
+       here ensures the default typography survives the cascade.
 
-       Previously this block held Cinematic values ('Geist',
-       'Archivo Black'), which meant every theme — including Quietude
-       — rendered with Cinematic typography. The Welcome heading
-       "Your library, understood." came out in Archivo Black on
-       Android Chrome instead of Inter. Restored to Quietude
-       (Inter / JetBrains Mono / Noto Serif SC) as the design board's
-       declared default.
+       These MUST stay in sync with tokens.css's :root font tokens —
+       the app's display + mono identity is Hanken Grotesk (the old
+       Cinematic 'Geist' / 'Archivo Black' gamer/digital look is now
+       retired; Cinematic itself maps to Hanken in tokens.css too).
 
-       Theme overrides for non-Quietude palettes live in
+       Theme overrides for non-default palettes live in
        Styles/themes/<name>.css. To beat this @theme's
        :root,:host output (specificity 0,0,1,0) they must use
        `html[data-theme="<name>"]` (specificity 0,0,1,1). Same trick
        applied to the Cinematic block in tokens.css. */
-    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-mono:    'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    --font-ui:      'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
 
     /* Backgrounds → bg-page, bg-panel, bg-surface, bg-surface-2, bg-surface-3 */

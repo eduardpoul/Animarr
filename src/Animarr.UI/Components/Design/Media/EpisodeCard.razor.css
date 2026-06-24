@@ -121,7 +121,7 @@
     color: var(--text-faint);
 }
 
-/* Big episode number — Archivo Black, white, sits on top-left of thumb. */
+/* Big episode number — display font, white, sits on top-left of thumb. */
 .d-ep__num {
     position: absolute;
     top: 10px;
