@@ -74,11 +74,13 @@ internal static class WatchStateEndpoints
             if (!string.IsNullOrEmpty(request.FilePath)) row.FilePath = request.FilePath;
             row.LastSeenAt = DateTime.UtcNow;
 
-            // Auto-flip IsWatched at ≥90% of runtime per CHANGELOG §1.
-            if (row.ProgressMs is > 0 && row.RuntimeMs is > 0 &&
-                (double)row.ProgressMs.Value / row.RuntimeMs.Value >= 0.9)
+            // IsWatched tracks "near the end of THIS playthrough": flip ON at
+            // ≥90% of runtime (per CHANGELOG §1), and back OFF below 90% so a
+            // rewatch — whose progress restarts low — shows as in-progress again
+            // instead of staying pinned to watched and masking the resume bar.
+            if (row.ProgressMs is > 0 && row.RuntimeMs is > 0)
             {
-                row.IsWatched = true;
+                row.IsWatched = (double)row.ProgressMs.Value / row.RuntimeMs.Value >= 0.9;
             }
 
             await db.SaveChangesAsync(ct);
