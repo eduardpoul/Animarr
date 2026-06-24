@@ -1529,14 +1529,13 @@
         const upNextEl = document.createElement('div');
         upNextEl.className = 'vp-upnext vp-upnext--hidden';
         upNextEl.innerHTML = `
+            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="Close">&times;</button>
             <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
             <div class="vp-upnext__name" data-bind="un-name"></div>
             <div class="vp-upnext__actions">
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">Skip credits</button>
               <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
                 <span data-bind="un-play">Play next</span>
-              </button>
-              <button type="button" class="vp-upnext__btn vp-upnext__btn--dismiss tv-focus" data-act="un-dismiss">
-                <span data-bind="un-dismiss">Dismiss</span>
               </button>
             </div>`;
         root.appendChild(upNextEl);
@@ -1544,7 +1543,7 @@
             eyebrow: upNextEl.querySelector('[data-bind="un-eyebrow"]'),
             name:    upNextEl.querySelector('[data-bind="un-name"]'),
             play:    upNextEl.querySelector('[data-bind="un-play"]'),
-            dismiss: upNextEl.querySelector('[data-bind="un-dismiss"]'),
+            skip:    upNextEl.querySelector('[data-bind="un-skip"]'),
         };
         // Next-up appears at the detected credits start; with no detection it
         // falls back to this fraction of the runtime.
@@ -1560,7 +1559,7 @@
             unRefs.eyebrow.textContent = m.eyebrow || 'Up next';
             unRefs.name.textContent    = m.name || '';
             unRefs.play.textContent    = m.play || 'Play next';
-            unRefs.dismiss.textContent = m.dismiss || 'Dismiss';
+            unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
             upNextEl.classList.remove('vp-upnext--hidden');
         }
         function hideUpNext() {
@@ -1584,6 +1583,11 @@
             const triggerAt = (cs > 0 && cs < dTime) ? cs : dTime * UP_NEXT_FALLBACK_PCT;
             if (cTime < triggerAt) { hideUpNext(); return; }  // not at credits / fallback yet
             showUpNext();
+            // In-card Skip-credits button: only when there's content after the
+            // credits to jump to (e.g. a next-episode preview).
+            const sg = entry.segments;
+            const canSkip = !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
+            unRefs.skip.style.display = canSkip ? '' : 'none';
             const remaining = dTime - cTime;
             const baseLabel = upNextLabels().play || 'Play next';
             if (remaining <= UP_NEXT_COUNTDOWN) {
@@ -1599,6 +1603,10 @@
             e.stopPropagation();
             if (b.dataset.act === 'un-next') triggerUpNext();
             else if (b.dataset.act === 'un-dismiss') dismissUpNext();
+            else if (b.dataset.act === 'un-skip') {
+                const sg = entry.segments;
+                if (sg && sg.creditsEnd > 0) adapter.currentTime = sg.creditsEnd;
+            }
         });
         // Belt-and-braces: timeupdate can stop firing right at EOF, so the
         // genuine end also advances (unless the user dismissed the card).
@@ -1616,35 +1624,22 @@
         skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
         root.appendChild(skipEl);
         let skipShown = false, skipTarget = 0;
-        function setSkip(label, target, beside) {
+        function setSkip(label, target) {
             skipTarget = target;
             if (skipEl.textContent !== label) skipEl.textContent = label;
-            // In the credits, sit the pill BESIDE the Up-Next card (same bottom
-            // row on desktop; stacked above it on narrow screens where the card
-            // is full-width). CSS handles the responsive switch.
-            skipEl.classList.toggle('vp-skip--beside', !!beside);
             if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
         }
         function hideSkip() {
             if (!skipShown) return;
             skipShown = false;
             skipEl.classList.add('vp-skip--hidden');
-            skipEl.classList.remove('vp-skip--beside');
         }
-        // One pill, two roles: Skip intro inside [introStart,introEnd], and Skip
-        // credits inside [creditsStart,creditsEnd] when there's content after the
-        // credits to jump to. The Up-Next card (next episode) is a separate
-        // element shown across the whole credits zone; when both appear the pill
-        // sits beside the card (see vp-skip--beside).
-        function updateSkip(cTime, dTime) {
+        // Floating pill for Skip intro only (the opening). Skip credits now lives
+        // inside the Up-Next card (the credits zone).
+        function updateSkip(cTime) {
             const s = entry.segments;
-            if (!s) { hideSkip(); return; }
-            if (s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
-                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd, false);
-            } else if (s.creditsStart > 0 && s.creditsEnd > s.creditsStart
-                       && (dTime - s.creditsEnd) > 5
-                       && cTime >= s.creditsStart && cTime < s.creditsEnd) {
-                setSkip(entry.skipCreditsLabel || 'Skip credits', s.creditsEnd, !!entry.nextAvailable);
+            if (s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
+                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
             } else {
                 hideSkip();
             }
@@ -1667,7 +1662,7 @@
             refs.dur.textContent = formatTime(dTime);
             // End-of-episode autoplay card (credits start → show; last 10s → countdown).
             updateUpNext(cTime, dTime);
-            updateSkip(cTime, dTime);
+            updateSkip(cTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
