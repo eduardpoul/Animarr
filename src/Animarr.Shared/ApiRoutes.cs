@@ -44,6 +44,10 @@ public static class ApiRoutes
     /// miss); without, returns all known <c>EpisodeSegmentsDto[]</c> for the item.
     /// PUT writes a manual override (Source=Manual, never clobbered by detection).</summary>
     public const string MediaSegments     = "/api/media/{id}/segments";
+    /// <summary>GET — skip-intro/credits scan progress (<c>SegmentScanStatusDto</c>).</summary>
+    public const string SegmentsStatus    = "/api/segments/status";
+    /// <summary>POST — reset scan flags so the background pass reprocesses all titles.</summary>
+    public const string SegmentsRescan    = "/api/segments/rescan";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";

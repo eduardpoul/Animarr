@@ -104,6 +104,15 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => GetOrNullAsync<EpisodeSegmentsDto>(
             ApiRoutes.MediaSegmentsFor(mediaItemId) + $"?season={season}&episode={episode}", ct);
 
+    public Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default)
+        => GetOrNullAsync<SegmentScanStatusDto>(ApiRoutes.SegmentsStatus, ct);
+
+    public async Task RescanSegmentsAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.SegmentsRescan, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public async Task SetEpisodeMappingAsync(Guid mediaItemId, EpisodeMappingRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PutAsJsonAsync(ApiRoutes.MediaFileMappingFor(mediaItemId), request, JsonOpts, ct);
