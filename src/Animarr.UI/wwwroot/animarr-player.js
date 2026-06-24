@@ -1549,7 +1549,7 @@
         // falls back to this fraction of the runtime.
         const UP_NEXT_FALLBACK_PCT = 0.95;
         const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
-        let upNextShown = false, upNextDismissed = false, upNextDone = false;
+        let upNextShown = false, upNextDismissed = false, upNextDone = false, skipCreditsUsed = false;
 
         function upNextLabels() { return entry.upNext || {}; }
         function showUpNext() {
@@ -1586,7 +1586,7 @@
             // In-card Skip-credits button: only when there's content after the
             // credits to jump to (e.g. a next-episode preview).
             const sg = entry.segments;
-            const canSkip = !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
+            const canSkip = !skipCreditsUsed && !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
             unRefs.skip.style.display = canSkip ? '' : 'none';
             const remaining = dTime - cTime;
             const baseLabel = upNextLabels().play || 'Play next';
@@ -1605,7 +1605,11 @@
             else if (b.dataset.act === 'un-dismiss') dismissUpNext();
             else if (b.dataset.act === 'un-skip') {
                 const sg = entry.segments;
-                if (sg && sg.creditsEnd > 0) adapter.currentTime = sg.creditsEnd;
+                if (sg && sg.creditsEnd > 0) {
+                    skipCreditsUsed = true;
+                    unRefs.skip.style.display = 'none';
+                    adapter.currentTime = sg.creditsEnd;
+                }
             }
         });
         // Belt-and-braces: timeupdate can stop firing right at EOF, so the
@@ -1623,7 +1627,7 @@
         skipEl.type = 'button';
         skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
         root.appendChild(skipEl);
-        let skipShown = false, skipTarget = 0;
+        let skipShown = false, skipTarget = 0, skipIntroUsed = false;
         function setSkip(label, target) {
             skipTarget = target;
             if (skipEl.textContent !== label) skipEl.textContent = label;
@@ -1638,7 +1642,7 @@
         // inside the Up-Next card (the credits zone).
         function updateSkip(cTime) {
             const s = entry.segments;
-            if (s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
+            if (!skipIntroUsed && s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
                 setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
             } else {
                 hideSkip();
@@ -1646,7 +1650,10 @@
         }
         skipEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (skipTarget > 0) { adapter.currentTime = skipTarget; hideSkip(); }
+            // One-shot: mark used + hide immediately so the next timeupdate (which
+            // still sees the pre-seek currentTime, esp. on Direct Stream reload)
+            // doesn't flash the pill back on.
+            if (skipTarget > 0) { skipIntroUsed = true; hideSkip(); adapter.currentTime = skipTarget; }
         });
 
         // ── adapter events ────────────────────────────────────────────
