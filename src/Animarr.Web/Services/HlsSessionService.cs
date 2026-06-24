@@ -158,14 +158,15 @@ public sealed class HlsSessionService : IDisposable
     /// else (MKV containers, HEVC video, AC3/DTS/TrueHD audio) goes through
     /// our HLS pipeline where the appropriate <see cref="HlsPlan"/> is picked.
     /// </summary>
-    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath, CancellationToken ct = default)
+    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath,
+        bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
         if (probe is null) return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
-        if (!IsDirectPlayEligible(container, probe))
+        if (!IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
             return new PlaybackDecision(false, null, duration, null);
 
         // /api/file serves the raw bytes with Range support — exactly what
@@ -244,22 +245,33 @@ public sealed class HlsSessionService : IDisposable
             TranscodeReason: reason);
     }
 
-    private static bool IsDirectPlayEligible(string container, ProbeInfo probe)
+    private static bool IsDirectPlayEligible(string container, ProbeInfo probe, bool clientHevc, bool clientHevc10)
     {
-        // Container must be browser-native MP4. MKV plays in Chrome but not
-        // Safari/Firefox; .mov works in Safari only. Sticking to .mp4/.m4v
-        // gives us the widest cross-browser coverage with zero risk.
-        if (container != "mp4" && container != "m4v") return false;
+        // Native <video src> needs a browser-demuxable MP4-family container.
+        // MKV isn't demuxable in-browser (→ HLS); .mov is fine in Safari/Chrome.
+        if (container != "mp4" && container != "m4v" && container != "mov") return false;
 
-        // H.264 8-bit only. HEVC in MP4 plays on Safari/iOS but not on
-        // Chrome/Firefox; 10-bit isn't universally supported even where the
-        // codec is; DV layer needs a DV-aware decoder.
-        if (!string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase)) return false;
-        if (probe.Is10Bit) return false;
+        // Dolby Vision: browsers can't decode the DV layer → never native-play
+        // (falls to HLS stream-copy / re-encode instead).
         if (probe.HasDolbyVision) return false;
 
-        // Audio: AAC and MP3 are the only universally-supported codecs inside
-        // MP4. AC3/E-AC3 in MP4 is browser-spotty; DTS/TrueHD not at all.
+        // Video must be something the browser decodes natively. Direct Play is
+        // what gets the file onto a real <video> element — the only path where
+        // client-GPU features (NVIDIA RTX VSR / Video HDR) engage; MSE/HLS
+        // doesn't trigger them. HEVC is gated on the capability the client
+        // reported: 8-bit → clientHevc, 10-bit (HDR10) → clientHevc10.
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        bool videoOk = vc switch
+        {
+            "h264" => !probe.Is10Bit,                              // 10-bit High10 isn't browser-safe
+            "hevc" => probe.Is10Bit ? clientHevc10 : clientHevc,
+            _      => false,
+        };
+        if (!videoOk) return false;
+
+        // Audio: native playback can't transcode, so the track must be a codec
+        // every browser decodes inside MP4. AC3/E-AC3 is spotty, DTS/TrueHD not
+        // at all → those keep the file on the HLS path (audio re-encoded there).
         var ac = (probe.AudioCodec ?? "").ToLowerInvariant();
         if (ac != "aac" && ac != "mp3" && ac != "mp4a") return false;
 

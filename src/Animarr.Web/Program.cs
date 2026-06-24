@@ -805,6 +805,9 @@ app.MapPost("/api/hls/start", async (
         // NB: bound as string, not bool — the client sends "1", which minimal
         // API's bool binder rejects with a 400 (it only accepts true/false).
         string? clientHevc,
+        // Same flag for 10-bit / Main10 HEVC — gates Direct Play of HDR10 MP4s
+        // (so they play on a native <video> where RTX VSR / HDR can engage).
+        string? clientHevc10,
         // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
         // at this bitrate; absent/0 = no cap.
         int? maxBitrate,
@@ -840,8 +843,10 @@ app.MapPost("/api/hls/start", async (
         // Skip the Direct Play probe entirely when an external dub is in play:
         // combining foreign audio with the source video requires the HLS mux
         // path, so a direct file URL would silently drop the dub.
+        bool wantHevc   = clientHevc   == "1" || string.Equals(clientHevc,   "true", StringComparison.OrdinalIgnoreCase);
+        bool wantHevc10 = clientHevc10 == "1" || string.Equals(clientHevc10, "true", StringComparison.OrdinalIgnoreCase);
         var decision = externalAudioFull is null
-            ? await hls.ChoosePlaybackAsync(fullPath!)
+            ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10)
             : new HlsSessionService.PlaybackDecision(false, null, 0, null);
         if (decision.DirectPlay && decision.DirectUrl is not null)
         {
@@ -889,7 +894,7 @@ app.MapPost("/api/hls/start", async (
             audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
             maxHeight:        Math.Max(0, maxHeight ?? 0),
             externalAudioPath: externalAudioFull,
-            clientHevc:       clientHevc == "1" || string.Equals(clientHevc, "true", StringComparison.OrdinalIgnoreCase),
+            clientHevc:       wantHevc,
             maxBitrate:       Math.Max(0, maxBitrate ?? 0));
         return Results.Ok(new
         {
