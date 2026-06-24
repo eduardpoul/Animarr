@@ -593,11 +593,9 @@ body[data-animarr-native="1"] .vp-backdrop * {
 .vp-upnext__btn--skip:hover { background: rgba(255, 255, 255, 0.16); }
 .vp-upnext__close {
     position: absolute;
-    top: 8px;
-    right: 10px;
-    width: 28px;
-    height: 28px;
-    padding: 0;
+    top: 10px;
+    right: 14px;
+    padding: 4px 6px;
     background: none;
     border: none;
     color: rgba(255, 255, 255, 0.55);
