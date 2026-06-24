@@ -38,12 +38,22 @@ public sealed class SegmentDetectionService(
         try { files = await resolver.ResolveAsync(mediaItemId, ct); }
         catch (Exception ex) { logger.LogWarning(ex, "[Segments] file resolve failed for {Id}", mediaItemId); return 0; }
 
-        var episodes = files
+        var withEp = files
             .Where(f => f.Episode is not null && !string.IsNullOrEmpty(f.FilePath))
+            .ToList();
+        if (withEp.Count == 0) return 0;
+
+        // All file paths grouped by season — chromaprint compares an episode
+        // against its season peers.
+        var seasonFiles = withEp
+            .GroupBy(f => f.Season ?? 1)
+            .ToDictionary(g => g.Key,
+                          g => (IReadOnlyList<string>)g.Select(f => f.FilePath).Distinct().ToList());
+
+        var episodes = withEp
             .GroupBy(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
             .Select(g => (g.Key.Season, g.Key.Episode, g.First().FilePath))
             .ToList();
-        if (episodes.Count == 0) return 0;
 
         // Episodes that already have BOTH intro and credits — skip the work.
         var covered = (await db.EpisodeSegments
@@ -63,7 +73,8 @@ public sealed class SegmentDetectionService(
             if (covered.Contains((season, episode))) continue;
             try
             {
-                if (await DetectForEpisodeAsync(item, season, episode, filePath, cheapOnly, ct))
+                var peers = seasonFiles.TryGetValue(season, out var sf) ? sf : Array.Empty<string>();
+                if (await DetectForEpisodeAsync(item, season, episode, filePath, peers, cheapOnly, ct))
                     touched++;
             }
             catch (OperationCanceledException) { throw; }
@@ -78,13 +89,24 @@ public sealed class SegmentDetectionService(
     /// <summary>Run the cascade for a single episode and upsert what it finds.
     /// Returns true when at least one row was written/updated. Used both by the
     /// batch pass and the player's lazy per-episode lookup.</summary>
-    public async Task<bool> DetectForEpisodeAsync(
+    public Task<bool> DetectForEpisodeAsync(
         MediaItem item, int season, int episode, string filePath, bool cheapOnly, CancellationToken ct = default)
+        => DetectForEpisodeAsync(item, season, episode, filePath, Array.Empty<string>(), cheapOnly, ct);
+
+    /// <inheritdoc cref="DetectForEpisodeAsync(MediaItem,int,int,string,bool,CancellationToken)"/>
+    /// <param name="seasonFiles">Every on-disk file in the same season, for the
+    /// chromaprint provider's peer comparison.</param>
+    public async Task<bool> DetectForEpisodeAsync(
+        MediaItem item, int season, int episode, string filePath,
+        IReadOnlyList<string> seasonFiles, bool cheapOnly, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return false;
 
         var dur = await MediaProbe.GetDurationAsync(filePath, ct);
-        var ctx = new SegmentEpisodeContext(item, season, episode, filePath, dur);
+        var ctx = new SegmentEpisodeContext(item, season, episode, filePath, dur)
+        {
+            SeasonFiles = seasonFiles,
+        };
 
         // First provider (highest cascade priority) to supply a kind wins this run.
         var detected = new Dictionary<SegmentKind, (DetectedSegment Seg, SegmentSource Source)>();

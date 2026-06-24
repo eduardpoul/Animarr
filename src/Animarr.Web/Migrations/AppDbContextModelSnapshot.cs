@@ -299,6 +299,9 @@ namespace Animarr.Web.Migrations
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastSegmentScanAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<double?>("LlmConfidence")
                         .HasColumnType("REAL");
 

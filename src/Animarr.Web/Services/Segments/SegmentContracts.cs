@@ -10,7 +10,13 @@ public sealed record SegmentEpisodeContext(
     int Season,
     int Episode,
     string FilePath,
-    double DurationSec);
+    double DurationSec)
+{
+    /// <summary>Absolute paths of every on-disk file in the same season
+    /// (including this one). The chromaprint provider compares this episode
+    /// against peers from here; empty on the cheap/lazy path.</summary>
+    public IReadOnlyList<string> SeasonFiles { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>A detected segment before persistence. Times are seconds from the
 /// start of the file (matching the player's currentTime).</summary>
