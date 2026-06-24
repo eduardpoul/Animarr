@@ -38,6 +38,7 @@ This is what makes non‑English content — most donghua, untranslated anime, t
 - **Never touches your files** — identification only updates DB associations; nothing on disk is renamed or moved.
 - **Smart episode resolution** — files are mapped to (season, episode) by a layered resolver: deterministic regex/path parsing → optional one‑click **Resolve with AI** for files that don't parse → manual per‑file override. Split‑season donghua (one absolute TMDB season spread across several disk folders) is handled with automatic season offsets.
 - **Media catalog** — poster grid with a fanart backdrop hero, **Continue Watching**, detail pages with seasons/episodes, ratings, tags and external links.
+- **In‑browser & native playback** — a custom player streams your files right in the browser (and via native ExoPlayer on Android TV), keeping the **original video bitstream and HDR** whenever the client can decode them; it only re‑encodes (hardware‑accelerated) as a last resort. See [Playback](#playback).
 - **Categories** — items are auto‑classified by the LLM at identification time into category chips on the home screen; you can pin categories manually per title.
 - **Full‑text search** — instant client‑side filter across title / original / English / CJK names.
 - **Theme music** — fetches the anime OP/ED from [AnimeThemes.moe](https://animethemes.moe) and plays it on the detail page (per‑user opt‑in + volume).
@@ -185,6 +186,16 @@ Patterns have a **priority** (lower = checked first) and a **scope**: **global**
 - **Search** (`/search`) — instant filter across all title forms.
 - **Detail page** — hero, season tabs + episode grid (or a movie card), studio/runtime/rating/tags, TMDB/MAL/IMDb links, theme music, and the **Unmatched files** resolver.
 - **Edit metadata** drawer — tabs for **Source IDs** (paste a TMDB/MAL/IMDb URL or id and re‑identify), **Basics**, **Poster** & **Backdrop** (all‑language galleries — pick any artwork you like), **Tags**, **Categories**, and **Manage** (re‑identify / delete from catalog). A read‑only line shows the original on‑disk folder/file the scanner matched, so a wrong match is easy to spot.
+
+## Playback
+
+Animarr plays your files directly in the browser — no companion app required — and picks the lightest delivery path the client can handle, so original quality is preserved whenever possible:
+
+- **Direct Play** — browser‑friendly MP4 (H.264 / HEVC + AAC) streams as the raw file: instant start, perfect A/V sync, zero transcoding.
+- **Direct Stream** — MKV and other containers are **remuxed on the fly** to a native MP4 stream (video copied untouched, audio to AAC), so the **original video bitstream and HDR pass through unchanged**. Browser HDR output is more reliable on this native path than via MSE.
+- **HLS** — only when the browser genuinely can't decode the codec (or you cap the quality) does Animarr re‑encode, **hardware‑accelerated** via VAAPI (AMD/Intel) or NVENC (NVIDIA), auto‑detected at deploy.
+
+The player has a custom HUD (two‑row controls, scrim, tap‑to‑toggle), a **quality menu** with bitrate presets, embedded **+ sideloaded audio / subtitle** track switching, an **audio‑sync** offset control, ultrawide letterbox auto‑crop, and **DLNA cast** to a TV. Android TV gets a native **ExoPlayer** path with D‑pad navigation. The MEDIA INFO panel reports exactly what's playing — codec, bit depth, HDR format, and which delivery path is in use.
 
 ## Torrent client
 
