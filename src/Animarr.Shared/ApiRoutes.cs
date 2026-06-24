@@ -338,4 +338,10 @@ public static class AppConfigKeys
     // ─── External player handoff ──────────────────────────────────────────
     public const string ExternalPlayer       = "playback.external_player";
     public const string ExternalPlayerCustom = "playback.external_player_custom";
+
+    // ─── Skip intro / credits (segment detection) ─────────────────────────
+    public const string SegmentsAniSkipEnabled     = "segments.aniskip_enabled";
+    public const string SegmentsChaptersEnabled    = "segments.chapters_enabled";
+    public const string SegmentsChromaprintEnabled = "segments.chromaprint_enabled";
+    public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
 }

@@ -95,4 +95,15 @@ public static class AppConfigKeys
     /// <summary>For ExternalPlayer="custom" — URI template with {url}
     /// placeholder, e.g. "potplayer://{url}" or "mxplayer://play?url={url}".</summary>
     public const string ExternalPlayerCustom = "playback.external_player_custom";
+
+    // ─── Skip intro / credits (segment detection) ─────────────────────────────
+    /// <summary>AniSkip crowd-sourced OP/ED lookup by MAL id. Default true.</summary>
+    public const string SegmentsAniSkipEnabled     = "segments.aniskip_enabled";
+    /// <summary>Map named embedded container chapters to segments. Default true.</summary>
+    public const string SegmentsChaptersEnabled    = "segments.chapters_enabled";
+    /// <summary>Audio-fingerprint (chromaprint) detection in the background pass. Default true.</summary>
+    public const string SegmentsChromaprintEnabled = "segments.chromaprint_enabled";
+    /// <summary>Black-frame video analysis to approximate a credits start —
+    /// expensive (decodes video), so off by default.</summary>
+    public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
 }
