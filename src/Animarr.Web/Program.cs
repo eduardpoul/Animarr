@@ -134,6 +134,7 @@ builder.Services.AddHttpClient(AniSkipClient.ClientName, c =>
     c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
 });
 builder.Services.AddScoped<AniSkipClient>();
+builder.Services.AddScoped<MalIdResolver>();   // title → MAL id via AniList (no key)
 // Providers are resolved as an IEnumerable<ISegmentProvider> by the orchestrator,
 // ordered by their cascade Order (cheapest first). Register-order independent.
 builder.Services.AddScoped<ISegmentProvider, AniSkipProvider>();     // Order 0  — network, by MAL id

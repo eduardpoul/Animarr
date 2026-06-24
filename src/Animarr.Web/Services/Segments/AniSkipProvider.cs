@@ -4,29 +4,29 @@ namespace Animarr.Web.Services.Segments;
 
 /// <summary>
 /// Cascade level 0: AniSkip crowd-sourced timestamps. Cheapest and usually the
-/// most accurate source for anime — a single network call keyed by MAL id, no
-/// file decoding, no CPU.
+/// most accurate source for anime — a network call keyed by MAL id, no file
+/// decoding. The MAL id comes from <see cref="MalIdResolver"/> (stored id, or
+/// bridged from the title via AniList — no API key needed).
 ///
-/// Numbering caveat: AniSkip keys on (malId, episodeNumber) where MAL normally
-/// gives each anime season its OWN id numbered from 1. Animarr stores one
-/// <see cref="MediaItem.MalId"/> per title, so the mapping is only unambiguous
-/// for a single-season title or Season 1 of a multi-season one. For Season ≥ 2
-/// we'd need a per-season MAL id we don't have — so we skip and let a later
-/// cascade level (chromaprint) or the player's 95% fallback handle it. A wrong
+/// Numbering caveat: AniSkip keys on (malId, episodeNumber), and MAL numbers each
+/// season/cour from 1. We only trust the mapping for a single-season title or
+/// Season 1 of a multi-season one; for Season ≥ 2 we skip (a per-season MAL id
+/// would be needed) and let chromaprint / the 95% fallback handle it. A wrong
 /// timestamp is worse than none.
 /// </summary>
-public sealed class AniSkipProvider(AniSkipClient client, ILogger<AniSkipProvider> logger) : ISegmentProvider
+public sealed class AniSkipProvider(AniSkipClient client, MalIdResolver malResolver, ILogger<AniSkipProvider> logger) : ISegmentProvider
 {
     public SegmentSource Source => SegmentSource.AniSkip;
     public int Order => 0;
-    public bool Cheap => true;   // a single network call, safe to run on demand
+    public bool Cheap => true;   // network call (MAL-id resolve + AniSkip), safe on demand
 
+    // MAL id is resolved lazily in DetectAsync (MalIdResolver / AniList), so
+    // CanRun only gates on the numbering being unambiguous.
     public bool CanRun(SegmentEpisodeContext ctx)
-        => ctx.Item.MalId is > 0 && TryResolveEpisodeNumber(ctx, out _);
+        => TryResolveEpisodeNumber(ctx, out _);
 
     public async Task<IReadOnlyList<DetectedSegment>> DetectAsync(SegmentEpisodeContext ctx, CancellationToken ct)
     {
-        if (ctx.Item.MalId is not int malId || malId <= 0) return Array.Empty<DetectedSegment>();
         if (!TryResolveEpisodeNumber(ctx, out var episodeNumber))
         {
             logger.LogDebug("[AniSkip] skipped {Title} S{S}E{E} — ambiguous MAL episode number",
@@ -34,7 +34,10 @@ public sealed class AniSkipProvider(AniSkipClient client, ILogger<AniSkipProvide
             return Array.Empty<DetectedSegment>();
         }
 
-        var intervals = await client.GetSkipTimesAsync(malId, episodeNumber, ctx.DurationSec, ct);
+        var malId = await malResolver.ResolveAsync(ctx.Item, ct);
+        if (malId is not int mal || mal <= 0) return Array.Empty<DetectedSegment>();
+
+        var intervals = await client.GetSkipTimesAsync(mal, episodeNumber, ctx.DurationSec, ct);
         if (intervals.Count == 0) return Array.Empty<DetectedSegment>();
 
         var result = new List<DetectedSegment>(intervals.Count);
@@ -51,7 +54,7 @@ public sealed class AniSkipProvider(AniSkipClient client, ILogger<AniSkipProvide
             result.Add(new DetectedSegment(kind.Value, iv.StartTime, iv.EndTime));
         }
 
-        logger.LogInformation("[AniSkip] mal={Mal} ep={Ep} → {Count} segment(s)", malId, episodeNumber, result.Count);
+        logger.LogInformation("[AniSkip] mal={Mal} ep={Ep} → {Count} segment(s)", mal, episodeNumber, result.Count);
         return result;
     }
 
