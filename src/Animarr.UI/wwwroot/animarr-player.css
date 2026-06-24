@@ -59,6 +59,34 @@ body[data-animarr-native="1"] .vp-backdrop * {
 .vp-art .art-loading,
 .vp-art .art-subtitle { display: block; }
 
+/* Direct Play: native <video> tagged (in JS) so Chrome promotes it to a
+   hardware overlay — where NVIDIA RTX VSR / Video HDR run. Artplayer's
+   `.art-video` styling otherwise keeps the video composited and the GPU
+   features never engage (a bare <video> does; overriding single properties
+   doesn't, so we reset every overlay-blocking property here). The element
+   fills the fullscreen player shell via position:fixed; the HUD layer
+   (z-index 30) stays above it. HLS isn't covered — MSE never overlays. */
+.vp-art .art-video.vp-directplay-video {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    object-fit: contain !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    clip-path: none !important;
+    mask: none !important;
+    -webkit-mask: none !important;
+    transform: none !important;
+    filter: none !important;
+    mix-blend-mode: normal !important;
+    isolation: auto !important;
+    contain: none !important;
+    will-change: auto !important;
+    backface-visibility: visible !important;
+    z-index: 1 !important;
+}
+
 /* ── HUD root ─────────────────────────────────────────────────────── */
 .vp-hud {
     /* Accent follows the user's / theme's chosen hue (--accent-hue from

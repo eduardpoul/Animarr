@@ -2090,6 +2090,19 @@
             }
         } catch {}
 
+        // RTX VSR / Video HDR (Direct Play only): Chrome won't promote a
+        // <video> to a hardware overlay — where NVIDIA RTX VSR/HDR run — while
+        // Artplayer's `.art-video` styling is in effect. A plain <video> engages
+        // them; overriding single CSS props doesn't, so we tag the element and
+        // reset Artplayer's video styling wholesale in CSS (.vp-directplay-video).
+        // HLS plays via MSE, which never gets the overlay anyway — leave it.
+        if (directPlayUrl) {
+            try {
+                const vsrVid = adapter.rawVideoElement && adapter.rawVideoElement();
+                if (vsrVid) vsrVid.classList.add('vp-directplay-video');
+            } catch {}
+        }
+
         // ── 5b) Wire HUD ──────────────────────────────────────────────
         // Root element for HUD events: Artplayer's player wrapper on the web
         // path, the bare `vp-art` container on the native path (where the
