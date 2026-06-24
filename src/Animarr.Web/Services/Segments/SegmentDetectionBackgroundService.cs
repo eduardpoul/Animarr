@@ -25,7 +25,10 @@ public sealed class SegmentDetectionBackgroundService(
     ILogger<SegmentDetectionBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    // Short gap between titles so the initial library fill runs back-to-back;
+    // long idle poll once the backlog is drained so we don't hammer the box.
+    private static readonly TimeSpan BusyDelay    = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan IdleDelay    = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RescanAfter  = TimeSpan.FromDays(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,16 +37,22 @@ public sealed class SegmentDetectionBackgroundService(
         try { await Task.Delay(StartupDelay, stoppingToken); }
         catch (OperationCanceledException) { return; }
 
-        using var timer = new PeriodicTimer(PollInterval);
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
-            try { await ProcessOneAsync(stoppingToken); }
+            bool didWork = false;
+            try { didWork = await ProcessOneAsync(stoppingToken); }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { logger.LogWarning(ex, "[Segments] background pass failed"); }
+
+            // Drain the backlog fast (initial fill), then settle into a slow poll.
+            try { await Task.Delay(didWork ? BusyDelay : IdleDelay, stoppingToken); }
+            catch (OperationCanceledException) { break; }
         }
     }
 
-    private async Task ProcessOneAsync(CancellationToken ct)
+    /// <summary>Process one title. Returns true when a title was picked up (so the
+    /// loop keeps draining), false when the queue is empty (so it idles).</summary>
+    private async Task<bool> ProcessOneAsync(CancellationToken ct)
     {
         Guid itemId;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
@@ -58,7 +67,7 @@ public sealed class SegmentDetectionBackgroundService(
                 .OrderBy(m => m.LastSegmentScanAt)
                 .Select(m => (Guid?)m.Id)
                 .FirstOrDefaultAsync(ct);
-            if (next is not Guid g) return;
+            if (next is not Guid g) return false;
             itemId = g;
         }
 
@@ -79,5 +88,6 @@ public sealed class SegmentDetectionBackgroundService(
                 .Where(m => m.Id == itemId)
                 .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastSegmentScanAt, DateTime.UtcNow), ct);
         }
+        return true;
     }
 }
