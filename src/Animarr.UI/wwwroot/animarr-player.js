@@ -1616,28 +1616,33 @@
         skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
         root.appendChild(skipEl);
         let skipShown = false, skipTarget = 0;
-        function setSkip(label, target) {
+        function setSkip(label, target, raised) {
             skipTarget = target;
             if (skipEl.textContent !== label) skipEl.textContent = label;
+            // Lift the pill above the Up-Next card when both show in the credits.
+            skipEl.classList.toggle('vp-skip--raised', !!raised);
             if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
         }
         function hideSkip() {
             if (!skipShown) return;
             skipShown = false;
             skipEl.classList.add('vp-skip--hidden');
+            skipEl.classList.remove('vp-skip--raised');
         }
-        // One button, two roles: Skip intro inside [introStart,introEnd], and
-        // Skip credits inside [creditsStart,creditsEnd] when there's content
-        // after the credits to jump to (e.g. a next-episode preview).
+        // One pill, two roles: Skip intro inside [introStart,introEnd], and Skip
+        // credits inside [creditsStart,creditsEnd] when there's content after the
+        // credits to jump to. The Up-Next card (next episode) is a separate
+        // element shown across the whole credits zone, so when both can appear we
+        // raise the Skip pill above the card to avoid overlap.
         function updateSkip(cTime, dTime) {
             const s = entry.segments;
             if (!s) { hideSkip(); return; }
             if (s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
-                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
+                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd, false);
             } else if (s.creditsStart > 0 && s.creditsEnd > s.creditsStart
                        && (dTime - s.creditsEnd) > 5
                        && cTime >= s.creditsStart && cTime < s.creditsEnd) {
-                setSkip(entry.skipCreditsLabel || 'Skip credits', s.creditsEnd);
+                setSkip(entry.skipCreditsLabel || 'Skip credits', s.creditsEnd, entry.nextAvailable);
             } else {
                 hideSkip();
             }
