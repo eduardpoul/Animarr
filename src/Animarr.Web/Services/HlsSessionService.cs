@@ -1620,7 +1620,13 @@ public sealed class HlsSessionService : IDisposable
                         double fps = 0;
                         if (s.TryGetProperty("avg_frame_rate", out var afrEl)) fps = ParseFrameRate(afrEl.GetString());
                         if (fps <= 0 && s.TryGetProperty("r_frame_rate", out var rfrEl)) fps = ParseFrameRate(rfrEl.GetString());
-                        if (hasB > 0 && fps > 0) reorderDelaySec = hasB / fps;
+                        // +1 frame safety bias: has_b_frames under-counts the
+                        // effective reorder on deep B-pyramids (UHD remuxes),
+                        // leaving audio slightly ahead. Audio-ahead (~45ms
+                        // perception threshold) is more noticeable than audio-
+                        // behind (~125ms), so bias toward a touch behind. Files
+                        // with no B-frames stay at 0 (no reorder, no bias).
+                        if (hasB > 0 && fps > 0) reorderDelaySec = (hasB + 1) / fps;
 
                         videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
                     }
