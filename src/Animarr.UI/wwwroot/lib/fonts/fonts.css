@@ -1,63 +1,24 @@
 /* ============================================================
-   Self-hosted font face declarations.
-   TTF files sourced from Google Fonts (Geist OFL-1.1, Geist Mono
-   OFL-1.1, Archivo Black OFL-1.1). Bundled into the wwwroot
-   so the UI works offline / in Docker without internet egress.
+   Self-hosted font face declaration (offline / air-gapped).
 
-   Noto Serif SC (CJK watermark) is decorative and 15 MB per
-   weight — kept on Google Fonts CDN. If unreachable, the CJK
-   watermark silently falls back to serif; everything else stays
-   intact.
+   The app's display + UI + mono identity is Hanken Grotesk (OFL-1.1).
+   A single variable font (wght 100–900) covers every weight the app
+   uses (400–800). Switch the hosts to load this file instead of the
+   Google Fonts CDN link to run fully offline (see README "To switch").
+
+   The per-theme families (Inter, JetBrains Mono, Quicksand,
+   Noto Serif SC / JP) still load from the Google Fonts CDN. For a
+   fully offline install, self-host those here too the same way.
+
+   Noto Serif SC / JP (CJK watermark + wuxia themes) are decorative
+   and ~15 MB per weight — kept on the CDN. If unreachable, the CJK
+   text silently falls back to serif; everything else stays intact.
    ============================================================ */
 
 @font-face {
-    font-family: 'Geist';
-    font-weight: 400;
+    font-family: 'Hanken Grotesk';
+    font-weight: 100 900;   /* variable wght axis — covers 400–800 used by the app */
     font-style: normal;
     font-display: swap;
-    src: url('geist-400.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-    src: url('geist-500.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 600;
-    font-style: normal;
-    font-display: swap;
-    src: url('geist-600.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-    src: url('geist-700.ttf') format('truetype');
-}
-
-@font-face {
-    font-family: 'Geist Mono';
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-    src: url('geist-mono-400.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist Mono';
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-    src: url('geist-mono-500.ttf') format('truetype');
-}
-
-@font-face {
-    font-family: 'Archivo Black';
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-    src: url('archivo-black-400.ttf') format('truetype');
+    src: url('hanken-grotesk-variable.ttf') format('truetype-variations');
 }

@@ -1,38 +1,34 @@
 # Self-hosted fonts (Docker offline)
 
-For offline Docker installs, drop the WOFF2 font files here and switch
-`App.razor` to use [`fonts.css`](fonts.css) instead of the Google Fonts
-CDN link.
+For offline / air-gapped installs, the font bundled here lets the app
+render without reaching the Google Fonts CDN. Switch the hosts to load
+[`fonts.css`](fonts.css) instead of the CDN `<link>` (see "To switch").
 
-## Required files
+## Bundled files
 
 ```
-geist-400.woff2
-geist-500.woff2
-geist-600.woff2
-geist-700.woff2
-geist-mono-400.woff2
-geist-mono-500.woff2
-archivo-black-400.woff2
-noto-serif-sc-700.woff2
-noto-serif-sc-900.woff2
+hanken-grotesk-variable.ttf   — Hanken Grotesk, variable wght 100–900
+hanken-grotesk-OFL.txt        — SIL Open Font License 1.1
 ```
 
-Sources:
-- Geist + Geist Mono — https://github.com/vercel/geist-font (OFL-1.1)
-- Archivo Black — https://github.com/Omnibus-Type/Archivo (OFL-1.1)
-- Noto Serif SC — https://github.com/notofonts/noto-cjk (OFL-1.1)
+One variable font covers every weight the app uses (400–800: UI, display
+and labels). The per-theme families (Inter, JetBrains Mono, Quicksand,
+Noto Serif SC / JP) still come from the Google Fonts CDN; self-host them
+here the same way for a fully air-gapped install.
 
-All four families are open-source under OFL — bundle freely.
+Source: https://github.com/google/fonts/tree/main/ofl/hankengrotesk (OFL-1.1)
+
+> Note: the Google Fonts catalog name is **Hanken Grotesk** (not
+> "Grotesque"). `family=Hanken+Grotesque` returns HTTP 400 from the CDN.
 
 ## To switch
 
-In `Components/App.razor`, replace the three Google Fonts `<link>` tags
-with a single line:
+Replace the Google Fonts `<link rel="stylesheet">` tag in both
+`index.html` files with:
 
 ```html
-<link rel="stylesheet" href="@Assets["lib/fonts/fonts.css"]" />
+<link rel="stylesheet" href="_content/Animarr.UI/lib/fonts/fonts.css" />
 ```
 
-The CSS `@font-face` declarations in `fonts.css` resolve via the
-relative `wwwroot/lib/fonts/*.woff2` paths.
+The `@font-face` in `fonts.css` resolves via the relative
+`wwwroot/lib/fonts/hanken-grotesk-variable.ttf` path.
