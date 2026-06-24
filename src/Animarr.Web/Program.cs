@@ -135,9 +135,13 @@ builder.Services.AddHttpClient(AniSkipClient.ClientName, c =>
 });
 builder.Services.AddScoped<AniSkipClient>();
 // Providers are resolved as an IEnumerable<ISegmentProvider> by the orchestrator,
-// ordered by their cascade Order. Add new providers (chapter/chromaprint/…) here.
-builder.Services.AddScoped<ISegmentProvider, AniSkipProvider>();
+// ordered by their cascade Order (cheapest first). Register-order independent.
+builder.Services.AddScoped<ISegmentProvider, AniSkipProvider>();     // Order 0  — network, by MAL id
+builder.Services.AddScoped<ISegmentProvider, ChapterProvider>();     // Order 10 — embedded chapters
+builder.Services.AddScoped<ISegmentProvider, ChromaprintProvider>(); // Order 20 — audio fingerprint
 builder.Services.AddScoped<SegmentDetectionService>();
+// Heavy detection (chromaprint) over identified titles, one at a time.
+builder.Services.AddHostedService<SegmentDetectionBackgroundService>();
 
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
