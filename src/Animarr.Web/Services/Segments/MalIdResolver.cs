@@ -27,21 +27,36 @@ public sealed class MalIdResolver(AniListClient aniList, ILogger<MalIdResolver> 
         if (item.MalId is > 0) return item.MalId;
         if (_cache.TryGetValue(item.Id, out var cached)) return cached;
 
-        var title = !string.IsNullOrWhiteSpace(item.OriginalTitle) ? item.OriginalTitle! : item.Title;
+        // Try several title forms in order. AniList matches English/romaji far
+        // better than a CJK original title — e.g. Gundam 00's OriginalTitle is
+        // kanji ("機動戦士ガンダム00"), which AniList misses, while its English
+        // title resolves fine.
+        var candidates = new[] { item.Title, item.EnglishTitle, item.OriginalTitle }
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         int? mal = null;
-        try
+        foreach (var query in candidates)
         {
-            var match = await aniList.ResolveAsync(title, ct);
-            mal = match?.IdMal is > 0 ? match!.IdMal : null;
-            if (mal is not null)
-                logger.LogInformation("[MalId] {Title} → mal {Mal} (via AniList)", item.Title, mal);
-            else
-                logger.LogDebug("[MalId] no MAL id for {Title} (AniList miss / not an anime)", item.Title);
+            try
+            {
+                var match = await aniList.ResolveAsync(query, ct);
+                if (match?.IdMal is > 0)
+                {
+                    mal = match.IdMal;
+                    logger.LogInformation("[MalId] {Title} → mal {Mal} (AniList query: {Query})", item.Title, mal, query);
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "[MalId] AniList resolve failed for query '{Query}'", query);
+            }
         }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "[MalId] AniList resolve failed for {Title}", item.Title);
-        }
+        if (mal is null)
+            logger.LogDebug("[MalId] no MAL id for {Title} (AniList miss / not an anime)", item.Title);
 
         _cache[item.Id] = mal;
         return mal;
