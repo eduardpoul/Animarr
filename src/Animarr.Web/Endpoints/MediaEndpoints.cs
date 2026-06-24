@@ -687,9 +687,10 @@ internal static class MediaEndpoints
                     .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
                     .ToListAsync(ct);
 
-                // Lazy detect on a miss using cheap providers only (a single
-                // AniSkip call). Best-effort — the player falls back to 95%.
-                if (have.Count == 0 && item.MalId is > 0)
+                // Lazy detect on a miss using cheap providers only (AniSkip via
+                // the AniList MAL-id bridge + chapters). Best-effort — the player
+                // falls back to 95%.
+                if (have.Count == 0)
                 {
                     try
                     {
