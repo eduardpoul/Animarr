@@ -48,7 +48,7 @@
     margin-left: var(--space-2);
 }
 
-/* Folder chip strip — design uses 11.5px Geist buttons with regular case,
+/* Folder chip strip — 11.5px UI-font buttons with regular case,
    accent solid fill when active. Distinct from the all-caps mono Pill primitive. */
 .catalog-folders {
     display: flex;
