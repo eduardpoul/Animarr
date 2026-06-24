@@ -1663,6 +1663,14 @@ public sealed class HlsSessionService : IDisposable
                 _                    => null,
             };
 
+            // Override the has_b_frames estimate with the ACTUAL max composition
+            // offset measured from the opening packets — accurate for deep
+            // B-pyramids (UHD remuxes) where has_b_frames badly under-counts.
+            // Falls back to the estimate above only if the packet probe yields
+            // nothing (returns null).
+            if (await MeasureReorderDelayAsync(fullPath, ct) is double measuredDelay)
+                reorderDelaySec = measuredDelay;
+
             return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
                 colorTransfer, audioChannels, audioLanguage, reorderDelaySec);
         }
@@ -1686,6 +1694,60 @@ public sealed class HlsSessionService : IDisposable
             && den > 0)
             return num / den;
         return 0;
+    }
+
+    /// <summary>Measure the real B-pyramid composition delay by probing the
+    /// opening video packets and taking max(pts − dts). On a stream-copy this
+    /// is how far video presentation lags decode — i.e. how far audio runs
+    /// ahead — and unlike has_b_frames it captures deep, irregular pyramids
+    /// (UHD remuxes). Returns the delay in seconds, or null on probe failure
+    /// (caller keeps the has_b_frames estimate). 0 = no reorder (no B-frames).</summary>
+    private async Task<double?> MeasureReorderDelayAsync(string fullPath, CancellationToken ct)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName               = "ffprobe",
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+            };
+            // Read only the first ~48 packets (a handful of GOPs) from the file
+            // start — enough to see the steady-state pyramid depth, cheap to read.
+            foreach (var a in new[]
+            {
+                "-v", "error", "-select_streams", "v:0",
+                "-read_intervals", "%+#48",
+                "-show_entries", "packet=pts_time,dts_time",
+                "-of", "csv=p=0",
+                fullPath,
+            }) psi.ArgumentList.Add(a);
+
+            using var p = Process.Start(psi);
+            if (p is null) return null;
+            var outp = await p.StandardOutput.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(ct);
+            if (p.ExitCode != 0) return null;
+
+            double max = 0;
+            bool any = false;
+            foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var c = line.IndexOf(',');
+                if (c <= 0) continue;
+                if (double.TryParse(line.AsSpan(0, c), NumberStyles.Float, CultureInfo.InvariantCulture, out var pts)
+                 && double.TryParse(line.AsSpan(c + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out var dts))
+                {
+                    any = true;
+                    var d = pts - dts;
+                    if (d > max) max = d;
+                }
+            }
+            return any ? max : (double?)null;
+        }
+        catch { return null; }
     }
 
     private static string? BuildVideoCodecsAttribute(string? codecName, JsonElement stream)
