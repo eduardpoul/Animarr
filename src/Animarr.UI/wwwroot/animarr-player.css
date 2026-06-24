@@ -610,7 +610,7 @@ body[data-animarr-native="1"] .vp-backdrop * {
     color: #0f1115;
     background: oklch(0.72 0.18 var(--accent-hue, 245));
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: 8px;
     cursor: pointer;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
