@@ -443,7 +443,14 @@ public sealed class HlsSessionService : IDisposable
         //   calibration test clip isn't representative of stream-copy timing).
         //   TS stream-copy → uses 0; PCR inside TS handles A/V sync natively
         //   and any -itsoffset would just throw it off.
-        var audioOffsetSec = externalAudioPath is not null
+        // fMP4 stream-copy keeps the source's B-frames, so video presentation
+        // lags decode by the reorder delay while audio plays on time → audio
+        // runs ahead. Pre-load the measured delay (from probe) as the baseline
+        // itsoffset; the SW slider then trims on top. 0 for every other plan
+        // (re-encode strips B-frames via -bf 0; TS carries PCR timing).
+        var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy
+            ? Math.Clamp(probe?.ReorderDelaySec ?? 0.0, 0.0, 1.0) : 0.0;
+        var audioOffsetSec = reorderDelaySec + (externalAudioPath is not null
             // External dub sync is a different problem from the source's own A/V
             // wobble (it depends on how the dub was authored vs the video cut),
             // so we route it through the manual SW slider for EVERY video plan —
@@ -459,7 +466,7 @@ public sealed class HlsSessionService : IDisposable
                 HlsPlan.Fmp4StreamCopy       => audioOffsetSwSec,
                 HlsPlan.TsStreamCopy         => 0.0,
                 _                            => 0.0,
-            };
+            });
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
@@ -834,7 +841,11 @@ public sealed class HlsSessionService : IDisposable
         // 2026-05-27: extended for PlayerOutputInfo. ColorTransfer drives
         // HDR10 / HLG detection (smpte2084 vs arib-std-b67), AudioChannels +
         // AudioLanguage feed the right-side meta plashka in the player HUD.
-        string? ColorTransfer, int AudioChannels, string? AudioLanguage);
+        string? ColorTransfer, int AudioChannels, string? AudioLanguage,
+        // Estimated B-frame reorder delay (seconds) = has_b_frames / fps — used
+        // as the default audio -itsoffset on the fMP4 stream-copy path so the
+        // composition delay (audio-ahead) is corrected without re-encoding.
+        double ReorderDelaySec = 0);
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once
@@ -1559,6 +1570,7 @@ public sealed class HlsSessionService : IDisposable
             string? audioLanguage = null;
             string? videoCodecsAttr = null;
             string? audioCodecsAttr = null;
+            double reorderDelaySec = 0;   // B-frame reorder delay → audio itsoffset for stream-copy
 
             if (root.TryGetProperty("streams", out var streams))
             {
@@ -1599,6 +1611,17 @@ public sealed class HlsSessionService : IDisposable
                                     && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
                                     hasDv = true;
                         }
+                        // B-frame reorder delay → default audio itsoffset for the
+                        // fMP4 stream-copy path. has_b_frames is the decoder's
+                        // reorder depth; × frame duration = how far video
+                        // presentation lags decode (and thus audio runs ahead).
+                        int hasB = 0;
+                        if (s.TryGetProperty("has_b_frames", out var hbEl) && hbEl.TryGetInt32(out var hbV)) hasB = hbV;
+                        double fps = 0;
+                        if (s.TryGetProperty("avg_frame_rate", out var afrEl)) fps = ParseFrameRate(afrEl.GetString());
+                        if (fps <= 0 && s.TryGetProperty("r_frame_rate", out var rfrEl)) fps = ParseFrameRate(rfrEl.GetString());
+                        if (hasB > 0 && fps > 0) reorderDelaySec = hasB / fps;
+
                         videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
                     }
                     else if (type == "audio" && aCodec is null)
@@ -1635,13 +1658,28 @@ public sealed class HlsSessionService : IDisposable
             };
 
             return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
-                colorTransfer, audioChannels, audioLanguage);
+                colorTransfer, audioChannels, audioLanguage, reorderDelaySec);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "ffprobe failed for {Path}", fullPath);
             return null;
         }
+    }
+
+    /// <summary>Parse an ffprobe frame-rate string ("24000/1001", "25", "0/0")
+    /// into fps. Returns 0 when unknown/zero so callers can skip it.</summary>
+    private static double ParseFrameRate(string? rate)
+    {
+        if (string.IsNullOrWhiteSpace(rate)) return 0;
+        var slash = rate.IndexOf('/');
+        if (slash < 0)
+            return double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out var single) ? single : 0;
+        if (double.TryParse(rate.AsSpan(0, slash), NumberStyles.Float, CultureInfo.InvariantCulture, out var num)
+            && double.TryParse(rate.AsSpan(slash + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out var den)
+            && den > 0)
+            return num / den;
+        return 0;
     }
 
     private static string? BuildVideoCodecsAttribute(string? codecName, JsonElement stream)
