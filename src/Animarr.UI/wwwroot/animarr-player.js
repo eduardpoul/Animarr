@@ -1449,7 +1449,16 @@
                 bar.addEventListener('mouseenter', () => { hovering = true;  show(); });
                 bar.addEventListener('mouseleave', () => { hovering = false; show(); });
             });
-        const onActivity = () => show();
+        // Ignore the synthetic "ghost" mousemove the browser fires ~300ms after
+        // a touch tap. On a phone that ghost called show() right as a deferred
+        // tap-toggle was deciding to hide — so the HUD flashed up and instantly
+        // vanished (and, on a tap-to-hide, the ghost re-revealed it). Real mouse
+        // moves on desktop are untouched (no preceding touch ⇒ lastTouchAt 0).
+        let lastTouchAt = 0;
+        const markTouch = () => { lastTouchAt = Date.now(); };
+        root.addEventListener('touchstart', markTouch, { passive: true });
+        root.addEventListener('touchend', markTouch, { passive: true });
+        const onActivity = () => { if (Date.now() - lastTouchAt < 700) return; show(); };
         // Desktop: mouse movement reveals the HUD (then it auto-hides).
         root.addEventListener('mousemove', onActivity);
         // Tap-catcher: a dedicated full-area layer (.vp-hud__tap, pointer-events
@@ -1512,9 +1521,15 @@
                 }
                 // First (maybe only) side tap: defer the toggle one window. A
                 // matching second tap cancels this timer and seeks instead.
+                // Capture the show/hide intent NOW so a stray show() in the gap
+                // (ghost mouse event, auto-hide firing) can't invert it.
                 lastTapAt = now; lastTapZone = zone;
+                const wantShow = hud.getAttribute('data-visible') !== 'true';
                 if (sideTapTimer) clearTimeout(sideTapTimer);
-                sideTapTimer = setTimeout(() => { sideTapTimer = null; toggleHud(); }, DT_MS);
+                sideTapTimer = setTimeout(() => {
+                    sideTapTimer = null;
+                    if (wantShow) show(); else hideNow();
+                }, DT_MS);
             });
         }
 
