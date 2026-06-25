@@ -31,7 +31,10 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
     private const double TailWindowSec = 300;   // analyse the last 5 min for the credits
 
     private const int    BitThreshold  = 8;     // max differing bits for two points to "match"
-    private static readonly int MaxShiftPoints  = (int)(15.0 / SampleDuration);  // ±15 s alignment search
+    // Two-pass alignment: a cheap narrow window first, escalated to a wide one
+    // only for an episode the narrow pass missed (openings that drift by minutes).
+    private static readonly int NarrowShiftPoints = (int)(30.0  / SampleDuration);  // default ±30 s alignment search
+    private static readonly int WideShiftPoints   = (int)(300.0 / SampleDuration);  // escalated ±300 s search
     private static readonly int MinIntroPoints  = (int)(15.0 / SampleDuration);  // ≥15 s run to count
     private static readonly int MinCreditsPoints = (int)(15.0 / SampleDuration);
 
@@ -57,18 +60,26 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
         var aHead = await GetFingerprintAsync(ctx.FilePath, 0, HeadWindowSec, ct);
         if (aHead.Length > MinIntroPoints)
         {
+            var bHeads = new List<uint[]>();
             foreach (var peer in peers)
             {
                 var bHead = await GetFingerprintAsync(peer, 0, HeadWindowSec, ct);
-                if (bHead.Length <= MinIntroPoints) continue;
-                var (start, len) = LongestCommonRun(aHead, bHead, MinIntroPoints);
-                if (len > 0)
-                {
-                    result.Add(new DetectedSegment(SegmentKind.Intro,
-                        start * SampleDuration, (start + len) * SampleDuration));
-                    break;   // first peer that yields an intro wins
-                }
+                if (bHead.Length > MinIntroPoints) bHeads.Add(bHead);
             }
+
+            // Cheap narrow window catches the common case (opening at a stable
+            // offset); widen only when that misses, for shows whose opening drifts.
+            var (start, len) = MatchAcrossPeers(aHead, bHeads, MinIntroPoints, NarrowShiftPoints);
+            if (len == 0)
+            {
+                (start, len) = MatchAcrossPeers(aHead, bHeads, MinIntroPoints, WideShiftPoints);
+                if (len > 0)
+                    logger.LogDebug("[Chromaprint] {File} intro found only after widening alignment window",
+                        Path.GetFileName(ctx.FilePath));
+            }
+            if (len > 0)
+                result.Add(new DetectedSegment(SegmentKind.Intro,
+                    start * SampleDuration, (start + len) * SampleDuration));
         }
 
         // ── Credits: shared audio at the tail ─────────────────────────────
@@ -78,21 +89,27 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
             var aTail = await GetFingerprintAsync(ctx.FilePath, aTailStart, TailWindowSec, ct);
             if (aTail.Length > MinCreditsPoints)
             {
+                var bTails = new List<uint[]>();
                 foreach (var peer in peers)
                 {
                     var peerDur = await MediaProbe.GetDurationAsync(peer, ct);
                     var peerTailStart = peerDur > TailWindowSec ? peerDur - TailWindowSec : 0;
                     var bTail = await GetFingerprintAsync(peer, peerTailStart, TailWindowSec, ct);
-                    if (bTail.Length <= MinCreditsPoints) continue;
-                    var (start, len) = LongestCommonRun(aTail, bTail, MinCreditsPoints);
-                    if (len > 0)
-                    {
-                        result.Add(new DetectedSegment(SegmentKind.Credits,
-                            aTailStart + start * SampleDuration,
-                            aTailStart + (start + len) * SampleDuration));
-                        break;
-                    }
+                    if (bTail.Length > MinCreditsPoints) bTails.Add(bTail);
                 }
+
+                var (start, len) = MatchAcrossPeers(aTail, bTails, MinCreditsPoints, NarrowShiftPoints);
+                if (len == 0)
+                {
+                    (start, len) = MatchAcrossPeers(aTail, bTails, MinCreditsPoints, WideShiftPoints);
+                    if (len > 0)
+                        logger.LogDebug("[Chromaprint] {File} credits found only after widening alignment window",
+                            Path.GetFileName(ctx.FilePath));
+                }
+                if (len > 0)
+                    result.Add(new DetectedSegment(SegmentKind.Credits,
+                        aTailStart + start * SampleDuration,
+                        aTailStart + (start + len) * SampleDuration));
             }
         }
 
@@ -169,14 +186,26 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
         }
     }
 
+    /// <summary>First peer that yields a matching run at the given alignment
+    /// window, or (0,0) when none do.</summary>
+    private static (int Start, int Len) MatchAcrossPeers(uint[] a, List<uint[]> peers, int minLen, int maxShift)
+    {
+        foreach (var b in peers)
+        {
+            var (start, len) = LongestCommonRun(a, b, minLen, maxShift);
+            if (len > 0) return (start, len);
+        }
+        return (0, 0);
+    }
+
     /// <summary>Longest contiguous run of matching points between two
-    /// fingerprints, scanning alignment shifts of ±<see cref="MaxShiftPoints"/>.
+    /// fingerprints, scanning alignment shifts of ±<paramref name="maxShift"/>.
     /// Returns the run's start index in <paramref name="a"/> and its length (in
     /// points), or (0,0) when nothing reaches <paramref name="minLen"/>.</summary>
-    private static (int Start, int Len) LongestCommonRun(uint[] a, uint[] b, int minLen)
+    private static (int Start, int Len) LongestCommonRun(uint[] a, uint[] b, int minLen, int maxShift)
     {
         int bestLen = 0, bestStart = 0;
-        for (int shift = -MaxShiftPoints; shift <= MaxShiftPoints; shift++)
+        for (int shift = -maxShift; shift <= maxShift; shift++)
         {
             int run = 0, runStart = 0;
             for (int i = 0; i < a.Length; i++)
