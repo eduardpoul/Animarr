@@ -46,6 +46,7 @@ internal static class MediaMappings
             Description     = entity.Description,
             Tagline         = entity.Tagline,
             Genres          = DeserialiseStrings(entity.GenresJson),
+            GenresLocalized = DeserialiseStrings(entity.GenresLocalizedJson),
             Tags            = DeserialiseStrings(entity.TagsJson),
             Rating          = entity.Rating,
             RatingCount     = entity.RatingCount,

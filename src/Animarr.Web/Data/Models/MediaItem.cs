@@ -71,8 +71,13 @@ public class MediaItem
     // ─── Metadata ──────────────────────────────────────────────────────────
     public string? Description { get; set; }
     public string? Tagline { get; set; }
-    /// <summary>JSON array of genre names: ["Action","Drama"]</summary>
+    /// <summary>JSON array of genre names in canonical English: ["Action","Drama"].
+    /// Catalog logic (anime detection, category classification, theme matching) keys
+    /// off these, so they stay language-independent regardless of the metadata language.</summary>
     public string? GenresJson { get; set; }
+    /// <summary>JSON array of the same genres localized to the metadata language, for
+    /// display only. Null when the language is English (UI falls back to <see cref="GenresJson"/>).</summary>
+    public string? GenresLocalizedJson { get; set; }
     /// <summary>JSON array of descriptive tag strings: ["Donghua","Cultivation","Mecha"].
     /// Distinct from MediaTag/MediaItemTag (which models user collections); these are
     /// source-derived labels used by hero/poster overlays.</summary>

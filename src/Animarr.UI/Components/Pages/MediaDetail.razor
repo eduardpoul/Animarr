@@ -81,8 +81,9 @@ else
                 @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>Rating</dt><dd>@item.ContentRating</dd> }
                 @if (item.Genres.Length > 0)
                 {
+                    var displayGenres = item.GenresLocalized.Length > 0 ? item.GenresLocalized : item.Genres;
                     <dt>Tags</dt>
-                    <dd class="md-kv__tags">@string.Join(" · ", item.Genres)</dd>
+                    <dd class="md-kv__tags">@string.Join(" · ", displayGenres)</dd>
                 }
             </dl>
         </section>
@@ -1080,7 +1081,12 @@ else
         if (_item is null) return;
         var prefs = UserCtx.Preferences;
         if (prefs is null || !prefs.ThemeMusicEnabled) return;
+        // Theme availability must not hinge on the metadata language: a resolved
+        // ThemeTitle (or MAL/anime classification) means there's a theme to play,
+        // regardless of whether the localized genres still read "Animation".
         bool animeLike = _item.MediaType == MediaItemType.Anime
+            || _item.MalId is not null
+            || !string.IsNullOrEmpty(_item.ThemeTitle)
             || _item.Genres.Any(g => string.Equals(g, "Animation", StringComparison.OrdinalIgnoreCase));
         if (!animeLike) return;
         var url = Animarr.UI.Services.MediaUrl.Theme(_item.Id);
