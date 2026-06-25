@@ -1466,7 +1466,7 @@
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
             let downX = 0, downY = 0;
-            let lastTapAt = 0;
+            let lastTapAt = 0, lastTapZone = '';
             const DT_MS = 280;   // double-tap window
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
@@ -1486,21 +1486,25 @@
                 // toggle left the centre button pointer-events:none for 280ms,
                 // so the natural "tap to wake, then tap pause" gesture landed on
                 // the tap-catcher and just re-toggled the UI instead of pausing.)
-                // A double-tap on the left / right third still seeks ∓10s: its
-                // first tap toggles, the second seeks.
+                // ±10s seek is a double-tap on the OUTER quarter of the SAME
+                // side. The middle band is generous and toggle-only, so a tap
+                // anywhere near the centre reliably shows/hides the controls —
+                // a quick second tap there (e.g. wake the UI, then tap to
+                // dismiss) is no longer mistaken for a seek.
                 const touchMode = hud.getAttribute('data-touch') === '1';
                 const rect = tapEl.getBoundingClientRect();
                 const x = (e.clientX || 0) - rect.left;
-                const zone = x < rect.width * 0.35 ? 'left'
-                           : x > rect.width * 0.65 ? 'right' : 'mid';
+                const zone = x < rect.width * 0.25 ? 'left'
+                           : x > rect.width * 0.75 ? 'right' : 'mid';
                 const now = Date.now();
-                if (touchMode && (now - lastTapAt < DT_MS) && zone !== 'mid') {
-                    lastTapAt = 0;
+                if (touchMode && (now - lastTapAt < DT_MS) && zone !== 'mid' && zone === lastTapZone) {
+                    lastTapAt = 0; lastTapZone = '';
                     if (zone === 'left') { seekBy(-10); showSeekRipple('left'); }
                     else                 { seekBy(+10); showSeekRipple('right'); }
                     return;
                 }
                 lastTapAt = now;
+                lastTapZone = zone;
                 toggleHud();
             });
         }
