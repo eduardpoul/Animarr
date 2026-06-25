@@ -775,6 +775,7 @@
         fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
         info:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5" stroke-width="2.2"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/></svg>',
         quality:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.7 7.7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.5 6.5 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.5 6.5 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.9 6.9 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>',
+        settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 4.32c.42-1.76 2.92-1.76 3.34 0a1.72 1.72 0 0 0 2.58 1.07c1.54-.94 3.3.82 2.37 2.37a1.72 1.72 0 0 0 1.06 2.57c1.76.42 1.76 2.92 0 3.34a1.72 1.72 0 0 0-1.07 2.58c.94 1.54-.82 3.3-2.37 2.37a1.72 1.72 0 0 0-2.57 1.06c-.42 1.76-2.92 1.76-3.34 0a1.72 1.72 0 0 0-2.58-1.07c-1.54.94-3.3-.82-2.37-2.37a1.72 1.72 0 0 0-1.06-2.57c-1.76-.42-1.76-2.92 0-3.34a1.72 1.72 0 0 0 1.07-2.58c-.94-1.54.82-3.3 2.37-2.37a1.72 1.72 0 0 0 2.57-1.06z"/><circle cx="12" cy="12" r="3"/></svg>',
     };
 
     /** Fullscreen action. On the MAUI Android host this ROTATES the device
@@ -817,6 +818,12 @@
       <div class="vp-hud__name"   data-bind="name"></div>
     </div>
     <div class="vp-hud__meta" data-bind="meta"></div>
+  </div>
+
+  <div class="vp-hud__center">
+    <button class="vp-hud__cplay" data-act="play" aria-label="Play / pause" title="Play / pause (Space)">
+      <span class="vp-glyph" data-bind="play-icon">${I.play}</span>
+    </button>
   </div>
 
   <div class="vp-hud__bottom">
@@ -902,6 +909,10 @@
           <span class="vp-label">Info</span>
         </button>
       </div>
+      <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__gear" data-act="settings"
+              aria-label="Settings" title="Settings">
+        <span class="vp-glyph">${I.settings}</span><span class="vp-label">Settings</span>
+      </button>
       <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__fs" data-act="fullscreen"
               aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
         <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
@@ -910,6 +921,48 @@
     </div>
   </div>
 </div>`.trim();
+    }
+
+    // ── settings menu (mobile gear) ───────────────────────────────────
+    // Worded list whose rows each fire a callback. Same popup shell + outside-
+    // click / toggle behaviour as the pickers; tapping a row opens that
+    // control's own picker (which replaces this menu — both are .vp-hud-popup).
+    function openMenuPopup(root, anchor, title, rows) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            existing.remove();
+            if (wasFor === anchor) return;   // gear tapped again → toggle closed
+        }
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--menu';
+        popup.setAttribute('data-anchor', anchor);
+        popup.innerHTML = `
+            <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
+            <div class="vp-hud-popup__list">
+                ${rows.map((r, i) => `
+                    <button class="vp-hud-popup__item" data-i="${i}">${escapeHtml(r.label)}</button>
+                `).join('')}
+            </div>`;
+        popup.addEventListener('click', (e) => {
+            const it = e.target.closest('[data-i]');
+            if (!it) return;
+            const i = parseInt(it.dataset.i, 10);
+            popup.remove();
+            const row = rows[i];
+            if (row && typeof row.run === 'function') row.run();
+        });
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) { document.removeEventListener('click', onDoc, true); return; }
+                if (!popup.contains(e.target) && !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
     }
 
     // ── popup picker (CC / Audio / Aspect) ────────────────────────────
@@ -1268,6 +1321,60 @@
             track:      $('[data-act="seek"]'),
         };
 
+        // ── touch / phone layout gate ─────────────────────────────────
+        // The minimal mobile layout (centre play, ±10 double-tap, settings
+        // gear) is driven by [data-touch="1"] on the HUD: a coarse pointer OR
+        // a narrow viewport (so a resized desktop window previews it too), and
+        // NEVER the Android-TV host (the d-pad needs the full button bar).
+        const isTvHost = document.documentElement.classList.contains('animarr-tv-host');
+        const applyTouchMode = () => {
+            const mm = window.matchMedia;
+            const touch = !isTvHost && !!mm
+                && (mm('(pointer: coarse)').matches || mm('(max-width: 760px)').matches);
+            hud.setAttribute('data-touch', touch ? '1' : '0');
+        };
+        applyTouchMode();
+        let touchMql = null;
+        try {
+            touchMql = window.matchMedia('(max-width: 760px)');
+            touchMql.addEventListener('change', applyTouchMode);
+        } catch { try { touchMql && touchMql.addListener(applyTouchMode); } catch {} }
+
+        // Transient ±10 ripple shown on a double-tap seek (phone).
+        function showSeekRipple(side) {
+            const rip = document.createElement('div');
+            rip.className = 'vp-seek-ripple vp-seek-ripple--' + side;
+            rip.innerHTML = '<span>' + (side === 'left' ? '« −10' : '+10 »') + '</span>';
+            // Append to the player root (sibling of .vp-hud), NOT the HUD — the
+            // HUD fades to opacity:0 when controls are hidden, and a double-tap
+            // seek commonly happens with controls down, where the ripple must
+            // still be visible.
+            root.appendChild(rip);
+            setTimeout(() => { try { rip.remove(); } catch {} }, 600);
+        }
+
+        // Settings menu (mobile gear): consolidates the secondary controls into
+        // one worded list. Each row fires the same callback the (now hidden)
+        // bottom-bar button would, which opens its own picker popup. Rows whose
+        // button is currently unavailable (offset / cast hidden) are skipped.
+        function openSettingsMenu() {
+            const hidden = (act) => {
+                const b = hud.querySelector('[data-act="' + act + '"]');
+                return !b || b.style.display === 'none';
+            };
+            const rows = [
+                { act: 'cc',      label: 'Subtitles',    run: callbacks.cc },
+                { act: 'audio',   label: 'Audio',        run: callbacks.audio },
+                { act: 'quality', label: 'Quality',      run: callbacks.quality },
+                { act: 'aspect',  label: 'Aspect ratio', run: callbacks.aspect },
+                { act: 'offset',  label: 'Audio sync',   run: callbacks.offset },
+                { act: 'volume',  label: 'Volume',       run: callbacks.volume },
+                { act: 'cast',    label: 'Cast to TV',   run: callbacks.cast },
+                { act: 'info',    label: 'Media info',   run: callbacks.info },
+            ].filter(r => !hidden(r.act) && typeof r.run === 'function');
+            openMenuPopup(root, 'settings', 'Settings', rows);
+        }
+
         // ── auto-hide ─────────────────────────────────────────────────
         // Hide the controls after 3s with no mouse/remote activity (during
         // playback). Any mouse move, tap, button press or remote key calls
@@ -1340,16 +1447,36 @@
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
             let downX = 0, downY = 0;
+            let lastTapAt = 0, singleTapTimer = null;
+            const DT_MS = 280;   // double-tap window
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
                 if (Math.hypot((e.clientX || 0) - downX, (e.clientY || 0) - downY) > 12) return;
                 const openPopup = root.querySelector('.vp-hud-popup');
                 if (openPopup) { openPopup.remove(); return; }  // first tap dismisses a popup
-                if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-                    toggleHud();      // phone: tap toggles the controls
-                } else {
-                    togglePlay();     // desktop/web: click toggles play/pause (togglePlay also calls show())
+                const isTouch = (e.pointerType === 'touch' || e.pointerType === 'pen');
+                // Mouse / desktop: click = play/pause, no gesture seeking.
+                if (!isTouch) { togglePlay(); return; }
+                // Phone: a double-tap on the left / right third seeks ∓10s
+                // (YouTube mobile). A lone tap toggles the controls — deferred
+                // briefly so a quick second tap upgrades it to a seek instead.
+                const touchMode = hud.getAttribute('data-touch') === '1';
+                const rect = tapEl.getBoundingClientRect();
+                const x = (e.clientX || 0) - rect.left;
+                const zone = x < rect.width * 0.35 ? 'left'
+                           : x > rect.width * 0.65 ? 'right' : 'mid';
+                const now = Date.now();
+                if (touchMode && (now - lastTapAt < DT_MS) && zone !== 'mid') {
+                    if (singleTapTimer) { clearTimeout(singleTapTimer); singleTapTimer = null; }
+                    lastTapAt = 0;
+                    if (zone === 'left') { seekBy(-10); showSeekRipple('left'); }
+                    else                 { seekBy(+10); showSeekRipple('right'); }
+                    return;
                 }
+                lastTapAt = now;
+                if (!touchMode) { toggleHud(); return; }
+                if (singleTapTimer) clearTimeout(singleTapTimer);
+                singleTapTimer = setTimeout(() => { singleTapTimer = null; toggleHud(); }, DT_MS);
             });
         }
 
@@ -1476,6 +1603,7 @@
                 case 'cc':     callbacks.cc(); break;
                 case 'quality': callbacks.quality(); break;
                 case 'info':   callbacks.info(); break;
+                case 'settings': openSettingsMenu(); break;
                 case 'fullscreen':
                     callbacks.fullscreen();
                     break;
@@ -1630,12 +1758,12 @@
         adapter.on('progress',       updateProgress);
         adapter.on('durationchange', updateProgress);
         adapter.on('play',  () => {
-            refs.playIcon.innerHTML    = I.pause;
+            hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.pause; });
             refs.playLabel.textContent = 'Pause';
             show();
         });
         adapter.on('pause', () => {
-            refs.playIcon.innerHTML    = I.play;
+            hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.play; });
             refs.playLabel.textContent = 'Play';
             // Paused → keep HUD visible.
             hud.classList.remove('vp-hud--hidden');
@@ -1658,6 +1786,8 @@
         const cleanup = () => {
             document.removeEventListener('keydown', onKey, { capture: true });
             document.removeEventListener('fullscreenchange', syncFsIcon);
+            try { touchMql && touchMql.removeEventListener('change', applyTouchMode); }
+            catch { try { touchMql && touchMql.removeListener(applyTouchMode); } catch {} }
             if (hideTimer) clearTimeout(hideTimer);
             try { upNextEl.remove(); } catch {}
             // Restore the system bars + drop the orientation listener so other
@@ -1689,6 +1819,15 @@
             },
             setVolumeIcon(volume, muted) {
                 refs.volumeIcon.innerHTML = (muted || volume === 0) ? I.mute : I.volume;
+            },
+            // Hide prev / next when no adjacent episode exists on disk (movie,
+            // first / last episode). Driven from setMediaSession's prev/next
+            // availability flags. Applies to every layout, not just mobile.
+            setNav(hasPrev, hasNext) {
+                const p = hud.querySelector('[data-act="prev"]');
+                const n = hud.querySelector('[data-act="next"]');
+                if (p) p.style.display = hasPrev ? '' : 'none';
+                if (n) n.style.display = hasNext ? '' : 'none';
             },
         };
     }
@@ -2661,6 +2800,9 @@
         // HUD's updateUpNext on each timeupdate; stored on the entry so it
         // survives until the next setMediaSession call (i.e. the next episode).
         entry.nextAvailable = !!(meta && meta.nextAvailable);
+        if (entry.hud && entry.hud.setNav) {
+            entry.hud.setNav(!!(meta && meta.prevAvailable), !!(meta && meta.nextAvailable));
+        }
         entry.upNext = {
             eyebrow: (meta && meta.upNextEyebrow) || 'Up next',
             name:    (meta && meta.upNextName)    || '',
