@@ -1060,24 +1060,105 @@ public class MetadataService(
         return sorted[0];
     }
 
+    // ── Re-localisation (text + poster only) ──────────────────────────────────
+
+    /// <summary>
+    /// Lightweight re-localisation of one already-identified TMDB item: re-fetches the
+    /// main TV/Movie detail in <paramref name="lang"/> and overwrites ONLY the
+    /// language-dependent fields — Title, Description, Genres — plus the poster when a
+    /// poster localized to that language exists (otherwise the current poster is kept,
+    /// never downgraded). Matched ids, ratings, episode mappings, original/CJK/English
+    /// titles and the audio Language are left untouched. Empty overview/title fall back
+    /// to English per field. Mutates <paramref name="item"/> in place; the caller owns
+    /// persistence. Returns false for non-TMDB items (e.g. MAL-only anime) or when the
+    /// detail fetch fails. Used by <see cref="MetadataLanguageService"/>'s library pass.
+    /// </summary>
+    public async Task<bool> RelocalizeItemAsync(MediaItem item, string lang, CancellationToken ct = default)
+    {
+        if (item.TmdbId is not { } tmdbId) return false;   // only TMDB-sourced items can be localized
+        lang = string.IsNullOrWhiteSpace(lang) ? "en" : lang;
+
+        string? title, overview, localizedPosterPath;
+        List<string> genres, localizedGenres;
+
+        if (item.MediaType == MediaItemType.Movie)
+        {
+            var d = await tmdb.GetMovieDetailAsync(tmdbId, lang, ct);
+            if (d is null) return false;
+            title = d.Title; overview = d.Overview;
+            genres = TmdbGenreCatalog.English(d.Genres);   // canonical (English) — catalog logic depends on it
+            localizedGenres = d.Genres.Select(g => g.Name).ToList();
+            localizedPosterPath = d.Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath;
+            if (lang != "en" && string.IsNullOrWhiteSpace(overview))
+            {
+                var en = await tmdb.GetMovieDetailAsync(tmdbId, "en", ct);
+                if (string.IsNullOrWhiteSpace(overview)) overview = en?.Overview;
+                if (string.IsNullOrWhiteSpace(title))    title    = en?.Title;
+            }
+        }
+        else
+        {
+            var d = await tmdb.GetTvDetailAsync(tmdbId, lang, ct);
+            if (d is null) return false;
+            title = d.Name; overview = d.Overview;
+            genres = TmdbGenreCatalog.English(d.Genres);   // canonical (English) — catalog logic depends on it
+            localizedGenres = d.Genres.Select(g => g.Name).ToList();
+            localizedPosterPath = d.Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath;
+            if (lang != "en" && string.IsNullOrWhiteSpace(overview))
+            {
+                var en = await tmdb.GetTvDetailAsync(tmdbId, "en", ct);
+                if (string.IsNullOrWhiteSpace(overview)) overview = en?.Overview;
+                if (string.IsNullOrWhiteSpace(title))    title    = en?.Name;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(title)) item.Title = title;
+        item.Description = overview;
+        if (genres.Count > 0)
+            item.GenresJson = JsonSerializer.Serialize(genres, _json);
+        // Localized genres for display (max localization); null → UI falls back to English canonical.
+        item.GenresLocalizedJson = lang != "en" && localizedGenres.Count > 0
+            ? JsonSerializer.Serialize(localizedGenres, _json)
+            : null;
+
+        // Swap the poster only when one localized to `lang` exists — overwrite the same
+        // cached file (mirrors ApplySelectedImageAsync) and bump the cache-bust stamp.
+        if (localizedPosterPath is { } lp && !string.IsNullOrEmpty(item.PosterPath))
+            await tmdb.DownloadImageAsync(TmdbClient.PosterUrl(lp), item.PosterPath, ct);
+
+        item.LastMetadataRefreshedAt = DateTime.UtcNow;
+        return true;
+    }
+
     // ── TMDB populate ─────────────────────────────────────────────────────────
 
     private async Task<bool> PopulateTvFromTmdbAsync(
         MediaItem item, FolderWatcher folder, int tmdbId, bool forceRefresh,
         Action<string>? log, CancellationToken ct)
     {
-        var detail = await tmdb.GetTvDetailAsync(tmdbId, ct);
+        var lang = await appConfig.GetAsync(AppConfigKeys.MetadataLanguage, ct) ?? "en";
+        var detail = await tmdb.GetTvDetailAsync(tmdbId, lang, ct);
         if (detail is null) { log?.Invoke($"[TMDB] GetTvDetail({tmdbId}) returned null."); return false; }
 
-        log?.Invoke($"[TMDB] TV detail: \"{detail.Name}\" ({detail.Year})  seasons={detail.Seasons.Count}");
+        log?.Invoke($"[TMDB] TV detail: \"{detail.Name}\" ({detail.Year})  seasons={detail.Seasons.Count}  lang={lang}");
+
+        // Per-field English fallback: TMDB returns an empty overview (and occasionally
+        // name) when the requested language has no translation — fill those from en-US.
+        string? locName = detail.Name, locOverview = detail.Overview;
+        if (lang != "en" && string.IsNullOrWhiteSpace(locOverview))
+        {
+            var en = await tmdb.GetTvDetailAsync(tmdbId, "en", ct);
+            if (string.IsNullOrWhiteSpace(locOverview)) locOverview = en?.Overview;
+            if (string.IsNullOrWhiteSpace(locName))     locName     = en?.Name;
+        }
 
         item.TmdbId        = detail.Id;
         item.ImdbId        = detail.ExternalIds?.ImdbId;
         item.TvdbId        = detail.ExternalIds?.TvdbId;
-        item.Title         = detail.Name;
+        item.Title         = string.IsNullOrWhiteSpace(locName) ? detail.Name : locName;
         item.OriginalTitle = detail.OriginalName;
         item.Year          = detail.Year;
-        item.Description   = detail.Overview;
+        item.Description   = locOverview;
         item.Tagline       = detail.Tagline;
         item.Status        = detail.Status;
         item.ContentRating = detail.ContentRating;
@@ -1085,7 +1166,10 @@ public class MetadataService(
         item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
         item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
         item.Runtime       = detail.EpisodeRunTime.FirstOrDefault();
-        item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
+        item.GenresJson    = JsonSerializer.Serialize(TmdbGenreCatalog.English(detail.Genres), _json);
+        item.GenresLocalizedJson = lang != "en"
+            ? JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json)
+            : null;
         item.Studio        = detail.StudioName;
         item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
         item.EpisodeCount  = detail.NumberOfEpisodes > 0
@@ -1131,9 +1215,9 @@ public class MetadataService(
 
         item.IdentificationStatus = IdentificationStatus.Identified;
 
-        // Main images
+        // Main images — prefer a poster localized to the metadata language.
         await DownloadImagesAsync(item, folder,
-            poster:       detail.PosterPath     != null ? TmdbClient.PosterUrl(detail.PosterPath)         : null,
+            poster:       detail.PickPosterPath(lang) is { } pp ? TmdbClient.PosterUrl(pp)                 : null,
             fanart:       detail.BestFanartPath != null ? TmdbClient.BackdropUrl(detail.BestFanartPath)   : null,
             logo:         detail.BestLogoPath   != null ? TmdbClient.LogoUrl(detail.BestLogoPath)         : null,
             forceRefresh: forceRefresh, log: log, ct: ct);
@@ -1154,18 +1238,28 @@ public class MetadataService(
         MediaItem item, FolderWatcher folder, int tmdbId, bool forceRefresh,
         Action<string>? log, CancellationToken ct)
     {
-        var detail = await tmdb.GetMovieDetailAsync(tmdbId, ct);
+        var lang = await appConfig.GetAsync(AppConfigKeys.MetadataLanguage, ct) ?? "en";
+        var detail = await tmdb.GetMovieDetailAsync(tmdbId, lang, ct);
         if (detail is null) { log?.Invoke($"[TMDB] GetMovieDetail({tmdbId}) returned null."); return false; }
 
-        log?.Invoke($"[TMDB] Movie detail: \"{detail.Title}\" ({detail.Year})");
+        log?.Invoke($"[TMDB] Movie detail: \"{detail.Title}\" ({detail.Year})  lang={lang}");
+
+        // Per-field English fallback for an untranslated overview/title.
+        string? locTitle = detail.Title, locOverview = detail.Overview;
+        if (lang != "en" && string.IsNullOrWhiteSpace(locOverview))
+        {
+            var en = await tmdb.GetMovieDetailAsync(tmdbId, "en", ct);
+            if (string.IsNullOrWhiteSpace(locOverview)) locOverview = en?.Overview;
+            if (string.IsNullOrWhiteSpace(locTitle))    locTitle    = en?.Title;
+        }
 
         item.TmdbId        = detail.Id;
         item.ImdbId        = detail.ExternalIds?.ImdbId;
         item.TvdbId        = detail.ExternalIds?.TvdbId;
-        item.Title         = detail.Title;
+        item.Title         = string.IsNullOrWhiteSpace(locTitle) ? detail.Title : locTitle;
         item.OriginalTitle = detail.OriginalTitle;
         item.Year          = detail.Year;
-        item.Description   = detail.Overview;
+        item.Description   = locOverview;
         item.Tagline       = detail.Tagline;
         item.Status        = detail.Status;
         item.ContentRating = detail.ContentRating;
@@ -1173,7 +1267,10 @@ public class MetadataService(
         item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
         item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
         item.Runtime       = detail.Runtime;
-        item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
+        item.GenresJson    = JsonSerializer.Serialize(TmdbGenreCatalog.English(detail.Genres), _json);
+        item.GenresLocalizedJson = lang != "en"
+            ? JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json)
+            : null;
         item.Studio        = detail.StudioName;
         item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
         item.EpisodeCount  = null;          // movies have no episodes — explicit null beats stale value on re-identify
@@ -1194,7 +1291,7 @@ public class MetadataService(
         item.IdentificationStatus = IdentificationStatus.Identified;
 
         await DownloadImagesAsync(item, folder,
-            poster:       detail.PosterPath   != null ? TmdbClient.PosterUrl(detail.PosterPath)     : null,
+            poster:       detail.PickPosterPath(lang) is { } pp ? TmdbClient.PosterUrl(pp)           : null,
             fanart:       detail.BackdropPath != null ? TmdbClient.BackdropUrl(detail.BackdropPath) : null,
             logo:         detail.BestLogoPath != null ? TmdbClient.LogoUrl(detail.BestLogoPath)    : null,
             forceRefresh: forceRefresh, log: log, ct: ct);
@@ -1603,7 +1700,7 @@ public class MetadataService(
                 string? posterUrl = null, fanartUrl = null, logoUrl = null;
                 if (isTv)
                 {
-                    var d = await tmdb.GetTvDetailAsync(tmdbId.Value, ct);
+                    var d = await tmdb.GetTvDetailAsync(tmdbId.Value, ct: ct);
                     if (d is not null)
                     {
                         if (needPoster && d.PosterPath     != null) posterUrl = TmdbClient.PosterUrl(d.PosterPath);
@@ -1613,7 +1710,7 @@ public class MetadataService(
                 }
                 else
                 {
-                    var d = await tmdb.GetMovieDetailAsync(tmdbId.Value, ct);
+                    var d = await tmdb.GetMovieDetailAsync(tmdbId.Value, ct: ct);
                     if (d is not null)
                     {
                         if (needPoster && d.PosterPath   != null) posterUrl = TmdbClient.PosterUrl(d.PosterPath);
@@ -1812,6 +1909,7 @@ public class MetadataService(
     private static bool LooksLikeAnime(MediaItem item, List<string> genres)
         => item.MediaType == MediaItemType.Anime
            || item.MalId is not null
+           || !string.IsNullOrEmpty(item.ThemeTitle)   // already has a resolved theme — keep serving it
            || (genres.Any(g => g.Equals("Animation", StringComparison.OrdinalIgnoreCase))
                && string.Equals(item.Language, "Japanese", StringComparison.OrdinalIgnoreCase));
 
