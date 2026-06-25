@@ -1457,7 +1457,7 @@
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
             let downX = 0, downY = 0;
-            let lastTapAt = 0, singleTapTimer = null;
+            let lastTapAt = 0;
             const DT_MS = 280;   // double-tap window
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
@@ -1472,9 +1472,13 @@
                 const isTouch = (e.pointerType === 'touch' || e.pointerType === 'pen');
                 // Mouse / desktop: click = play/pause, no gesture seeking.
                 if (!isTouch) { togglePlay(); return; }
-                // Phone: a double-tap on the left / right third seeks ∓10s
-                // (YouTube mobile). A lone tap toggles the controls — deferred
-                // briefly so a quick second tap upgrades it to a seek instead.
+                // Phone: a single tap toggles the controls INSTANTLY, so the
+                // centre play/pause becomes tappable straight away. (A deferred
+                // toggle left the centre button pointer-events:none for 280ms,
+                // so the natural "tap to wake, then tap pause" gesture landed on
+                // the tap-catcher and just re-toggled the UI instead of pausing.)
+                // A double-tap on the left / right third still seeks ∓10s: its
+                // first tap toggles, the second seeks.
                 const touchMode = hud.getAttribute('data-touch') === '1';
                 const rect = tapEl.getBoundingClientRect();
                 const x = (e.clientX || 0) - rect.left;
@@ -1482,16 +1486,13 @@
                            : x > rect.width * 0.65 ? 'right' : 'mid';
                 const now = Date.now();
                 if (touchMode && (now - lastTapAt < DT_MS) && zone !== 'mid') {
-                    if (singleTapTimer) { clearTimeout(singleTapTimer); singleTapTimer = null; }
                     lastTapAt = 0;
                     if (zone === 'left') { seekBy(-10); showSeekRipple('left'); }
                     else                 { seekBy(+10); showSeekRipple('right'); }
                     return;
                 }
                 lastTapAt = now;
-                if (!touchMode) { toggleHud(); return; }
-                if (singleTapTimer) clearTimeout(singleTapTimer);
-                singleTapTimer = setTimeout(() => { singleTapTimer = null; toggleHud(); }, DT_MS);
+                toggleHud();
             });
         }
 
