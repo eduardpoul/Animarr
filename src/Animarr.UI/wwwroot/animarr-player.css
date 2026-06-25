@@ -707,3 +707,15 @@ body[data-animarr-native="1"] .vp-backdrop * {
 
 /* Settings menu — same shell as the pickers, list of worded rows. */
 .vp-hud-popup--menu { min-width: 240px; }
+
+/* Kill the mobile double-tap-zoom heuristic on the controls: it adds a ~300ms
+   click delay AND fires a synthesized "ghost" click ~300ms after the real one,
+   which used to re-toggle the just-opened settings menu shut ("appears then
+   immediately disappears"). `manipulation` keeps pan/pinch and does NOT affect
+   the pointer-event-based ±10 double-tap-seek. */
+.vp-hud[data-touch="1"] .vp-hud__tap,
+.vp-hud[data-touch="1"] .vp-btn,
+.vp-hud[data-touch="1"] .vp-hud__cplay,
+.vp-hud-popup {
+    touch-action: manipulation;
+}
