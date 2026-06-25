@@ -42,6 +42,8 @@ public sealed record MediaItemDto
     public string?  Description    { get; init; }
     public string?  Tagline        { get; init; }
     public string[] Genres         { get; init; } = Array.Empty<string>();
+    /// <summary>Genres localized to the metadata language, for display. Empty → fall back to <see cref="Genres"/> (English).</summary>
+    public string[] GenresLocalized { get; init; } = Array.Empty<string>();
     public string[] Tags           { get; init; } = Array.Empty<string>();
     public double?  Rating         { get; init; }
     public int?     RatingCount    { get; init; }

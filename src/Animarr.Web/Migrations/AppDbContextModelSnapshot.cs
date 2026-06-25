@@ -281,6 +281,9 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("GenresJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GenresLocalizedJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("Hue")
                         .HasColumnType("INTEGER");
 

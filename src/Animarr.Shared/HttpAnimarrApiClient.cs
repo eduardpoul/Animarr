@@ -461,6 +461,18 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public Task<MetadataLanguageStatusDto?> GetMetadataLanguageStatusAsync(CancellationToken ct = default)
+        => GetOrNullAsync<MetadataLanguageStatusDto>(ApiRoutes.MetadataLanguage, ct);
+
+    public async Task SetMetadataLanguageAsync(string language, CancellationToken ct = default)
+    {
+        using var resp = await _http.PutAsJsonAsync(
+            ApiRoutes.MetadataLanguage,
+            new MetadataLanguageRequest(language),
+            JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public async Task<HardwareReportDto> GetHardwareReportAsync(bool rescan, CancellationToken ct = default)
     {
         var url = rescan ? $"{ApiRoutes.HardwareInfo}?rescan=true" : ApiRoutes.HardwareInfo;
