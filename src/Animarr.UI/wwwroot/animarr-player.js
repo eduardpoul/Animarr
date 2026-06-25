@@ -1466,7 +1466,7 @@
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
             let downX = 0, downY = 0;
-            let lastTapAt = 0, lastTapZone = '';
+            let lastTapAt = 0, lastTapZone = '', sideTapTimer = null;
             const DT_MS = 280;   // double-tap window
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
@@ -1481,31 +1481,40 @@
                 const isTouch = (e.pointerType === 'touch' || e.pointerType === 'pen');
                 // Mouse / desktop: click = play/pause, no gesture seeking.
                 if (!isTouch) { togglePlay(); return; }
-                // Phone: a single tap toggles the controls INSTANTLY, so the
-                // centre play/pause becomes tappable straight away. (A deferred
-                // toggle left the centre button pointer-events:none for 280ms,
-                // so the natural "tap to wake, then tap pause" gesture landed on
-                // the tap-catcher and just re-toggled the UI instead of pausing.)
-                // ±10s seek is a double-tap on the OUTER quarter of the SAME
-                // side. The middle band is generous and toggle-only, so a tap
-                // anywhere near the centre reliably shows/hides the controls —
-                // a quick second tap there (e.g. wake the UI, then tap to
-                // dismiss) is no longer mistaken for a seek.
+                // Single tap = show/hide the controls; a double tap on a side =
+                // ±10s seek. The only way to tell a lone tap from the first half
+                // of a double tap is to WAIT one double-tap window, so a side
+                // tap's toggle is DEFERRED: "no second tap ⇒ they wanted to hide
+                // the UI". The CENTRE band (where the play/pause button sits) is
+                // exempt and toggles INSTANTLY, so waking the controls makes the
+                // centre button reachable right away and a tap there pauses /
+                // hides with no lag — and there is no ±10 in the centre anyway.
                 const touchMode = hud.getAttribute('data-touch') === '1';
                 const rect = tapEl.getBoundingClientRect();
                 const x = (e.clientX || 0) - rect.left;
-                const zone = x < rect.width * 0.25 ? 'left'
-                           : x > rect.width * 0.75 ? 'right' : 'mid';
+                const zone = x < rect.width * 0.30 ? 'left'
+                           : x > rect.width * 0.70 ? 'right' : 'mid';
                 const now = Date.now();
-                if (touchMode && (now - lastTapAt < DT_MS) && zone !== 'mid' && zone === lastTapZone) {
+                if (!touchMode || zone === 'mid') {
+                    if (sideTapTimer) { clearTimeout(sideTapTimer); sideTapTimer = null; }
+                    lastTapAt = now; lastTapZone = zone;
+                    toggleHud();
+                    return;
+                }
+                // Second tap on the SAME side within the window → ±10 seek; this
+                // also cancels the lone-tap toggle the first tap had pending.
+                if ((now - lastTapAt < DT_MS) && zone === lastTapZone) {
+                    if (sideTapTimer) { clearTimeout(sideTapTimer); sideTapTimer = null; }
                     lastTapAt = 0; lastTapZone = '';
                     if (zone === 'left') { seekBy(-10); showSeekRipple('left'); }
                     else                 { seekBy(+10); showSeekRipple('right'); }
                     return;
                 }
-                lastTapAt = now;
-                lastTapZone = zone;
-                toggleHud();
+                // First (maybe only) side tap: defer the toggle one window. A
+                // matching second tap cancels this timer and seeks instead.
+                lastTapAt = now; lastTapZone = zone;
+                if (sideTapTimer) clearTimeout(sideTapTimer);
+                sideTapTimer = setTimeout(() => { sideTapTimer = null; toggleHud(); }, DT_MS);
             });
         }
 
