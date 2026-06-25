@@ -262,7 +262,13 @@
                 var landscape = window.innerWidth > window.innerHeight;
                 var smallCssLandscape = landscape && window.innerWidth <= 1280;
                 var remoteOnly = window.matchMedia && window.matchMedia('(pointer: none)').matches;
-                isTv = uaLooksTv || (noTouch && smallCssLandscape) || remoteOnly;
+                // A touchscreen device is never a TV via the soft heuristics:
+                // some Android System WebViews report `pointer: none` / no coarse
+                // pointer, which made `remoteOnly` true and misclassified a phone
+                // (especially in landscape) as a TV — forcing the 10-foot /
+                // desktop button bar. Gate BOTH soft signals behind noTouch; only
+                // the UA string can mark a touch device as a TV.
+                isTv = uaLooksTv || (noTouch && (smallCssLandscape || remoteOnly));
             }
             if (!isTv) return;
 
