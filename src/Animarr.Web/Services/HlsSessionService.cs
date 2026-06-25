@@ -1030,8 +1030,15 @@ public sealed class HlsSessionService : IDisposable
                 return HlsPlan.Fmp4NvencReencode;
             if (!probe.Is10Bit && _hardware?.Current.Vaapi.Available == true)
                 return HlsPlan.Fmp4VaapiReencode;
+            return HlsPlan.Fmp4StreamCopy;   // HEVC: let the browser decode the bitstream
         }
-        return HlsPlan.Fmp4StreamCopy;
+
+        // Anything else — mpeg4/XviD (AVI), MPEG-2, VC-1, MPEG-1, … — the browser
+        // can't play it and it can't be stream-copied into fMP4 (AVI carries no
+        // valid pts → "pts has no value"). Re-encode to H.264. Software decode is
+        // the safe choice: VAAPI/NVENC may not decode these legacy codecs, and
+        // such files are usually low-res so libx264 is cheap.
+        return HlsPlan.Fmp4SoftwareReencode;
     }
 
     /// <summary>Audio codecs decoded natively by every MSE-capable browser

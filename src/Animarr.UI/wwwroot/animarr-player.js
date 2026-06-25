@@ -1672,14 +1672,13 @@
         const upNextEl = document.createElement('div');
         upNextEl.className = 'vp-upnext vp-upnext--hidden';
         upNextEl.innerHTML = `
+            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="Close">&times;</button>
             <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
             <div class="vp-upnext__name" data-bind="un-name"></div>
             <div class="vp-upnext__actions">
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">Skip credits</button>
               <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
                 <span data-bind="un-play">Play next</span>
-              </button>
-              <button type="button" class="vp-upnext__btn vp-upnext__btn--dismiss tv-focus" data-act="un-dismiss">
-                <span data-bind="un-dismiss">Dismiss</span>
               </button>
             </div>`;
         root.appendChild(upNextEl);
@@ -1687,11 +1686,13 @@
             eyebrow: upNextEl.querySelector('[data-bind="un-eyebrow"]'),
             name:    upNextEl.querySelector('[data-bind="un-name"]'),
             play:    upNextEl.querySelector('[data-bind="un-play"]'),
-            dismiss: upNextEl.querySelector('[data-bind="un-dismiss"]'),
+            skip:    upNextEl.querySelector('[data-bind="un-skip"]'),
         };
-        const UP_NEXT_PCT = 0.9;        // show threshold (matches auto-watched)
+        // Next-up appears at the detected credits start; with no detection it
+        // falls back to this fraction of the runtime.
+        const UP_NEXT_FALLBACK_PCT = 0.95;
         const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
-        let upNextShown = false, upNextDismissed = false, upNextDone = false;
+        let upNextShown = false, upNextDismissed = false, upNextDone = false, skipCreditsUsed = false;
 
         function upNextLabels() { return entry.upNext || {}; }
         function showUpNext() {
@@ -1701,7 +1702,7 @@
             unRefs.eyebrow.textContent = m.eyebrow || 'Up next';
             unRefs.name.textContent    = m.name || '';
             unRefs.play.textContent    = m.play || 'Play next';
-            unRefs.dismiss.textContent = m.dismiss || 'Dismiss';
+            unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
             upNextEl.classList.remove('vp-upnext--hidden');
         }
         function hideUpNext() {
@@ -1720,9 +1721,16 @@
         function updateUpNext(cTime, dTime) {
             if (upNextDone || upNextDismissed) return;
             if (!entry.nextAvailable || !(dTime > 0)) { hideUpNext(); return; }
-            const pct = cTime / dTime;
-            if (pct < UP_NEXT_PCT) { hideUpNext(); return; }  // seeked back out of the zone
+            // Show at the detected end-credits start; otherwise fall back to 95%.
+            const cs = entry.segments && entry.segments.creditsStart;
+            const triggerAt = (cs > 0 && cs < dTime) ? cs : dTime * UP_NEXT_FALLBACK_PCT;
+            if (cTime < triggerAt) { hideUpNext(); return; }  // not at credits / fallback yet
             showUpNext();
+            // In-card Skip-credits button: only when there's content after the
+            // credits to jump to (e.g. a next-episode preview).
+            const sg = entry.segments;
+            const canSkip = !skipCreditsUsed && !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
+            unRefs.skip.style.display = canSkip ? '' : 'none';
             const remaining = dTime - cTime;
             const baseLabel = upNextLabels().play || 'Play next';
             if (remaining <= UP_NEXT_COUNTDOWN) {
@@ -1738,11 +1746,57 @@
             e.stopPropagation();
             if (b.dataset.act === 'un-next') triggerUpNext();
             else if (b.dataset.act === 'un-dismiss') dismissUpNext();
+            else if (b.dataset.act === 'un-skip') {
+                const sg = entry.segments;
+                if (sg && sg.creditsEnd > 0) {
+                    skipCreditsUsed = true;
+                    unRefs.skip.style.display = 'none';
+                    adapter.currentTime = sg.creditsEnd;
+                }
+            }
         });
         // Belt-and-braces: timeupdate can stop firing right at EOF, so the
         // genuine end also advances (unless the user dismissed the card).
         adapter.on('ended', () => {
             if (!upNextDismissed && entry.nextAvailable) triggerUpNext();
+        });
+
+        // ── skip-intro button ─────────────────────────────────────────
+        // Floating button shown only while currentTime is inside the detected
+        // intro [introStart, introEnd]; clicking seeks past it. Sibling of the
+        // HUD so it stays put while the controls fade. Stays hidden entirely
+        // when no intro was detected for this episode.
+        const skipEl = document.createElement('button');
+        skipEl.type = 'button';
+        skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
+        root.appendChild(skipEl);
+        let skipShown = false, skipTarget = 0, skipIntroUsed = false;
+        function setSkip(label, target) {
+            skipTarget = target;
+            if (skipEl.textContent !== label) skipEl.textContent = label;
+            if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
+        }
+        function hideSkip() {
+            if (!skipShown) return;
+            skipShown = false;
+            skipEl.classList.add('vp-skip--hidden');
+        }
+        // Floating pill for Skip intro only (the opening). Skip credits now lives
+        // inside the Up-Next card (the credits zone).
+        function updateSkip(cTime) {
+            const s = entry.segments;
+            if (!skipIntroUsed && s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
+                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
+            } else {
+                hideSkip();
+            }
+        }
+        skipEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // One-shot: mark used + hide immediately so the next timeupdate (which
+            // still sees the pre-seek currentTime, esp. on Direct Stream reload)
+            // doesn't flash the pill back on.
+            if (skipTarget > 0) { skipIntroUsed = true; hideSkip(); adapter.currentTime = skipTarget; }
         });
 
         // ── adapter events ────────────────────────────────────────────
@@ -1756,8 +1810,9 @@
                 refs.cur.textContent   = formatTime(cTime);
             }
             refs.dur.textContent = formatTime(dTime);
-            // End-of-episode autoplay card (90% → show; last 10s → countdown).
+            // End-of-episode autoplay card (credits start → show; last 10s → countdown).
             updateUpNext(cTime, dTime);
+            updateSkip(cTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
@@ -2824,6 +2879,13 @@
             play:    (meta && meta.upNextPlay)    || 'Play next',
             dismiss: (meta && meta.upNextDismiss) || 'Dismiss',
         };
+        // Skip-intro/credits segment times (seconds). Read live by updateUpNext
+        // (credits → next-up trigger) and updateSkipIntro (Skip button) on each
+        // timeupdate. null → no detected segments: Skip stays hidden and the
+        // next-up card falls back to 95% of the runtime.
+        entry.segments = (meta && meta.segments) || null;
+        entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || 'Skip intro';
+        entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || 'Skip credits';
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;

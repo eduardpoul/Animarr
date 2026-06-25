@@ -110,6 +110,44 @@ namespace Animarr.Web.Migrations
                     b.ToTable("EpisodeFileMappings");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeSegment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DetectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("EndSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("StartSec")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "Season", "Episode", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("EpisodeSegments");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -259,6 +297,9 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSegmentScanAt")
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("LlmConfidence")
@@ -859,6 +900,17 @@ namespace Animarr.Web.Migrations
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeSegment", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
                         .WithMany()

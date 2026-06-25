@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
     public DbSet<WatchState> WatchStates => Set<WatchState>();
     public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
+    public DbSet<EpisodeSegment> EpisodeSegments => Set<EpisodeSegment>();
 
     // ─── Multi-user (v4) ──────────────────────────────────────────────────────
     public DbSet<User> Users => Set<User>();
@@ -173,6 +174,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Cascade);
             // One override per (item, file). Upserts target this key.
             e.HasIndex(x => new { x.MediaItemId, x.FilePath }).IsUnique();
+        });
+
+        modelBuilder.Entity<EpisodeSegment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One segment per (item, season, episode, kind). The detection pass
+            // upserts against this key, so re-running is idempotent.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode, x.Kind }).IsUnique();
         });
 
         // ─── Multi-user (v4) ────────────────────────────────────────────────

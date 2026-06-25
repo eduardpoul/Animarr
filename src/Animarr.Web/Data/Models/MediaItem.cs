@@ -138,6 +138,11 @@ public class MediaItem
     public IdentificationStatus IdentificationStatus { get; set; } = IdentificationStatus.Pending;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastMetadataRefreshedAt { get; set; }
+    /// <summary>When the skip-intro/credits background pass last analysed this
+    /// item with the heavy providers (chromaprint). Null = never scanned. Gates
+    /// the background queue so a title is fully scanned once, then only
+    /// re-scanned after a long TTL.</summary>
+    public DateTime? LastSegmentScanAt { get; set; }
 
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];

@@ -6,6 +6,7 @@ using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
+using Animarr.Web.Services.Segments;
 using Microsoft.EntityFrameworkCore;
 using SharedEnums = Animarr.Shared;
 using EfModels    = Animarr.Web.Data.Models;
@@ -661,7 +662,176 @@ internal static class MediaEndpoints
             return Results.NotFound();
         });
 
+        // ── Skip intro / credits segments ────────────────────────────────────
+        // GET with ?season=&episode= returns one episode's segments and lazily
+        // detects them via the cheap providers (AniSkip) on a first-watch miss,
+        // so the player gets times immediately. Without params it returns every
+        // segment already known for the item (no detection). AllowAnonymous to
+        // match the other playback endpoints the player calls directly.
+        app.MapGet(ApiRoutes.MediaSegments, async (
+            Guid id,
+            int? season,
+            int? episode,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MediaFileResolver resolver,
+            SegmentDetectionService detector,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+
+            if (season is int s && episode is int e)
+            {
+                var have = await db.EpisodeSegments.AsNoTracking()
+                    .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
+                    .ToListAsync(ct);
+
+                // Lazy detect on a miss using cheap providers only (AniSkip via
+                // the AniList MAL-id bridge + chapters). Best-effort — the player
+                // falls back to 95%.
+                if (have.Count == 0)
+                {
+                    try
+                    {
+                        var files = await resolver.ResolveAsync(id, ct);
+                        var fp = files.FirstOrDefault(f => (f.Season ?? 1) == s && f.Episode == e)?.FilePath;
+                        if (!string.IsNullOrEmpty(fp) &&
+                            await detector.DetectForEpisodeAsync(item, s, e, fp!, cheapOnly: true, ct))
+                        {
+                            have = await db.EpisodeSegments.AsNoTracking()
+                                .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
+                                .ToListAsync(ct);
+                        }
+                    }
+                    catch { /* best-effort lazy detection */ }
+                }
+                // Smart credits fallback: this episode has no detected credits →
+                // use the median credits start of the season's other episodes, so
+                // the next-episode card appears at the ending instead of at the
+                // player's blunt 95%-of-runtime guess.
+                double? creditsFallback = null;
+                if (!have.Any(x => x.Kind == SegmentKind.Credits))
+                {
+                    var others = await db.EpisodeSegments.AsNoTracking()
+                        .Where(x => x.MediaItemId == id && x.Season == s
+                                 && x.Kind == SegmentKind.Credits && x.Episode != e)
+                        .Select(x => x.StartSec)
+                        .ToListAsync(ct);
+                    if (others.Count > 0)
+                    {
+                        others.Sort();
+                        creditsFallback = others[others.Count / 2];
+                    }
+                }
+                return Results.Ok(ToSegmentsDto(s, e, have, creditsFallback));
+            }
+
+            var all = await db.EpisodeSegments.AsNoTracking()
+                .Where(x => x.MediaItemId == id)
+                .ToListAsync(ct);
+            var dtos = all
+                .GroupBy(x => (x.Season, x.Episode))
+                .OrderBy(g => g.Key.Season).ThenBy(g => g.Key.Episode)
+                .Select(g => ToSegmentsDto(g.Key.Season, g.Key.Episode, g.ToList()))
+                .ToArray();
+            return Results.Ok(dtos);
+        })
+        .AllowAnonymous();
+
+        // Manual override — Source=Manual, never clobbered by detection. Null
+        // start/end clears that kind's override.
+        app.MapPut(ApiRoutes.MediaSegments, async (
+            Guid id,
+            SegmentOverrideRequest req,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            SegmentKind? kind = req.Kind?.ToLowerInvariant() switch
+            {
+                "intro"   => SegmentKind.Intro,
+                "credits" => SegmentKind.Credits,
+                "recap"   => SegmentKind.Recap,
+                _         => null,
+            };
+            if (kind is null) return Results.BadRequest(new { error = "Kind must be intro, credits or recap." });
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (!await db.MediaItems.AnyAsync(m => m.Id == id, ct)) return Results.NotFound();
+
+            var row = await db.EpisodeSegments.FirstOrDefaultAsync(
+                x => x.MediaItemId == id && x.Season == req.Season && x.Episode == req.Episode && x.Kind == kind.Value, ct);
+
+            if (req.StartSec is null || req.EndSec is null)
+            {
+                if (row is not null) { db.EpisodeSegments.Remove(row); await db.SaveChangesAsync(ct); }
+                return Results.NoContent();
+            }
+            if (req.EndSec <= req.StartSec)
+                return Results.BadRequest(new { error = "EndSec must be greater than StartSec." });
+
+            if (row is null)
+            {
+                row = new EfModels.EpisodeSegment
+                {
+                    MediaItemId = id, Season = req.Season, Episode = req.Episode, Kind = kind.Value,
+                };
+                db.EpisodeSegments.Add(row);
+            }
+            row.StartSec      = req.StartSec.Value;
+            row.EndSec        = req.EndSec.Value;
+            row.Source        = SegmentSource.Manual;
+            row.DetectedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Skip-intro/credits scan progress for the Settings indicator.
+        app.MapGet(ApiRoutes.SegmentsStatus, async (
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var total = await db.MediaItems.CountAsync(
+                m => m.IdentificationStatus == EfModels.IdentificationStatus.Identified
+                  || m.IdentificationStatus == EfModels.IdentificationStatus.Manual, ct);
+            var scanned = await db.MediaItems.CountAsync(
+                m => (m.IdentificationStatus == EfModels.IdentificationStatus.Identified
+                   || m.IdentificationStatus == EfModels.IdentificationStatus.Manual)
+                  && m.LastSegmentScanAt != null, ct);
+            var withSegs = await db.EpisodeSegments.Select(s => s.MediaItemId).Distinct().CountAsync(ct);
+            return Results.Ok(new SegmentScanStatusDto(total, scanned, withSegs));
+        });
+
+        // Reset scan flags → background pass reprocesses every title. Existing
+        // detected segments stay (precedence lets a better source overwrite).
+        app.MapPost(ApiRoutes.SegmentsRescan, async (
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            await db.MediaItems.ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.LastSegmentScanAt, (DateTime?)null), ct);
+            return Results.Accepted();
+        });
+
         return app;
+    }
+
+    /// <summary>Collapse the per-(season,episode) segment rows into the flat DTO
+    /// the player consumes.</summary>
+    private static EpisodeSegmentsDto ToSegmentsDto(int season, int episode, List<EfModels.EpisodeSegment> segs,
+        double? creditsStartFallback = null)
+    {
+        EfModels.EpisodeSegment? Pick(SegmentKind k) => segs.FirstOrDefault(x => x.Kind == k);
+        var intro   = Pick(SegmentKind.Intro);
+        var credits = Pick(SegmentKind.Credits);
+        var recap   = Pick(SegmentKind.Recap);
+        // No detected credits → use the season-median fallback the caller passed,
+        // so the next-episode card still lands at the ending (not at 95%).
+        return new EpisodeSegmentsDto(
+            season, episode,
+            intro?.StartSec,   intro?.EndSec,
+            credits?.StartSec ?? creditsStartFallback, credits?.EndSec,
+            recap?.StartSec,   recap?.EndSec);
     }
 
     // Cap concurrent ffmpeg frame-grabs: opening a season fires a burst of lazy
