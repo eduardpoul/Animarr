@@ -39,6 +39,7 @@ This is what makes non‑English content — most donghua, untranslated anime, t
 - **Smart episode resolution** — files are mapped to (season, episode) by a layered resolver: deterministic regex/path parsing → optional one‑click **Resolve with AI** for files that don't parse → manual per‑file override. Split‑season donghua (one absolute TMDB season spread across several disk folders) is handled with automatic season offsets.
 - **Media catalog** — poster grid with a fanart backdrop hero, **Continue Watching**, detail pages with seasons/episodes, ratings, tags and external links.
 - **In‑browser & native playback** — a custom player streams your files right in the browser (and via native ExoPlayer on Android TV), keeping the **original video bitstream and HDR** whenever the client can decode them; it only re‑encodes (hardware‑accelerated) as a last resort. See [Playback](#playback).
+- **Skip intro & credits** — opening and ending segments are auto‑detected (AniSkip → embedded chapters → audio fingerprint → black‑frame cascade); a **Skip** button appears over the intro, and an **Up Next** card at the credits auto‑advances to the next episode.
 - **Categories** — items are auto‑classified by the LLM at identification time into category chips on the home screen; you can pin categories manually per title.
 - **Full‑text search** — instant client‑side filter across title / original / English / CJK names.
 - **Theme music** — fetches the anime OP/ED from [AnimeThemes.moe](https://animethemes.moe) and plays it on the detail page (per‑user opt‑in + volume).
@@ -195,7 +196,7 @@ Animarr plays your files directly in the browser — no companion app required �
 - **Direct Stream** — MKV and other containers are **remuxed on the fly** to a native MP4 stream (video copied untouched, audio to AAC), so the **original video bitstream and HDR pass through unchanged**. Browser HDR output is more reliable on this native path than via MSE.
 - **HLS** — only when the browser genuinely can't decode the codec (or you cap the quality) does Animarr re‑encode, **hardware‑accelerated** via VAAPI (AMD/Intel) or NVENC (NVIDIA), auto‑detected at deploy.
 
-The player has a custom HUD (two‑row controls, scrim, tap‑to‑toggle), a **quality menu** with bitrate presets, embedded **+ sideloaded audio / subtitle** track switching, an **audio‑sync** offset control, ultrawide letterbox auto‑crop, and **DLNA cast** to a TV. Android TV gets a native **ExoPlayer** path with D‑pad navigation. The MEDIA INFO panel reports exactly what's playing — codec, bit depth, HDR format, and which delivery path is in use.
+The player has a custom HUD (two‑row controls, scrim, tap‑to‑toggle), a **quality menu** with bitrate presets, embedded **+ sideloaded audio / subtitle** track switching, an **audio‑sync** offset control, ultrawide letterbox auto‑crop, **DLNA cast** to a TV, and **Skip intro / Skip credits** buttons with an **Up Next** card that auto‑advances at the end. On **phones** the controls switch to a touch layout — a big centre play/pause, **double‑tap the left/right edge to skip ±10s**, a full‑width scrubber, and a settings gear that holds the secondary controls. Android TV gets a native **ExoPlayer** path with D‑pad navigation. The MEDIA INFO panel reports exactly what's playing — codec, bit depth, HDR format, and which delivery path is in use.
 
 ## Torrent client
 
