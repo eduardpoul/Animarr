@@ -113,6 +113,8 @@ builder.Services.AddScoped<ImdbSearchClient>();
 builder.Services.AddScoped<AnimeThemesClient>();
 builder.Services.AddScoped<AniListClient>();
 builder.Services.AddScoped<MetadataService>();
+// Background "metadata language changed → re-fetch the library" pass + its progress.
+builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
 builder.Services.AddSingleton<HlsSessionService>();
 builder.Services.AddSingleton<DlnaService>();
@@ -347,6 +349,7 @@ app.MapTorrentEndpoints();
 app.MapRenameEndpoints();
 app.MapMediaTagEndpoints();
 app.MapAppConfigEndpoints();
+app.MapMetadataLanguageEndpoints();
 app.MapSearchEndpoints();
 app.MapDlnaCastEndpoints();
 // v5 multi-server: anonymous /api/server/info probe used by Discovery.

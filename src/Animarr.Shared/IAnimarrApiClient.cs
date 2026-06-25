@@ -124,6 +124,10 @@ public interface IAnimarrApiClient
     Task<AppConfigEntryDto[]> GetAppConfigAsync(CancellationToken ct = default);
     Task<AppConfigEntryDto?>  GetAppConfigValueAsync(string key, CancellationToken ct = default);
     Task                      SetAppConfigValueAsync(string key, string? value, CancellationToken ct = default);
+    /// <summary>Current metadata language + progress of the library re-localisation pass.</summary>
+    Task<MetadataLanguageStatusDto?> GetMetadataLanguageStatusAsync(CancellationToken ct = default);
+    /// <summary>Persist the metadata language and start re-fetching texts/posters for the library.</summary>
+    Task                      SetMetadataLanguageAsync(string language, CancellationToken ct = default);
     Task<HardwareReportDto>   GetHardwareReportAsync(bool rescan, CancellationToken ct = default);
 
     // ─── Search ──────────────────────────────────────────────────────────

@@ -115,6 +115,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private RenamePatternDto[]? _patterns;
     private TorrentConfigDto? _torrentCfg;
     private SegmentScanStatusDto? _segStatus;
+    private MetadataLanguageStatusDto? _langStatus;
 
     // ── Dialog state ──
     private bool _folderDialogOpen;
@@ -165,7 +166,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         "patterns" when _patterns is null   => LoadPatternsAsync(),
         "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
         "ai"       when _catalog is null    => LoadEmbeddedAsync(),
-        "metadata" when _segStatus is null  => LoadSegStatusAsync(),
+        "metadata"                          => LoadMetadataAuxAsync(),
         _ => Task.CompletedTask,
     });
 
@@ -196,6 +197,57 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         }
         catch { /* swallow */ }
         StateHasChanged();
+    }
+
+    private async Task LoadMetadataAuxAsync()
+    {
+        if (_segStatus is null) await LoadSegStatusAsync();
+        await LoadLangStatusAsync();
+    }
+
+    private async Task LoadLangStatusAsync()
+    {
+        try
+        {
+            _langStatus = await Api.GetMetadataLanguageStatusAsync();
+            // Resume the progress poll if a pass is still running (e.g. tab re-opened mid-run).
+            if (_langStatus is { Phase: "running" }) _ = PollLangAsync();
+        }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task SetMetadataLanguageAsync(string code)
+    {
+        try
+        {
+            await Api.SetMetadataLanguageAsync(code);
+            _config[AppConfigKeys.MetadataLanguage] = code;
+            _langStatus = await Api.GetMetadataLanguageStatusAsync();
+            _ = PollLangAsync();
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task PollLangAsync()
+    {
+        _langPollCts?.Cancel();
+        _langPollCts = new CancellationTokenSource();
+        var ct = _langPollCts.Token;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(750, ct);
+                _langStatus = await Api.GetMetadataLanguageStatusAsync();
+                await InvokeAsync(StateHasChanged);
+                if (_langStatus is null || _langStatus.Phase != "running")
+                    break;
+            }
+        }
+        catch (OperationCanceledException) { /* navigated away / superseded */ }
+        catch { /* swallow */ }
     }
 
     // ── General tab ──
@@ -498,6 +550,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private string _customFile = "";
     private bool   _embeddedBusy;
     private CancellationTokenSource? _pollCts;
+    private CancellationTokenSource? _langPollCts;
 
     private async Task LoadEmbeddedAsync()
     {
@@ -590,6 +643,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     public void Dispose()
     {
         try { _pollCts?.Cancel(); _pollCts?.Dispose(); } catch { /* ignore */ }
+        try { _langPollCts?.Cancel(); _langPollCts?.Dispose(); } catch { /* ignore */ }
     }
 
     // The embedded-provider panel: runtime status, model picker (curated +
@@ -924,6 +978,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var imdbOn = _sourceEnabled("imdb_search");
         var tmdbKey = _config.GetValueOrDefault(AppConfigKeys.TmdbApiKey) ?? "";
         var malKey  = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
+        var metaLang = _config.GetValueOrDefault(AppConfigKeys.MetadataLanguage) ?? "en";
         return @<section class="settings-section">
             <h2>Metadata sources</h2>
             <p class="settings-hint">
@@ -975,6 +1030,39 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 </div>
 
             </div>
+
+            <h3>Metadata language</h3>
+            <p class="settings-hint">
+                Language for titles, overviews and genres fetched from TMDb (and
+                localized posters when available). Changing it re-fetches every
+                identified title; fields with no translation fall back to English.
+                Anime matched only on MyAnimeList stay in English.
+            </p>
+            <label class="settings-field">
+                <span class="settings-field__label">Metadata language</span>
+                <select class="settings-field__select" value="@metaLang"
+                        @onchange="@(e => SetMetadataLanguageAsync(e.Value?.ToString() ?? "en"))">
+                    <option value="en">English</option>
+                    <option value="ru">Русский</option>
+                    <option value="uk">Українська</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                </select>
+            </label>
+            @if (_langStatus is { } ls && ls.Phase != "idle")
+            {
+                var pct = ls.Total > 0 ? ls.Done * 100 / ls.Total : (ls.Phase == "done" ? 100 : 0);
+                <div class="settings-llm-progress">
+                    <div class="settings-llm-progress__bar">
+                        <div class="settings-llm-progress__fill" style="width:@(pct)%"></div>
+                    </div>
+                    <div class="settings-llm-progress__text">
+                        @if (ls.Phase == "running")   { <span>Re-fetched @ls.Done/@ls.Total titles (@(pct)%)</span> }
+                        else if (ls.Phase == "done")  { <span class="is-ok">Re-fetched @ls.Done/@ls.Total titles ✓</span> }
+                        else if (ls.Phase == "error") { <span class="is-err">Error: @ls.Error</span> }
+                    </div>
+                </div>
+            }
 
             <h3>Auto-identification</h3>
             <label class="settings-field settings-field--inline">

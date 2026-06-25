@@ -21,6 +21,11 @@ public static class AppConfigKeys
     /// <summary>JSON: [{id:"tmdb_tv",enabled:true},{id:"tmdb_movie",enabled:true}] — ordered by priority.</summary>
     public const string SearchSourceOrder = "metadata.search_source_order";
 
+    /// <summary>Preferred metadata language (UI codes en/ru/uk/de/es; default en).
+    /// Drives the TMDB <c>language</c> parameter for title/overview/genres and
+    /// localized-poster selection. Empty fields fall back to English per field.</summary>
+    public const string MetadataLanguage = "metadata.language";
+
     // ─── Auto-identification ──────────────────────────────────────────────────
     public const string AutoIdentifyEnabled     = "metadata.auto_identify_enabled";
     public const string DownloadEpisodeThumbs   = "metadata.download_episode_thumbs";

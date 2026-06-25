@@ -115,6 +115,11 @@ public static class ApiRoutes
     public const string AppConfig          = "/api/app-config";
     public const string AppConfigByKey     = "/api/app-config/{key}";
 
+    /// <summary>GET — current metadata language + relocalisation progress
+    /// (<c>MetadataLanguageStatusDto</c>). PUT <c>{ language }</c> — change the
+    /// language and kick off re-fetching TMDB texts/posters for the library.</summary>
+    public const string MetadataLanguage   = "/api/metadata/language";
+
     // ─── LLM diagnostics ──────────────────────────────────────────────────
     /// <summary>Live "ping" test against the configured LLM endpoint. Returns
     /// {ok, latencyMs, sample, error} so the AI tab can show success / failure
@@ -302,6 +307,11 @@ public static class AppConfigKeys
     /// toggle independently (Movies vs TV); the Settings UI groups them
     /// under one "TMDb" toggle for clarity.</summary>
     public const string SearchSourceOrder  = "metadata.search_source_order";
+
+    /// <summary>Preferred metadata language (UI codes en/ru/uk/de/es; default en).
+    /// Server re-fetches TMDB title/overview/genres (+ localized posters) in this
+    /// language; missing fields fall back to English.</summary>
+    public const string MetadataLanguage   = "metadata.language";
 
     // ─── Auto-identification ──────────────────────────────────────────────
     public const string AutoIdentifyEnabled   = "metadata.auto_identify_enabled";
