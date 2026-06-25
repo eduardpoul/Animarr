@@ -39,6 +39,15 @@ public static class ApiRoutes
     /// else an ffmpeg frame grabbed from the local video. Lazy + cached.</summary>
     public const string MediaEpisodeThumb = "/api/media/{id}/episode-thumb";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
+    /// <summary>GET — skip-intro/credits segments. With <c>?season=&amp;episode=</c>
+    /// returns one <c>EpisodeSegmentsDto</c> (lazy-detecting via AniSkip on a
+    /// miss); without, returns all known <c>EpisodeSegmentsDto[]</c> for the item.
+    /// PUT writes a manual override (Source=Manual, never clobbered by detection).</summary>
+    public const string MediaSegments     = "/api/media/{id}/segments";
+    /// <summary>GET — skip-intro/credits scan progress (<c>SegmentScanStatusDto</c>).</summary>
+    public const string SegmentsStatus    = "/api/segments/status";
+    /// <summary>POST — reset scan flags so the background pass reprocesses all titles.</summary>
+    public const string SegmentsRescan    = "/api/segments/rescan";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -245,6 +254,7 @@ public static class ApiRoutes
     public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
     public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
     public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
+    public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
@@ -332,4 +342,10 @@ public static class AppConfigKeys
     // ─── External player handoff ──────────────────────────────────────────
     public const string ExternalPlayer       = "playback.external_player";
     public const string ExternalPlayerCustom = "playback.external_player_custom";
+
+    // ─── Skip intro / credits (segment detection) ─────────────────────────
+    public const string SegmentsAniSkipEnabled     = "segments.aniskip_enabled";
+    public const string SegmentsChaptersEnabled    = "segments.chapters_enabled";
+    public const string SegmentsChromaprintEnabled = "segments.chromaprint_enabled";
+    public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
 }

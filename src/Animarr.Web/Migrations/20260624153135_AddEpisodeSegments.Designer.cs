@@ -3,6 +3,7 @@ using System;
 using Animarr.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Animarr.Web.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260624153135_AddEpisodeSegments")]
+    partial class AddEpisodeSegments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
@@ -297,9 +300,6 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastSegmentScanAt")
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("LlmConfidence")

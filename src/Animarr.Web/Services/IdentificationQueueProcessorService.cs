@@ -1,6 +1,7 @@
 using System.Text;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
+using Animarr.Web.Services.Segments;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Services;
@@ -307,6 +308,40 @@ public class IdentificationQueueProcessorService(
             catch (Exception soEx)
             {
                 logger.LogWarning(soEx, "Season-offset resolve failed for folder {FolderId} — continuing.", job.FolderId);
+            }
+
+            // Step 6: skip-intro/credits detection. Cheap providers only here
+            // (AniSkip network lookups by MAL id) — heavy providers (chromaprint)
+            // run in the dedicated background pass. Fire-and-forget so a big
+            // season's lookups don't stall the queue; the work is idempotent and
+            // self-skipping, so a restart that drops the task just re-detects.
+            try
+            {
+                await using var segDb = await dbFactory.CreateDbContextAsync(ct);
+                var segItemId = await segDb.MediaItems
+                    .Where(m => m.FolderId == job.FolderId)
+                    .Select(m => (Guid?)m.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (segItemId is Guid segMid)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var segScope = scopeFactory.CreateScope();
+                            var detector = segScope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
+                            await detector.DetectForItemAsync(segMid, cheapOnly: true, CancellationToken.None);
+                        }
+                        catch (Exception bgEx)
+                        {
+                            logger.LogWarning(bgEx, "[Segments] background detection failed for {Id}", segMid);
+                        }
+                    }, CancellationToken.None);
+                }
+            }
+            catch (Exception segEx)
+            {
+                logger.LogWarning(segEx, "[Segments] detection enqueue failed for folder {FolderId} — continuing.", job.FolderId);
             }
 
             job.Status      = IdentificationQueueStatus.Done;

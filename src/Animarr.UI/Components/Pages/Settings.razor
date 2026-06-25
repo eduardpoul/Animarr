@@ -114,6 +114,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private HardwareReportDto? _hw;
     private RenamePatternDto[]? _patterns;
     private TorrentConfigDto? _torrentCfg;
+    private SegmentScanStatusDto? _segStatus;
 
     // ── Dialog state ──
     private bool _folderDialogOpen;
@@ -164,6 +165,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         "patterns" when _patterns is null   => LoadPatternsAsync(),
         "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
         "ai"       when _catalog is null    => LoadEmbeddedAsync(),
+        "metadata" when _segStatus is null  => LoadSegStatusAsync(),
         _ => Task.CompletedTask,
     });
 
@@ -173,6 +175,24 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         {
             await Api.SetAppConfigValueAsync(key, value);
             _config[key] = value;
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task LoadSegStatusAsync()
+    {
+        try { _segStatus = await Api.GetSegmentScanStatusAsync(); }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task RescanSegmentsAsync()
+    {
+        try
+        {
+            await Api.RescanSegmentsAsync();
+            _segStatus = await Api.GetSegmentScanStatusAsync();
         }
         catch { /* swallow */ }
         StateHasChanged();
@@ -891,6 +911,10 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var nrThr   = _config.GetValueOrDefault(AppConfigKeys.NeedsReviewConfidence) ?? "0.50";
         var extPlay = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayer) ?? "mpv";
         var extCust = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayerCustom) ?? "";
+        var segAniSkip    = (_config.GetValueOrDefault(AppConfigKeys.SegmentsAniSkipEnabled)     ?? "true")  != "false";
+        var segChapters   = (_config.GetValueOrDefault(AppConfigKeys.SegmentsChaptersEnabled)    ?? "true")  != "false";
+        var segChroma     = (_config.GetValueOrDefault(AppConfigKeys.SegmentsChromaprintEnabled) ?? "true")  != "false";
+        var segBlackFrame = (_config.GetValueOrDefault(AppConfigKeys.SegmentsBlackFrameEnabled)  ?? "false") == "true";
         // Source enable flags live in metadata.search_source_order as a JSON
         // array — MetadataService.GatherCandidatesAsync already reads that
         // format. _sourceEnabled parses it once per render; SetSourceEnabledAsync
@@ -1003,6 +1027,46 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayerCustom, e.Value?.ToString()))" />
                 </label>
             }
+
+            <h3>Skip intro &amp; credits</h3>
+            <p class="settings-hint">
+                Detect opening/ending timestamps so the player shows a Skip button
+                and surfaces "next episode" at the credits start. Sources are tried
+                cheapest-first and the first hit wins.
+            </p>
+            <label class="settings-field settings-field--inline">
+                <Toggle Checked="@segAniSkip"
+                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsAniSkipEnabled, v ? "true" : "false"))" />
+                <span class="settings-field__label">AniSkip — crowd-sourced OP/ED by MAL id</span>
+            </label>
+            <label class="settings-field settings-field--inline">
+                <Toggle Checked="@segChapters"
+                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChaptersEnabled, v ? "true" : "false"))" />
+                <span class="settings-field__label">Embedded chapters — named opening/ending</span>
+            </label>
+            <label class="settings-field settings-field--inline">
+                <Toggle Checked="@segChroma"
+                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChromaprintEnabled, v ? "true" : "false"))" />
+                <span class="settings-field__label">Audio fingerprint — chromaprint (background pass)</span>
+            </label>
+            <label class="settings-field settings-field--inline">
+                <Toggle Checked="@segBlackFrame"
+                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsBlackFrameEnabled, v ? "true" : "false"))" />
+                <span class="settings-field__label">Black-frame credits guess — slow, decodes video</span>
+            </label>
+            <div class="settings-field settings-field--inline" style="justify-content: space-between; gap: 12px;">
+                <span class="settings-hint">
+                    @if (_segStatus is { } seg)
+                    {
+                        @($"Analysed {seg.ScannedTitles}/{seg.TotalTitles} titles · {seg.TitlesWithSegments} with segments")
+                    }
+                    else
+                    {
+                        @("Analysis progress —")
+                    }
+                </span>
+                <button type="button" class="settings-section-head__new tv-focus" @onclick="RescanSegmentsAsync">Rescan all</button>
+            </div>
         </section>;
     }
 
