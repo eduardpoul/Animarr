@@ -1339,8 +1339,17 @@
         const isTvHost = document.documentElement.classList.contains('animarr-tv-host');
         const applyTouchMode = () => {
             const mm = window.matchMedia;
-            const touch = !isTvHost && !!mm
-                && (mm('(pointer: coarse)').matches || mm('(max-width: 760px)').matches);
+            const mq = (q) => !!mm && mm(q).matches;
+            // Detect a touch device robustly. The Android System WebView (MAUI
+            // host) does NOT report `pointer: coarse`, so relying on that left
+            // the mobile layout to `max-width:760` alone — true in portrait but
+            // FALSE in landscape (~964px wide), which dropped the phone back to
+            // the full desktop button bar on rotate. maxTouchPoints / ontouchstart
+            // are orientation- and width-independent and work in that WebView.
+            const hasTouch = (navigator.maxTouchPoints || 0) > 0
+                || ('ontouchstart' in window)
+                || mq('(pointer: coarse)') || mq('(any-pointer: coarse)');
+            const touch = !isTvHost && (hasTouch || mq('(max-width: 760px)'));
             hud.setAttribute('data-touch', touch ? '1' : '0');
         };
         applyTouchMode();
