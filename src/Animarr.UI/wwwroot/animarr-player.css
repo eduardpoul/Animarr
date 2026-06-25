@@ -606,7 +606,7 @@ body[data-animarr-native="1"] .vp-backdrop * {
 .vp-upnext__close:hover { color: #fff; }
 
 @media (max-width: 560px) {
-    .vp-upnext { right: 16px; left: 16px; bottom: 96px; width: auto; }
+    .vp-upnext { right: 16px; left: 16px; bottom: 120px; width: auto; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -759,5 +759,5 @@ body[data-animarr-native="1"] .vp-backdrop * {
     pointer-events: none;
 }
 @media (max-width: 560px) {
-    .vp-skip { right: 16px; bottom: 96px; }
+    .vp-skip { right: 16px; bottom: 120px; }
 }
