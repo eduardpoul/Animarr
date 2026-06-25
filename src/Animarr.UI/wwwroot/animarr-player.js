@@ -931,6 +931,12 @@
         const existing = root.querySelector('.vp-hud-popup');
         if (existing) {
             const wasFor = existing.getAttribute('data-anchor');
+            // Touch devices fire the opener's click and then a synthesized
+            // "ghost" click ~300ms later (double-tap-zoom heuristic). Without
+            // this grace window that second click re-enters here and toggles the
+            // just-opened menu straight back shut ("appears and immediately
+            // disappears"). A deliberate re-tap to close still works afterwards.
+            if (wasFor === anchor && Date.now() - Number(existing.dataset.openedAt || 0) < 400) return;
             existing.remove();
             if (wasFor === anchor) return;   // gear tapped again → toggle closed
         }
@@ -952,10 +958,12 @@
             const row = rows[i];
             if (row && typeof row.run === 'function') row.run();
         });
+        popup.dataset.openedAt = String(Date.now());
         root.appendChild(popup);
         setTimeout(() => {
             const onDoc = (e) => {
                 if (!popup.isConnected) { document.removeEventListener('click', onDoc, true); return; }
+                if (Date.now() - Number(popup.dataset.openedAt || 0) < 400) return;  // ignore the opening tap's ghost click
                 if (!popup.contains(e.target) && !e.target.closest(`[data-act="${anchor}"]`)) {
                     popup.remove();
                     document.removeEventListener('click', onDoc, true);
@@ -991,6 +999,7 @@
             onPick(i);
             popup.remove();
         });
+        popup.dataset.openedAt = String(Date.now());
         root.appendChild(popup);
         setTimeout(() => {
             const onDoc = (e) => {
@@ -998,6 +1007,7 @@
                     document.removeEventListener('click', onDoc, true);
                     return;
                 }
+                if (Date.now() - Number(popup.dataset.openedAt || 0) < 400) return;  // ignore the opening tap's ghost click
                 if (!popup.contains(e.target) &&
                     !e.target.closest(`[data-act="${anchor}"]`)) {
                     popup.remove();
@@ -1453,7 +1463,12 @@
             tapEl.addEventListener('pointerup', (e) => {
                 if (Math.hypot((e.clientX || 0) - downX, (e.clientY || 0) - downY) > 12) return;
                 const openPopup = root.querySelector('.vp-hud-popup');
-                if (openPopup) { openPopup.remove(); return; }  // first tap dismisses a popup
+                if (openPopup) {
+                    // Tap outside dismisses a popup — but not the very tap that
+                    // opened it (touch fires a ghost click ~300ms later).
+                    if (Date.now() - Number(openPopup.dataset.openedAt || 0) >= 350) openPopup.remove();
+                    return;
+                }
                 const isTouch = (e.pointerType === 'touch' || e.pointerType === 'pen');
                 // Mouse / desktop: click = play/pause, no gesture seeking.
                 if (!isTouch) { togglePlay(); return; }
