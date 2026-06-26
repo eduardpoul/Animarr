@@ -34,6 +34,12 @@ public sealed class AniSkipProvider(AniSkipClient client, MalIdResolver malResol
             return Array.Empty<DetectedSegment>();
         }
 
+        // Preflight: if AniSkip isn't reachable from this host, skip it entirely
+        // (cached verdict, ~one probe per 10 min) and let the cascade fall through
+        // to chromaprint — don't fire one hanging request per episode.
+        if (!await client.IsReachableAsync(ct))
+            return Array.Empty<DetectedSegment>();
+
         var malId = await malResolver.ResolveAsync(ctx.Item, ct);
         if (malId is not int mal || mal <= 0) return Array.Empty<DetectedSegment>();
 

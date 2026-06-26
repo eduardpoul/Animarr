@@ -134,6 +134,9 @@ builder.Services.AddHttpClient(AniSkipClient.ClientName, c =>
     c.BaseAddress = new Uri("https://api.aniskip.com");
     c.DefaultRequestHeaders.Add("Accept", "application/json");
     c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+    // The API answers in ~0.3s when reachable; cap well below the 100s default so
+    // an unreachable host (broken-MTU/DPI network) fails fast instead of hanging.
+    c.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddScoped<AniSkipClient>();
 builder.Services.AddScoped<MalIdResolver>();   // title → MAL id via AniList (no key)
