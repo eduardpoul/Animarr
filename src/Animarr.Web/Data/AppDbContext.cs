@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WatchState> WatchStates => Set<WatchState>();
     public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
     public DbSet<EpisodeSegment> EpisodeSegments => Set<EpisodeSegment>();
+    public DbSet<EpisodeMetadata> EpisodeMetadata => Set<EpisodeMetadata>();
 
     // ─── Multi-user (v4) ──────────────────────────────────────────────────────
     public DbSet<User> Users => Set<User>();
@@ -187,6 +188,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // One segment per (item, season, episode, kind). The detection pass
             // upserts against this key, so re-running is idempotent.
             e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode, x.Kind }).IsUnique();
+        });
+
+        modelBuilder.Entity<EpisodeMetadata>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One metadata row per (item, TMDB season, TMDB episode). The lazy
+            // fetch replaces the item's rows wholesale, but the unique key keeps
+            // the table clean if a partial write ever races.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode }).IsUnique();
         });
 
         // ─── Multi-user (v4) ────────────────────────────────────────────────

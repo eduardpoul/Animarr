@@ -51,6 +51,13 @@ public class UserPreferences
     /// Applies only on the Catalog hero. Spec: hero-nav-variants.html.</summary>
     public string HeroPagerStyle { get; set; } = "g";
 
+    /// <summary>Default layout of the episode list on a title's detail page —
+    /// "grid" (poster-card grid, default) or "list" (detailed horizontal rows
+    /// with title/overview/meta). The grid⇄list toggle on the detail page
+    /// writes back here, so it doubles as the per-account default.
+    /// Spec: "Animarr — Episode View Modes".</summary>
+    public string EpisodeListView { get; set; } = "grid";
+
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 
     /// <summary>Preferred audio language for new playbacks. ISO 639-1 lowercase or

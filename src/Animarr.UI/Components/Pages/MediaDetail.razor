@@ -177,6 +177,7 @@ else
     if (showEpisodeGrid)
     {
         <section class="md-seasons">
+            <div class="md-season-row">
             <nav class="md-season-tabs" aria-label="Seasons">
                 @if (hasSeasonMeta)
                 {
@@ -217,6 +218,27 @@ else
                 }
             </nav>
 
+                @* NEW (Episode View Modes): grid ⇄ detailed-list toggle. Writes
+                   the EpisodeListView preference, so flipping it here also sets
+                   the per-account default surfaced in Profile → Appearance. *@
+                <div class="md-view-toggle" role="group" aria-label="Episode view">
+                    <button type="button"
+                            class="@($"md-view-btn tv-focus {(_episodeView == "grid" ? "md-view-btn--active" : "")}")"
+                            aria-pressed="@(_episodeView == "grid" ? "true" : "false")"
+                            title="Grid view"
+                            @onclick="@(() => SetEpisodeViewAsync("grid"))">
+                        <DIcon Name="grid" Size="15" />
+                    </button>
+                    <button type="button"
+                            class="@($"md-view-btn tv-focus {(_episodeView == "list" ? "md-view-btn--active" : "")}")"
+                            aria-pressed="@(_episodeView == "list" ? "true" : "false")"
+                            title="Detailed list"
+                            @onclick="@(() => SetEpisodeViewAsync("list"))">
+                        <DIcon Name="list" Size="15" />
+                    </button>
+                </div>
+            </div>
+
             @{
                 var active = hasSeasonMeta ? item.Seasons.FirstOrDefault(s => s.Number == _activeSeason) : null;
                 // Episode count for the loop. Prefer the metadata's count, but
@@ -237,28 +259,59 @@ else
                 var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
                     ? Animarr.UI.Services.MediaUrl.Image(seasonPoster, item.LastMetadataRefreshedAt?.Ticks ?? 0)
                     : null;
+                // Section meta ("X of Y watched · all on disk") — Episode View
+                // Modes design. Counts over the active season's 1..loopEpCount.
+                var epsWatched = 0;
+                var epsOnDisk  = 0;
+                for (int si = 1; si <= loopEpCount; si++)
+                {
+                    if (_files.Any(f => (f.Season ?? 1) == _activeSeason && f.Episode == si)) epsOnDisk++;
+                    if (_watchStates.Any(w => w.Season == _activeSeason && w.Episode == si && w.IsWatched)) epsWatched++;
+                }
             }
             @if (active is not null && !string.IsNullOrEmpty(active.Overview))
             {
                 <p class="md-season-overview">@active.Overview</p>
             }
 
+            <div class="md-secmeta">
+                <b>@epsWatched</b> of @loopEpCount watched
+                @if (epsOnDisk >= loopEpCount)
+                {
+                    <span>· all episodes on disk</span>
+                }
+                else
+                {
+                    <span>· @epsOnDisk of @loopEpCount on disk</span>
+                }
+            </div>
+
             @{ var didMarkAutofocusEp = false; }
-            <div class="md-episode-grid">
+            <div class="@(_episodeView == "list" ? "md-episode-rows" : "md-episode-grid")">
                 @for (int i = 1; i <= loopEpCount; i++)
                 {
                     var ep        = i;
                     var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
                     var hasFile   = epFile is not null;
                     var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
-                    // Season 0 = Specials; a donghua season-offset surfaces the
-                    // TMDB absolute number so the user sees which TMDB episode
-                    // their disk file maps to ("Episode 1 · TMDB #107").
-                    var epTitle   = _activeSeason == 0
-                        ? $"Special {ep}"
-                        : epFile?.AbsoluteEpisode is int absEp
-                            ? $"Episode {ep} · TMDB #{absEp}"
-                            : $"Episode {ep}";
+                    // Stage B: per-episode TMDB metadata. Disk → TMDB key mirrors
+                    // the thumb endpoint — an absolute-numbered donghua file maps
+                    // to TMDB season 1 / its absolute episode; everything else maps
+                    // straight through.
+                    var absEpNum  = epFile?.AbsoluteEpisode;
+                    var metaKey   = absEpNum is int absKey ? (Season: 1, Episode: absKey) : (Season: _activeSeason, Episode: ep);
+                    var epDto     = _episodeMeta.GetValueOrDefault(metaKey);
+                    var epRuntime = epDto?.RuntimeMin ?? item.Runtime;
+                    // Prefer the real TMDB episode title; fall back to the
+                    // numbered label. Season 0 = Specials; a donghua season-offset
+                    // surfaces the TMDB absolute number ("Episode 1 · TMDB #107").
+                    var epTitle   = !string.IsNullOrWhiteSpace(epDto?.Title)
+                        ? epDto!.Title!
+                        : _activeSeason == 0
+                            ? $"Special {ep}"
+                            : absEpNum is int absEp
+                                ? $"Episode {ep} · TMDB #{absEp}"
+                                : $"Episode {ep}";
                     // First on-disk episode becomes the default-focus target
                     // when the hero has no Continue CTA (i.e. nothing in
                     // progress yet). Series like Death's Game where every
@@ -273,7 +326,7 @@ else
                     // like the file IS there with broken styling. Bug surfaced on
                     // Death's Game where every episode is missing.
                     var epMeta    = hasFile
-                        ? (item.Runtime is > 0 ? $"{item.Runtime}m" : "")
+                        ? (epRuntime is > 0 ? $"{epRuntime}m" : "")
                         : L["episode_card.meta_missing"];
 
                     @* On TV the card itself MUST be focusable — without it, the
@@ -295,7 +348,13 @@ else
                          @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
                          @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
                         <EpisodeCard Number="ep"
+                                     Layout="@(_episodeView == "list" ? "list" : "card")"
                                      Title="@epTitle"
+                                     Overview="@epDto?.Overview"
+                                     AirDate="@epDto?.AirDate"
+                                     Rating="@epDto?.Rating"
+                                     Resolution="@(hasFile ? ResolutionFromName(epFile?.FileName) : null)"
+                                     Lang="@(UserCtx.Preferences?.Language)"
                                      ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
                                      Meta="@epMeta"
                                      Have="hasFile"
@@ -424,7 +483,16 @@ else
     private ContinueWatchDto? _continue;
     private ContinueAction?   _continueAction;
     private List<WatchStateDto> _watchStates = new();
+    /// <summary>Per-episode TMDB metadata (Stage B), keyed by TMDB
+    /// (season, episode). Loaded in the background after the page paints; the
+    /// render maps disk episodes to these keys via the file's AbsoluteEpisode.</summary>
+    private Dictionary<(int Season, int Episode), EpisodeMetaDto> _episodeMeta = new();
     private int _activeSeason = 1;
+    /// <summary>Episode-list layout — "grid" (poster cards) or "list" (detailed
+    /// rows). Seeded from the user's EpisodeListView preference on init; the
+    /// grid⇄list toggle writes the same preference back (so it doubles as the
+    /// per-account default). Spec: "Animarr — Episode View Modes".</summary>
+    private string _episodeView = "grid";
     private bool _movieWatched;
     private bool _editOpen;
 
@@ -515,7 +583,28 @@ else
         // flips (cookie-restored MAUI boot resolves the registry after the
         // page first renders).
         Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+        // Seed the episode-list layout from the user's saved default. On a cold
+        // reload (F5) the page can mount BEFORE UserContextState has finished
+        // fetching /api/me/preferences, so this seed may read null → "grid".
+        // The OnChange subscription below re-seeds once prefs arrive, so the
+        // saved "list" default isn't lost to that race.
+        _episodeView = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        UserCtx.OnChange += OnUserCtxChanged;
         await LoadAsync();
+    }
+
+    /// <summary>Re-seed the episode-list layout whenever UserContextState changes
+    /// — chiefly when preferences finish loading after a cold reload (so the saved
+    /// default applies) and after the page toggle's PATCH echoes back via
+    /// SetPreferences. Guarded so unrelated changes (accent, backdrop) are no-ops.</summary>
+    private void OnUserCtxChanged()
+    {
+        var v = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        if (v != _episodeView)
+        {
+            _episodeView = v;
+            InvokeAsync(StateHasChanged);
+        }
     }
 
     /// <summary>Honour the Home rail's auto-play query params once the item +
@@ -574,6 +663,43 @@ else
         catch { _item = null; }
         _loading = false;
         StateHasChanged();
+
+        // Stage B: pull per-episode TMDB metadata in the background so the page
+        // paints immediately (grid/list with "Episode N" + thumbs) and the real
+        // titles / synopses / ratings fill in when the fetch returns. Series-only
+        // — movies have no episode list to localize.
+        if (_item is { MediaType: MediaItemType.Series or MediaItemType.Anime or MediaItemType.Multserials })
+            _ = LoadEpisodeMetaAsync();
+    }
+
+    /// <summary>Background-load per-episode TMDB metadata (Stage B) keyed by TMDB
+    /// (season, episode). The render maps disk episodes to these via the file's
+    /// AbsoluteEpisode, mirroring the episode-thumb endpoint. Fire-and-forget
+    /// from <see cref="LoadAsync"/> — failures just leave the "Episode N"
+    /// fallbacks in place.</summary>
+    private async Task LoadEpisodeMetaAsync()
+    {
+        try
+        {
+            var meta = await Api.GetEpisodeMetadataAsync(Id);
+            _episodeMeta = meta.ToDictionary(m => (m.Season, m.Episode));
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* keep the "Episode N" fallbacks */ }
+    }
+
+    /// <summary>Best-effort video resolution parsed from a file name
+    /// ("…1080p…" / "…720p…" / "…2160p…" / "4K" / "UHD") for the detailed-list
+    /// `.res` chip. Null when no token is present.</summary>
+    private static string? ResolutionFromName(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            fileName, @"\b(2160p|1080p|720p|480p|4k|uhd)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var tok = m.Value.ToLowerInvariant();
+        return tok is "4k" or "uhd" ? "4K" : tok;
     }
 
     private Task OnHeroContinue(ContinueAction action) => HandleContinueClick();
@@ -936,6 +1062,27 @@ else
     private void OpenEditPanel() => _editOpen = true;
     private async Task OnEditSaved() { _editOpen = false; await LoadAsync(); }
 
+    /// <summary>Flip the episode list between grid + detailed-list. Per the
+    /// design decision, the page toggle IS the per-account default — so it
+    /// PATCHes EpisodeListView (the same preference the Profile → Appearance
+    /// picker writes) and mirrors it into UserContextState. Optimistic: the
+    /// layout swaps locally first; a failed PATCH just leaves the next page
+    /// load to reconcile.</summary>
+    private async Task SetEpisodeViewAsync(string view)
+    {
+        if (view is not ("grid" or "list") || _episodeView == view) return;
+        _episodeView = view;
+        StateHasChanged();
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                EpisodeListView: view));
+            UserCtx.SetPreferences(updated);
+        }
+        catch { /* keep the local view; next load reconciles from the server */ }
+    }
+
     /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.
     /// Re-fetches the item afterwards so any per-user fields derived from
     /// favorites (e.g. category cards) stay in sync.</summary>
@@ -1103,6 +1250,7 @@ else
     public async ValueTask DisposeAsync()
     {
         Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+        UserCtx.OnChange -= OnUserCtxChanged;
         await StopThemeAsync();
         if (_playerSelfRef is not null)
         {
