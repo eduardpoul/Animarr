@@ -10,6 +10,9 @@
 @switch (Name)
 {
     case "catalog":   <svg @attributes="@P"><rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /></svg> break;
+    @* Episode-view toggle glyphs: 2×2 grid vs detailed list (thumb + lines). *@
+    case "grid":      <svg @attributes="@P"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" /></svg> break;
+    case "list":      <svg @attributes="@P"><rect x="3" y="4" width="6" height="6" rx="1.2" /><rect x="3" y="14" width="6" height="6" rx="1.2" /><path d="M12 6h9" /><path d="M12 9h6" /><path d="M12 16h9" /><path d="M12 19h6" /></svg> break;
     case "torrent":   <svg @attributes="@P"><path d="M12 4v12" /><path d="m6 10 6 6 6-6" /><path d="M5 20h14" /></svg> break;
     case "folder":    <svg @attributes="@P"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg> break;
     case "clock":     <svg @attributes="@P"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg> break;

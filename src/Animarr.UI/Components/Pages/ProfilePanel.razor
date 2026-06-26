@@ -268,6 +268,10 @@
     /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "g"
     /// (Chevrons) — the hover-revealed prev/next chevrons + dash pager.</summary>
     private string _heroPagerStyle = "g";
+    /// <summary>Default episode-list layout on a title's detail page —
+    /// "grid" (poster cards) or "list" (detailed rows). The page's grid⇄list
+    /// toggle writes the same preference, so this is the shared default.</summary>
+    private string _episodeListView = "grid";
 
     /// <summary>Player HUD style: "full" (icons + text + glass background)
     /// or "icons" (just icons, no background, no labels). Device-local only —
@@ -334,6 +338,7 @@
         _language        = p.Language;
         _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
         _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
+        _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
     }
 
     // ─── Edit profile / change password handlers ───────────────────────
@@ -1569,6 +1574,46 @@
                 </div>
             </div>
 
+            @* ── Episode list view ────────────────────────────────────
+                 Default layout for the episode list on a title's detail
+                 page. The grid⇄list toggle on that page writes the SAME
+                 preference, so picking here and toggling there stay in
+                 lockstep. Spec: "Animarr — Episode View Modes". *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">Episode list view</div>
+                    <div class="d-profile__section-hint">
+                        How a series' episodes are laid out on its page. Grid is
+                        compact poster cards; Detailed list shows a row per episode
+                        with title and synopsis. The toggle on the page changes this too.
+                    </div>
+                </div>
+                <div class="d-profile__pager-grid">
+                    @{
+                        var epGridActive = string.Equals(_episodeListView, "grid", StringComparison.OrdinalIgnoreCase);
+                        var epListActive = string.Equals(_episodeListView, "list", StringComparison.OrdinalIgnoreCase);
+                    }
+                    <button type="button"
+                            class="@($"d-profile__pager-card tv-focus {(epGridActive ? "is-active" : "")}")"
+                            title="Poster-card grid"
+                            @onclick="@(() => OnSelectEpisodeView("grid"))">
+                        <span class="d-profile__pager-card__preview">
+                            <DIcon Name="grid" Size="26" />
+                        </span>
+                        <span class="d-profile__pager-card__name">Grid</span>
+                    </button>
+                    <button type="button"
+                            class="@($"d-profile__pager-card tv-focus {(epListActive ? "is-active" : "")}")"
+                            title="Detailed list — row per episode"
+                            @onclick="@(() => OnSelectEpisodeView("list"))">
+                        <span class="d-profile__pager-card__preview">
+                            <DIcon Name="list" Size="26" />
+                        </span>
+                        <span class="d-profile__pager-card__name">Detailed list</span>
+                    </button>
+                </div>
+            </div>
+
             @* ── Interface language — moved here from its own tab. It's a
                  display preference like theme / accent, so it belongs in
                  Appearance rather than a standalone tab that held one
@@ -1605,6 +1650,19 @@
         new PagerOption("g", "Chevrons",    "Hover-revealed prev/next chevrons + dash pager."),
         new PagerOption("h", "Numbered",    "Numbered pills with chevrons — best for many slots."),
     };
+
+    /// <summary>Episode-list layout picker. PATCHes the preference and mirrors
+    /// it into UserCtx so the MediaDetail page (which reads
+    /// <c>UserCtx.Preferences.EpisodeListView</c>) renders the chosen layout
+    /// the next time it's opened. Same optimistic pattern as the pager picker.</summary>
+    private async Task OnSelectEpisodeView(string key)
+    {
+        _episodeListView = key;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            EpisodeListView: key));
+        StateHasChanged();
+    }
 
     private async Task OnSelectPagerStyle(string key)
     {

@@ -161,6 +161,7 @@ internal static class AuthEndpoints
             if (req.HeroPagerStyle is string hps)         prefs.HeroPagerStyle     = ValidatePagerStyle(hps);
             if (req.ThemeMusicEnabled is bool tme)        prefs.ThemeMusicEnabled  = tme;
             if (req.ThemeMusicVolume is int tmv)          prefs.ThemeMusicVolume   = Math.Clamp(tmv, 0, 100);
+            if (req.EpisodeListView is string elv)        prefs.EpisodeListView    = ValidateEpisodeListView(elv);
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -679,7 +680,8 @@ internal static class AuthEndpoints
         p.Theme,
         p.HeroPagerStyle,
         p.ThemeMusicEnabled,
-        p.ThemeMusicVolume);
+        p.ThemeMusicVolume,
+        p.EpisodeListView);
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale
@@ -696,4 +698,11 @@ internal static class AuthEndpoints
     private static readonly HashSet<string> ValidPagerStyles = new(StringComparer.OrdinalIgnoreCase) { "f", "g", "h" };
     private static string ValidatePagerStyle(string s)
         => ValidPagerStyles.Contains(s) ? s.ToLowerInvariant() : "g";
+
+    // Episode-list layout on the detail page — "grid" (poster cards) or "list"
+    // (detailed rows). Unknown values fall back to "grid" so a stale client
+    // can't write a layout the page doesn't render.
+    private static readonly HashSet<string> ValidEpisodeViews = new(StringComparer.OrdinalIgnoreCase) { "grid", "list" };
+    private static string ValidateEpisodeListView(string s)
+        => ValidEpisodeViews.Contains(s) ? s.ToLowerInvariant() : "grid";
 }

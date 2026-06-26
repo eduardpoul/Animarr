@@ -3,6 +3,7 @@ using System;
 using Animarr.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Animarr.Web.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260626105727_AddEpisodeListView")]
+    partial class AddEpisodeListView
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
@@ -108,54 +111,6 @@ namespace Animarr.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("EpisodeFileMappings");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeMetadata", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AirDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Episode")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("FetchedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Language")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("MediaItemId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Overview")
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("Rating")
-                        .HasColumnType("REAL");
-
-                    b.Property<int?>("RuntimeMin")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Season")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Title")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MediaItemId", "Season", "Episode")
-                        .IsUnique();
-
-                    b.ToTable("EpisodeMetadata");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeSegment", b =>
@@ -955,17 +910,6 @@ namespace Animarr.Web.Migrations
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
-                {
-                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
-                        .WithMany()
-                        .HasForeignKey("MediaItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("MediaItem");
-                });
-
-            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeMetadata", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
                         .WithMany()
