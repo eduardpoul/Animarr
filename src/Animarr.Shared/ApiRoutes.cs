@@ -38,6 +38,11 @@ public static class ApiRoutes
     /// <summary>GET — per-episode thumbnail: TMDB episode still when available,
     /// else an ffmpeg frame grabbed from the local video. Lazy + cached.</summary>
     public const string MediaEpisodeThumb = "/api/media/{id}/episode-thumb";
+    /// <summary>GET — per-episode TMDB metadata (title / synopsis / air date /
+    /// rating / runtime) for the detailed-list episode view. Lazy-fetched +
+    /// cached in EpisodeMetadata; re-fetched when the metadata language or the
+    /// title's identification changes. Returns <c>EpisodeMetaDto[]</c>.</summary>
+    public const string MediaEpisodes     = "/api/media/{id}/episodes";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
     /// <summary>GET — skip-intro/credits segments. With <c>?season=&amp;episode=</c>
     /// returns one <c>EpisodeSegmentsDto</c> (lazy-detecting via AniSkip on a
@@ -259,6 +264,7 @@ public static class ApiRoutes
     public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
     public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
     public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
+    public static string MediaEpisodesFor(Guid id)     => MediaEpisodes.Replace("{id}", id.ToString());
     public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 

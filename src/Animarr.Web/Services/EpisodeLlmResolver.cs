@@ -103,7 +103,7 @@ public sealed class EpisodeLlmResolver(
         {
             try
             {
-                var detail = await tmdb.GetSeasonDetailAsync(tmdbId, seasonNum, ct);
+                var detail = await tmdb.GetSeasonDetailAsync(tmdbId, seasonNum, ct: ct);
                 if (detail is { Episodes.Count: > 0 })
                     return detail.Episodes
                         .Where(e => e.EpisodeNumber > 0)

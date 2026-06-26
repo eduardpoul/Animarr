@@ -129,8 +129,10 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
     public Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, string? language = null, CancellationToken ct = default)
         => GetJsonAsync<TmdbTvDetail>($"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids,credits,keywords&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
-    public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, CancellationToken ct = default)
-        => GetJsonAsync<TmdbSeasonDetail>($"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language=en-US&include_image_language=en,ja,zh,ru,null", ct);
+    /// <param name="language">UI language code (en/ru/uk/de/es). null → English.
+    /// Controls episode Name/Overview localization.</param>
+    public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbSeasonDetail>($"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
     // ── Movie detail ─────────────────────────────────────────────────────────
 
