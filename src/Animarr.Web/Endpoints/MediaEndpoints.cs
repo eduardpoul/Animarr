@@ -639,7 +639,7 @@ internal static class MediaEndpoints
                 var tmdbEp     = f?.AbsoluteEpisode ?? episode;
                 try
                 {
-                    var detail = await tmdb.GetSeasonDetailAsync(tmdbId, tmdbSeason, ct);
+                    var detail = await tmdb.GetSeasonDetailAsync(tmdbId, tmdbSeason, ct: ct);
                     var still  = detail?.Episodes?.FirstOrDefault(e => e.EpisodeNumber == tmdbEp)?.StillPath;
                     if (!string.IsNullOrEmpty(still)
                         && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
@@ -660,6 +660,71 @@ internal static class MediaEndpoints
                 return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
 
             return Results.NotFound();
+        });
+
+        // ── Per-episode metadata (detailed-list view) ────────────────────────
+        // Lazy-fetch + cache TMDB episode texts (title / synopsis / air date /
+        // rating / runtime) for a title, mirroring the episode-thumb endpoint's
+        // lazy pattern. Rows are keyed by TMDB (season, episode); the client maps
+        // disk files to them via AbsoluteEpisode. Re-fetched when the metadata
+        // language changes or the title is re-identified/-localized.
+        app.MapGet(ApiRoutes.MediaEpisodes, async (
+            Guid id,
+            IDbContextFactory<AppDbContext> dbFactory,
+            TmdbClient tmdb,
+            IAppConfigService config,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+            // No TMDB id → no episode list to localize. The UI falls back to
+            // "Episode N" titles, so an empty array is the right answer.
+            if (item.TmdbId is not int tmdbId || tmdbId <= 0)
+                return Results.Ok(Array.Empty<EpisodeMetaDto>());
+
+            var lang = (await config.GetAsync(Animarr.Shared.AppConfigKeys.MetadataLanguage, ct) ?? "en")
+                .Trim().ToLowerInvariant();
+
+            var cached = await db.EpisodeMetadata
+                .Where(e => e.MediaItemId == id)
+                .ToListAsync(ct);
+
+            // Stale when never fetched, written by an older fetch-logic version,
+            // fetched in a different language, or the title was re-identified/
+            // -localized after these rows were written.
+            bool stale = cached.Count == 0
+                || cached.Any(e => e.Version != EpisodeMetadataFetcher.CurrentVersion)
+                || cached.Any(e => !string.Equals(e.Language, lang, StringComparison.OrdinalIgnoreCase))
+                || (item.LastMetadataRefreshedAt is DateTime t && cached.Max(e => e.FetchedAtUtc) < t);
+
+            if (stale)
+            {
+                var fresh = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, lang, ct);
+
+                // Only replace the cache when TMDB actually returned something —
+                // a transient outage must not wipe good cached rows. Delete the
+                // old rows in a separate SaveChanges before inserting: on SQLite,
+                // a delete+insert sharing the (item, season, episode) unique key
+                // in one batch can trip the index.
+                if (fresh.Count > 0)
+                {
+                    if (cached.Count > 0)
+                    {
+                        db.EpisodeMetadata.RemoveRange(cached);
+                        await db.SaveChangesAsync(ct);
+                    }
+                    db.EpisodeMetadata.AddRange(fresh);
+                    await db.SaveChangesAsync(ct);
+                    cached = fresh;
+                }
+            }
+
+            var dtos = cached
+                .OrderBy(e => e.Season).ThenBy(e => e.Episode)
+                .Select(e => new EpisodeMetaDto(e.Season, e.Episode, e.Title, e.Overview, e.AirDate, e.Rating, e.RuntimeMin))
+                .ToArray();
+            return Results.Ok(dtos);
         });
 
         // ── Skip intro / credits segments ────────────────────────────────────

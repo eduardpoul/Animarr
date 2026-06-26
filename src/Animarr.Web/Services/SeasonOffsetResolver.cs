@@ -64,7 +64,7 @@ public sealed class SeasonOffsetResolver(
         // overstate the final season (A Will Eternal: TMDB lists 200, but only
         // 165 have aired → real seasons 52/54/59). Range-based block counts
         // (End-Start+1) tolerate the odd missing date in the middle.
-        var detail = await tmdb.GetSeasonDetailAsync(tmdbId, 1, ct);
+        var detail = await tmdb.GetSeasonDetailAsync(tmdbId, 1, ct: ct);
         var eps = detail?.Episodes?
             .Where(e => e.EpisodeNumber > 0 && ParseDate(e.AirDate) is not null)
             .OrderBy(e => e.EpisodeNumber)

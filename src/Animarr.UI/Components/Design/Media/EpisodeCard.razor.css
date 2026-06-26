@@ -298,3 +298,202 @@ button.d-ep__chip--eye:hover { transform: scale(1.08); }
         opacity: 0.7;
     }
 }
+
+/* ── DETAILED LIST LAYOUT (Layout="list") ─────────────────────────────
+   Reflows the SAME elements (thumb / number / progress / play overlay are
+   reused verbatim) into a horizontal grid: thumb · caption · actions.
+   Spec: "Animarr — Episode View Modes" (.lrow). Stage B fills in synopsis /
+   air-date / rating in .d-eplist__main. */
+.d-ep--list {
+    display: grid;
+    grid-template-columns: 220px 1fr auto;
+    gap: 16px;
+    align-items: stretch;
+}
+
+/* Thumb fills the row's full height (drop the base 16/9 so a 2-line synopsis
+   doesn't leave a gap under the still); the vignette + watched/missing filters
+   carry over from the base .d-ep__art rules. */
+.d-ep--list .d-ep__art {
+    aspect-ratio: auto;
+    height: 100%;
+    min-height: 116px;
+}
+.d-ep--list .d-ep__num {
+    font-size: 22px;
+    top: 8px;
+    left: 11px;
+}
+
+/* ── Center column — episode caption ─────────────────────────── */
+.d-eplist__main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px 0;
+}
+.d-eplist__top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.d-eplist__epnum {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--accent-hi);
+}
+.d-eplist__title {
+    min-width: 0;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.d-ep--list.d-ep--watched .d-eplist__title { color: var(--text-dim); }
+
+.d-eplist__badge {
+    flex-shrink: 0;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: var(--radius-ctrl);
+}
+.d-eplist__badge--watched {
+    background: oklch(0.74 0.15 150 / 0.18);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+.d-eplist__badge--progress {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    color: var(--accent-hi);
+}
+.d-eplist__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.3px;
+}
+.d-eplist__sep  { color: var(--text-faint); }
+.d-eplist__star { color: oklch(0.82 0.13 75); font-weight: 600; }
+/* Resolution chip (1080p / 720p / 4K) parsed from the file name. */
+.d-eplist__res {
+    color: var(--text-dim);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+.d-ep--list.d-ep--miss .d-eplist__meta { color: var(--warn); }
+
+/* Episode synopsis — 2-line clamp (Stage B). */
+.d-eplist__desc {
+    margin: 2px 0 0;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.d-ep--list.d-ep--watched .d-eplist__desc,
+.d-ep--list.d-ep--miss .d-eplist__desc { color: var(--text-faint); }
+
+/* ── Right column — TMDB score + watched/play actions ────────── */
+.d-eplist__right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 14px;
+}
+.d-eplist__score {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1;
+}
+.d-eplist__score-v {
+    font-family: var(--font-mono);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+}
+.d-eplist__score-star { color: oklch(0.82 0.13 75); font-size: 13px; }
+.d-eplist__score-l {
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    color: var(--text-faint);
+}
+.d-eplist__acts {
+    display: flex;
+    gap: 8px;
+}
+button.d-eplist__act {
+    appearance: none;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-ctrl);
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: transform var(--motion-fast), color var(--motion-base), border-color var(--motion-base);
+}
+button.d-eplist__act:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+}
+button.d-eplist__act.is-on {
+    background: oklch(0.74 0.15 150 / 0.18);
+    border-color: var(--success);
+    color: var(--success);
+}
+button.d-eplist__act--pri,
+button.d-eplist__act--pri:hover {
+    background: var(--accent);
+    border-color: transparent;
+    color: #15100b;
+}
+
+/* Tablet — tighten the thumb column. */
+@media (max-width: 959px) {
+    .d-ep--list { grid-template-columns: 180px 1fr auto; gap: 12px; }
+}
+
+/* Phone — smaller thumb; drop the Play button (tap the row to play) but keep
+   the eye so watched stays toggleable without a full-width card. */
+@media (max-width: 639px) {
+    .d-ep--list { grid-template-columns: 104px 1fr auto; gap: 10px; }
+    .d-ep--list .d-ep__num { font-size: 16px; top: 6px; left: 8px; }
+    .d-eplist__title { font-size: 13.5px; }
+    .d-eplist__desc { font-size: 11.5px; }
+    .d-eplist__right { padding: 8px; }
+    .d-eplist__score { display: none; }
+    button.d-eplist__act--pri { display: none; }
+}

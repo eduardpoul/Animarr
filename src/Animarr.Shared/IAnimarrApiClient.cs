@@ -34,6 +34,10 @@ public interface IAnimarrApiClient
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Per-episode TMDB metadata (title/synopsis/air date/rating/runtime)
+    /// for the detailed-list view. Lazy-fetched + cached server-side; empty for
+    /// movies or titles without a TMDB id.</summary>
+    Task<EpisodeMetaDto[]> GetEpisodeMetadataAsync(Guid mediaItemId, CancellationToken ct = default);
     /// <summary>Skip-intro/credits segment times for one episode (lazy-detected
     /// via AniSkip on a miss). Null when the item is unknown or has none.</summary>
     Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default);

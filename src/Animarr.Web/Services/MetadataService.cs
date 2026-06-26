@@ -373,6 +373,36 @@ public class MetadataService(
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
 
+        // Warm per-episode metadata so the detail page's detailed-list view is
+        // instant on first open instead of lazy-fetching there. Best-effort: a
+        // TMDB hiccup must never fail identification. TMDB-backed series only
+        // (movies have no episode list; MAL-only anime have no TMDB season
+        // detail). The /episodes endpoint stays the lazy fallback for everything
+        // this skips — manual re-picks, transient misses, language changes.
+        if (identified
+            && item.TmdbId is int
+            && item.MediaType is MediaItemType.Series or MediaItemType.Anime or MediaItemType.Multserials)
+        {
+            try
+            {
+                var epLang = (await appConfig.GetAsync(AppConfigKeys.MetadataLanguage, ct) ?? "en")
+                    .Trim().ToLowerInvariant();
+                var epRows = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, epLang, ct);
+                if (epRows.Count > 0)
+                {
+                    var old = await db.EpisodeMetadata.Where(e => e.MediaItemId == item.Id).ToListAsync(ct);
+                    if (old.Count > 0) { db.EpisodeMetadata.RemoveRange(old); await db.SaveChangesAsync(ct); }
+                    db.EpisodeMetadata.AddRange(epRows);
+                    await db.SaveChangesAsync(ct);
+                    log?.Invoke($"[Episodes] Warmed {epRows.Count} episode(s) of metadata.");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Episode-metadata warm failed for {Id}", item.Id);
+            }
+        }
+
         // Container-folder auto-rename was removed entirely after two catastrophic
         // data-corruption incidents (Movies → 6 wrong-named folders, Bleach → "The
         // Portal"). Identification now only updates the DB association
