@@ -35,9 +35,11 @@
         <!-- App Identifier -->
         <ApplicationId>com.animarr.app</ApplicationId>
 
-        <!-- Versions -->
-        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-        <ApplicationVersion>1</ApplicationVersion>
+        <!-- Versions — kept in lockstep with the server/WASM client release
+             (git tag vX.Y.Z). ApplicationVersion is the Android versionCode
+             (monotonic int): 0.4.5 -> 405 (major*10000 + minor*100 + patch). -->
+        <ApplicationDisplayVersion>0.4.5</ApplicationDisplayVersion>
+        <ApplicationVersion>405</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
@@ -47,7 +49,7 @@
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
-        <Company>Animarr</Company>
+        <Company>zoldyck</Company>
         <Product>Animarr</Product>
     </PropertyGroup>
 
