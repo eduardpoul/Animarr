@@ -12,10 +12,13 @@ public sealed record SegmentEpisodeContext(
     string FilePath,
     double DurationSec)
 {
-    /// <summary>Absolute paths of every on-disk file in the same season
-    /// (including this one). The chromaprint provider compares this episode
-    /// against peers from here; empty on the cheap/lazy path.</summary>
-    public IReadOnlyList<string> SeasonFiles { get; init; } = Array.Empty<string>();
+    /// <summary>Every on-disk file in the same season (including this one) as
+    /// (episode number, absolute path). The chromaprint provider compares this
+    /// episode against the nearest-numbered peers from here (openings/endings
+    /// drift across a long run, so neighbours match better than the first few
+    /// episodes). Empty on the cheap/lazy path.</summary>
+    public IReadOnlyList<(int Episode, string Path)> SeasonFiles { get; init; }
+        = Array.Empty<(int Episode, string Path)>();
 }
 
 /// <summary>A detected segment before persistence. Times are seconds from the

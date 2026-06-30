@@ -49,7 +49,8 @@ public sealed class SegmentDetectionService(
         var seasonFiles = withEp
             .GroupBy(f => f.Season ?? 1)
             .ToDictionary(g => g.Key,
-                          g => (IReadOnlyList<string>)g.Select(f => f.FilePath).Distinct().ToList());
+                          g => (IReadOnlyList<(int Episode, string Path)>)
+                               g.Select(f => (f.Episode!.Value, f.FilePath)).Distinct().ToList());
 
         var episodes = withEp
             .GroupBy(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
@@ -74,7 +75,7 @@ public sealed class SegmentDetectionService(
             if (covered.Contains((season, episode))) continue;
             try
             {
-                var peers = seasonFiles.TryGetValue(season, out var sf) ? sf : Array.Empty<string>();
+                var peers = seasonFiles.TryGetValue(season, out var sf) ? sf : Array.Empty<(int Episode, string Path)>();
                 if (await DetectForEpisodeAsync(item, season, episode, filePath, peers, cheapOnly, ct))
                     touched++;
             }
@@ -92,14 +93,14 @@ public sealed class SegmentDetectionService(
     /// batch pass and the player's lazy per-episode lookup.</summary>
     public Task<bool> DetectForEpisodeAsync(
         MediaItem item, int season, int episode, string filePath, bool cheapOnly, CancellationToken ct = default)
-        => DetectForEpisodeAsync(item, season, episode, filePath, Array.Empty<string>(), cheapOnly, ct);
+        => DetectForEpisodeAsync(item, season, episode, filePath, Array.Empty<(int Episode, string Path)>(), cheapOnly, ct);
 
     /// <inheritdoc cref="DetectForEpisodeAsync(MediaItem,int,int,string,bool,CancellationToken)"/>
-    /// <param name="seasonFiles">Every on-disk file in the same season, for the
-    /// chromaprint provider's peer comparison.</param>
+    /// <param name="seasonFiles">Every on-disk file in the same season as
+    /// (episode, path), for the chromaprint provider's nearest-peer comparison.</param>
     public async Task<bool> DetectForEpisodeAsync(
         MediaItem item, int season, int episode, string filePath,
-        IReadOnlyList<string> seasonFiles, bool cheapOnly, CancellationToken ct = default)
+        IReadOnlyList<(int Episode, string Path)> seasonFiles, bool cheapOnly, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return false;
 

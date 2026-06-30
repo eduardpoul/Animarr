@@ -48,9 +48,15 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
 
     public async Task<IReadOnlyList<DetectedSegment>> DetectAsync(SegmentEpisodeContext ctx, CancellationToken ct)
     {
+        // Nearest-numbered peers, not the first three: across a long run the
+        // opening/ending theme changes every cour, so episode 275's neighbours
+        // share its theme while episodes 1-3 don't. Comparing against neighbours
+        // is what lets late episodes match at all.
         var peers = ctx.SeasonFiles
-            .Where(f => !string.Equals(f, ctx.FilePath, StringComparison.OrdinalIgnoreCase) && File.Exists(f))
+            .Where(f => !string.Equals(f.Path, ctx.FilePath, StringComparison.OrdinalIgnoreCase) && File.Exists(f.Path))
+            .OrderBy(f => Math.Abs(f.Episode - ctx.Episode))
             .Take(3)
+            .Select(f => f.Path)
             .ToList();
         if (peers.Count == 0) return Array.Empty<DetectedSegment>();
 
