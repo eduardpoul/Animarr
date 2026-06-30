@@ -8,6 +8,8 @@ using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Segments;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using System.Collections.Concurrent;
 using SharedEnums = Animarr.Shared;
 using EfModels    = Animarr.Web.Data.Models;
 
@@ -25,6 +27,12 @@ using Animarr.Web.Services.Auth;
 
 internal static class MediaEndpoints
 {
+    // Debounce for the lazy per-episode chromaprint fallback (see MediaSegments
+    // GET): keys are "{itemId}|{season}|{episode}" we've already kicked a heavy
+    // detect for this process, so repeat opens of a genuinely segment-less episode
+    // don't re-decode its audio every time. Cleared on restart (cheap to redo).
+    private static readonly ConcurrentDictionary<string, byte> _lazyHeavyTried = new();
+
     public static IEndpointRouteBuilder MapMediaEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet(ApiRoutes.Media, async (
@@ -740,6 +748,7 @@ internal static class MediaEndpoints
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
             SegmentDetectionService detector,
+            IServiceScopeFactory scopeFactory,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -761,12 +770,42 @@ internal static class MediaEndpoints
                     {
                         var files = await resolver.ResolveAsync(id, ct);
                         var fp = files.FirstOrDefault(f => (f.Season ?? 1) == s && f.Episode == e)?.FilePath;
-                        if (!string.IsNullOrEmpty(fp) &&
-                            await detector.DetectForEpisodeAsync(item, s, e, fp!, cheapOnly: true, ct))
+                        if (!string.IsNullOrEmpty(fp))
                         {
-                            have = await db.EpisodeSegments.AsNoTracking()
-                                .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
-                                .ToListAsync(ct);
+                            if (await detector.DetectForEpisodeAsync(item, s, e, fp!, cheapOnly: true, ct))
+                            {
+                                have = await db.EpisodeSegments.AsNoTracking()
+                                    .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
+                                    .ToListAsync(ct);
+                            }
+
+                            // Cheap providers found nothing. The heavy chromaprint
+                            // provider can still detect it (e.g. donghua, which aren't
+                            // on AniList), but it decodes minutes of audio — too slow
+                            // to run inline. The batch pass would do it, except it
+                            // skips already-scanned titles (LastSegmentScanAt), so a
+                            // newly-added episode of an ongoing show never gets
+                            // fingerprinted. Run chromaprint for THIS episode in the
+                            // background, debounced once per process so repeat opens
+                            // of a genuinely segment-less episode don't re-decode it;
+                            // it'll be ready on a later open.
+                            if (have.Count == 0 && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
+                            {
+                                var peers = files
+                                    .Where(f => (f.Season ?? 1) == s && !string.IsNullOrEmpty(f.FilePath))
+                                    .Select(f => f.FilePath!).Distinct().ToList();
+                                var fpBg = fp!;
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        using var scope = scopeFactory.CreateScope();
+                                        var bg = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
+                                        await bg.DetectForEpisodeAsync(item, s, e, fpBg, peers, cheapOnly: false, CancellationToken.None);
+                                    }
+                                    catch { /* best-effort background detection */ }
+                                });
+                            }
                         }
                     }
                     catch { /* best-effort lazy detection */ }
