@@ -341,6 +341,21 @@ public class TorrentEngineService : BackgroundService
                 record.CompletedAt = DateTime.UtcNow;
                 record.State = TorrentRecordState.Seeding;
                 await ctx.SaveChangesAsync();
+
+                // A finished download is the precise "files are fully on disk" signal
+                // (unlike a FileSystemWatcher, which fires mid-download). New episodes
+                // may have landed in an already-scanned title, which the segment batch
+                // pass skips for 30 days (LastSegmentScanAt). Clear that gate so the
+                // background pass revisits the title and fingerprints the new files —
+                // covered-skip keeps it cheap (only new/uncovered episodes run).
+                if (record.FolderWatcherId is Guid fwId)
+                {
+                    var cleared = await ctx.MediaItems
+                        .Where(m => m.FolderId == fwId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastSegmentScanAt, (DateTime?)null));
+                    if (cleared > 0)
+                        _logger.LogInformation("[Segments] torrent {Hash} done → cleared segment-scan gate for its title", infoHash);
+                }
             }
 
             // Stop seeding check
