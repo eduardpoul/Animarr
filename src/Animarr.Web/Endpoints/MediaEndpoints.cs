@@ -792,8 +792,8 @@ internal static class MediaEndpoints
                             if (have.Count == 0 && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
                             {
                                 var peers = files
-                                    .Where(f => (f.Season ?? 1) == s && !string.IsNullOrEmpty(f.FilePath))
-                                    .Select(f => f.FilePath!).Distinct().ToList();
+                                    .Where(f => (f.Season ?? 1) == s && f.Episode != null && !string.IsNullOrEmpty(f.FilePath))
+                                    .Select(f => (f.Episode!.Value, f.FilePath!)).Distinct().ToList();
                                 var fpBg = fp!;
                                 _ = Task.Run(async () =>
                                 {
