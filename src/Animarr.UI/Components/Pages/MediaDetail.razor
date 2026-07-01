@@ -948,13 +948,22 @@ else
     /// <summary>"Next episode" — lock-screen / Bluetooth next-track, the HUD Next
     /// button, the MediaTrackNext remote key, AND the end-of-episode auto-advance
     /// overlay. Jumps to the nearest LATER on-disk episode (rolls forward into
-    /// the next season). No-op for movies or at the last available episode.</summary>
+    /// the next season). No-op for movies or at the last available episode.
+    ///
+    /// Advancing to a next episode is itself a "done with this one" signal, even
+    /// when playback never crossed the 90% auto-watched threshold (credits that
+    /// run long, or the user just skipping ahead) — so the outgoing episode is
+    /// marked watched here rather than left to the progress-based heuristic.
+    /// Fire-and-forget so the network round-trip doesn't delay the switch.</summary>
     [JSInvokable]
     public Task InvokeNext()
     {
         if (_item is null) return Task.CompletedTask;
         var next = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
-        return next is { } n ? PlayEpisodeAsync(n.Season, n.Episode) : Task.CompletedTask;
+        if (next is not { } n) return Task.CompletedTask;
+        if (_playerEpisode is not null)
+            _ = ToggleEpisodeWatched(_playerSeason ?? 1, _playerEpisode.Value, true);
+        return PlayEpisodeAsync(n.Season, n.Episode);
     }
 
     /// <summary>Nearest on-disk episode AFTER (season, episode), ordered by
