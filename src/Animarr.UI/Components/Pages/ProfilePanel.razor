@@ -35,7 +35,7 @@
          to fall through to the backdrop and close the dialog. *@
     <div class="d-pin-shell" @onclick="OnKeypadCancel">
         <div class="d-pin-card" @onclick:stopPropagation="true"
-             role="dialog" aria-modal="true" aria-label="Enter PIN">
+             role="dialog" aria-modal="true" aria-label="@L["pin.enter_aria"]">
             <PinKeypad UserName="@kt.Name"
                        Error="@_keypadError"
                        OnSubmit="OnKeypadSubmit"
@@ -47,7 +47,7 @@
 @if (IsOpen && UserCtx.Me is { } me)
 {
     <div class="d-profile__backdrop" @onclick="Close" aria-hidden="true"></div>
-    <aside class="d-profile" role="dialog" aria-label="Profile" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
+    <aside class="d-profile" role="dialog" aria-label="@L["profile.dialog_aria"]" data-mobile-detail="@(_mobileShowingDetail ? "true" : "false")">
 
         @* ── Header — on mobile + detail mode the close icon turns into a
              back arrow so the user can return to the category list without
@@ -57,7 +57,7 @@
             {
                 <button type="button" class="d-profile__back tv-focus"
                         @onclick="@(() => _mobileShowingDetail = false)"
-                        aria-label="Back to settings list">
+                        aria-label="@L["profile.back_to_list_aria"]">
                     <DIcon Name="chev-l" Size="18" />
                 </button>
             }
@@ -69,7 +69,7 @@
                    place without it. Closes the drawer → back to the main grid. *@
                 <button type="button" class="d-profile__back d-profile__back--home tv-focus"
                         @onclick="Close"
-                        aria-label="Back">
+                        aria-label="@L["common.back"]">
                     <DIcon Name="chev-l" Size="18" />
                 </button>
                 <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue"
@@ -86,14 +86,14 @@
                     </div>
                 }
             </div>
-            <button type="button" class="d-profile__close tv-focus" @onclick="Close" aria-label="Close">
+            <button type="button" class="d-profile__close tv-focus" @onclick="Close" aria-label="@L["common.btn_close"]">
                 <DIcon Name="x" Size="14" />
             </button>
         </header>
 
         @* ── Desktop tabs — hidden on mobile via .d-profile__tabs--desktop
              media query. Mobile users see the drilldown list below instead. *@
-        <nav class="d-profile__tabs d-profile__tabs--desktop" aria-label="Profile sections">
+        <nav class="d-profile__tabs d-profile__tabs--desktop" aria-label="@L["profile.sections_aria"]">
             @foreach (var t in Tabs)
             {
                 var key = t.Key;
@@ -102,7 +102,7 @@
                         class="@($"d-profile__tab tv-focus {(active ? "is-active" : "")}")"
                         @onclick="@(() => _activeTab = key)">
                     <DIcon Name="@t.Icon" Size="12" />
-                    @t.Label
+                    @L[t.Label]
                 </button>
             }
         </nav>
@@ -114,7 +114,7 @@
              Identity tab and live alongside the tab categories on phone —
              on a small screen those two actions deserve top-level surface
              instead of being buried two screens deep. ────────────────── *@
-        <nav class="d-profile__mlist" aria-label="Settings categories">
+        <nav class="d-profile__mlist" aria-label="@L["profile.categories_aria"]">
             @foreach (var t in Tabs)
             {
                 var key = t.Key;
@@ -123,7 +123,7 @@
                     <span class="d-profile__mlist-ic">
                         <DIcon Name="@t.Icon" Size="14" />
                     </span>
-                    <span class="d-profile__mlist-label">@t.Label</span>
+                    <span class="d-profile__mlist-label">@L[t.Label]</span>
                     <DIcon Name="chev-r" Size="13" />
                 </button>
             }
@@ -139,7 +139,7 @@
                     <span class="d-profile__mlist-ic">
                         <DIcon Name="torrent" Size="14" />
                     </span>
-                    <span class="d-profile__mlist-label">Downloads</span>
+                    <span class="d-profile__mlist-label">@L["profile.downloads"]</span>
                     <DIcon Name="chev-r" Size="13" />
                 </button>
             }
@@ -156,7 +156,7 @@
                     <span class="d-profile__mlist-ic">
                         <DIcon Name="qr-code" Size="14" />
                     </span>
-                    <span class="d-profile__mlist-label">Pair a TV</span>
+                    <span class="d-profile__mlist-label">@L["profile.pair_tv"]</span>
                     <DIcon Name="chev-r" Size="13" />
                 </button>
             }
@@ -183,7 +183,7 @@
                 <span class="d-profile__mlist-ic d-profile__mlist-ic--danger">
                     <DIcon Name="logout" Size="14" />
                 </span>
-                <span class="d-profile__mlist-label">SIGN OUT</span>
+                <span class="d-profile__mlist-label">@L["profile.sign_out"]</span>
             </button>
         </nav>
 
@@ -217,13 +217,16 @@
     /// the Server section sits. Pass null for the regular default.</summary>
     [Parameter] public string? InitialTab { get; set; }
 
+    // Label holds a localization KEY (resolved via L[...] at each render site)
+    // rather than an English literal — the array is static so it can't call the
+    // injected LocalizationService directly.
     private record TabDef(string Key, string Label, string Icon);
     private static readonly TabDef[] Tabs =
     {
-        new("identity",   "Identity",   "user"),
-        new("servers",    "Servers",    "server"),
-        new("appearance", "Appearance", "sparkle"),
-        new("audio",      "Audio",      "audio"),
+        new("identity",   "profile.tab_identity",   "user"),
+        new("servers",    "profile.tab_servers",    "server"),
+        new("appearance", "profile.tab_appearance", "sparkle"),
+        new("audio",      "profile.tab_audio",      "audio"),
         // Language used to be its own tab; it now lives at the bottom of the
         // Appearance tab (it's a display preference like theme / accent, and
         // a standalone tab for one dropdown was overkill on mobile drilldown).
@@ -244,8 +247,8 @@
         get
         {
             foreach (var t in Tabs)
-                if (t.Key == _activeTab) return t.Label;
-            return "Settings";
+                if (t.Key == _activeTab) return L[t.Label];
+            return L["nav.settings"];
         }
     }
 
@@ -402,7 +405,7 @@
     private async Task SubmitSetPinAsync()
     {
         _pinError = "";
-        if (_pinValue.Length < 4) { _pinError = "PIN must be 4 digits."; return; }
+        if (_pinValue.Length < 4) { _pinError = L["profile.pin_err_len"]; return; }
         if (UserCtx.Me is not { } me) return;
         _pinBusy = true; StateHasChanged();
         try
@@ -412,9 +415,9 @@
             _myHasDevicePin = true;
             await LoadProfilesAsync();        // refresh the strip's lock badge
             _pinOpen = false; _pinValue = "";
-            Toasts.ShowSuccess("PIN saved on this device");
+            Toasts.ShowSuccess(L["profile.pin_toast_saved"]);
         }
-        catch (Exception ex) { _pinError = $"Couldn't save PIN: {ex.Message}"; }
+        catch (Exception ex) { _pinError = L.Get("profile.pin_err_save", ex.Message); }
         finally { _pinBusy = false; StateHasChanged(); }
     }
 
@@ -429,9 +432,9 @@
             _myHasDevicePin = false;
             await LoadProfilesAsync();
             _pinOpen = false; _pinValue = "";
-            Toasts.ShowSuccess("PIN removed");
+            Toasts.ShowSuccess(L["profile.pin_toast_removed"]);
         }
-        catch (Exception ex) { _pinError = $"Couldn't remove PIN: {ex.Message}"; }
+        catch (Exception ex) { _pinError = L.Get("profile.pin_err_remove", ex.Message); }
         finally { _pinBusy = false; StateHasChanged(); }
     }
 
@@ -441,7 +444,7 @@
         var trimmedName = _editName.Trim();
         if (string.IsNullOrEmpty(trimmedName))
         {
-            _editProfileError = "Name cannot be empty.";
+            _editProfileError = L["profile.err_name_empty"];
             return;
         }
         _editProfileBusy = true;
@@ -457,11 +460,11 @@
             // re-pulls /api/me which carries the freshly-saved Name/Email/Hue.
             await UserCtx.RefreshMeAsync();
             _editProfileOpen = false;
-            Toasts.ShowSuccess("Profile updated");
+            Toasts.ShowSuccess(L["profile.toast_updated"]);
         }
         catch (Exception ex)
         {
-            _editProfileError = $"Save failed: {ex.Message}";
+            _editProfileError = L.Get("profile.err_save_failed", ex.Message);
         }
         finally
         {
@@ -475,17 +478,17 @@
         _changePwError = "";
         if (string.IsNullOrEmpty(_pwCurrent))
         {
-            _changePwError = "Current password is required.";
+            _changePwError = L["profile.err_pw_current_required"];
             return;
         }
         if (_pwNew.Length < 6)
         {
-            _changePwError = "New password must be at least 6 characters.";
+            _changePwError = L["profile.err_pw_min"];
             return;
         }
         if (_pwNew != _pwRepeat)
         {
-            _changePwError = "Passwords don't match.";
+            _changePwError = L["profile.err_pw_mismatch"];
             return;
         }
         _changePwBusy = true;
@@ -495,14 +498,14 @@
             await Api.ChangeMyPasswordAsync(new ChangePasswordRequest(_pwCurrent, _pwNew));
             _changePwOpen = false;
             _pwCurrent = _pwNew = _pwRepeat = "";
-            Toasts.ShowSuccess("Password changed");
+            Toasts.ShowSuccess(L["profile.toast_pw_changed"]);
         }
         catch (Exception ex)
         {
             // The server returns 400 with {error} JSON for the "current password is
             // incorrect" + min-length cases. Surface the underlying message when we
             // can, otherwise the generic message keeps the form open.
-            _changePwError = $"Update failed: {ex.Message}";
+            _changePwError = L.Get("profile.err_update_failed", ex.Message);
         }
         finally
         {
@@ -720,7 +723,7 @@
                                         ImagePath="@prof.User.AvatarPath" Size="md" />
                                 @if (prof.HasPin)
                                 {
-                                    <span class="d-profile__user-card-pin-badge" aria-label="PIN required">
+                                    <span class="d-profile__user-card-pin-badge" aria-label="@L["profile.pin_required_aria"]">
                                         <DIcon Name="lock" Size="9" />
                                     </span>
                                 }
@@ -729,7 +732,7 @@
                             <span class="d-profile__user-card-meta">
                                 @if (isMe)
                                 {
-                                    <span>you</span>
+                                    <span>@L["profile.you"]</span>
                                 }
                                 else
                                 {
@@ -743,20 +746,20 @@
                             @onclick="OnAddAccountClick">
                         <span class="d-profile__user-card-avatar d-profile__user-card-avatar--dashed">+</span>
                         <span class="d-profile__user-card-name d-profile__user-card-name--dim">
-                            Add account
+                            @L["profile.add_account"]
                         </span>
                     </button>
                 </div>
             </div>
 
             <div class="d-profile__kv">
-                <span class="d-profile__kv-key">USERNAME</span>
+                <span class="d-profile__kv-key">@L["profile.kv_username"]</span>
                 <span class="d-profile__kv-val">@me.User.Username</span>
-                <span class="d-profile__kv-key">ROLE</span>
+                <span class="d-profile__kv-key">@L["profile.kv_role"]</span>
                 <span class="d-profile__kv-val d-profile__kv-val--accent">@me.User.RoleName.ToUpperInvariant()</span>
-                <span class="d-profile__kv-key">EMAIL</span>
+                <span class="d-profile__kv-key">@L["profile.kv_email"]</span>
                 <span class="d-profile__kv-val">@(string.IsNullOrEmpty(me.User.Email) ? "—" : me.User.Email)</span>
-                <span class="d-profile__kv-key">CREATED</span>
+                <span class="d-profile__kv-key">@L["profile.kv_created"]</span>
                 <span class="d-profile__kv-val d-profile__kv-val--dim">@me.User.CreatedAt.ToString("yyyy-MM-dd")</span>
             </div>
 
@@ -768,7 +771,7 @@
                  device migrations (server stores the override). *@
             <button type="button" class="d-profile__inline-btn tv-focus"
                     @onclick="@(() => ToggleEditProfile())">
-                <DIcon Name="pencil" Size="13" /> @(_editProfileOpen ? "Cancel" : "Edit profile")
+                <DIcon Name="pencil" Size="13" /> @(_editProfileOpen ? L["common.btn_cancel"] : L["profile.edit_profile"])
             </button>
             @if (_editProfileOpen)
             {
@@ -778,27 +781,27 @@
                         <div class="d-profile__inline-error">@_editProfileError</div>
                     }
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">DISPLAY NAME</span>
+                        <span class="d-profile__field-label">@L["profile.field_display_name"]</span>
                         <input class="d-profile__inline-input" type="text"
                                value="@_editName"
                                @oninput="@((ChangeEventArgs e) => _editName = e.Value?.ToString() ?? "")" />
                     </label>
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">EMAIL (OPTIONAL)</span>
+                        <span class="d-profile__field-label">@L["profile.field_email_optional"]</span>
                         <input class="d-profile__inline-input" type="email"
                                value="@_editEmail"
                                @oninput="@((ChangeEventArgs e) => _editEmail = e.Value?.ToString() ?? "")" />
                     </label>
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">AVATAR HUE · @_editAvatarHue°</span>
+                        <span class="d-profile__field-label">@L["profile.field_avatar_hue"] · @_editAvatarHue°</span>
                         <input class="d-profile__range" type="range" min="0" max="359" step="1"
                                value="@_editAvatarHue"
                                @oninput="@((ChangeEventArgs e) => { if (int.TryParse(e.Value?.ToString(), out var n)) _editAvatarHue = n; })" />
                     </label>
                     <div class="d-profile__inline-actions">
                         <Btn Variant="primary" Size="sm" Loading="@_editProfileBusy"
-                             OnClick="SubmitEditProfileAsync">Save changes</Btn>
-                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _editProfileOpen = false)">Cancel</Btn>
+                             OnClick="SubmitEditProfileAsync">@L["profile.btn_save_changes"]</Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _editProfileOpen = false)">@L["common.btn_cancel"]</Btn>
                     </div>
                 </div>
             }
@@ -809,7 +812,7 @@
                  password and enforces a 6-char minimum on the new value. *@
             <button type="button" class="d-profile__inline-btn tv-focus"
                     @onclick="@(() => ToggleChangePassword())">
-                <DIcon Name="key" Size="13" /> @(_changePwOpen ? "Cancel" : "Change password")
+                <DIcon Name="key" Size="13" /> @(_changePwOpen ? L["common.btn_cancel"] : L["profile.change_password"])
             </button>
             @if (_changePwOpen)
             {
@@ -819,27 +822,27 @@
                         <div class="d-profile__inline-error">@_changePwError</div>
                     }
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">CURRENT PASSWORD</span>
+                        <span class="d-profile__field-label">@L["profile.field_current_password"]</span>
                         <input class="d-profile__inline-input" type="password"
                                value="@_pwCurrent"
                                @oninput="@((ChangeEventArgs e) => _pwCurrent = e.Value?.ToString() ?? "")" />
                     </label>
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">NEW PASSWORD (min 6)</span>
+                        <span class="d-profile__field-label">@L["profile.field_new_password"]</span>
                         <input class="d-profile__inline-input" type="password"
                                value="@_pwNew"
                                @oninput="@((ChangeEventArgs e) => _pwNew = e.Value?.ToString() ?? "")" />
                     </label>
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">REPEAT NEW PASSWORD</span>
+                        <span class="d-profile__field-label">@L["profile.field_repeat_password"]</span>
                         <input class="d-profile__inline-input" type="password"
                                value="@_pwRepeat"
                                @oninput="@((ChangeEventArgs e) => _pwRepeat = e.Value?.ToString() ?? "")" />
                     </label>
                     <div class="d-profile__inline-actions">
                         <Btn Variant="primary" Size="sm" Loading="@_changePwBusy"
-                             OnClick="SubmitChangePasswordAsync">Update password</Btn>
-                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _changePwOpen = false)">Cancel</Btn>
+                             OnClick="SubmitChangePasswordAsync">@L["profile.btn_update_password"]</Btn>
+                        <Btn Variant="ghost" Size="sm" OnClick="@(() => _changePwOpen = false)">@L["common.btn_cancel"]</Btn>
                     </div>
                 </div>
             }
@@ -852,7 +855,7 @@
             <button type="button" class="d-profile__inline-btn tv-focus"
                     @onclick="@(() => ToggleSetPin())">
                 <DIcon Name="lock" Size="13" />
-                @(_pinOpen ? "Cancel" : (_myHasDevicePin ? "Change or remove PIN (this device)" : "Set a PIN (this device)"))
+                @(_pinOpen ? L["common.btn_cancel"] : (_myHasDevicePin ? L["profile.pin_change_or_remove"] : L["profile.pin_set"]))
             </button>
             @if (_pinOpen)
             {
@@ -862,7 +865,7 @@
                         <div class="d-profile__inline-error">@_pinError</div>
                     }
                     <label class="d-profile__field">
-                        <span class="d-profile__field-label">@(_myHasDevicePin ? "NEW PIN (4 DIGITS)" : "PIN (4 DIGITS)")</span>
+                        <span class="d-profile__field-label">@(_myHasDevicePin ? L["profile.field_new_pin"] : L["profile.field_pin"])</span>
                         <input class="d-profile__inline-input" type="password"
                                inputmode="numeric" autocomplete="off" maxlength="4"
                                value="@_pinValue"
@@ -870,11 +873,11 @@
                     </label>
                     <div class="d-profile__inline-actions">
                         <Btn Variant="primary" Size="sm" Loading="@_pinBusy" OnClick="SubmitSetPinAsync">
-                            @(_myHasDevicePin ? "Update PIN" : "Set PIN")
+                            @(_myHasDevicePin ? L["profile.btn_update_pin"] : L["profile.btn_set_pin"])
                         </Btn>
                         @if (_myHasDevicePin)
                         {
-                            <Btn Variant="ghost" Size="sm" OnClick="RemovePinAsync">Remove PIN</Btn>
+                            <Btn Variant="ghost" Size="sm" OnClick="RemovePinAsync">@L["profile.btn_remove_pin"]</Btn>
                         }
                     </div>
                 </div>
@@ -900,8 +903,8 @@
                             <DIcon Name="qr-code" Size="14" />
                         </span>
                         <span class="d-profile__nav-row__body">
-                            <span class="d-profile__nav-row__name">Pair a TV</span>
-                            <span class="d-profile__nav-row__meta">Scan the QR shown on your TV's pairing screen.</span>
+                            <span class="d-profile__nav-row__name">@L["profile.pair_tv"]</span>
+                            <span class="d-profile__nav-row__meta">@L["profile.pair_tv_sub"]</span>
                         </span>
                         <DIcon Name="chev-r" Size="13" />
                     </button>
@@ -927,7 +930,7 @@
                 }
 
                 <button type="button" class="d-profile__signout tv-focus" @onclick="SignOut">
-                    <DIcon Name="logout" Size="13" /> SIGN OUT
+                    <DIcon Name="logout" Size="13" /> @L["profile.sign_out"]
                 </button>
             </div>
         </div>
@@ -999,7 +1002,7 @@
     {
         _addError = "";
         var url = _addUrl.Trim();
-        if (string.IsNullOrEmpty(url)) { _addError = "Enter a URL."; return; }
+        if (string.IsNullOrEmpty(url)) { _addError = L["profile.err_enter_url"]; return; }
         if (!url.Contains("://", StringComparison.Ordinal)) url = "http://" + url;
 
         _adding = true;
@@ -1009,7 +1012,7 @@
             var entry = await ServerReg.AddServerAsync(url);
             if (entry is null)
             {
-                _addError = "Couldn't reach an Animarr server at that URL.";
+                _addError = L["profile.err_server_unreachable"];
                 return;
             }
             _addUrl = "";
@@ -1017,7 +1020,7 @@
         }
         catch (Exception ex)
         {
-            _addError = $"Probe failed: {ex.Message}";
+            _addError = L.Get("profile.err_probe_failed", ex.Message);
         }
         finally
         {
@@ -1145,7 +1148,7 @@
             var newMe = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, null));
             if (newMe is null)
             {
-                _keypadError = "Couldn't switch — try again.";
+                _keypadError = L["profile.err_switch_failed"];
                 _switchBusy = false;
                 StateHasChanged();
                 return;
@@ -1168,7 +1171,7 @@
         }
         catch
         {
-            _keypadError = "Couldn't switch — try again.";
+            _keypadError = L["profile.err_switch_failed"];
         }
         finally
         {
@@ -1252,12 +1255,12 @@
     {
         <div class="d-profile__section">
             <div class="d-profile__server-block">
-                <div class="d-profile__field-label">Servers</div>
+                <div class="d-profile__field-label">@L["profile.servers_label"]</div>
 
                 @if (ServerReg.Count == 0)
                 {
                     <div class="d-profile__server-empty">
-                        No servers registered yet. Add one below — manual IP, hostname or Tailscale name all work.
+                        @L["profile.servers_empty"]
                     </div>
                 }
 
@@ -1276,8 +1279,8 @@
                         @onclick="@(() => _addServerOpen = !_addServerOpen)">
                     <span class="d-profile__server-row__ic d-profile__server-row__ic--dashed">+</span>
                     <span class="d-profile__server-row__body">
-                        <span class="d-profile__server-row__name d-profile__server-row__name--dim">Add server</span>
-                        <span class="d-profile__server-row__meta">manual IP / Tailscale</span>
+                        <span class="d-profile__server-row__name d-profile__server-row__name--dim">@L["profile.add_server"]</span>
+                        <span class="d-profile__server-row__meta">@L["profile.add_server_sub"]</span>
                     </span>
                 </button>
 
@@ -1298,10 +1301,10 @@
                             <Btn Variant="primary" Size="sm" Loading="@_adding"
                                  OnClick="OnAddServer"
                                  Disabled="@(string.IsNullOrWhiteSpace(_addUrl))">
-                                Probe
+                                @L["profile.btn_probe"]
                             </Btn>
                             <Btn Variant="flat" Size="sm" OnClick="@(() => { _addServerOpen = false; _addError = ""; })">
-                                Cancel
+                                @L["common.btn_cancel"]
                             </Btn>
                         </div>
                     </div>
@@ -1338,14 +1341,14 @@
                            @onblur="CommitRename"
                            autofocus />
                     <span class="d-profile__server-row__meta">
-                        Enter to save · Esc to cancel
+                        @L["profile.rename_hint"]
                     </span>
                 }
                 else
                 {
                     <span class="d-profile__server-row__name">@srv.Name</span>
                     <span class="d-profile__server-row__meta">
-                        @srv.BaseUrl@(srv.TitleCount is int c ? $" · {c} titles" : "")
+                        @srv.BaseUrl@(srv.TitleCount is int c ? L.Get("profile.server_titles_suffix_fmt", c) : "")
                     </span>
                 }
             </span>
@@ -1358,11 +1361,11 @@
                 @if (editing)
                 {
                     <button type="button" class="d-profile__server-row__btn tv-focus"
-                            @onclick="CommitRename" aria-label="Save name">
+                            @onclick="CommitRename" aria-label="@L["profile.aria_save_name"]">
                         <DIcon Name="check" Size="13" />
                     </button>
                     <button type="button" class="d-profile__server-row__btn tv-focus"
-                            @onclick="CancelRename" aria-label="Cancel rename">
+                            @onclick="CancelRename" aria-label="@L["profile.aria_cancel_rename"]">
                         <DIcon Name="x" Size="13" />
                     </button>
                 }
@@ -1370,18 +1373,18 @@
                 {
                     <button type="button" class="d-profile__server-row__btn tv-focus"
                             @onclick="@(() => StartRename(srv))"
-                            aria-label="Rename server">
+                            aria-label="@L["profile.aria_rename_server"]">
                         <DIcon Name="pencil" Size="13" />
                     </button>
                     @if (isCurrent)
                     {
-                        <span class="d-profile__server-row__right">current</span>
+                        <span class="d-profile__server-row__right">@L["profile.server_current"]</span>
                     }
                     else
                     {
                         <button type="button" class="d-profile__server-row__btn d-profile__server-row__btn--switch tv-focus"
                                 @onclick="@(() => OnSwitchServer(srv))">
-                            switch
+                            @L["profile.server_switch"]
                         </button>
                     }
                 }
@@ -1401,8 +1404,8 @@
 
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Theme</div>
-                    <div class="d-profile__section-hint">Pick the personality palette and typography.</div>
+                    <div class="d-profile__section-title">@L["profile.theme_title"]</div>
+                    <div class="d-profile__section-hint">@L["profile.theme_hint"]</div>
                 </div>
                 <div class="d-profile__theme-grid">
                     @foreach (var th in Themes)
@@ -1411,7 +1414,7 @@
                         var active = string.Equals(_theme, t.Slug, StringComparison.OrdinalIgnoreCase);
                         <button type="button"
                                 class="@($"d-profile__theme-card tv-focus {(active ? "is-active" : "")}")"
-                                title="@t.Description"
+                                title="@L[t.Description]"
                                 @onclick="@(() => OnSelectTheme(t.Slug))">
                             <span class="d-profile__theme-card__preview"
                                   style="@($"--th-bg: {t.PreviewBg}; --th-accent: {t.PreviewAccent}; --th-text: {t.PreviewText};")">
@@ -1425,8 +1428,8 @@
 
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Accent color</div>
-                    <div class="d-profile__section-hint">Tints buttons, links, hero highlights and the brand mark.</div>
+                    <div class="d-profile__section-title">@L["profile.accent_title"]</div>
+                    <div class="d-profile__section-hint">@L["profile.accent_hint"]</div>
                 </div>
                 <div class="d-profile__swatches">
                     @foreach (var sw in AccentSwatches)
@@ -1436,7 +1439,7 @@
                         <button type="button"
                                 class="@($"d-profile__swatch tv-focus {(active ? "is-active" : "")}")"
                                 style="@SwatchStyle(s)"
-                                title="@s.Label"
+                                title="@L[s.Label]"
                                 @onclick="@(() => OnSelectAccent(s.Hue))"></button>
                     }
                 </div>
@@ -1444,16 +1447,16 @@
 
             <div class="d-profile__toggle-row">
                 <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">Animated backdrop</div>
-                    <div class="d-profile__toggle-hint">Fanart slideshow behind every page.</div>
+                    <div class="d-profile__toggle-title">@L["profile.backdrop_toggle_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.backdrop_toggle_hint"]</div>
                 </div>
                 <Toggle Checked="@_backdropEnabled" CheckedChanged="OnBackdropToggle" />
             </div>
 
             <div class="d-profile__toggle-row">
                 <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">TV mode</div>
-                    <div class="d-profile__toggle-hint">Larger focus rings + bigger hit targets for remote-control navigation.</div>
+                    <div class="d-profile__toggle-title">@L["profile.tv_mode_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.tv_mode_hint"]</div>
                 </div>
                 <Toggle Checked="@_tvMode" CheckedChanged="OnTvModeToggle" />
             </div>
@@ -1465,10 +1468,9 @@
                  no background, no labels. *@
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Player style</div>
+                    <div class="d-profile__section-title">@L["profile.player_style_title"]</div>
                     <div class="d-profile__section-hint">
-                        How the in-player controls render. Saved per device — set
-                        this differently on a TV vs phone if you like.
+                        @L["profile.player_style_hint"]
                     </div>
                 </div>
                 <div class="d-profile__pager-grid">
@@ -1478,7 +1480,7 @@
                     }
                     <button type="button"
                             class="@($"d-profile__pager-card tv-focus {(fullActive ? "is-active" : "")}")"
-                            title="Glass buttons with icons and labels"
+                            title="@L["profile.player_style_full_tooltip"]"
                             @onclick="@(() => OnPlayerStyleSelect("full"))">
                         <span class="d-profile__pager-card__preview">
                             <span class="d-profile__player-style-preview d-profile__player-style-preview--full">
@@ -1487,11 +1489,11 @@
                                 <span class="d-profile__player-style-chip">CC</span>
                             </span>
                         </span>
-                        <span class="d-profile__pager-card__name">Full</span>
+                        <span class="d-profile__pager-card__name">@L["profile.player_style_full"]</span>
                     </button>
                     <button type="button"
                             class="@($"d-profile__pager-card tv-focus {(iconsActive ? "is-active" : "")}")"
-                            title="Just the icons, no labels, no background"
+                            title="@L["profile.player_style_icons_tooltip"]"
                             @onclick="@(() => OnPlayerStyleSelect("icons"))">
                         <span class="d-profile__pager-card__preview">
                             <span class="d-profile__player-style-preview d-profile__player-style-preview--icons">
@@ -1500,7 +1502,7 @@
                                 <span class="d-profile__player-style-icon">CC</span>
                             </span>
                         </span>
-                        <span class="d-profile__pager-card__name">Icons only</span>
+                        <span class="d-profile__pager-card__name">@L["profile.player_style_icons"]</span>
                     </button>
                 </div>
             </div>
@@ -1512,11 +1514,9 @@
                  actual pager markup so a glance is enough to pick. *@
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Hero pager style</div>
+                    <div class="d-profile__section-title">@L["profile.hero_pager_title"]</div>
                     <div class="d-profile__section-hint">
-                        Layout of the Continue Watching slot pager. Only visible
-                        when you have in-progress titles — the Featured hero
-                        below uses its own numbered side rail.
+                        @L["profile.hero_pager_hint"]
                     </div>
                 </div>
                 <div class="d-profile__pager-grid">
@@ -1526,7 +1526,7 @@
                         var active = string.Equals(_heroPagerStyle, opt.Key, StringComparison.OrdinalIgnoreCase);
                         <button type="button"
                                 class="@($"d-profile__pager-card tv-focus {(active ? "is-active" : "")}")"
-                                title="@opt.Hint"
+                                title="@L[opt.Hint]"
                                 @onclick="@(() => OnSelectPagerStyle(opt.Key))">
                             <span class="d-profile__pager-card__preview">
                                 @switch (opt.Key)
@@ -1568,7 +1568,7 @@
                                         break;
                                 }
                             </span>
-                            <span class="d-profile__pager-card__name">@opt.Label</span>
+                            <span class="d-profile__pager-card__name">@L[opt.Label]</span>
                         </button>
                     }
                 </div>
@@ -1581,11 +1581,9 @@
                  lockstep. Spec: "Animarr — Episode View Modes". *@
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Episode list view</div>
+                    <div class="d-profile__section-title">@L["profile.episode_view_title"]</div>
                     <div class="d-profile__section-hint">
-                        How a series' episodes are laid out on its page. Grid is
-                        compact poster cards; Detailed list shows a row per episode
-                        with title and synopsis. The toggle on the page changes this too.
+                        @L["profile.episode_view_hint"]
                     </div>
                 </div>
                 <div class="d-profile__pager-grid">
@@ -1595,21 +1593,21 @@
                     }
                     <button type="button"
                             class="@($"d-profile__pager-card tv-focus {(epGridActive ? "is-active" : "")}")"
-                            title="Poster-card grid"
+                            title="@L["profile.episode_view_grid_tooltip"]"
                             @onclick="@(() => OnSelectEpisodeView("grid"))">
                         <span class="d-profile__pager-card__preview">
                             <DIcon Name="grid" Size="26" />
                         </span>
-                        <span class="d-profile__pager-card__name">Grid</span>
+                        <span class="d-profile__pager-card__name">@L["profile.episode_view_grid"]</span>
                     </button>
                     <button type="button"
                             class="@($"d-profile__pager-card tv-focus {(epListActive ? "is-active" : "")}")"
-                            title="Detailed list — row per episode"
+                            title="@L["profile.episode_view_list_tooltip"]"
                             @onclick="@(() => OnSelectEpisodeView("list"))">
                         <span class="d-profile__pager-card__preview">
                             <DIcon Name="list" Size="26" />
                         </span>
-                        <span class="d-profile__pager-card__name">Detailed list</span>
+                        <span class="d-profile__pager-card__name">@L["profile.episode_view_list"]</span>
                     </button>
                 </div>
             </div>
@@ -1620,11 +1618,9 @@
                  dropdown (especially awkward in the mobile drilldown). *@
             <div class="d-profile__section-block">
                 <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">Interface language</div>
+                    <div class="d-profile__section-title">@L["profile.language_title"]</div>
                     <div class="d-profile__section-hint">
-                        Picking a different language reloads the app so every screen
-                        re-renders in the new locale. Your preferred audio + subtitle
-                        languages live in the <strong>Audio</strong> tab.
+                        @((MarkupString)L["profile.language_hint_html"])
                     </div>
                 </div>
                 <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
@@ -1643,12 +1639,14 @@
     /// <c>AuthEndpoints.ValidatePagerStyle</c>; <c>CatalogContinueHero</c>
     /// reads the same string from <c>UserCtx.Preferences.HeroPagerStyle</c>
     /// to pick which markup branch to render.</summary>
+    // Label / Hint hold localization KEYS resolved via L[...] at the render
+    // site (the array is static and can't reach the injected service).
     private sealed record PagerOption(string Key, string Label, string Hint);
     private static readonly PagerOption[] PagerOptions = new[]
     {
-        new PagerOption("f", "Transparent", "Long strokes with title underneath each slot."),
-        new PagerOption("g", "Chevrons",    "Hover-revealed prev/next chevrons + dash pager."),
-        new PagerOption("h", "Numbered",    "Numbered pills with chevrons — best for many slots."),
+        new PagerOption("f", "profile.pager_f_label", "profile.pager_f_hint"),
+        new PagerOption("g", "profile.pager_g_label", "profile.pager_g_hint"),
+        new PagerOption("h", "profile.pager_h_label", "profile.pager_h_hint"),
     };
 
     /// <summary>Episode-list layout picker. PATCHes the preference and mirrors
@@ -1679,19 +1677,21 @@
 
     // 10 personality themes. PreviewBg / PreviewAccent / PreviewText are tiny
     // swatches rendered in the picker — they don't have to match the theme's
-    // CSS exactly, just convey the vibe.
+    // CSS exactly, just convey the vibe. Name is the theme's proper (brand-like)
+    // palette name and is kept literal; Description holds a localization KEY
+    // resolved via L[...] at the render site (tooltip helper text).
     private static readonly ThemeOption[] Themes = new[]
     {
-        new ThemeOption("quietude",        "Quietude",           "Calm graphite + soft teal",        "#181c24", "#65b6c8", "#e9ecf2"),
-        new ThemeOption("cinematic",       "Cinematic",          "Warm leather + crimson",           "#15110e", "#e25a4d", "#f4eee6"),
-        new ThemeOption("terminal",        "Terminal",           "Pure black + neon green",          "#000000", "#5aff8c", "#c6ffd2"),
-        new ThemeOption("anime",           "Anime",              "Plum + pastel pink",               "#1c1320", "#f3a8c8", "#f8e8f0"),
-        new ThemeOption("ember-edge",      "Ember Edge",         "Indigo + checker pattern",         "#131826", "#8870ff", "#e6e9f5"),
-        new ThemeOption("mountain-sect",   "Mountain Sect",      "Warm black + gold/red CJK",        "#1a1410", "#c43a3a", "#f3e5c8"),
-        new ThemeOption("immortal-path",   "Immortal Path",      "Parchment + jade ink",             "#28231b", "#5aa57b", "#f5ecd8"),
-        new ThemeOption("heavens-defiance","Heaven's Defiance",  "Storm black + blood red",          "#0d1018", "#cc2a2a", "#f0e8e0"),
-        new ThemeOption("ink-and-paper",   "Ink & Paper",        "Washi paper + hanko red (light)",  "#f5f0e6", "#b03030", "#1a1612"),
-        new ThemeOption("cyberpunk",       "Cyberpunk",          "Black + neon yellow + glitch",     "#0d0d0d", "#fcd14d", "#e0fcff"),
+        new ThemeOption("quietude",        "Quietude",           "profile.theme_desc_quietude",        "#181c24", "#65b6c8", "#e9ecf2"),
+        new ThemeOption("cinematic",       "Cinematic",          "profile.theme_desc_cinematic",       "#15110e", "#e25a4d", "#f4eee6"),
+        new ThemeOption("terminal",        "Terminal",           "profile.theme_desc_terminal",        "#000000", "#5aff8c", "#c6ffd2"),
+        new ThemeOption("anime",           "Anime",              "profile.theme_desc_anime",           "#1c1320", "#f3a8c8", "#f8e8f0"),
+        new ThemeOption("ember-edge",      "Ember Edge",         "profile.theme_desc_ember_edge",      "#131826", "#8870ff", "#e6e9f5"),
+        new ThemeOption("mountain-sect",   "Mountain Sect",      "profile.theme_desc_mountain_sect",   "#1a1410", "#c43a3a", "#f3e5c8"),
+        new ThemeOption("immortal-path",   "Immortal Path",      "profile.theme_desc_immortal_path",   "#28231b", "#5aa57b", "#f5ecd8"),
+        new ThemeOption("heavens-defiance","Heaven's Defiance",  "profile.theme_desc_heavens_defiance","#0d1018", "#cc2a2a", "#f0e8e0"),
+        new ThemeOption("ink-and-paper",   "Ink & Paper",        "profile.theme_desc_ink_and_paper",   "#f5f0e6", "#b03030", "#1a1612"),
+        new ThemeOption("cyberpunk",       "Cyberpunk",          "profile.theme_desc_cyberpunk",       "#0d0d0d", "#fcd14d", "#e0fcff"),
     };
 
     private sealed record ThemeOption(
@@ -1713,50 +1713,50 @@
     {
         <div class="d-profile__audio-grid">
             <label class="d-profile__field">
-                <span class="d-profile__field-label">PREFERRED AUDIO</span>
+                <span class="d-profile__field-label">@L["profile.audio_preferred_label"]</span>
                 <select class="d-profile__select" value="@_audioPref" @onchange="OnAudioPrefChanged">
-                    <option>Japanese</option>
-                    <option>Mandarin</option>
-                    <option>English</option>
-                    <option>Russian</option>
-                    <option>Korean</option>
+                    <option value="Japanese">@L["edit_metadata.basics_lang_japanese"]</option>
+                    <option value="Mandarin">@L["edit_metadata.basics_lang_mandarin"]</option>
+                    <option value="English">@L["edit_metadata.basics_lang_english"]</option>
+                    <option value="Russian">@L["edit_metadata.basics_lang_russian"]</option>
+                    <option value="Korean">@L["edit_metadata.basics_lang_korean"]</option>
                 </select>
             </label>
 
             <label class="d-profile__field">
-                <span class="d-profile__field-label">SUBTITLE LANGUAGE</span>
+                <span class="d-profile__field-label">@L["profile.subtitle_lang_label"]</span>
                 <select class="d-profile__select" value="@_subPref" @onchange="OnSubPrefChanged">
-                    <option>Russian</option>
-                    <option>English</option>
-                    <option>Off</option>
-                    <option>Japanese</option>
+                    <option value="Russian">@L["edit_metadata.basics_lang_russian"]</option>
+                    <option value="English">@L["edit_metadata.basics_lang_english"]</option>
+                    <option value="Off">@L["profile.subtitle_off"]</option>
+                    <option value="Japanese">@L["edit_metadata.basics_lang_japanese"]</option>
                 </select>
             </label>
 
             <label class="d-profile__field d-profile__field--full">
-                <span class="d-profile__field-label">SUBTITLE SIZE · @_subSize px</span>
+                <span class="d-profile__field-label">@L["profile.subtitle_size_label"] · @_subSize px</span>
                 <input type="range" min="12" max="32" step="1" class="d-profile__range"
                        value="@_subSize" @onchange="OnSubSizeChanged" />
             </label>
 
             <label class="d-profile__field d-profile__field--full">
-                <span class="d-profile__field-label">DEFAULT VOLUME · @_volume %</span>
+                <span class="d-profile__field-label">@L["profile.default_volume_label"] · @_volume %</span>
                 <input type="range" min="0" max="100" step="1" class="d-profile__range"
                        value="@_volume" @onchange="OnVolumeChanged" />
             </label>
 
             <div class="d-profile__toggle-row d-profile__field--full">
                 <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">Audio passthrough</div>
-                    <div class="d-profile__toggle-hint">For AV receivers — sends raw bitstream.</div>
+                    <div class="d-profile__toggle-title">@L["profile.passthrough_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.passthrough_hint"]</div>
                 </div>
                 <Toggle Checked="@_passthrough" CheckedChanged="OnPassthroughToggle" />
             </div>
 
             <div class="d-profile__toggle-row d-profile__field--full">
                 <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">Normalize volume between titles</div>
-                    <div class="d-profile__toggle-hint">EBU R128 loudness normalization.</div>
+                    <div class="d-profile__toggle-title">@L["profile.normalize_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.normalize_hint"]</div>
                 </div>
                 <Toggle Checked="@_normalize" CheckedChanged="OnNormalizeToggle" />
             </div>
@@ -1767,8 +1767,8 @@
                  plays on Home/catalog. *@
             <div class="d-profile__toggle-row d-profile__field--full">
                 <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">Theme music</div>
-                    <div class="d-profile__toggle-hint">Play a title's opening theme when you open it (anime only).</div>
+                    <div class="d-profile__toggle-title">@L["profile.theme_music_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.theme_music_hint"]</div>
                 </div>
                 <Toggle Checked="@_themeMusic" CheckedChanged="OnThemeMusicToggle" />
             </div>
@@ -1776,7 +1776,7 @@
             @if (_themeMusic)
             {
                 <label class="d-profile__field d-profile__field--full">
-                    <span class="d-profile__field-label">THEME VOLUME · @_themeMusicVolume %</span>
+                    <span class="d-profile__field-label">@L["profile.theme_volume_label"] · @_themeMusicVolume %</span>
                     <input type="range" min="0" max="100" step="1" class="d-profile__range"
                            value="@_themeMusicVolume" @onchange="OnThemeMusicVolumeChanged" />
                 </label>
@@ -1784,14 +1784,17 @@
         </div>
     };
 
+    // Label holds an existing localization KEY (settings.accent_*) resolved via
+    // L[...] at the swatch render site — reuses the palette names already
+    // translated for the admin Settings page.
     private record SwatchDef(int Hue, double L, double C, string Label);
     private static readonly SwatchDef[] AccentSwatches =
     {
-        new(25,  0.66, 0.20, "Crimson"),
-        new(60,  0.72, 0.17, "Amber"),
-        new(150, 0.74, 0.15, "Green"),
-        new(240, 0.66, 0.16, "Blue"),
-        new(290, 0.66, 0.20, "Violet"),
+        new(25,  0.66, 0.20, "settings.accent_crimson"),
+        new(60,  0.72, 0.17, "settings.accent_amber"),
+        new(150, 0.74, 0.15, "settings.accent_green"),
+        new(240, 0.66, 0.16, "settings.accent_blue"),
+        new(290, 0.66, 0.20, "settings.accent_violet"),
     };
 
     /// <summary>Inline style for an accent swatch. Built with InvariantCulture

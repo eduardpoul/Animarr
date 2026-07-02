@@ -20,7 +20,7 @@
         {
             <button type="button" class="d-server__mback tv-focus"
                     @onclick="@(() => _mobileShowingDetail = false)"
-                    aria-label="Back to server settings list">
+                    aria-label="@L["server_settings.aria_back_list"]">
                 <DIcon Name="chev-l" Size="18" />
             </button>
         }
@@ -28,12 +28,12 @@
            mback above + the mobile nav handle navigation). *@
         <PageBack />
         <div class="d-page-header__main">
-            <div class="d-page-header__overline">ADMIN</div>
-            <h1 class="d-page-header__title">@(_mobileShowingDetail ? CurrentTab.Label : "SERVER SETTINGS")</h1>
+            <div class="d-page-header__overline">@L["server_settings.overline"]</div>
+            <h1 class="d-page-header__title">@(_mobileShowingDetail ? L[CurrentTab.LabelKey] : L["server_settings.title"])</h1>
             @if (!_mobileShowingDetail)
             {
                 <div class="d-page-header__sub">
-                    Visible only to users with the systemSettings permission. Changes apply live.
+                    @L["server_settings.sub"]
                 </div>
             }
         </div>
@@ -42,7 +42,7 @@
     <div class="d-server__body">
         @* Desktop rail — vertical list pinned next to the content. Hidden
            on phone in favour of the drilldown list below. *@
-        <nav class="d-server__rail" aria-label="Server settings sections">
+        <nav class="d-server__rail" aria-label="@L["server_settings.aria_sections"]">
             @foreach (var t in Tabs)
             {
                 var key = t.Key;
@@ -51,10 +51,10 @@
                         class="@($"d-server__rail-item tv-focus {(active ? "is-active" : "")}")"
                         @onclick="@(() => _active = key)">
                     <span class="d-server__rail-icon"><DIcon Name="@t.Icon" Size="16" /></span>
-                    <span class="d-server__rail-label">@t.Label</span>
+                    <span class="d-server__rail-label">@L[t.LabelKey]</span>
                     @if (t.New)
                     {
-                        <span class="d-server__rail-new">NEW</span>
+                        <span class="d-server__rail-new">@L["server_settings.badge_new"]</span>
                     }
                 </button>
             }
@@ -63,7 +63,7 @@
         @* Mobile drilldown list — full-width vertical cards. Click → set
            the active tab + flip to detail mode. CSS toggles list ⇄ body
            via the parent's data-mobile-detail attribute. *@
-        <nav class="d-server__mlist" aria-label="Server settings categories">
+        <nav class="d-server__mlist" aria-label="@L["server_settings.aria_categories"]">
             @foreach (var t in Tabs)
             {
                 var key = t.Key;
@@ -73,12 +73,12 @@
                         <DIcon Name="@t.Icon" Size="14" />
                     </span>
                     <span class="d-server__mlist-body">
-                        <span class="d-server__mlist-label">@t.Label</span>
-                        <span class="d-server__mlist-meta">@t.Description</span>
+                        <span class="d-server__mlist-label">@L[t.LabelKey]</span>
+                        <span class="d-server__mlist-meta">@L[t.DescKey]</span>
                     </span>
                     @if (t.New)
                     {
-                        <span class="d-server__mlist-new">NEW</span>
+                        <span class="d-server__mlist-new">@L["server_settings.badge_new"]</span>
                     }
                     <DIcon Name="chev-r" Size="13" />
                 </button>
@@ -124,8 +124,8 @@
                 default:
                     <div class="d-server__placeholder">
                         <DIcon Name="@CurrentTab.Icon" Size="48" />
-                        <h2 class="d-server__placeholder-title">@CurrentTab.Label</h2>
-                        <p class="d-server__placeholder-body">@CurrentTab.Description</p>
+                        <h2 class="d-server__placeholder-title">@L[CurrentTab.LabelKey]</h2>
+                        <p class="d-server__placeholder-body">@L[CurrentTab.DescKey]</p>
                     </div>
                     break;
             }
@@ -134,18 +134,18 @@
 </div>
 
 @code {
-    private record TabDef(string Key, string Label, string Icon, string Description, bool New = false);
+    private record TabDef(string Key, string LabelKey, string Icon, string DescKey, bool New = false);
 
     private static readonly TabDef[] Tabs =
     {
-        new("users",      "Users & Roles",  "users",    "Manage user accounts and permission roles."),
-        new("categories", "Categories",     "sparkle",  "Catalog tags — chips above the grid. LLM auto-classifies; admin curates."),
-        new("folders",    "Root folders",   "folder",   "Library source paths that the watcher monitors."),
-        new("llm",        "AI / LLM",       "magic",    "Configure the on-host LLM provider used for identification."),
-        new("patterns",   "Parsing",        "pencil",   "Regex rules that parse season / episode from filenames."),
-        new("downloads",  "Downloads",      "download", "Torrent listen port, encryption, global Mbps caps, DHT / PEX / UPnP."),
-        new("meta",       "Metadata",       "external", "TMDB / MAL / IMDb / AniDB order + API credentials."),
-        new("about",      "About",          "info",     "Version, build, runtime, license, GitHub link."),
+        new("users",      "server_settings.tab_users_label",      "users",    "server_settings.tab_users_desc"),
+        new("categories", "server_settings.tab_categories_label", "sparkle",  "server_settings.tab_categories_desc"),
+        new("folders",    "server_settings.tab_folders_label",    "folder",   "server_settings.tab_folders_desc"),
+        new("llm",        "server_settings.tab_llm_label",        "magic",    "server_settings.tab_llm_desc"),
+        new("patterns",   "server_settings.tab_patterns_label",   "pencil",   "server_settings.tab_patterns_desc"),
+        new("downloads",  "server_settings.tab_downloads_label",  "download", "server_settings.tab_downloads_desc"),
+        new("meta",       "server_settings.tab_meta_label",       "external", "server_settings.tab_meta_desc"),
+        new("about",      "server_settings.tab_about_label",      "info",     "server_settings.tab_about_desc"),
     };
 
     private string _active = "users";

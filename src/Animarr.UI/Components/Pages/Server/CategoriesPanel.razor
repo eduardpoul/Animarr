@@ -18,11 +18,9 @@
 <div class="d-srv-card">
     <header class="d-srv-card__head d-srv-card__head--with-cta">
         <div class="d-srv-card__head-text">
-            <h2 class="d-srv-card__title">Categories</h2>
+            <h2 class="d-srv-card__title">@L["categories.title"]</h2>
             <div class="d-srv-card__sub">
-                Chip strip above the catalog grid. Each item can belong to multiple
-                categories. The LLM classifier reads the Hint at identification time;
-                manual overrides per item win over auto-classification.
+                @L["categories.subtitle"]
             </div>
         </div>
         @* "+ New category" floats top-right next to the header instead of
@@ -30,11 +28,11 @@
            segment-bar pattern. Rescan stays as a ghost CTA alongside. *@
         <div class="d-srv-card__head-actions">
             <button type="button" class="d-srv-users__new-btn tv-focus" @onclick="StartAdd">
-                <DIcon Name="plus" Size="13" /> New category
+                <DIcon Name="plus" Size="13" /> @L["categories.btn_new"]
             </button>
             <button type="button" class="d-srv-cat__rescan-btn tv-focus"
                     @onclick="RescanAsync" disabled="@_rescanning">
-                <DIcon Name="refresh" Size="13" /> @(_rescanning ? "Rescanning…" : "Rescan all")
+                <DIcon Name="refresh" Size="13" /> @(_rescanning ? L["categories.btn_rescanning"] : L["categories.btn_rescan_all"])
             </button>
         </div>
     </header>
@@ -57,7 +55,7 @@
                             <span class="d-srv-cat__row-title">@cat.Name</span>
                             @if (cat.BuiltIn)
                             {
-                                <span class="d-srv-cat__row-builtin">BUILT-IN</span>
+                                <span class="d-srv-cat__row-builtin">@L["categories.badge_builtin"]</span>
                             }
                         </div>
                         @if (!string.IsNullOrEmpty(cat.Description))
@@ -66,7 +64,7 @@
                         }
                         @if (!string.IsNullOrEmpty(cat.Hint))
                         {
-                            <div class="d-srv-cat__row-hint" title="LLM classifier hint">
+                            <div class="d-srv-cat__row-hint" title="@L["categories.hint_tooltip"]">
                                 <DIcon Name="magic" Size="11" /> @cat.Hint
                             </div>
                         }
@@ -74,14 +72,14 @@
                     <span class="d-srv-cat__row-count">@cat.ItemCount</span>
                     <div class="d-srv-cat__row-actions">
                         <button type="button" class="d-srv-cat__icon-btn tv-focus"
-                                title="Edit"
+                                title="@L["categories.action_edit"]"
                                 @onclick="@(() => StartEdit(cat))">
                             <DIcon Name="pencil" Size="14" />
                         </button>
                         @if (!cat.BuiltIn)
                         {
                             <button type="button" class="d-srv-cat__icon-btn tv-focus"
-                                    title="Delete"
+                                    title="@L["categories.action_delete"]"
                                     @onclick="@(() => DeleteAsync(cat.Id))">
                                 <DIcon Name="trash" Size="14" />
                             </button>
@@ -95,46 +93,45 @@
            Rescan also hoisted to the header. Hint stays here so admins see
            the cost / behaviour callout right under the list. *@
         <div class="d-srv-cat__rescan-hint">
-            Rescan reclassifies every media item against current categories.
-            Manual overrides are preserved. Cost: ~1 LLM call per item.
+            @L["categories.rescan_hint"]
         </div>
     }
 </div>
 
 <SettingsEditDrawer IsOpen="@_drawerOpen"
-                    Title="@(_editingId is null ? "Create category" : $"Edit: {_editName}")"
-                    Overline="CATEGORIES"
+                    Title="@(_editingId is null ? L["categories.drawer_title_create"] : L.Get("categories.drawer_title_edit", _editName))"
+                    Overline="@L["categories.drawer_overline"]"
                     Hint="@(_editingId is null
-                            ? "Add a new user-curated category. The LLM uses Hint at identification time."
-                            : "Update name, description and LLM hint. Built-in names cannot be changed.")"
+                            ? L["categories.drawer_hint_create"]
+                            : L["categories.drawer_hint_edit"])"
                     Icon="sparkle"
                     OnClose="CancelEdit">
     <Body>
         <div class="d-srv-cat__drawer-form">
             <div class="d-srv-cat__form-grid">
                 <Input Value="@_editName" ValueChanged="@(v => _editName = v ?? "")"
-                       Label="NAME" Placeholder="e.g. K-Pop documentaries"
+                       Label="@L["categories.field_name"]" Placeholder="@L["categories.field_name_placeholder"]"
                        Disabled="@(_editingId is not null && _categories.FirstOrDefault(c => c.Id == _editingId)?.BuiltIn == true)" />
                 <Input Value="@_editSortOrder.ToString()"
                        ValueChanged="@(v => int.TryParse(v, out _editSortOrder))"
-                       Label="SORT ORDER" Type="number" />
+                       Label="@L["categories.field_sort_order"]" Type="number" />
             </div>
             <Input Value="@_editDescription" ValueChanged="@(v => _editDescription = v ?? "")"
-                   Label="DESCRIPTION" Placeholder="Short label for admins" />
+                   Label="@L["categories.field_description"]" Placeholder="@L["categories.field_description_placeholder"]" />
             <label class="d-input-group">
-                <span class="d-input-group__label">HINT (LLM classifier)</span>
+                <span class="d-input-group__label">@L["categories.field_hint"]</span>
                 <textarea class="d-srv-cat__hint-input" rows="6"
                           @bind="_editHint"
-                          placeholder="Tell the LLM how to recognise this category. Example: 'Korean variety shows and reality TV — NOT Korean dramas (those go to Dorama).'"></textarea>
+                          placeholder="@L["categories.field_hint_placeholder"]"></textarea>
             </label>
         </div>
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SaveAsync">
             <DIcon Name="check" Size="13" />
-            @(_editingId is null ? "Create category" : "Save changes")
+            @(_editingId is null ? L["categories.btn_create"] : L["categories.btn_save_changes"])
         </Btn>
-        <Btn Variant="ghost" Size="md" OnClick="CancelEdit">Cancel</Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CancelEdit">@L["common.btn_cancel"]</Btn>
     </Footer>
 </SettingsEditDrawer>
 
@@ -164,7 +161,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Failed to load categories: {ex.Message}");
+            Toasts.ShowError(L.Get("categories.toast_load_failed", ex.Message));
         }
         _loading = false;
         StateHasChanged();
@@ -180,7 +177,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Toggle failed: {ex.Message}");
+            Toasts.ShowError(L.Get("categories.toast_toggle_failed", ex.Message));
         }
     }
 
@@ -214,7 +211,7 @@
     {
         if (string.IsNullOrWhiteSpace(_editName))
         {
-            Toasts.ShowWarning("Name is required");
+            Toasts.ShowWarning(L["categories.toast_name_required"]);
             return;
         }
         try
@@ -227,7 +224,7 @@
                     Hint: _editHint,
                     SortOrder: _editSortOrder,
                     Enabled: null));
-                Toasts.ShowSuccess("Category updated");
+                Toasts.ShowSuccess(L["categories.toast_updated"]);
             }
             else
             {
@@ -236,7 +233,7 @@
                     Description: _editDescription,
                     Hint: _editHint,
                     SortOrder: _editSortOrder));
-                Toasts.ShowSuccess("Category created");
+                Toasts.ShowSuccess(L["categories.toast_created"]);
             }
             CancelEdit();
             _drawerOpen = false;
@@ -244,7 +241,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Save failed: {ex.Message}");
+            Toasts.ShowError(L.Get("categories.toast_save_failed", ex.Message));
         }
     }
 
@@ -253,12 +250,12 @@
         try
         {
             await Api.DeleteCategoryAsync(id);
-            Toasts.ShowSuccess("Category deleted");
+            Toasts.ShowSuccess(L["categories.toast_deleted"]);
             await LoadAsync();
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Delete failed: {ex.Message}");
+            Toasts.ShowError(L.Get("categories.toast_delete_failed", ex.Message));
         }
     }
 
@@ -270,11 +267,11 @@
         try
         {
             await Api.RescanCategoriesAsync();
-            Toasts.ShowSuccess("Rescan started — will run in the background");
+            Toasts.ShowSuccess(L["categories.toast_rescan_started"]);
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Rescan failed: {ex.Message}");
+            Toasts.ShowError(L.Get("categories.toast_rescan_failed", ex.Message));
         }
         _rescanning = false;
         StateHasChanged();
