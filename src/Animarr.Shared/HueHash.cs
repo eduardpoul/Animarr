@@ -1,4 +1,4 @@
-namespace Animarr.Web.Services;
+namespace Animarr.Shared;
 
 /// <summary>
 /// Deterministic hash → hue (0..360) for poster wash and CJK watermark tint.

@@ -3,6 +3,10 @@ using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
+// Shared helpers moved to Animarr.Shared. Aliased (not `using Animarr.Shared`)
+// so the shared enum copies there don't clash with the Data.Models entities.
+using HueHash = Animarr.Shared.HueHash;
+using LanguageNameMap = Animarr.Shared.LanguageNameMap;
 
 namespace Animarr.Web.Services;
 
