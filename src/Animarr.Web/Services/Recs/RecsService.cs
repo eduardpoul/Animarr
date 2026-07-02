@@ -126,7 +126,12 @@ public sealed class RecsService(
 
         // Local candidates: untouched, not dismissed. Cold start (no history)
         // falls back to top-rated so the rail isn't empty on day one.
-        var anchor = topWatched.FirstOrDefault();
+        // Reason anchors: each card picks its OWN best-overlapping title from
+        // the user's top-watched — a rail where every reason reads "because
+        // you watch Bleach" is monotone even when true.
+        var anchors = topWatched.Take(4)
+            .Select(a => (Item: a, Labels: LabelsOf(a)))
+            .ToList();
         var locals = new List<(MediaItem M, double Score, string? ReasonTitle, string? ReasonTag)>();
         foreach (var m in all)
         {
@@ -140,8 +145,13 @@ public sealed class RecsService(
                 foreach (var l in labels) overlap += genreWeight.GetValueOrDefault(l) / maxWeight;
                 if (overlap <= 0) continue;   // with history, only suggest things the profile supports
                 score += overlap * 2.0;
-                if (anchor is not null && labels.Intersect(LabelsOf(anchor), StringComparer.OrdinalIgnoreCase).Any())
-                    reasonTitle = anchor.Title;
+                var best = anchors
+                    .Select(a => (a.Item, Shared: labels.Intersect(a.Labels, StringComparer.OrdinalIgnoreCase).Count()))
+                    .Where(x => x.Shared > 0)
+                    .OrderByDescending(x => x.Shared)
+                    .FirstOrDefault();
+                if (best.Item is not null)
+                    reasonTitle = best.Item.Title;
                 else
                     reasonTag = PickDisplayLabel(m,
                         labels.OrderByDescending(l => genreWeight.GetValueOrDefault(l)).Take(1).ToList());
