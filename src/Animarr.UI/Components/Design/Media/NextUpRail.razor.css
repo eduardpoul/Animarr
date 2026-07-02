@@ -124,7 +124,7 @@
 
 /* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
 .nur__viewport { position: relative; }
-.nur__row.is-dragging { cursor: grabbing; user-select: none; }
+.nur__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
 .nur__nav {
     position: absolute;
     top: 0;

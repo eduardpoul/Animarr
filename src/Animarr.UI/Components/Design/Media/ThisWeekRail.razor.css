@@ -132,7 +132,7 @@
 
 /* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
 .twr__viewport { position: relative; }
-.twr__row.is-dragging { cursor: grabbing; user-select: none; }
+.twr__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
 .twr__nav {
     position: absolute;
     top: 0;

@@ -7,9 +7,15 @@ export function init(row, dotnet) {
     if (!row) return;
     let dragging = false, moved = false, startX = 0, startLeft = 0;
 
+    // Edge-triggered: only cross the JS→.NET bridge when the ‹/› visibility
+    // actually flips — scroll fires per frame during a drag and per-event
+    // interop calls read as jank.
+    let lastL = null, lastR = null;
     const notify = () => {
         const canLeft  = row.scrollLeft > 2;
         const canRight = row.scrollLeft + row.clientWidth < row.scrollWidth - 2;
+        if (canLeft === lastL && canRight === lastR) return;
+        lastL = canLeft; lastR = canRight;
         dotnet.invokeMethodAsync('OnRailScrollState', canLeft, canRight).catch(() => {});
     };
 
@@ -30,6 +36,13 @@ export function init(row, dotnet) {
             moved = true;
             try { row.setPointerCapture(e.pointerId); } catch { }
             row.classList.add('is-dragging');
+            // Inline, not class-only: with snap active every scrollLeft write
+            // re-snaps to the nearest card, so a drag jumps card-by-card
+            // instead of panning. Restored on release so proximity snap
+            // settles the row afterwards.
+            row.__snapPrev = row.style.scrollSnapType;
+            row.style.scrollSnapType = 'none';
+            row.style.scrollBehavior = 'auto';
         }
         if (moved) row.scrollLeft = startLeft - dx;
     });
@@ -38,6 +51,8 @@ export function init(row, dotnet) {
         dragging = false;
         try { row.releasePointerCapture(e.pointerId); } catch { }
         row.classList.remove('is-dragging');
+        row.style.scrollSnapType = row.__snapPrev || '';
+        row.style.scrollBehavior = '';
     };
     row.addEventListener('pointerup', end);
     row.addEventListener('pointercancel', end);
