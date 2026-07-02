@@ -261,8 +261,6 @@
     private string _audioPref     = "Japanese";
     private string _subPref       = "Russian";
     private int _subSize          = 18;
-    private int _volume           = 78;
-    private bool _passthrough     = false;
     private bool _normalize       = true;
     private bool _themeMusic       = false;
     private int  _themeMusicVolume = 40;
@@ -333,8 +331,6 @@
         _audioPref       = p.AudioPreferredLanguage;
         _subPref         = p.SubtitlePreferredLanguage;
         _subSize         = p.SubtitleSize;
-        _volume          = p.DefaultVolume;
-        _passthrough     = p.AudioPassthrough;
         _normalize       = p.NormalizeVolume;
         _themeMusic       = p.ThemeMusicEnabled;
         _themeMusicVolume = p.ThemeMusicVolume;
@@ -594,13 +590,6 @@
             null, null, null, null, null, TvMode: v, null, null, null, null, null, null, null));
     }
 
-    private async Task OnPassthroughToggle(bool v)
-    {
-        _passthrough = v;
-        await PatchAsync(new UpdatePreferencesRequest(
-            null, null, null, null, null, null, null, null, null, null, AudioPassthrough: v, null, null));
-    }
-
     private async Task OnNormalizeToggle(bool v)
     {
         _normalize = v;
@@ -651,15 +640,6 @@
         }
     }
 
-    private async Task OnVolumeChanged(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var n))
-        {
-            _volume = n;
-            await PatchAsync(new UpdatePreferencesRequest(
-                null, null, null, null, null, null, null, null, null, DefaultVolume: n, null, null, null));
-        }
-    }
 
     private async Task OnLanguageChanged(ChangeEventArgs e)
     {
@@ -1739,19 +1719,11 @@
                        value="@_subSize" @onchange="OnSubSizeChanged" />
             </label>
 
-            <label class="d-profile__field d-profile__field--full">
-                <span class="d-profile__field-label">@L["profile.default_volume_label"] · @_volume %</span>
-                <input type="range" min="0" max="100" step="1" class="d-profile__range"
-                       value="@_volume" @onchange="OnVolumeChanged" />
-            </label>
-
-            <div class="d-profile__toggle-row d-profile__field--full">
-                <div class="d-profile__toggle-text">
-                    <div class="d-profile__toggle-title">@L["profile.passthrough_title"]</div>
-                    <div class="d-profile__toggle-hint">@L["profile.passthrough_hint"]</div>
-                </div>
-                <Toggle Checked="@_passthrough" CheckedChanged="OnPassthroughToggle" />
-            </div>
+            @* Default-volume + audio-passthrough controls removed: the player
+               remembers volume per-device in localStorage, and a browser
+               <video> can't bitstream-passthrough to a receiver (where it does
+               matter — DLNA cast / Direct Play — the raw audio already passes
+               through untouched). Both preferences were write-only. *@
 
             <div class="d-profile__toggle-row d-profile__field--full">
                 <div class="d-profile__toggle-text">

@@ -21,6 +21,46 @@
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
 
+    // ── User audio/subtitle preferences ─────────────────────────────────────
+    // Pushed once from MediaDetail via animarrPlayer.setPrefs(...) when the
+    // account prefs load. audioLang/subLang are ISO-639-1 codes ('ja','ru') or
+    // null; subSize is a pixel size or 0 (= leave Artplayer's default).
+    //   • subLang  → picks the initial subtitle track by language (client-side
+    //                overlay only — never touches the video/audio pipeline).
+    //   • subSize  → Artplayer cue font-size.
+    //   • audioLang→ auto-selects the matching audio track ONLY on a transcoding
+    //                HLS session (see attach). Direct Play is never disturbed:
+    //                we never force a transcode just to switch audio language.
+    let PREFS = { audioLang: null, subLang: null, subSize: 0 };
+    function setPrefs(p) {
+        PREFS = {
+            audioLang: (p && p.audioLang) ? String(p.audioLang).toLowerCase() : null,
+            subLang:   (p && p.subLang)   ? String(p.subLang).toLowerCase()   : null,
+            subSize:   (p && Number.isFinite(p.subSize)) ? Math.max(0, p.subSize) : 0,
+        };
+    }
+    // Normalise any track language tag (ISO-639-2/B or /T, ISO-639-1, or a full
+    // English name) to a 639-1 2-letter code so preference matching is tolerant
+    // of how a muxer tagged the stream. Scope mirrors LanguageNameMap.
+    const LANG_2TO1 = {
+        jpn:'ja', ja:'ja', eng:'en', en:'en', rus:'ru', ru:'ru',
+        ger:'de', deu:'de', de:'de', fre:'fr', fra:'fr', fr:'fr',
+        spa:'es', es:'es', ita:'it', it:'it', por:'pt', pt:'pt',
+        chi:'zh', zho:'zh', cmn:'zh', yue:'zh', zh:'zh', cn:'zh',
+        kor:'ko', ko:'ko', tha:'th', th:'th', vie:'vi', vi:'vi',
+        ind:'id', id:'id', ara:'ar', ar:'ar', hin:'hi', hi:'hi', tur:'tr', tr:'tr',
+        japanese:'ja', english:'en', russian:'ru', german:'de', french:'fr',
+        spanish:'es', italian:'it', portuguese:'pt', mandarin:'zh', chinese:'zh',
+        korean:'ko', thai:'th', vietnamese:'vi', indonesian:'id', arabic:'ar',
+        hindi:'hi', turkish:'tr',
+    };
+    function normLang(l) {
+        if (!l) return '';
+        const k = String(l).trim().toLowerCase();
+        if (k === 'und' || k === '') return '';
+        return LANG_2TO1[k] || (k.length === 2 ? k : '');
+    }
+
     // Prefer the MAUI loopback media-proxy base when present
     // (window.animarrLocalProxyBase = http://127.0.0.1:<port>, published by the
     // Android host). All WebView fetches then go to the proxy, which forwards to
@@ -2313,6 +2353,18 @@
             adapter = native;
         } else {
             // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
+            // Initial subtitle track: prefer the user's subtitle language, then
+            // the container's `default`-disposition track, then the first. Pure
+            // client-side overlay — never influences the video/audio pipeline.
+            const prefSubIdx = (() => {
+                if (PREFS.subLang) {
+                    const i = subtitleList.findIndex(s => normLang(s.lang) === PREFS.subLang);
+                    if (i >= 0) return i;
+                }
+                const d = subtitleList.findIndex(s => s.default);
+                if (d >= 0) return d;
+                return subtitleList.length > 0 ? 0 : -1;
+            })();
             art = new window.Artplayer({
             container: el,
             url: playUrl,
@@ -2403,7 +2455,7 @@
             // undefined (i.e. media with NO subtitle tracks). Use {} for the
             // no-subtitle case instead of undefined.
             subtitle: subtitleList.length > 0 ? {
-                url: (subtitleList.find(s => s.default) || subtitleList[0]).url,
+                url: subtitleList[prefSubIdx >= 0 ? prefSubIdx : 0].url,
                 // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
                 // a recognised value and silently dropped on the loader path
                 // — fix landed 2026-05-27 after subtitle.switch() reported
@@ -2411,6 +2463,8 @@
                 type: 'vtt',
                 encoding: 'utf-8',
                 escape: false,
+                // User's subtitle size (px). Omitted (Artplayer default) when 0.
+                ...(PREFS.subSize > 0 ? { style: { fontSize: PREFS.subSize + 'px' } } : {}),
             } : {},
             layers: [{
                 name: 'animarr-hud',
@@ -2428,8 +2482,27 @@
 
         entry.art = art;
         entry.adapter = adapter;
-        entry.currentSubIdx = subtitleList.findIndex(s => s.default);
+        entry.currentSubIdx = (typeof prefSubIdx === 'number') ? prefSubIdx
+            : (subtitleList.findIndex(s => s.default));
         if (entry.currentSubIdx < 0 && subtitleList.length > 0) entry.currentSubIdx = 0;
+
+        // ── Preferred audio language — HLS transcode path ONLY ──────────────
+        // Direct Play / Direct Stream serve the raw container and the browser
+        // plays its default audio track; switching to a non-default track there
+        // would require a transcode, so we deliberately DON'T touch those paths
+        // (Direct Play is never sacrificed for an audio-language preference).
+        // On a transcoding HLS session we're re-muxing anyway, so re-selecting
+        // the matching-language stream is free. Runs once per user-initiated
+        // open (opts.autoAudio) — never on switchAudio/switchQuality re-attaches.
+        if (opts && opts.autoAudio && entry.sessionToken && PREFS.audioLang
+            && Array.isArray(audioList) && audioList.length > 1) {
+            const want = audioList.findIndex(a => normLang(a.lang) === PREFS.audioLang);
+            if (want > 0 && want !== entry.currentAudIdx) {
+                // Defer so the current attach finishes wiring before we tear it
+                // down and restart with the preferred audio map.
+                setTimeout(() => { try { switchAudioTrack(elementId, want); } catch {} }, 0);
+            }
+        }
 
         // Autostart reliability (covers BOTH the HLS and Direct-Play paths).
         // Artplayer's autoplay can lose the race against media readiness, so we
@@ -3006,7 +3079,7 @@
     window.animarrPlayer = {
         attach, flush, detach,
         setMediaSession, setWatchNextMeta, togglePictureInPicture,
-        setStyle, switchAudioTrack, switchAudio,
+        setStyle, switchAudioTrack, switchAudio, setPrefs,
     };
 })();
 

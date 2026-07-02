@@ -808,8 +808,26 @@ else
             _playerSelfRef = DotNetObjectReference.Create(this);
             try
             {
+                // Push the account's audio/subtitle preferences to the player.
+                // Names ("Japanese"/"Russian") are resolved to ISO-639-1 codes so
+                // the player can match them against stream language tags. The
+                // player uses subLang/subSize on every attach and applies the
+                // audio-language preference only on transcoding HLS sessions —
+                // Direct Play is never forced into a transcode for it.
+                var prefs = UserCtx.Preferences;
+                if (prefs is not null)
+                {
+                    await JS.InvokeVoidAsync("animarrPlayer.setPrefs", new
+                    {
+                        audioLang = Animarr.Shared.LanguageNameMap.ToIso639(prefs.AudioPreferredLanguage),
+                        subLang   = Animarr.Shared.LanguageNameMap.ToIso639(prefs.SubtitlePreferredLanguage),
+                        subSize   = prefs.SubtitleSize,
+                    });
+                }
+
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
-                    _playerElementId, _playerSelfRef, _playerPath);
+                    _playerElementId, _playerSelfRef, _playerPath,
+                    new { autoAudio = true });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title
