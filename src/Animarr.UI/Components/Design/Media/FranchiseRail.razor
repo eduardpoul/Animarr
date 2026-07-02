@@ -7,6 +7,8 @@
 *@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @if (Franchise is { Cards.Count: > 1 } fr)
 {
@@ -18,7 +20,18 @@
             </div>
             <span class="frail__progress">@L.Get("franchise.progress", fr.WatchedCount, fr.Total)</span>
         </div>
-        <div class="frail__row">
+        <div class="frail__viewport">
+        @if (_canLeft)
+        {
+            <button type="button" class="frail__nav frail__nav--l tv-focus" aria-label="‹"
+                    @onclick="@(() => ScrollRailAsync(-1))">‹</button>
+        }
+        @if (_canRight)
+        {
+            <button type="button" class="frail__nav frail__nav--r tv-focus" aria-label="›"
+                    @onclick="@(() => ScrollRailAsync(1))">›</button>
+        }
+        <div class="frail__row" @ref="_rowRef">
             @for (var i = 0; i < fr.Cards.Count; i++)
             {
                 var card = fr.Cards[i];
@@ -81,6 +94,7 @@
                 </div>
             }
         </div>
+        </div>
     </section>
 }
 
@@ -88,6 +102,57 @@
     [Parameter] public FranchiseDto? Franchise { get; set; }
 
     private readonly HashSet<int> _wanted = new();
+
+    // Drag-to-scroll + ‹ › paging, shared module with the other rails. The
+    // rail renders lazily (Franchise arrives async), so init keys off the
+    // first render that actually has cards, not firstRender.
+    private ElementReference _rowRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<FranchiseRail>? _selfRef;
+    private bool _canLeft, _canRight, _railInit;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_railInit || Franchise is not { Cards.Count: > 1 }) return;
+        _railInit = true;
+        try
+        {
+            _js = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Design/Media/RecRail.razor.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("init", _rowRef, _selfRef);
+        }
+        catch { /* drag/arrows are enhancement — wheel scroll still works */ }
+    }
+
+    [JSInvokable]
+    public void OnRailScrollState(bool canLeft, bool canRight)
+    {
+        if (_canLeft == canLeft && _canRight == canRight) return;
+        _canLeft = canLeft;
+        _canRight = canRight;
+        StateHasChanged();
+    }
+
+    private async Task ScrollRailAsync(int dir)
+    {
+        if (_js is null) return;
+        try { await _js.InvokeVoidAsync("scrollRail", _rowRef, dir); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_js is not null)
+            {
+                await _js.InvokeVoidAsync("destroy", _rowRef);
+                await _js.DisposeAsync();
+            }
+        }
+        catch { /* circuit teardown */ }
+        _selfRef?.Dispose();
+    }
 
     private async Task WantAsync(FranchiseCardDto card)
     {

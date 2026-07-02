@@ -4,6 +4,8 @@
     into the title. Rendered by Home only when the week has events.
 *@
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @if (Items.Length > 0)
 {
@@ -13,7 +15,18 @@
         <div class="twr__head">
             <h2 class="twr__title">@L["home.this_week"]</h2>
         </div>
-        <div class="twr__row">
+        <div class="twr__viewport">
+        @if (_canLeft)
+        {
+            <button type="button" class="twr__nav twr__nav--l tv-focus" aria-label="‹"
+                    @onclick="@(() => ScrollRailAsync(-1))">‹</button>
+        }
+        @if (_canRight)
+        {
+            <button type="button" class="twr__nav twr__nav--r tv-focus" aria-label="›"
+                    @onclick="@(() => ScrollRailAsync(1))">›</button>
+        }
+        <div class="twr__row" @ref="_rowRef">
             @foreach (var ev in Items)
             {
                 var e = ev;
@@ -31,11 +44,63 @@
                 </button>
             }
         </div>
+        </div>
     </section>
 }
 
 @code {
     [Parameter] public CalendarEventDto[] Items { get; set; } = Array.Empty<CalendarEventDto>();
+
+    // Drag-to-scroll + ‹ › paging, shared module with the other rails. Home
+    // mounts this rail before the week's events arrive, so init keys off the
+    // first render that actually has cards, not firstRender.
+    private ElementReference _rowRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<ThisWeekRail>? _selfRef;
+    private bool _canLeft, _canRight, _railInit;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_railInit || Items.Length == 0) return;
+        _railInit = true;
+        try
+        {
+            _js = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Design/Media/RecRail.razor.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("init", _rowRef, _selfRef);
+        }
+        catch { /* drag/arrows are enhancement — wheel scroll still works */ }
+    }
+
+    [JSInvokable]
+    public void OnRailScrollState(bool canLeft, bool canRight)
+    {
+        if (_canLeft == canLeft && _canRight == canRight) return;
+        _canLeft = canLeft;
+        _canRight = canRight;
+        StateHasChanged();
+    }
+
+    private async Task ScrollRailAsync(int dir)
+    {
+        if (_js is null) return;
+        try { await _js.InvokeVoidAsync("scrollRail", _rowRef, dir); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_js is not null)
+            {
+                await _js.InvokeVoidAsync("destroy", _rowRef);
+                await _js.DisposeAsync();
+            }
+        }
+        catch { /* circuit teardown */ }
+        _selfRef?.Dispose();
+    }
 
     private string DayLabel(DateTime local)
     {
