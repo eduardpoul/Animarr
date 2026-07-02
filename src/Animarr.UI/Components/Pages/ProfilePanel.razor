@@ -342,6 +342,7 @@
         _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
         _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
         _homeSections    = HomeSections.Parse(p.HomeSectionsJson);
+        _recsScope       = string.IsNullOrEmpty(p.RecsScope) ? "everywhere" : p.RecsScope.ToLowerInvariant();
     }
 
     // ─── Edit profile / change password handlers ───────────────────────
@@ -1645,6 +1646,31 @@
                 </div>
             </div>
 
+            @* ── Recommendation sources ───────────────────────────────
+                 Scope of the "More like this" / "For you" rails: local
+                 titles always come first; "everywhere" lets TMDB backfill
+                 the free slots with not-in-library cards. *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">@L["profile.recs_scope_title"]</div>
+                    <div class="d-profile__section-hint">
+                        @L["profile.recs_scope_hint"]
+                    </div>
+                </div>
+                <div class="d-profile__hs-list">
+                    @foreach (var (key, labelKey) in new[] { ("everywhere", "profile.recs_scope_everywhere"), ("library", "profile.recs_scope_library") })
+                    {
+                        var k = key;
+                        <button type="button"
+                                class="@($"d-profile__scope-row tv-focus {(_recsScope == k ? "is-active" : "")}")"
+                                @onclick="@(() => OnRecsScopeSelect(k))">
+                            <span class="d-profile__scope-dot"></span>
+                            <span class="d-profile__hs-name">@L[labelKey]</span>
+                        </button>
+                    }
+                </div>
+            </div>
+
         </div>
     };
 
@@ -1730,6 +1756,19 @@
         await PatchAsync(new UpdatePreferencesRequest(
             null, null, null, null, null, null, null, null, null, null, null, null, null,
             HomeSectionsJson: HomeSections.Serialize(_homeSections)));
+        StateHasChanged();
+    }
+
+    // ─── Recommendation scope (everywhere / library-only) ──────────────
+    private string _recsScope = "everywhere";
+
+    private async Task OnRecsScopeSelect(string key)
+    {
+        if (_recsScope == key) return;
+        _recsScope = key;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            RecsScope: key));
         StateHasChanged();
     }
 

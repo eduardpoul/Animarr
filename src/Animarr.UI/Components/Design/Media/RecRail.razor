@@ -1,0 +1,118 @@
+@*
+    Recommendation rail — shared by "More like this" (MediaDetail) and
+    "For you" (Home). Local-first with external backfill: library cards are
+    plain posters that navigate into the catalog; external (TMDB) cards render
+    dashed with a "not in library" badge and a Want button that drops the
+    title into the user's watchlist. Reasons arrive as parts (anchor title /
+    shared genre) and are formatted through localization here.
+*@
+@inject IAnimarrApiClient Api
+
+@if (_cards.Count > 0)
+{
+    <section class="recrail">
+        <div class="recrail__head">
+            <h2 class="recrail__title">@Title</h2>
+            @if (!string.IsNullOrEmpty(Hint))
+            {
+                <span class="recrail__hint">@Hint</span>
+            }
+        </div>
+        <div class="recrail__row">
+            @foreach (var c in _cards)
+            {
+                var card = c;
+                <div class="recrail__cell">
+                    <div class="recrail__art-wrap">
+                        @if (card.InLibrary && card.MediaItemId is Guid mid)
+                        {
+                            <a class="recrail__poster tv-focus" href="/catalog/@mid" title="@card.Title">
+                                @if (!string.IsNullOrEmpty(card.PosterUrl))
+                                {
+                                    <img loading="lazy" src="@card.PosterUrl" alt="@card.Title" class="recrail__img" />
+                                }
+                                else
+                                {
+                                    <div class="recrail__ph"><DIcon Name="video" Size="30" /></div>
+                                }
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="recrail__ext" title="@card.Title">
+                                @if (!string.IsNullOrEmpty(card.PosterUrl))
+                                {
+                                    <img loading="lazy" src="@card.PosterUrl" alt="@card.Title" class="recrail__img" />
+                                }
+                                else
+                                {
+                                    <div class="recrail__ph"><DIcon Name="video" Size="30" /></div>
+                                }
+                                <span class="recrail__ext-badge">@L["recs.not_in_library"]</span>
+                                <button type="button"
+                                        class="@($"recrail__want tv-focus {(IsWanted(card) ? "is-on" : "")}")"
+                                        @onclick="@(() => ToggleWantAsync(card))">
+                                    @(IsWanted(card) ? L["recs.in_list"] : L["recs.want"])
+                                </button>
+                            </div>
+                        }
+                        @if (Dismissable)
+                        {
+                            <button type="button" class="recrail__dismiss tv-focus"
+                                    title="@L["recs.dismiss"]" aria-label="@L["recs.dismiss"]"
+                                    @onclick="@(() => DismissAsync(card))">✕</button>
+                        }
+                    </div>
+                    <div class="recrail__name">@card.Title@(card.Year is int y ? $" · {y}" : "")</div>
+                    @if (ReasonOf(card) is string reason)
+                    {
+                        <div class="recrail__reason" title="@reason"><span class="recrail__reason-dot">●</span> @reason</div>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public RecCardDto[] Items { get; set; } = Array.Empty<RecCardDto>();
+    /// <summary>Show the "don't suggest" ✕ (For-you rail; the Similar rail keeps
+    /// cards stable — dismissing "similar" makes less sense per-title).</summary>
+    [Parameter] public bool Dismissable { get; set; }
+
+    private List<RecCardDto> _cards = new();
+    private readonly HashSet<int> _wantedTmdb = new();
+
+    protected override void OnParametersSet() => _cards = Items.ToList();
+
+    private bool IsWanted(RecCardDto c) => c.TmdbId is int t && _wantedTmdb.Contains(t);
+
+    private string? ReasonOf(RecCardDto c)
+        => !string.IsNullOrEmpty(c.ReasonTitle) ? L.Get("recs.reason_because", c.ReasonTitle)
+         : !string.IsNullOrEmpty(c.ReasonTag)   ? L.Get("recs.reason_genre", c.ReasonTag)
+         : null;
+
+    private async Task ToggleWantAsync(RecCardDto c)
+    {
+        if (c.TmdbId is not int tmdbId) return;
+        if (_wantedTmdb.Contains(tmdbId)) return;   // v1: add-only from the rail; manage on /watchlist
+        _wantedTmdb.Add(tmdbId);
+        try
+        {
+            await Api.AddWatchlistAsync(new WatchlistAddRequest(
+                null, tmdbId, c.Title, c.Year, c.PosterUrl, c.MediaType));
+        }
+        catch { _wantedTmdb.Remove(tmdbId); }
+        StateHasChanged();
+    }
+
+    private async Task DismissAsync(RecCardDto c)
+    {
+        _cards.Remove(c);
+        StateHasChanged();
+        try { await Api.DismissRecAsync(c.MediaItemId, c.MediaItemId is null ? c.TmdbId : null); }
+        catch { /* card is gone locally; server retry next load */ }
+    }
+}

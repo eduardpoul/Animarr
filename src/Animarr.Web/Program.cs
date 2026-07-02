@@ -159,6 +159,10 @@ builder.Services.AddHostedService<SegmentDetectionBackgroundService>();
 builder.Services.AddScoped<TrickplayService>();
 builder.Services.AddHostedService<TrickplayBackgroundService>();
 
+// Recommendations — heuristic "More like this" / "For you" rails with
+// local-first scoring and TMDB backfill.
+builder.Services.AddScoped<Animarr.Web.Services.Recs.RecsService>();
+
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
@@ -391,6 +395,7 @@ app.MapLlmEndpoints();
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();
+app.MapRecsEndpoints();
 app.MapTorrentEndpoints();
 app.MapRenameEndpoints();
 app.MapMediaTagEndpoints();

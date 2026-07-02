@@ -58,6 +58,10 @@ public static class ApiRoutes
     /// when no sprite has been generated yet. Sprites are pre-built by the
     /// trickplay background pass; this endpoint never generates inline.</summary>
     public const string MediaTrickplay    = "/api/media/{id}/trickplay";
+    /// <summary>GET — "More like this" rail for a title (<c>RecCardDto[]</c>):
+    /// library matches first, TMDB backfill for the remaining slots (subject
+    /// to the user's RecsScope preference).</summary>
+    public const string MediaSimilar      = "/api/media/{id}/similar";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -217,6 +221,15 @@ public static class ApiRoutes
     /// hero on Home.</summary>
     public const string MeContinue   = "/api/me/continue";
     public const string MeNextUp     = "/api/me/next-up";
+    /// <summary>GET — the "For you" Home rail (<c>RecCardDto[]</c>): heuristic
+    /// profile from the user's watch history, library candidates first, TMDB
+    /// backfill per RecsScope.</summary>
+    public const string MeForYou     = "/api/me/for-you";
+    /// <summary>POST — "don't suggest this again" (one of MediaItemId/TmdbId).</summary>
+    public const string MeRecsDismiss = "/api/me/recs/dismiss";
+    /// <summary>GET list / POST add for the user's "Хочу посмотреть" list.</summary>
+    public const string MeWatchlist  = "/api/me/watchlist";
+    public const string MeWatchlistById = "/api/me/watchlist/{id}";
 
     // ─── Server identity (v5 multi-server) ───────────────────────────────
     /// <summary>Anonymous probe — returns <c>ServerInfoDto</c>. Hit by the
@@ -272,6 +285,8 @@ public static class ApiRoutes
     public static string MediaEpisodesFor(Guid id)     => MediaEpisodes.Replace("{id}", id.ToString());
     public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
     public static string MediaTrickplayFor(Guid id)    => MediaTrickplay.Replace("{id}", id.ToString());
+    public static string MediaSimilarFor(Guid id)      => MediaSimilar.Replace("{id}", id.ToString());
+    public static string MeWatchlistItem(Guid id)      => MeWatchlistById.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());

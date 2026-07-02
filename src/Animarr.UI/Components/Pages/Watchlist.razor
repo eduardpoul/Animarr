@@ -1,0 +1,93 @@
+@page "/watchlist"
+@inject IAnimarrApiClient Api
+
+<PageTitle>@L["watchlist.title"] — Animarr</PageTitle>
+
+@*
+    "Хочу посмотреть" — the user's personal wants. Local entries (library
+    titles) open the catalog; external ones (added from recommendation rails)
+    render with their TMDB snapshot and just sit here until acquired — the
+    future torrent-search hookup starts from this list.
+*@
+<div class="wl-page">
+    <div class="wl-head">
+        <h1 class="wl-title">@L["watchlist.title"]</h1>
+        <span class="wl-count">@_items.Count</span>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="wl-empty">…</div>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="wl-empty">
+            <DIcon Name="video" Size="42" />
+            <div class="wl-empty__text">@L["watchlist.empty"]</div>
+        </div>
+    }
+    else
+    {
+        <div class="wl-grid">
+            @foreach (var it in _items)
+            {
+                var item = it;
+                <div class="wl-cell">
+                    <div class="wl-art-wrap">
+                        @if (item.MediaItemId is Guid mid)
+                        {
+                            <a class="wl-card tv-focus" href="/catalog/@mid" title="@item.Title">
+                                @if (!string.IsNullOrEmpty(item.PosterUrl))
+                                {
+                                    <img loading="lazy" src="@item.PosterUrl" alt="@item.Title" class="wl-img" />
+                                }
+                                else
+                                {
+                                    <div class="wl-ph"><DIcon Name="video" Size="30" /></div>
+                                }
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="wl-card wl-card--ext" title="@item.Title">
+                                @if (!string.IsNullOrEmpty(item.PosterUrl))
+                                {
+                                    <img loading="lazy" src="@item.PosterUrl" alt="@item.Title" class="wl-img" />
+                                }
+                                else
+                                {
+                                    <div class="wl-ph"><DIcon Name="video" Size="30" /></div>
+                                }
+                                <span class="wl-ext-badge">@L["recs.not_in_library"]</span>
+                            </div>
+                        }
+                        <button type="button" class="wl-remove tv-focus"
+                                title="@L["watchlist.remove"]" aria-label="@L["watchlist.remove"]"
+                                @onclick="@(() => RemoveAsync(item))">✕</button>
+                    </div>
+                    <div class="wl-name">@item.Title@(item.Year is int y ? $" · {y}" : "")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<WatchlistItemDto> _items = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _items = (await Api.GetWatchlistAsync()).ToList(); }
+        catch { _items = new(); }
+        _loading = false;
+    }
+
+    private async Task RemoveAsync(WatchlistItemDto item)
+    {
+        _items.Remove(item);
+        StateHasChanged();
+        try { await Api.RemoveWatchlistAsync(item.Id); }
+        catch { /* removed locally; reconciles on next load */ }
+    }
+}

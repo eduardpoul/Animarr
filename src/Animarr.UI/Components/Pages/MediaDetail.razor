@@ -440,6 +440,13 @@ else
             }
         </section>
     }
+
+    @* "More like this" — library matches first, TMDB backfill (per the user's
+       RecsScope preference) rendered as dashed not-in-library cards. *@
+    @if (_similar.Length > 0)
+    {
+        <RecRail Title="@L["recs.similar_title"]" Items="@_similar" />
+    }
 }
 
 @* Player overlay — Artplayer mounts into the .vp-art container. *@
@@ -670,6 +677,22 @@ else
         // — movies have no episode list to localize.
         if (_item is { MediaType: MediaItemType.Series or MediaItemType.Anime or MediaItemType.Multserials })
             _ = LoadEpisodeMetaAsync();
+
+        // Stage C: the "More like this" rail, also fire-and-forget — genre
+        // scoring is instant server-side; the TMDB backfill may add a beat.
+        _ = LoadSimilarAsync();
+    }
+
+    private RecCardDto[] _similar = Array.Empty<RecCardDto>();
+
+    private async Task LoadSimilarAsync()
+    {
+        try
+        {
+            _similar = await Api.GetSimilarAsync(Id);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* rail is optional decoration */ }
     }
 
     /// <summary>Background-load per-episode TMDB metadata (Stage B) keyed by TMDB

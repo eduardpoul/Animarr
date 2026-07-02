@@ -29,6 +29,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
+    public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
+    public DbSet<RecDismissal> RecDismissals => Set<RecDismissal>();
 
     // ─── Categories ────────────────────────────────────────────────────────────
     public DbSet<Category> Categories => Set<Category>();
@@ -296,6 +298,45 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.MediaItemId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.UserId);
+        });
+
+        modelBuilder.Entity<WatchlistItem>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Title).HasMaxLength(512);
+            e.Property(x => x.MediaType).HasMaxLength(16);
+            e.Property(x => x.PosterUrl).HasMaxLength(1024);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Adds upsert against these keys in code (select-first); the
+            // indexes just make the lookups + per-user list cheap.
+            e.HasIndex(x => new { x.UserId, x.MediaItemId });
+            e.HasIndex(x => new { x.UserId, x.TmdbId });
+        });
+
+        modelBuilder.Entity<RecDismissal>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.UserId, x.MediaItemId });
+            e.HasIndex(x => new { x.UserId, x.TmdbId });
         });
 
         // ─── Categories ────────────────────────────────────────────────────────

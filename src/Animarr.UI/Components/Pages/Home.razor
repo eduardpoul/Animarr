@@ -59,6 +59,20 @@
                     }
                     break;
 
+                case "foryou":
+                    @* Heuristic recommendations: unwatched library titles scored
+                       against the user's watch-time genre profile, TMDB backfill
+                       for the free slots (dashed cards with a Want button).
+                       Dismiss ✕ persists per user. *@
+                    @if (_forYou.Length > 0)
+                    {
+                        <RecRail Title="@L["home.for_you"]"
+                                 Hint="@L["recs.foryou_hint"]"
+                                 Items="@_forYou"
+                                 Dismissable="true" />
+                    }
+                    break;
+
                 case "library":
                     @* Compact library block — a poster grid capped to two rows on
                        desktop (four on phones) with a "view all" tile as the last
@@ -126,6 +140,7 @@
     /// drives the render stack above. Recomputed whenever preferences change
     /// (saving the editor in ProfilePanel reorders Home live).</summary>
     private List<string> _homeSections = new();
+    private RecCardDto[] _forYou = Array.Empty<RecCardDto>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -160,6 +175,14 @@
             // items into the hero and fills the rail under it.
             try { _nextUpItems = await Api.GetNextUpAsync(take: 12); }
             catch { _nextUpItems = Array.Empty<ContinueWatchItemDto>(); }
+
+            // "For you" — heuristic recommendations (skipped entirely when the
+            // user hid the section, so no wasted TMDB round-trips).
+            if (_homeSections.Contains("foryou"))
+            {
+                try { _forYou = await Api.GetForYouAsync(); }
+                catch { _forYou = Array.Empty<RecCardDto>(); }
+            }
 
             var sections = await Api.GetSectionFoldersAsync();
             _sections = sections.OrderBy(f => f.Label).ToList();

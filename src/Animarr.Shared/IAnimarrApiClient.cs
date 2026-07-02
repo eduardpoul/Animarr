@@ -44,6 +44,16 @@ public interface IAnimarrApiClient
     /// <summary>Seek-preview sprite manifest for one episode (pass null/null for
     /// movies). Null when the background pass hasn't generated one yet.</summary>
     Task<TrickplayDto?> GetTrickplayAsync(Guid mediaItemId, int? season, int? episode, CancellationToken ct = default);
+    /// <summary>"More like this" rail for a title — library matches first,
+    /// TMDB backfill per the user's RecsScope preference.</summary>
+    Task<RecCardDto[]> GetSimilarAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>"For you" Home rail for the current user.</summary>
+    Task<RecCardDto[]> GetForYouAsync(CancellationToken ct = default);
+    /// <summary>"Don't suggest this again" — one of the ids set.</summary>
+    Task DismissRecAsync(Guid? mediaItemId, int? tmdbId, CancellationToken ct = default);
+    Task<WatchlistItemDto[]> GetWatchlistAsync(CancellationToken ct = default);
+    Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default);
+    Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default);
     /// <summary>Skip-intro/credits background-scan progress for the Settings indicator.</summary>
     Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default);
     /// <summary>Reset scan flags so the background pass reprocesses all titles.</summary>

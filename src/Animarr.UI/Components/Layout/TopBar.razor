@@ -78,6 +78,16 @@
         <DIcon Name="search" Size="15" />
     </button>
 
+    @* Watchlist — "Хочу посмотреть". Fed by the Want buttons on the
+       recommendation rails (and, later, franchises). *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/watchlist") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/watchlist"))"
+            title="@L["watchlist.title"]"
+            aria-label="@L["watchlist.title"]">
+        <DIcon Name="bookmark" Size="15" />
+    </button>
+
     @if (UserCtx.Can(p => p.UploadContent))
     {
         <button type="button"
