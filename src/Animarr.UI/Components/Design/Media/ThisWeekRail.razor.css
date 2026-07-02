@@ -17,16 +17,6 @@
     font-weight: 700;
     letter-spacing: -0.02em;
 }
-.twr__all {
-    margin-left: auto;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--accent-hi);
-    text-decoration: none;
-    white-space: nowrap;
-}
-.twr__all:hover { color: var(--accent); }
-
 .twr__row {
     display: flex;
     gap: var(--space-6);
