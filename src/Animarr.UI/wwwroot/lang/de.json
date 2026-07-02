@@ -1234,7 +1234,6 @@
   "profile.btn_update_pin": "PIN aktualisieren",
   "profile.categories_aria": "Einstellungskategorien",
   "profile.change_password": "Passwort ändern",
-  "profile.default_volume_label": "STANDARDLAUTSTÄRKE",
   "profile.dialog_aria": "Profil",
   "profile.downloads": "Downloads",
   "profile.edit_profile": "Profil bearbeiten",
@@ -1280,8 +1279,6 @@
   "profile.pager_h_label": "Nummeriert",
   "profile.pair_tv": "TV koppeln",
   "profile.pair_tv_sub": "Scanne den QR-Code auf dem Kopplungsbildschirm deines TVs.",
-  "profile.passthrough_hint": "Für AV-Receiver — sendet den rohen Bitstream.",
-  "profile.passthrough_title": "Audio-Passthrough",
   "profile.pin_change_or_remove": "PIN ändern oder entfernen (dieses Gerät)",
   "profile.pin_err_len": "Die PIN muss 4 Ziffern haben.",
   "profile.pin_err_remove": "PIN konnte nicht entfernt werden: {0}",
@@ -1308,7 +1305,6 @@
   "profile.subtitle_off": "Aus",
   "profile.subtitle_size_label": "UNTERTITELGRÖSSE",
   "profile.tab_appearance": "Darstellung",
-  "profile.tab_audio": "Audio",
   "profile.tab_identity": "Identität",
   "profile.tab_servers": "Server",
   "profile.theme_desc_anime": "Pflaume + Pastellrosa",
@@ -1512,5 +1508,6 @@
   "users_roles.users_card_sub": "Konten, die sich anmelden können. Rollen legen fest, was jedes tun darf.",
   "users_roles.users_card_title": "Benutzer",
   "welcome.get_started": "Loslegen",
-  "welcome.tagline": "Selbst gehostete Anime- & Film-Bibliothek, verstanden von einem LLM."
+  "welcome.tagline": "Selbst gehostete Anime- & Film-Bibliothek, verstanden von einem LLM.",
+  "profile.tab_settings": "Einstellungen"
 }

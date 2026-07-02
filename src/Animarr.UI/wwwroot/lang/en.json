@@ -1403,7 +1403,6 @@
   "profile.tab_identity": "Identity",
   "profile.tab_servers": "Servers",
   "profile.tab_appearance": "Appearance",
-  "profile.tab_audio": "Audio",
   "profile.downloads": "Downloads",
   "profile.pair_tv": "Pair a TV",
   "profile.pair_tv_sub": "Scan the QR shown on your TV's pairing screen.",
@@ -1505,12 +1504,10 @@
   "profile.subtitle_lang_label": "SUBTITLE LANGUAGE",
   "profile.subtitle_off": "Off",
   "profile.subtitle_size_label": "SUBTITLE SIZE",
-  "profile.default_volume_label": "DEFAULT VOLUME",
-  "profile.passthrough_title": "Audio passthrough",
-  "profile.passthrough_hint": "For AV receivers — sends raw bitstream.",
   "profile.normalize_title": "Normalize volume between titles",
   "profile.normalize_hint": "EBU R128 loudness normalization.",
   "profile.theme_music_title": "Theme music",
   "profile.theme_music_hint": "Play a title's opening theme when you open it (anime only).",
-  "profile.theme_volume_label": "THEME VOLUME"
+  "profile.theme_volume_label": "THEME VOLUME",
+  "profile.tab_settings": "Settings"
 }
