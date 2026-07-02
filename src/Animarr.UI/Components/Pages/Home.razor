@@ -60,6 +60,10 @@
                     }
                     break;
 
+                case "thisweek":
+                    <ThisWeekRail Items="@_thisWeek" />
+                    break;
+
                 case "foryou":
                     @* Heuristic recommendations: unwatched library titles scored
                        against the user's watch-time genre profile, TMDB backfill
@@ -147,6 +151,7 @@
     /// (saving the editor in ProfilePanel reorders Home live).</summary>
     private List<string> _homeSections = new();
     private RecCardDto[] _forYou = Array.Empty<RecCardDto>();
+    private CalendarEventDto[] _thisWeek = Array.Empty<CalendarEventDto>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,6 +193,22 @@
             {
                 try { _forYou = await Api.GetForYouAsync(); }
                 catch { _forYou = Array.Empty<RecCardDto>(); }
+            }
+
+            // "This week" — airing events for the current week (rail collapses
+            // when the week is empty).
+            if (_homeSections.Contains("thisweek"))
+            {
+                try
+                {
+                    var events = await Api.GetCalendarAsync(back: 1, ahead: 7);
+                    var weekEnd = DateTime.Now.Date.AddDays(7);
+                    _thisWeek = events
+                        .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
+                        .OrderBy(e => e.AiringAtUtc)
+                        .ToArray();
+                }
+                catch { _thisWeek = Array.Empty<CalendarEventDto>(); }
             }
 
             var sections = await Api.GetSectionFoldersAsync();

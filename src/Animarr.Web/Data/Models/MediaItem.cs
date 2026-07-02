@@ -159,6 +159,29 @@ public class MediaItem
     /// ongoing title get sprites without waiting out the TTL.</summary>
     public DateTime? LastTrickplayScanAt { get; set; }
 
+    // ─── Airing schedule (ongoing calendar) ────────────────────────────────
+    // Refreshed by AiringRefreshBackgroundService: AniList nextAiringEpisode
+    // for anime/donghua (batched), TMDB next_episode_to_air as the fallback
+    // for live-action "Returning Series".
+
+    /// <summary>Normalized release state: RELEASING / NOT_YET_RELEASED /
+    /// FINISHED / CANCELLED / HIATUS (AniList vocabulary; TMDB statuses are
+    /// mapped onto it). Null = never checked.</summary>
+    public string? AiringStatus { get; set; }
+    /// <summary>Absolute number of the NEXT episode to air (source numbering —
+    /// AniList counts per-entry, TMDB per-season; display maps via
+    /// SeasonOffsetsJson where applicable).</summary>
+    public int? NextEpisodeNumber { get; set; }
+    public DateTime? NextAirAtUtc { get; set; }
+    /// <summary>The previously-announced episode once its air time passes —
+    /// keeps "aired recently, is the file here yet?" answerable after the
+    /// refresh pass rolls NextEpisode forward.</summary>
+    public int? LastAiredEpisode { get; set; }
+    public DateTime? LastAiredAtUtc { get; set; }
+    /// <summary>Refresh gate: re-checked when stale (12h) or when the stored
+    /// NextAirAtUtc has passed. Null = never checked.</summary>
+    public DateTime? LastAiringCheckAt { get; set; }
+
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];
     public ICollection<MediaItemCategory> Categories { get; set; } = [];

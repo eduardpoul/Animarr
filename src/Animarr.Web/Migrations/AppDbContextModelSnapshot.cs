@@ -299,6 +299,9 @@ namespace Animarr.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AiringStatus")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("AniListId")
                         .HasColumnType("INTEGER");
 
@@ -350,6 +353,15 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("Language")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastAiredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastAiredEpisode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastAiringCheckAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
                         .HasColumnType("TEXT");
 
@@ -375,6 +387,12 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("MediaType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("NextAirAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NextEpisodeNumber")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("OriginalTitle")

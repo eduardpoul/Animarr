@@ -274,6 +274,11 @@ public class TmdbTvDetail
     public TmdbKeywords? Keywords { get; set; }
     [JsonPropertyName("in_production")] public bool InProduction { get; set; }
     [JsonPropertyName("type")] public string? ShowType { get; set; }
+    /// <summary>Next scheduled episode — the airing-calendar fallback for
+    /// live-action shows AniList doesn't know. Present in the default TV
+    /// detail payload; date-only precision (no air time).</summary>
+    [JsonPropertyName("next_episode_to_air")] public TmdbEpisodeBrief? NextEpisodeToAir { get; set; }
+    [JsonPropertyName("last_episode_to_air")] public TmdbEpisodeBrief? LastEpisodeToAir { get; set; }
 
     public int? Year => int.TryParse((FirstAirDate ?? "").Split('-')[0], out var y) ? y : null;
     public string? ContentRating => ContentRatings?.Results?.FirstOrDefault(r => r.Iso31661 == "US")?.Rating;
@@ -348,6 +353,15 @@ public class TmdbSeasonSummary
     public string? Name { get; set; }
     [JsonPropertyName("episode_count")] public int EpisodeCount { get; set; }
     [JsonPropertyName("poster_path")]   public string? PosterPath { get; set; }
+}
+
+/// <summary>Slim episode ref used by next/last_episode_to_air on the TV detail.</summary>
+public class TmdbEpisodeBrief
+{
+    [JsonPropertyName("episode_number")] public int EpisodeNumber { get; set; }
+    [JsonPropertyName("season_number")]  public int SeasonNumber  { get; set; }
+    [JsonPropertyName("air_date")]       public string? AirDate   { get; set; }
+    public string? Name { get; set; }
 }
 
 public class TmdbEpisode
