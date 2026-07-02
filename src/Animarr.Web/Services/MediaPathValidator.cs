@@ -16,8 +16,14 @@ public sealed class MediaPathValidator(
 {
     /// <summary>Outcome of a validation. When <see cref="Ok"/> is false,
     /// <see cref="Error"/> carries the HTTP result to return (400/403/404);
-    /// when true, <see cref="FullPath"/> is the canonical absolute path.</summary>
-    public readonly record struct Result(bool Ok, string? FullPath, IResult? Error);
+    /// when true, <see cref="FullPath"/> is the canonical absolute path.
+    /// Deconstructs into <c>(ok, fullPath, earlyResult)</c> so call sites read
+    /// like the old inline tuple helper.</summary>
+    public readonly record struct Result(bool Ok, string? FullPath, IResult? Error)
+    {
+        public void Deconstruct(out bool ok, out string? fullPath, out IResult? earlyResult)
+            => (ok, fullPath, earlyResult) = (Ok, FullPath, Error);
+    }
 
     /// <summary>Validate a path that must resolve to a FILE inside one of the
     /// registered FolderWatcher roots.</summary>
