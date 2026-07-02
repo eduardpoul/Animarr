@@ -7,7 +7,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Archivo+Black&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesque:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Schibsted+Grotesk:wght@400;500;600;700;800;900&family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Archivo+Black&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
 
 <style>
   :root {
@@ -22,9 +22,9 @@
     --accent-line: oklch(0.66 0.20 25 / 0.40);
     --success: oklch(0.74 0.15 150);
     --warn: oklch(0.80 0.17 75);
-    --font-ui: 'Geist', system-ui, sans-serif;
-    --font-display: 'Archivo Black', 'Geist', sans-serif;
-    --font-mono: 'Geist Mono', ui-monospace, monospace;
+    --font-ui: 'Hanken Grotesque', system-ui, sans-serif;
+    --font-display: 'Hanken Grotesque', system-ui, sans-serif;
+    --font-mono: 'Hanken Grotesque', system-ui, sans-serif;
     --font-cjk: 'Noto Serif SC', serif;
   }
   * { box-sizing: border-box; }
@@ -37,6 +37,10 @@
     -webkit-font-smoothing: antialiased;
   }
   #root { min-height: 100vh; width: 100vw; }
+  /* Display headings carry weight inside the family (the old Archivo Black was
+     single-weight, so headings never set font-weight). Drive a refined heavy
+     weight for whichever display family is active. */
+  [style*="--font-display"] { font-weight: 700; }
   button { font-family: inherit; cursor: pointer; }
   input, select, textarea { font-family: inherit; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }

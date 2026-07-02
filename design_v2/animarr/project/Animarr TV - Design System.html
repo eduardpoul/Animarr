@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr TV — Design System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesque:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="tv-ds/ds.css" />
+</head>
+<body>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" rx="22" fill="#15110e"/>
+    <rect x="40" y="74" width="120" height="62" rx="9" fill="#e85a3a"/>
+    <text x="100" y="120" text-anchor="middle" font-family="Hanken Grotesque, sans-serif" font-weight="800" font-size="34" fill="#fff">TV·DS</text>
+  </svg>
+</template>
+
+<div class="wrap">
+  <aside class="side">
+    <div class="brand">
+      <div class="mark">A</div>
+      <b>Animarr</b><span class="tag">TV</span>
+    </div>
+    <nav class="toc">
+      <div class="grp">Foundations</div>
+      <a href="#colors">Color &amp; accent</a>
+      <a href="#type">Typography</a>
+      <a href="#tokens">Tokens · radius · spacing</a>
+      <a href="#focus">Focus &amp; glass</a>
+      <div class="grp">Components</div>
+      <a href="#buttons">Buttons &amp; chips</a>
+      <a href="#cards">Posters &amp; episodes</a>
+      <a href="#widgets">Profiles · PIN · QR · menus</a>
+      <div class="grp">Auth &amp; pairing</div>
+      <a href="#welcome">Welcome</a>
+      <a href="#discovery">Discovery</a>
+      <a href="#login">Login</a>
+      <a href="#pair">Pair · QR</a>
+      <a href="#switch">Who's watching · PIN</a>
+      <a href="#setup">Setup</a>
+      <div class="grp">Browse</div>
+      <a href="#home">Home / catalog</a>
+      <a href="#category">Category grid</a>
+      <a href="#search">Search</a>
+      <a href="#series">Series detail</a>
+      <a href="#movie">Movie detail</a>
+      <div class="grp">Playback</div>
+      <a href="#player">Player HUD</a>
+      <a href="#popups">Popups (D-pad)</a>
+      <a href="#upnext">Up-next</a>
+      <div class="grp">Settings</div>
+      <a href="#set-appearance">Appearance</a>
+      <a href="#set-audio">Audio</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <header class="cover">
+      <div class="eyebrow">DESIGN SYSTEM · 10-FOOT UI</div>
+      <h1>Animarr <span class="tv">TV</span></h1>
+      <p>The leanback design language for Animarr — a self-hosted anime, donghua, film &amp; series library played from the couch. Remote-first (D-pad), image-light for weak TV silicon, built on Hanken Grotesque + a crimson accent. Every rail, tile and poster is a CSS gradient; only the hero / detail backdrop decodes a photo.</p>
+      <div class="meta">
+        <div><div class="k">Canvas</div><div class="v">1280 × 720 · 16:9</div></div>
+        <div><div class="k">Type</div><div class="v">Hanken Grotesque</div></div>
+        <div><div class="k">Accent</div><div class="v">Crimson · oklch(0.66 0.20 25)</div></div>
+        <div><div class="k">Navigation</div><div class="v">D-pad · OK · Back</div></div>
+        <div><div class="k">Min text</div><div class="v">24px+ on screen</div></div>
+      </div>
+    </header>
+
+    <!-- ============ FOUNDATIONS ============ -->
+    <section class="section" id="colors">
+      <div class="sec-head">
+        <div class="n">01 · FOUNDATIONS</div>
+        <h2>Color &amp; accent</h2>
+        <p>A warm near-black palette so fanart and posters carry the color. Surfaces step up in warmth; text steps down. The accent is a single user-recolorable hue (crimson by default) expressed in OKLCH so every tint — fill, hover, soft, line — stays perceptually even.</p>
+      </div>
+
+      <div class="subhead">Backgrounds &amp; surfaces</div>
+      <div class="sw-row">
+        <div class="sw"><div class="chip" style="background:#0a0807"></div><div class="lbl"><b>bg-0</b><span>#0a0807</span></div></div>
+        <div class="sw"><div class="chip" style="background:#100d0b"></div><div class="lbl"><b>bg-1</b><span>#100d0b</span></div></div>
+        <div class="sw"><div class="chip" style="background:#15110e"></div><div class="lbl"><b>surface</b><span>#15110e</span></div></div>
+        <div class="sw"><div class="chip" style="background:#1c1814"></div><div class="lbl"><b>surface-2</b><span>#1c1814</span></div></div>
+        <div class="sw"><div class="chip" style="background:#25201b"></div><div class="lbl"><b>surface-3</b><span>#25201b</span></div></div>
+      </div>
+
+      <div class="subhead">Text &amp; semantic</div>
+      <div class="sw-row">
+        <div class="sw"><div class="chip" style="background:#f4eee6"></div><div class="lbl"><b>text</b><span>#f4eee6</span></div></div>
+        <div class="sw"><div class="chip" style="background:#b3aaa0"></div><div class="lbl"><b>text-dim</b><span>#b3aaa0</span></div></div>
+        <div class="sw"><div class="chip" style="background:#6b635b"></div><div class="lbl"><b>text-faint</b><span>#6b635b</span></div></div>
+        <div class="sw"><div class="chip" style="background:oklch(0.74 0.15 150)"></div><div class="lbl"><b>success</b><span>oklch .74/.15/150</span></div></div>
+        <div class="sw"><div class="chip" style="background:oklch(0.80 0.17 75)"></div><div class="lbl"><b>warn</b><span>oklch .80/.17/75</span></div></div>
+        <div class="sw"><div class="chip" style="background:oklch(0.70 0.12 240)"></div><div class="lbl"><b>info</b><span>oklch .70/.12/240</span></div></div>
+      </div>
+
+      <div class="subhead">Accent — crimson default + 5 swatches</div>
+      <div class="sw-row">
+        <div class="sw"><div class="chip" style="background:var(--accent)"></div><div class="lbl"><b>accent</b><span>0.66 / 0.20 / 25</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--accent-hi)"></div><div class="lbl"><b>accent-hi</b><span>0.76 / 0.21 / 25</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--accent-soft)"></div><div class="lbl"><b>accent-soft</b><span>/ 0.18</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--accent-line)"></div><div class="lbl"><b>accent-line</b><span>/ 0.45</span></div></div>
+      </div>
+      <div class="accent-row" style="margin-top:18px">
+        <div class="accent-dot sel" style="background:oklch(0.66 0.20 25)" title="Crimson"></div>
+        <div class="accent-dot" style="background:oklch(0.72 0.17 60)" title="Amber"></div>
+        <div class="accent-dot" style="background:oklch(0.74 0.15 150)" title="Green"></div>
+        <div class="accent-dot" style="background:oklch(0.66 0.16 240)" title="Blue"></div>
+        <div class="accent-dot" style="background:oklch(0.66 0.20 290)" title="Violet"></div>
+      </div>
+    </section>
+
+    <section class="section" id="type">
+      <div class="sec-head">
+        <div class="n">01 · FOUNDATIONS</div>
+        <h2>Typography</h2>
+        <p>One family — <b>Hanken Grotesque</b> — across display, UI and labels (the "mono" token is a proportional label sans, not code). Warm and humanist rather than gamer-digital. On a 1280×720 canvas nothing sits below 24px; hero titles run 72px.</p>
+      </div>
+      <div class="type-stack">
+        <div><div class="meta"><b>Hero title</b>800 · 72 / -1.6</div><div class="demo" style="font-size:60px;font-weight:800;letter-spacing:-1.6px;line-height:1">Perfect World</div></div>
+        <div><div class="meta"><b>Screen title</b>800 · 48 / -1</div><div class="demo" style="font-size:48px;font-weight:800;letter-spacing:-1px">Browse · Anime</div></div>
+        <div><div class="meta"><b>Section / card</b>700 · 26</div><div class="demo" style="font-size:26px;font-weight:700">Continue watching</div></div>
+        <div><div class="meta"><b>Body</b>500 · 19 / 1.55</div><div class="demo" style="font-size:19px;font-weight:500;color:var(--doc-dim)">Shi Hao walks the cruel road of cultivation across a perfect world soaked in war and betrayal.</div></div>
+        <div><div class="meta"><b>Label / eyebrow</b>700 · 14 / 2.4 caps</div><div class="demo" style="font-size:14px;font-weight:700;letter-spacing:2.4px;color:var(--accent-hi)">CONTINUE WATCHING</div></div>
+        <div><div class="meta"><b>Meta · tabular</b>500 · 17</div><div class="demo mono" style="font-size:17px;color:var(--doc-dim)">★ 8.4 · 2018 · S1 · E5 · 270 EP</div></div>
+        <div><div class="meta"><b>CJK decoration</b>Noto Serif SC 900</div><div class="demo" style="font-family:var(--font-cjk);font-size:46px;color:oklch(0.7 0.12 25)">完美世界</div></div>
+      </div>
+    </section>
+
+    <section class="section" id="tokens">
+      <div class="sec-head">
+        <div class="n">01 · FOUNDATIONS</div>
+        <h2>Tokens · radius · spacing</h2>
+        <p>Generous radii and spacing read clearly from 3 metres. Focus-target minimum is 40px; on-screen hit areas are larger still.</p>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:40px">
+        <div>
+          <div class="subhead" style="margin-top:0">Radius</div>
+          <div class="demo-row">
+            <div class="demo-card"><div style="width:90px;height:54px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px"></div><div class="cap">ctrl · 8px</div></div>
+            <div class="demo-card"><div style="width:90px;height:54px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:12px"></div><div class="cap">card · 12px</div></div>
+            <div class="demo-card"><div style="width:90px;height:54px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:16px"></div><div class="cap">panel · 16px</div></div>
+            <div class="demo-card"><div style="width:90px;height:54px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:999px"></div><div class="cap">pill · 999</div></div>
+          </div>
+          <div class="subhead">Spacing scale</div>
+          <div class="demo-row" style="align-items:center">
+            <div style="width:8px;height:34px;background:var(--accent-soft)"></div>
+            <div style="width:12px;height:34px;background:var(--accent-soft)"></div>
+            <div style="width:16px;height:34px;background:var(--accent-soft)"></div>
+            <div style="width:22px;height:34px;background:var(--accent-soft)"></div>
+            <div style="width:26px;height:34px;background:var(--accent-soft)"></div>
+            <div style="width:48px;height:34px;background:var(--accent-soft)"></div>
+            <span class="cap">8 · 12 · 16 · 22 · 26 · 48</span>
+          </div>
+        </div>
+        <div>
+          <div class="subhead" style="margin-top:0">Token reference</div>
+          <table class="tok-table">
+            <tr><td>--bg-0</td><td>#0a0807</td><td>page base</td></tr>
+            <tr><td>--surface</td><td>#15110e</td><td>cards, chips</td></tr>
+            <tr><td>--text</td><td>#f4eee6</td><td>primary</td></tr>
+            <tr><td>--text-dim</td><td>#b3aaa0</td><td>meta, body</td></tr>
+            <tr><td>--accent</td><td>oklch .66 .20 25</td><td>primary CTA</td></tr>
+            <tr><td>--accent-hi</td><td>oklch .76 .21 25</td><td>focus, links</td></tr>
+            <tr><td>--accent-soft</td><td>· / 0.18</td><td>fills, badges</td></tr>
+            <tr><td>--accent-line</td><td>· / 0.45</td><td>active borders</td></tr>
+            <tr><td>--font-ui</td><td>Hanken Grotesque</td><td>everything</td></tr>
+            <tr><td>--font-cjk</td><td>Noto Serif SC</td><td>watermark only</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="focus">
+      <div class="sec-head">
+        <div class="n">01 · FOUNDATIONS</div>
+        <h2>Focus &amp; glass</h2>
+        <p>The single most important 10-foot affordance. Every focusable carries a focus state; the focused element gets a bold accent ring + glow. Inside scrolling grids the ring is drawn <b>inset</b> so it is never clipped. Floating controls use the "glass" treatment: translucent fill, hairline border, blur.</p>
+      </div>
+      <div class="canvas">
+        <div class="cap-row">
+          <div><span class="cap">Rest</span><button class="btn ghost">Episode 6</button></div>
+          <div><span class="cap">Focused (outer ring)</span><button class="btn ghost tvf focus">Episode 6</button></div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">Tile rest</span>
+            <div class="tile" style="width:150px;height:96px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 12 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.15 0.05 12))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:15px">EP 06</div></div></div>
+          </div>
+          <div><span class="cap">Tile focused (inset ring)</span>
+            <div class="tile tvf flat focus" style="width:150px;height:96px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 12 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.15 0.05 12))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:15px">EP 06</div></div></div>
+          </div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">Glass square</span><div class="gsq">★</div></div>
+          <div><span class="cap">Glass button</span><button class="btn glass sm">‹ Back</button></div>
+          <div><span class="cap">Hint bar key</span><span style="color:var(--text-faint);font-size:15px"><kbd style="display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 6px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border-strong);font-size:12px;font-weight:700;margin-right:7px">OK</kbd>Select</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ COMPONENTS ============ -->
+    <section class="section" id="buttons">
+      <div class="sec-head">
+        <div class="n">02 · COMPONENTS</div>
+        <h2>Buttons &amp; chips</h2>
+        <p>One accent-filled primary per surface; everything else is a surface/ghost or glass control. Chips carry classification (type ribbon), navigation (categories) and paging (episode ranges).</p>
+      </div>
+      <div class="canvas col">
+        <div class="cap-row">
+          <div><span class="cap">Primary CTA</span><button class="btn"><span class="pl">▶</span> Resume Episode 5</button></div>
+          <div><span class="cap">Primary focused</span><button class="btn hi"><span class="pl">▶</span> Play movie</button></div>
+          <div><span class="cap">Ghost</span><button class="btn ghost">Back</button></div>
+          <div><span class="cap">Glass</span><button class="btn glass">More info</button></div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">Type pill</span><span class="pill type">Series</span></div>
+          <div><span class="cap">Tag pills</span><span class="pill tag">Donghua</span></div>
+          <div><span class="cap">Manual</span><span class="pill info">Manual</span></div>
+          <div><span class="cap">Needs review</span><span class="pill warn">Needs review</span></div>
+          <div><span class="cap">LLM live</span><span class="pill live"><span class="dot"></span> AI · 17/25</span></div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">Category chips</span><div class="flex" style="gap:10px"><span class="cat-chip on">All</span><span class="cat-chip">Anime</span><span class="cat-chip">Movies</span></div></div>
+          <div><span class="cap">Episode range chips</span><div class="flex" style="gap:10px"><span class="range-chip on">1–50</span><span class="range-chip">51–100</span><span class="range-chip">101–150</span></div></div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">Progress bar</span><div class="bar" style="width:240px"><i style="width:38%"></i></div></div>
+          <div><span class="cap">Toggle off / on</span><div class="flex" style="gap:14px"><span class="tog"><i></i></span><span class="tog on"><i></i></span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="cards">
+      <div class="sec-head">
+        <div class="n">02 · COMPONENTS</div>
+        <h2>Posters &amp; episode cards</h2>
+        <p>The browse wall is image-free: each poster is a hue-tinted gradient with a faint CJK watermark, a type ribbon, optional confidence chip and a title/meta overlay. Episode cards encode disk status, watched state and progress at a glance.</p>
+      </div>
+      <div class="canvas">
+        <div class="cap-row">
+          <div><span class="cap">Poster · rest</span>
+            <div class="tile poster" style="background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 12 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.15 0.05 12))">
+              <div class="cjk" style="font-size:120px">完美</div><div class="ribbon">SERIES</div><div class="scrim"></div>
+              <div class="body"><div class="t">Perfect World</div><div class="m"><span class="star">★ 8.4</span><span>2018</span></div></div>
+            </div>
+          </div>
+          <div><span class="cap">Poster · focused + conf</span>
+            <div class="tile poster tvf flat focus" style="background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 285 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 285),oklch(0.15 0.05 285))">
+              <div class="cjk" style="font-size:120px">凡尘</div><div class="ribbon">SERIES</div><div class="conf">78%</div><div class="scrim"></div>
+              <div class="body"><div class="t">Beyond Time's Gaze</div><div class="m"><span class="star">★ 7.9</span><span>2025</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">On disk · in progress</span>
+            <div class="epc tile" style="background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .85),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.16 0.05 12))">
+              <div class="strip disk"></div><div class="scrim"></div><div class="n">05</div><div class="disk ok">✓ On disk</div>
+              <div class="et">Episode 5</div><div class="em">23m</div><div class="eye">◠</div><div class="prog"><i style="width:38%"></i></div>
+            </div>
+          </div>
+          <div><span class="cap">Watched</span>
+            <div class="epc tile watched" style="background:linear-gradient(158deg,oklch(0.36 0.1 12),oklch(0.15 0.05 12))">
+              <div class="strip done"></div><div class="scrim"></div><div class="n">04</div><div class="disk ok">✓ On disk</div>
+              <div class="et">Episode 4</div><div class="em">24m</div><div class="eye on">✓</div>
+            </div>
+          </div>
+          <div><span class="cap">Missing</span>
+            <div class="epc tile missing" style="background:linear-gradient(158deg,oklch(0.3 0.06 75),oklch(0.14 0.04 75))">
+              <div class="strip miss"></div><div class="scrim"></div><div class="n" style="color:rgba(255,255,255,.55)">07</div><div class="disk no">⚠ Missing</div>
+              <div class="et">Episode 7</div><div class="em" style="color:var(--warn)">Not downloaded</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="widgets">
+      <div class="sec-head">
+        <div class="n">02 · COMPONENTS</div>
+        <h2>Profiles · PIN · QR · menus</h2>
+        <p>Identity and pairing primitives, plus the D-pad-focusable settings row and player popup list — the menus that the spec flags as the highest-value leanback fix.</p>
+      </div>
+      <div class="canvas" style="align-items:flex-start">
+        <div class="cap-row">
+          <div><span class="cap">Profile tile</span>
+            <div class="ptile tvf flat focus" style="position:relative">
+              <div class="av" style="background:linear-gradient(155deg,oklch(0.6 0.13 150),oklch(0.34 0.09 150))">Y<div class="lock">🔒</div></div>
+              <div><div class="nm">Yuri</div><div class="rl">Master</div></div>
+            </div>
+          </div>
+          <div><span class="cap">PIN keypad</span>
+            <div class="pin">
+              <h4>Sign in as Yuri</h4><div class="sub">Enter 4-digit PIN</div>
+              <div class="dots"><span class="dot2 on"></span><span class="dot2 on"></span><span class="dot2"></span><span class="dot2"></span></div>
+              <div class="keys"><div class="key">1</div><div class="key">2</div><div class="key">3</div><div class="key">4</div><div class="key tvf flat focus" style="position:relative">5</div><div class="key">6</div><div class="key">7</div><div class="key">8</div><div class="key">9</div><div class="key" style="background:transparent;border:0"></div><div class="key">0</div><div class="key">⌫</div></div>
+              <div class="cancel">CANCEL</div>
+            </div>
+          </div>
+        </div>
+        <div class="cap-row">
+          <div><span class="cap">QR pairing card</span>
+            <div class="qr"><svg viewBox="0 0 29 29" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="29" height="29" fill="#fff"/><g fill="#000"><rect x="0" y="0" width="7" height="7"/><rect x="2" y="2" width="3" height="3" fill="#fff"/><rect x="22" y="0" width="7" height="7"/><rect x="24" y="2" width="3" height="3" fill="#fff"/><rect x="0" y="22" width="7" height="7"/><rect x="2" y="24" width="3" height="3" fill="#fff"/><rect x="9" y="1" width="1" height="1"/><rect x="11" y="0" width="1" height="2"/><rect x="13" y="1" width="2" height="1"/><rect x="17" y="0" width="1" height="3"/><rect x="19" y="2" width="1" height="1"/><rect x="1" y="9" width="2" height="1"/><rect x="4" y="9" width="1" height="2"/><rect x="9" y="9" width="3" height="3"/><rect x="14" y="10" width="2" height="2"/><rect x="18" y="9" width="2" height="1"/><rect x="21" y="11" width="3" height="2"/><rect x="26" y="9" width="1" height="3"/><rect x="9" y="14" width="2" height="2"/><rect x="13" y="15" width="3" height="1"/><rect x="18" y="14" width="1" height="3"/><rect x="22" y="14" width="2" height="2"/><rect x="26" y="15" width="1" height="2"/><rect x="10" y="18" width="1" height="3"/><rect x="13" y="19" width="2" height="2"/><rect x="17" y="18" width="3" height="1"/><rect x="22" y="18" width="1" height="3"/><rect x="25" y="19" width="3" height="2"/><rect x="9" y="23" width="2" height="1"/><rect x="13" y="22" width="1" height="3"/><rect x="16" y="24" width="3" height="2"/><rect x="21" y="23" width="2" height="2"/><rect x="25" y="24" width="2" height="3"/></g></svg></div>
+          </div>
+          <div><span class="cap">Settings row</span>
+            <div style="width:420px;display:flex;flex-direction:column;gap:8px">
+              <div class="srow tvf flat focus" style="position:relative"><div class="l"><b>Accent color</b></div><div class="v"><span style="color:var(--accent-hi)">‹</span><span style="width:16px;height:16px;border-radius:50%;background:var(--accent);display:inline-block"></span>Crimson<span style="color:var(--accent-hi)">›</span></div></div>
+              <div class="srow"><div class="l"><b>Data saver</b><span>Hide backdrops — fewer images for slow TVs</span></div><div class="v"><span class="tog"><i></i></span></div></div>
+            </div>
+          </div>
+          <div><span class="cap">Player popup (D-pad list)</span>
+            <div class="menu">
+              <div class="mh">Subtitles</div>
+              <div class="mi">Off</div>
+              <div class="mi on tvf flat focus" style="position:relative">Russian (srt)<span class="ck">✓</span></div>
+              <div class="mi">English · Full Subs</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ AUTH & PAIRING ============ -->
+    <section class="section" id="welcome">
+      <div class="sec-head">
+        <div class="n">03 · AUTH &amp; PAIRING</div>
+        <h2>Auth &amp; pairing screens</h2>
+        <p>All auth screens share <b>AuthLayout</b>: a dimmed animated fanart backdrop + film grain, a centered translucent glass card, a vertical CJK watermark, a top-left glass <b>Back</b>. Exactly one control per screen is the autofocus target for the remote.</p>
+      </div>
+
+      <div class="screens">
+        <div class="shot" id="welcome-shot">
+          <div class="label"><span class="num">/welcome</span><h3>Welcome</h3><span class="rt">anonymous · autofocus: Get started</span></div>
+          <p class="note">One decision, nothing else. Brand mark → wordmark → tagline → a single large primary CTA. CTA routes to Setup (no users yet) or Discovery.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 80% at 50% 40%,oklch(0.32 0.12 25 / .42),#08070a)">
+            <div class="grain"></div>
+            <div class="watermark">动画</div>
+            <div class="center-col">
+              <div style="display:flex;align-items:center;gap:18px;margin-bottom:26px">
+                <div style="width:84px;height:84px;border-radius:20px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),oklch(0.42 0.18 25));color:#fff;font-weight:800;font-size:46px;box-shadow:0 0 70px -8px oklch(0.66 0.20 25 / .6)">A</div>
+              </div>
+              <h1 class="title" style="font-size:62px;text-align:center">Animarr</h1>
+              <p style="font-size:21px;color:var(--text-dim);margin:18px 0 0;text-align:center;max-width:680px">Self-hosted anime &amp; movie library, understood by an LLM.</p>
+              <button class="btn hi" style="margin-top:38px;font-size:20px;padding:17px 40px">Get started <span class="pl">→</span></button>
+            </div>
+            <div style="position:absolute;bottom:22px;left:0;right:0;text-align:center;color:var(--text-faint);font-size:14px">github</div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="discovery">
+          <div class="label"><span class="num">/discovery</span><h3>Discovery — find your library</h3><span class="rt">pre-auth · autofocus: first server card</span></div>
+          <p class="note">Scans the LAN via mDNS (native) or opens the manual-add form (browser). <b>Found</b> state shown: server cards with a live green dot, base URL, title count and version. Also has Scanning / Empty / Manual-add states.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 80% at 50% 35%,oklch(0.3 0.1 25 / .4),#08070a)">
+            <div class="grain"></div>
+            <button class="btn glass sm back">‹ Back</button>
+            <div class="auth">
+              <div class="card" style="width:620px">
+                <div class="kicker" style="margin-bottom:6px">FIND YOUR LIBRARY</div>
+                <div style="font-size:24px;font-weight:700;margin-bottom:22px">2 servers found · pick one to sign in</div>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div class="srow tvf flat focus" style="position:relative;padding:18px 22px">
+                    <div style="display:flex;align-items:center;gap:16px">
+                      <div style="width:48px;height:48px;border-radius:12px;background:var(--surface-3);display:grid;place-items:center;font-size:22px">🖥</div>
+                      <div><b style="font-size:19px">Living-room NAS</b><div class="mono" style="font-size:14px;color:var(--text-dim);margin-top:4px;display:flex;align-items:center;gap:9px"><span class="dot g"></span>192.168.1.50:8080 · 214 titles · v5.0</div></div>
+                    </div>
+                    <div class="v" style="font-size:15px;color:var(--accent-hi)">connect ›</div>
+                  </div>
+                  <div class="srow" style="padding:18px 22px">
+                    <div style="display:flex;align-items:center;gap:16px">
+                      <div style="width:48px;height:48px;border-radius:12px;background:var(--surface-3);display:grid;place-items:center;font-size:22px">🖥</div>
+                      <div><b style="font-size:19px">animarr.tailnet.ts.net</b><div class="mono" style="font-size:14px;color:var(--text-dim);margin-top:4px;display:flex;align-items:center;gap:9px"><span class="dot g"></span>https · 214 titles · v5.0</div></div>
+                    </div>
+                    <div class="v" style="font-size:15px">connect ›</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:18px"><button class="btn ghost sm">Add manually</button><button class="btn ghost sm">Rescan</button></div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↕</kbd>Move</span><span><kbd>OK</kbd>Connect</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="login">
+          <div class="label"><span class="num">/login</span><h3>Login</h3><span class="rt">anonymous · autofocus: Username</span></div>
+          <p class="note">420px glass card. Username + masked password, <b>SIGN IN</b>, and a QR shortcut (<b>"Sign in via phone QR"</b> → /pair). The native TV app auto-redirects to /pair on mount — a remote can't type — so this form is mainly a browser fallback.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 80% at 50% 40%,oklch(0.3 0.1 25 / .4),#08070a)">
+            <div class="grain"></div>
+            <button class="btn glass sm back">‹ Back</button>
+            <div class="watermark" style="font-size:380px">动画</div>
+            <div class="auth"><div class="card" style="width:430px">
+              <div style="display:flex;align-items:center;gap:13px;margin-bottom:24px">
+                <div style="width:42px;height:42px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),oklch(0.42 0.18 25));color:#fff;font-weight:800;font-size:22px">A</div>
+                <div><div style="font-size:22px;font-weight:800;letter-spacing:.5px">ANIMARR</div><div style="font-size:13px;color:var(--text-faint)">Sign in to continue</div></div>
+              </div>
+              <div class="field"><div class="fl">Username</div><div class="fi tvf flat focus" style="position:relative">yuri</div></div>
+              <div class="field"><div class="fl">Password</div><div class="fi ph">••••••••</div></div>
+              <button class="btn" style="width:100%;justify-content:center;margin-top:6px">SIGN IN <span class="pl">→</span></button>
+              <div style="text-align:center;margin-top:18px;font-size:15px;color:var(--accent-hi)">Sign in via phone QR ›</div>
+            </div></div>
+            <div class="hint"><span><kbd>↕</kbd>Field</span><span><kbd>OK</kbd>Keyboard</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="pair">
+          <div class="label"><span class="num">/pair</span><h3>Pair · QR + 6-digit code (TV side)</h3><span class="rt">anonymous-friendly · polls every 2s</span></div>
+          <p class="note">The leanback sign-in. A QR on a white card (left) + a huge spaced 6-digit code (right) with the instruction <b>"on your phone: Profile → Pair a TV"</b>. Code auto-rotates ~1 min before its 10-min TTL; on confirm the poll hard-reloads to Home signed-in.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 80% at 50% 40%,oklch(0.3 0.1 25 / .4),#08070a)">
+            <div class="grain"></div>
+            <div class="auth"><div class="card" style="width:760px;display:flex;align-items:center;gap:44px">
+              <div class="qr"><svg viewBox="0 0 29 29" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="29" height="29" fill="#fff"/><g fill="#000"><rect x="0" y="0" width="7" height="7"/><rect x="2" y="2" width="3" height="3" fill="#fff"/><rect x="22" y="0" width="7" height="7"/><rect x="24" y="2" width="3" height="3" fill="#fff"/><rect x="0" y="22" width="7" height="7"/><rect x="2" y="24" width="3" height="3" fill="#fff"/><rect x="9" y="1" width="1" height="1"/><rect x="11" y="0" width="1" height="2"/><rect x="13" y="1" width="2" height="1"/><rect x="17" y="0" width="1" height="3"/><rect x="1" y="9" width="2" height="1"/><rect x="4" y="9" width="1" height="2"/><rect x="9" y="9" width="3" height="3"/><rect x="14" y="10" width="2" height="2"/><rect x="18" y="9" width="2" height="1"/><rect x="21" y="11" width="3" height="2"/><rect x="26" y="9" width="1" height="3"/><rect x="9" y="14" width="2" height="2"/><rect x="13" y="15" width="3" height="1"/><rect x="18" y="14" width="1" height="3"/><rect x="22" y="14" width="2" height="2"/><rect x="10" y="18" width="1" height="3"/><rect x="13" y="19" width="2" height="2"/><rect x="17" y="18" width="3" height="1"/><rect x="22" y="18" width="1" height="3"/><rect x="25" y="19" width="3" height="2"/><rect x="9" y="23" width="2" height="1"/><rect x="13" y="22" width="1" height="3"/><rect x="16" y="24" width="3" height="2"/><rect x="21" y="23" width="2" height="2"/><rect x="25" y="24" width="2" height="3"/></g></svg></div>
+              <div>
+                <div class="kicker">SCAN TO SIGN IN</div>
+                <div class="mono" style="font-size:60px;font-weight:800;letter-spacing:6px;color:var(--accent-hi);text-shadow:0 0 30px var(--accent-soft);margin:14px 0 18px">123 456</div>
+                <div style="font-size:17px;color:var(--text-dim);line-height:1.5">On your phone open<br/><b style="color:var(--text)">Profile → Pair a TV</b> and scan, or enter the code.</div>
+                <div class="mono" style="font-size:13px;color:var(--text-faint);margin-top:18px;display:flex;align-items:center;gap:9px"><span class="dot g"></span>Waiting for confirmation…</div>
+              </div>
+            </div></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="switch">
+          <div class="label"><span class="num">/switch</span><h3>Who's watching? + PIN gate</h3><span class="rt">device-local roster · autofocus: first profile</span></div>
+          <p class="note">Fast user switch on native launch when ≥2 profiles have signed in on this device. PIN-locked profiles show a lock badge; selecting one swaps the tile grid for the centered <b>PIN keypad</b> (auto-advance, shake on wrong).</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(75% 75% at 50% 42%,oklch(0.3 0.1 25 / .4),#08070a)">
+            <div class="grain"></div>
+            <div class="center-col">
+              <div style="display:flex;align-items:center;gap:13px;margin-bottom:12px"><div style="width:42px;height:42px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),oklch(0.42 0.18 25));color:#fff;font-weight:800;font-size:24px">A</div><div style="font-size:28px;font-weight:800;letter-spacing:.6px">ANIMARR <span style="font-size:15px;color:var(--accent-hi)">TV</span></div></div>
+              <div style="font-size:32px;font-weight:700;margin-bottom:44px">Who's watching?</div>
+              <div style="display:flex;gap:40px">
+                <div class="ptile tvf flat focus" style="position:relative"><div class="av" style="background:linear-gradient(155deg,oklch(0.6 0.13 150),oklch(0.34 0.09 150))">Y<div class="lock">🔒</div></div><div><div class="nm">Yuri</div><div class="rl">Master</div></div></div>
+                <div class="ptile"><div class="av" style="background:linear-gradient(155deg,oklch(0.6 0.13 240),oklch(0.34 0.09 240))">A</div><div><div class="nm">Anna</div><div class="rl">User</div></div></div>
+                <div class="ptile"><div class="av" style="background:linear-gradient(155deg,oklch(0.6 0.13 60),oklch(0.34 0.09 60))">P</div><div><div class="nm">Pavel</div><div class="rl">Uploader</div></div></div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↔</kbd>Choose</span><span><kbd>OK</kbd>Sign in</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="setup">
+          <div class="label"><span class="num">/setup</span><h3>Setup — create master account</h3><span class="rt">only while no users exist</span></div>
+          <p class="note">First-run only. Name + Username (two-up), optional Email, Password + Repeat. Submit <b>Create master account</b>. Validation gates the button until all fields pass; on success auto-signs in and lands on Home.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 80% at 50% 40%,oklch(0.3 0.1 25 / .4),#08070a)">
+            <div class="grain"></div>
+            <button class="btn glass sm back">‹ Back</button>
+            <div class="auth"><div class="card" style="width:520px">
+              <div style="font-size:22px;font-weight:800;letter-spacing:.4px">CREATE MASTER ACCOUNT</div>
+              <div style="font-size:13px;color:var(--text-faint);margin:5px 0 22px">First-run setup — full access to every folder</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field" style="margin:0"><div class="fl">Name</div><div class="fi tvf flat focus" style="position:relative">Yuri</div></div>
+                <div class="field" style="margin:0"><div class="fl">Username</div><div class="fi">yuri</div></div>
+              </div>
+              <div class="field" style="margin-top:14px"><div class="fl">Email (optional)</div><div class="fi ph">you@example.com</div></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field" style="margin:0"><div class="fl">Password</div><div class="fi ph">••••••</div></div>
+                <div class="field" style="margin:0"><div class="fl">Repeat</div><div class="fi ph">••••••</div></div>
+              </div>
+              <button class="btn" style="width:100%;justify-content:center;margin-top:8px">Create master account <span class="pl">→</span></button>
+            </div></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BROWSE ============ -->
+    <section class="section" id="home">
+      <div class="sec-head">
+        <div class="n">04 · BROWSE</div>
+        <h2>Home, catalog &amp; detail</h2>
+        <p>The browse surface keeps exactly one photographic backdrop on screen (the hero / detail fanart); every rail, poster and episode tile is a CSS gradient. The remote parks on the hero's primary CTA on each screen.</p>
+      </div>
+
+      <div class="screens">
+        <div class="shot">
+          <div class="label"><span class="num">/</span><h3>Home / catalog</h3><span class="rt">autofocus: Resume</span></div>
+          <p class="note">Continue-watching hero (one fanart) + a <b>Next Up</b> rail + a category chip strip. Folder pills in the top bar narrow both the hero and the grid below. D-pad moves between hero CTA → rail → categories.</p>
+          <div class="frame"><div class="screen">
+            <div class="bg" style="width:74%;left:26%"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1280&q=60" alt="" /></div>
+            <div class="scrim-l"></div><div class="grain"></div>
+            <div class="topbar">
+              <div class="brand"><div class="mk">A</div><b>ANIMARR</b><span class="tv">TV</span></div>
+              <div class="nav"><a class="on">All</a><a>Anime</a><a>Movies</a><a>Series</a><a>Donghua</a></div>
+              <div class="right"><span class="mono" style="font-size:17px">21:30</span><span style="font-size:16px;font-weight:600;color:var(--text)">Yuri</span><span class="av">Y</span></div>
+            </div>
+            <div class="hero-text" style="top:118px">
+              <div class="kicker">CONTINUE WATCHING</div>
+              <h1 class="title" style="font-size:64px">Perfect World</h1>
+              <div class="meta"><span class="star">★ 8.4</span><span>2018</span><span>S1 · E5</span><span class="muted">38% watched</span></div>
+              <div class="ov">Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world soaked in war, betrayal and forbidden ancient ruins.</div>
+              <button class="btn hi" style="margin-top:24px"><span class="pl">▶</span> Resume Episode 5</button>
+            </div>
+            <div style="position:absolute;left:56px;right:56px;top:446px;z-index:15">
+              <div class="rail-label">NEXT UP</div>
+              <div class="rail">
+                <div class="tile" style="width:228px;height:128px;background:linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.16 0.05 12))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Perfect World</div></div><div class="bar" style="position:absolute;left:0;right:0;bottom:0;border-radius:0"><i style="width:38%"></i></div></div>
+                <div class="tile" style="width:228px;height:128px;background:linear-gradient(158deg,oklch(0.42 0.13 220),oklch(0.16 0.05 220))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Swallowed Star</div></div><div class="bar" style="position:absolute;left:0;right:0;bottom:0;border-radius:0"><i style="width:72%"></i></div></div>
+                <div class="tile" style="width:228px;height:128px;background:linear-gradient(158deg,oklch(0.42 0.13 200),oklch(0.16 0.05 200))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Xian Ni</div></div></div>
+                <div class="tile" style="width:228px;height:128px;background:linear-gradient(158deg,oklch(0.42 0.13 285),oklch(0.16 0.05 285))"><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Arcane</div></div></div>
+              </div>
+              <div class="rail-label" style="margin-top:22px">BROWSE</div>
+              <div class="rail" style="gap:12px;margin-top:12px"><span class="cat-chip on">All</span><span class="cat-chip">Anime · 18</span><span class="cat-chip">Movies · 3</span><span class="cat-chip">Serials · 1</span><span class="cat-chip">Donghua · 15</span></div>
+            </div>
+            <div class="hint"><span><kbd>↕</kbd>Move</span><span><kbd>↔</kbd>Browse</span><span><kbd>OK</kbd>Open</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="category">
+          <div class="label"><span class="num">/ → category</span><h3>Category grid</h3><span class="rt">autofocus: first poster</span></div>
+          <p class="note">Picking a category opens an image-free poster wall (~6 cols, dense ~8 on a real TV host). Hue-tinted gradient posters with a type ribbon; the grid scrolls vertically as focus descends. Caps at 240 with a "showing N of M" footnote.</p>
+          <div class="frame"><div class="screen" style="background:radial-gradient(80% 60% at 12% 0%,oklch(0.5 0.13 12 / .22),var(--bg-0))">
+            <div class="grain"></div>
+            <div class="topbar"><div class="brand"><div class="mk">A</div><b>ANIMARR</b><span class="tv">TV</span></div><div class="right"><span class="mono" style="font-size:17px">21:30</span><span class="av">Y</span></div></div>
+            <div style="position:absolute;left:56px;top:88px;display:flex;align-items:baseline;gap:18px"><span class="btn glass sm">‹ Back</span><span style="font-size:44px;font-weight:800;letter-spacing:-1px">Anime</span><span style="font-size:17px;color:var(--text-faint);font-weight:600">18 titles</span></div>
+            <div style="position:absolute;left:56px;right:56px;top:170px;display:grid;grid-template-columns:repeat(6,1fr);gap:20px">
+              <div class="tile poster tvf flat focus" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 12 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.15 0.05 12))"><div class="cjk" style="font-size:104px">完美</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Perfect World</div><div class="m"><span class="star">★ 8.4</span><span>2018</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 220 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 220),oklch(0.15 0.05 220))"><div class="cjk" style="font-size:104px">吞噬</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Swallowed Star</div><div class="m"><span class="star">★ 7.9</span><span>2020</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 200 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 200),oklch(0.15 0.05 200))"><div class="cjk" style="font-size:104px">仙逆</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Xian Ni</div><div class="m"><span class="star">★ 8.2</span><span>2023</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 195 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 195),oklch(0.15 0.05 195))"><div class="cjk" style="font-size:104px">遮天</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Shrouding the Heavens</div><div class="m"><span class="star">★ 8.0</span><span>2024</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 28 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 28),oklch(0.15 0.05 28))"><div class="cjk" style="font-size:104px">仙逆</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Renegade Immortal</div><div class="m"><span class="star">★ 8.1</span><span>2023</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 168 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 168),oklch(0.15 0.05 168))"><div class="cjk" style="font-size:104px">凡人</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">A Record of a Mortal's</div><div class="m"><span class="star">★ 8.5</span><span>2020</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 290 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 290),oklch(0.15 0.05 290))"><div class="cjk" style="font-size:104px">一念</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">A Will Eternal</div><div class="m"><span class="star">★ 7.8</span><span>2020</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 230 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 230),oklch(0.15 0.05 230))"><div class="cjk" style="font-size:104px">星辰</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Stellar Transformation</div><div class="m"><span class="star">★ 7.7</span><span>2018</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 220 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 220),oklch(0.15 0.05 220))"><div class="cjk" style="font-size:104px">神印</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Throne of Seal</div><div class="m"><span class="star">★ 7.5</span><span>2022</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 35 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 35),oklch(0.15 0.05 35))"><div class="cjk" style="font-size:104px">武动</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Martial Universe</div><div class="m"><span class="star">★ 7.6</span><span>2019</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 5 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 5),oklch(0.15 0.05 5))"><div class="cjk" style="font-size:104px">斗破</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Fights Break Sphere</div><div class="m"><span class="star">★ 8.0</span><span>2017</span></div></div></div><div class="tile poster" style="height:264px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 245 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 245),oklch(0.15 0.05 245))"><div class="cjk" style="font-size:104px">全职</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t" style="font-size:16px">Full-Time Magister</div><div class="m"><span class="star">★ 7.4</span><span>2017</span></div></div></div>
+            </div>
+            <div class="hint"><span><kbd>↕↔</kbd>Move</span><span><kbd>OK</kbd>Open</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="search">
+          <div class="label"><span class="num">/search</span><h3>Search</h3><span class="rt">D-pad: field not auto-focused</span></div>
+          <p class="note">A single glass search bar (PageBack + input + live results counter) over the same poster wall. Filters client-side across Title / Original / English / CJK. In TV mode the field is <b>not</b> auto-focused (would trap the D-pad) — the user arrows to it and invokes the IME.</p>
+          <div class="frame"><div class="screen" style="background:var(--bg-0)">
+            <div class="grain"></div>
+            <div style="position:absolute;left:56px;right:56px;top:46px;display:flex;align-items:center;gap:16px">
+              <span class="gsq">‹</span>
+              <div class="fi tvf flat focus" style="position:relative;flex:1;height:58px;border-radius:12px;background:rgba(20,15,12,.55);border:1px solid var(--border-strong);display:flex;align-items:center;gap:14px;padding:0 18px;font-size:20px"><span style="color:var(--text-faint)">🔍</span><span>perfect</span><span style="margin-left:auto;color:var(--text-faint);font-size:22px">✕</span></div>
+              <span class="mono" style="font-size:14px;letter-spacing:1px;color:var(--text-faint)">2 / 21 RESULTS</span>
+            </div>
+            <div style="position:absolute;left:56px;right:56px;top:138px;display:grid;grid-template-columns:repeat(6,1fr);gap:20px">
+              <div class="tile poster tvf flat focus" style="height:300px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 12 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.15 0.05 12))"><div class="cjk" style="font-size:120px">完美</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t">Perfect World</div><div class="m"><span class="star">★ 8.4</span><span>2018</span></div></div></div>
+              <div class="tile poster" style="height:300px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.58 0.16 168 / .9),transparent 55%),linear-gradient(158deg,oklch(0.42 0.13 168),oklch(0.15 0.05 168))"><div class="cjk" style="font-size:120px">凡人</div><div class="ribbon">SERIES</div><div class="scrim"></div><div class="body"><div class="t">A Record of a Mortal</div><div class="m"><span class="star">★ 8.5</span><span>2020</span></div></div></div>
+            </div>
+            <div class="hint"><span><kbd>↕↔</kbd>Move</span><span><kbd>OK</kbd>Open</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="series">
+          <div class="label"><span class="num">/catalog/{id}</span><h3>Series detail — seasons + episode grid</h3><span class="rt">autofocus: Resume / first episode</span></div>
+          <p class="note">Fanart hero + a 7-state continue CTA, then a paged episode <b>grid</b> with range chips (1–50, 51–100 …) so a 270-episode donghua never scrolls in one line. Episode cards encode on-disk / watched / in-progress; missing cards are skipped by the remote.</p>
+          <div class="frame"><div class="screen">
+            <div class="bg" style="width:68%;left:32%"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1280&q=60" alt="" /></div>
+            <div class="scrim-l"></div><div class="grain"></div>
+            <div style="position:absolute;top:22px;left:30px;z-index:25"><span class="gsq">‹</span></div>
+            <div style="position:absolute;top:22px;right:30px;z-index:25;display:flex;gap:12px"><span class="gsq">☆</span><span class="gsq">✎</span></div>
+            <div style="position:absolute;left:56px;top:120px;z-index:15;max-width:760px">
+              <div style="display:flex;gap:10px;margin-bottom:12px"><span class="pill type">Series</span><span class="pill info">Manual</span><span class="pill tag">Donghua</span><span class="pill tag">Cultivation</span></div>
+              <h1 class="title" style="font-size:60px">Perfect World</h1>
+              <div class="meta mono" style="gap:14px;font-size:16px"><span class="star">★ 8.4</span><span>2018</span><span>Yuewen</span><span>22m</span><span>270 ep</span><span>Mandarin</span><span style="color:var(--success)">98% match</span></div>
+              <div class="ov" style="font-size:16px">Shi Hao, born with extraordinary talent, walks the cruel road of cultivation across a perfect world soaked in war, betrayal and forbidden ancient ruins.</div>
+              <button class="btn hi" style="margin-top:18px"><span class="pl">▶</span> Continue · EP 05</button>
+            </div>
+            <div style="position:absolute;left:56px;right:56px;top:436px;z-index:15">
+              <div style="display:flex;align-items:center;gap:16px"><div class="rail-label">EPISODES</div><span style="font-size:14px;color:var(--text-faint);font-weight:600">TV-1 · 270 total</span></div>
+              <div class="flex" style="gap:10px;margin-top:12px"><span class="range-chip on">1–50</span><span class="range-chip">51–100</span><span class="range-chip">101–150</span><span class="range-chip">151–200</span><span class="range-chip">251–270</span></div>
+              <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:14px;margin-top:14px">
+                <div class="epc tile watched" style="width:auto;height:66px;background:linear-gradient(158deg,oklch(0.34 0.1 12),oklch(0.14 0.05 12))"><div class="strip done"></div><div class="scrim"></div><div class="n" style="font-size:24px">01</div><div class="et" style="bottom:10px;font-size:12px">Episode 1</div><div class="eye on">✓</div></div><div class="epc tile watched" style="width:auto;height:66px;background:linear-gradient(158deg,oklch(0.34 0.1 12),oklch(0.14 0.05 12))"><div class="strip done"></div><div class="scrim"></div><div class="n" style="font-size:24px">02</div><div class="et" style="bottom:10px;font-size:12px">Episode 2</div><div class="eye on">✓</div></div><div class="epc tile watched" style="width:auto;height:66px;background:linear-gradient(158deg,oklch(0.34 0.1 12),oklch(0.14 0.05 12))"><div class="strip done"></div><div class="scrim"></div><div class="n" style="font-size:24px">03</div><div class="et" style="bottom:10px;font-size:12px">Episode 3</div><div class="eye on">✓</div></div><div class="epc tile watched" style="width:auto;height:66px;background:linear-gradient(158deg,oklch(0.34 0.1 12),oklch(0.14 0.05 12))"><div class="strip done"></div><div class="scrim"></div><div class="n" style="font-size:24px">04</div><div class="et" style="bottom:10px;font-size:12px">Episode 4</div><div class="eye on">✓</div></div><div class="epc tile tvf flat focus" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">05</div><div class="et" style="bottom:10px;font-size:12px">Episode 5</div><div class="eye">◠</div><div class="prog"><i style="width:38%"></i></div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">06</div><div class="et" style="bottom:10px;font-size:12px">Episode 6</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">07</div><div class="et" style="bottom:10px;font-size:12px">Episode 7</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">08</div><div class="et" style="bottom:10px;font-size:12px">Episode 8</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">09</div><div class="et" style="bottom:10px;font-size:12px">Episode 9</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">10</div><div class="et" style="bottom:10px;font-size:12px">Episode 10</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">11</div><div class="et" style="bottom:10px;font-size:12px">Episode 11</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">12</div><div class="et" style="bottom:10px;font-size:12px">Episode 12</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">13</div><div class="et" style="bottom:10px;font-size:12px">Episode 13</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">14</div><div class="et" style="bottom:10px;font-size:12px">Episode 14</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">15</div><div class="et" style="bottom:10px;font-size:12px">Episode 15</div><div class="eye">◠</div></div><div class="epc tile" style="width:auto;height:66px;background:radial-gradient(120% 90% at 78% 8%,oklch(0.5 0.14 12 / .8),transparent 55%),linear-gradient(158deg,oklch(0.4 0.12 12),oklch(0.15 0.05 12))"><div class="strip disk"></div><div class="scrim"></div><div class="n" style="font-size:24px">16</div><div class="et" style="bottom:10px;font-size:12px">Episode 16</div><div class="eye">◠</div></div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↕↔</kbd>Move</span><span><kbd>OK</kbd>Play</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="movie">
+          <div class="label"><span class="num">/catalog/{id}</span><h3>Movie detail — the file itself</h3><span class="rt">autofocus: Play movie</span></div>
+          <p class="note">Same hero, but the grid is replaced by one wide <b>file card</b> — the feature film — showing runtime / resolution / codec / size and a Play (label mirrors the continue matrix). Watched-eye toggles state.</p>
+          <div class="frame"><div class="screen">
+            <div class="bg" style="width:68%;left:32%"><img src="https://images.unsplash.com/photo-1454496522488-7a8e488e8606?auto=format&fit=crop&w=1280&q=60" alt="" /></div>
+            <div class="scrim-l"></div><div class="grain"></div>
+            <div style="position:absolute;top:22px;left:30px;z-index:25"><span class="gsq">‹</span></div>
+            <div style="position:absolute;top:22px;right:30px;z-index:25;display:flex;gap:12px"><span class="gsq">★</span><span class="gsq">✎</span></div>
+            <div style="position:absolute;left:56px;top:150px;z-index:15;max-width:820px">
+              <div style="display:flex;gap:10px;margin-bottom:12px"><span class="pill type">Movie</span><span class="pill tag">Action</span><span class="pill tag">Thriller</span></div>
+              <h1 class="title" style="font-size:58px">Mission: Impossible — Fallout</h1>
+              <div class="meta mono" style="gap:16px;font-size:16px"><span class="star">★ 7.7</span><span>2018</span><span>2h27m</span><span>Paramount</span></div>
+              <div class="ov" style="font-size:16px">An IMF agent races across three continents to recover stolen plutonium before a stateless network detonates the world.</div>
+            </div>
+            <div style="position:absolute;left:56px;right:56px;top:436px;z-index:15">
+              <div class="rail-label">FILE · ON DISK</div>
+              <div class="tvf flat focus" style="position:relative;margin-top:14px;display:flex;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;overflow:hidden;height:170px">
+                <div class="tile" style="width:300px;flex:0 0 auto;border-radius:0;background:linear-gradient(158deg,oklch(0.42 0.13 12),oklch(0.16 0.05 12))"><div class="scrim"></div><div class="disk ok" style="position:absolute;left:14px;top:12px">✓ On disk</div><div class="bar" style="position:absolute;left:0;right:0;bottom:0;border-radius:0;height:5px"><i style="width:0"></i></div></div>
+                <div style="flex:1;padding:22px 26px;display:flex;flex-direction:column;justify-content:center">
+                  <div style="font-size:24px;font-weight:700">Feature film</div>
+                  <div class="mono" style="font-size:13px;color:var(--text-faint);margin-top:6px">Mission.Impossible.Fallout.2018.1080p.BluRay.x265.mkv</div>
+                  <div class="flex" style="gap:30px;margin-top:14px" class="mono"><span class="mono" style="color:var(--text-dim);font-size:14px"><span class="muted">RUNTIME</span> 2h27m</span><span class="mono" style="color:var(--text-dim);font-size:14px"><span class="muted">RES</span> 1080p</span><span class="mono" style="color:var(--text-dim);font-size:14px"><span class="muted">CODEC</span> HEVC</span><span class="mono" style="color:var(--text-dim);font-size:14px"><span class="muted">SIZE</span> 6.1 GB</span></div>
+                  <div class="flex" style="gap:14px;margin-top:16px"><button class="btn hi sm"><span class="pl">▶</span> Play movie</button><button class="btn ghost sm">Mark watched</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↕</kbd>Switch</span><span><kbd>OK</kbd>Play</span><span><kbd>⌫</kbd>Back</span></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PLAYBACK ============ -->
+    <section class="section" id="player">
+      <div class="sec-head">
+        <div class="n">05 · PLAYBACK</div>
+        <h2>Video player</h2>
+        <p>A full-viewport overlay; scrims (not solid bars) carry contrast, auto-hiding after 3s while playing. The leanback redesign makes the control bar and every popup <b>first-class D-pad-focusable</b> — the spec's highest-value TV fix. Two styles: <b>Icons only</b> (default) and <b>Full</b> (chips with labels).</p>
+      </div>
+
+      <div class="screens">
+        <div class="shot">
+          <div class="label"><span class="num">player</span><h3>HUD — D-pad control bar</h3><span class="rt">body.player-open owns the arrows</span></div>
+          <p class="note">Top: Back + centered title block (accent kicker "Now playing · S1 · EP 5" + name). Bottom: a scrub row (current / buffer / played / thumb / duration) then a focusable control row — <b>−10 · Prev · Play · Next · +10</b> primary, then Volume / Quality / Aspect / Cast / Sync / Audio / CC / Info, Fullscreen far right. ←/→ seek, OK = play/pause, Back closes (flushes progress).</p>
+          <div class="frame"><div class="screen" style="background:#000">
+            <div class="bg"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1280&q=60" alt="" style="filter:blur(26px) brightness(.32);transform:scale(1.1)" /></div>
+            <div style="position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.85),transparent 42%),linear-gradient(180deg,rgba(0,0,0,.6),transparent 28%)"></div>
+            <!-- top -->
+            <div style="position:absolute;top:30px;left:56px;z-index:10"><span class="gsq" style="background:transparent;border:0;font-size:22px">‹</span></div>
+            <div style="position:absolute;top:34px;left:0;right:0;text-align:center;z-index:10">
+              <div class="kicker" style="font-size:13px">NOW PLAYING · S1 · EP 5</div>
+              <div style="font-size:22px;font-weight:700;margin-top:5px">Perfect World</div>
+            </div>
+            <!-- bottom -->
+            <div style="position:absolute;left:56px;right:56px;bottom:54px;z-index:10">
+              <div style="display:flex;align-items:center;gap:20px;margin-bottom:22px">
+                <span class="mono" style="font-size:17px;color:var(--text-dim);width:60px">8:24</span>
+                <div style="flex:1;position:relative;height:7px;border-radius:999px;background:rgba(255,255,255,.18)"><div style="position:absolute;left:0;top:0;bottom:0;width:55%;background:rgba(255,255,255,.3);border-radius:999px"></div><div style="position:absolute;left:0;top:0;bottom:0;width:42%;background:var(--accent);border-radius:999px"></div><div style="position:absolute;left:42%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)"></div></div>
+                <span class="mono" style="font-size:17px;color:var(--text-dim);width:60px;text-align:right">20:00</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <span class="gsq" style="background:transparent;border:0">−10</span>
+                <span class="gsq" style="background:transparent;border:0">⏮</span>
+                <button class="btn hi tvf focus" style="width:62px;height:62px;justify-content:center;border-radius:50%;padding:0;font-size:22px">❚❚</button>
+                <span class="gsq" style="background:transparent;border:0">⏭</span>
+                <span class="gsq" style="background:transparent;border:0">+10</span>
+                <div style="flex:1"></div>
+                <span class="gsq" style="background:transparent;border:0">🔊</span>
+                <span class="gsq" style="background:transparent;border:0;font-size:14px;font-weight:700">HD</span>
+                <span class="gsq" style="background:transparent;border:0;font-size:14px;font-weight:700">AR</span>
+                <span class="gsq" style="background:transparent;border:0;font-size:14px;font-weight:700">AT</span>
+                <span class="gsq" style="background:transparent;border:0;font-size:14px;font-weight:700">CC</span>
+                <span class="gsq" style="background:transparent;border:0;font-size:14px;font-weight:700">i</span>
+                <span class="gsq" style="background:transparent;border:0">⛶</span>
+              </div>
+            </div>
+            <div class="hint" style="bottom:16px"><span><kbd>↔</kbd>Seek</span><span><kbd>OK</kbd>Play / Pause</span><span><kbd>⌫</kbd>Close</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="popups">
+          <div class="label"><span class="num">player · popups</span><h3>Popups as D-pad menus</h3><span class="rt">one open at a time · bottom-right</span></div>
+          <p class="note">Each secondary control opens a shared dark card anchored bottom-right with a focusable single-select list. Quality mixes "Original" (stream-copy) + resolution rungs + bitrate caps; Audio lists embedded then external dubs; Subtitles add sidecar files; Info is read-only and describes the <b>output</b> (incl. the delivery-path badge).</p>
+          <div class="canvas" style="align-items:flex-start;gap:18px">
+            <div class="menu"><div class="mh">Quality</div><div class="mi on tvf flat focus" style="position:relative">Original · 1080p<span class="ck">✓</span></div><div class="mi">1080p · ~12 Mbps</div><div class="mi">720p · ~6 Mbps</div><div class="mi">≤ 25 Mbps · 1080p</div></div>
+            <div class="menu"><div class="mh">Audio tracks</div><div class="mi on">RUS · AAC · 5.1<span class="ck">✓</span></div><div class="mi">JPN · AAC · 2.0</div><div class="mi">Russian · AniLilia (mka)</div></div>
+            <div class="menu"><div class="mh">Subtitles</div><div class="mi">Off</div><div class="mi on">Russian (srt)<span class="ck">✓</span></div><div class="mi">English · Full Subs</div></div>
+            <div class="menu"><div class="mh">Aspect ratio</div><div class="mi on">Default<span class="ck">✓</span></div><div class="mi">16:9</div><div class="mi">2.35:1 · cinema</div><div class="mi">21:9 · ultrawide</div></div>
+            <div class="menu"><div class="mh">Media info</div><div class="mi" style="font-size:14px">Resolution<span style="color:var(--text)">1080p</span></div><div class="mi" style="font-size:14px">Video<span style="color:var(--text)">HEVC 10-bit</span></div><div class="mi" style="font-size:14px">Audio<span style="color:var(--text)">AAC 5.1 · RUS</span></div><div class="mi" style="font-size:14px">Playback<span style="color:var(--accent-hi)">Direct Play</span></div></div>
+          </div>
+        </div>
+
+        <div class="shot" id="upnext">
+          <div class="label"><span class="num">player · up-next</span><h3>Up-next auto-advance</h3><span class="rt">appears past 90%</span></div>
+          <p class="note">A frosted card bottom-right that stays opaque while the HUD fades. Shows only when a next on-disk episode exists and playback crosses 90%. In the last 10s "Play next" appends a live countdown and auto-advances at 0.</p>
+          <div class="frame"><div class="screen" style="background:#000">
+            <div class="bg"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1280&q=60" alt="" style="filter:blur(26px) brightness(.28);transform:scale(1.1)" /></div>
+            <div style="position:absolute;right:56px;bottom:120px;width:420px;background:rgba(16,13,11,.92);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border:1px solid var(--border-strong);border-radius:16px;padding:22px 24px;z-index:10">
+              <div class="kicker" style="font-size:13px">UP NEXT</div>
+              <div style="font-size:24px;font-weight:700;margin:8px 0 4px">Perfect World</div>
+              <div class="mono" style="font-size:15px;color:var(--text-dim)">S1 · EP 6 · 24m</div>
+              <div class="flex" style="gap:12px;margin-top:18px"><button class="btn hi sm tvf focus"><span class="pl">▶</span> Play next · 9…</button><button class="btn ghost sm">Dismiss</button></div>
+            </div>
+            <div style="position:absolute;left:56px;right:56px;bottom:54px;z-index:5;opacity:.4">
+              <div style="display:flex;align-items:center;gap:20px"><span class="mono" style="font-size:17px;color:var(--text-dim);width:60px">19:08</span><div style="flex:1;height:7px;border-radius:999px;background:rgba(255,255,255,.18)"><div style="height:100%;width:94%;background:var(--accent);border-radius:999px"></div></div><span class="mono" style="font-size:17px;color:var(--text-dim);width:60px;text-align:right">20:00</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section class="section" id="set-appearance">
+      <div class="sec-head">
+        <div class="n">06 · SETTINGS</div>
+        <h2>Settings (simplified for TV)</h2>
+        <p>On TV the Profile drawer becomes a full-screen panel of D-pad rows. Only what matters from the couch: profile + appearance + audio + switch profile / sign out. Complex server admin (users, folders, LLM, torrents, parsing) is hidden on TV — it lives on desktop/phone.</p>
+      </div>
+
+      <div class="screens">
+        <div class="shot">
+          <div class="label"><span class="num">settings · appearance</span><h3>Profile &amp; appearance</h3><span class="rt">↕ move · ↔ change value</span></div>
+          <p class="note">Rows change value in place with ← / →; OK opens a picker or fires an action. Theme, accent (5 OKLCH swatches), animated backdrop, player style, and a <b>Data saver</b> toggle (hide backdrops — fewer images for slow TVs). The Profile row opens "Who's watching".</p>
+          <div class="frame"><div class="screen" style="background:rgba(8,6,5,.96)">
+            <div class="grain"></div>
+            <div style="position:absolute;left:50%;top:64px;transform:translateX(-50%);width:840px">
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:26px"><span class="av" style="width:52px;height:52px;font-size:22px">Y</span><div><div style="font-size:32px;font-weight:800;letter-spacing:-.6px">Settings</div><div style="font-size:16px;color:var(--text-faint)">Signed in as Yuri</div></div></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:var(--text-faint);margin:6px 0">PROFILE</div>
+                <div class="srow"><div class="l"><b>Profile</b><span>Master</span></div><div class="v">Yuri <span class="chev">Switch ›</span></div></div>
+                <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:var(--text-faint);margin:14px 0 6px">APPEARANCE</div>
+                <div class="srow tvf flat focus" style="position:relative"><div class="l"><b>Theme</b></div><div class="v"><span class="chev">‹</span>Cinematic<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Accent color</b></div><div class="v"><span style="width:16px;height:16px;border-radius:50%;background:var(--accent);display:inline-block"></span>Crimson<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Animated backdrop</b><span>Fanart slideshow behind every page</span></div><div class="v"><span class="tog on"><i></i></span></div></div>
+                <div class="srow"><div class="l"><b>Player style</b></div><div class="v">Icons only<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Data saver</b><span>Hide backdrops — fewer images for slow TVs</span></div><div class="v"><span class="tog"><i></i></span></div></div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↕</kbd>Move</span><span><kbd>↔</kbd>Change</span><span><kbd>OK</kbd>Select</span><span><kbd>⌫</kbd>Close</span></div>
+          </div></div>
+        </div>
+
+        <div class="shot" id="set-audio">
+          <div class="label"><span class="num">settings · audio</span><h3>Audio &amp; account</h3><span class="rt">↕ move · ↔ change value</span></div>
+          <p class="note">Preferred audio language, subtitle language &amp; size, default volume, and toggles for passthrough / loudness normalization / theme music. The account section ends with a danger <b>Sign out</b> (returns to "Who's watching").</p>
+          <div class="frame"><div class="screen" style="background:rgba(8,6,5,.96)">
+            <div class="grain"></div>
+            <div style="position:absolute;left:50%;top:64px;transform:translateX(-50%);width:840px">
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:26px"><span class="av" style="width:52px;height:52px;font-size:22px">Y</span><div><div style="font-size:32px;font-weight:800;letter-spacing:-.6px">Settings</div><div style="font-size:16px;color:var(--text-faint)">Audio &amp; subtitles</div></div></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:var(--text-faint);margin:6px 0">PLAYBACK</div>
+                <div class="srow tvf flat focus" style="position:relative"><div class="l"><b>Audio language</b></div><div class="v"><span class="chev">‹</span>Japanese<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Subtitles</b></div><div class="v"><span class="chev">‹</span>Russian<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Subtitle size</b></div><div class="v"><span class="chev">‹</span>18 px<span class="chev">›</span></div></div>
+                <div class="srow"><div class="l"><b>Default volume</b></div><div class="v" style="gap:18px"><div class="bar" style="width:200px"><i style="width:78%"></i></div>78%</div></div>
+                <div class="srow"><div class="l"><b>Normalize volume between titles</b><span>EBU R128 loudness normalization</span></div><div class="v"><span class="tog on"><i></i></span></div></div>
+                <div class="srow"><div class="l"><b>Theme music</b><span>Play a title's opening theme when you open it</span></div><div class="v"><span class="tog on"><i></i></span></div></div>
+                <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:var(--text-faint);margin:14px 0 6px">ACCOUNT</div>
+                <div class="srow"><div class="l"><b style="color:var(--accent-hi)">Sign out</b></div><div class="v"><span class="chev">›</span></div></div>
+              </div>
+            </div>
+            <div class="hint"><span><kbd>↕</kbd>Move</span><span><kbd>↔</kbd>Change</span><span><kbd>OK</kbd>Select</span><span><kbd>⌫</kbd>Close</span></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <footer style="max-width:1180px;padding:80px 56px 0;color:var(--doc-faint);font-size:13px;border-top:1px solid var(--doc-line);margin-top:80px">
+      Animarr TV — design system · Hanken Grotesque · crimson accent · 1280×720 canvas. Built against ANIMARR_PRODUCT_SPEC_FOR_DESIGN.md (§5–§9 TV surfaces). Server admin &amp; torrents are intentionally desktop/phone-only.
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>
+

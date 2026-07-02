@@ -495,6 +495,8 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
         </div>
       )}
 
+      {window.HomeRails && <window.HomeRails onOpen={onOpen} />}
+
       {/* FILTER BAR + GRID */}
       <div style={{ padding: `28px ${SIDE_PAD}px 80px` }}>
         <div style={{ display:"flex", alignItems:"center", gap: 12, flexWrap:"wrap", marginBottom: 16 }}>
@@ -550,6 +552,8 @@ const CatalogV3 = ({ onOpen, setBdImage, rotateSec = 18 }) => {
           ))}
         </div>
       </div>
+
+      {window.DiscoverSection && <window.DiscoverSection onOpen={onOpen} />}
 
       {nrOpen && window.NRModal && <window.NRModal onClose={() => setNrOpen(false)} />}
 
