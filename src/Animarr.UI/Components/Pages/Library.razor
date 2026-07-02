@@ -18,6 +18,12 @@
 *@
 <div class="catalog-page catalog-page--library">
 
+    <div class="library-head">
+        @* Unified back affordance — the same PageBack arrow as /search and
+           the detail hero (history.back with a "/" fallback). *@
+        <PageBack Fallback="/" />
+    </div>
+
     @if (_categories.Count > 0)
     {
         <div class="catalog-folders">
