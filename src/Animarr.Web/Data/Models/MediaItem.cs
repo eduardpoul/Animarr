@@ -182,6 +182,10 @@ public class MediaItem
     /// NextAirAtUtc has passed. Null = never checked.</summary>
     public DateTime? LastAiringCheckAt { get; set; }
 
+    /// <summary>When the franchise-relations BFS last ran for this title.
+    /// Null = never; re-walked after a long TTL (franchises change rarely).</summary>
+    public DateTime? LastRelationsCheckAt { get; set; }
+
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];
     public ICollection<MediaItemCategory> Categories { get; set; } = [];

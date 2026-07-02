@@ -256,6 +256,81 @@ namespace Animarr.Web.Migrations
                     b.ToTable("FolderWatchers");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.FranchiseEdge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FromAniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RelationType")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ToAniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ToAniListId");
+
+                    b.HasIndex("FromAniListId", "ToAniListId", "RelationType")
+                        .IsUnique();
+
+                    b.ToTable("FranchiseEdges");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.FranchiseNode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CoverUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Episodes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("FetchedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Format")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("MalId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AniListId")
+                        .IsUnique();
+
+                    b.HasIndex("MalId");
+
+                    b.ToTable("FranchiseNodes");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.IdentificationQueue", b =>
                 {
                     b.Property<Guid>("Id")
@@ -363,6 +438,9 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastRelationsCheckAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastSegmentScanAt")
@@ -1120,6 +1198,9 @@ namespace Animarr.Web.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("AniListId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");

@@ -31,6 +31,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
     public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
     public DbSet<RecDismissal> RecDismissals => Set<RecDismissal>();
+    public DbSet<FranchiseNode> FranchiseNodes => Set<FranchiseNode>();
+    public DbSet<FranchiseEdge> FranchiseEdges => Set<FranchiseEdge>();
 
     // ─── Categories ────────────────────────────────────────────────────────────
     public DbSet<Category> Categories => Set<Category>();
@@ -337,6 +339,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.UserId, x.MediaItemId });
             e.HasIndex(x => new { x.UserId, x.TmdbId });
+        });
+
+        modelBuilder.Entity<FranchiseNode>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Title).HasMaxLength(512);
+            e.Property(x => x.Format).HasMaxLength(16);
+            e.Property(x => x.Status).HasMaxLength(24);
+            e.Property(x => x.CoverUrl).HasMaxLength(1024);
+            e.HasIndex(x => x.AniListId).IsUnique();
+            e.HasIndex(x => x.MalId);
+        });
+
+        modelBuilder.Entity<FranchiseEdge>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.RelationType).HasMaxLength(24);
+            // The BFS upserts against this triple.
+            e.HasIndex(x => new { x.FromAniListId, x.ToAniListId, x.RelationType }).IsUnique();
+            e.HasIndex(x => x.ToAniListId);
         });
 
         // ─── Categories ────────────────────────────────────────────────────────

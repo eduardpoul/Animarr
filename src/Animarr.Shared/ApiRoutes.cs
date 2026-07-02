@@ -62,6 +62,10 @@ public static class ApiRoutes
     /// library matches first, TMDB backfill for the remaining slots (subject
     /// to the user's RecsScope preference).</summary>
     public const string MediaSimilar      = "/api/media/{id}/similar";
+    /// <summary>GET — franchise watch-order rail (<c>FranchiseDto</c>); 204
+    /// when the graph is unknown/trivial (never-checked titles lazily kick a
+    /// background AniList walk).</summary>
+    public const string MediaFranchise    = "/api/media/{id}/franchise";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -290,6 +294,7 @@ public static class ApiRoutes
     public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
     public static string MediaTrickplayFor(Guid id)    => MediaTrickplay.Replace("{id}", id.ToString());
     public static string MediaSimilarFor(Guid id)      => MediaSimilar.Replace("{id}", id.ToString());
+    public static string MediaFranchiseFor(Guid id)    => MediaFranchise.Replace("{id}", id.ToString());
     public static string MeWatchlistItem(Guid id)      => MeWatchlistById.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 

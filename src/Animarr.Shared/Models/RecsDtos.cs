@@ -30,17 +30,20 @@ public sealed record WatchlistItemDto(
     int?     Year,
     string?  PosterUrl,
     string?  MediaType,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    int?     AniListId = null);
 
 /// <summary>POST body for /api/me/watchlist. Local add: MediaItemId only.
-/// External add: TmdbId + the snapshot fields from the rec card.</summary>
+/// External add: TmdbId (recommendation rails) or AniListId (franchise rail)
+/// + the snapshot fields from the card.</summary>
 public sealed record WatchlistAddRequest(
     Guid?   MediaItemId,
     int?    TmdbId,
     string? Title,
     int?    Year,
     string? PosterUrl,
-    string? MediaType);
+    string? MediaType,
+    int?    AniListId = null);
 
 /// <summary>POST body for /api/me/recs/dismiss — exactly one of the ids set.</summary>
 public sealed record RecDismissRequest(Guid? MediaItemId, int? TmdbId);

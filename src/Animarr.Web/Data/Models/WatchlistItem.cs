@@ -23,6 +23,10 @@ public class WatchlistItem
     /// <summary>Set for external (not-in-library) titles.</summary>
     public int? TmdbId { get; set; }
 
+    /// <summary>External entries added from the franchise rail carry the
+    /// AniList id instead of (or besides) a TMDB one.</summary>
+    public int? AniListId { get; set; }
+
     /// <summary>Snapshot fields for external entries (local entries render
     /// from the MediaItem row instead).</summary>
     public string  Title     { get; set; } = string.Empty;

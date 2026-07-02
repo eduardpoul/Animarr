@@ -81,9 +81,9 @@ internal static class RecsEndpoints
                 if (r.MediaItemId is Guid mid && items.TryGetValue(mid, out var m))
                     return new WatchlistItemDto(r.Id, mid, m.TmdbId, MediaTitles.DisplayTitle(m), m.Year,
                         string.IsNullOrEmpty(m.PosterPath) ? null : $"/api/image?path={Uri.EscapeDataString(m.PosterPath)}",
-                        m.MediaType == Data.Models.MediaItemType.Movie ? "movie" : "tv", r.CreatedAt);
+                        m.MediaType == Data.Models.MediaItemType.Movie ? "movie" : "tv", r.CreatedAt, r.AniListId);
                 return new WatchlistItemDto(r.Id, r.MediaItemId, r.TmdbId, r.Title, r.Year,
-                    r.PosterUrl, r.MediaType, r.CreatedAt);
+                    r.PosterUrl, r.MediaType, r.CreatedAt, r.AniListId);
             }).ToArray());
         }).RequireAuthorization();
 
@@ -93,12 +93,14 @@ internal static class RecsEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
-            if (req.MediaItemId is null && req.TmdbId is null)
-                return Results.BadRequest(new { error = "MediaItemId or TmdbId required" });
+            if (req.MediaItemId is null && req.TmdbId is null && req.AniListId is null)
+                return Results.BadRequest(new { error = "MediaItemId, TmdbId or AniListId required" });
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var row = await db.WatchlistItems.FirstOrDefaultAsync(w => w.UserId == uid &&
-                (req.MediaItemId != null ? w.MediaItemId == req.MediaItemId : w.TmdbId == req.TmdbId), ct);
+                (req.MediaItemId != null ? w.MediaItemId == req.MediaItemId
+                 : req.TmdbId != null    ? w.TmdbId == req.TmdbId
+                                         : w.AniListId == req.AniListId), ct);
             if (row is null)
             {
                 row = new WatchlistItem
@@ -107,6 +109,7 @@ internal static class RecsEndpoints
                     UserId      = uid.Value,
                     MediaItemId = req.MediaItemId,
                     TmdbId      = req.TmdbId,
+                    AniListId   = req.AniListId,
                     Title       = req.Title?.Trim() ?? "",
                     Year        = req.Year,
                     PosterUrl   = req.PosterUrl,
@@ -116,7 +119,7 @@ internal static class RecsEndpoints
                 await db.SaveChangesAsync(ct);
             }
             return Results.Ok(new WatchlistItemDto(row.Id, row.MediaItemId, row.TmdbId,
-                row.Title, row.Year, row.PosterUrl, row.MediaType, row.CreatedAt));
+                row.Title, row.Year, row.PosterUrl, row.MediaType, row.CreatedAt, row.AniListId));
         }).RequireAuthorization();
 
         app.MapDelete(ApiRoutes.MeWatchlistById, async (
