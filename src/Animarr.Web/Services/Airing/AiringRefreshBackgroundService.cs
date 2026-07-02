@@ -65,12 +65,17 @@ public sealed class AiringRefreshBackgroundService(
         var noDateCutoff   = now - NoDateRecheck;
         var staleCutoff    = now - RecheckAfter;
         var finishedCutoff = now - FinishedRecheck;
+        // "Ongoing but no date yet" rechecks fast (3h): both AniList RELEASING
+        // without a schedule AND TMDB "Returning Series" — the latter catches
+        // donghua whose title-resolved AniList entry is season 1 (FINISHED)
+        // while the show itself airs weekly under a later entry.
         var candidates = await db.MediaItems
             .Where(m => m.IdentificationStatus == IdentificationStatus.Identified ||
                         m.IdentificationStatus == IdentificationStatus.Manual)
             .Where(m => m.LastAiringCheckAt == null
                      || (m.NextAirAtUtc != null && m.NextAirAtUtc < now)
-                     || (m.AiringStatus == "RELEASING" && m.NextAirAtUtc == null && m.LastAiringCheckAt < noDateCutoff)
+                     || (m.NextAirAtUtc == null && m.LastAiringCheckAt < noDateCutoff
+                            && (m.AiringStatus == "RELEASING" || (m.Status != null && m.Status.Contains("Returning"))))
                      || (m.AiringStatus == "FINISHED"
                             ? m.LastAiringCheckAt < finishedCutoff
                             : m.LastAiringCheckAt < staleCutoff))
@@ -141,16 +146,20 @@ public sealed class AiringRefreshBackgroundService(
         }
 
         // ── TMDB fallback ─────────────────────────────────────────────────────
-        // Two cases: (a) live-action shows AniList doesn't cover at all, and
-        // (b) titles AniList marks RELEASING but without a scheduled next
-        // episode — common for donghua, where TMDB often still carries the
-        // weekly air dates. A handful of detail requests per tick.
+        // Three cases: (a) shows AniList doesn't cover at all, (b) AniList
+        // RELEASING without a scheduled time, and (c) TMDB says "Returning
+        // Series" while AniList's title-resolved entry is a FINISHED season 1
+        // — the classic donghua mismatch (Perfect World, BTTH, …). TMDB models
+        // these as one long show and usually knows next_episode_to_air, so its
+        // verdict overrides the stale FINISHED.
         var tmdb = svcScope.ServiceProvider.GetRequiredService<TmdbClient>();
         var tmdbCandidates = candidates
             .Where(m => m.TmdbId is > 0 && m.MediaType != MediaItemType.Movie)
-            .Where(m => m.LastAiringCheckAt != now                             // (a) no AniList data this tick
-                     || (m.AiringStatus == "RELEASING" && m.NextAirAtUtc is null))   // (b) releasing, time unknown
-            .Take(8)
+            .Where(m => m.NextAirAtUtc is null)
+            .Where(m => m.LastAiringCheckAt != now                                        // (a)
+                     || m.AiringStatus == "RELEASING"                                     // (b)
+                     || m.Status?.Contains("Returning", StringComparison.OrdinalIgnoreCase) == true)  // (c)
+            .Take(16)
             .ToList();
         foreach (var m in tmdbCandidates)
         {
