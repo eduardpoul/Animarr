@@ -24,6 +24,11 @@ export function init(row, dotnet) {
     ro.observe(row);
     row.__recRailRo = ro;
 
+    // Posters are <a><img> — both natively draggable, and the browser's
+    // drag-and-drop ghost swallows pointermove, so grabbing a poster
+    // wouldn't pan the rail (only the gaps between cards would).
+    row.addEventListener('dragstart', (e) => e.preventDefault());
+
     row.addEventListener('pointerdown', (e) => {
         if (e.pointerType !== 'mouse' || e.button !== 0) return;
         dragging = true; moved = false;
