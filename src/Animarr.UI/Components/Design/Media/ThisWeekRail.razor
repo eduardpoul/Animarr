@@ -8,9 +8,10 @@
 @if (Items.Length > 0)
 {
     <section class="twr">
+        @* No header link — the calendar has its own topbar icon; a second
+           entry point here read as clutter (user feedback). *@
         <div class="twr__head">
             <h2 class="twr__title">@L["home.this_week"]</h2>
-            <a class="twr__all tv-focus" href="/calendar">@L["calendar.title"] →</a>
         </div>
         <div class="twr__row">
             @foreach (var ev in Items)
