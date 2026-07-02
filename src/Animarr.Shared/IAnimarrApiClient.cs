@@ -41,6 +41,9 @@ public interface IAnimarrApiClient
     /// <summary>Skip-intro/credits segment times for one episode (lazy-detected
     /// via AniSkip on a miss). Null when the item is unknown or has none.</summary>
     Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default);
+    /// <summary>Seek-preview sprite manifest for one episode (pass null/null for
+    /// movies). Null when the background pass hasn't generated one yet.</summary>
+    Task<TrickplayDto?> GetTrickplayAsync(Guid mediaItemId, int? season, int? episode, CancellationToken ct = default);
     /// <summary>Skip-intro/credits background-scan progress for the Settings indicator.</summary>
     Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default);
     /// <summary>Reset scan flags so the background pass reprocesses all titles.</summary>

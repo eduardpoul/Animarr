@@ -226,6 +226,41 @@ body[data-animarr-native="1"] .vp-backdrop * {
         0 0 0 9px rgba(255,255,255,0.06);
 }
 
+/* Trickplay seek-preview bubble — sprite-sheet frame + timestamp floating
+   above the scrubber at the hovered/scrubbed position. Sized by JS from the
+   sprite manifest; hidden whenever no manifest exists for the episode. */
+.vp-hud__preview {
+    position: absolute;
+    bottom: calc(100% + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 6px 28px rgba(0,0,0,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 100ms ease-out;
+    z-index: 4;
+}
+.vp-hud__preview--on { opacity: 1; }
+.vp-hud__preview-img { background-repeat: no-repeat; }
+.vp-hud__preview-time {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 0 3px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+    background: linear-gradient(to top, rgba(0,0,0,0.72), transparent);
+}
+
 /* Controls row.
    Landscape (default): one row — primary playback group on the left (margin-
    right:auto pushes the rest right), then the secondary settings group and the

@@ -6,6 +6,7 @@ using Animarr.Web.Hubs;
 using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Segments;
+using Animarr.Web.Services.Trickplay;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
@@ -152,6 +153,11 @@ builder.Services.AddScoped<ISegmentProvider, BlackFrameProvider>();  // Order 30
 builder.Services.AddScoped<SegmentDetectionService>();
 // Heavy detection (chromaprint) over identified titles, one at a time.
 builder.Services.AddHostedService<SegmentDetectionBackgroundService>();
+
+// Trickplay — seek-preview sprite sheets, generated in the background one
+// title at a time (yields to live HLS transcodes).
+builder.Services.AddScoped<TrickplayService>();
+builder.Services.AddHostedService<TrickplayBackgroundService>();
 
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();

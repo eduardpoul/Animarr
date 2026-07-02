@@ -356,6 +356,9 @@ namespace Animarr.Web.Migrations
                     b.Property<DateTime?>("LastSegmentScanAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastTrickplayScanAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<double?>("LlmConfidence")
                         .HasColumnType("REAL");
 
@@ -755,6 +758,66 @@ namespace Animarr.Web.Migrations
                     b.ToTable("TorrentRecords");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Cols")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("DurationSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("GeneratedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IntervalSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SourceWriteTimeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpritePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TileHeight")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TileWidth")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "FilePath")
+                        .IsUnique();
+
+                    b.HasIndex("MediaItemId", "Season", "Episode");
+
+                    b.ToTable("TrickplayAssets");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1120,6 +1183,17 @@ namespace Animarr.Web.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("FolderWatcher");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>

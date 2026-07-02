@@ -153,6 +153,11 @@ public class MediaItem
     /// the background queue so a title is fully scanned once, then only
     /// re-scanned after a long TTL.</summary>
     public DateTime? LastSegmentScanAt { get; set; }
+    /// <summary>When the trickplay background pass last generated seek-preview
+    /// sprites for this item. Same gating contract as LastSegmentScanAt: null =
+    /// never, cleared by the torrent-completion hook so new episodes of an
+    /// ongoing title get sprites without waiting out the TTL.</summary>
+    public DateTime? LastTrickplayScanAt { get; set; }
 
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];

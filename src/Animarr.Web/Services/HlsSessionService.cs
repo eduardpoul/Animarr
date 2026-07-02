@@ -72,6 +72,11 @@ public sealed partial class HlsSessionService : IDisposable
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
     private readonly Timer _gcTimer;
 
+    /// <summary>Live HLS transcode sessions right now (idle-but-not-yet-reaped
+    /// included). Background jobs (trickplay) poll this to yield the CPU to
+    /// playback.</summary>
+    public int ActiveSessionCount => _sessions.Count;
+
     public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null)
     {
         _logger  = logger;

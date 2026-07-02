@@ -894,6 +894,27 @@ else
                         catch { /* segments are optional decoration */ }
                     }
 
+                    // Trickplay seek-preview manifest. Null (204 before the
+                    // background pass reaches this title) → no preview bubble.
+                    object? trickplay = null;
+                    try
+                    {
+                        var tp = _playerEpisode is > 0
+                            ? await Api.GetTrickplayAsync(_item.Id, _playerSeason ?? 1, _playerEpisode.Value)
+                            : await Api.GetTrickplayAsync(_item.Id, null, null);
+                        if (tp is not null)
+                            trickplay = new {
+                                spriteUrl   = tp.SpriteUrl,
+                                intervalSec = tp.IntervalSec,
+                                tileWidth   = tp.TileWidth,
+                                tileHeight  = tp.TileHeight,
+                                cols        = tp.Cols,
+                                rows        = tp.Rows,
+                                count       = tp.Count,
+                            };
+                    }
+                    catch { /* preview is optional decoration */ }
+
                     var meta = new {
                         title,
                         artist,
@@ -912,6 +933,8 @@ else
                         upNextDismiss = L["player.up_next_dismiss"],
                         // Skip-intro/credits segment times (seconds) for the player.
                         segments,
+                        // Seek-preview sprite manifest (trickplay).
+                        trickplay,
                     };
                     try
                     {
