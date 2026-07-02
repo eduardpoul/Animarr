@@ -39,19 +39,24 @@ internal static class CalendarEndpoints
                 var poster   = string.IsNullOrEmpty(m.PosterPath) ? null : $"/api/image?path={Uri.EscapeDataString(m.PosterPath)}";
                 var backdrop = string.IsNullOrEmpty(m.FanartPath) ? null : $"/api/image?path={Uri.EscapeDataString(m.FanartPath)}";
 
-                if (m.NextAirAtUtc is DateTime next && next >= from && next <= to && m.NextEpisodeNumber is int nextEp)
+                int? airedEpEmitted = null;
+                if (m.LastAiredAtUtc is DateTime aired && aired >= from && aired <= to && m.LastAiredEpisode is int airedEp)
+                {
+                    var status = await EpisodeOnDiskAsync(resolver, m.Id, airedEp, ct) ? "in-library" : "aired-waiting";
+                    events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, airedEp, aired, status));
+                    airedEpEmitted = airedEp;
+                }
+
+                // Skip a "next" that duplicates the aired row — on air day the
+                // sources lag and re-announce the episode that just went out.
+                if (m.NextAirAtUtc is DateTime next && next >= from && next <= to
+                    && m.NextEpisodeNumber is int nextEp && nextEp != airedEpEmitted)
                 {
                     // Announced but the refresh pass hasn't rolled it yet —
                     // treat a passed timestamp as freshly aired.
                     var status = next > now ? "upcoming"
                         : await EpisodeOnDiskAsync(resolver, m.Id, nextEp, ct) ? "in-library" : "aired-waiting";
                     events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, nextEp, next, status));
-                }
-
-                if (m.LastAiredAtUtc is DateTime aired && aired >= from && aired <= to && m.LastAiredEpisode is int airedEp)
-                {
-                    var status = await EpisodeOnDiskAsync(resolver, m.Id, airedEp, ct) ? "in-library" : "aired-waiting";
-                    events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, airedEp, aired, status));
                 }
             }
 
