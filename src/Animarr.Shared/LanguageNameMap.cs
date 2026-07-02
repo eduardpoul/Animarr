@@ -34,4 +34,33 @@ public static class LanguageNameMap
             _    => code.ToUpperInvariant(),
         };
     }
+
+    /// <summary>Reverse of <see cref="FromIso639"/>: maps a display name (as stored in
+    /// AudioPreferredLanguage / SubtitlePreferredLanguage, e.g. "Japanese") back to its
+    /// ISO-639-1 code ("ja"). Case-insensitive. Returns null when the name isn't one of
+    /// the library's known languages — the player then leaves the default track selected.</summary>
+    public static string? ToIso639(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        return name.Trim().ToLowerInvariant() switch
+        {
+            "mandarin" or "chinese" or "cantonese" => "zh",
+            "japanese"   => "ja",
+            "korean"     => "ko",
+            "english"    => "en",
+            "russian"    => "ru",
+            "french"     => "fr",
+            "german"     => "de",
+            "spanish"    => "es",
+            "italian"    => "it",
+            "portuguese" => "pt",
+            "thai"       => "th",
+            "vietnamese" => "vi",
+            "indonesian" => "id",
+            "arabic"     => "ar",
+            "hindi"      => "hi",
+            "turkish"    => "tr",
+            _            => null,
+        };
+    }
 }
