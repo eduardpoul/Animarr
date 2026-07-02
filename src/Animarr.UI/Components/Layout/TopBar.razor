@@ -199,8 +199,10 @@
 
     private bool IsCatalogRoute()
     {
+        // Home ("/") and the full Library page share the folder/category
+        // filter state, so pills highlight — and filter in place — on both.
         var path = new Uri(Nav.Uri).AbsolutePath;
-        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog";
+        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog" || path == "/library";
     }
 
     private bool IsRoute(string path)
