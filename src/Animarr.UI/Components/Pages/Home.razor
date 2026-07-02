@@ -5,6 +5,7 @@
 @inject CategoryNavService CategoryNav
 @inject FolderJumpService FolderJump
 @inject UserContextState UserCtx
+@inject IJSRuntime JS
 @inject Animarr.UI.Services.ServerRegistryState ServerReg
 
 <PageTitle>Animarr</PageTitle>
@@ -96,8 +97,11 @@
                         }
                         else
                         {
-                            <div class="home-lib__grid">
-                                @foreach (var item in _filtered.Take(17))
+                            @* Render with headroom (41 covers ~21 columns × 2
+                               rows); the collocated JS trims to the exact slot
+                               count for the current width. *@
+                            <div class="home-lib__grid" @ref="_libGridRef">
+                                @foreach (var item in _filtered.Take(41))
                                 {
                                     <Poster Item="@item" />
                                 }
@@ -344,10 +348,46 @@
     // OnInitializedAsync (right after _sections loads).
     private readonly Dictionary<Guid, HashSet<Guid>> _childFolderIdsBySection = new();
 
+    // ── library-block fill (see Home.razor.js) ────────────────────────────
+    private ElementReference _libGridRef;
+    private IJSObjectReference? _libJs;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Init is idempotent (the JS guards on a per-element flag), and the
+        // grid element can be re-created by a section re-order — so re-run it
+        // on every render while the grid exists.
+        if (_loading || _libGridRef.Id is null) return;
+        try
+        {
+            _libJs ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Pages/Home.razor.js");
+            await _libJs.InvokeVoidAsync("initLibGrid", _libGridRef);
+        }
+        catch { /* fill trim is an enhancement — the CSS clamp still holds */ }
+    }
+
     public void Dispose()
     {
         CategoryNav.OnChange -= OnCategoryChanged;
         FolderJump.OnChange  -= OnFolderJumpChanged;
         UserCtx.OnChange     -= OnUserChanged;
+        if (_libJs is not null)
+        {
+            // Sync Dispose — fire-and-forget the JS teardown; the observer
+            // dies with the element anyway on full page teardown.
+            _ = SafeDisposeJsAsync(_libJs, _libGridRef);
+            _libJs = null;
+        }
+    }
+
+    private static async Task SafeDisposeJsAsync(IJSObjectReference js, ElementReference grid)
+    {
+        try
+        {
+            await js.InvokeVoidAsync("destroyLibGrid", grid);
+            await js.DisposeAsync();
+        }
+        catch { /* circuit teardown */ }
     }
 }

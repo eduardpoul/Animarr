@@ -283,24 +283,19 @@
     color: var(--text-faint);
 }
 
-/* The "view all" tile is pinned to the last cell of the second (last
-   visible) row — posters auto-flow around it, and anything past the two
-   rows falls into the collapsed hidden rows. */
-.home-lib__more {
-    grid-row: 2 / 3;
-    grid-column: -2 / -1;
-}
+/* The "view all" tile is NOT pinned: the collocated Home.razor.js shows
+   exactly (columns × rows − 1) posters, so the tile flows into the very
+   next cell — the rows fill completely, and when the library runs out it
+   sits right after the last poster instead of hugging the far edge. The
+   collapsed-rows clamp above stays as the no-JS/first-paint fallback. */
 
 /* Phone: fixed 210px would leave a single column — switch to the classic
-   2 stretched columns × 4 rows, tile pinned to the end of row 4. */
+   2 stretched columns × 4 rows. */
 @media (max-width: 639px) {
     .home-lib__grid {
         grid-template-columns: repeat(2, 1fr);
         grid-template-rows: repeat(4, auto);
         column-gap: var(--space-5);
-    }
-    .home-lib__more {
-        grid-row: 4 / 5;
     }
     .home-lib__title { font-size: 19px; }
 }
