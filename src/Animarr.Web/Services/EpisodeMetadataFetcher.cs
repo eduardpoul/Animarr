@@ -32,19 +32,27 @@ internal static class EpisodeMetadataFetcher
     /// that genuinely exists is kept but a placeholder/empty one is replaced with
     /// the real English value.</summary>
     public static async Task<List<EpisodeMetadata>> FetchAsync(
-        TmdbClient tmdb, MediaItem item, string lang, CancellationToken ct)
+        TmdbClient tmdb, MediaItem item, string lang, CancellationToken ct,
+        ILogger? logger = null)
     {
         var rows = new List<EpisodeMetadata>();
         if (item.TmdbId is not int tmdbId || tmdbId <= 0) return rows;
 
         var now            = DateTime.UtcNow;
-        var needsEnglish   = !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
+        // StartsWith, not Equals: a locale like "en-US" is still English and
+        // shouldn't trigger a redundant second fetch of the same season.
+        var needsEnglish   = !lang.StartsWith("en", StringComparison.OrdinalIgnoreCase);
 
         foreach (var seasonNumber in ParseSeasonNumbers(item.SeasonsJson))
         {
             TmdbSeasonDetail? detail;
             try { detail = await tmdb.GetSeasonDetailAsync(tmdbId, seasonNumber, language: lang, ct: ct); }
-            catch { detail = null; }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(ex, "TMDB season detail fetch failed for {TmdbId} S{Season} ({Lang})",
+                    tmdbId, seasonNumber, lang);
+                detail = null;
+            }
             if (detail?.Episodes is null) continue;
 
             // English season (once per season) for the per-field fallback.
@@ -58,7 +66,12 @@ internal static class EpisodeMetadataFetcher
                         .GroupBy(e => e.EpisodeNumber)
                         .ToDictionary(g => g.Key, g => g.First());
                 }
-                catch { en = null; }
+                catch (Exception ex)
+                {
+                    logger?.LogDebug(ex, "TMDB English-fallback fetch failed for {TmdbId} S{Season}",
+                        tmdbId, seasonNumber);
+                    en = null;
+                }
             }
 
             foreach (var ep in detail.Episodes)

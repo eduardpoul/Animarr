@@ -681,6 +681,7 @@ internal static class MediaEndpoints
             IDbContextFactory<AppDbContext> dbFactory,
             TmdbClient tmdb,
             IAppConfigService config,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -708,7 +709,8 @@ internal static class MediaEndpoints
 
             if (stale)
             {
-                var fresh = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, lang, ct);
+                var fresh = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, lang, ct,
+                    loggerFactory.CreateLogger("EpisodeMetadataFetcher"));
 
                 // Only replace the cache when TMDB actually returned something —
                 // a transient outage must not wipe good cached rows. Delete the

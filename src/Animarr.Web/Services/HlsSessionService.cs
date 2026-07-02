@@ -629,7 +629,8 @@ public sealed class HlsSessionService : IDisposable
             if (ready) break;
             if (proc.HasExited)
             {
-                _sessions.TryRemove(token, out _);
+                if (_sessions.TryRemove(token, out var dead))
+                    try { dead.RestartLock.Dispose(); } catch { }
                 TryRemoveDir(dir);
                 throw new InvalidOperationException($"ffmpeg exited before producing init/first segment (code {proc.ExitCode}).");
             }
@@ -782,14 +783,14 @@ public sealed class HlsSessionService : IDisposable
     private static string SegmentExtension(HlsPlan plan) =>
         plan == HlsPlan.TsStreamCopy ? "ts" : "m4s";
 
-    private readonly SemaphoreSlim _restartLock = new(1, 1);
-
     private async Task RestartFfmpegAtSegmentAsync(HlsSession session, int targetSegment, CancellationToken ct)
     {
         // Serialise restarts so a flurry of player seeks (the seek bar fires
         // multiple `seeking` events as the user drags) can't spawn racing
-        // ffmpegs that overwrite each other's output.
-        await _restartLock.WaitAsync(ct);
+        // ffmpegs that overwrite each other's output. The lock is PER SESSION —
+        // a shared one made a seek in one playback stall the restart of every
+        // other concurrent viewer.
+        await session.RestartLock.WaitAsync(ct);
         try
         {
             // Double-check after acquiring the lock — if another scrub
@@ -890,7 +891,7 @@ public sealed class HlsSessionService : IDisposable
         }
         finally
         {
-            _restartLock.Release();
+            session.RestartLock.Release();
         }
     }
 
@@ -899,6 +900,7 @@ public sealed class HlsSessionService : IDisposable
         if (!_sessions.TryRemove(token, out var s)) return;
         try { if (!s.Process.HasExited) s.Process.Kill(true); } catch { }
         try { s.Process.Dispose(); } catch { }
+        try { s.RestartLock.Dispose(); } catch { }
         TryRemoveDir(s.OutputDir);
         _logger.LogInformation("HLS session {Token} stopped (by client / GC).", token);
     }
@@ -2039,6 +2041,11 @@ public sealed class HlsSessionService : IDisposable
             CreatedAt   = DateTime.UtcNow;
             LastActive  = DateTime.UtcNow;
         }
+
+        /// <summary>Per-session restart serialiser — a backward seek kills and
+        /// respawns this session's ffmpeg, and this stops overlapping seeks on
+        /// the SAME session from racing. Disposed by <see cref="Stop"/>.</summary>
+        public SemaphoreSlim RestartLock { get; } = new(1, 1);
 
         public void Touch() => LastActive = DateTime.UtcNow;
 

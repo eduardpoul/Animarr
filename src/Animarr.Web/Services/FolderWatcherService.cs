@@ -276,12 +276,7 @@ public class FolderWatcherService(
 
     private void OnVideoFileCreated(string filePath, Guid sectionId)
     {
-        // Only handle video files directly in the section root
         if (!_videoExtensions.Contains(Path.GetExtension(filePath))) return;
-        if (!string.Equals(Path.GetDirectoryName(filePath), null, StringComparison.OrdinalIgnoreCase))
-        {
-            // Ensure the file is directly in the section root (not a subfolder)
-        }
 
         _ = Task.Run(async () =>
         {
@@ -297,6 +292,18 @@ public class FolderWatcherService(
 
                 var section = await db.FolderWatchers.FindAsync(sectionId);
                 if (section is null) return;
+
+                // Only auto-register files sitting DIRECTLY in the flat-section
+                // root — a file one level down belongs to a subfolder title,
+                // which OnDirectoryCreated handles. The backing FileSystemWatcher
+                // already sets IncludeSubdirectories=false, but a bulk rescan or
+                // a future caller could route a nested path here, so we re-check
+                // against the section root rather than trusting the watcher.
+                var fileDir  = Path.GetDirectoryName(filePath);
+                var rootNorm = section.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(fileDir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        rootNorm, StringComparison.OrdinalIgnoreCase))
+                    return;
 
                 var newFolder = new FolderWatcher
                 {
