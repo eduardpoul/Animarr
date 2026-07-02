@@ -118,7 +118,7 @@
                 <div class="d-mdhero__cta">
                     <Btn Variant="primary" Size="lg" OnClick="OnContinue" data-tv-autofocus="true">
                         <DIcon Name="@Continue.IconName" Size="14" />
-                        @Continue.Label
+                        @ContinueLabel(Continue)
                     </Btn>
                 </div>
             }
@@ -133,6 +133,19 @@
     /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
     [Parameter] public ContinueAction? Continue { get; set; }
     [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }
+
+    /// <summary>Localised caption for the primary CTA, rebuilt from the
+    /// server's Kind + episode hint so it reads in the UI language. Falls back
+    /// to the server-supplied English Label for any unmapped Kind.</summary>
+    private string ContinueLabel(ContinueAction c) => c.Kind switch
+    {
+        "continue" or "next" when c.EpisodeHint is int ep => L.Get("continue.continue_ep_fmt", ep.ToString("D2")),
+        "continue"                                        => L["continue.resume"],
+        "first" when c.EpisodeHint is int                 => L["continue.play_first_episode"],
+        "first"                                           => L["continue.play_movie"],
+        "rewatch"                                         => L["continue.rewatch_from_start"],
+        _                                                 => c.Label,
+    };
     /// <summary>Fired when ★ Favorite button is clicked. Parent flips
     /// the IsFavorite flag and calls Api.Add/RemoveFavoriteAsync.</summary>
     [Parameter] public EventCallback OnFavoriteClick { get; set; }
