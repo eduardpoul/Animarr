@@ -11,7 +11,9 @@ const TWEAK_DEFAULTS_V4 = /*EDITMODE-BEGIN*/{
   "asUser": "u-admin",
   "heroPager": "F",
   "fontSet": "soft",
-  "badgeStyle": "chips"
+  "badgeStyle": "chips",
+  "llmRecs": "on",
+  "recHistory": "rich"
 }/*EDITMODE-END*/;
 
 // Type personalities. "original" restores the old Archivo Black + Geist Mono
@@ -89,7 +91,7 @@ const AppV4 = () => {
   u4E(() => { window.__heroPager = tweaks.heroPager || "F"; }, [tweaks.heroPager]);
 
   // Feature flags (badge style A/B) — read at render by feature components.
-  u4E(() => { window.__feat = { badgeStyle: tweaks.badgeStyle || "chips" }; }, [tweaks.badgeStyle]);
+  u4E(() => { window.__feat = { badgeStyle: tweaks.badgeStyle || "chips", llm: tweaks.llmRecs || "on", history: tweaks.recHistory || "rich" }; }, [tweaks.badgeStyle, tweaks.llmRecs, tweaks.recHistory]);
 
   const handleOpen = (id) => { setOpenId(id); setRoute("media"); };
   const handleBack = () => { setOpenId(null); setRoute("catalog"); };
@@ -137,6 +139,8 @@ const AppV4 = () => {
           ? <window.StatsPage onOpen={handleOpen} />
           : route === "calendar" && window.CalendarPage
           ? <window.CalendarPage onOpen={handleOpen} />
+          : route === "discover" && window.DiscoverPage
+          ? <window.DiscoverPage />
           : route === "watchlist" && window.WatchlistPage
           ? <window.WatchlistPage onOpen={handleOpen} />
           : route === "downloads"
@@ -210,6 +214,8 @@ const TweaksUIV4 = ({ tweaks, setTweak }) => {
             { value: "meta",  label: "Тихо" },
           ]}
         />
+        <window.TweakSelect label="LLM-рекомендации" value={tweaks.llmRecs} onChange={v => setTweak("llmRecs", v)} options={[{ value: "on", label: "Включены" }, { value: "off", label: "Выкл (эвристика)" }]} />
+        <window.TweakSelect label="История просмотра" value={tweaks.recHistory} onChange={v => setTweak("recHistory", v)} options={[{ value: "rich", label: "Много (активный)" }, { value: "thin", label: "Мало (новый юзер)" }]} />
       </window.TweakSection>
       <window.TweakSection label="Backdrop">
         <window.TweakToggle label="Show on all pages" value={tweaks.showBackdrop} onChange={v => setTweak("showBackdrop", v)} />

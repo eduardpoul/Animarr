@@ -329,6 +329,18 @@ const TopBarV4 = ({ user, route, onRoute, onProfile, onLLM }) => {
         </button>
       )}
 
+      {window.DiscoverPage && (
+        <button onClick={() => onRoute("discover")} className="tv-focus" title={window.RU ? window.RU.discover : "Discover"} style={{
+          all:"unset", cursor:"pointer", flexShrink: 0, width: 36, height: 36, borderRadius: 8,
+          background: activeBtn("discover") ? "var(--accent-soft)" : "var(--surface)",
+          border:`1px solid ${activeBtn("discover") ? "var(--accent-line)" : "var(--border)"}`,
+          color: activeBtn("discover") ? "var(--accent-hi)" : "var(--text-dim)",
+          display:"grid", placeItems:"center",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="16 8 13.5 13.5 8 16 10.5 10.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+      )}
+
       {window.WatchlistPage && (
         <button onClick={() => onRoute("watchlist")} className="tv-focus" title={window.RU ? window.RU.watchlist : "Watchlist"} style={{
           all:"unset", cursor:"pointer", position:"relative", flexShrink: 0,
