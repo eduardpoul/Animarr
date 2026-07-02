@@ -2,6 +2,7 @@ using Animarr.Shared;
 using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
+using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Recs;
 using Microsoft.EntityFrameworkCore;
@@ -78,7 +79,7 @@ internal static class RecsEndpoints
             return Results.Ok(rows.Select(r =>
             {
                 if (r.MediaItemId is Guid mid && items.TryGetValue(mid, out var m))
-                    return new WatchlistItemDto(r.Id, mid, m.TmdbId, m.Title, m.Year,
+                    return new WatchlistItemDto(r.Id, mid, m.TmdbId, MediaTitles.DisplayTitle(m), m.Year,
                         string.IsNullOrEmpty(m.PosterPath) ? null : $"/api/image?path={Uri.EscapeDataString(m.PosterPath)}",
                         m.MediaType == Data.Models.MediaItemType.Movie ? "movie" : "tv", r.CreatedAt);
                 return new WatchlistItemDto(r.Id, r.MediaItemId, r.TmdbId, r.Title, r.Year,

@@ -557,6 +557,8 @@
   "home.next_up": "Смотреть дальше",
   "home.new_badge": "Новое",
   "home.this_week": "На этой неделе",
+  "calendar.weekdays_short": "вс,пн,вт,ср,чт,пт,сб",
+  "calendar.months_short": "янв,фев,мар,апр,мая,июн,июл,авг,сен,окт,ноя,дек",
   "calendar.title": "Календарь",
   "calendar.sub": "Когда выходит следующая серия каждого онгоинга — и есть ли уже файл.",
   "calendar.today": "Сегодня",

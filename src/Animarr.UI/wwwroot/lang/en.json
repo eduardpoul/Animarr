@@ -557,6 +557,8 @@
   "home.next_up": "Up next",
   "home.new_badge": "NEW",
   "home.this_week": "This week",
+  "calendar.weekdays_short": "Sun,Mon,Tue,Wed,Thu,Fri,Sat",
+  "calendar.months_short": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",
   "calendar.title": "Calendar",
   "calendar.sub": "When the next episode of each ongoing title airs — and whether the file is here yet.",
   "calendar.today": "Today",

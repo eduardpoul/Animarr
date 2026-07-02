@@ -41,15 +41,9 @@
         var today = DateTime.Now.Date;
         if (local.Date == today) return L["calendar.today"];
         if (local.Date == today.AddDays(1)) return L["calendar.tomorrow"];
-        var culture = L.CurrentLanguage switch
-        {
-            "ru" => System.Globalization.CultureInfo.GetCultureInfo("ru-RU"),
-            "uk" => System.Globalization.CultureInfo.GetCultureInfo("uk-UA"),
-            "de" => System.Globalization.CultureInfo.GetCultureInfo("de-DE"),
-            "es" => System.Globalization.CultureInfo.GetCultureInfo("es-ES"),
-            _    => System.Globalization.CultureInfo.GetCultureInfo("en-US"),
-        };
-        return culture.DateTimeFormat.GetAbbreviatedDayName(local.DayOfWeek);
+        // Lang-pack names — WASM's sharded ICU quietly anglicises CultureInfo.
+        var parts = L["calendar.weekdays_short"].Split(',');
+        return parts.Length == 7 ? parts[(int)local.DayOfWeek] : local.DayOfWeek.ToString()[..3];
     }
 
     private string StatusLabel(string status) => status switch

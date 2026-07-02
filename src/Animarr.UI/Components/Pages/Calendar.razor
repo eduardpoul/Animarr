@@ -1,5 +1,4 @@
 @page "/calendar"
-@using System.Globalization
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 
@@ -48,7 +47,7 @@
                 <div class="cal-day">
                     <div class="@($"cal-day__head {(isToday ? "is-today" : "")}")">
                         <span class="cal-day__num">@day.Day</span>
-                        <span class="cal-day__dow">@Culture.DateTimeFormat.GetAbbreviatedDayName(day.DayOfWeek)</span>
+                        <span class="cal-day__dow">@DowName(day.DayOfWeek)</span>
                     </div>
                     <div class="cal-day__list">
                         @if (events.Count == 0)
@@ -82,14 +81,20 @@
     private bool _loading = true;
     private int  _weekOffset;
 
-    private CultureInfo Culture => L.CurrentLanguage switch
+    // Day/month names come from the lang packs — WASM's sharded ICU quietly
+    // falls back to English when the culture data isn't loaded, so
+    // CultureInfo can't be trusted here.
+    private string DowName(DayOfWeek dow)
     {
-        "ru" => CultureInfo.GetCultureInfo("ru-RU"),
-        "uk" => CultureInfo.GetCultureInfo("uk-UA"),
-        "de" => CultureInfo.GetCultureInfo("de-DE"),
-        "es" => CultureInfo.GetCultureInfo("es-ES"),
-        _    => CultureInfo.GetCultureInfo("en-US"),
-    };
+        var parts = L["calendar.weekdays_short"].Split(',');
+        return parts.Length == 7 ? parts[(int)dow] : dow.ToString()[..3];
+    }
+
+    private string MonthName(int month)
+    {
+        var parts = L["calendar.months_short"].Split(',');
+        return parts.Length == 12 ? parts[month - 1] : month.ToString();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -122,8 +127,7 @@
         get
         {
             var sun = Monday.AddDays(6);
-            var c = Culture;
-            return $"{Monday.Day} {c.DateTimeFormat.GetAbbreviatedMonthName(Monday.Month)} — {sun.Day} {c.DateTimeFormat.GetAbbreviatedMonthName(sun.Month)}";
+            return $"{Monday.Day} {MonthName(Monday.Month)} — {sun.Day} {MonthName(sun.Month)}";
         }
     }
 
