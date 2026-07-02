@@ -49,6 +49,11 @@ public class MediaItem
     public int?    MalId  { get; set; }
     public string? ImdbId { get; set; }
     public int?    TvdbId { get; set; }
+    /// <summary>AniList id, captured whenever the AniList bridge resolves this
+    /// title (theme music / AniSkip MAL-id lookups). Unlike MalId it exists for
+    /// most donghua too, and is the key for future airing-schedule / relations
+    /// queries against the AniList GraphQL API.</summary>
+    public int?    AniListId { get; set; }
 
     // ─── Local image paths (absolute paths to MediaCachePaths.ForFolder dir) ─
     /// <summary>poster.jpg — primary poster art (portrait)</summary>

@@ -54,7 +54,7 @@ public partial class MetadataService
             // Resolve a MAL/AniList id. MAL is off by default, so most anime reach
             // here without item.MalId — bridge via AniList (title → idMal).
             int? malId = item.MalId;
-            int? aniListId = null;
+            int? aniListId = item.AniListId;
             if (malId is null)
             {
                 var match = await aniList.ResolveAsync(item.EnglishTitle ?? item.Title, ct);
@@ -63,6 +63,11 @@ public partial class MetadataService
                     malId     = match.IdMal;
                     aniListId = match.AniListId;
                     log?.Invoke($"[Theme] AniList resolved \"{item.Title}\" → mal={malId} anilist={aniListId} ({match.Title})");
+                    // Keep the bridged ids — AniListId in particular feeds the
+                    // airing-schedule / relations features. item is tracked by
+                    // the caller's context and saved with the theme fields.
+                    if (item.MalId is not > 0 && malId is > 0) item.MalId = malId;
+                    if (item.AniListId is not > 0 && aniListId is > 0) item.AniListId = aniListId;
                 }
             }
 
@@ -109,7 +114,9 @@ public partial class MetadataService
         if (folder is null) return null;
 
         await FillThemeMusicAsync(item, folder, forceRefresh: false, log: null, ct);
-        if (item.ThemePath is not null) await db.SaveChangesAsync(ct);
+        // Save whatever the pass produced — ThemePath and/or freshly bridged
+        // MAL/AniList ids (worth keeping even when no theme was found).
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
         return item.ThemePath;
     }
 

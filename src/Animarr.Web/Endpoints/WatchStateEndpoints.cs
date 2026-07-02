@@ -49,11 +49,13 @@ internal static class WatchStateEndpoints
             if (uid is null) return Results.Unauthorized();
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var now = DateTime.UtcNow;
             var row = await db.WatchStates.FirstOrDefaultAsync(w =>
                 w.UserId      == uid &&
                 w.MediaItemId == request.MediaItemId &&
                 w.Season      == request.Season &&
                 w.Episode     == request.Episode, ct);
+            long deltaSec = 0;
             if (row is null)
             {
                 row = new WatchState
@@ -64,15 +66,34 @@ internal static class WatchStateEndpoints
                     Season      = request.Season,
                     Episode     = request.Episode,
                     FilePath    = request.FilePath,
-                    CreatedAt   = DateTime.UtcNow,
+                    CreatedAt   = now,
                     PlayCount   = 1,
                 };
                 db.WatchStates.Add(row);
             }
+            else
+            {
+                // A ping after a quiet gap starts a new playback session — the
+                // convention PlayCount documents but only the external-player
+                // path used to honour.
+                if (row.LastSeenAt is { } seen && (now - seen).TotalMinutes >= 30)
+                    row.PlayCount++;
+                // Position delta since the previous ping ≈ seconds actually
+                // played (pings arrive every ~2-5s during playback). Larger
+                // jumps are seeks / stalled tabs and credit nothing.
+                if (row.ProgressMs is { } prev)
+                {
+                    var d = (request.ProgressMs - prev) / 1000;
+                    if (d > 0 && d <= WatchEventRecorder.MaxTickSeconds) deltaSec = d;
+                }
+            }
             row.ProgressMs = request.ProgressMs;
             if (request.RuntimeMs is > 0) row.RuntimeMs = request.RuntimeMs;
             if (!string.IsNullOrEmpty(request.FilePath)) row.FilePath = request.FilePath;
-            row.LastSeenAt = DateTime.UtcNow;
+            row.LastSeenAt = now;
+            row.TotalWatchTimeSec += deltaSec;
+            await WatchEventRecorder.RecordAsync(
+                db, uid, request.MediaItemId, request.Season, request.Episode, deltaSec, now, ct);
 
             // IsWatched tracks "near the end of THIS playthrough": flip ON at
             // ≥90% of runtime (per CHANGELOG §1), and back OFF below 90% so a
