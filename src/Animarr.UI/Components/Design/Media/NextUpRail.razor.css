@@ -5,14 +5,19 @@
     margin: 0 0 8px;
 }
 
+/* Section title — matches the "For you" rail (.recrail__title) and the
+   library block so every Home section header reads the same size. */
 .nur__title {
-    margin: 0 0 12px;
+    margin: 0 0 16px;
     font-family: var(--font-display);
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: var(--label-tracking);
-    text-transform: var(--label-casing);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-transform: none;
     color: var(--text);
+}
+@media (max-width: 639px) {
+    .nur__title { font-size: 19px; }
 }
 
 .nur__row {
