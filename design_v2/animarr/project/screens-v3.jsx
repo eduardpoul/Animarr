@@ -651,10 +651,14 @@ const NRBadgeV3 = ({ count, onClick }) => {
 // ============================================================
 // MEDIA DETAIL (v3) — 3-column body, full-width
 // ============================================================
-const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
+const MediaDetailV3 = ({ id, onBack, setBdImage, onOpen }) => {
   const init = window.__init || {};
   const item = window.LIBRARY.find(x => x.id === id) || window.LIBRARY[0];
   const [season, setSeason] = useStateV3(1);
+  const [epView, setEpView] = useStateV3(() => { try { return localStorage.getItem("animarr:epView") || "grid"; } catch (e) { return "grid"; } });
+  const [hideFiller, setHideFiller] = useStateV3(false);
+  useEffectV3(() => { try { localStorage.setItem("animarr:epView", epView); } catch (e) {} }, [epView]);
+  const epMix = window.epStats ? window.epStats(item) : { hasData: false, canon: 0, filler: 0, recap: 0 };
   const [editing, setEditing] = useStateV3(!!init.openEditDrawer);
   const seasons = item.type === "Anime" || item.type === "Series" ? [1, 2] : [];
   const totalEps = item.episodes || 12;
@@ -818,7 +822,7 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
           <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)", marginBottom: 12 }}>SYNOPSIS</div>
           <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65, color:"var(--text)", textWrap:"pretty" }}>{item.overview}</p>
           <div style={{ display:"flex", gap: 10, marginTop: 26, flexWrap:"wrap" }}>
-            <BtnV kind="primary" icon="play">{cont.label}</BtnV>
+            <BtnV kind="primary" icon="play" onClick={() => window.__play && window.__play(item.id, cont.n || 1)}>{cont.label}</BtnV>
             <BtnV kind="solid" icon="pencil" onClick={() => setEditing(true)}>Edit metadata</BtnV>
             <BtnV kind="ghost" icon="magic">Re-identify</BtnV>
           </div>
@@ -897,39 +901,75 @@ const MediaDetailV3 = ({ id, onBack, setBdImage }) => {
       {/* EPISODES — full-width with redesigned cards */}
       {seasons.length > 0 && (
         <div style={{ padding: `30px ${SIDE_PAD}px 60px` }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 26 }}>
+          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", gap: 16, marginBottom: 24, flexWrap:"wrap" }}>
             <div>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)" }}>EPISODES</div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, letterSpacing: 1.4, color:"var(--accent-hi)" }}>СЕРИИ</div>
               <h2 style={{ margin: "6px 0 0", fontFamily:"var(--font-display)", fontSize: 44, letterSpacing:-1 }}>
-                SEASON {String(season).padStart(2,"0")}
-                <span style={{ fontSize: 18, color:"var(--text-faint)", marginLeft: 14, letterSpacing: 0 }}>
-                  {eps.filter(e=>e.have).length}/{eps.length} on disk
+                СЕЗОН {String(season).padStart(2,"0")}
+                <span style={{ fontSize: 16, color:"var(--text-faint)", marginLeft: 14, letterSpacing: 0, fontFamily:"var(--font-mono)" }}>
+                  {eps.filter(e=>e.have).length}/{eps.length} на диске{epMix.hasData ? ` · ${epMix.canon} канон · ${epMix.filler} филлер` : ""}
                 </span>
               </h2>
             </div>
-            <div style={{ display:"flex", gap: 6 }}>
-              {seasons.map(s => (
-                <button key={s} onClick={() => setSeason(s)} style={{
-                  all:"unset", cursor:"pointer",
-                  padding:"10px 18px", borderRadius: 8,
-                  fontFamily:"var(--font-mono)", fontSize: 11.5, letterSpacing: 0.8,
-                  background: s === season ? "var(--accent-soft)" : "var(--surface)",
-                  color: s === season ? "var(--accent-hi)" : "var(--text-dim)",
-                  border: s === season ? "1px solid var(--accent-line)" : "1px solid var(--border)",
-                }}>SEASON {String(s).padStart(2,"0")}</button>
-              ))}
+            <div style={{ display:"flex", alignItems:"center", gap: 10, flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap: 6 }}>
+                {seasons.map(s => (
+                  <button key={s} onClick={() => setSeason(s)} className="tv-focus" style={{
+                    all:"unset", cursor:"pointer",
+                    padding:"9px 16px", borderRadius: 8,
+                    fontFamily:"var(--font-mono)", fontSize: 11.5, letterSpacing: 0.8,
+                    background: s === season ? "var(--accent-soft)" : "var(--surface)",
+                    color: s === season ? "var(--accent-hi)" : "var(--text-dim)",
+                    border: s === season ? "1px solid var(--accent-line)" : "1px solid var(--border)",
+                  }}>СЕЗОН {String(s).padStart(2,"0")}</button>
+                ))}
+              </div>
+              {epMix.hasData && (
+                <button onClick={() => setHideFiller(v => !v)} className="tv-focus" title={window.RU.hideFiller} style={{
+                  all:"unset", cursor:"pointer", display:"inline-flex", alignItems:"center", gap: 7,
+                  padding:"8px 13px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  background: hideFiller ? "var(--accent-soft)" : "var(--surface)",
+                  color: hideFiller ? "var(--accent-hi)" : "var(--text-dim)",
+                  border: `1px solid ${hideFiller ? "var(--accent-line)" : "var(--border)"}`,
+                }}>
+                  <span style={{ width:7, height:7, borderRadius:7, background:"var(--warn)" }} />
+                  {window.RU.hideFiller}
+                </button>
+              )}
+              <div style={{ display:"flex", gap: 3, padding: 3, borderRadius: 9, background:"var(--surface)", border:"1px solid var(--border)" }}>
+                <button onClick={() => setEpView("grid")} className="tv-focus" title={window.RU.grid} style={{ all:"unset", cursor:"pointer", width: 34, height: 30, borderRadius: 6, display:"grid", placeItems:"center", background: epView==="grid" ? "var(--accent-soft)" : "transparent", color: epView==="grid" ? "var(--accent-hi)" : "var(--text-faint)", boxShadow: epView==="grid" ? "inset 0 0 0 1px var(--accent-line)" : "none" }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.6"/><rect x="13" y="3" width="8" height="8" rx="1.6"/><rect x="3" y="13" width="8" height="8" rx="1.6"/><rect x="13" y="13" width="8" height="8" rx="1.6"/></svg>
+                </button>
+                <button onClick={() => setEpView("list")} className="tv-focus" title={window.RU.list} style={{ all:"unset", cursor:"pointer", width: 34, height: 30, borderRadius: 6, display:"grid", placeItems:"center", background: epView==="list" ? "var(--accent-soft)" : "transparent", color: epView==="list" ? "var(--accent-hi)" : "var(--text-faint)", boxShadow: epView==="list" ? "inset 0 0 0 1px var(--accent-line)" : "none" }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4.5" width="5" height="5" rx="1" fill="currentColor" stroke="none"/><rect x="3" y="14.5" width="5" height="5" rx="1" fill="currentColor" stroke="none"/><line x1="11" y1="6" x2="21" y2="6"/><line x1="11" y1="9.5" x2="18" y2="9.5"/><line x1="11" y1="17" x2="21" y2="17"/><line x1="11" y1="20.5" x2="18" y2="20.5"/></svg>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div style={{
-            display:"grid",
-            gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))",
-            gap: 16,
-          }}>
-            {eps.map(ep => <EpisodeCardV3 key={ep.n} ep={ep} item={item} onToggleWatched={() => toggleWatched(ep.n)} />)}
-          </div>
+          {(() => {
+            const isFillerN = (n) => window.epKind && window.epKind(item.id, n) === "filler";
+            const shown = hideFiller ? eps.filter(e => !isFillerN(e.n)) : eps;
+            const hiddenCount = eps.length - shown.length;
+            if (epView === "list") {
+              return (
+                <div style={{ display:"flex", flexDirection:"column", gap: 10 }}>
+                  {shown.map(ep => <EpisodeListRowV3 key={ep.n} ep={ep} item={item} onToggleWatched={() => toggleWatched(ep.n)} />)}
+                  {hiddenCount > 0 && <HiddenFillerBar count={hiddenCount} onShow={() => setHideFiller(false)} />}
+                </div>
+              );
+            }
+            return (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+                {shown.map(ep => <EpisodeCardV3 key={ep.n} ep={ep} item={item} onToggleWatched={() => toggleWatched(ep.n)} />)}
+                {hiddenCount > 0 && <div style={{ gridColumn:"1 / -1" }}><HiddenFillerBar count={hiddenCount} onShow={() => setHideFiller(false)} /></div>}
+              </div>
+            );
+          })()}
         </div>
       )}
+
+      {window.MediaExtras && <window.MediaExtras item={item} onOpen={onOpen} />}
 
       <style>{`
         @keyframes detail-pan-v3 {
@@ -1097,11 +1137,13 @@ const EpisodeCardV3 = ({ ep, item, onToggleWatched }) => {
   const have = ep.have;
   const watched = ep.watched;
   const inProg = !watched && ep.progress > 0;
+  const meta = window.epMeta ? window.epMeta(item, ep.n) : null;
   // Left edge: green if on disk, amber if missing. Once watched, dim it.
   const stripColor = have ? (watched ? "var(--text-faint)" : "var(--success)") : "var(--warn)";
   const [hover, setHover] = useStateV3(false);
   return (
     <div
+      onClick={() => have && window.__play && window.__play(item.id, ep.n)}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         position:"relative",
@@ -1153,6 +1195,12 @@ const EpisodeCardV3 = ({ ep, item, onToggleWatched }) => {
         }}>
           <IconV name={have ? "check" : "warn"} size={13} stroke={2.4} />
         </div>
+
+        {window.EpisodeBadges && window.epKind && window.epKind(item.id, ep.n) !== "canon" && (
+          <div style={{ position:"absolute", top: 52, left: 14, zIndex: 3 }}>
+            <window.EpisodeBadges item={item} ep={ep} layout="thumb" />
+          </div>
+        )}
 
         {/* Watched-toggle eye — BOTTOM-RIGHT. User-controlled state. */}
         {have && (
@@ -1217,12 +1265,14 @@ const EpisodeCardV3 = ({ ep, item, onToggleWatched }) => {
       </div>
 
       <div style={{ padding: "12px 14px 14px 17px" }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: have ? "var(--text)" : "var(--text-dim)" }}>{ep.title}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: have ? "var(--text)" : "var(--text-dim)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{meta ? meta.title : ep.title}</div>
         <div style={{
           fontFamily:"var(--font-mono)", fontSize: 10.5,
           color:"var(--text-faint)", marginTop: 4,
           display:"flex", alignItems:"center", gap: 8,
         }}>
+          {meta && <span style={{ color:"var(--accent-hi)" }}>★ {meta.rating}</span>}
+          {meta && <span>·</span>}
           <span>{ep.runtime}</span>
           {have ? (
             <>
@@ -1238,6 +1288,100 @@ const EpisodeCardV3 = ({ ep, item, onToggleWatched }) => {
               <span>·</span>
               <span style={{ color:"var(--warn)" }}>Missing</span>
             </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Hidden-filler placeholder — keeps episode numbering from looking buggy when
+// fillers are hidden; click to reveal.
+const HiddenFillerBar = ({ count, onShow }) => {
+  const d = count % 10, dd = count % 100;
+  const word = d === 1 && dd !== 11 ? "филлер" : (d >= 2 && d <= 4 && (dd < 10 || dd >= 20) ? "филлера" : "филлеров");
+  return (
+    <button onClick={onShow} className="tv-focus" style={{
+      all:"unset", cursor:"pointer", width:"100%", boxSizing:"border-box",
+      display:"flex", alignItems:"center", justifyContent:"center", gap: 10,
+      padding:"11px 16px", borderRadius: 10, border:"1px dashed var(--border-strong)",
+      background:"rgba(255,255,255,0.02)", color:"var(--text-faint)",
+      fontFamily:"var(--font-mono)", fontSize: 11.5, letterSpacing: 0.4,
+    }}>
+      <span style={{ width:6, height:6, borderRadius:6, background:"var(--warn)" }} />
+      скрыто {count} {word} · <span style={{ color:"var(--accent-hi)", fontWeight:700 }}>показать</span>
+    </button>
+  );
+};
+
+// EpisodeListRowV3 — detailed list row: artwork + number/title + badges +
+// air date · runtime · resolution · rating + synopsis + score/actions.
+const EpisodeListRowV3 = ({ ep, item, onToggleWatched }) => {
+  const have = ep.have, watched = ep.watched, inProg = !watched && ep.progress > 0;
+  const meta = window.epMeta ? window.epMeta(item, ep.n) : null;
+  const [hover, setHover] = useStateV3(false);
+  const air = meta && meta.air;
+  const airStr = air ? `${window.RU.weekdaysShort[air.getDay()]}, ${air.getDate()} ${window.RU.months[air.getMonth()]} ${air.getFullYear()}` : "";
+  const stripColor = have ? (watched ? "var(--text-faint)" : "var(--success)") : "var(--warn)";
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{
+      position:"relative", display:"grid", gridTemplateColumns:"248px minmax(0,1fr) auto", gap: 0,
+      background: have ? "var(--surface)" : "rgba(21,17,14,0.5)",
+      border: have ? "1px solid var(--border)" : "1px dashed rgba(255,240,220,0.12)",
+      borderRadius: 12, overflow:"hidden",
+      opacity: have ? (watched ? 0.78 : 1) : 0.6,
+      borderColor: hover && have ? "var(--accent-line)" : undefined,
+      transition:"border-color .2s ease, opacity .2s ease",
+    }}>
+      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:3, background: stripColor, boxShadow: (have && !watched) ? "0 0 12px var(--success)" : "none", zIndex:2 }} />
+      <div style={{ position:"relative", overflow:"hidden", backgroundImage:`url("${item.bd}")`, backgroundSize:"cover", backgroundPosition:`${(ep.n*19)%100}% center`, filter: have ? (watched ? "saturate(.6) brightness(.7)" : "none") : "grayscale(1) brightness(.5)" }}>
+        <div style={{ position:"absolute", inset:0, background:"linear-gradient(90deg, rgba(0,0,0,.55), transparent 62%), linear-gradient(0deg, rgba(0,0,0,.6), transparent 55%)" }} />
+        <div style={{ position:"absolute", top:10, left:14, fontFamily:"var(--font-display)", fontSize:30, color: have ? "#fff" : "rgba(255,255,255,.55)", textShadow:"0 2px 8px rgba(0,0,0,.7)", lineHeight:1 }}>{String(ep.n).padStart(2,"0")}</div>
+        <div title={have ? window.RU.onDisk : window.RU.missing} style={{ position:"absolute", top:9, right:9, width:24, height:24, borderRadius:6, background: have ? "oklch(0.74 0.15 150 / 0.18)" : "oklch(0.80 0.17 75 / 0.2)", border:`1px solid ${have ? "var(--success)" : "var(--warn)"}`, display:"grid", placeItems:"center", color: have ? "var(--success)" : "var(--warn)", backdropFilter:"blur(6px)" }}>
+          <IconV name={have ? "check" : "warn"} size={12} stroke={2.4} />
+        </div>
+        {have && hover && (
+          <div style={{ position:"absolute", left:"50%", top:"50%", transform:"translate(-50%,-50%)", width:46, height:46, borderRadius:46, background:"rgba(0,0,0,.5)", backdropFilter:"blur(8px)", display:"grid", placeItems:"center", border:"1px solid rgba(255,255,255,.3)" }}>
+            <IconV name="play" size={20} style={{ color:"#fff", marginLeft:2 }} />
+          </div>
+        )}
+        {have && (watched || inProg) && (
+          <div style={{ position:"absolute", left:0, right:0, bottom:0, height:3, background:"rgba(255,255,255,.1)" }}>
+            <div style={{ width:`${(watched ? 1 : ep.progress)*100}%`, height:"100%", background: watched ? "var(--text-faint)" : "linear-gradient(90deg, var(--accent), var(--accent-hi))" }} />
+          </div>
+        )}
+      </div>
+      <div style={{ padding:"14px 20px", minWidth:0, display:"flex", flexDirection:"column", justifyContent:"center" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, color:"var(--accent-hi)", letterSpacing:.5 }}>{window.RU.ep.toUpperCase()} {String(ep.n).padStart(2,"0")}</span>
+          <span style={{ fontSize:16, fontWeight:700, letterSpacing:-.2, color: have ? "var(--text)" : "var(--text-dim)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"44ch" }}>{meta ? meta.title : ep.title}</span>
+          {window.EpisodeBadges && <window.EpisodeBadges item={item} ep={ep} layout="row" />}
+          {watched && <span className="feat-chip" style={{ fontSize:9.5, padding:"2px 8px", borderRadius:5, color:"var(--success)", background:"oklch(0.74 0.15 150 / 0.16)", border:"1px solid var(--success)" }}>{window.RU.watched}</span>}
+          {inProg && <span className="feat-chip" style={{ fontSize:9.5, padding:"2px 8px", borderRadius:5, color:"var(--accent-hi)", background:"var(--accent-soft)", border:"1px solid var(--accent-line)" }}>{Math.round(ep.progress*100)}% · {window.RU.resume}</span>}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:9, marginTop:8, fontFamily:"var(--font-mono)", fontSize:11.5, color:"var(--text-dim)", flexWrap:"wrap" }}>
+          {airStr && <><span>{airStr}</span><span style={{color:"var(--text-faint)"}}>·</span></>}
+          <span>{meta ? meta.runtime : ep.runtime}</span>
+          <span style={{color:"var(--text-faint)"}}>·</span>
+          <span style={{ border:"1px solid var(--border-strong)", borderRadius:4, padding:"1px 6px", fontSize:10 }}>{have ? "1080p" : "—"}</span>
+          <span style={{color:"var(--text-faint)"}}>·</span>
+          <span style={{ color:"var(--accent-hi)" }}>★ {meta ? meta.rating : "—"}</span>
+        </div>
+        <div style={{ marginTop:9, fontSize:13, lineHeight:1.55, color:"var(--text-dim)", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", textWrap:"pretty", maxWidth:720 }}>{meta ? meta.overview : ""}</div>
+      </div>
+      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"space-between", gap:12, minWidth:96 }}>
+        <div style={{ textAlign:"right" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:19, fontWeight:700, color:"var(--text)", lineHeight:1 }}><span style={{ color:"var(--accent-hi)", fontSize:14 }}>★</span> {meta ? meta.rating : "—"}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--text-faint)", letterSpacing:.8, marginTop:5 }}>TMDB</div>
+        </div>
+        <div style={{ display:"flex", gap:7 }}>
+          <button onClick={(e) => { e.stopPropagation(); onToggleWatched && onToggleWatched(); }} title={watched ? "Отметить непросмотренной" : "Отметить просмотренной"} style={{ all:"unset", cursor:"pointer", width:34, height:34, borderRadius:8, display:"grid", placeItems:"center", background: watched ? "oklch(0.74 0.15 150 / 0.2)" : "var(--surface-2)", border:`1px solid ${watched ? "var(--success)" : "var(--border-strong)"}`, color: watched ? "var(--success)" : "var(--text-dim)" }}>
+            <EyeIconV3 closed={!watched} size={15} />
+          </button>
+          {have && (
+            <button onClick={(e) => { e.stopPropagation(); window.__play && window.__play(item.id, ep.n); }} title={window.RU.resume} style={{ all:"unset", cursor:"pointer", width:34, height:34, borderRadius:8, display:"grid", placeItems:"center", background:"var(--accent)", color:"#fff" }}>
+              <IconV name="play" size={15} />
+            </button>
           )}
         </div>
       </div>
