@@ -387,7 +387,7 @@ public class MetadataService(
             {
                 var epLang = (await appConfig.GetAsync(AppConfigKeys.MetadataLanguage, ct) ?? "en")
                     .Trim().ToLowerInvariant();
-                var epRows = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, epLang, ct);
+                var epRows = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, epLang, ct, logger);
                 if (epRows.Count > 0)
                 {
                     var old = await db.EpisodeMetadata.Where(e => e.MediaItemId == item.Id).ToListAsync(ct);
