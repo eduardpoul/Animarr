@@ -83,10 +83,12 @@
                        column counts per breakpoint + nth-child hides, so the tile
                        always lands right after the last visible poster. *@
                     <section class="home-lib">
+                        @* Header link removed per feedback — the poster-shaped
+                           "view all" tile at the end of the grid is the single
+                           entry into /library. *@
                         <div class="home-lib__head">
                             <h2 class="home-lib__title">@L["home.library_title"]</h2>
                             <span class="home-lib__count">@_filtered.Count</span>
-                            <a class="home-lib__all tv-focus" href="/library">@L["home.view_all"] →</a>
                         </div>
                         @if (_filtered.Count == 0)
                         {

@@ -23,6 +23,12 @@
     padding-top: var(--space-4);
 }
 
+.library-head {
+    display: flex;
+    align-items: center;
+    margin-bottom: var(--space-6);
+}
+
 .catalog-folders {
     display: flex;
     align-items: center;
