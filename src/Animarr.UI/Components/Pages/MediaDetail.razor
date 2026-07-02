@@ -605,6 +605,31 @@ else
         // saved "list" default isn't lost to that race.
         _episodeView = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
         UserCtx.OnChange += OnUserCtxChanged;
+        // The initial load happens in OnParametersSetAsync (which also runs on
+        // first mount) — it owns Id-change detection.
+    }
+
+    /// <summary>Id of the title the page currently shows. Blazor reuses this
+    /// component when navigating /catalog/A → /catalog/B (rail links on the
+    /// franchise / "more like this" rows), so the reload must key off the
+    /// route parameter — OnInitializedAsync only runs once per instance.</summary>
+    private Guid _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id) return;
+        var isSwitch = _loadedId != Guid.Empty;
+        _loadedId = Id;
+        if (isSwitch)
+        {
+            // Per-title state that LoadAsync doesn't unconditionally overwrite.
+            _similar      = Array.Empty<RecCardDto>();
+            _franchise    = null;
+            _episodeMeta  = new();
+            _activeSeason = 1;
+            _didAutoFocus = false;   // re-focus the new title's hero CTA
+            _themeStarted = false;   // switch theme music to the new title
+        }
         await LoadAsync();
     }
 
@@ -701,9 +726,12 @@ else
 
     private async Task LoadSimilarAsync()
     {
+        var id = Id;   // discard the result if the user navigated to another title
         try
         {
-            _similar = await Api.GetSimilarAsync(Id);
+            var similar = await Api.GetSimilarAsync(id);
+            if (id != Id) return;
+            _similar = similar;
             await InvokeAsync(StateHasChanged);
         }
         catch { /* rail is optional decoration */ }
@@ -711,16 +739,20 @@ else
 
     private async Task LoadFranchiseAsync()
     {
+        var id = Id;   // discard the result if the user navigated to another title
         try
         {
-            _franchise = await Api.GetFranchiseAsync(Id);
-            if (_franchise is null)
+            var franchise = await Api.GetFranchiseAsync(id);
+            if (franchise is null)
             {
                 // The lazy walk needs a few AniList round-trips; one delayed
                 // retry covers the common "first ever open" case.
                 await Task.Delay(TimeSpan.FromSeconds(12));
-                _franchise = await Api.GetFranchiseAsync(Id);
+                if (id != Id) return;
+                franchise = await Api.GetFranchiseAsync(id);
             }
+            if (id != Id) return;
+            _franchise = franchise;
             if (_franchise is not null) await InvokeAsync(StateHasChanged);
         }
         catch { /* rail is optional decoration */ }
@@ -733,9 +765,11 @@ else
     /// fallbacks in place.</summary>
     private async Task LoadEpisodeMetaAsync()
     {
+        var id = Id;   // discard the result if the user navigated to another title
         try
         {
-            var meta = await Api.GetEpisodeMetadataAsync(Id);
+            var meta = await Api.GetEpisodeMetadataAsync(id);
+            if (id != Id) return;
             _episodeMeta = meta.ToDictionary(m => (m.Season, m.Episode));
             await InvokeAsync(StateHasChanged);
         }
