@@ -53,14 +53,14 @@ else
     @* ── 3-column body — Synopsis · Details · Identification ────────────── *@
     <div class="md-body">
         <section class="md-body__col md-synopsis">
-            <div class="md-overline">SYNOPSIS</div>
+            <div class="md-overline">@L["media_detail.overline_synopsis"]</div>
             @if (!string.IsNullOrEmpty(item.Description))
             {
                 <p class="md-prose">@item.Description</p>
             }
             else
             {
-                <p class="md-prose md-prose--empty">No synopsis available.</p>
+                <p class="md-prose md-prose--empty">@L["media_detail.no_synopsis"]</p>
             }
             <div class="md-actions">
                 <Btn Variant="ghost" Size="md" OnClick="ReidentifyAsync">
@@ -70,19 +70,19 @@ else
         </section>
 
         <section class="md-body__col md-details">
-            <div class="md-overline">DETAILS</div>
+            <div class="md-overline">@L["media_detail.overline_details"]</div>
             <dl class="md-kv">
-                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>Studio</dt><dd>@item.Studio</dd> }
-                @if (!string.IsNullOrEmpty(item.Language)) { <dt>Language</dt><dd>@item.Language</dd> }
-                @if (item.Runtime is > 0) { <dt>Runtime</dt><dd>@item.Runtime m</dd> }
-                @if (item.EpisodeCount is > 0) { <dt>Episodes</dt><dd>@item.EpisodeCount</dd> }
-                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>Season</dt><dd>@item.SeasonLabel</dd> }
-                @if (!string.IsNullOrEmpty(item.Status)) { <dt>Status</dt><dd>@item.Status</dd> }
-                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>Rating</dt><dd>@item.ContentRating</dd> }
+                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>@L["media_detail.detail_studio"]</dt><dd>@item.Studio</dd> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <dt>@L["media_detail.detail_language"]</dt><dd>@item.Language</dd> }
+                @if (item.Runtime is > 0) { <dt>@L["media_detail.detail_runtime"]</dt><dd>@item.Runtime @L["media_detail.detail_runtime_unit"]</dd> }
+                @if (item.EpisodeCount is > 0) { <dt>@L["media_detail.detail_episodes"]</dt><dd>@item.EpisodeCount</dd> }
+                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>@L["media_detail.detail_season"]</dt><dd>@item.SeasonLabel</dd> }
+                @if (!string.IsNullOrEmpty(item.Status)) { <dt>@L["media_detail.detail_status"]</dt><dd>@item.Status</dd> }
+                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>@L["media_detail.detail_rating"]</dt><dd>@item.ContentRating</dd> }
                 @if (item.Genres.Length > 0)
                 {
                     var displayGenres = item.GenresLocalized.Length > 0 ? item.GenresLocalized : item.Genres;
-                    <dt>Tags</dt>
+                    <dt>@L["media_detail.detail_tags"]</dt>
                     <dd class="md-kv__tags">@string.Join(" · ", displayGenres)</dd>
                 }
             </dl>

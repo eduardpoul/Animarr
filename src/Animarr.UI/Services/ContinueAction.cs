@@ -10,19 +10,20 @@ namespace Animarr.UI.Services;
 /// hero markup binding-compatible.
 /// </summary>
 public record ContinueAction(
+    // Server-decided intent: "continue" | "next" | "first" | "rewatch".
+    // The hero localises the button caption from this + EpisodeHint (see
+    // MediaDetailHero); Label is the server's English caption, kept as a
+    // fallback for any unmapped Kind.
+    string Kind,
     string Label,
     string IconName,
     bool   IsResume,
     int?   SeasonHint,
     int?   EpisodeHint)
 {
-    public static ContinueAction PlayFirstEpisode()  => new("Play first episode",   "play",    false, null, null);
-    public static ContinueAction PlayAgainFromStart() => new("Play again from start","refresh", false, null, null);
-    public static ContinueAction PlayMovie()         => new("Play movie",           "play",    false, null, null);
-    public static ContinueAction RewatchMovie()      => new("Rewatch from start",   "refresh", false, null, null);
-
     /// <summary>Bridge from the API's ContinueWatchDto into the hero's parameter shape.</summary>
     public static ContinueAction FromDto(Animarr.Shared.Models.ContinueWatchDto dto) => new(
+        Kind:         dto.Kind,
         Label:        dto.Label,
         IconName:     dto.Kind == "continue" ? "play" : (dto.Kind == "rewatch" ? "refresh" : "play"),
         IsResume:     dto.Kind == "continue",
