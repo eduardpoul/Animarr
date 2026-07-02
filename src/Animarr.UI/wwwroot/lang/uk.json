@@ -556,6 +556,8 @@
   "home.next_up": "Дивитися далі",
   "home.new_badge": "Нове",
   "home.this_week": "Цього тижня",
+  "calendar.weekdays_short": "нд,пн,вт,ср,чт,пт,сб",
+  "calendar.months_short": "січ,лют,бер,кві,тра,чер,лип,сер,вер,жов,лис,гру",
   "calendar.title": "Календар",
   "calendar.sub": "Коли виходить наступна серія кожного онгоїнгу — і чи є вже файл.",
   "calendar.today": "Сьогодні",

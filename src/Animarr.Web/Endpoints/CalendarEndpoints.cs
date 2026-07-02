@@ -45,13 +45,13 @@ internal static class CalendarEndpoints
                     // treat a passed timestamp as freshly aired.
                     var status = next > now ? "upcoming"
                         : await EpisodeOnDiskAsync(resolver, m.Id, nextEp, ct) ? "in-library" : "aired-waiting";
-                    events.Add(new CalendarEventDto(m.Id, m.Title, poster, backdrop, nextEp, next, status));
+                    events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, nextEp, next, status));
                 }
 
                 if (m.LastAiredAtUtc is DateTime aired && aired >= from && aired <= to && m.LastAiredEpisode is int airedEp)
                 {
                     var status = await EpisodeOnDiskAsync(resolver, m.Id, airedEp, ct) ? "in-library" : "aired-waiting";
-                    events.Add(new CalendarEventDto(m.Id, m.Title, poster, backdrop, airedEp, aired, status));
+                    events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, airedEp, aired, status));
                 }
             }
 

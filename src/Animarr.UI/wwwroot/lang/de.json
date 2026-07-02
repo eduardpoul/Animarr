@@ -556,6 +556,8 @@
   "home.next_up": "Als Nächstes",
   "home.new_badge": "NEU",
   "home.this_week": "Diese Woche",
+  "calendar.weekdays_short": "So,Mo,Di,Mi,Do,Fr,Sa",
+  "calendar.months_short": "Jan,Feb,Mär,Apr,Mai,Jun,Jul,Aug,Sep,Okt,Nov,Dez",
   "calendar.title": "Kalender",
   "calendar.sub": "Wann die nächste Folge jedes laufenden Titels erscheint — und ob die Datei schon da ist.",
   "calendar.today": "Heute",

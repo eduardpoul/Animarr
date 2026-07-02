@@ -233,7 +233,7 @@ public sealed class RecsService(
                         .OrderByDescending(x => x.Shared)
                         .ThenBy(x => (m.Id.GetHashCode() ^ x.Item.Id.GetHashCode()) & 0x7fffffff)
                         .FirstOrDefault();
-                    if (best.Item is not null) rTitle = best.Item.Title;
+                    if (best.Item is not null) rTitle = MediaTitles.DisplayTitle(best.Item);
                     else rTag = PickDisplayLabel(m, labels.OrderByDescending(l => profile.GetValueOrDefault(l)).Take(1).ToList());
                 }
                 list.Add((m, score, rTitle, rTag));
@@ -293,7 +293,7 @@ public sealed class RecsService(
                         if (votes.TryGetValue(r.Id, out var cur))
                             votes[r.Id] = (cur.Score + v, cur.R, cur.Movie, cur.Seed);
                         else
-                            votes[r.Id] = (v, r, isMovie, seed.Title);
+                            votes[r.Id] = (v, r, isMovie, MediaTitles.DisplayTitle(seed));
                     }
                 }
                 return votes.Values
@@ -404,7 +404,7 @@ public sealed class RecsService(
         => all.Where(m => m.TmdbId is not null).Select(m => m.TmdbId!.Value).ToHashSet();
 
     private static RecCardDto LocalCard(MediaItem m, string? reasonTitle = null, string? reasonTag = null) => new(
-        m.Id, m.TmdbId, m.Title, m.Year,
+        m.Id, m.TmdbId, MediaTitles.DisplayTitle(m), m.Year,
         string.IsNullOrEmpty(m.PosterPath) ? null : $"/api/image?path={Uri.EscapeDataString(m.PosterPath)}",
         m.Rating,
         m.MediaType == MediaItemType.Movie ? "movie" : "tv",
