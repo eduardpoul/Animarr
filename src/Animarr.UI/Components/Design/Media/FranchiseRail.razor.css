@@ -214,3 +214,41 @@
     .frail__cell { width: 138px; }
     .frail__title { font-size: 19px; }
 }
+
+/* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
+.frail__viewport { position: relative; }
+.frail__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
+.frail__nav {
+    position: absolute;
+    /* The row carries 10px top padding for the order badges. */
+    top: 10px;
+    /* Cover the 2/3 posters of the 164px cells (~246px). */
+    height: 246px;
+    width: 44px;
+    z-index: 6;
+    display: grid;
+    place-items: center;
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    opacity: 0.75;
+    transition: opacity var(--motion-base);
+}
+.frail__nav:hover { opacity: 1; }
+.frail__nav--l { left: 0; border-radius: 12px 0 0 12px; }
+.frail__nav--r {
+    right: 0;
+    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    border-radius: 0 12px 12px 0;
+}
+@media (hover: none) {
+    .frail__nav { display: none; }
+}
+@media (max-width: 639px) {
+    /* 138px cells → shorter posters. */
+    .frail__nav { height: 207px; }
+}

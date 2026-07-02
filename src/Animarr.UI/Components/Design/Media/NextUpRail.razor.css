@@ -121,3 +121,40 @@
 @media (max-width: 560px) {
     .nur__card { width: 168px; }
 }
+
+/* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
+.nur__viewport { position: relative; }
+.nur__row.is-dragging { cursor: grabbing; user-select: none; }
+.nur__nav {
+    position: absolute;
+    top: 0;
+    /* Cover the 16:9 thumb of the 220px cards (~124px). */
+    height: 124px;
+    width: 44px;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    opacity: 0.75;
+    transition: opacity var(--motion-base);
+}
+.nur__nav:hover { opacity: 1; }
+.nur__nav--l { left: 0; border-radius: 12px 0 0 12px; }
+.nur__nav--r {
+    right: 0;
+    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    border-radius: 0 12px 12px 0;
+}
+@media (hover: none) {
+    .nur__nav { display: none; }
+}
+@media (max-width: 560px) {
+    /* 168px cards → shorter thumbs. */
+    .nur__nav { height: 95px; }
+}
