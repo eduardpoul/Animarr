@@ -178,6 +178,17 @@ public sealed class AiringRefreshBackgroundService(
                                      && DateTime.TryParse(d, out var parsed)
                         ? DateTime.SpecifyKind(parsed.Date, DateTimeKind.Utc).AddHours(12)
                         : null;
+                    // On air day TMDB's next_episode_to_air lags behind the
+                    // broadcast — a "next" in the past is really the latest
+                    // aired episode. File it as aired and leave Next empty;
+                    // the 3h no-date recheck picks up the real next episode.
+                    if (m.NextAirAtUtc is DateTime na && na <= now)
+                    {
+                        m.LastAiredEpisode  = m.NextEpisodeNumber;
+                        m.LastAiredAtUtc    = m.NextAirAtUtc;
+                        m.NextEpisodeNumber = null;
+                        m.NextAirAtUtc      = null;
+                    }
                 }
                 m.LastAiringCheckAt = now;
                 updated++;
