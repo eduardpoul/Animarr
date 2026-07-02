@@ -31,7 +31,7 @@ public sealed class AiringRefreshBackgroundService(
     private static readonly TimeSpan TickEvery       = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan RecheckAfter    = TimeSpan.FromHours(12);
     private static readonly TimeSpan FinishedRecheck = TimeSpan.FromDays(7);
-    private const int ResolvesPerTick = 5;
+    private const int ResolvesPerTick = 10;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -78,11 +78,17 @@ public sealed class AiringRefreshBackgroundService(
         }
 
         // Titles with no external ids: bridge a handful per tick via the same
-        // resolver AniSkip uses (it persists MalId/AniListId onto the row).
+        // resolver AniSkip uses (it persists MalId/AniListId onto the row and
+        // mutates the tracked instance, so resolved titles join THIS tick's
+        // batch). Likely-ongoing ones first so a fresh library's calendar
+        // fills front-to-back.
         var unresolved = candidates
             .Where(m => m.AniListId is null && m.MalId is null && m.MediaType != MediaItemType.Movie)
+            .OrderByDescending(m => m.Status?.Contains("Returning", StringComparison.OrdinalIgnoreCase) == true)
+            .ThenByDescending(m => m.CreatedAt)
             .Take(ResolvesPerTick)
             .ToList();
+        var attempted = unresolved.Select(m => m.Id).ToHashSet();
         if (unresolved.Count > 0)
         {
             using var scope = scopeFactory.CreateScope();
@@ -126,19 +132,17 @@ public sealed class AiringRefreshBackgroundService(
             }
         }
 
-        // ── TMDB fallback: live-action shows AniList doesn't cover ───────────
-        // Only "Returning Series" (or never-checked) with a TmdbId and no
-        // AniList data — a couple of detail requests per tick at most.
+        // ── TMDB fallback ─────────────────────────────────────────────────────
+        // Two cases: (a) live-action shows AniList doesn't cover at all, and
+        // (b) titles AniList marks RELEASING but without a scheduled next
+        // episode — common for donghua, where TMDB often still carries the
+        // weekly air dates. A handful of detail requests per tick.
         var tmdb = svcScope.ServiceProvider.GetRequiredService<TmdbClient>();
         var tmdbCandidates = candidates
-            .Where(m => m.LastAiringCheckAt != now                 // not covered by AniList above
-                     && m.TmdbId is > 0
-                     && m.AniListId is null && m.MalId is null
-                     && m.MediaType != MediaItemType.Movie
-                     && (m.Status is null || m.Status.Contains("Returning", StringComparison.OrdinalIgnoreCase)
-                                          || m.Status.Contains("Production", StringComparison.OrdinalIgnoreCase)
-                                          || m.AiringStatus is null or "RELEASING" or "NOT_YET_RELEASED"))
-            .Take(5)
+            .Where(m => m.TmdbId is > 0 && m.MediaType != MediaItemType.Movie)
+            .Where(m => m.LastAiringCheckAt != now                             // (a) no AniList data this tick
+                     || (m.AiringStatus == "RELEASING" && m.NextAirAtUtc is null))   // (b) releasing, time unknown
+            .Take(8)
             .ToList();
         foreach (var m in tmdbCandidates)
         {
@@ -148,13 +152,16 @@ public sealed class AiringRefreshBackgroundService(
                 if (detail is null) { m.LastAiringCheckAt = now; continue; }
                 var next = detail.NextEpisodeToAir;
                 m.AiringStatus = next is not null || detail.InProduction ? "RELEASING" : "FINISHED";
-                m.NextEpisodeNumber = next?.EpisodeNumber;
-                // TMDB gives a date, not a time — noon UTC keeps it on the
-                // right day in any nearby timezone.
-                m.NextAirAtUtc = next?.AirDate is { Length: >= 10 } d
-                                 && DateTime.TryParse(d, out var parsed)
-                    ? DateTime.SpecifyKind(parsed.Date, DateTimeKind.Utc).AddHours(12)
-                    : null;
+                if (next is not null)
+                {
+                    m.NextEpisodeNumber = next.EpisodeNumber;
+                    // TMDB gives a date, not a time — noon UTC keeps it on the
+                    // right day in any nearby timezone.
+                    m.NextAirAtUtc = next.AirDate is { Length: >= 10 } d
+                                     && DateTime.TryParse(d, out var parsed)
+                        ? DateTime.SpecifyKind(parsed.Date, DateTimeKind.Utc).AddHours(12)
+                        : null;
+                }
                 m.LastAiringCheckAt = now;
                 updated++;
             }
@@ -166,12 +173,20 @@ public sealed class AiringRefreshBackgroundService(
             }
         }
 
-        // Whatever the sources didn't recognise still gets stamped so it can't
-        // wedge the queue — a miss retries on the normal TTL.
+        // Stamp the leftovers — with one exception: id-less titles the resolve
+        // quota didn't REACH this tick stay unstamped, so they remain
+        // candidates and the whole library resolves front-to-back across a few
+        // ticks instead of sleeping a week as a phantom "FINISHED".
         foreach (var m in candidates.Where(m => m.LastAiringCheckAt != now))
         {
-            if (m.AniListId is not null || m.MalId is not null || m.TmdbId is not null)
-                m.AiringStatus ??= "FINISHED";
+            var idLess = m.AniListId is null && m.MalId is null;
+            if (idLess && m.MediaType != MediaItemType.Movie && !attempted.Contains(m.Id))
+                continue;
+            // Only default to FINISHED when a source actually knew the title
+            // (had ids but the batch returned nothing). Unknown stays null and
+            // retries on the 12h TTL.
+            if (!idLess) m.AiringStatus ??= "FINISHED";
+            if (m.MediaType == MediaItemType.Movie) m.AiringStatus ??= "FINISHED";
             m.LastAiringCheckAt = now;
         }
 
