@@ -303,6 +303,9 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
+    /* Separate the playback prefs from the interface-language block that now
+       sits above them at the top of the Settings tab. */
+    margin-top: 20px;
 }
 
 /* ── Field wrapper ──────────────────────────────────────── */

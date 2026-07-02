@@ -1267,7 +1267,7 @@
   "profile.kv_email": "EMAIL",
   "profile.kv_role": "РОЛЬ",
   "profile.kv_username": "ІМ'Я КОРИСТУВАЧА",
-  "profile.language_hint_html": "Вибір іншої мови перезавантажує застосунок, щоб кожен екран перемалювався в новій локалі. Твої улюблені мови аудіо та субтитрів живуть у вкладці <strong>Аудіо</strong>.",
+  "profile.language_hint_html": "Вибір іншої мови перезавантажує застосунок, щоб кожен екран відобразився новою локаллю.",
   "profile.language_title": "Мова інтерфейсу",
   "profile.normalize_hint": "Нормалізація гучності EBU R128.",
   "profile.normalize_title": "Нормалізувати гучність між тайтлами",
