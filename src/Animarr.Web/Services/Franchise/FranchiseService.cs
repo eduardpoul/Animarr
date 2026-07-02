@@ -194,9 +194,16 @@ public sealed class FranchiseService(
             .Where(m => (m.AniListId != null && aniIds.Contains(m.AniListId.Value))
                      || (m.MalId != null && malIds.Contains(m.MalId.Value)))
             .ToListAsync(ct);
-        MediaItem? MatchOf(FranchiseNode n) =>
-            libItems.FirstOrDefault(m => m.AniListId == n.AniListId)
-            ?? libItems.FirstOrDefault(m => n.MalId != null && m.MalId == n.MalId);
+
+        var claims = new Dictionary<int, MediaItem>();
+        foreach (var n in nodes)
+        {
+            var m = libItems.FirstOrDefault(x => x.AniListId == n.AniListId)
+                 ?? libItems.FirstOrDefault(x => n.MalId != null && x.MalId == n.MalId);
+            if (m is not null) claims[n.AniListId] = m;
+        }
+        PropagateSeasonClaims(claims, ordered, edges);
+        MediaItem? MatchOf(FranchiseNode n) => claims.GetValueOrDefault(n.AniListId);
 
         // Watched = the matched item has at least one watched episode (any user
         // scoping is deliberately ignored here — the rail is a shared surface).
@@ -247,6 +254,70 @@ public sealed class FranchiseService(
             cards.Count(c => c.Watched),
             cards.Count(c => c.InLibrary),
             cards);
+    }
+
+    /// <summary>A TMDB series spans several AniList season-entries but its ids
+    /// only pin the first one, so "Season 2" nodes would render as
+    /// not-in-library. Claim TV-ish SEQUEL successors for the same item while
+    /// the AniList episode sum still fits the item's TMDB episode total — the
+    /// budget is what stops true successor SERIES from being swallowed
+    /// (Naruto's one AniList entry already spends its 220 episodes, so
+    /// Shippuuden never fits). Movies/OVA between cours are walked through
+    /// without being claimed; a node exactly matched to another library item
+    /// ends the chain.</summary>
+    private static void PropagateSeasonClaims(
+        Dictionary<int, MediaItem> claims, List<FranchiseNode> ordered, List<FranchiseEdge> edges)
+    {
+        var byId = ordered.ToDictionary(n => n.AniListId);
+        var nextOf = new Dictionary<int, int>();
+        foreach (var e in edges)
+        {
+            if (e.RelationType.Equals("SEQUEL", StringComparison.OrdinalIgnoreCase))
+                nextOf.TryAdd(e.FromAniListId, e.ToAniListId);
+            else if (e.RelationType.Equals("PREQUEL", StringComparison.OrdinalIgnoreCase))
+                nextOf.TryAdd(e.ToAniListId, e.FromAniListId);
+        }
+
+        static bool SeasonishFormat(string? f) =>
+            f is null || f.ToUpperInvariant() is "TV" or "ONA" or "TV_SHORT";
+
+        foreach (var start in ordered.Where(n => claims.ContainsKey(n.AniListId)).ToList())
+        {
+            var item = claims[start.AniListId];
+            if (item.MediaType == MediaItemType.Movie) continue;   // only episodic items span seasons
+            if (TmdbEpisodeTotal(item) is not int cap) continue;
+
+            var cum = start.Episodes ?? 0;
+            var cur = start.AniListId;
+            for (var steps = 0; steps < MaxNodes && cum < cap; steps++)
+            {
+                if (!nextOf.TryGetValue(cur, out var nxId) || !byId.TryGetValue(nxId, out var nx)) break;
+                if (claims.TryGetValue(nxId, out var owner))
+                {
+                    if (!ReferenceEquals(owner, item)) break;
+                    cur = nxId; continue;
+                }
+                if (!SeasonishFormat(nx.Format)) { cur = nxId; continue; }
+                if (cum + (nx.Episodes ?? 0) > cap + 1) break;   // +1: recap-episode slack
+                claims[nxId] = item;
+                cum += nx.Episodes ?? 0;
+                cur = nxId;
+            }
+        }
+    }
+
+    /// <summary>Episode total across the item's real TMDB seasons (specials
+    /// excluded), or null when season metadata is absent.</summary>
+    private static int? TmdbEpisodeTotal(MediaItem item)
+    {
+        if (string.IsNullOrEmpty(item.SeasonsJson)) return null;
+        try
+        {
+            var seasons = System.Text.Json.JsonSerializer.Deserialize<List<SeasonMeta>>(item.SeasonsJson);
+            var total = seasons?.Where(s => s.Number > 0).Sum(s => s.EpisodeCount) ?? 0;
+            return total > 0 ? total : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>Kahn's topological sort over SEQUEL edges (PREQUEL inverted),
