@@ -1234,7 +1234,6 @@
   "profile.btn_update_pin": "Actualizar PIN",
   "profile.categories_aria": "Categorías de ajustes",
   "profile.change_password": "Cambiar contraseña",
-  "profile.default_volume_label": "VOLUMEN POR DEFECTO",
   "profile.dialog_aria": "Perfil",
   "profile.downloads": "Descargas",
   "profile.edit_profile": "Editar perfil",
@@ -1280,8 +1279,6 @@
   "profile.pager_h_label": "Numerado",
   "profile.pair_tv": "Vincular una TV",
   "profile.pair_tv_sub": "Escanea el QR que aparece en la pantalla de vinculación de tu TV.",
-  "profile.passthrough_hint": "Para receptores AV — envía el bitstream sin procesar.",
-  "profile.passthrough_title": "Passthrough de audio",
   "profile.pin_change_or_remove": "Cambiar o quitar el PIN (este dispositivo)",
   "profile.pin_err_len": "El PIN debe tener 4 dígitos.",
   "profile.pin_err_remove": "No se pudo quitar el PIN: {0}",
@@ -1308,7 +1305,6 @@
   "profile.subtitle_off": "Desactivados",
   "profile.subtitle_size_label": "TAMAÑO DE SUBTÍTULOS",
   "profile.tab_appearance": "Apariencia",
-  "profile.tab_audio": "Audio",
   "profile.tab_identity": "Identidad",
   "profile.tab_servers": "Servidores",
   "profile.theme_desc_anime": "Ciruela + rosa pastel",
@@ -1512,5 +1508,6 @@
   "users_roles.users_card_sub": "Cuentas que pueden iniciar sesión. Los roles definen lo que cada una puede hacer.",
   "users_roles.users_card_title": "Usuarios",
   "welcome.get_started": "Empezar",
-  "welcome.tagline": "Biblioteca de anime y películas autoalojada, comprendida por un LLM."
+  "welcome.tagline": "Biblioteca de anime y películas autoalojada, comprendida por un LLM.",
+  "profile.tab_settings": "Ajustes"
 }

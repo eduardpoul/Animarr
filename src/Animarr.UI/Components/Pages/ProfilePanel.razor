@@ -226,7 +226,10 @@
         new("identity",   "profile.tab_identity",   "user"),
         new("servers",    "profile.tab_servers",    "server"),
         new("appearance", "profile.tab_appearance", "sparkle"),
-        new("audio",      "profile.tab_audio",      "audio"),
+        // Internal key stays "audio" (drives the render switch + persisted
+        // active tab); the tab now also hosts interface language, so it's
+        // labelled "Settings" with a gear icon.
+        new("audio",      "profile.tab_settings",   "settings"),
         // Language used to be its own tab; it now lives at the bottom of the
         // Appearance tab (it's a display preference like theme / accent, and
         // a standalone tab for one dropdown was overkill on mobile drilldown).
@@ -1592,25 +1595,6 @@
                 </div>
             </div>
 
-            @* ── Interface language — moved here from its own tab. It's a
-                 display preference like theme / accent, so it belongs in
-                 Appearance rather than a standalone tab that held one
-                 dropdown (especially awkward in the mobile drilldown). *@
-            <div class="d-profile__section-block">
-                <div class="d-profile__section-head">
-                    <div class="d-profile__section-title">@L["profile.language_title"]</div>
-                    <div class="d-profile__section-hint">
-                        @((MarkupString)L["profile.language_hint_html"])
-                    </div>
-                </div>
-                <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
-                    <option value="en">English</option>
-                    <option value="ru">Русский</option>
-                    <option value="uk">Українська</option>
-                    <option value="de">Deutsch</option>
-                    <option value="es">Español</option>
-                </select>
-            </div>
         </div>
     };
 
@@ -1691,6 +1675,25 @@
 
     private RenderFragment RenderAudio() => __builder =>
     {
+        @* ── Interface language — top of the Settings tab. Changing it
+             re-localizes the whole UI (and triggers a metadata re-fetch on
+             the server), so it sits above the playback preferences. *@
+        <div class="d-profile__section-block">
+            <div class="d-profile__section-head">
+                <div class="d-profile__section-title">@L["profile.language_title"]</div>
+                <div class="d-profile__section-hint">
+                    @((MarkupString)L["profile.language_hint_html"])
+                </div>
+            </div>
+            <select class="d-profile__select" value="@_language" @onchange="OnLanguageChanged">
+                <option value="en">English</option>
+                <option value="ru">Русский</option>
+                <option value="uk">Українська</option>
+                <option value="de">Deutsch</option>
+                <option value="es">Español</option>
+            </select>
+        </div>
+
         <div class="d-profile__audio-grid">
             <label class="d-profile__field">
                 <span class="d-profile__field-label">@L["profile.audio_preferred_label"]</span>

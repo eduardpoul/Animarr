@@ -1234,7 +1234,6 @@
   "profile.btn_update_pin": "Обновить PIN",
   "profile.categories_aria": "Категории настроек",
   "profile.change_password": "Сменить пароль",
-  "profile.default_volume_label": "ГРОМКОСТЬ ПО УМОЛЧАНИЮ",
   "profile.dialog_aria": "Профиль",
   "profile.downloads": "Загрузки",
   "profile.edit_profile": "Изменить профиль",
@@ -1280,8 +1279,6 @@
   "profile.pager_h_label": "Нумерованный",
   "profile.pair_tv": "Подключить ТВ",
   "profile.pair_tv_sub": "Отсканируйте QR, показанный на экране подключения вашего ТВ.",
-  "profile.passthrough_hint": "Для AV-ресиверов — отдаёт сырой битстрим.",
-  "profile.passthrough_title": "Прямая передача звука",
   "profile.pin_change_or_remove": "Изменить или удалить PIN (это устройство)",
   "profile.pin_err_len": "PIN должен состоять из 4 цифр.",
   "profile.pin_err_remove": "Не удалось удалить PIN: {0}",
@@ -1308,7 +1305,6 @@
   "profile.subtitle_off": "Выкл",
   "profile.subtitle_size_label": "РАЗМЕР СУБТИТРОВ",
   "profile.tab_appearance": "Оформление",
-  "profile.tab_audio": "Звук",
   "profile.tab_identity": "Учётная запись",
   "profile.tab_servers": "Серверы",
   "profile.theme_desc_anime": "Сливовый + пастельно-розовый",
@@ -1512,5 +1508,6 @@
   "users_roles.users_card_sub": "Учётные записи, которые могут входить. Роли определяют, что каждая может делать.",
   "users_roles.users_card_title": "Пользователи",
   "welcome.get_started": "Начать",
-  "welcome.tagline": "Самостоятельно размещаемая библиотека аниме и фильмов, понимаемая LLM."
+  "welcome.tagline": "Самостоятельно размещаемая библиотека аниме и фильмов, понимаемая LLM.",
+  "profile.tab_settings": "Настройки"
 }
