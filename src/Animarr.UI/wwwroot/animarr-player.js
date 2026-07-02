@@ -2498,9 +2498,16 @@
             && Array.isArray(audioList) && audioList.length > 1) {
             const want = audioList.findIndex(a => normLang(a.lang) === PREFS.audioLang);
             if (want > 0 && want !== entry.currentAudIdx) {
-                // Defer so the current attach finishes wiring before we tear it
-                // down and restart with the preferred audio map.
-                setTimeout(() => { try { switchAudioTrack(elementId, want); } catch {} }, 0);
+                // Defer past the rest of attach()'s wiring (autostart + HUD)
+                // before we tear the session down and restart with the preferred
+                // audio map. Only reached on a transcoding HLS file whose default
+                // audio isn't the preferred language, so the extra warm-up is
+                // rare; guard against the user navigating away meanwhile.
+                setTimeout(() => {
+                    if (WIRED.has(elementId)) {
+                        try { switchAudioTrack(elementId, want); } catch {}
+                    }
+                }, 600);
             }
         }
 
