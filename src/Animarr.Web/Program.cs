@@ -166,6 +166,10 @@ builder.Services.AddScoped<Animarr.Web.Services.Recs.RecsService>();
 // Airing calendar — AniList/TMDB schedule refresh for ongoing titles.
 builder.Services.AddHostedService<Animarr.Web.Services.Airing.AiringRefreshBackgroundService>();
 
+// Franchise graphs — AniList relations BFS + watch-order rail.
+builder.Services.AddScoped<Animarr.Web.Services.Franchise.FranchiseService>();
+builder.Services.AddHostedService<Animarr.Web.Services.Franchise.FranchiseBackgroundService>();
+
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
@@ -400,6 +404,7 @@ app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();
 app.MapRecsEndpoints();
 app.MapCalendarEndpoints();
+app.MapFranchiseEndpoints();
 app.MapTorrentEndpoints();
 app.MapRenameEndpoints();
 app.MapMediaTagEndpoints();

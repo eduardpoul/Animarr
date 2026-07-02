@@ -441,6 +441,14 @@ else
         </section>
     }
 
+    @* Franchise watch-order rail — release order, "вы здесь", missing members
+       dashed with a Want button. Above "More like this": franchise context is
+       the stronger signal on a title page. *@
+    @if (_franchise is not null)
+    {
+        <FranchiseRail Franchise="@_franchise" />
+    }
+
     @* "More like this" — library matches first, TMDB backfill (per the user's
        RecsScope preference) rendered as dashed not-in-library cards. *@
     @if (_similar.Length > 0)
@@ -681,9 +689,15 @@ else
         // Stage C: the "More like this" rail, also fire-and-forget — genre
         // scoring is instant server-side; the TMDB backfill may add a beat.
         _ = LoadSimilarAsync();
+
+        // Stage D: the franchise rail. A 204 (never-walked title) kicks a
+        // background AniList walk server-side — retry once shortly after so a
+        // small graph appears without leaving the page.
+        _ = LoadFranchiseAsync();
     }
 
     private RecCardDto[] _similar = Array.Empty<RecCardDto>();
+    private FranchiseDto? _franchise;
 
     private async Task LoadSimilarAsync()
     {
@@ -691,6 +705,23 @@ else
         {
             _similar = await Api.GetSimilarAsync(Id);
             await InvokeAsync(StateHasChanged);
+        }
+        catch { /* rail is optional decoration */ }
+    }
+
+    private async Task LoadFranchiseAsync()
+    {
+        try
+        {
+            _franchise = await Api.GetFranchiseAsync(Id);
+            if (_franchise is null)
+            {
+                // The lazy walk needs a few AniList round-trips; one delayed
+                // retry covers the common "first ever open" case.
+                await Task.Delay(TimeSpan.FromSeconds(12));
+                _franchise = await Api.GetFranchiseAsync(Id);
+            }
+            if (_franchise is not null) await InvokeAsync(StateHasChanged);
         }
         catch { /* rail is optional decoration */ }
     }

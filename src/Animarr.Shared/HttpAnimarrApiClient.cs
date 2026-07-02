@@ -138,6 +138,9 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<CalendarEventDto[]>($"{ApiRoutes.Calendar}?back={back}&ahead={ahead}", JsonOpts, ct)
             ?? Array.Empty<CalendarEventDto>();
 
+    public Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default)
+        => GetOrNullAsync<FranchiseDto>(ApiRoutes.MediaFranchiseFor(mediaItemId), ct);
+
     public async Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeWatchlist, request, JsonOpts, ct);
