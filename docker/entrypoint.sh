@@ -46,9 +46,15 @@ if [ "$ANIMARR_LLM_VULKAN" = "1" ] && ! vulkan_ok; then
     #    this base image. Downloads are redirected to the volume cache and kept
     #    (the base's docker-clean hook only purges /var/cache/apt), so the next
     #    boot takes the offline path.
+    #
+    #    The repair step MUST run bare: `apt-get -f install` with package names
+    #    is not allowed to add packages outside the named set, so it can't pull
+    #    the very dependency the wedged package is missing and fails with
+    #    "X is not going to be installed". Bare -f is the documented remedy.
     if ! vulkan_ok; then
         if apt-get update \
-           && apt-get install -y -f --no-install-recommends \
+           && apt-get install -y -f \
+           && apt-get install -y --no-install-recommends \
                 -o Dir::Cache::archives="$CACHE" \
                 -o APT::Keep-Downloaded-Packages=true \
                 libvulkan1 mesa-vulkan-drivers \
