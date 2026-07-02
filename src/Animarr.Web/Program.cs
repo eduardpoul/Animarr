@@ -8,6 +8,7 @@ using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Segments;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -56,6 +57,8 @@ builder.Services.AddDataProtection()
     .SetApplicationName("Animarr");
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<MediaCachePaths>();
+// Central "may this disk path be served?" gate for every byte-serving endpoint.
+builder.Services.AddSingleton<MediaPathValidator>();
 
 // App services
 builder.Services.AddScoped<SeedDataService>();
@@ -232,6 +235,35 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(AuthConstants.Policies.UploadContent,  PolicyFor(r => r.PermUploadContent));
     options.AddPolicy(AuthConstants.Policies.SystemSettings, PolicyFor(r => r.PermSystemSettings));
     options.AddPolicy(AuthConstants.Policies.ManageUsers,    PolicyFor(r => r.PermManageUsers));
+
+    // Default-deny: every endpoint that doesn't explicitly opt out with
+    // .AllowAnonymous() (or carry its own policy) requires a signed-in user.
+    // The media-byte surface (video/file/HLS segments/image/DLNA, pairing,
+    // server-info) opts out deliberately — those are consumed by cookie-less
+    // clients (DLNA renderers, mpv, the Android WebView proxy) and rely on
+    // library-path validation instead.
+    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(AuthConstants.CookieScheme)
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+// Pairing endpoints are anonymous by design (the TV has no cookie yet), which
+// makes the 6-digit code a brute-force target. A per-IP fixed window keeps a
+// legitimate TV's 2s poll loop (30 req/min) comfortably inside the budget
+// while capping a scanner to ~60 code guesses a minute — at 10⁶ codes and a
+// 10-minute TTL that's a ~0.06% hit chance per pairing session.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(RateLimitPolicies.Pair, httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window      = TimeSpan.FromMinutes(1),
+                QueueLimit  = 0,
+            }));
 });
 builder.Services.AddSingleton<TorrentHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcaster>());
@@ -330,12 +362,17 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes })
 // and the second middleware short-circuits without running the endpoint →
 // "The request reached the end of the pipeline without executing the
 // endpoint: ''". One call to MapStaticAssets is enough.
-app.MapStaticAssets();
+// AllowAnonymous: the login page itself is served from these assets, so they
+// must bypass the default-deny fallback policy.
+app.MapStaticAssets().AllowAnonymous();
 
 // v4 auth middleware — must come BEFORE endpoint mappings so the cookie is
 // resolved into HttpContext.User before [Authorize] checks run.
 app.UseAuthentication();
 app.UseAuthorization();
+// Endpoint-scoped limiter policies (TV pairing). Must run before endpoint
+// execution so RequireRateLimiting metadata is honoured.
+app.UseRateLimiter();
 
 // ─── Animarr.Shared REST surface ──────────────────────────────────────────
 // Each endpoint group backs one slice of the IAnimarrApiClient contract that
@@ -359,8 +396,12 @@ app.MapDlnaCastEndpoints();
 app.MapServerInfoEndpoints();
 
 // SignalR hubs — push-only telemetry for torrents + identification queue.
-app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents);
-app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification);
+// AllowAnonymous: the MAUI apps connect with a bare HubConnection that carries
+// no auth cookie (only the app's REST HttpClient holds the cookie jar), so a
+// required-auth hub would silently break native live updates. The hubs never
+// accept client invocations — they only broadcast status snapshots.
+app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents).AllowAnonymous();
+app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification).AllowAnonymous();
 
 // ─── /api/image — serve media images from arbitrary disk paths ────────────
 // Security: path must resolve inside one of the registered FolderWatcher paths,
@@ -1057,26 +1098,21 @@ app.MapDelete("/api/hls/{token}", (string token, HlsSessionService hls) =>
 
 // Diagnostic: list every active session with ffmpeg state + segment progress.
 // Hit this when a player is stuck on a frame to see whether the backing
-// session is alive, crashed, or completed-partial.
+// session is alive, crashed, or completed-partial. Admin-gated — the snapshot
+// exposes library file paths and lets the caller correlate who watches what.
 app.MapGet("/api/hls/sessions", (HlsSessionService hls) =>
     Results.Ok(hls.Snapshot()))
     .WithName("ListHlsSessions")
-    .AllowAnonymous();
+    .RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
-// Hardware-acceleration report — Settings UI calls this to show what's
-// detected (VAAPI / NVENC / QSV) plus help text for any vendor that isn't
-// available. Probed once at startup; ?rescan=true forces a re-probe (e.g.
-// after the user changes docker run flags and restarts).
-app.MapGet("/api/hardware-info", (HardwareInfoService hw, bool? rescan) =>
-{
-    if (rescan == true) hw.Rescan();
-    return Results.Ok(hw.Current);
-})
-.WithName("HardwareInfo")
-.AllowAnonymous();
+// NOTE: /api/hardware-info used to be mapped here TOO — AppConfigEndpoints
+// maps the same route, and two endpoints on one route+method make ASP.NET
+// throw AmbiguousMatchException (HTTP 500) on every request. The endpoint
+// now lives only in AppConfigEndpoints.cs.
 
 // Nuke everything — useful when a runaway tab piled up stale sessions and
-// the user wants a clean slate without restarting the container.
+// the user wants a clean slate without restarting the container. Admin-gated:
+// anonymous callers must not be able to kill every active playback on the box.
 app.MapDelete("/api/hls/sessions", (HlsSessionService hls) =>
 {
     var n = 0;
@@ -1084,7 +1120,7 @@ app.MapDelete("/api/hls/sessions", (HlsSessionService hls) =>
     return Results.Ok(new { stopped = n });
 })
 .WithName("StopAllHlsSessions")
-.AllowAnonymous();
+.RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
 // ─── DLNA / UPnP MediaServer ─────────────────────────────────────────────
 // Serves the device description + ContentDirectory/ConnectionManager SCPDs
@@ -1139,57 +1175,12 @@ app.MapMethods("/dlna/cm/event", new[] { "SUBSCRIBE", "UNSUBSCRIBE" }, (HttpCont
     return Results.Ok();
 }).AllowAnonymous();
 
-// ─── DLNA ControlPoint — discover renderers + send Play to a TV ──────────
-// MediaRenderers on the LAN (TVs, AVRs, speakers) announce themselves via
-// SSDP. /api/dlna/renderers triggers an active M-SEARCH burst (throttled
-// to one every 3s) and returns the cached list. /api/dlna/play issues
-// SetAVTransportURI + Play to the selected renderer's AVTransport service.
-app.MapGet("/api/dlna/renderers", async (DlnaCastService cast, CancellationToken ct) =>
-{
-    var list = await cast.RefreshAsync(ct);
-    return Results.Ok(list.Select(r => new
-    {
-        udn          = r.Udn,
-        name         = r.FriendlyName,
-        manufacturer = r.Manufacturer,
-        model        = r.ModelName,
-    }));
-}).AllowAnonymous();
-
-app.MapPost("/api/dlna/play", async (
-        DlnaCastPlayRequest body,
-        DlnaCastService cast,
-        DlnaService dlna,
-        IDbContextFactory<AppDbContext> dbFactory,
-        CancellationToken ct) =>
-{
-    if (string.IsNullOrWhiteSpace(body.Udn) || string.IsNullOrWhiteSpace(body.Path))
-        return Results.BadRequest("udn + path required");
-
-    var (ok, fullPath, early) = await ResolveAllowedPathAsync(body.Path, dbFactory);
-    if (!ok) return early!;
-
-    // Build the stream URL from the SAME origin the DLNA description
-    // advertises. Using the inbound Request.Host header would break when
-    // the user opens Animarr at https://hostname:8443 but the TV (on the
-    // LAN) can't resolve that hostname — and would also point at port 8443
-    // (TLS) which TVs reject because of our self-signed cert. The SSDP
-    // LOCATION header reaches all TVs at this same origin already, so we
-    // know they can hit it.
-    var baseUrl = dlna.AdvertisedHost ?? "http://localhost:8080";
-    var ext = Path.GetExtension(fullPath!).ToLowerInvariant();
-    var mime = MimeForVideoExt(ext);
-    // Use /api/file for the cast URL — raw byte-stream with Range support.
-    // TVs/AVRs decode the source natively (HEVC + AC3 + Atmos passthrough
-    // and 5.1 surround intact, instead of /api/video's stereo AAC downmix).
-    // Use the *validated* fullPath, not body.Path — the URL pointed at the
-    // TV must be the same canonical form /api/file will accept.
-    var streamUrl = $"{baseUrl}/api/file?path={Uri.EscapeDataString(fullPath!)}";
-    var title = string.IsNullOrWhiteSpace(body.Title) ? Path.GetFileNameWithoutExtension(fullPath!) : body.Title!;
-
-    var success = await cast.PlayAsync(body.Udn!, streamUrl, title, mime, ct);
-    return success ? Results.NoContent() : Results.Problem("Renderer rejected the request.", statusCode: 502);
-}).AllowAnonymous();
+// NOTE: /api/dlna/renderers + /api/dlna/play used to be mapped inline here
+// TOO — DlnaCastEndpoints maps the same routes, and two endpoints on one
+// route+method make ASP.NET throw AmbiguousMatchException (HTTP 500) on
+// every request, which silently broke "Send to TV". The control-point
+// endpoints now live only in DlnaCastEndpoints.cs (with this version's
+// path validation + AdvertisedHost URL building folded in).
 
 // ─── /api/probe — return ffprobe stream list as JSON for player UI menus ──
 app.MapGet("/api/probe", async (
@@ -1417,15 +1408,13 @@ app.MapGet("/api/mpv-tracker.lua", (HttpContext http, DlnaService dlna) =>
 // SPA fallback — anything not matched by an API endpoint, Razor page, or
 // static file falls through to Animarr.Web.Client's index.html. The WASM
 // router then claims the URL client-side. Keep this LAST so it doesn't
-// shadow the explicit routes above.
-app.MapFallbackToFile("index.html");
+// shadow the explicit routes above. AllowAnonymous — the SPA handles the
+// login flow itself, so the document must load for signed-out visitors.
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
 // ─── Request DTOs ─────────────────────────────────────────────────────────
-
-/// <summary>POST body for /api/dlna/play.</summary>
-public record DlnaCastPlayRequest(string? Udn, string? Path, string? Title);
 
 /// <summary>POST body for /api/watch/external-progress (sent by mpv lua script).</summary>
 public record ExternalProgressRequest(

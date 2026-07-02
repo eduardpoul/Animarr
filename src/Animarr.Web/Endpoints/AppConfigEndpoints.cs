@@ -2,6 +2,7 @@ using Animarr.Shared;
 using Animarr.Shared.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 
 namespace Animarr.Web.Endpoints;
 
@@ -13,7 +14,13 @@ internal static class AppConfigEndpoints
 {
     public static IEndpointRouteBuilder MapAppConfigEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet(ApiRoutes.AppConfig, async (
+        // The config store carries secrets (TMDB/MAL/LLM API keys) and every
+        // consumer is the Settings page, so the whole surface — reads included
+        // — is admin-only. Empty prefix: the group exists to apply the policy.
+        var admin = app.MapGroup(string.Empty)
+            .RequireAuthorization(AuthConstants.Policies.SystemSettings);
+
+        admin.MapGet(ApiRoutes.AppConfig, async (
             IAppConfigService config,
             CancellationToken ct) =>
         {
@@ -40,7 +47,7 @@ internal static class AppConfigEndpoints
             return Results.Ok(entries.ToArray());
         });
 
-        app.MapGet(ApiRoutes.AppConfigByKey, async (
+        admin.MapGet(ApiRoutes.AppConfigByKey, async (
             string key,
             IAppConfigService config,
             CancellationToken ct) =>
@@ -51,7 +58,7 @@ internal static class AppConfigEndpoints
                 : Results.Ok(new AppConfigEntryDto(key, value));
         });
 
-        app.MapPut(ApiRoutes.AppConfigByKey, async (
+        admin.MapPut(ApiRoutes.AppConfigByKey, async (
             string key,
             AppConfigEntryDto entry,
             IAppConfigService config,
@@ -62,7 +69,7 @@ internal static class AppConfigEndpoints
             return Results.NoContent();
         });
 
-        app.MapGet(ApiRoutes.HardwareInfo, (HardwareInfoService hw, bool? rescan) =>
+        admin.MapGet(ApiRoutes.HardwareInfo, (HardwareInfoService hw, bool? rescan) =>
         {
             if (rescan == true) hw.Rescan();
             return Results.Ok(hw.Current.ToDto());

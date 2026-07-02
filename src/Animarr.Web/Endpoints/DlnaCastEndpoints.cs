@@ -9,6 +9,12 @@ namespace Animarr.Web.Endpoints;
 /// "Send to TV" — DLNA renderer discovery + control. The DLNA media server
 /// (SSDP NOTIFY / ContentDirectory) endpoints live in Program.cs; this
 /// wraps the cast (control-point) side only.
+///
+/// AllowAnonymous: both endpoints are called by the player's JS overlay,
+/// which in the MAUI apps runs behind a cookie-less WebView proxy — a
+/// required-auth gate would break casting from the native apps. The play
+/// path is validated against the library roots before anything is sent to
+/// the renderer.
 /// </summary>
 internal static class DlnaCastEndpoints
 {
@@ -29,44 +35,43 @@ internal static class DlnaCastEndpoints
                     LastSeenUtc:   r.LastSeen))
                 .ToArray();
             return Results.Ok(dtos);
-        });
+        }).AllowAnonymous();
 
         app.MapPost(ApiRoutes.DlnaPlay, async (
             DlnaPlayRequest request,
-            HttpContext http,
             DlnaCastService cast,
+            DlnaService dlna,
+            MediaPathValidator pathValidator,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.RendererUdn))
                 return Results.BadRequest("RendererUdn is required.");
-            if (string.IsNullOrWhiteSpace(request.FilePath))
-                return Results.BadRequest("FilePath is required.");
 
-            // Build the absolute stream URL the renderer can fetch from us.
-            // Anchor it on whatever host the client used so reverse-proxy
-            // setups (Caddy / Traefik) work without extra config.
-            var scheme = http.Request.Scheme;
-            var hostHeader = http.Request.Host.Value;
-            var streamUrl = $"{scheme}://{hostHeader}{ApiRoutes.File}?path={Uri.EscapeDataString(request.FilePath)}";
+            var (ok, fullPath, early) = await pathValidator.ResolveLibraryFileAsync(request.FilePath, ct);
+            if (!ok) return early!;
 
-            var ext  = Path.GetExtension(request.FilePath).ToLowerInvariant();
-            var mime = ext switch
-            {
-                ".mp4"  => "video/mp4",
-                ".m4v"  => "video/x-m4v",
-                ".mov"  => "video/quicktime",
-                ".mkv"  => "video/x-matroska",
-                ".webm" => "video/webm",
-                ".avi"  => "video/x-msvideo",
-                ".ts"   => "video/mp2t",
-                ".m2ts" => "video/mp2t",
-                _       => "application/octet-stream",
-            };
-            var title = Path.GetFileNameWithoutExtension(request.FilePath);
+            // Build the stream URL from the SAME origin the DLNA description
+            // advertises. Using the inbound Request.Host header would break
+            // when the user opens Animarr at https://hostname:8443 but the TV
+            // (on the LAN) can't resolve that hostname — and would also point
+            // at port 8443 (TLS), which TVs reject because of our self-signed
+            // cert. The SSDP LOCATION header reaches all TVs at this same
+            // origin already, so we know they can hit it.
+            var baseUrl = dlna.AdvertisedHost ?? "http://localhost:8080";
+            var ext  = Path.GetExtension(fullPath!).ToLowerInvariant();
+            var mime = MediaMime.ForVideoExtension(ext);
+            // Use /api/file for the cast URL — raw byte-stream with Range
+            // support. TVs/AVRs decode the source natively (HEVC + AC3 +
+            // Atmos passthrough and 5.1 surround intact, instead of
+            // /api/video's stereo AAC downmix). Use the *validated* fullPath,
+            // not request.FilePath — the URL pointed at the TV must be the
+            // same canonical form /api/file will accept.
+            var streamUrl = $"{baseUrl}{ApiRoutes.File}?path={Uri.EscapeDataString(fullPath!)}";
+            var title = Path.GetFileNameWithoutExtension(fullPath!);
 
-            var ok = await cast.PlayAsync(request.RendererUdn, streamUrl, title, mime, ct);
-            return ok ? Results.Accepted() : Results.NotFound();
-        });
+            var success = await cast.PlayAsync(request.RendererUdn, streamUrl, title, mime, ct);
+            return success ? Results.NoContent() : Results.Problem("Renderer rejected the request.", statusCode: 502);
+        }).AllowAnonymous();
 
         return app;
     }

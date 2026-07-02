@@ -5,6 +5,7 @@ using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -21,7 +22,14 @@ internal static class TorrentEndpoints
 {
     public static IEndpointRouteBuilder MapTorrentEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet(ApiRoutes.Torrents, async (
+        // Torrenting is "getting media in" — the whole surface sits behind the
+        // uploadContent permission (the built-in view-only User role has it
+        // off). Empty group prefix: routes keep their absolute ApiRoutes paths;
+        // the group exists only to apply the policy in one place.
+        var torrents = app.MapGroup(string.Empty)
+            .RequireAuthorization(AuthConstants.Policies.UploadContent);
+
+        torrents.MapGet(ApiRoutes.Torrents, async (
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
         {
@@ -33,7 +41,7 @@ internal static class TorrentEndpoints
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
         });
 
-        app.MapGet(ApiRoutes.TorrentById, async (
+        torrents.MapGet(ApiRoutes.TorrentById, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
@@ -45,7 +53,7 @@ internal static class TorrentEndpoints
             return row is null ? Results.NotFound() : Results.Ok(row.ToDto());
         });
 
-        app.MapPost(ApiRoutes.TorrentAddMagnet, async (
+        torrents.MapPost(ApiRoutes.TorrentAddMagnet, async (
             AddMagnetRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -77,7 +85,7 @@ internal static class TorrentEndpoints
                 : Results.Created(ApiRoutes.Torrent(record.Id), record.ToDto());
         });
 
-        app.MapPost(ApiRoutes.TorrentAddFile, async (
+        torrents.MapPost(ApiRoutes.TorrentAddFile, async (
             AddTorrentFileRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -123,7 +131,7 @@ internal static class TorrentEndpoints
                 : Results.Created(ApiRoutes.Torrent(record.Id), record.ToDto());
         });
 
-        app.MapPut(ApiRoutes.TorrentById, async (
+        torrents.MapPut(ApiRoutes.TorrentById, async (
             Guid id,
             UpdateTorrentRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
@@ -149,7 +157,7 @@ internal static class TorrentEndpoints
             return Results.Ok(entity.ToDto());
         });
 
-        app.MapDelete(ApiRoutes.TorrentById, async (
+        torrents.MapDelete(ApiRoutes.TorrentById, async (
             Guid id,
             bool? deleteFiles,
             IDbContextFactory<AppDbContext> dbFactory,
@@ -173,7 +181,7 @@ internal static class TorrentEndpoints
             return Results.NoContent();
         });
 
-        app.MapPost(ApiRoutes.TorrentPause, async (
+        torrents.MapPost(ApiRoutes.TorrentPause, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -186,7 +194,7 @@ internal static class TorrentEndpoints
             return Results.Accepted();
         });
 
-        app.MapPost(ApiRoutes.TorrentResume, async (
+        torrents.MapPost(ApiRoutes.TorrentResume, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -201,7 +209,7 @@ internal static class TorrentEndpoints
 
         // File tree is built from MonoTorrent's metadata cache held by the
         // engine; we re-shape it into the DTO recursively.
-        app.MapGet(ApiRoutes.TorrentFileTree, async (
+        torrents.MapGet(ApiRoutes.TorrentFileTree, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -237,7 +245,7 @@ internal static class TorrentEndpoints
             });
         });
 
-        app.MapPut(ApiRoutes.TorrentFileSelections, async (
+        torrents.MapPut(ApiRoutes.TorrentFileSelections, async (
             Guid id,
             UpdateFileSelectionsRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
@@ -253,7 +261,7 @@ internal static class TorrentEndpoints
             return Results.NoContent();
         });
 
-        app.MapGet(ApiRoutes.TorrentConfig, async (
+        torrents.MapGet(ApiRoutes.TorrentConfig, async (
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
         {
@@ -263,7 +271,7 @@ internal static class TorrentEndpoints
             return Results.Ok(cfg.ToDto());
         });
 
-        app.MapPut(ApiRoutes.TorrentConfig, async (
+        torrents.MapPut(ApiRoutes.TorrentConfig, async (
             TorrentConfigDto cfg,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -297,7 +305,7 @@ internal static class TorrentEndpoints
         // inside a .torrent before the user commits, without spinning up a
         // TorrentManager. Uses the static helper TorrentEngineService.
         // ParseTorrentFilesAsync so the engine doesn't get touched.
-        app.MapPost(ApiRoutes.TorrentParse, async (
+        torrents.MapPost(ApiRoutes.TorrentParse, async (
             ParseTorrentRequest request,
             CancellationToken ct) =>
         {

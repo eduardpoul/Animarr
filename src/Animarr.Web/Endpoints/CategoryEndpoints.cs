@@ -184,10 +184,17 @@ internal static class CategoryEndpoints
             Guid id,
             SetMediaCategoriesRequest req,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var mediaExists = await db.MediaItems.AnyAsync(m => m.Id == id, ct);
+            // "Items they can see": honour the role's folder allowlist, so a
+            // folder-restricted user can't curate items outside their scope by
+            // guessing GUIDs.
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var mediaExists = await db.MediaItems
+                .ApplyRoleFolderFilter(me?.Role)
+                .AnyAsync(m => m.Id == id, ct);
             if (!mediaExists) return Results.NotFound();
 
             var requested = (req.CategoryIds ?? Array.Empty<Guid>()).Distinct().ToArray();

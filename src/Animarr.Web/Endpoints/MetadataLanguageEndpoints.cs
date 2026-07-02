@@ -2,6 +2,7 @@ using Animarr.Shared;
 using Animarr.Shared.Models;
 using Animarr.Shared.Requests;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 // AppConfigKeys is taken from Animarr.Shared (same constant values as the server-side
 // mirror) — importing Animarr.Web.Data.Models too would make the name ambiguous.
 
@@ -46,7 +47,7 @@ internal static class MetadataLanguageEndpoints
 
             await svc.StartAsync(lang, ct);
             return Results.Accepted();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         return app;
     }
