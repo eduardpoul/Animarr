@@ -193,3 +193,109 @@
     color: var(--text-faint);
 }
 @keyframes catalog-loading-spin { to { transform: rotate(360deg); } }
+
+/* ── Home library block ─────────────────────────────────────────────
+   Compact slice of the catalog: fixed column counts per breakpoint keep it
+   to exactly two poster rows on desktop (four on phones); posters past the
+   row budget are display:none'd so the "view all" tile — always the last
+   DOM child — lands right after the last visible poster. The full catalog
+   moved to /library. */
+.home-lib {
+    margin-bottom: var(--space-11);
+}
+.home-lib__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+.home-lib__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.home-lib__count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-faint);
+}
+.home-lib__all {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent-hi);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.home-lib__all:hover { color: var(--accent); }
+
+.home-lib__grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--space-9);
+}
+
+/* "View all" tile — poster-shaped card closing the grid. */
+.home-lib__more {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-lg, 12px);
+    border: 1px dashed var(--border-strong);
+    background: var(--surface);
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: border-color var(--motion-base), color var(--motion-base), background var(--motion-base);
+}
+.home-lib__more:hover {
+    border-color: var(--accent-line, var(--accent));
+    color: var(--text);
+    background: var(--surface-2);
+}
+.home-lib__more-icon { color: var(--accent-hi); }
+.home-lib__more-label {
+    font-size: 13px;
+    font-weight: 600;
+}
+.home-lib__more-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+}
+
+/* Row budget per breakpoint. Hidden posters keep their nth-child slot
+   (display:none doesn't reorder), so the caps below are simply
+   columns × rows; the tile is the last child and always shows. */
+.home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: none; }         /* 5 cols × 2 rows */
+@media (min-width: 1600px) {
+    .home-lib__grid { grid-template-columns: repeat(7, 1fr); }
+    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
+    .home-lib__grid ::deep > :nth-child(n+14):not(.home-lib__more) { display: none; }     /* 7 × 2 */
+}
+@media (min-width: 1200px) and (max-width: 1599px) {
+    .home-lib__grid { grid-template-columns: repeat(6, 1fr); }
+    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
+    .home-lib__grid ::deep > :nth-child(n+12):not(.home-lib__more) { display: none; }     /* 6 × 2 */
+}
+@media (max-width: 959px) {
+    .home-lib__grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-6);
+    }
+    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
+    .home-lib__grid ::deep > :nth-child(n+8):not(.home-lib__more) { display: none; }      /* 4 × 2 */
+}
+@media (max-width: 639px) {
+    .home-lib__grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-5);
+    }
+    /* 2 cols × 4 rows on phones. */
+    .home-lib__grid ::deep > :nth-child(n+8):not(.home-lib__more) { display: none; }
+    .home-lib__title { font-size: 20px; }
+}

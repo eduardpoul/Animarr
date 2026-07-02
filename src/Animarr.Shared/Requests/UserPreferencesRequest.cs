@@ -22,7 +22,9 @@ public sealed record UpdatePreferencesRequest(
     string? HeroPagerStyle    = null,
     bool?   ThemeMusicEnabled = null,
     int?    ThemeMusicVolume  = null,
-    string? EpisodeListView   = null);
+    string? EpisodeListView   = null,
+    string? HomeSectionsJson  = null,
+    string? RecsScope         = null);
 
 /// <summary>POST body for <c>/api/me/password</c>. Requires the current
 /// password as an anti-CSRF measure on top of the auth cookie.</summary>

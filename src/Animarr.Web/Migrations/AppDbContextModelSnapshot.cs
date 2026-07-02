@@ -929,6 +929,9 @@ namespace Animarr.Web.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("HomeSectionsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Language")
                         .IsRequired()
                         .HasMaxLength(8)
@@ -936,6 +939,10 @@ namespace Animarr.Web.Migrations
 
                     b.Property<bool>("NormalizeVolume")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecsScope")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("SubtitlePreferredLanguage")
                         .IsRequired()

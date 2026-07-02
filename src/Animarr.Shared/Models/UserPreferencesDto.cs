@@ -23,4 +23,6 @@ public sealed record UserPreferencesDto(
     string HeroPagerStyle,
     bool   ThemeMusicEnabled,
     int    ThemeMusicVolume,
-    string EpisodeListView);
+    string EpisodeListView,
+    string? HomeSectionsJson = null,
+    string  RecsScope        = "everywhere");

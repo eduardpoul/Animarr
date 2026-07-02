@@ -58,6 +58,19 @@ public class UserPreferences
     /// Spec: "Animarr — Episode View Modes".</summary>
     public string EpisodeListView { get; set; } = "grid";
 
+    /// <summary>Order + visibility of the Home page sections as a JSON array
+    /// ([{"key":"continue","enabled":true}, …]) — see
+    /// <c>Animarr.Shared.HomeSections</c> for the schema and defaults.
+    /// Null = default order, everything visible.</summary>
+    public string? HomeSectionsJson { get; set; }
+
+    /// <summary>Where the recommendation features ("For you" / "Discover")
+    /// may look for candidates: "everywhere" (library + external sources like
+    /// TMDB, default) or "library" (local titles only — hides Discover).
+    /// Persisted ahead of the recommendations feature so the setting is
+    /// already per-user when it ships; no UI reads it yet.</summary>
+    public string RecsScope { get; set; } = "everywhere";
+
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 
     /// <summary>Preferred audio language for new playbacks. ISO 639-1 lowercase or

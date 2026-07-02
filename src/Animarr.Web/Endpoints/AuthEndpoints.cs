@@ -162,6 +162,11 @@ internal static class AuthEndpoints
             if (req.ThemeMusicEnabled is bool tme)        prefs.ThemeMusicEnabled  = tme;
             if (req.ThemeMusicVolume is int tmv)          prefs.ThemeMusicVolume   = Math.Clamp(tmv, 0, 100);
             if (req.EpisodeListView is string elv)        prefs.EpisodeListView    = ValidateEpisodeListView(elv);
+            // Canonicalise through the shared parser: unknown keys drop out,
+            // missing known keys are appended, broken JSON falls back to null
+            // (= defaults). Bounded by the parser, so no length games.
+            if (req.HomeSectionsJson is string hsj)       prefs.HomeSectionsJson   = HomeSections.Normalize(hsj);
+            if (req.RecsScope is string rs)               prefs.RecsScope          = rs.ToLowerInvariant() == "library" ? "library" : "everywhere";
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -681,7 +686,9 @@ internal static class AuthEndpoints
         p.HeroPagerStyle,
         p.ThemeMusicEnabled,
         p.ThemeMusicVolume,
-        p.EpisodeListView);
+        p.EpisodeListView,
+        p.HomeSectionsJson,
+        p.RecsScope);
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale

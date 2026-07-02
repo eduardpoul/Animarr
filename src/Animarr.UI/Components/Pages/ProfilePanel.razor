@@ -341,6 +341,7 @@
         _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
         _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
         _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
+        _homeSections    = HomeSections.Parse(p.HomeSectionsJson);
     }
 
     // ─── Edit profile / change password handlers ───────────────────────
@@ -1595,6 +1596,55 @@
                 </div>
             </div>
 
+            @* ── Home sections — order + visibility ───────────────────
+                 The Home page renders its sections (hero / next-up /
+                 library block) in this order, skipping the disabled ones.
+                 Rows drag to reorder (HTML5 DnD); the ▲▼ buttons cover
+                 keyboard / TV / Firefox. Persisted per-user as
+                 UserPreferences.HomeSectionsJson via the shared
+                 HomeSections schema — future sections (calendar /
+                 recommendations) will appear here when they ship. *@
+            <div class="d-profile__section-block">
+                <div class="d-profile__section-head">
+                    <div class="d-profile__section-title">@L["profile.home_sections_title"]</div>
+                    <div class="d-profile__section-hint">
+                        @L["profile.home_sections_hint"]
+                    </div>
+                </div>
+                <div class="d-profile__hs-list">
+                    @{
+                        var hsVisible = _homeSections
+                            .Where(e => HomeSections.ImplementedKeys.Contains(e.Key))
+                            .ToList();
+                    }
+                    @for (int i = 0; i < hsVisible.Count; i++)
+                    {
+                        var entry = hsVisible[i];
+                        var idx   = i;
+                        <div class="@($"d-profile__hs-row {(entry.Enabled ? "" : "is-off")} {(_hsDragKey == entry.Key ? "is-dragging" : "")}")"
+                             draggable="true"
+                             @ondragstart="@(() => OnHsDragStart(entry.Key))"
+                             @ondragover="@(() => OnHsDragOver(entry.Key))"
+                             @ondragover:preventDefault
+                             @ondragend="OnHsDragEnd">
+                            <span class="d-profile__hs-grip" aria-hidden="true">⠿</span>
+                            <span class="d-profile__hs-name">@L[HsLabelKey(entry.Key)]</span>
+                            <span class="d-profile__hs-arrows">
+                                <button type="button" class="d-profile__hs-arrow tv-focus"
+                                        disabled="@(idx == 0)"
+                                        aria-label="@L["profile.home_sections_up"]"
+                                        @onclick="@(() => OnHsMove(entry.Key, -1))">▲</button>
+                                <button type="button" class="d-profile__hs-arrow tv-focus"
+                                        disabled="@(idx == hsVisible.Count - 1)"
+                                        aria-label="@L["profile.home_sections_down"]"
+                                        @onclick="@(() => OnHsMove(entry.Key, +1))">▼</button>
+                            </span>
+                            <Toggle Checked="@entry.Enabled" CheckedChanged="@(v => OnHsToggle(entry.Key, v))" />
+                        </div>
+                    }
+                </div>
+            </div>
+
         </div>
     };
 
@@ -1612,6 +1662,76 @@
         new PagerOption("g", "profile.pager_g_label", "profile.pager_g_hint"),
         new PagerOption("h", "profile.pager_h_label", "profile.pager_h_hint"),
     };
+
+    // ─── Home sections editor (order + visibility) ─────────────────────
+    // Works on the FULL HomeSections list (including keys the app hasn't
+    // shipped yet) so a future section keeps its saved slot; the markup only
+    // shows ImplementedKeys. Drag reorders live (dragover moves the row under
+    // the cursor), dragend / arrows / toggles persist through PatchAsync —
+    // which mirrors into UserCtx, so the Home page restacks behind the drawer
+    // immediately.
+    private List<HomeSections.Entry> _homeSections = HomeSections.Defaults();
+    private string? _hsDragKey;
+
+    private static string HsLabelKey(string key) => key switch
+    {
+        "continue" => "home.continue_watching",
+        "nextup"   => "home.next_up",
+        "library"  => "home.library_title",
+        _          => $"home.section_{key}",
+    };
+
+    private void OnHsDragStart(string key) => _hsDragKey = key;
+
+    private void OnHsDragOver(string overKey)
+    {
+        if (_hsDragKey is null || _hsDragKey == overKey) return;
+        MoveHsEntry(_hsDragKey, overKey);
+        StateHasChanged();
+    }
+
+    private async Task OnHsDragEnd()
+    {
+        if (_hsDragKey is null) return;
+        _hsDragKey = null;
+        await SaveHomeSectionsAsync();
+    }
+
+    private async Task OnHsMove(string key, int dir)
+    {
+        var visible = _homeSections.Where(e => HomeSections.ImplementedKeys.Contains(e.Key)).ToList();
+        var i = visible.FindIndex(e => e.Key == key);
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= visible.Count) return;
+        MoveHsEntry(key, visible[j].Key);
+        await SaveHomeSectionsAsync();
+    }
+
+    private void MoveHsEntry(string key, string targetKey)
+    {
+        var from = _homeSections.FindIndex(e => e.Key == key);
+        var to   = _homeSections.FindIndex(e => e.Key == targetKey);
+        if (from < 0 || to < 0 || from == to) return;
+        var item = _homeSections[from];
+        _homeSections.RemoveAt(from);
+        _homeSections.Insert(to, item);
+    }
+
+    private async Task OnHsToggle(string key, bool on)
+    {
+        var i = _homeSections.FindIndex(e => e.Key == key);
+        if (i < 0) return;
+        _homeSections[i] = _homeSections[i] with { Enabled = on };
+        await SaveHomeSectionsAsync();
+    }
+
+    private async Task SaveHomeSectionsAsync()
+    {
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            HomeSectionsJson: HomeSections.Serialize(_homeSections)));
+        StateHasChanged();
+    }
 
     /// <summary>Episode-list layout picker. PATCHes the preference and mirrors
     /// it into UserCtx so the MediaDetail page (which reads

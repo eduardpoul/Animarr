@@ -1,0 +1,140 @@
+/* Library page — the full chip-filtered poster grid (moved here from Home,
+   which now shows a two-row teaser block). Styles are the catalog set from
+   Home.razor.css; scoped per page so the two can diverge later. */
+
+.catalog-chip__count {
+    margin-left: 7px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.4px;
+    font-weight: 400;
+}
+.catalog-chip--active .catalog-chip__count { color: rgba(255, 255, 255, 0.6); }
+
+.catalog-page {
+    position: relative;
+    z-index: 1;
+}
+
+/* Chip strip sits at the very top here (no hero above it) — give it a bit
+   of breathing room from the fixed topbar. */
+.catalog-page--library {
+    padding-top: var(--space-4);
+}
+
+.catalog-folders {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-11);
+    flex-wrap: wrap;
+}
+
+.catalog-chip {
+    appearance: none;
+    cursor: pointer;
+    padding: 5px 11px;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: color var(--motion-base), background var(--motion-base), border-color var(--motion-base);
+}
+
+.catalog-chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.catalog-chip--active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.catalog-chip--active:hover {
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
+}
+
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-9);
+}
+
+.catalog-empty {
+    text-align: center;
+    padding: var(--space-12) 0;
+    color: var(--text-dim);
+}
+
+.catalog-empty__text {
+    margin-top: var(--space-5);
+    font-size: 15px;
+}
+
+.catalog-more {
+    text-align: center;
+    padding: var(--space-9) 0;
+    color: var(--text-faint);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+}
+
+.catalog-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 80px 24px;
+    min-height: 280px;
+}
+.catalog-loading__ring {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 2.5px solid rgba(255, 255, 255, 0.08);
+    border-top-color: var(--accent-hi);
+    animation: library-loading-spin 0.9s linear infinite;
+}
+.catalog-loading__label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+@keyframes library-loading-spin { to { transform: rotate(360deg); } }
+
+/* ── Mobile / tablet (≤ 959px) */
+@media (max-width: 959px) {
+    .catalog-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: var(--space-6);
+    }
+    .catalog-folders {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+        margin-bottom: var(--space-8);
+    }
+    .catalog-folders::-webkit-scrollbar { display: none; }
+    .catalog-chip { flex-shrink: 0; }
+}
+
+/* ── Phone (≤ 639px) */
+@media (max-width: 639px) {
+    .catalog-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-5);
+    }
+}
