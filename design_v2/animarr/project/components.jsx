@@ -217,6 +217,7 @@ const Poster = ({ item, w = 188, h = 280, ribbon = true, onClick }) => {
   return (
     <button
       onClick={onClick}
+      className="poster-btn"
       style={{
         all: "unset",
         cursor: "pointer",
@@ -283,7 +284,7 @@ const Poster = ({ item, w = 188, h = 280, ribbon = true, onClick }) => {
       {/* confidence indicator */}
       {item.conf !== undefined && item.conf < 0.85 && (
         <div style={{
-          position:"absolute", top: 10, right: 10,
+          position:"absolute", top: 10, right: 46,
           display:"flex", alignItems:"center", gap: 4,
           fontFamily:"var(--font-mono)", fontSize: 9,
           padding:"3px 6px", borderRadius: 3,
@@ -293,6 +294,8 @@ const Poster = ({ item, w = 188, h = 280, ribbon = true, onClick }) => {
           <Icon name="warn" size={9} stroke={2.4} /> {Math.round(item.conf*100)}%
         </div>
       )}
+
+      {window.WatchlistButton && <window.WatchlistButton id={item.id} variant="poster" />}
 
       {/* title block */}
       <div style={{ position:"absolute", left: 0, right: 0, bottom: 0, padding: "14px 12px 12px" }}>
