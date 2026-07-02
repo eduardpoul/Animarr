@@ -7,6 +7,8 @@
     shared genre) and are formatted through localization here.
 *@
 @inject IAnimarrApiClient Api
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @if (_cards.Count > 0)
 {
@@ -18,7 +20,18 @@
                 <span class="recrail__hint">@Hint</span>
             }
         </div>
-        <div class="recrail__row">
+        <div class="recrail__viewport">
+        @if (_canLeft)
+        {
+            <button type="button" class="recrail__nav recrail__nav--l tv-focus" aria-label="‹"
+                    @onclick="@(() => ScrollRailAsync(-1))">‹</button>
+        }
+        @if (_canRight)
+        {
+            <button type="button" class="recrail__nav recrail__nav--r tv-focus" aria-label="›"
+                    @onclick="@(() => ScrollRailAsync(1))">›</button>
+        }
+        <div class="recrail__row" @ref="_rowRef">
             @foreach (var c in _cards)
             {
                 var card = c;
@@ -71,6 +84,7 @@
                 </div>
             }
         </div>
+        </div>
     </section>
 }
 
@@ -84,8 +98,54 @@
 
     private List<RecCardDto> _cards = new();
     private readonly HashSet<int> _wantedTmdb = new();
+    private ElementReference _rowRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<RecRail>? _selfRef;
+    private bool _canLeft, _canRight;
 
     protected override void OnParametersSet() => _cards = Items.ToList();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _cards.Count == 0) return;
+        try
+        {
+            _js = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Design/Media/RecRail.razor.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("init", _rowRef, _selfRef);
+        }
+        catch { /* drag/arrows are enhancement — wheel scroll still works */ }
+    }
+
+    [JSInvokable]
+    public void OnRailScrollState(bool canLeft, bool canRight)
+    {
+        if (_canLeft == canLeft && _canRight == canRight) return;
+        _canLeft = canLeft;
+        _canRight = canRight;
+        StateHasChanged();
+    }
+
+    private async Task ScrollRailAsync(int dir)
+    {
+        if (_js is null) return;
+        try { await _js.InvokeVoidAsync("scrollRail", _rowRef, dir); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_js is not null)
+            {
+                await _js.InvokeVoidAsync("destroy", _rowRef);
+                await _js.DisposeAsync();
+            }
+        }
+        catch { /* circuit teardown */ }
+        _selfRef?.Dispose();
+    }
 
     private bool IsWanted(RecCardDto c) => c.TmdbId is int t && _wantedTmdb.Contains(t);
 
