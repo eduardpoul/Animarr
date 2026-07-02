@@ -1267,7 +1267,7 @@
   "profile.kv_email": "E-MAIL",
   "profile.kv_role": "ROLLE",
   "profile.kv_username": "BENUTZERNAME",
-  "profile.language_hint_html": "Eine andere Sprache lädt die App neu, damit jeder Bildschirm im neuen Gebietsschema neu gerendert wird. Deine bevorzugten Audio- + Untertitelsprachen findest du im Tab <strong>Audio</strong>.",
+  "profile.language_hint_html": "Eine andere Sprache lädt die App neu, damit jeder Bildschirm in der neuen Locale gerendert wird.",
   "profile.language_title": "Oberflächensprache",
   "profile.normalize_hint": "Lautstärke-Normalisierung nach EBU R128.",
   "profile.normalize_title": "Lautstärke zwischen Titeln angleichen",

@@ -1267,7 +1267,7 @@
   "profile.kv_email": "EMAIL",
   "profile.kv_role": "ROL",
   "profile.kv_username": "USUARIO",
-  "profile.language_hint_html": "Elegir otro idioma recarga la app para que cada pantalla se vuelva a renderizar en la nueva configuración regional. Tus idiomas de audio y subtítulos preferidos están en la pestaña <strong>Audio</strong>.",
+  "profile.language_hint_html": "Elegir otro idioma recarga la app para que cada pantalla se muestre en la nueva configuración regional.",
   "profile.language_title": "Idioma de la interfaz",
   "profile.normalize_hint": "Normalización de volumen EBU R128.",
   "profile.normalize_title": "Normalizar el volumen entre títulos",

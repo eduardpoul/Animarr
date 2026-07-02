@@ -1499,7 +1499,7 @@
   "profile.episode_view_list_tooltip": "Detailed list — row per episode",
   "profile.episode_view_list": "Detailed list",
   "profile.language_title": "Interface language",
-  "profile.language_hint_html": "Picking a different language reloads the app so every screen re-renders in the new locale. Your preferred audio + subtitle languages live in the <strong>Audio</strong> tab.",
+  "profile.language_hint_html": "Picking a different language reloads the app so every screen re-renders in the new locale.",
   "profile.audio_preferred_label": "PREFERRED AUDIO",
   "profile.subtitle_lang_label": "SUBTITLE LANGUAGE",
   "profile.subtitle_off": "Off",
