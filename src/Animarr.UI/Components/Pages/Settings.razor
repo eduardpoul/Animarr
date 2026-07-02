@@ -23,9 +23,9 @@
 
     <header class="d-page-header">
         <div class="d-page-header__main">
-            <div class="d-page-header__overline">CONFIG</div>
-            <h1 class="d-page-header__title">SETTINGS</h1>
-            <div class="d-page-header__sub">Persisted in SQLite — survives restarts.</div>
+            <div class="d-page-header__overline">@L["settings.page_overline"]</div>
+            <h1 class="d-page-header__title">@L["settings.page_title"]</h1>
+            <div class="d-page-header__sub">@L["settings.header_sub_sqlite"]</div>
         </div>
     </header>
 
@@ -36,7 +36,7 @@
             <button type="button"
                     class="@($"settings-tab {(_activeTab == k ? "settings-tab--active" : "")}")"
                     @onclick="@(() => SwitchTabAsync(k))">
-                @label
+                @L[label]
             </button>
         }
     </nav>
@@ -96,17 +96,18 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         }
     }
 
+    // Label holds an i18n key resolved through L at render time (@L[label]).
     private static readonly (string Key, string Label)[] _settingsTabs =
     [
-        ("general",        "General"),
-        ("root_folders",   "Root folders"),
-        ("appearance",     "Appearance"),
-        ("audio",          "Audio"),
-        ("hardware",       "Hardware"),
-        ("ai",             "AI / LLM"),
-        ("patterns",       "Parsing"),
-        ("torrent",        "Torrent"),
-        ("metadata",       "Metadata"),
+        ("general",        "settings.tab_general"),
+        ("root_folders",   "settings.tab_root_folders"),
+        ("appearance",     "settings.tab_appearance"),
+        ("audio",          "settings.tab_audio"),
+        ("hardware",       "settings.tab_hardware"),
+        ("ai",             "settings.tab_ai"),
+        ("patterns",       "settings.tab_parsing"),
+        ("torrent",        "settings.tab_torrent"),
+        ("metadata",       "settings.tab_metadata"),
     ];
 
     // ── Tab-state (lazy-initialised on first tab visit) ──────────────
@@ -252,9 +253,9 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
     // ── General tab ──
     private RenderFragment GeneralTab() => @<section class="settings-section">
-        <h2>General</h2>
+        <h2>@L["settings.tab_general"]</h2>
         <label class="settings-field">
-            <span class="settings-field__label">Language</span>
+            <span class="settings-field__label">@L["settings.section_language"]</span>
             <select class="settings-field__select"
                     value="@(_config.GetValueOrDefault(AppConfigKeys.Language) ?? "en")"
                     @onchange="@(e => SetConfigAsync(AppConfigKeys.Language, e.Value?.ToString()))">
@@ -265,20 +266,20 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 <option value="es">Español</option>
             </select>
         </label>
-        <p class="settings-hint">The app re-renders translations after you reload the page.</p>
+        <p class="settings-hint">@L["settings.general_language_hint"]</p>
     </section>;
 
     // ── Root folders tab ──
     private RenderFragment RootFoldersTab() => @<section class="settings-section">
         <div class="settings-section-head">
-            <h2>Root folders</h2>
+            <h2>@L["settings.tab_root_folders"]</h2>
             @* Use the same compact accent CTA the v5 panels use elsewhere
                (Users/Roles, Categories). The old Btn Size="sm" was visually
                undersized next to the heading and looked cramped on wide
                viewports. *@
             <button type="button" class="settings-section-head__new tv-focus"
                     @onclick="@(() => { _folderDialogTarget = null; _folderDialogOpen = true; })">
-                <DIcon Name="plus" Size="13" /> Add section folder
+                <DIcon Name="plus" Size="13" /> @L["settings.btn_add_section"]
             </button>
         </div>
         <RootFoldersList ReloadToken="_foldersReloadToken"
@@ -309,14 +310,14 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var enabled  = (_config.GetValueOrDefault(AppConfigKeys.BackdropEnabled) ?? "true") != "false";
         var blurStr  = _config.GetValueOrDefault(AppConfigKeys.BackdropBlurPx) ?? "30";
         return @<section class="settings-section">
-            <h2>Appearance</h2>
+            <h2>@L["settings.tab_appearance"]</h2>
             <div class="settings-field">
-                <span class="settings-field__label">Accent hue</span>
+                <span class="settings-field__label">@L["settings.accent_hue_label"]</span>
                 <div class="accent-swatches">
-                    @foreach (var preset in new[] { ("Crimson", 25), ("Amber", 75), ("Green", 150), ("Blue", 240), ("Violet", 300) })
+                    @foreach (var preset in new[] { ("settings.accent_crimson", 25), ("settings.accent_amber", 75), ("settings.accent_green", 150), ("settings.accent_blue", 240), ("settings.accent_violet", 300) })
                     {
                         var hue = preset.Item2;
-                        var name = preset.Item1;
+                        var name = L[preset.Item1];
                         var isActive = int.TryParse(hueStr, out var current) && current == hue;
                         <button type="button"
                                 class="@($"accent-swatch {(isActive ? "accent-swatch--active" : "")}")"
@@ -331,17 +332,17 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         </button>
                     }
                 </div>
-                <span class="settings-hint">Current: @hueStr</span>
+                <span class="settings-hint">@L.Get("settings.accent_current_fmt", hueStr)</span>
             </div>
 
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@enabled"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.BackdropEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Backdrop on catalog</span>
+                <span class="settings-field__label">@L["settings.backdrop_on_catalog_label"]</span>
             </label>
 
             <label class="settings-field">
-                <span class="settings-field__label">Backdrop blur (px)</span>
+                <span class="settings-field__label">@L["settings.backdrop_blur_px_label"]</span>
                 <input class="settings-field__input" type="number" min="0" max="80"
                        value="@blurStr"
                        @onchange="@(e => SetConfigAsync(AppConfigKeys.BackdropBlurPx, e.Value?.ToString()))" />
@@ -355,22 +356,15 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     // animarr-calibrate.js. Sliders read the cached value on init via
     // getCached() and write back through setManual().
     private RenderFragment AudioTab() => @<section class="settings-section settings-audio">
-        <h2>Audio sync</h2>
+        <h2>@L["settings.audio_sync_title"]</h2>
         <p class="settings-hint">
-            The server picks one of two pipelines per file (hardware re-encode
-            vs stream-copy). Each has its own audio-vs-video latency profile
-            that a single offset can't tune for both. Drag a slider while a
-            matching codec is playing in another tab — close and reopen the
-            player for the new value to take effect.
-            <br/><br/>
-            <strong>Positive delays audio</strong> (use when audio feels ahead
-            of picture). Negative pulls audio forward.
+            @((MarkupString)L["settings.audio_sync_hint_html"])
         </p>
 
         <div class="audio-sync-slider">
             <label class="settings-field">
                 <span class="settings-field__label">
-                    Hardware re-encode (HEVC 8-bit) ·
+                    @L["settings.audio_hw_label"] ·
                     <strong id="animarr-sync-hw-value">70</strong> ms
                 </span>
                 <input type="range" min="-200" max="300" step="5"
@@ -382,7 +376,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         <div class="audio-sync-slider">
             <label class="settings-field">
                 <span class="settings-field__label">
-                    Stream-copy (HEVC 10-bit / HDR / DV) ·
+                    @L["settings.audio_sw_label"] ·
                     <strong id="animarr-sync-sw-value">0</strong> ms
                 </span>
                 <input type="range" min="-200" max="700" step="5"
@@ -413,10 +407,10 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
     // ── Hardware tab ──
     private RenderFragment HardwareTab() => @<section class="settings-section">
-        <h2>Hardware acceleration</h2>
+        <h2>@L["settings.hw_title"]</h2>
         @if (_hw is null)
         {
-            <p>Probing… <Btn Variant="ghost" Size="sm" OnClick="@(() => LoadHardwareAsync())">Probe now</Btn></p>
+            <p>@L["settings.hw_probing"] <Btn Variant="ghost" Size="sm" OnClick="@(() => LoadHardwareAsync())">@L["settings.hw_probe_now"]</Btn></p>
         }
         else
         {
@@ -425,7 +419,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 <li><strong>NVENC:</strong> @StatusLine(_hw.Nvenc)</li>
                 <li><strong>QSV:</strong> @StatusLine(_hw.Qsv)</li>
             </ul>
-            <Btn Variant="primary" Size="sm" OnClick="@(() => LoadHardwareAsync(rescan: true))">Rescan</Btn>
+            <Btn Variant="primary" Size="sm" OnClick="@(() => LoadHardwareAsync(rescan: true))">@L["settings.hw_btn_rescan"]</Btn>
         }
     </section>;
 
@@ -446,37 +440,37 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var model    = _config.GetValueOrDefault(AppConfigKeys.LlmModel) ?? "";
         var epMap    = (_config.GetValueOrDefault(AppConfigKeys.LlmEpisodeMapping) ?? "false") == "true";
         return @<section class="settings-section">
-            <h2>AI / LLM</h2>
+            <h2>@L["settings.tab_ai"]</h2>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@enabled"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Use LLM during identification</span>
+                <span class="settings-field__label">@L["settings.llm_use_during_id"]</span>
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">Provider</span>
+                <span class="settings-field__label">@L["settings.llm_provider_label"]</span>
                 <select class="settings-field__select" value="@provider"
                         @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmProvider, e.Value?.ToString()))">
-                    <option value="openai">openai (api.openai.com)</option>
-                    <option value="compatible">compatible (Ollama / LM Studio / Groq …)</option>
-                    <option value="embedded">embedded (built-in llama.cpp — downloads a local model)</option>
+                    <option value="openai">@L["settings.llm_provider_opt_openai"]</option>
+                    <option value="compatible">@L["settings.llm_provider_opt_compatible"]</option>
+                    <option value="embedded">@L["settings.llm_provider_opt_embedded"]</option>
                 </select>
             </label>
             @if (provider != "embedded")
             {
                 <label class="settings-field">
-                    <span class="settings-field__label">Base URL</span>
+                    <span class="settings-field__label">@L["settings.llm_base_url_label"]</span>
                     <input class="settings-field__input" placeholder="http://ollama:11434/v1"
                            value="@baseUrl"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmBaseUrl, e.Value?.ToString()))" />
                 </label>
                 <label class="settings-field">
-                    <span class="settings-field__label">API key</span>
+                    <span class="settings-field__label">@L["settings.llm_api_key_label"]</span>
                     <input class="settings-field__input" type="password" placeholder="sk-…"
                            value="@apiKey"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmApiKey, e.Value?.ToString()))" />
                 </label>
                 <label class="settings-field">
-                    <span class="settings-field__label">Model</span>
+                    <span class="settings-field__label">@L["settings.llm_model_label"]</span>
                     <input class="settings-field__input" placeholder="qwen2.5:1.5b"
                            value="@model"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmModel, e.Value?.ToString()))" />
@@ -489,7 +483,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@epMap"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEpisodeMapping, v ? "true" : "false"))" />
-                <span class="settings-field__label">Use LLM for episode-mapping fallback</span>
+                <span class="settings-field__label">@L["settings.llm_episode_mapping_switch"]</span>
             </label>
 
             @* ── Test connection card ──────────────────────────────────
@@ -504,7 +498,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         @onclick="TestLlmAsync"
                         disabled="@_llmTesting">
                     <DIcon Name="@(_llmTesting ? "refresh" : "magic")" Size="13" />
-                    @(_llmTesting ? "Testing…" : "Test connection")
+                    @(_llmTesting ? L["settings.llm_hero_btn_testing"] : L["settings.llm_hero_btn_test"])
                 </button>
                 @if (_llmTestResult is { } r)
                 {
@@ -512,19 +506,19 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         @if (r.Ok)
                         {
                             <div class="settings-llm-test__line">
-                                <strong>Connected.</strong> Latency: @r.LatencyMs ms.
+                                <strong>@L["settings.llm_test_connected"]</strong> @L.Get("settings.llm_test_latency_fmt", r.LatencyMs)
                             </div>
                             @if (!string.IsNullOrEmpty(r.Sample))
                             {
                                 <div class="settings-llm-test__sample">
-                                    Sample: <code>@r.Sample</code>
+                                    @L["settings.llm_test_sample_label"] <code>@r.Sample</code>
                                 </div>
                             }
                         }
                         else
                         {
                             <div class="settings-llm-test__line">
-                                <strong>Failed</strong> after @r.LatencyMs ms.
+                                <strong>@L["settings.llm_test_failed"]</strong> @L.Get("settings.llm_test_after_fmt", r.LatencyMs)
                             </div>
                             @if (!string.IsNullOrEmpty(r.Error))
                             {
@@ -664,7 +658,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 <span class="settings-llm-gpu__meta">@(st.GpuActive ? $"GPU · {st.GpuMode}" : "CPU")</span>
                 <button type="button" class="settings-llm-gpu__restart tv-focus"
                         @onclick="RestartEmbeddedAsync" disabled="@_embeddedBusy">
-                    <DIcon Name="refresh" Size="12" /> Restart
+                    <DIcon Name="refresh" Size="12" /> @L["settings.embedded_btn_restart"]
                 </button>
                 @if (!string.IsNullOrEmpty(st.Error))
                 {
@@ -674,10 +668,10 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         }
 
         <label class="settings-field">
-            <span class="settings-field__label">Model</span>
+            <span class="settings-field__label">@L["settings.llm_model_label"]</span>
             <select class="settings-field__select" value="@selId"
                     @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmEmbeddedModelId, e.Value?.ToString()))">
-                <option value="">— select a model —</option>
+                <option value="">@L["settings.embedded_select_model"]</option>
                 @if (_catalog is { } cat)
                 {
                     @foreach (var m in cat.Curated)
@@ -685,27 +679,27 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         <option value="@m.Id">@m.DisplayName · @FormatBytes(m.ApproxBytes) @(m.GpuRecommended ? "· GPU" : "· CPU")@(m.Installed ? " ✓" : "")</option>
                     }
                 }
-                <option value="custom">Custom Hugging Face repo…</option>
+                <option value="custom">@L["settings.embedded_custom_hf"]</option>
             </select>
         </label>
 
         @if (selId == "custom")
         {
             <label class="settings-field">
-                <span class="settings-field__label">HF repo</span>
+                <span class="settings-field__label">@L["settings.embedded_hf_repo_label"]</span>
                 <input class="settings-field__input" placeholder="Qwen/Qwen2.5-1.5B-Instruct-GGUF"
                        value="@_customRepo" @oninput="@(e => _customRepo = e.Value?.ToString() ?? "")" />
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">GGUF file</span>
+                <span class="settings-field__label">@L["settings.embedded_gguf_file_label"]</span>
                 <input class="settings-field__input" placeholder="qwen2.5-1.5b-instruct-q4_k_m.gguf"
                        value="@_customFile" @oninput="@(e => _customFile = e.Value?.ToString() ?? "")" />
             </label>
-            <p class="settings-hint">Only public <code>*.gguf</code> files on huggingface.co. Repo must look like <code>Owner/Name</code>.</p>
+            <p class="settings-hint">@((MarkupString)L["settings.embedded_custom_hint_html"])</p>
         }
         else if (selCurated is { } sc)
         {
-            <p class="settings-hint">@sc.Notes · needs ~@(sc.RecommendedRamMb) MB RAM.</p>
+            <p class="settings-hint">@sc.Notes @L.Get("settings.embedded_ram_fmt", sc.RecommendedRamMb)</p>
         }
 
         <div class="settings-llm-test">
@@ -713,7 +707,7 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                     @onclick="StartDownloadAsync"
                     disabled="@(_embeddedBusy || string.IsNullOrEmpty(selId) || downloading)">
                 <DIcon Name="download" Size="13" />
-                @(downloading ? "Downloading…" : "Download model")
+                @(downloading ? L["settings.embedded_downloading"] : L["settings.embedded_download_model"])
             </button>
 
             @if (dl is { } d && d.Phase != "idle")
@@ -726,11 +720,11 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         @if (d.Phase == "downloading")
                         {
                             <span>@FormatBytes(d.BytesReceived) / @(d.TotalBytes is { } t ? FormatBytes(t) : "?") (@((int)d.Percent)%)</span>
-                            <button type="button" class="settings-llm-progress__cancel tv-focus" @onclick="CancelDownloadAsync">Cancel</button>
+                            <button type="button" class="settings-llm-progress__cancel tv-focus" @onclick="CancelDownloadAsync">@L["common.btn_cancel"]</button>
                         }
-                        else if (d.Phase == "done")      { <span class="is-ok">Downloaded ✓ — loading model…</span> }
-                        else if (d.Phase == "cancelled") { <span class="is-warn">Cancelled.</span> }
-                        else if (d.Phase == "error")     { <span class="is-err">Error: @d.Error</span> }
+                        else if (d.Phase == "done")      { <span class="is-ok">@L["settings.embedded_done"]</span> }
+                        else if (d.Phase == "cancelled") { <span class="is-warn">@L["settings.embedded_cancelled"]</span> }
+                        else if (d.Phase == "error")     { <span class="is-err">@L.Get("folder_files.toast_error", d.Error)</span> }
                     </div>
                 </div>
             }
@@ -739,15 +733,15 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         @if (_catalog is { Installed.Length: > 0 } c2)
         {
             <div class="settings-llm-models">
-                <div class="settings-llm-models__label">INSTALLED</div>
+                <div class="settings-llm-models__label">@L["settings.embedded_installed_label"]</div>
                 @foreach (var m in c2.Installed)
                 {
                     <div class="settings-llm-models__row">
-                        <span class="settings-llm-models__name">@m.FileName @(m.IsActive ? "· active" : "")</span>
+                        <span class="settings-llm-models__name">@m.FileName @(m.IsActive ? L["settings.embedded_active_suffix"] : "")</span>
                         <span class="settings-llm-models__size">@FormatBytes(m.Bytes)</span>
                         <button type="button" class="settings-llm-models__del tv-focus"
                                 disabled="@m.IsActive" @onclick="@(() => DeleteModelAsync(m.FileName))"
-                                title="@(m.IsActive ? "Active model — switch first" : "Delete")">
+                                title="@(m.IsActive ? L["settings.embedded_active_tooltip"] : L["settings.btn_delete_tooltip"])">
                             <DIcon Name="trash" Size="12" />
                         </button>
                     </div>
@@ -759,14 +753,14 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     // Documentation block shown under every provider — explains all four ways
     // to run the LLM and how to enable each.
     private RenderFragment LlmDocs() => @<section class="settings-llm-docs">
-        <h3>How to use the LLM — all options</h3>
+        <h3>@L["settings.llm_docs_title"]</h3>
         <ul>
-            <li><strong>Embedded — CPU (easiest):</strong> Provider = <code>embedded</code>, pick a model (e.g. Qwen2.5 1.5B), click <em>Download model</em>. Runs inside the Animarr container, no GPU needed. Best for models up to ~3B.</li>
-            <li><strong>Embedded — GPU (Vulkan):</strong> set <code>ANIMARR_LLM_VULKAN=1</code> in the compose <code>environment:</code>, add <code>--device /dev/dri</code> and <code>group_add: [video]</code> (AMD/Intel), then restart. Vulkan is installed on first boot and layers are offloaded; it falls back to CPU automatically if the GPU isn't usable.</li>
-            <li><strong>Remote — compatible (Ollama / LM Studio):</strong> run your own server (see <code>deploy/ollama/</code>), Provider = <code>compatible</code>, Base URL = <code>http://ollama:11434</code>, Model = the tag you pulled. Nothing is downloaded into Animarr.</li>
-            <li><strong>Remote — OpenAI:</strong> Provider = <code>openai</code>, paste an API key, Model = e.g. <code>gpt-4o-mini</code>.</li>
+            <li>@((MarkupString)L["settings.llm_docs_li_cpu_html"])</li>
+            <li>@((MarkupString)L["settings.llm_docs_li_gpu_html"])</li>
+            <li>@((MarkupString)L["settings.llm_docs_li_compatible_html"])</li>
+            <li>@((MarkupString)L["settings.llm_docs_li_openai_html"])</li>
         </ul>
-        <p class="settings-hint">Embedded models are stored on the data volume (<code>/app/data/models</code>) and survive restarts. A bigger model = more accurate identification but more RAM/time — match it to your hardware.</p>
+        <p class="settings-hint">@((MarkupString)L["settings.llm_docs_footer_html"])</p>
     </section>;
 
     // ─── Metadata sources — enable flags ─────────────────────────────
@@ -849,21 +843,21 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     // ── Patterns tab ──
     private RenderFragment PatternsTab() => @<section class="settings-section">
         <div class="settings-section-head">
-            <h2>Filename parsing patterns</h2>
-            <Btn Variant="primary" Size="sm" OnClick="LoadPatternsAsync">Reload</Btn>
+            <h2>@L["settings.patterns_title"]</h2>
+            <Btn Variant="primary" Size="sm" OnClick="LoadPatternsAsync">@L["settings.btn_reload"]</Btn>
         </div>
         @if (_patterns is null)
         {
-            <p>Loading…</p>
+            <p>@L["common.loading"]</p>
         }
         else if (_patterns.Length == 0)
         {
-            <p>No patterns defined yet.</p>
+            <p>@L["settings.patterns_empty"]</p>
         }
         else
         {
             <table class="d-table">
-                <thead><tr><th>Name</th><th>Pattern</th><th>Scope</th><th>Priority</th><th>Built-in</th></tr></thead>
+                <thead><tr><th>@L["settings.patterns_th_name"]</th><th>@L["settings.patterns_th_pattern"]</th><th>@L["settings.patterns_th_scope"]</th><th>@L["settings.patterns_th_priority"]</th><th>@L["settings.patterns_th_builtin"]</th></tr></thead>
                 <tbody>
                     @foreach (var p in _patterns.OrderBy(p => p.Priority))
                     {
@@ -889,28 +883,28 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
     // ── Torrent tab ──
     private RenderFragment TorrentTab() => @<section class="settings-section">
-        <h2>Torrent engine</h2>
+        <h2>@L["settings.torrent_engine_title"]</h2>
         @if (_torrentCfg is null)
         {
-            <p>Loading… <Btn Variant="ghost" Size="sm" OnClick="LoadTorrentAsync">Load now</Btn></p>
+            <p>@L["common.loading"] <Btn Variant="ghost" Size="sm" OnClick="LoadTorrentAsync">@L["settings.btn_load_now"]</Btn></p>
         }
         else
         {
             var cfg = _torrentCfg;
             <label class="settings-field">
-                <span class="settings-field__label">Global download limit (MB/s, 0 = unlimited)</span>
+                <span class="settings-field__label">@L["settings.torrent_dl_limit_mbs"]</span>
                 <input class="settings-field__input" type="number" min="0"
                        value="@(cfg.GlobalDownloadLimit / 125_000)"
                        @onchange="@(e => UpdateTorrentDownload(int.TryParse(e.Value?.ToString(), out var v) ? v : 0))" />
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">Global upload limit (MB/s)</span>
+                <span class="settings-field__label">@L["settings.torrent_ul_limit_mbs"]</span>
                 <input class="settings-field__input" type="number" min="0"
                        value="@(cfg.GlobalUploadLimit / 125_000)"
                        @onchange="@(e => UpdateTorrentUpload(int.TryParse(e.Value?.ToString(), out var v) ? v : 0))" />
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">Listen port</span>
+                <span class="settings-field__label">@L["settings.torrent_port_label"]</span>
                 <input class="settings-field__input" type="number" min="1" max="65535"
                        value="@cfg.ListenPort"
                        @onchange="@(e => UpdateTorrentField(c => c with { ListenPort = int.TryParse(e.Value?.ToString(), out var v) ? v : c.ListenPort }))" />
@@ -918,17 +912,17 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@cfg.EnableDHT"
                         CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableDHT = v }))" />
-                <span class="settings-field__label">DHT</span>
+                <span class="settings-field__label">@L["settings.torrent_dht_short"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@cfg.EnableLSD"
                         CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableLSD = v }))" />
-                <span class="settings-field__label">Local Service Discovery</span>
+                <span class="settings-field__label">@L["settings.torrent_lsd_full"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@cfg.EnableUPnP"
                         CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableUPnP = v }))" />
-                <span class="settings-field__label">UPnP port forwarding</span>
+                <span class="settings-field__label">@L["settings.torrent_upnp_short"]</span>
             </label>
         }
     </section>;
@@ -980,11 +974,9 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         var malKey  = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
         var metaLang = _config.GetValueOrDefault(AppConfigKeys.MetadataLanguage) ?? "en";
         return @<section class="settings-section">
-            <h2>Metadata sources</h2>
+            <h2>@L["settings.meta_sources_title"]</h2>
             <p class="settings-hint">
-                Identification asks each enabled source for candidates, then the
-                LLM picks the best match. Toggle a source off to mute it without
-                erasing the saved key.
+                @L["settings.meta_sources_intro"]
             </p>
             <div class="settings-providers">
 
@@ -994,11 +986,11 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                                 CheckedChanged="@((bool v) => ToggleTmdbAsync(v))" />
                         <div class="settings-provider__name">
                             TMDb
-                            <span class="settings-provider__hint">Movies + TV — primary source</span>
+                            <span class="settings-provider__hint">@L["settings.meta_tmdb_hint"]</span>
                         </div>
                     </div>
                     <input class="settings-field__input" type="password"
-                           placeholder="v3 key or v4 read-token"
+                           placeholder="@L["settings.meta_tmdb_key_placeholder"]"
                            value="@tmdbKey"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.TmdbApiKey, e.Value?.ToString()))" />
                 </div>
@@ -1009,11 +1001,11 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                                 CheckedChanged="@((bool v) => ToggleMalAsync(v))" />
                         <div class="settings-provider__name">
                             MAL
-                            <span class="settings-provider__hint">MyAnimeList — anime fallback</span>
+                            <span class="settings-provider__hint">@L["settings.meta_mal_hint"]</span>
                         </div>
                     </div>
                     <input class="settings-field__input" type="password"
-                           placeholder="Client ID from MAL API portal"
+                           placeholder="@L["settings.meta_mal_key_placeholder"]"
                            value="@malKey"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.MalClientId, e.Value?.ToString()))" />
                 </div>
@@ -1024,22 +1016,19 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                                 CheckedChanged="@((bool v) => ToggleImdbAsync(v))" />
                         <div class="settings-provider__name">
                             IMDb
-                            <span class="settings-provider__hint">imdbapi.dev — no key required, free</span>
+                            <span class="settings-provider__hint">@L["settings.meta_imdb_hint"]</span>
                         </div>
                     </div>
                 </div>
 
             </div>
 
-            <h3>Metadata language</h3>
+            <h3>@L["settings.meta_language_title"]</h3>
             <p class="settings-hint">
-                Language for titles, overviews and genres fetched from TMDb (and
-                localized posters when available). Changing it re-fetches every
-                identified title; fields with no translation fall back to English.
-                Anime matched only on MyAnimeList stay in English.
+                @L["settings.meta_language_intro"]
             </p>
             <label class="settings-field">
-                <span class="settings-field__label">Metadata language</span>
+                <span class="settings-field__label">@L["settings.meta_language_label"]</span>
                 <select class="settings-field__select" value="@metaLang"
                         @onchange="@(e => SetMetadataLanguageAsync(e.Value?.ToString() ?? "en"))">
                     <option value="en">English</option>
@@ -1057,114 +1046,114 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                         <div class="settings-llm-progress__fill" style="width:@(pct)%"></div>
                     </div>
                     <div class="settings-llm-progress__text">
-                        @if (ls.Phase == "running")   { <span>Re-fetched @ls.Done/@ls.Total titles (@(pct)%)</span> }
-                        else if (ls.Phase == "done")  { <span class="is-ok">Re-fetched @ls.Done/@ls.Total titles ✓</span> }
-                        else if (ls.Phase == "error") { <span class="is-err">Error: @ls.Error</span> }
+                        @if (ls.Phase == "running")   { <span>@L.Get("settings.meta_lang_progress_fmt", ls.Done, ls.Total, pct)</span> }
+                        else if (ls.Phase == "done")  { <span class="is-ok">@L.Get("settings.meta_lang_done_fmt", ls.Done, ls.Total)</span> }
+                        else if (ls.Phase == "error") { <span class="is-err">@L.Get("folder_files.toast_error", ls.Error)</span> }
                     </div>
                 </div>
             }
 
-            <h3>Auto-identification</h3>
+            <h3>@L["settings.auto_id_title"]</h3>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@auto"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.AutoIdentifyEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Auto-identify new folders</span>
+                <span class="settings-field__label">@L["settings.auto_id_new_folders"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@thumbs"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.DownloadEpisodeThumbs, v ? "true" : "false"))" />
-                <span class="settings-field__label">Download episode thumbnails</span>
+                <span class="settings-field__label">@L["settings.download_ep_thumbs_short"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@ep"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.IncludeEpisodeNameInFile, v ? "true" : "false"))" />
-                <span class="settings-field__label">Include episode name in rename output</span>
+                <span class="settings-field__label">@L["settings.include_ep_name_switch"]</span>
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">Auto-apply confidence threshold (0..1)</span>
+                <span class="settings-field__label">@L["settings.auto_apply_threshold"]</span>
                 <input class="settings-field__input" type="number" step="0.01" min="0" max="1"
                        value="@autoApp"
                        @onchange="@(e => SetConfigAsync(AppConfigKeys.AutoApplyConfidence, e.Value?.ToString()))" />
             </label>
             <label class="settings-field">
-                <span class="settings-field__label">Needs-review threshold (0..1)</span>
+                <span class="settings-field__label">@L["settings.needs_review_threshold"]</span>
                 <input class="settings-field__input" type="number" step="0.01" min="0" max="1"
                        value="@nrThr"
                        @onchange="@(e => SetConfigAsync(AppConfigKeys.NeedsReviewConfidence, e.Value?.ToString()))" />
             </label>
 
-            <h3>External player handoff</h3>
+            <h3>@L["settings.ext_player_title"]</h3>
             <label class="settings-field">
-                <span class="settings-field__label">External player</span>
+                <span class="settings-field__label">@L["settings.ext_player_label"]</span>
                 <select class="settings-field__select" value="@extPlay"
                         @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayer, e.Value?.ToString()))">
                     <option value="mpv">mpv</option>
                     <option value="iina">IINA (macOS)</option>
                     <option value="infuse">Infuse (iOS / Apple TV)</option>
                     <option value="vlc_ios">VLC (iOS)</option>
-                    <option value="m3u">.m3u download (universal)</option>
-                    <option value="custom">Custom URI template</option>
+                    <option value="m3u">@L["settings.ext_player_m3u"]</option>
+                    <option value="custom">@L["settings.ext_player_custom_opt"]</option>
                 </select>
             </label>
             @if (extPlay == "custom")
             {
                 <label class="settings-field">
-                    <span class="settings-field__label">Custom URI template (with <code>{url}</code>)</span>
+                    <span class="settings-field__label">@((MarkupString)L["settings.ext_player_custom_label_html"])</span>
                     <input class="settings-field__input" placeholder="potplayer://{url}"
                            value="@extCust"
                            @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayerCustom, e.Value?.ToString()))" />
                 </label>
             }
 
-            <h3>Skip intro &amp; credits</h3>
+            <h3>@L["settings.skip_intro_title"]</h3>
             <p class="settings-hint">
-                Detect opening/ending timestamps so the player shows a Skip button
-                and surfaces "next episode" at the credits start. Sources are tried
-                cheapest-first and the first hit wins.
+                @L["settings.skip_intro_intro"]
             </p>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@segAniSkip"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsAniSkipEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">AniSkip — crowd-sourced OP/ED by MAL id</span>
+                <span class="settings-field__label">@L["settings.seg_aniskip_label"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@segChapters"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChaptersEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Embedded chapters — named opening/ending</span>
+                <span class="settings-field__label">@L["settings.seg_chapters_label"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@segChroma"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChromaprintEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Audio fingerprint — chromaprint (background pass)</span>
+                <span class="settings-field__label">@L["settings.seg_chroma_label"]</span>
             </label>
             <label class="settings-field settings-field--inline">
                 <Toggle Checked="@segBlackFrame"
                         CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsBlackFrameEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">Black-frame credits guess — slow, decodes video</span>
+                <span class="settings-field__label">@L["settings.seg_blackframe_label"]</span>
             </label>
             <div class="settings-field settings-field--inline" style="justify-content: space-between; gap: 12px;">
                 <span class="settings-hint">
                     @if (_segStatus is { } seg)
                     {
-                        @($"Analysed {seg.ScannedTitles}/{seg.TotalTitles} titles · {seg.TitlesWithSegments} with segments")
+                        @L.Get("settings.seg_analysed_fmt", seg.ScannedTitles, seg.TotalTitles, seg.TitlesWithSegments)
                     }
                     else
                     {
-                        @("Analysis progress —")
+                        @L["settings.seg_analysis_progress"]
                     }
                 </span>
-                <button type="button" class="settings-section-head__new tv-focus" @onclick="RescanSegmentsAsync">Rescan all</button>
+                <button type="button" class="settings-section-head__new tv-focus" @onclick="RescanSegmentsAsync">@L["settings.btn_rescan_all"]</button>
             </div>
         </section>;
     }
 
     // ── Helpers ──
-    private static string StatusLine(EncoderStatusDto s)
+    // Instance method (not static) so it can localise the fallback strings
+    // through the injected LocalizationService.
+    private string StatusLine(EncoderStatusDto s)
     {
-        if (!s.Available) return s.Detail ?? "unavailable";
+        if (!s.Available) return s.Detail ?? L["settings.hw_status_unavailable"];
         var bits = new List<string>();
         if (!string.IsNullOrEmpty(s.Vendor))     bits.Add(s.Vendor);
         if (!string.IsNullOrEmpty(s.DeviceName)) bits.Add(s.DeviceName);
-        return bits.Count == 0 ? "available" : string.Join(" — ", bits);
+        return bits.Count == 0 ? L["settings.hw_status_available"] : string.Join(" — ", bits);
     }
 }

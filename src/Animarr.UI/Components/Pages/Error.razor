@@ -9,19 +9,18 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<h1 class="text-danger">Error.</h1>
-<h2 class="text-danger">Something went wrong handling your request.</h2>
+<h1 class="text-danger">@L["error.title"]</h1>
+<h2 class="text-danger">@L["error.subtitle"]</h2>
 
 @if (!string.IsNullOrEmpty(_activityId))
 {
     <p>
-        <strong>Trace ID:</strong> <code>@_activityId</code>
+        <strong>@L["error.trace_id_label"]</strong> <code>@_activityId</code>
     </p>
 }
 
 <p>
-    Try reloading. If the problem persists, check the server logs and the
-    browser devtools network tab for the failed API call.
+    @L["error.body"]
 </p>
 
 @code {

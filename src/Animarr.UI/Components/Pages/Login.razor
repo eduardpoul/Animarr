@@ -21,22 +21,22 @@
 
 <div class="d-login">
     <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> BACK
+        <DIcon Name="arrow-l" Size="13" /> @L["login.back"]
     </button>
 
-    <div class="d-login__card" role="dialog" aria-label="Sign in">
+    <div class="d-login__card" role="dialog" aria-label="@L["login.aria_sign_in"]">
         <header class="d-login__brand">
             <BrandMark Size="38" ExtraClass="d-login__brand-mark" />
             <div>
                 <div class="d-login__brand-name">ANIMARR</div>
-                <div class="d-login__brand-sub">Sign in to continue</div>
+                <div class="d-login__brand-sub">@L["login.brand_sub"]</div>
             </div>
         </header>
 
         <form class="d-login__form" @onsubmit="OnSubmit" @onsubmit:preventDefault>
-            <Input @bind-Value="_username" Placeholder="Username" Label="USERNAME"
+            <Input @bind-Value="_username" Placeholder="@L["login.field_username_placeholder"]" Label="@L["login.field_username_label"]"
                    Autocomplete="username" Disabled="@_loading" />
-            <Input @bind-Value="_password" Placeholder="••••••••" Label="PASSWORD" Type="password"
+            <Input @bind-Value="_password" Placeholder="••••••••" Label="@L["login.field_password_label"]" Type="password"
                    Autocomplete="current-password" Disabled="@_loading" />
             @if (!string.IsNullOrEmpty(_error))
             {
@@ -61,7 +61,7 @@
             {
                 <button type="button" class="d-login__qr-link tv-focus"
                         @onclick="@(() => Nav.NavigateTo("/pair"))">
-                    <DIcon Name="qr-code" Size="14" /> Sign in via phone QR
+                    <DIcon Name="qr-code" Size="14" /> @L["login.pair_via_phone_qr"]
                 </button>
             }
 
@@ -69,11 +69,11 @@
                 @if (_loading)
                 {
                     <Spinner Size="14" />
-                    <text>SIGNING IN…</text>
+                    <text>@L["login.btn_signing_in"]</text>
                 }
                 else
                 {
-                    <text>SIGN IN</text>
+                    <text>@L["login.btn_sign_in"]</text>
                     <DIcon Name="arrow-r" Size="13" />
                 }
             </Btn>
@@ -82,11 +82,11 @@
 
     @if (_qrModalOpen)
     {
-        <div class="d-login__qr-modal" role="dialog" aria-label="Scan TV QR">
+        <div class="d-login__qr-modal" role="dialog" aria-label="@L["login.aria_scan_tv_qr"]">
             <div class="d-login__qr-modal-card">
                 <header class="d-login__qr-modal-head">
-                    <span>SCAN TV</span>
-                    <button type="button" class="d-login__qr-modal-close tv-focus" @onclick="CloseQrScan" aria-label="Close">
+                    <span>@L["login.qr_scan_tv"]</span>
+                    <button type="button" class="d-login__qr-modal-close tv-focus" @onclick="CloseQrScan" aria-label="@L["login.qr_aria_close"]">
                         <DIcon Name="x" Size="14" />
                     </button>
                 </header>
@@ -96,7 +96,7 @@
                     <div class="d-login__qr-status">@_qrStatus</div>
                 }
                 <div class="d-login__qr-modal-hint">
-                    Point the camera at the QR shown on your TV's pairing screen.
+                    @L["login.qr_modal_hint"]
                 </div>
             </div>
         </div>
@@ -181,7 +181,7 @@
             var user = await Api.LoginAsync(new LoginRequest(_username, _password));
             if (user is null)
             {
-                _error = "Wrong username or password";
+                _error = L["login.error_wrong_credentials"];
                 _loading = false;
                 return;
             }
@@ -195,7 +195,7 @@
         }
         catch (Exception ex)
         {
-            _error = $"Sign-in failed: {ex.Message}";
+            _error = L.Get("login.error_sign_in_failed_fmt", ex.Message);
             _loading = false;
         }
     }
@@ -216,7 +216,7 @@
         }
         catch (Exception ex)
         {
-            _qrStatus = $"Camera unavailable: {ex.Message}";
+            _qrStatus = L.Get("login.qr_camera_unavailable_fmt", ex.Message);
         }
     }
 
@@ -237,13 +237,13 @@
         var code = ExtractCode(payload);
         if (code is null)
         {
-            _qrStatus = "Not an Animarr pairing code";
+            _qrStatus = L["login.qr_not_pairing_code"];
             await InvokeAsync(StateHasChanged);
             return;
         }
 
         _confirmingPair = true;
-        _qrStatus = "Confirming…";
+        _qrStatus = L["login.qr_confirming"];
         await InvokeAsync(StateHasChanged);
 
         try
@@ -251,13 +251,13 @@
             var ok = await Api.ConfirmPairAsync(new ConfirmPairRequest(code));
             if (!ok)
             {
-                _qrStatus = "Code expired or unknown";
+                _qrStatus = L["login.qr_code_expired"];
                 _confirmingPair = false;        // let a fresh code be scanned
                 await InvokeAsync(StateHasChanged);
                 return;
             }
             await CloseQrScan();
-            _toast = "Signed in TV";
+            _toast = L["login.qr_signed_in_tv"];
             await InvokeAsync(StateHasChanged);
             // Auto-dismiss the toast after a couple of seconds.
             _ = Task.Run(async () =>
@@ -269,7 +269,7 @@
         }
         catch (Exception ex)
         {
-            _qrStatus = $"Failed: {ex.Message}";
+            _qrStatus = L.Get("login.qr_failed_fmt", ex.Message);
             await InvokeAsync(StateHasChanged);
         }
     }

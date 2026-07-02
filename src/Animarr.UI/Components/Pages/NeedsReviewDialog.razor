@@ -18,20 +18,20 @@
 @if (IsOpen)
 {
     <SettingsEditDrawer IsOpen="true"
-                        Title="@($"{_items.Count} titles below confidence")"
-                        Overline="NEEDS REVIEW"
-                        Hint="Pick the right match — Animarr stores it in SQLite, leaves folders on disk untouched."
+                        Title="@L.Get("needs_review.drawer_title_fmt", _items.Count)"
+                        Overline="@L["needs_review.overline"]"
+                        Hint="@L["needs_review.sub"]"
                         Icon="warn"
                         Tone="warn"
                         OnClose="OnCloseAsync">
         <Body>
             @if (_loading)
             {
-                <div class="nrm__empty">Loading…</div>
+                <div class="nrm__empty">@L["common.loading"]</div>
             }
             else if (_items.Count == 0)
             {
-                <div class="nrm__empty">All items are identified.</div>
+                <div class="nrm__empty">@L["needs_review.empty_all_done"]</div>
             }
             else
             {
@@ -74,7 +74,7 @@
                                                     disabled="@(_busyKey == key)"
                                                     @onclick="@(() => ApplyAsync(mi.Id, cand))">
                                                 @if (_busyKey == key) { <Spinner Size="sm" Tone="light" /> }
-                                                Use
+                                                @L["needs_review.use_btn"]
                                             </button>
                                         </div>
                                     </div>
@@ -82,7 +82,7 @@
                             }
                             <button type="button" class="nrm-search"
                                     @onclick="@(() => ToggleSearchPanel(mi))">
-                                <DIcon Name="search" Size="13" /> @(isExpanded ? "CLOSE SEARCH" : "SEARCH MANUALLY")
+                                <DIcon Name="search" Size="13" /> @(isExpanded ? L["needs_review.close_search_btn"] : L["needs_review.search_manually_btn"])
                             </button>
 
                             @if (isExpanded)
@@ -96,12 +96,12 @@
                                             <option value="imdb">IMDb</option>
                                         </select>
                                         <input class="nrm-search-panel__input"
-                                               placeholder="@($"Search {_searchSource.ToUpperInvariant()}…")"
+                                               placeholder="@L.Get("needs_review.search_placeholder_fmt", _searchSource.ToUpperInvariant())"
                                                value="@_searchQuery"
                                                @onkeydown="@(e => { if (e.Key == "Enter") _ = RunSearchAsync(mi); })"
                                                @oninput="@(e => _searchQuery = e.Value?.ToString() ?? "")" />
                                         <Btn Variant="primary" Size="sm" Loading="@_searchBusy"
-                                             OnClick="@(() => RunSearchAsync(mi))">Search</Btn>
+                                             OnClick="@(() => RunSearchAsync(mi))">@L["media_search.btn_search"]</Btn>
                                     </div>
                                     @if (_searchResults.Length > 0)
                                     {
@@ -114,7 +114,7 @@
                                                     <div class="nrm-search-panel__title">@res.Title</div>
                                                     <div class="nrm-search-panel__meta">@(res.Year?.ToString() ?? "—")</div>
                                                     <Btn Variant="solid" Size="sm" Loading="@(_busyKey == rkey)"
-                                                         OnClick="@(() => ApplyAsync(mi.Id, res))">Use</Btn>
+                                                         OnClick="@(() => ApplyAsync(mi.Id, res))">@L["needs_review.use_btn"]</Btn>
                                                 </div>
                                             }
                                         </div>
@@ -127,7 +127,7 @@
             }
         </Body>
         <Footer>
-            <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">Close</Btn>
+            <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">@L["common.btn_close"]</Btn>
         </Footer>
     </SettingsEditDrawer>
 }

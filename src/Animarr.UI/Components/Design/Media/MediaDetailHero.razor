@@ -38,8 +38,8 @@
         <button type="button"
                 class="@($"d-mdhero__fav surface-glass tv-focus {(Item.IsFavorite ? "is-active" : "")}")"
                 @onclick="OnFavorite"
-                aria-label="@(Item.IsFavorite ? "Remove from favorites" : "Add to favorites")"
-                title="@(Item.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+                aria-label="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])"
+                title="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])">
             @if (Item.IsFavorite)
             {
                 <span class="d-mdhero__fav-star d-mdhero__fav-star--filled">★</span>
@@ -50,7 +50,7 @@
             }
         </button>
         <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
-                aria-label="Edit metadata" title="Edit metadata">
+                aria-label="@L["media_detail_hero.edit_metadata_tooltip"]" title="@L["media_detail_hero.edit_metadata_tooltip"]">
             <DIcon Name="pencil" Size="16" />
         </button>
     </div>
@@ -82,8 +82,8 @@
 
             <div class="d-mdhero__pills">
                 <Pill Tone="accent">@TypeLabel(Item.MediaType)</Pill>
-                @if (Item.IdentificationStatus == IdentificationStatus.Manual) { <Pill Tone="info">Manual</Pill> }
-                @if (Item.IdentificationStatus == IdentificationStatus.NeedsReview) { <Pill Tone="warn">Needs review</Pill> }
+                @if (Item.IdentificationStatus == IdentificationStatus.Manual) { <Pill Tone="info">@L["media_detail_hero.pill_manual"]</Pill> }
+                @if (Item.IdentificationStatus == IdentificationStatus.NeedsReview) { <Pill Tone="warn">@L["media_detail_hero.pill_needs_review"]</Pill> }
                 @foreach (var tag in TagPreview(Item))
                 {
                     <Pill>@tag</Pill>
@@ -94,12 +94,12 @@
                 @if (Item.Rating is > 0) { <span>★ @($"{Item.Rating:F1}")</span><span class="d-mdhero__dot">·</span> }
                 @if (Item.Year is not null) { <span>@Item.Year</span><span class="d-mdhero__dot">·</span> }
                 @if (!string.IsNullOrEmpty(Item.Studio)) { <span>@Item.Studio</span><span class="d-mdhero__dot">·</span> }
-                @if (Item.Runtime is > 0) { <span>@Item.Runtime m</span><span class="d-mdhero__dot">·</span> }
-                @if (Item.EpisodeCount is > 0) { <span>@Item.EpisodeCount ep</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.Runtime is > 0) { <span>@Item.Runtime @L["media_detail_hero.runtime_unit"]</span><span class="d-mdhero__dot">·</span> }
+                @if (Item.EpisodeCount is > 0) { <span>@Item.EpisodeCount @L["media_detail_hero.episode_count_fmt_short"]</span><span class="d-mdhero__dot">·</span> }
                 @if (!string.IsNullOrEmpty(Item.Language)) { <span>@Item.Language</span><span class="d-mdhero__dot">·</span> }
                 @if (BestConfidence is > 0)
                 {
-                    <span class="d-mdhero__conf">@($"{BestConfidence:P0}") match</span>
+                    <span class="d-mdhero__conf">@($"{BestConfidence:P0}") @L["media_detail_hero.match_suffix"]</span>
                 }
             </div>
 

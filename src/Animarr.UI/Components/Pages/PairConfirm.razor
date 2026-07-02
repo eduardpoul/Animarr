@@ -26,15 +26,15 @@
 <div class="d-pair-confirm">
     <button type="button" class="d-pair-confirm__back tv-focus"
             @onclick="@(() => Nav.NavigateTo("/"))">
-        <DIcon Name="arrow-l" Size="13" /> BACK
+        <DIcon Name="arrow-l" Size="13" /> @L["pair.confirm.back"]
     </button>
 
-    <div class="d-pair-confirm__card" role="dialog" aria-label="Pair a TV">
+    <div class="d-pair-confirm__card" role="dialog" aria-label="@L["pair.confirm.aria_pair_tv"]">
         <header class="d-pair-confirm__brand">
             <BrandMark Size="38" ExtraClass="d-pair-confirm__brand-mark" />
             <div>
-                <div class="d-pair-confirm__brand-name">PAIR A TV</div>
-                <div class="d-pair-confirm__brand-sub">Sign your TV in to this account</div>
+                <div class="d-pair-confirm__brand-name">@L["pair.confirm.brand_name"]</div>
+                <div class="d-pair-confirm__brand-sub">@L["pair.confirm.brand_sub"]</div>
             </div>
         </header>
 
@@ -44,13 +44,13 @@
                     class="@($"d-pair-confirm__tab tv-focus {(_mode == "scan" ? "is-active" : "")}")"
                     @onclick="@(() => SwitchModeAsync("scan"))"
                     role="tab" aria-selected="@(_mode == "scan")">
-                <DIcon Name="qr-code" Size="13" /> Scan QR
+                <DIcon Name="qr-code" Size="13" /> @L["pair.confirm.tab_scan_qr"]
             </button>
             <button type="button"
                     class="@($"d-pair-confirm__tab tv-focus {(_mode == "code" ? "is-active" : "")}")"
                     @onclick="@(() => SwitchModeAsync("code"))"
                     role="tab" aria-selected="@(_mode == "code")">
-                <DIcon Name="pencil" Size="13" /> Enter code
+                <DIcon Name="pencil" Size="13" /> @L["pair.confirm.tab_enter_code"]
             </button>
         </div>
 
@@ -68,7 +68,7 @@
                     <div class="d-pair-confirm__status">@_status</div>
                 }
                 <div class="d-pair-confirm__hint">
-                    Point the camera at the QR code shown on your TV's pairing screen.
+                    @L["pair.confirm.scan_hint"]
                 </div>
             </div>
         }
@@ -76,7 +76,7 @@
         {
             <div class="d-pair-confirm__code-wrap">
                 <div class="d-pair-confirm__hint">
-                    Type the 6-digit code shown under the QR on your TV.
+                    @L["pair.confirm.code_hint"]
                 </div>
                 <input class="d-pair-confirm__code-input"
                        type="tel"
@@ -95,7 +95,7 @@
                 <Btn Variant="primary" Size="lg" Loading="@_submitting"
                      OnClick="OnSubmitCode"
                      Disabled="@(_typedCode.Length < 6 || _submitting)">
-                    <DIcon Name="check" Size="14" /> Confirm pairing
+                    <DIcon Name="check" Size="14" /> @L["pair.confirm.btn_confirm"]
                 </Btn>
             </div>
         }
@@ -160,7 +160,7 @@
                 var granted = await JS.InvokeAsync<bool>("animarr_requestCameraPermission");
                 if (!granted)
                 {
-                    _status = "Camera permission denied. Use the code tab or grant the permission in app settings.";
+                    _status = L["pair.confirm.camera_denied"];
                     StateHasChanged();
                     return;
                 }
@@ -168,7 +168,7 @@
             }
             catch (Exception ex)
             {
-                _status = $"Camera unavailable: {ex.Message}. Use the code tab instead.";
+                _status = L.Get("pair.confirm.camera_unavailable_fmt", ex.Message);
                 StateHasChanged();
             }
         }
@@ -227,7 +227,7 @@
         var code = ExtractCode(payload);
         if (code is null)
         {
-            _status = "Not an Animarr pairing QR";
+            _status = L["pair.confirm.not_pairing_qr"];
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -241,14 +241,14 @@
         // consumed code (410) and showed a bogus "expired" after success.
         if (_paired || _confirming) return;
         _confirming = true;
-        _status = "Confirming…";
+        _status = L["pair.confirm.confirming"];
         await InvokeAsync(StateHasChanged);
         try
         {
             var ok = await Api.ConfirmPairAsync(new ConfirmPairRequest(code));
             if (!ok)
             {
-                _status = "Code expired or unknown — refresh the TV and try again.";
+                _status = L["pair.confirm.code_expired"];
                 _confirming = false;   // allow a retry with a fresh code
                 await InvokeAsync(StateHasChanged);
                 return;
@@ -259,7 +259,7 @@
             try { await JS.InvokeVoidAsync("animarr_stopQrScan"); } catch { }
             _scannerStarted = false;
             _status = null;
-            _toast = "TV signed in!";
+            _toast = L["pair.confirm.tv_signed_in"];
             await InvokeAsync(StateHasChanged);
             // Brief delay so the success toast registers, then go home.
             await Task.Delay(1200);
@@ -267,7 +267,7 @@
         }
         catch (Exception ex)
         {
-            _status = $"Confirm failed: {ex.Message}";
+            _status = L.Get("pair.confirm.confirm_failed_fmt", ex.Message);
             _confirming = false;   // transient failure — let the user retry
             await InvokeAsync(StateHasChanged);
         }

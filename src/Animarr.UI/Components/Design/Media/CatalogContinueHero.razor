@@ -67,7 +67,7 @@
                 <Btn Variant="primary" Size="lg"
                      OnClick="@(() => Nav.NavigateTo(PlayHref(item)))"
                      data-tv-autofocus="true">
-                    <DIcon Name="play" Size="16" /> Resume
+                    <DIcon Name="play" Size="16" /> @L["continue.resume"]
                 </Btn>
             </div>
         </div>
@@ -83,7 +83,7 @@
         {
             @if (pager == "f")
             {
-                <nav class="d-chero__pager" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager" role="tablist" aria-label="@L["continue.slots_aria"]">
                     @for (int i = 0; i < Items.Length; i++)
                     {
                         var idx = i;
@@ -102,9 +102,9 @@
             }
             else if (pager == "g")
             {
-                <nav class="d-chero__pager-g" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager-g" role="tablist" aria-label="@L["continue.slots_aria"]">
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
-                            @onclick="PrevSlide" aria-label="Previous slot">
+                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
                         <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-dashes">
@@ -116,20 +116,20 @@
                                     class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
                                     @onclick="@(() => SetActive(idx))"
                                     role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@($"Slot {idx + 1}")"></button>
+                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)"></button>
                         }
                     </div>
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
-                            @onclick="NextSlideManual" aria-label="Next slot">
+                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
                         <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>
             }
             else // pager == "h"
             {
-                <nav class="d-chero__pager-h" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager-h" role="tablist" aria-label="@L["continue.slots_aria"]">
                     <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="PrevSlide" aria-label="Previous slot">
+                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
                         <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-pills">
@@ -141,11 +141,11 @@
                                     class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
                                     @onclick="@(() => SetActive(idx))"
                                     role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@($"Slot {idx + 1}")">@(idx + 1)</button>
+                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)">@(idx + 1)</button>
                         }
                     </div>
                     <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="NextSlideManual" aria-label="Next slot">
+                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
                         <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>

@@ -16,11 +16,11 @@
 
 @if (_loading)
 {
-    <div class="rfl-empty">Loading…</div>
+    <div class="rfl-empty">@L["rootfolders.loading"]</div>
 }
 else if (_sections.Count == 0)
 {
-    <div class="rfl-empty">No section folders yet. Click <strong>Add section folder</strong> to point Animarr at a directory.</div>
+    <div class="rfl-empty">@((MarkupString)L["rootfolders.empty_html"])</div>
 }
 else
 {
@@ -37,21 +37,21 @@ else
                     <div class="rfl-row__path">@section.Path</div>
                 </div>
                 <div class="rfl-row__pills">
-                    <span class="rfl-pill">@s.Watchers w</span>
-                    <span class="rfl-pill rfl-pill--success">@s.Identified ID</span>
+                    <span class="rfl-pill">@s.Watchers @L["rootfolders.suffix_watchers"]</span>
+                    <span class="rfl-pill rfl-pill--success">@s.Identified @L["rootfolders.suffix_identified"]</span>
                     @if (s.Missing > 0)
                     {
                         <span class="rfl-pill rfl-pill--warn">@s.Missing ?</span>
                     }
                 </div>
                 <button type="button" class="rfl-btn" @onclick="@(() => RescanAsync(section.Id))">
-                    <DIcon Name="refresh" Size="13" /> Rescan
+                    <DIcon Name="refresh" Size="13" /> @L["rootfolders.btn_rescan"]
                 </button>
                 <div class="rfl-row__icons">
-                    <button type="button" class="rfl-icon" title="Edit" @onclick="@(() => OnEdit.InvokeAsync(section))">
+                    <button type="button" class="rfl-icon" title="@L["rootfolders.tooltip_edit"]" @onclick="@(() => OnEdit.InvokeAsync(section))">
                         <DIcon Name="pencil" Size="14" />
                     </button>
-                    <button type="button" class="rfl-icon rfl-icon--danger" title="Remove" @onclick="@(() => OnDelete.InvokeAsync(section))">
+                    <button type="button" class="rfl-icon rfl-icon--danger" title="@L["rootfolders.tooltip_remove"]" @onclick="@(() => OnDelete.InvokeAsync(section))">
                         <DIcon Name="trash" Size="14" />
                     </button>
                 </div>
