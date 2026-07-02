@@ -31,6 +31,10 @@ public sealed class AiringRefreshBackgroundService(
     private static readonly TimeSpan TickEvery       = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan RecheckAfter    = TimeSpan.FromHours(12);
     private static readonly TimeSpan FinishedRecheck = TimeSpan.FromDays(7);
+    /// <summary>RELEASING but no air time known (donghua whose schedule AniList
+    /// doesn't carry) — recheck faster so the TMDB fallback fills the date in
+    /// hours, not half a day.</summary>
+    private static readonly TimeSpan NoDateRecheck   = TimeSpan.FromHours(3);
     private const int ResolvesPerTick = 10;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -58,14 +62,18 @@ public sealed class AiringRefreshBackgroundService(
     {
         var now = DateTime.UtcNow;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var noDateCutoff   = now - NoDateRecheck;
+        var staleCutoff    = now - RecheckAfter;
+        var finishedCutoff = now - FinishedRecheck;
         var candidates = await db.MediaItems
             .Where(m => m.IdentificationStatus == IdentificationStatus.Identified ||
                         m.IdentificationStatus == IdentificationStatus.Manual)
             .Where(m => m.LastAiringCheckAt == null
                      || (m.NextAirAtUtc != null && m.NextAirAtUtc < now)
+                     || (m.AiringStatus == "RELEASING" && m.NextAirAtUtc == null && m.LastAiringCheckAt < noDateCutoff)
                      || (m.AiringStatus == "FINISHED"
-                            ? m.LastAiringCheckAt < now - FinishedRecheck
-                            : m.LastAiringCheckAt < now - RecheckAfter))
+                            ? m.LastAiringCheckAt < finishedCutoff
+                            : m.LastAiringCheckAt < staleCutoff))
             .ToListAsync(ct);
         if (candidates.Count == 0) return;
 
