@@ -230,6 +230,10 @@ public static class ApiRoutes
     /// <summary>GET list / POST add for the user's "Хочу посмотреть" list.</summary>
     public const string MeWatchlist  = "/api/me/watchlist";
     public const string MeWatchlistById = "/api/me/watchlist/{id}";
+    /// <summary>GET <c>?back=&amp;ahead=</c> (days) — airing-calendar events
+    /// (<c>CalendarEventDto[]</c>) for the window around now. Data is kept
+    /// fresh by the AiringRefreshBackgroundService (AniList + TMDB).</summary>
+    public const string Calendar     = "/api/calendar";
 
     // ─── Server identity (v5 multi-server) ───────────────────────────────
     /// <summary>Anonymous probe — returns <c>ServerInfoDto</c>. Hit by the

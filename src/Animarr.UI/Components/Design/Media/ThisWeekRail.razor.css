@@ -1,0 +1,141 @@
+/* "На этой неделе" rail — compact airing cards, 210px cells to match the
+   other Home surfaces. Status chips reuse the calendar palette (the shared
+   .cal-chip classes are duplicated here because scoped CSS doesn't cross
+   components). */
+
+.twr { margin: var(--space-10) 0; }
+.twr__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+.twr__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.twr__all {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent-hi);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.twr__all:hover { color: var(--accent); }
+
+.twr__row {
+    display: flex;
+    gap: var(--space-6);
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+}
+.twr__row::-webkit-scrollbar { display: none; }
+
+.twr__card {
+    appearance: none;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+    width: 210px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color var(--motion-base);
+}
+.twr__card:hover { border-color: var(--border-strong); }
+
+.twr__art {
+    position: relative;
+    display: block;
+    height: 108px;
+    background-size: cover;
+    background-position: center;
+    background-color: var(--surface-2);
+}
+.twr__art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.78));
+}
+.twr__when {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    z-index: 1;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+}
+.twr__name {
+    position: absolute;
+    left: 9px;
+    right: 9px;
+    bottom: 6px;
+    z-index: 1;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.twr__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 8px 10px 10px;
+}
+.twr__ep {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--accent-hi);
+}
+
+/* Status chips — same palette as Calendar.razor.css. */
+.cal-chip {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.cal-chip--upcoming {
+    color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-strong);
+}
+.cal-chip--aired-waiting {
+    color: var(--warn, oklch(0.8 0.17 75));
+    background: oklch(0.8 0.17 75 / 0.16);
+    border: 1px solid oklch(0.6 0.16 75 / 0.5);
+}
+.cal-chip--in-library {
+    color: var(--success, oklch(0.74 0.15 150));
+    background: oklch(0.74 0.15 150 / 0.16);
+    border: 1px solid var(--success, oklch(0.74 0.15 150));
+}
+
+@media (max-width: 639px) {
+    .twr__card { width: 182px; }
+    .twr__title { font-size: 19px; }
+}

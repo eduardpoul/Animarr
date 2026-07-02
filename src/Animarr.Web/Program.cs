@@ -163,6 +163,9 @@ builder.Services.AddHostedService<TrickplayBackgroundService>();
 // local-first scoring and TMDB backfill.
 builder.Services.AddScoped<Animarr.Web.Services.Recs.RecsService>();
 
+// Airing calendar — AniList/TMDB schedule refresh for ongoing titles.
+builder.Services.AddHostedService<Animarr.Web.Services.Airing.AiringRefreshBackgroundService>();
+
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
@@ -396,6 +399,7 @@ app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();
 app.MapRecsEndpoints();
+app.MapCalendarEndpoints();
 app.MapTorrentEndpoints();
 app.MapRenameEndpoints();
 app.MapMediaTagEndpoints();

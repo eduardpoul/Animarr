@@ -52,6 +52,8 @@ public interface IAnimarrApiClient
     /// <summary>"Don't suggest this again" — one of the ids set.</summary>
     Task DismissRecAsync(Guid? mediaItemId, int? tmdbId, CancellationToken ct = default);
     Task<WatchlistItemDto[]> GetWatchlistAsync(CancellationToken ct = default);
+    /// <summary>Airing-calendar events for [now-back, now+ahead] days.</summary>
+    Task<CalendarEventDto[]> GetCalendarAsync(int back = 14, int ahead = 60, CancellationToken ct = default);
     Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default);
     Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default);
     /// <summary>Skip-intro/credits background-scan progress for the Settings indicator.</summary>

@@ -1,0 +1,66 @@
+@*
+    "На этой неделе" — Home rail of this week's airing events (compact
+    calendar cards). Header links to the full /calendar page; cards click
+    into the title. Rendered by Home only when the week has events.
+*@
+@inject NavigationManager Nav
+
+@if (Items.Length > 0)
+{
+    <section class="twr">
+        <div class="twr__head">
+            <h2 class="twr__title">@L["home.this_week"]</h2>
+            <a class="twr__all tv-focus" href="/calendar">@L["calendar.title"] →</a>
+        </div>
+        <div class="twr__row">
+            @foreach (var ev in Items)
+            {
+                var e = ev;
+                var local = e.AiringAtUtc.ToLocalTime();
+                <button type="button" class="twr__card tv-focus" title="@e.Title"
+                        @onclick="@(() => Nav.NavigateTo($"/catalog/{e.MediaItemId}"))">
+                    <span class="twr__art" style="@ArtStyle(e)">
+                        <span class="twr__when">@DayLabel(local) · @local.ToString("HH:mm")</span>
+                        <span class="twr__name">@e.Title</span>
+                    </span>
+                    <span class="twr__meta">
+                        <span class="twr__ep">EP @e.Episode</span>
+                        <span class="@($"cal-chip cal-chip--{e.Status} twr__chip")">@StatusLabel(e.Status)</span>
+                    </span>
+                </button>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public CalendarEventDto[] Items { get; set; } = Array.Empty<CalendarEventDto>();
+
+    private string DayLabel(DateTime local)
+    {
+        var today = DateTime.Now.Date;
+        if (local.Date == today) return L["calendar.today"];
+        if (local.Date == today.AddDays(1)) return L["calendar.tomorrow"];
+        var culture = L.CurrentLanguage switch
+        {
+            "ru" => System.Globalization.CultureInfo.GetCultureInfo("ru-RU"),
+            "uk" => System.Globalization.CultureInfo.GetCultureInfo("uk-UA"),
+            "de" => System.Globalization.CultureInfo.GetCultureInfo("de-DE"),
+            "es" => System.Globalization.CultureInfo.GetCultureInfo("es-ES"),
+            _    => System.Globalization.CultureInfo.GetCultureInfo("en-US"),
+        };
+        return culture.DateTimeFormat.GetAbbreviatedDayName(local.DayOfWeek);
+    }
+
+    private string StatusLabel(string status) => status switch
+    {
+        "in-library"    => L["calendar.in_library"],
+        "aired-waiting" => L["calendar.aired_waiting"],
+        _               => L["calendar.upcoming"],
+    };
+
+    private static string ArtStyle(CalendarEventDto e)
+        => string.IsNullOrEmpty(e.BackdropUrl ?? e.PosterUrl)
+            ? ""
+            : $"background-image:url('{(e.BackdropUrl ?? e.PosterUrl)!.Replace("'", "%27")}')";
+}

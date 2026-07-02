@@ -78,6 +78,15 @@
         <DIcon Name="search" Size="15" />
     </button>
 
+    @* Airing calendar — when the next episodes of the library's ongoings drop. *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/calendar") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/calendar"))"
+            title="@L["calendar.title"]"
+            aria-label="@L["calendar.title"]">
+        <DIcon Name="calendar" Size="15" />
+    </button>
+
     @* Watchlist — "Хочу посмотреть". Fed by the Want buttons on the
        recommendation rails (and, later, franchises). *@
     <button type="button"
