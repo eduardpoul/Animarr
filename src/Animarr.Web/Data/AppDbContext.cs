@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
     public DbSet<WatchState> WatchStates => Set<WatchState>();
+    public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
     public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
     public DbSet<EpisodeSegment> EpisodeSegments => Set<EpisodeSegment>();
     public DbSet<EpisodeMetadata> EpisodeMetadata => Set<EpisodeMetadata>();
@@ -104,6 +105,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.FolderId).IsUnique();
             e.HasIndex(x => x.TmdbId);
             e.HasIndex(x => x.MalId);
+            e.HasIndex(x => x.AniListId);
             e.HasIndex(x => x.IdentificationStatus);
         });
 
@@ -162,6 +164,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.MediaItemId);
             e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.LastSeenAt);
+        });
+
+        modelBuilder.Entity<WatchEvent>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+            // One bucket per (user, item, season, episode, day) — the recorder
+            // upserts against this key. SQLite treats NULL as distinct here,
+            // but the recorder always SELECTs before INSERT so the anonymous
+            // (UserId=null) external-player rows don't duplicate either.
+            e.HasIndex(x => new { x.UserId, x.MediaItemId, x.Season, x.Episode, x.Date }).IsUnique();
+            // Stats queries scan a user's date range.
+            e.HasIndex(x => new { x.UserId, x.Date });
         });
 
         modelBuilder.Entity<EpisodeFileMapping>(e =>

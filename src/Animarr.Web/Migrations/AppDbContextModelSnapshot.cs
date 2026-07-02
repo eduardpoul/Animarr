@@ -299,6 +299,9 @@ namespace Animarr.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("AniListId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CandidatesJson")
                         .HasColumnType("TEXT");
 
@@ -433,6 +436,8 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AniListId");
 
                     b.HasIndex("FolderId")
                         .IsUnique();
@@ -898,6 +903,45 @@ namespace Animarr.Web.Migrations
                     b.ToTable("UserPreferences");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SecondsWatched")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "Date");
+
+                    b.HasIndex("UserId", "MediaItemId", "Season", "Episode", "Date")
+                        .IsUnique();
+
+                    b.ToTable("WatchEvents");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.WatchState", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1115,6 +1159,24 @@ namespace Animarr.Web.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchEvent", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MediaItem");
 
                     b.Navigation("User");
                 });
