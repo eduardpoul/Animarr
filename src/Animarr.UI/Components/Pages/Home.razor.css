@@ -233,10 +233,23 @@
 }
 .home-lib__all:hover { color: var(--accent); }
 
+/* Fixed-size cards (the For-you rail's 210px), as many columns as fit —
+   never stretched. Two-row clamp without knowing the column count: rows
+   past the second collapse to 0 height and are clipped by overflow:hidden;
+   row spacing comes from item margins (row-gap would leak into the
+   collapsed rows as phantom bottom padding). */
 .home-lib__grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: var(--space-9);
+    grid-template-columns: repeat(auto-fill, 210px);
+    grid-template-rows: repeat(2, auto);
+    grid-auto-rows: 0;
+    column-gap: var(--space-9);
+    row-gap: 0;
+    justify-content: start;
+    overflow: hidden;
+}
+.home-lib__grid ::deep > * {
+    margin-bottom: var(--space-6);
 }
 
 /* "View all" tile — poster-shaped card closing the grid. */
@@ -270,47 +283,24 @@
     color: var(--text-faint);
 }
 
-/* Row budget per breakpoint. Hidden posters keep their nth-child slot
-   (display:none doesn't reorder), so the caps below are simply
-   columns × rows; the tile is the last child and always shows.
-   Column counts target ~210-240px posters (the classic catalog size)
-   instead of stretching to fill — on ultrawide that means MORE columns,
-   not bigger cards. */
-.home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: none; }         /* 5 cols × 2 rows */
-@media (min-width: 2200px) {
-    .home-lib__grid { grid-template-columns: repeat(9, 1fr); }
-    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
-    .home-lib__grid ::deep > :nth-child(n+18):not(.home-lib__more) { display: none; }     /* 9 × 2 */
+/* The "view all" tile is pinned to the last cell of the second (last
+   visible) row — posters auto-flow around it, and anything past the two
+   rows falls into the collapsed hidden rows. */
+.home-lib__more {
+    grid-row: 2 / 3;
+    grid-column: -2 / -1;
 }
-@media (min-width: 1900px) and (max-width: 2199px) {
-    .home-lib__grid { grid-template-columns: repeat(8, 1fr); }
-    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
-    .home-lib__grid ::deep > :nth-child(n+16):not(.home-lib__more) { display: none; }     /* 8 × 2 */
-}
-@media (min-width: 1600px) and (max-width: 1899px) {
-    .home-lib__grid { grid-template-columns: repeat(7, 1fr); }
-    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
-    .home-lib__grid ::deep > :nth-child(n+14):not(.home-lib__more) { display: none; }     /* 7 × 2 */
-}
-@media (min-width: 1300px) and (max-width: 1599px) {
-    .home-lib__grid { grid-template-columns: repeat(6, 1fr); }
-    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
-    .home-lib__grid ::deep > :nth-child(n+12):not(.home-lib__more) { display: none; }     /* 6 × 2 */
-}
-@media (max-width: 959px) {
-    .home-lib__grid {
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-6);
-    }
-    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
-    .home-lib__grid ::deep > :nth-child(n+8):not(.home-lib__more) { display: none; }      /* 4 × 2 */
-}
+
+/* Phone: fixed 210px would leave a single column — switch to the classic
+   2 stretched columns × 4 rows, tile pinned to the end of row 4. */
 @media (max-width: 639px) {
     .home-lib__grid {
         grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-5);
+        grid-template-rows: repeat(4, auto);
+        column-gap: var(--space-5);
     }
-    /* 2 cols × 4 rows on phones. */
-    .home-lib__grid ::deep > :nth-child(n+8):not(.home-lib__more) { display: none; }
+    .home-lib__more {
+        grid-row: 4 / 5;
+    }
     .home-lib__title { font-size: 19px; }
 }

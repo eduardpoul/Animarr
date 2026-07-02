@@ -145,10 +145,16 @@ public sealed class RecsService(
                 foreach (var l in labels) overlap += genreWeight.GetValueOrDefault(l) / maxWeight;
                 if (overlap <= 0) continue;   // with history, only suggest things the profile supports
                 score += overlap * 2.0;
+                // Tie-break by a per-candidate hash: with a genre-homogeneous
+                // library every candidate ties across anchors, and a plain
+                // "first wins" cites the single most-watched show on every
+                // card. The hash spreads ties across the top-watched titles
+                // deterministically (stable between reloads).
                 var best = anchors
                     .Select(a => (a.Item, Shared: labels.Intersect(a.Labels, StringComparer.OrdinalIgnoreCase).Count()))
                     .Where(x => x.Shared > 0)
                     .OrderByDescending(x => x.Shared)
+                    .ThenBy(x => (m.Id.GetHashCode() ^ x.Item.Id.GetHashCode()) & 0x7fffffff)
                     .FirstOrDefault();
                 if (best.Item is not null)
                     reasonTitle = best.Item.Title;

@@ -162,3 +162,43 @@
     /* Touch has no hover — keep the dismiss reachable. */
     .recrail__dismiss { opacity: 1; }
 }
+
+/* ── viewport + paging arrows ──────────────────────────────────────────
+   Arrows overlay the rail edges while more content exists in that
+   direction (state pushed from the collocated JS on scroll/resize).
+   Mouse-only affordance — touch pans natively. */
+.recrail__viewport { position: relative; }
+.recrail__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
+.recrail__nav {
+    position: absolute;
+    top: 0;
+    /* Centre on the poster area (aspect 2/3 of the 210px cell ≈ 315px). */
+    height: 315px;
+    width: 44px;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    opacity: 0.75;
+    transition: opacity var(--motion-base);
+}
+.recrail__nav:hover { opacity: 1; }
+.recrail__nav--l { left: 0; border-radius: 12px 0 0 12px; }
+.recrail__nav--r {
+    right: 0;
+    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    border-radius: 0 12px 12px 0;
+}
+@media (hover: none) {
+    .recrail__nav { display: none; }
+}
+@media (max-width: 639px) {
+    /* 156px cells → shorter posters. */
+    .recrail__nav { height: 234px; }
+}
