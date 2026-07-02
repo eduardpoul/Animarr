@@ -1277,3 +1277,38 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     opacity: 0.35;
     cursor: default;
 }
+
+/* ── Recommendation scope picker (radio-style rows) ─────────────────── */
+.d-profile__scope-row {
+    appearance: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    text-align: left;
+    transition: border-color var(--motion-base), background var(--motion-base);
+}
+.d-profile__scope-row:hover { border-color: var(--border-strong); }
+.d-profile__scope-row.is-active {
+    border-color: var(--accent-line, var(--accent));
+    background: var(--accent-soft);
+}
+.d-profile__scope-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 14px;
+    border: 2px solid var(--border-strong);
+    flex-shrink: 0;
+    transition: border-color var(--motion-base), background var(--motion-base), box-shadow var(--motion-base);
+}
+.d-profile__scope-row.is-active .d-profile__scope-dot {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: inset 0 0 0 3px var(--surface);
+}

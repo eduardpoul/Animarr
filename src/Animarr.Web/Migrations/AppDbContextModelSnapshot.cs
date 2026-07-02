@@ -523,6 +523,35 @@ namespace Animarr.Web.Migrations
                     b.ToTable("MediaTags");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.RecDismissal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId");
+
+                    b.HasIndex("UserId", "TmdbId");
+
+                    b.ToTable("RecDismissals");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1068,6 +1097,51 @@ namespace Animarr.Web.Migrations
                     b.ToTable("WatchStates");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchlistItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MediaType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PosterUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId");
+
+                    b.HasIndex("UserId", "TmdbId");
+
+                    b.ToTable("WatchlistItems");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
@@ -1159,6 +1233,24 @@ namespace Animarr.Web.Migrations
                     b.Navigation("MediaItem");
 
                     b.Navigation("MediaTag");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.RecDismissal", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
@@ -1274,6 +1366,24 @@ namespace Animarr.Web.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchlistItem", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("MediaItem");
 

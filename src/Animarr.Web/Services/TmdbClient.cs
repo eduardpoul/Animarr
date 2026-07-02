@@ -156,6 +156,24 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
     public Task<TmdbFindResponse?> FindByExternalIdAsync(string externalId, string source, CancellationToken ct = default)
         => GetJsonAsync<TmdbFindResponse>($"{BaseUrl}/find/{Uri.EscapeDataString(externalId)}?external_source={source}&language=en-US", ct);
 
+    // ── Related titles (similar + recommendations) ──────────────────────────
+
+    /// <summary>TMDB's two relatedness feeds for one title, merged and deduped
+    /// (recommendations first — they're behaviour-based and noticeably better
+    /// than the tag-based /similar). This is the external backfill pool for the
+    /// "More like this" / "For you" rails.</summary>
+    public async Task<List<TmdbSearchResult>> GetRelatedAsync(int tmdbId, bool isMovie, CancellationToken ct = default)
+    {
+        var kind = isMovie ? "movie" : "tv";
+        var rec = await GetJsonAsync<TmdbPagedResponse<TmdbSearchResult>>($"{BaseUrl}/{kind}/{tmdbId}/recommendations?language=en-US", ct);
+        var sim = await GetJsonAsync<TmdbPagedResponse<TmdbSearchResult>>($"{BaseUrl}/{kind}/{tmdbId}/similar?language=en-US", ct);
+        return (rec?.Results ?? []).Concat(sim?.Results ?? [])
+            .Where(r => r.Id > 0 && !string.IsNullOrEmpty(r.DisplayTitle))
+            .GroupBy(r => r.Id)
+            .Select(g => g.First())
+            .ToList();
+    }
+
     // ── All images for a given TMDB entity ───────────────────────────────────
 
     /// <summary>Returns ALL posters, backdrops and logos for a TV series, in

@@ -115,6 +115,38 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return GetOrNullAsync<TrickplayDto>(url, ct);
     }
 
+    public async Task<RecCardDto[]> GetSimilarAsync(Guid mediaItemId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<RecCardDto[]>(ApiRoutes.MediaSimilarFor(mediaItemId), JsonOpts, ct)
+            ?? Array.Empty<RecCardDto>();
+
+    public async Task<RecCardDto[]> GetForYouAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<RecCardDto[]>(ApiRoutes.MeForYou, JsonOpts, ct)
+            ?? Array.Empty<RecCardDto>();
+
+    public async Task DismissRecAsync(Guid? mediaItemId, int? tmdbId, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeRecsDismiss,
+            new RecDismissRequest(mediaItemId, tmdbId), JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<WatchlistItemDto[]> GetWatchlistAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<WatchlistItemDto[]>(ApiRoutes.MeWatchlist, JsonOpts, ct)
+            ?? Array.Empty<WatchlistItemDto>();
+
+    public async Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeWatchlist, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<WatchlistItemDto>(JsonOpts, ct))!;
+    }
+
+    public async Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.MeWatchlistItem(watchlistItemId), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default)
         => GetOrNullAsync<SegmentScanStatusDto>(ApiRoutes.SegmentsStatus, ct);
 

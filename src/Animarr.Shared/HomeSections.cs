@@ -28,7 +28,7 @@ public static class HomeSections
 
     /// <summary>Sections that exist in the app TODAY. The settings editor only
     /// offers these (no dead toggles); Home only renders these.</summary>
-    public static readonly string[] ImplementedKeys = ["continue", "nextup", "library"];
+    public static readonly string[] ImplementedKeys = ["continue", "nextup", "foryou", "library"];
 
     public static List<Entry> Defaults() => KnownKeys.Select(k => new Entry(k, true)).ToList();
 
