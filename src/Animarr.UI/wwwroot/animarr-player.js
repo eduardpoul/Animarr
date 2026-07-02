@@ -873,6 +873,10 @@
         <div class="vp-hud__track-buffer" data-bind="buffer"></div>
         <div class="vp-hud__track-fill"   data-bind="fill"></div>
         <div class="vp-hud__thumb"        data-bind="thumb"></div>
+        <div class="vp-hud__preview" data-bind="preview">
+          <div class="vp-hud__preview-img"  data-bind="preview-img"></div>
+          <div class="vp-hud__preview-time" data-bind="preview-time">0:00</div>
+        </div>
       </div>
       <span class="vp-hud__time" data-bind="dur">0:00</span>
     </div>
@@ -1369,6 +1373,9 @@
             fsIcon:     $('[data-bind="fs-icon"]'),
             fsLabel:    $('[data-bind="fs-label"]'),
             track:      $('[data-act="seek"]'),
+            preview:     $('[data-bind="preview"]'),
+            previewImg:  $('[data-bind="preview-img"]'),
+            previewTime: $('[data-bind="preview-time"]'),
         };
 
         // ── touch / phone layout gate ─────────────────────────────────
@@ -1720,21 +1727,66 @@
             refs.thumb.style.left = (pct * 100) + '%';
             refs.cur.textContent  = formatTime(t);
         }
+        // ── trickplay seek preview ────────────────────────────────────
+        // Sprite-sheet thumbnail bubble over the scrubber. Data arrives via
+        // setMediaSession → entry.trickplay (null → no bubble). Mouse: any
+        // hover over the track; touch: while scrubbing (pointermove only
+        // fires pressed on touch), hidden again when the finger lifts.
+        let previewSprite = null;
+        function hideSeekPreview() {
+            if (refs.preview) refs.preview.classList.remove('vp-hud__preview--on');
+        }
+        function seekPreviewAt(clientX) {
+            const tp = entry.trickplay;
+            if (!refs.preview || !tp || !tp.spriteUrl || !tp.count) { hideSeekPreview(); return; }
+            const dur = adapter.duration || entry.totalDuration || 0;
+            if (dur <= 0) { hideSeekPreview(); return; }
+            const rect = refs.track.getBoundingClientRect();
+            if (rect.width <= 0) return;
+            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const t   = dur * pct;
+            let idx = Math.floor(t / (tp.intervalSec || 10));
+            idx = Math.max(0, Math.min(tp.count - 1, idx));
+            const col = idx % tp.cols, row = Math.floor(idx / tp.cols);
+            if (previewSprite !== tp.spriteUrl) {
+                previewSprite = tp.spriteUrl;
+                refs.previewImg.style.width  = tp.tileWidth + 'px';
+                refs.previewImg.style.height = tp.tileHeight + 'px';
+                refs.previewImg.style.backgroundImage = 'url("' + tp.spriteUrl + '")';
+                // Natural sprite size keeps the tile math 1:1 — never scale it.
+                refs.previewImg.style.backgroundSize =
+                    (tp.cols * tp.tileWidth) + 'px ' + (tp.rows * tp.tileHeight) + 'px';
+            }
+            refs.previewImg.style.backgroundPosition =
+                (-(col * tp.tileWidth)) + 'px ' + (-(row * tp.tileHeight)) + 'px';
+            refs.previewTime.textContent = formatTime(t);
+            const half = (refs.preview.offsetWidth || tp.tileWidth) / 2;
+            refs.preview.style.left =
+                Math.max(half, Math.min(rect.width - half, clientX - rect.left)) + 'px';
+            refs.preview.classList.add('vp-hud__preview--on');
+        }
+
         refs.track.addEventListener('pointerdown', (e) => {
             dragging = true;
             try { refs.track.setPointerCapture(e.pointerId); } catch {}
+            seekPreviewAt(e.clientX);
             seekToPct(pctFromEvent(e));
             show();
         });
         refs.track.addEventListener('pointermove', (e) => {
+            seekPreviewAt(e.clientX);
             if (!dragging) return;
             seekToPct(pctFromEvent(e));
             show();
         });
+        refs.track.addEventListener('pointerleave', hideSeekPreview);
         const endDrag = (e) => {
             if (!dragging) return;
             dragging = false;
             try { refs.track.releasePointerCapture(e.pointerId); } catch {}
+            // Touch has no hover — drop the bubble as the finger lifts. The
+            // mouse re-shows it on the very next move over the track.
+            hideSeekPreview();
             show();
         };
         refs.track.addEventListener('pointerup',     endDrag);
@@ -3002,6 +3054,16 @@
         // timeupdate. null → no detected segments: Skip stays hidden and the
         // next-up card falls back to 95% of the runtime.
         entry.segments = (meta && meta.segments) || null;
+        // Trickplay sprite manifest (seek preview). Read live by the HUD's
+        // scrubber hover/drag handler; null → no preview bubble. Warm the
+        // sprite image so the first hover doesn't flash an empty box.
+        entry.trickplay = (meta && meta.trickplay) || null;
+        try {
+            if (entry.trickplay && entry.trickplay.spriteUrl) {
+                const im = new Image();
+                im.src = entry.trickplay.spriteUrl;
+            }
+        } catch { /* preload is best-effort */ }
         entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || 'Skip intro';
         entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || 'Skip credits';
         try {

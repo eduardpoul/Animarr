@@ -53,6 +53,11 @@ public static class ApiRoutes
     public const string SegmentsStatus    = "/api/segments/status";
     /// <summary>POST — reset scan flags so the background pass reprocesses all titles.</summary>
     public const string SegmentsRescan    = "/api/segments/rescan";
+    /// <summary>GET <c>?season=&amp;episode=</c> (omit both for movies) — the
+    /// episode's seek-preview sprite manifest (<c>TrickplayDto</c>), or 204
+    /// when no sprite has been generated yet. Sprites are pre-built by the
+    /// trickplay background pass; this endpoint never generates inline.</summary>
+    public const string MediaTrickplay    = "/api/media/{id}/trickplay";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -266,6 +271,7 @@ public static class ApiRoutes
     public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
     public static string MediaEpisodesFor(Guid id)     => MediaEpisodes.Replace("{id}", id.ToString());
     public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
+    public static string MediaTrickplayFor(Guid id)    => MediaTrickplay.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());

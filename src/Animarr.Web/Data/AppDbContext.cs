@@ -21,6 +21,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
     public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
     public DbSet<EpisodeSegment> EpisodeSegments => Set<EpisodeSegment>();
+    public DbSet<TrickplayAsset> TrickplayAssets => Set<TrickplayAsset>();
     public DbSet<EpisodeMetadata> EpisodeMetadata => Set<EpisodeMetadata>();
 
     // ─── Multi-user (v4) ──────────────────────────────────────────────────────
@@ -212,6 +213,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // One segment per (item, season, episode, kind). The detection pass
             // upserts against this key, so re-running is idempotent.
             e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode, x.Kind }).IsUnique();
+        });
+
+        modelBuilder.Entity<TrickplayAsset>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One sprite per (item, file) — the generator upserts against this.
+            e.HasIndex(x => new { x.MediaItemId, x.FilePath }).IsUnique();
+            // Player lookup: (item, season, episode). Non-unique — alt versions
+            // of the same episode each carry a sprite; the endpoint picks one.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode });
         });
 
         modelBuilder.Entity<EpisodeMetadata>(e =>

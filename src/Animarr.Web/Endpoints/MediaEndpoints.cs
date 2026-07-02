@@ -892,6 +892,37 @@ internal static class MediaEndpoints
             return Results.NoContent();
         });
 
+        // ── Trickplay (seek-preview sprites) ─────────────────────────────────
+        // Manifest for one episode (?season=&episode=) or the movie file (no
+        // params). 204 when the background pass hasn't generated a sprite yet —
+        // the player just shows no preview bubble. Never generates inline: a
+        // sprite costs seconds of ffmpeg, far too slow for a player-start call.
+        // AllowAnonymous to match the other playback endpoints.
+        app.MapGet(ApiRoutes.MediaTrickplay, async (
+            Guid id,
+            int? season,
+            int? episode,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var q = db.TrickplayAssets.AsNoTracking().Where(a => a.MediaItemId == id);
+            // Seasonless disk layouts store Season=null but the player asks with
+            // season=1 — same ??1 convention as the segments endpoint.
+            q = episode is int e
+                ? q.Where(a => (a.Season ?? 1) == (season ?? 1) && a.Episode == e)
+                : q.Where(a => a.Episode == null);
+            var rows = await q.ToListAsync(ct);
+            var row = rows.FirstOrDefault(r => File.Exists(r.SpritePath));
+            if (row is null) return Results.NoContent();
+
+            var spriteUrl = $"/api/image?path={Uri.EscapeDataString(row.SpritePath)}&t={row.GeneratedAtUtc.Ticks}";
+            return Results.Ok(new TrickplayDto(
+                spriteUrl, row.IntervalSec, row.TileWidth, row.TileHeight,
+                row.Cols, row.Rows, row.Count));
+        })
+        .AllowAnonymous();
+
         // Skip-intro/credits scan progress for the Settings indicator.
         app.MapGet(ApiRoutes.SegmentsStatus, async (
             IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>

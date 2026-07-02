@@ -108,6 +108,13 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => GetOrNullAsync<EpisodeSegmentsDto>(
             ApiRoutes.MediaSegmentsFor(mediaItemId) + $"?season={season}&episode={episode}", ct);
 
+    public Task<TrickplayDto?> GetTrickplayAsync(Guid mediaItemId, int? season, int? episode, CancellationToken ct = default)
+    {
+        var url = ApiRoutes.MediaTrickplayFor(mediaItemId);
+        if (episode is int e) url += $"?season={season ?? 1}&episode={e}";
+        return GetOrNullAsync<TrickplayDto>(url, ct);
+    }
+
     public Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default)
         => GetOrNullAsync<SegmentScanStatusDto>(ApiRoutes.SegmentsStatus, ct);
 

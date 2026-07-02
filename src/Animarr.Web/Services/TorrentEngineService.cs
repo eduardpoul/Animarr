@@ -360,9 +360,11 @@ public class TorrentEngineService : BackgroundService
                 {
                     var cleared = await ctx.MediaItems
                         .Where(m => m.FolderId == fwId)
-                        .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastSegmentScanAt, (DateTime?)null));
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(m => m.LastSegmentScanAt,   (DateTime?)null)
+                            .SetProperty(m => m.LastTrickplayScanAt, (DateTime?)null));
                     if (cleared > 0)
-                        _logger.LogInformation("[Segments] torrent {Hash} done → cleared segment-scan gate for its title", infoHash);
+                        _logger.LogInformation("[Segments] torrent {Hash} done → cleared segment/trickplay scan gates for its title", infoHash);
                 }
             }
 
