@@ -33,11 +33,19 @@ public sealed class RecsService(
 {
     private const int SimilarBudget = 8;
     private const int ForYouBudget  = 12;
+    /// <summary>Candidate pool size the For-you rail rotates over.</summary>
+    private const int PoolSize      = 30;
+    /// <summary>Recency half-life for the core taste profile.</summary>
+    private const double HalfLifeDays = 14;
+    private static readonly TimeSpan PoolTtl     = TimeSpan.FromHours(3);
+    private static readonly TimeSpan RotateEvery = TimeSpan.FromHours(2);
 
     // TMDB related feeds barely move day to day — cache per (id, kind) so a
     // detail page reopen or a Home reload costs zero external calls.
     private static readonly ConcurrentDictionary<(int Id, bool Movie), (DateTime At, List<TmdbSearchResult> Items)> _relatedCache = new();
     private static readonly TimeSpan RelatedTtl = TimeSpan.FromHours(24);
+    /// <summary>Per-user For-you pools (see <see cref="BuildForYouPoolAsync"/>).</summary>
+    private static readonly ConcurrentDictionary<Guid, (DateTime At, List<RecCardDto> Pool)> _forYouPool = new();
 
     // ── "More like this" ────────────────────────────────────────────────────
 
@@ -87,14 +95,62 @@ public sealed class RecsService(
 
     // ── "For you" ───────────────────────────────────────────────────────────
 
+    /// <summary>Serve the "For you" rail: a ~30-card pool is (re)built lazily
+    /// every <see cref="PoolTtl"/> and cached per user; the visible window of
+    /// <see cref="ForYouBudget"/> rotates every <see cref="RotateEvery"/> so
+    /// the rail doesn't flicker between Home visits but does feel alive over
+    /// the day. Dismissals / watchlist adds apply at serve time — instantly,
+    /// without waiting for a rebuild.</summary>
     public async Task<List<RecCardDto>> GetForYouAsync(Guid userId, CancellationToken ct = default)
+    {
+        List<RecCardDto> pool;
+        if (_forYouPool.TryGetValue(userId, out var hit) && DateTime.UtcNow - hit.At < PoolTtl)
+        {
+            pool = hit.Pool;
+        }
+        else
+        {
+            pool = await BuildForYouPoolAsync(userId, ct);
+            _forYouPool[userId] = (DateTime.UtcNow, pool);
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var (dismissed, dismissedTmdb, wlTmdb) = await LoadExclusionsAsync(db, userId, ct);
+        var visible = pool
+            .Where(c => c.MediaItemId is not Guid mid || !dismissed.Contains(mid))
+            .Where(c => c.MediaItemId is not null ||
+                        (c.TmdbId is int t && !dismissedTmdb.Contains(t) && !wlTmdb.Contains(t)))
+            .ToList();
+        if (visible.Count <= ForYouBudget) return visible;
+
+        // Deterministic rotation: same window for RotateEvery, then it slides.
+        var epoch  = DateTime.UtcNow.Ticks / RotateEvery.Ticks;
+        var offset = (int)((uint)HashCode.Combine(userId, epoch) % visible.Count);
+        return visible.Skip(offset).Concat(visible.Take(offset)).Take(ForYouBudget).ToList();
+    }
+
+    /// <summary>Build the layered candidate pool:
+    ///   • CORE (~60%) — the CURRENT taste: per-title engagement decays with a
+    ///     14-day half-life (day-bucketed WatchEvents, falling back to the
+    ///     LastSeenAt-decayed aggregate for pre-journal history); externals are
+    ///     picked by CONSENSUS VOTING across the recent seeds' TMDB related
+    ///     lists (a title two recent shows both point at beats a merely
+    ///     popular one).
+    ///   • MEMORY (~25%) — the OLD taste: seeds/genres from all-time history
+    ///     that the current core doesn't cover, so a phase of watching donghua
+    ///     doesn't erase the sci-fi you loved before.
+    ///   • EXPLORE (~15%) — high-rated titles OUTSIDE both profiles, an
+    ///     anti-filter-bubble wildcard.
+    /// The layers are interleaved (memory/explore every ~4th slot).</summary>
+    private async Task<List<RecCardDto>> BuildForYouPoolAsync(Guid userId, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var all = await LoadCatalogAsync(db, ct);
         if (all.Count == 0) return [];
-        var (dismissed, dismissedTmdb, wlTmdb) = await LoadExclusionsAsync(db, userId, ct);
+        var byId = all.ToDictionary(m => m.Id);
+        var now  = DateTime.UtcNow;
 
-        // Engagement per title: watch seconds + "touched at all".
+        // ── engagement: recency-decayed (core) + flat all-time (memory) ─────
         var states = await db.WatchStates.AsNoTracking()
             .Where(w => w.UserId == userId)
             .GroupBy(w => w.MediaItemId)
@@ -102,95 +158,166 @@ public sealed class RecsService(
             {
                 MediaItemId = g.Key,
                 Seconds     = g.Sum(w => w.TotalWatchTimeSec),
+                LastSeen    = g.Max(w => w.LastSeenAt),
                 Touched     = g.Any(w => w.IsWatched || (w.ProgressMs ?? 0) > 0),
             })
             .ToListAsync(ct);
-        var byId      = all.ToDictionary(m => m.Id);
-        var touched   = states.Where(s => s.Touched).Select(s => s.MediaItemId).ToHashSet();
-        var topWatched = states
-            .Where(s => s.Seconds > 0 && byId.ContainsKey(s.MediaItemId))
-            .OrderByDescending(s => s.Seconds)
-            .Select(s => byId[s.MediaItemId])
-            .Take(5)
-            .ToList();
+        var events = await db.WatchEvents.AsNoTracking()
+            .Where(e => e.UserId == userId)
+            .Select(e => new { e.MediaItemId, e.Date, e.SecondsWatched })
+            .ToListAsync(ct);
 
-        // Genre profile: seconds spent per canonical genre/tag label.
-        var genreWeight = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        foreach (var s in states.Where(x => x.Seconds > 0))
+        double DecayDays(double days) => Math.Pow(0.5, Math.Max(0, days) / HalfLifeDays);
+        var recentWeight = events
+            .GroupBy(e => e.MediaItemId)
+            .ToDictionary(g => g.Key, g => g.Sum(e => e.SecondsWatched * DecayDays((now - e.Date).TotalDays)));
+        foreach (var s in states.Where(x => x.Seconds > 0 && x.LastSeen is not null))
         {
-            if (!byId.TryGetValue(s.MediaItemId, out var m)) continue;
-            foreach (var g in LabelsOf(m))
-                genreWeight[g] = genreWeight.GetValueOrDefault(g) + s.Seconds;
+            // Pre-journal fallback: the aggregate decayed by its last activity.
+            var fb = s.Seconds * DecayDays((now - s.LastSeen!.Value).TotalDays);
+            if (fb > recentWeight.GetValueOrDefault(s.MediaItemId))
+                recentWeight[s.MediaItemId] = fb;
         }
-        var maxWeight = genreWeight.Count > 0 ? genreWeight.Values.Max() : 0;
+        var flatWeight = states.Where(s => s.Seconds > 0)
+            .ToDictionary(s => s.MediaItemId, s => (double)s.Seconds);
+        var touched = states.Where(s => s.Touched).Select(s => s.MediaItemId).ToHashSet();
 
-        // Local candidates: untouched, not dismissed. Cold start (no history)
-        // falls back to top-rated so the rail isn't empty on day one.
-        // Reason anchors: each card picks its OWN best-overlapping title from
-        // the user's top-watched — a rail where every reason reads "because
-        // you watch Bleach" is monotone even when true.
-        var anchors = topWatched.Take(4)
-            .Select(a => (Item: a, Labels: LabelsOf(a)))
+        List<MediaItem> SeedsOf(Dictionary<Guid, double> w, HashSet<Guid>? not = null, int take = 3) => w
+            .Where(kv => kv.Value > 0 && byId.ContainsKey(kv.Key) && (not is null || !not.Contains(kv.Key)))
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => byId[kv.Key])
+            .Take(take)
             .ToList();
-        var locals = new List<(MediaItem M, double Score, string? ReasonTitle, string? ReasonTag)>();
-        foreach (var m in all)
+        var recentSeeds   = SeedsOf(recentWeight, take: 3);
+        var recentSeedIds = recentSeeds.Select(s => s.Id).ToHashSet();
+        var memorySeeds   = SeedsOf(flatWeight, not: recentSeedIds, take: 2);
+
+        Dictionary<string, double> GenreProfile(Dictionary<Guid, double> w)
         {
-            if (touched.Contains(m.Id) || dismissed.Contains(m.Id)) continue;
-            var labels = LabelsOf(m);
-            double score = (m.Rating ?? 0) * 0.15;
-            string? reasonTitle = null, reasonTag = null;
-            if (maxWeight > 0)
+            var p = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (id, weight) in w)
             {
-                double overlap = 0;
-                foreach (var l in labels) overlap += genreWeight.GetValueOrDefault(l) / maxWeight;
-                if (overlap <= 0) continue;   // with history, only suggest things the profile supports
-                score += overlap * 2.0;
-                // Tie-break by a per-candidate hash: with a genre-homogeneous
-                // library every candidate ties across anchors, and a plain
-                // "first wins" cites the single most-watched show on every
-                // card. The hash spreads ties across the top-watched titles
-                // deterministically (stable between reloads).
-                var best = anchors
-                    .Select(a => (a.Item, Shared: labels.Intersect(a.Labels, StringComparer.OrdinalIgnoreCase).Count()))
-                    .Where(x => x.Shared > 0)
-                    .OrderByDescending(x => x.Shared)
-                    .ThenBy(x => (m.Id.GetHashCode() ^ x.Item.Id.GetHashCode()) & 0x7fffffff)
-                    .FirstOrDefault();
-                if (best.Item is not null)
-                    reasonTitle = best.Item.Title;
-                else
-                    reasonTag = PickDisplayLabel(m,
-                        labels.OrderByDescending(l => genreWeight.GetValueOrDefault(l)).Take(1).ToList());
+                if (weight <= 0 || !byId.TryGetValue(id, out var m)) continue;
+                foreach (var l in LabelsOf(m)) p[l] = p.GetValueOrDefault(l) + weight;
             }
-            locals.Add((m, score, reasonTitle, reasonTag));
+            return p;
+        }
+        var coreProfile   = GenreProfile(recentWeight);
+        var flatProfile   = GenreProfile(flatWeight);
+        var coreTopGenres = coreProfile.OrderByDescending(kv => kv.Value).Take(3).Select(kv => kv.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // ── local candidate scoring against a profile ────────────────────────
+        List<(MediaItem M, double Score, string? RTitle, string? RTag)> ScoreLocals(
+            Dictionary<string, double> profile, List<MediaItem> anchorSeeds, Func<MediaItem, List<string>, bool>? gate)
+        {
+            var maxW = profile.Count > 0 ? profile.Values.Max() : 0;
+            var anchors = anchorSeeds.Select(a => (Item: a, Labels: LabelsOf(a))).ToList();
+            var list = new List<(MediaItem, double, string?, string?)>();
+            foreach (var m in all)
+            {
+                if (touched.Contains(m.Id)) continue;
+                var labels = LabelsOf(m);
+                if (gate is not null && !gate(m, labels)) continue;
+                double score = (m.Rating ?? 0) * 0.15;
+                string? rTitle = null, rTag = null;
+                if (maxW > 0)
+                {
+                    double overlap = 0;
+                    foreach (var l in labels) overlap += profile.GetValueOrDefault(l) / maxW;
+                    if (overlap <= 0) continue;
+                    score += overlap * 2.0;
+                    var best = anchors
+                        .Select(a => (a.Item, Shared: labels.Intersect(a.Labels, StringComparer.OrdinalIgnoreCase).Count()))
+                        .Where(x => x.Shared > 0)
+                        .OrderByDescending(x => x.Shared)
+                        .ThenBy(x => (m.Id.GetHashCode() ^ x.Item.Id.GetHashCode()) & 0x7fffffff)
+                        .FirstOrDefault();
+                    if (best.Item is not null) rTitle = best.Item.Title;
+                    else rTag = PickDisplayLabel(m, labels.OrderByDescending(l => profile.GetValueOrDefault(l)).Take(1).ToList());
+                }
+                list.Add((m, score, rTitle, rTag));
+            }
+            return list;
         }
 
-        var cards = locals
-            .OrderByDescending(s => s.Score)
-            .Take(ForYouBudget)
-            .Select(s => LocalCard(s.M, s.ReasonTitle, s.ReasonTag))
+        var coreBudget    = (int)(PoolSize * 0.6);
+        var memoryBudget  = (int)(PoolSize * 0.25);
+        var exploreBudget = PoolSize - coreBudget - memoryBudget;
+
+        // CORE — current-taste locals (cold start: profile empty → top-rated).
+        var core = ScoreLocals(coreProfile, recentSeeds, gate: null)
+            .OrderByDescending(x => x.Score).Take(coreBudget)
+            .Select(x => LocalCard(x.M, x.RTitle, x.RTag)).ToList();
+        var used = core.Where(c => c.MediaItemId is not null).Select(c => c.MediaItemId!.Value).ToHashSet();
+
+        // MEMORY — old-taste locals whose strongest genre is OUTSIDE the
+        // current core's top genres (that difference is the whole point).
+        var memory = ScoreLocals(flatProfile, memorySeeds,
+                gate: (m, labels) => !used.Contains(m.Id) && !labels.Any(coreTopGenres.Contains))
+            .OrderByDescending(x => x.Score).Take(memoryBudget)
+            .Select(x => LocalCard(x.M, x.RTitle, x.RTag)).ToList();
+        foreach (var c in memory.Where(c => c.MediaItemId is not null)) used.Add(c.MediaItemId!.Value);
+
+        // EXPLORE — high-rated untouched titles outside BOTH profiles.
+        var knownGenres = coreProfile.Keys.Concat(flatProfile.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var explore = all
+            .Where(m => !touched.Contains(m.Id) && !used.Contains(m.Id)
+                        && (knownGenres.Count == 0 || !LabelsOf(m).Any(knownGenres.Contains)))
+            .OrderByDescending(m => m.Rating ?? 0)
+            .Take(exploreBudget)
+            .Select(m => LocalCard(m))
             .ToList();
 
-        // External backfill: TMDB related of the top-watched titles.
-        var need = ForYouBudget - cards.Count;
-        if (need > 0 && topWatched.Count > 0 && await ScopeAllowsExternalAsync(db, userId, ct))
+        // ── external backfill by consensus voting ────────────────────────────
+        if (await ScopeAllowsExternalAsync(db, userId, ct))
         {
             var libTmdb = LibraryTmdbIds(all);
-            var seen = new HashSet<int>();
-            var pool = new List<(TmdbSearchResult R, bool Movie, string Seed)>();
-            foreach (var seed in topWatched.Take(3).Where(s => s.TmdbId is int))
+            async Task<List<RecCardDto>> VoteAsync(List<MediaItem> seeds, Dictionary<Guid, double> weights, int take)
             {
-                var isMovie = seed.MediaType == MediaItemType.Movie;
-                foreach (var r in await RelatedCachedAsync(seed.TmdbId!.Value, isMovie, ct))
-                    if (seen.Add(r.Id)) pool.Add((r, isMovie, seed.Title));
+                if (take <= 0 || seeds.Count == 0) return [];
+                var maxSeedW = seeds.Max(s => weights.GetValueOrDefault(s.Id));
+                var votes = new Dictionary<int, (double Score, TmdbSearchResult R, bool Movie, string Seed)>();
+                foreach (var seed in seeds.Where(s => s.TmdbId is int))
+                {
+                    var isMovie = seed.MediaType == MediaItemType.Movie;
+                    var seedW = maxSeedW > 0 ? weights.GetValueOrDefault(seed.Id) / maxSeedW : 1;
+                    var related = await RelatedCachedAsync(seed.TmdbId!.Value, isMovie, ct);
+                    for (var i = 0; i < related.Count; i++)
+                    {
+                        var r = related[i];
+                        if (libTmdb.Contains(r.Id)) continue;
+                        // Vote = seed recency-weight + a small list-position bonus;
+                        // a title present in SEVERAL seeds' lists accumulates.
+                        var v = seedW * (1.0 + 0.2 * (related.Count - i) / (double)related.Count);
+                        if (votes.TryGetValue(r.Id, out var cur))
+                            votes[r.Id] = (cur.Score + v, cur.R, cur.Movie, cur.Seed);
+                        else
+                            votes[r.Id] = (v, r, isMovie, seed.Title);
+                    }
+                }
+                return votes.Values
+                    .OrderByDescending(v => v.Score)
+                    .ThenByDescending(v => v.R.VoteCount)
+                    .Take(take)
+                    .Select(v => ExternalCard(v.R, v.Movie, reasonTitle: v.Seed))
+                    .ToList();
             }
-            cards.AddRange(pool
-                .Where(p => !libTmdb.Contains(p.R.Id) && !dismissedTmdb.Contains(p.R.Id) && !wlTmdb.Contains(p.R.Id))
-                .OrderByDescending(p => p.R.VoteCount)
-                .Take(need)
-                .Select(p => ExternalCard(p.R, p.Movie, reasonTitle: p.Seed)));
+
+            core.AddRange(await VoteAsync(recentSeeds, recentWeight, coreBudget - core.Count));
+            memory.AddRange(await VoteAsync(memorySeeds, flatWeight, memoryBudget - memory.Count));
         }
-        return cards;
+
+        // ── interleave: core is the spine, memory/explore every ~4th slot ────
+        var extras = new Queue<RecCardDto>(memory.Concat(explore));
+        var spine  = new Queue<RecCardDto>(core);
+        var pool   = new List<RecCardDto>(PoolSize);
+        while (pool.Count < PoolSize && (spine.Count > 0 || extras.Count > 0))
+        {
+            var takeExtra = (pool.Count % 4 == 3 && extras.Count > 0) || spine.Count == 0;
+            pool.Add(takeExtra ? extras.Dequeue() : spine.Dequeue());
+        }
+        return pool;
     }
 
     // ── shared bits ─────────────────────────────────────────────────────────
