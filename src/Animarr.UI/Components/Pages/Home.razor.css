@@ -270,14 +270,27 @@
 
 /* Row budget per breakpoint. Hidden posters keep their nth-child slot
    (display:none doesn't reorder), so the caps below are simply
-   columns × rows; the tile is the last child and always shows. */
+   columns × rows; the tile is the last child and always shows.
+   Column counts target ~210-240px posters (the classic catalog size)
+   instead of stretching to fill — on ultrawide that means MORE columns,
+   not bigger cards. */
 .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: none; }         /* 5 cols × 2 rows */
-@media (min-width: 1600px) {
+@media (min-width: 2200px) {
+    .home-lib__grid { grid-template-columns: repeat(9, 1fr); }
+    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
+    .home-lib__grid ::deep > :nth-child(n+18):not(.home-lib__more) { display: none; }     /* 9 × 2 */
+}
+@media (min-width: 1900px) and (max-width: 2199px) {
+    .home-lib__grid { grid-template-columns: repeat(8, 1fr); }
+    .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
+    .home-lib__grid ::deep > :nth-child(n+16):not(.home-lib__more) { display: none; }     /* 8 × 2 */
+}
+@media (min-width: 1600px) and (max-width: 1899px) {
     .home-lib__grid { grid-template-columns: repeat(7, 1fr); }
     .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
     .home-lib__grid ::deep > :nth-child(n+14):not(.home-lib__more) { display: none; }     /* 7 × 2 */
 }
-@media (min-width: 1200px) and (max-width: 1599px) {
+@media (min-width: 1300px) and (max-width: 1599px) {
     .home-lib__grid { grid-template-columns: repeat(6, 1fr); }
     .home-lib__grid ::deep > :nth-child(n+10):not(.home-lib__more) { display: initial; }
     .home-lib__grid ::deep > :nth-child(n+12):not(.home-lib__more) { display: none; }     /* 6 × 2 */

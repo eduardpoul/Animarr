@@ -34,7 +34,9 @@
 .recrail__row::-webkit-scrollbar { display: none; }
 
 .recrail__cell {
-    width: 164px;
+    /* Match the library grid's poster width (~210-240px) so the rails and
+       the grid read as one system, Emby-style. */
+    width: 210px;
     flex-shrink: 0;
     scroll-snap-align: start;
 }
@@ -155,7 +157,7 @@
 .recrail__reason-dot { color: var(--accent-hi); font-size: 8px; }
 
 @media (max-width: 639px) {
-    .recrail__cell { width: 138px; }
+    .recrail__cell { width: 156px; }
     .recrail__title { font-size: 19px; }
     /* Touch has no hover — keep the dismiss reachable. */
     .recrail__dismiss { opacity: 1; }
