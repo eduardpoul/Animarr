@@ -1,4 +1,4 @@
-namespace Animarr.UI.Services;
+namespace Animarr.Shared;
 
 /// <summary>
 /// Maps ISO-639-1 language codes (returned by TMDB / MAL) to display names used by the catalog

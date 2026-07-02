@@ -1,4 +1,4 @@
-namespace Animarr.Web.Services;
+namespace Animarr.Shared;
 
 /// <summary>
 /// Compares strings so that embedded numbers sort numerically rather than lexicographically.
