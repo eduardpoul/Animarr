@@ -30,3 +30,15 @@ public static class AuthConstants
         public const string ManageUsers    = "perm:manageUsers";
     }
 }
+
+/// <summary>
+/// Names of the rate-limiter policies registered in <c>Program.cs</c> and
+/// referenced by endpoints via <c>RequireRateLimiting</c>. Kept next to
+/// <see cref="AuthConstants"/> because both guard the anonymous surface.
+/// </summary>
+public static class RateLimitPolicies
+{
+    /// <summary>Per-IP window for the anonymous TV-pairing endpoints — see
+    /// the registration comment in <c>Program.cs</c> for the budget math.</summary>
+    public const string Pair = "pair";
+}
