@@ -71,6 +71,11 @@ public class UserPreferences
     /// already per-user when it ships; no UI reads it yet.</summary>
     public string RecsScope { get; set; } = "everywhere";
 
+    /// <summary>Hide filler/recap-flagged episodes from the episode grid and
+    /// list on title pages. The page toggle IS this per-account default (same
+    /// contract as EpisodeListView).</summary>
+    public bool HideFillers { get; set; }
+
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 
     /// <summary>Preferred audio language for new playbacks. ISO 639-1 lowercase or

@@ -1060,6 +1060,9 @@ namespace Animarr.Web.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("HideFillers")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("HomeSectionsJson")
                         .HasColumnType("TEXT");
 

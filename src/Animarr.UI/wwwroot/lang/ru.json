@@ -557,6 +557,8 @@
   "home.next_up": "Смотреть дальше",
   "home.new_badge": "Новое",
   "episode.filler": "Филлер",
+  "episode.hide_fillers": "Скрыть филлеры",
+  "episode.hide_fillers_hint": "Скрыть филлерные и рекап-серии",
   "episode.recap": "Рекап",
   "franchise.overline": "Франшиза",
   "franchise.progress": "просмотрено {0} из {1}",

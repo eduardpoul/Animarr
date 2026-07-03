@@ -24,7 +24,8 @@ public sealed record UpdatePreferencesRequest(
     int?    ThemeMusicVolume  = null,
     string? EpisodeListView   = null,
     string? HomeSectionsJson  = null,
-    string? RecsScope         = null);
+    string? RecsScope         = null,
+    bool?   HideFillers       = null);
 
 /// <summary>POST body for <c>/api/me/password</c>. Requires the current
 /// password as an anti-CSRF measure on top of the auth cookie.</summary>

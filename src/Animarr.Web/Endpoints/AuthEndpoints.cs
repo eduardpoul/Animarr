@@ -167,6 +167,7 @@ internal static class AuthEndpoints
             // (= defaults). Bounded by the parser, so no length games.
             if (req.HomeSectionsJson is string hsj)       prefs.HomeSectionsJson   = HomeSections.Normalize(hsj);
             if (req.RecsScope is string rs)               prefs.RecsScope          = rs.ToLowerInvariant() == "library" ? "library" : "everywhere";
+            if (req.HideFillers is bool hfil)             prefs.HideFillers        = hfil;
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -688,7 +689,8 @@ internal static class AuthEndpoints
         p.ThemeMusicVolume,
         p.EpisodeListView,
         p.HomeSectionsJson,
-        p.RecsScope);
+        p.RecsScope,
+        p.HideFillers);
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale

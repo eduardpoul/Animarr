@@ -556,6 +556,8 @@
   "home.next_up": "Als Nächstes",
   "home.new_badge": "NEU",
   "episode.filler": "Filler",
+  "episode.hide_fillers": "Filler ausblenden",
+  "episode.hide_fillers_hint": "Filler- und Rückblick-Folgen ausblenden",
   "episode.recap": "Rückblick",
   "franchise.overline": "Franchise",
   "franchise.progress": "{0} von {1} gesehen",

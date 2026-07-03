@@ -218,6 +218,21 @@ else
                 }
             </nav>
 
+                @* Hide-fillers toggle — only on titles that actually carry
+                   Jikan flags; writes the HideFillers preference (page toggle
+                   IS the per-account default, same as the view toggle). *@
+                @if (item.FillerEpisodes.Length + item.RecapEpisodes.Length > 0)
+                {
+                    <button type="button"
+                            class="@($"md-filler-toggle tv-focus {(_hideFillers ? "md-filler-toggle--on" : "")}")"
+                            aria-pressed="@(_hideFillers ? "true" : "false")"
+                            title="@L["episode.hide_fillers_hint"]"
+                            @onclick="ToggleHideFillersAsync">
+                        <DIcon Name="@(_hideFillers ? "eye-off" : "eye")" Size="14" />
+                        <span>@L["episode.hide_fillers"]</span>
+                    </button>
+                }
+
                 @* NEW (Episode View Modes): grid ⇄ detailed-list toggle. Writes
                    the EpisodeListView preference, so flipping it here also sets
                    the per-account default surfaced in Profile → Appearance. *@
@@ -340,6 +355,9 @@ else
                         && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
                                                  : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
                     var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
+                    // Canon-only marathon mode: flagged episodes drop out of the
+                    // grid entirely while the toggle is on.
+                    if (_hideFillers && epFlag is not null) { continue; }
 
                     @* On TV the card itself MUST be focusable — without it, the
                        D-pad has nothing to land on inside the episode grid and
@@ -522,6 +540,10 @@ else
     /// grid⇄list toggle writes the same preference back (so it doubles as the
     /// per-account default). Spec: "Animarr — Episode View Modes".</summary>
     private string _episodeView = "grid";
+    /// <summary>Hide filler/recap episodes from the grid/list. Seeded from the
+    /// HideFillers preference; the page toggle writes it back (per-account
+    /// default, same contract as <see cref="_episodeView"/>).</summary>
+    private bool _hideFillers;
     private bool _movieWatched;
     private bool _editOpen;
 
@@ -618,6 +640,7 @@ else
         // The OnChange subscription below re-seeds once prefs arrive, so the
         // saved "list" default isn't lost to that race.
         _episodeView = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        _hideFillers = UserCtx.Preferences?.HideFillers == true;
         UserCtx.OnChange += OnUserCtxChanged;
         // The initial load happens in OnParametersSetAsync (which also runs on
         // first mount) — it owns Id-change detection.
@@ -653,10 +676,12 @@ else
     /// SetPreferences. Guarded so unrelated changes (accent, backdrop) are no-ops.</summary>
     private void OnUserCtxChanged()
     {
-        var v = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
-        if (v != _episodeView)
+        var v  = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        var hf = UserCtx.Preferences?.HideFillers == true;
+        if (v != _episodeView || hf != _hideFillers)
         {
             _episodeView = v;
+            _hideFillers = hf;
             InvokeAsync(StateHasChanged);
         }
     }
@@ -1233,6 +1258,22 @@ else
             UserCtx.SetPreferences(updated);
         }
         catch { /* keep the local view; next load reconciles from the server */ }
+    }
+
+    /// <summary>Hide-fillers toggle — optimistic flip + preference PATCH
+    /// (mirrors <see cref="SetEpisodeViewAsync"/>).</summary>
+    private async Task ToggleHideFillersAsync()
+    {
+        _hideFillers = !_hideFillers;
+        StateHasChanged();
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                HideFillers: _hideFillers));
+            UserCtx.SetPreferences(updated);
+        }
+        catch { /* keep the local state; next load reconciles from the server */ }
     }
 
     /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.

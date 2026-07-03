@@ -557,6 +557,8 @@
   "home.next_up": "Up next",
   "home.new_badge": "NEW",
   "episode.filler": "Filler",
+  "episode.hide_fillers": "Hide fillers",
+  "episode.hide_fillers_hint": "Hide filler and recap episodes",
   "episode.recap": "Recap",
   "franchise.overline": "Franchise",
   "franchise.progress": "watched {0} of {1}",
