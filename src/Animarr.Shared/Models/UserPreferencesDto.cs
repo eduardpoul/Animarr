@@ -26,4 +26,5 @@ public sealed record UserPreferencesDto(
     string EpisodeListView,
     string? HomeSectionsJson = null,
     string  RecsScope        = "everywhere",
-    bool    HideFillers      = false);
+    bool    HideFillers      = false,
+    string? FillerOverridesJson = null);

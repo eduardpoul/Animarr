@@ -540,9 +540,10 @@ else
     /// grid⇄list toggle writes the same preference back (so it doubles as the
     /// per-account default). Spec: "Animarr — Episode View Modes".</summary>
     private string _episodeView = "grid";
-    /// <summary>Hide filler/recap episodes from the grid/list. Seeded from the
-    /// HideFillers preference; the page toggle writes it back (per-account
-    /// default, same contract as <see cref="_episodeView"/>).</summary>
+    /// <summary>Effective "hide fillers" for THIS title: the per-title override
+    /// if one is set, else the global <c>HideFillers</c> default. Drives grid
+    /// filtering AND the next-episode skip. The page toggle writes a per-title
+    /// override (never the global default — that's Profile → Appearance).</summary>
     private bool _hideFillers;
     private bool _movieWatched;
     private bool _editOpen;
@@ -640,7 +641,7 @@ else
         // The OnChange subscription below re-seeds once prefs arrive, so the
         // saved "list" default isn't lost to that race.
         _episodeView = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
-        _hideFillers = UserCtx.Preferences?.HideFillers == true;
+        _hideFillers = ResolveHideFillers();
         UserCtx.OnChange += OnUserCtxChanged;
         // The initial load happens in OnParametersSetAsync (which also runs on
         // first mount) — it owns Id-change detection.
@@ -657,6 +658,8 @@ else
         if (_loadedId == Id) return;
         var isSwitch = _loadedId != Guid.Empty;
         _loadedId = Id;
+        // Re-resolve the per-title filler state for the title now in view.
+        _hideFillers = ResolveHideFillers();
         if (isSwitch)
         {
             // Per-title state that LoadAsync doesn't unconditionally overwrite.
@@ -677,7 +680,7 @@ else
     private void OnUserCtxChanged()
     {
         var v  = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
-        var hf = UserCtx.Preferences?.HideFillers == true;
+        var hf = ResolveHideFillers();
         if (v != _episodeView || hf != _hideFillers)
         {
             _episodeView = v;
@@ -1143,10 +1146,15 @@ else
         if (episode is null) return null;
         var curS = season ?? 1;
         var curE = episode.Value;
+        // When fillers are hidden for this title, the auto-advance / Next action
+        // jumps over filler+recap episodes to the next canon one — otherwise the
+        // "hide" is cosmetic and playback still lands you on a filler. If only
+        // fillers remain ahead, there's no next (overlay stays hidden).
         return _files
             .Where(f => f.Episode is not null)
             .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
             .Where(x => x.Season > curS || (x.Season == curS && x.Episode > curE))
+            .Where(x => !_hideFillers || !IsFlaggedEpisode(x.Season, x.Episode))
             .OrderBy(x => x.Season).ThenBy(x => x.Episode)
             .Select(x => ((int Season, int Episode)?)x)
             .FirstOrDefault();
@@ -1260,20 +1268,55 @@ else
         catch { /* keep the local view; next load reconciles from the server */ }
     }
 
-    /// <summary>Hide-fillers toggle — optimistic flip + preference PATCH
-    /// (mirrors <see cref="SetEpisodeViewAsync"/>).</summary>
+    /// <summary>Hide-fillers toggle — optimistic flip, then persist a PER-TITLE
+    /// override (not the global default): merge this title's new value into the
+    /// override map and PATCH the whole map back. So the global default stays
+    /// put and only this title flips.</summary>
     private async Task ToggleHideFillersAsync()
     {
         _hideFillers = !_hideFillers;
         StateHasChanged();
+        var map = FillerOverrides(UserCtx.Preferences?.FillerOverridesJson);
+        map[Id.ToString()] = _hideFillers;
+        var json = System.Text.Json.JsonSerializer.Serialize(map);
         try
         {
             var updated = await Api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
                 null, null, null, null, null, null, null, null, null, null, null, null, null,
-                HideFillers: _hideFillers));
+                FillerOverridesJson: json));
             UserCtx.SetPreferences(updated);
         }
         catch { /* keep the local state; next load reconciles from the server */ }
+    }
+
+    /// <summary>Effective hide-fillers for the current title: the per-title
+    /// override if present, else the global <c>HideFillers</c> default.</summary>
+    private bool ResolveHideFillers()
+    {
+        var prefs = UserCtx.Preferences;
+        if (prefs is null) return false;
+        return FillerOverrides(prefs.FillerOverridesJson).TryGetValue(Id.ToString(), out var v)
+            ? v : prefs.HideFillers;
+    }
+
+    private static Dictionary<string, bool> FillerOverrides(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(json) ?? new(); }
+        catch { return new(); }
+    }
+
+    /// <summary>Is (season, episode) a MAL filler/recap? Matches the file's
+    /// AbsoluteEpisode first (long-runners / offset donghua), else the plain
+    /// number on season 1 only — mirrors the grid's badge logic so the
+    /// next-episode skip and the visible chips agree.</summary>
+    private bool IsFlaggedEpisode(int season, int episode)
+    {
+        if (_item is null) return false;
+        if (_item.FillerEpisodes.Length == 0 && _item.RecapEpisodes.Length == 0) return false;
+        var abs = _files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == episode)?.AbsoluteEpisode;
+        bool Hit(int[] arr) => abs is int a ? arr.Contains(a) : season <= 1 && arr.Contains(episode);
+        return Hit(_item.FillerEpisodes) || Hit(_item.RecapEpisodes);
     }
 
     /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.

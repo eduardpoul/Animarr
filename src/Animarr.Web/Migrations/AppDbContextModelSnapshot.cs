@@ -1056,6 +1056,9 @@ namespace Animarr.Web.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FillerOverridesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HeroPagerStyle")
                         .IsRequired()
                         .HasColumnType("TEXT");

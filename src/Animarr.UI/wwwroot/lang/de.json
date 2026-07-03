@@ -594,6 +594,8 @@
   "profile.recs_scope_hint": "Die eigene Bibliothek kommt immer zuerst; „Überall“ lässt TMDB freie Plätze mit neuen Titeln füllen.",
   "profile.recs_scope_everywhere": "Überall — Bibliothek + TMDB",
   "profile.recs_scope_library": "Nur meine Bibliothek",
+  "profile.fillers_title": "Filler-Folgen",
+  "profile.fillers_hint": "Filler- und Rückblick-Folgen (MAL) standardmäßig ausblenden und beim Weiterschalten überspringen. Der Titel-Schalter überschreibt dies.",
   "home.library_title": "Bibliothek",
   "home.view_all": "Alle anzeigen",
   "profile.home_sections_title": "Startbildschirm",

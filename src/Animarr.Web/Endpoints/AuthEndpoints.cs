@@ -168,6 +168,7 @@ internal static class AuthEndpoints
             if (req.HomeSectionsJson is string hsj)       prefs.HomeSectionsJson   = HomeSections.Normalize(hsj);
             if (req.RecsScope is string rs)               prefs.RecsScope          = rs.ToLowerInvariant() == "library" ? "library" : "everywhere";
             if (req.HideFillers is bool hfil)             prefs.HideFillers        = hfil;
+            if (req.FillerOverridesJson is string foj)    prefs.FillerOverridesJson = NormalizeFillerOverrides(foj);
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -690,7 +691,27 @@ internal static class AuthEndpoints
         p.EpisodeListView,
         p.HomeSectionsJson,
         p.RecsScope,
-        p.HideFillers);
+        p.HideFillers,
+        p.FillerOverridesJson);
+
+    /// <summary>Canonicalise the per-title filler override map: keep only valid
+    /// GUID keys with bool values, re-serialise compactly, null when empty.
+    /// Guards the JSON column against client-sent garbage and unbounded growth.</summary>
+    private static string? NormalizeFillerOverrides(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var raw = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(json);
+            if (raw is null || raw.Count == 0) return null;
+            var clean = raw
+                .Where(kv => Guid.TryParse(kv.Key, out _))
+                .Take(2000)   // sanity cap; a real single-user library never approaches this
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            return clean.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(clean);
+        }
+        catch { return null; }
+    }
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale

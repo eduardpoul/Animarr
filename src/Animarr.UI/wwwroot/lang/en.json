@@ -595,6 +595,8 @@
   "profile.recs_scope_hint": "Your library always comes first; “Everywhere” lets TMDB fill the remaining slots with new titles.",
   "profile.recs_scope_everywhere": "Everywhere — library + TMDB",
   "profile.recs_scope_library": "My library only",
+  "profile.fillers_title": "Filler episodes",
+  "profile.fillers_hint": "Hide MAL filler & recap episodes by default and skip them when advancing. A title's own toggle overrides this.",
   "home.library_title": "Library",
   "home.view_all": "View all",
   "profile.home_sections_title": "Home screen",

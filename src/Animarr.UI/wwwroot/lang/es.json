@@ -594,6 +594,8 @@
   "profile.recs_scope_hint": "Tu biblioteca siempre va primero; «En todas partes» permite a TMDB llenar los huecos con títulos nuevos.",
   "profile.recs_scope_everywhere": "En todas partes — biblioteca + TMDB",
   "profile.recs_scope_library": "Solo mi biblioteca",
+  "profile.fillers_title": "Episodios de relleno",
+  "profile.fillers_hint": "Ocultar episodios de relleno y resumen (MAL) por defecto y saltarlos al avanzar. El interruptor del título lo anula.",
   "home.library_title": "Biblioteca",
   "home.view_all": "Ver todo",
   "profile.home_sections_title": "Pantalla de inicio",
