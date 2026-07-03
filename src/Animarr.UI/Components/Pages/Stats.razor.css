@@ -2,7 +2,8 @@
    CSS (flex/height bars + a heatmap grid) so nothing external is pulled in. */
 
 .st-page {
-    max-width: 1100px;
+    /* Match the Torrents / Server shell width (.tor-page / .d-server: 1480). */
+    max-width: 1480px;
     margin: 0 auto;
     padding: 20px 20px 64px;
 }
