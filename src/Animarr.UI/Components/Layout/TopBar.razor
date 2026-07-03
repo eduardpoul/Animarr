@@ -97,6 +97,15 @@
         <DIcon Name="bookmark" Size="15" />
     </button>
 
+    @* Personal watch statistics. *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/stats") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/stats"))"
+            title="@L["stats.title"]"
+            aria-label="@L["stats.title"]">
+        <DIcon Name="stats" Size="15" />
+    </button>
+
     @if (UserCtx.Can(p => p.UploadContent))
     {
         <button type="button"

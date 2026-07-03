@@ -56,6 +56,8 @@ public interface IAnimarrApiClient
     Task<CalendarEventDto[]> GetCalendarAsync(int back = 14, int ahead = 60, CancellationToken ct = default);
     /// <summary>Franchise watch-order rail; null until the AniList walk ran.</summary>
     Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Personal watch statistics dashboard for the signed-in user.</summary>
+    Task<StatsDto?> GetStatsAsync(CancellationToken ct = default);
     Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default);
     Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default);
     /// <summary>Skip-intro/credits background-scan progress for the Settings indicator.</summary>

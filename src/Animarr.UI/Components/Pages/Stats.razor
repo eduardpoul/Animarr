@@ -1,0 +1,264 @@
+@page "/stats"
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>@L["stats.title"] — Animarr</PageTitle>
+
+@*
+    Personal watch-stats dashboard. KPI cards + top genres/studios + type
+    split + most-watched titles from WatchStates; activity heatmap + monthly
+    hours from the WatchEvents journal (fills over time).
+*@
+<div class="st-page">
+    <div class="st-head">
+        <PageBack Fallback="/" />
+        <div class="st-head__text">
+            <h1 class="st-title">@L["stats.title"]</h1>
+            <div class="st-sub">@L["stats.sub"]</div>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="st-empty">…</div>
+    }
+    else if (_stats is null || _stats.Summary.WatchedEpisodes == 0)
+    {
+        <div class="st-empty">
+            <div class="st-empty__title">@L["stats.empty_title"]</div>
+            <div class="st-empty__text">@L["stats.empty_text"]</div>
+        </div>
+    }
+    else
+    {
+        var s = _stats;
+
+        @* ── KPI row ─────────────────────────────────────────────── *@
+        <div class="st-kpis">
+            <div class="st-kpi">
+                <div class="st-kpi__val">@HoursMain(s.Summary.TotalMinutes)</div>
+                <div class="st-kpi__lbl">@L["stats.kpi_hours"]</div>
+            </div>
+            <div class="st-kpi">
+                <div class="st-kpi__val">@s.Summary.WatchedEpisodes</div>
+                <div class="st-kpi__lbl">@L["stats.kpi_episodes"]</div>
+            </div>
+            <div class="st-kpi">
+                <div class="st-kpi__val">@s.Summary.WatchedTitles</div>
+                <div class="st-kpi__lbl">@L["stats.kpi_titles"]</div>
+            </div>
+            <div class="st-kpi">
+                <div class="st-kpi__val">@s.Summary.ActiveDays</div>
+                <div class="st-kpi__lbl">@L["stats.kpi_days"]</div>
+            </div>
+            <div class="st-kpi">
+                <div class="st-kpi__val">@s.Summary.CurrentStreak<span class="st-kpi__unit">@L["stats.days_unit"]</span></div>
+                <div class="st-kpi__lbl">@L["stats.kpi_streak"]</div>
+                @if (s.Summary.LongestStreak > s.Summary.CurrentStreak)
+                {
+                    <div class="st-kpi__note">@L.Get("stats.streak_best", s.Summary.LongestStreak)</div>
+                }
+            </div>
+        </div>
+
+        @* ── Type split ──────────────────────────────────────────── *@
+        @if (s.ByType.Count > 0)
+        {
+            var typeMax = s.ByType.Max(t => t.Minutes);
+            <section class="st-block">
+                <h2 class="st-block__title">@L["stats.by_type"]</h2>
+                <div class="st-types">
+                    @foreach (var t in s.ByType)
+                    {
+                        <div class="st-type">
+                            <div class="st-type__head">
+                                <span class="st-type__name">@L[$"stats.type_{t.Type}"]</span>
+                                <span class="st-type__meta">@L.Get("stats.n_titles", t.Titles) · @HoursMain(t.Minutes)</span>
+                            </div>
+                            <div class="st-bar"><div class="st-bar__fill st-bar__fill--@t.Type" style="width:@Pct(t.Minutes, typeMax)%"></div></div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        <div class="st-cols">
+            @* ── Top genres ──────────────────────────────────────── *@
+            @if (s.TopGenres.Count > 0)
+            {
+                var gMax = s.TopGenres.Max(g => g.Minutes);
+                <section class="st-block">
+                    <h2 class="st-block__title">@L["stats.top_genres"]</h2>
+                    <div class="st-bars">
+                        @foreach (var g in s.TopGenres)
+                        {
+                            <div class="st-row">
+                                <span class="st-row__lbl" title="@g.Label">@g.Label</span>
+                                <div class="st-bar"><div class="st-bar__fill" style="width:@Pct(g.Minutes, gMax)%"></div></div>
+                                <span class="st-row__val">@HoursMain(g.Minutes)</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+
+            @* ── Top studios ─────────────────────────────────────── *@
+            @if (s.TopStudios.Count > 0)
+            {
+                var stMax = s.TopStudios.Max(x => x.Minutes);
+                <section class="st-block">
+                    <h2 class="st-block__title">@L["stats.top_studios"]</h2>
+                    <div class="st-bars">
+                        @foreach (var st in s.TopStudios)
+                        {
+                            <div class="st-row">
+                                <span class="st-row__lbl" title="@st.Label">@st.Label</span>
+                                <div class="st-bar"><div class="st-bar__fill st-bar__fill--alt" style="width:@Pct(st.Minutes, stMax)%"></div></div>
+                                <span class="st-row__val">@HoursMain(st.Minutes)</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+
+        @* ── Most-watched titles ─────────────────────────────────── *@
+        @if (s.TopTitles.Count > 0)
+        {
+            <section class="st-block">
+                <h2 class="st-block__title">@L["stats.top_titles"]</h2>
+                <div class="st-titles">
+                    @{ var rank = 0; }
+                    @foreach (var t in s.TopTitles)
+                    {
+                        rank++;
+                        <a class="st-title-card tv-focus" href="/catalog/@t.MediaItemId" title="@t.Title">
+                            <span class="st-title-card__rank">@rank</span>
+                            <span class="st-title-card__art">
+                                @if (!string.IsNullOrEmpty(t.PosterUrl))
+                                {
+                                    <img loading="lazy" src="@t.PosterUrl" alt="@t.Title" />
+                                }
+                                else
+                                {
+                                    <span class="st-title-card__ph"><DIcon Name="video" Size="22" /></span>
+                                }
+                            </span>
+                            <span class="st-title-card__name">@t.Title</span>
+                            <span class="st-title-card__meta">@L.Get("stats.n_episodes", t.WatchedEpisodes) · @HoursMain(t.Minutes)</span>
+                        </a>
+                    }
+                </div>
+            </section>
+        }
+
+        @* ── Activity heatmap ────────────────────────────────────── *@
+        <section class="st-block">
+            <h2 class="st-block__title">@L["stats.heatmap"]</h2>
+            @if (_heatByDay.Count == 0)
+            {
+                <div class="st-heat-empty">@L["stats.heatmap_empty"]</div>
+            }
+            else
+            {
+                <div class="st-heat">
+                    @for (int w = 0; w < HeatWeeks; w++)
+                    {
+                        <div class="st-heat__col">
+                            @for (int d = 0; d < 7; d++)
+                            {
+                                var day = _heatStart.AddDays(w * 7 + d);
+                                var mins = _heatByDay.GetValueOrDefault(day, -1);
+                                var lvl = mins < 0 ? -1 : HeatLevel(mins);
+                                <span class="@($"st-heat__cell st-heat__cell--l{lvl}")"
+                                      title="@(mins >= 0 ? $"{day:yyyy-MM-dd}: {HoursMain(mins)}" : day.ToString("yyyy-MM-dd"))"></span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        @* ── Monthly hours ───────────────────────────────────────── *@
+        @if (s.ByMonth.Count > 0)
+        {
+            var mMax = s.ByMonth.Max(m => m.Minutes);
+            <section class="st-block">
+                <h2 class="st-block__title">@L["stats.by_month"]</h2>
+                <div class="st-months">
+                    @foreach (var m in s.ByMonth)
+                    {
+                        <div class="st-month">
+                            <div class="st-month__bar-wrap">
+                                <div class="st-month__bar" style="height:@Pct(m.Minutes, mMax)%" title="@HoursMain(m.Minutes)"></div>
+                            </div>
+                            <div class="st-month__lbl">@MonthLabel(m.Month)</div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private StatsDto? _stats;
+    private bool _loading = true;
+
+    // Heatmap grid: last HeatWeeks weeks, Monday-started columns.
+    private const int HeatWeeks = 26;
+    private Dictionary<DateTime, long> _heatByDay = new();
+    private DateTime _heatStart;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _stats = await Api.GetStatsAsync(); }
+        catch { _stats = null; }
+        BuildHeatmap();
+        _loading = false;
+    }
+
+    private void BuildHeatmap()
+    {
+        _heatByDay = new();
+        if (_stats is null) return;
+        foreach (var c in _stats.Heatmap)
+            if (DateTime.TryParse(c.Date, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var d))
+                _heatByDay[d.Date] = c.Minutes;
+
+        // Grid ends on the current week; start HeatWeeks-1 weeks earlier on a
+        // Monday so columns line up as weeks.
+        var today = DateTime.Now.Date;
+        int backToMon = ((int)today.DayOfWeek + 6) % 7;   // Mon=0 … Sun=6
+        var thisMon = today.AddDays(-backToMon);
+        _heatStart = thisMon.AddDays(-7 * (HeatWeeks - 1));
+    }
+
+    private static int Pct(long v, long max) => max <= 0 ? 0 : (int)Math.Round(100.0 * v / max);
+
+    /// <summary>Compact primary value: hours when ≥ 60 min, else minutes.</summary>
+    private string HoursMain(long minutes)
+        => minutes >= 60 ? L.Get("stats.hours_value", minutes / 60)
+                         : L.Get("stats.minutes_value", minutes);
+
+    /// <summary>Heatmap intensity bucket 0..4 from minutes that day.</summary>
+    private static int HeatLevel(long min) => min switch
+    {
+        <= 0  => 0,
+        < 30  => 1,
+        < 90  => 2,
+        < 180 => 3,
+        _     => 4,
+    };
+
+    /// <summary>"2026-07" → localized "Jul" (lang-pack month names — WASM's
+    /// sharded ICU quietly anglicises CultureInfo).</summary>
+    private string MonthLabel(string yyyymm)
+    {
+        var parts = yyyymm.Split('-');
+        if (parts.Length != 2 || !int.TryParse(parts[1], out var m) || m < 1 || m > 12) return yyyymm;
+        var names = L["stats.months_short"].Split(',');
+        return names.Length == 12 ? names[m - 1] : yyyymm;
+    }
+}
