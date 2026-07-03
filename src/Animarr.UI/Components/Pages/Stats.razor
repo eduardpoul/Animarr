@@ -155,8 +155,10 @@
         @* ── Activity heatmap ────────────────────────────────────── *@
         <section class="st-block">
             <h2 class="st-block__title">@L["stats.heatmap"]</h2>
-            @if (_heatByDay.Count == 0)
+            @if (_heatByDay.Count == 0 || _heatByDay.Values.All(m => m <= 0))
             {
+                @* Journal still thin (or same-day only, rounded to 0 min) — a
+                   lone cell reads as broken; show the "fills over time" note. *@
                 <div class="st-heat-empty">@L["stats.heatmap_empty"]</div>
             }
             else
@@ -180,7 +182,9 @@
         </section>
 
         @* ── Monthly hours ───────────────────────────────────────── *@
-        @if (s.ByMonth.Count > 0)
+        @* Only worth a bar chart once the journal has real minutes — a single
+           flat month reads as broken, so hold the section until then. *@
+        @if (s.ByMonth.Any(m => m.Minutes > 0))
         {
             var mMax = s.ByMonth.Max(m => m.Minutes);
             <section class="st-block">
