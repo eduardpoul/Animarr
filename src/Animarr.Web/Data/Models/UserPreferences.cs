@@ -71,10 +71,17 @@ public class UserPreferences
     /// already per-user when it ships; no UI reads it yet.</summary>
     public string RecsScope { get; set; } = "everywhere";
 
-    /// <summary>Hide filler/recap-flagged episodes from the episode grid and
-    /// list on title pages. The page toggle IS this per-account default (same
-    /// contract as EpisodeListView).</summary>
+    /// <summary>Global default: hide filler/recap-flagged episodes from the
+    /// episode grid/list and skip them on next-episode advance. Set in
+    /// Profile → Appearance; per-title overrides live in
+    /// <see cref="FillerOverridesJson"/>.</summary>
     public bool HideFillers { get; set; }
+
+    /// <summary>Per-title overrides of <see cref="HideFillers"/> as JSON
+    /// {"&lt;mediaItemId&gt;": true|false}. A present key wins over the global
+    /// default for that title (title-page toggle writes it); an absent key
+    /// inherits the global. Null/empty = no overrides.</summary>
+    public string? FillerOverridesJson { get; set; }
 
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 

@@ -594,6 +594,8 @@
   "profile.recs_scope_hint": "Своя бібліотека завжди перша; «Всюди» дозволяє TMDB заповнювати вільні місця новими тайтлами.",
   "profile.recs_scope_everywhere": "Всюди — бібліотека + TMDB",
   "profile.recs_scope_library": "Лише моя бібліотека",
+  "profile.fillers_title": "Філерні серії",
+  "profile.fillers_hint": "За замовчуванням приховувати філери та рекапи (MAL) і пропускати їх при переході. На сторінці тайтлу можна перевизначити.",
   "home.library_title": "Бібліотека",
   "home.view_all": "Переглянути все",
   "profile.home_sections_title": "Головний екран",

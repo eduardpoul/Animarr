@@ -343,6 +343,7 @@
         _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
         _homeSections    = HomeSections.Parse(p.HomeSectionsJson);
         _recsScope       = string.IsNullOrEmpty(p.RecsScope) ? "everywhere" : p.RecsScope.ToLowerInvariant();
+        _hideFillers     = p.HideFillers;
     }
 
     // ─── Edit profile / change password handlers ───────────────────────
@@ -1674,6 +1675,18 @@
                 </div>
             </div>
 
+            @* ── Filler episodes ──────────────────────────────────────
+                 Global default for hiding MAL filler/recap episodes (grid +
+                 next-episode skip). A title's own page toggle overrides this
+                 per-title. *@
+            <div class="d-profile__toggle-row">
+                <div class="d-profile__toggle-text">
+                    <div class="d-profile__toggle-title">@L["profile.fillers_title"]</div>
+                    <div class="d-profile__toggle-hint">@L["profile.fillers_hint"]</div>
+                </div>
+                <Toggle Checked="@_hideFillers" CheckedChanged="OnHideFillersToggle" />
+            </div>
+
         </div>
     };
 
@@ -1774,6 +1787,18 @@
         await PatchAsync(new UpdatePreferencesRequest(
             null, null, null, null, null, null, null, null, null, null, null, null, null,
             RecsScope: key));
+        StateHasChanged();
+    }
+
+    // ─── Hide fillers (global default; per-title override lives on MediaDetail) ──
+    private bool _hideFillers;
+
+    private async Task OnHideFillersToggle(bool v)
+    {
+        _hideFillers = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            HideFillers: v));
         StateHasChanged();
     }
 
