@@ -1051,3 +1051,27 @@
     background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; font-size: 13px;
 }
 .md-unmatched__save:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* ── Hide-fillers toggle (next to the view toggle; only when flags exist) ── */
+.md-filler-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    height: 34px;
+    margin-bottom: 8px;          /* aligns with .md-view-toggle */
+    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--motion-base), border-color var(--motion-base), background var(--motion-base);
+}
+.md-filler-toggle:hover { color: var(--text-dim); border-color: var(--border-strong); }
+.md-filler-toggle--on {
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border-color: var(--accent-line, var(--accent));
+}

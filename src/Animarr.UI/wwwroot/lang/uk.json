@@ -556,6 +556,8 @@
   "home.next_up": "Дивитися далі",
   "home.new_badge": "Нове",
   "episode.filler": "Філер",
+  "episode.hide_fillers": "Приховати філери",
+  "episode.hide_fillers_hint": "Приховати філерні та рекап-серії",
   "episode.recap": "Рекап",
   "franchise.overline": "Франшиза",
   "franchise.progress": "переглянуто {0} з {1}",

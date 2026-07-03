@@ -25,4 +25,5 @@ public sealed record UserPreferencesDto(
     int    ThemeMusicVolume,
     string EpisodeListView,
     string? HomeSectionsJson = null,
-    string  RecsScope        = "everywhere");
+    string  RecsScope        = "everywhere",
+    bool    HideFillers      = false);

@@ -556,6 +556,8 @@
   "home.next_up": "A continuación",
   "home.new_badge": "NUEVO",
   "episode.filler": "Relleno",
+  "episode.hide_fillers": "Ocultar relleno",
+  "episode.hide_fillers_hint": "Ocultar episodios de relleno y resumen",
   "episode.recap": "Resumen",
   "franchise.overline": "Franquicia",
   "franchise.progress": "vistos {0} de {1}",
