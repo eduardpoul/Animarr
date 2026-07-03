@@ -140,6 +140,15 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
     public Task<TmdbMovieDetail?> GetMovieDetailAsync(int tmdbId, string? language = null, CancellationToken ct = default)
         => GetJsonAsync<TmdbMovieDetail>($"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids,credits,keywords&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
+    // ── Movie collection (franchise) ─────────────────────────────────────────
+
+    /// <summary>All entries of a TMDB movie collection ("Mission: Impossible
+    /// Collection", …) — the franchise source for live-action films AniList
+    /// doesn't cover. Parts carry title/release date/poster for a release-order
+    /// rail; localized via <paramref name="language"/>.</summary>
+    public Task<TmdbCollectionDetail?> GetCollectionAsync(int collectionId, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbCollectionDetail>($"{BaseUrl}/collection/{collectionId}?language={ToTmdbLocale(language)}", ct);
+
     // ── Translations (for CJK / English alternative titles) ──────────────────
 
     public Task<TmdbTranslations?> GetTvTranslationsAsync(int tmdbId, CancellationToken ct = default)
@@ -322,6 +331,9 @@ public class TmdbMovieDetail
     [JsonPropertyName("production_companies")] public List<TmdbCompany> ProductionCompanies { get; set; } = [];
     public TmdbCredits? Credits { get; set; }
     public TmdbKeywords? Keywords { get; set; }
+    /// <summary>Present when the film is part of a TMDB collection (franchise);
+    /// its <c>Id</c> feeds <see cref="TmdbClient.GetCollectionAsync"/>.</summary>
+    [JsonPropertyName("belongs_to_collection")] public TmdbCollectionRef? BelongsToCollection { get; set; }
 
     public int? Year => int.TryParse((ReleaseDate ?? "").Split('-')[0], out var y) ? y : null;
     public string? ContentRating => ReleaseDates?.Results?.FirstOrDefault(r => r.Iso31661 == "US")
@@ -337,6 +349,35 @@ public class TmdbMovieDetail
         (string.IsNullOrEmpty(lang) ? null : Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath)
         ?? PosterPath
         ?? Images?.Posters?.FirstOrDefault()?.FilePath;
+}
+
+/// <summary>Stub returned inside a movie's <c>belongs_to_collection</c>.</summary>
+public class TmdbCollectionRef
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    [JsonPropertyName("poster_path")]   public string? PosterPath   { get; set; }
+    [JsonPropertyName("backdrop_path")] public string? BackdropPath { get; set; }
+}
+
+/// <summary>Full collection with its member films (GET /collection/{id}).</summary>
+public class TmdbCollectionDetail
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public List<TmdbCollectionPart> Parts { get; set; } = [];
+}
+
+public class TmdbCollectionPart
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    [JsonPropertyName("original_title")] public string? OriginalTitle { get; set; }
+    [JsonPropertyName("release_date")]   public string? ReleaseDate   { get; set; }
+    [JsonPropertyName("poster_path")]    public string? PosterPath    { get; set; }
+    [JsonPropertyName("media_type")]     public string? MediaType     { get; set; }
+
+    public int? Year => int.TryParse((ReleaseDate ?? "").Split('-')[0], out var y) && y > 0 ? y : null;
 }
 
 public class TmdbSeasonDetail

@@ -22,11 +22,18 @@ namespace Animarr.Web.Services.Franchise;
 public sealed class FranchiseService(
     IDbContextFactory<AppDbContext> dbFactory,
     AniListClient aniList,
+    TmdbClient tmdb,
     Segments.MalIdResolver malResolver,
     ILogger<FranchiseService> logger)
 {
     private const int MaxDepth = 6;
     private const int MaxNodes = 30;
+
+    // TMDB collections change rarely; a short process cache spares a movie its
+    // detail+collection round-trip on every rail open. (movie tmdbId → collId,
+    // collId → collection). No eviction needed — bounded by library size.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int?> _collectionIdCache = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, TmdbCollectionDetail?> _collectionCache = new();
 
     /// <summary>Edge types the BFS FOLLOWS outward. ALTERNATIVE/CHARACTER/
     /// SUMMARY/OTHER nodes are recorded when seen but not expanded — following
@@ -153,13 +160,41 @@ public sealed class FranchiseService(
 
     // ── read ─────────────────────────────────────────────────────────────────
 
-    /// <summary>The watch-order rail for one library title, or null when the
-    /// graph is unknown / trivial (single node).</summary>
+    /// <summary>The watch-order rail for one title, or null when nothing useful
+    /// is known (fewer than two members). Merges two sources — the AniList
+    /// relations graph (anime) and the TMDB collection (live-action / film
+    /// franchises AniList doesn't cover) — so either can contribute members the
+    /// other misses.</summary>
     public async Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
-        if (item?.AniListId is not int rootId) return null;
+        if (item is null) return null;
+
+        var aniCards  = await BuildAniListCardsAsync(db, item, mediaItemId, ct);
+        var tmdbCards = await BuildTmdbCollectionCardsAsync(db, item, mediaItemId, ct);
+
+        var cards = MergeFranchiseCards(aniCards, tmdbCards);
+        if (cards.Count <= 1) return null;
+
+        // Franchise title = the first card's title (root of the AniList
+        // release-order, or earliest film in a TMDB collection).
+        var title = cards[0].Title;
+        return new FranchiseDto(
+            title,
+            cards.Count,
+            cards.Count(c => c.Watched),
+            cards.Count(c => c.InLibrary),
+            cards);
+    }
+
+    /// <summary>Cards from the stored AniList relations graph (empty when the
+    /// title has no AniList id / no graph). Same logic as before: connected
+    /// component → release-order toposort → library match → season collapse.</summary>
+    private async Task<List<FranchiseCardDto>> BuildAniListCardsAsync(
+        AppDbContext db, MediaItem item, Guid mediaItemId, CancellationToken ct)
+    {
+        if (item.AniListId is not int rootId) return new();
 
         // Connected component around the root (undirected reachability).
         var component = new HashSet<int> { rootId };
@@ -174,12 +209,12 @@ public sealed class FranchiseService(
             foreach (var e in grown) { component.Add(e.FromAniListId); component.Add(e.ToAniListId); }
             if (component.Count == before || component.Count > MaxNodes * 2) break;
         }
-        if (component.Count <= 1) return null;
+        if (component.Count <= 1) return new();
 
         var nodes = await db.FranchiseNodes.AsNoTracking()
             .Where(n => component.Contains(n.AniListId))
             .ToListAsync(ct);
-        if (nodes.Count <= 1) return null;
+        if (nodes.Count <= 1) return new();
         var edges = await db.FranchiseEdges.AsNoTracking()
             .Where(e => component.Contains(e.FromAniListId) && component.Contains(e.ToAniListId))
             .ToListAsync(ct);
@@ -245,16 +280,113 @@ public sealed class FranchiseService(
                 Watched:   match is not null && watchedIds.Contains(match.Id),
                 SpanCount: 1));
         }
-        if (cards.Count <= 1) return null;
-
-        var title = cards.FirstOrDefault(c => c.Year == cards.Min(x => x.Year))?.Title ?? cards[0].Title;
-        return new FranchiseDto(
-            title,
-            cards.Count,
-            cards.Count(c => c.Watched),
-            cards.Count(c => c.InLibrary),
-            cards);
+        return cards;
     }
+
+    /// <summary>Cards from the title's TMDB movie collection (empty for
+    /// non-movies, titles with no TmdbId, or films not in a collection). The
+    /// franchise source for live-action / film series AniList doesn't model.
+    /// Parts match the library by TmdbId; order is by release year.</summary>
+    private async Task<List<FranchiseCardDto>> BuildTmdbCollectionCardsAsync(
+        AppDbContext db, MediaItem item, Guid currentId, CancellationToken ct)
+    {
+        if (item.TmdbId is not int tmdbId || item.MediaType != MediaItemType.Movie)
+            return new();   // belongs_to_collection is a movie-only TMDB concept
+
+        var collId = await ResolveCollectionIdAsync(tmdbId, ct);
+        if (collId is null) return new();
+        var coll = await GetCollectionCachedAsync(collId.Value, ct);
+        if (coll?.Parts is not { Count: > 1 }) return new();
+
+        var partIds = coll.Parts.Select(p => p.Id).ToList();
+        var libItems = await db.MediaItems.AsNoTracking()
+            .Where(m => m.TmdbId != null && partIds.Contains(m.TmdbId.Value))
+            .ToListAsync(ct);
+        var libIds = libItems.Select(m => m.Id).ToList();
+        var watchedIds = (await db.WatchStates.AsNoTracking()
+                .Where(w => libIds.Contains(w.MediaItemId) && w.IsWatched)
+                .Select(w => w.MediaItemId).Distinct().ToListAsync(ct))
+            .ToHashSet();
+
+        var cards = new List<FranchiseCardDto>();
+        foreach (var p in coll.Parts.OrderBy(p => p.Year ?? int.MaxValue))
+        {
+            if (p.Id <= 0 || string.IsNullOrWhiteSpace(p.Title)) continue;
+            var match = libItems.FirstOrDefault(m => m.TmdbId == p.Id);
+            cards.Add(new FranchiseCardDto(
+                AniListId: 0,
+                MediaItemId: match?.Id,
+                Title: match is not null ? MediaTitles.DisplayTitle(match) : p.Title,
+                Year: p.Year,
+                Format: "MOVIE",
+                Episodes: null,
+                CoverUrl: match is not null && !string.IsNullOrEmpty(match.PosterPath)
+                    ? $"/api/image?path={Uri.EscapeDataString(match.PosterPath)}"
+                    : (!string.IsNullOrEmpty(p.PosterPath) ? $"https://image.tmdb.org/t/p/w342{p.PosterPath}" : null),
+                Relation: null,
+                InLibrary: match is not null,
+                IsCurrent: match?.Id == currentId,
+                Watched: match is not null && watchedIds.Contains(match.Id),
+                SpanCount: 1,
+                TmdbId: p.Id));
+        }
+        return cards;
+    }
+
+    private async Task<int?> ResolveCollectionIdAsync(int movieTmdbId, CancellationToken ct)
+    {
+        if (_collectionIdCache.TryGetValue(movieTmdbId, out var cached)) return cached;
+        int? collId = null;
+        try
+        {
+            var detail = await tmdb.GetMovieDetailAsync(movieTmdbId, ct: ct);
+            collId = detail?.BelongsToCollection?.Id;
+        }
+        catch { /* leave null; cache the miss so we don't retry every open */ }
+        _collectionIdCache[movieTmdbId] = collId;
+        return collId;
+    }
+
+    private async Task<TmdbCollectionDetail?> GetCollectionCachedAsync(int collectionId, CancellationToken ct)
+    {
+        if (_collectionCache.TryGetValue(collectionId, out var cached)) return cached;
+        TmdbCollectionDetail? coll = null;
+        try { coll = await tmdb.GetCollectionAsync(collectionId, ct: ct); }
+        catch { /* leave null */ }
+        _collectionCache[collectionId] = coll;
+        return coll;
+    }
+
+    /// <summary>Merge the two sources into one rail. When only one source has
+    /// cards, keep it verbatim — AniList's release-order toposort and TMDB's
+    /// year order are each already correct, and re-sorting AniList by year
+    /// would drop the SEQUEL chain. Only the (rare) hybrid — an anime that ALSO
+    /// has a TMDB movie collection — needs a common order, done by year after
+    /// deduping TMDB films already present as AniList nodes.</summary>
+    private static List<FranchiseCardDto> MergeFranchiseCards(
+        List<FranchiseCardDto> ani, List<FranchiseCardDto> tmdb)
+    {
+        if (tmdb.Count == 0) return ani;
+        if (ani.Count == 0) return tmdb;
+        var result = new List<FranchiseCardDto>(ani);
+        foreach (var t in tmdb)
+            if (!result.Any(a => SameTitleYear(a, t)))
+                result.Add(t);
+        return result
+            .OrderBy(c => c.Year ?? int.MaxValue)
+            .ThenBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool SameTitleYear(FranchiseCardDto a, FranchiseCardDto b)
+    {
+        if (a.Year is int ay && b.Year is int by && Math.Abs(ay - by) > 1) return false;
+        return NormalizeTitle(a.Title) == NormalizeTitle(b.Title)
+            && NormalizeTitle(a.Title).Length > 0;
+    }
+
+    private static string NormalizeTitle(string t) =>
+        new string((t ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
     /// <summary>A TMDB series spans several AniList season-entries but its ids
     /// only pin the first one, so "Season 2" nodes would render as

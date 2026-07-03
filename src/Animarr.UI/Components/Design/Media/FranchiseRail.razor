@@ -69,9 +69,9 @@
                                 }
                                 <span class="frail__ext-badge">@L["recs.not_in_library"]</span>
                                 <button type="button"
-                                        class="@($"frail__want tv-focus {(_wanted.Contains(card.AniListId) ? "is-on" : "")}")"
+                                        class="@($"frail__want tv-focus {(IsWanted(card) ? "is-on" : "")}")"
                                         @onclick="@(() => WantAsync(card))">
-                                    @(_wanted.Contains(card.AniListId) ? L["recs.in_list"] : L["recs.want"])
+                                    @(IsWanted(card) ? L["recs.in_list"] : L["recs.want"])
                                 </button>
                             </div>
                         }
@@ -101,7 +101,12 @@
 @code {
     [Parameter] public FranchiseDto? Franchise { get; set; }
 
-    private readonly HashSet<int> _wanted = new();
+    // Keyed by source so an AniList id and a TMDB id can't collide: "t123" /
+    // "a123". A card is either a TMDB-collection film (TmdbId set) or an
+    // AniList node.
+    private readonly HashSet<string> _wanted = new();
+    private static string WantKey(FranchiseCardDto c) => c.TmdbId is int t ? $"t{t}" : $"a{c.AniListId}";
+    private bool IsWanted(FranchiseCardDto c) => _wanted.Contains(WantKey(c));
 
     // Drag-to-scroll + ‹ › paging, shared module with the other rails. The
     // rail renders lazily (Franchise arrives async), so init keys off the
@@ -156,16 +161,20 @@
 
     private async Task WantAsync(FranchiseCardDto card)
     {
-        if (_wanted.Contains(card.AniListId)) return;
-        _wanted.Add(card.AniListId);
+        var key = WantKey(card);
+        if (_wanted.Contains(key)) return;
+        _wanted.Add(key);
         try
         {
-            await Api.AddWatchlistAsync(new WatchlistAddRequest(
-                null, null, card.Title, card.Year, card.CoverUrl,
-                card.Format == "MOVIE" ? "movie" : "tv",
-                AniListId: card.AniListId));
+            // TMDB-collection films go on the watchlist by TmdbId; AniList nodes
+            // by AniListId (they carry no TMDB id).
+            var req = card.TmdbId is int tid
+                ? new WatchlistAddRequest(null, tid, card.Title, card.Year, card.CoverUrl, "movie")
+                : new WatchlistAddRequest(null, null, card.Title, card.Year, card.CoverUrl,
+                    card.Format == "MOVIE" ? "movie" : "tv", AniListId: card.AniListId);
+            await Api.AddWatchlistAsync(req);
         }
-        catch { _wanted.Remove(card.AniListId); }
+        catch { _wanted.Remove(key); }
         StateHasChanged();
     }
 
