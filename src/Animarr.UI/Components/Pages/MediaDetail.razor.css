@@ -1059,6 +1059,9 @@
     gap: 6px;
     padding: 0 12px;
     height: 34px;
+    /* Push off the season tabs so the toggle sits next to the view switcher on
+       the right, not stranded in the middle of the space-between row. */
+    margin-left: auto;
     margin-bottom: 8px;          /* aligns with .md-view-toggle */
     border-radius: 9px;
     background: var(--surface);
