@@ -78,6 +78,14 @@
                 window.animarr_setAccentHue(parseInt(storedHue, 10));
             var storedTheme = localStorage.getItem('animarr-theme');
             document.documentElement.setAttribute('data-theme', storedTheme || 'quietude');
+            // Interface language cached from last session. Program.cs loads this
+            // exact pack before the first render, so a non-English user never
+            // sees an English flash before /api/me/preferences comes back.
+            // <html lang> is updated for a11y / correct hyphenation too.
+            try {
+                var storedLang = localStorage.getItem('animarr-lang');
+                if (storedLang) document.documentElement.setAttribute('lang', storedLang);
+            } catch (_) {}
         })();
 
         // ── TV-mode boot resolver ───────────────────────────────────────
