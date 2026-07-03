@@ -14,9 +14,11 @@ public sealed record FranchiseDto(
     IReadOnlyList<FranchiseCardDto> Cards);
 
 /// <summary>One franchise member. InLibrary cards navigate to the catalog;
-/// external ones show a Want button (watchlist by AniListId). Relation is the
-/// AniList branch type (SIDE_STORY / SPIN_OFF / ALTERNATIVE / SUMMARY) or
-/// null for main-chain entries.</summary>
+/// external ones show a Want button (watchlist by AniListId, or TmdbId for a
+/// TMDB-collection film). Relation is the AniList branch type (SIDE_STORY /
+/// SPIN_OFF / ALTERNATIVE / SUMMARY) or null for main-chain entries.
+/// A card comes from AniList (AniListId &gt; 0) or a TMDB collection (TmdbId
+/// set, AniListId 0).</summary>
 public sealed record FranchiseCardDto(
     int     AniListId,
     Guid?   MediaItemId,
@@ -29,4 +31,5 @@ public sealed record FranchiseCardDto(
     bool    InLibrary,
     bool    IsCurrent,
     bool    Watched,
-    int     SpanCount);
+    int     SpanCount,
+    int?    TmdbId = null);
