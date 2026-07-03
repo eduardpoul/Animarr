@@ -94,6 +94,14 @@ public sealed record MediaItemDto
     /// IUserContext so each user sees their own ★ state. Anonymous requests
     /// always see false.</summary>
     public bool IsFavorite { get; init; }
+
+    /// <summary>Episode numbers MAL flags as filler (Jikan), in the MAL
+    /// entry's own numbering — match display episodes via the file's
+    /// AbsoluteEpisode first, then the season-1 episode number.</summary>
+    public int[] FillerEpisodes { get; init; } = Array.Empty<int>();
+    /// <summary>Episode numbers MAL flags as recap — same numbering rules as
+    /// <see cref="FillerEpisodes"/>.</summary>
+    public int[] RecapEpisodes { get; init; } = Array.Empty<int>();
 }
 
 public sealed record SeasonMetaDto(

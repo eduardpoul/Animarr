@@ -328,6 +328,18 @@ else
                     var epMeta    = hasFile
                         ? (epRuntime is > 0 ? $"{epRuntime}m" : "")
                         : L["episode_card.meta_missing"];
+                    // Filler/recap marker (Jikan, MAL-entry numbering): match by
+                    // the file's absolute number first — long-runners and
+                    // offset donghua — else by the plain episode number, but
+                    // only on season 1 (a per-season MAL entry's "ep 5" must
+                    // not tag S2E5).
+                    var isFiller = item.FillerEpisodes.Length > 0
+                        && (absEpNum is int fAbs ? item.FillerEpisodes.Contains(fAbs)
+                                                 : _activeSeason <= 1 && item.FillerEpisodes.Contains(ep));
+                    var isRecap  = !isFiller && item.RecapEpisodes.Length > 0
+                        && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
+                                                 : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
+                    var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
 
                     @* On TV the card itself MUST be focusable — without it, the
                        D-pad has nothing to land on inside the episode grid and
@@ -358,6 +370,8 @@ else
                                      ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
                                      Meta="@epMeta"
                                      Have="hasFile"
+                                     Flag="@epFlag"
+                                     FlagLabel="@(epFlag == "filler" ? L["episode.filler"] : epFlag == "recap" ? L["episode.recap"] : null)"
                                      WatchStateDto="@watchDto"
                                      OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
                     </div>

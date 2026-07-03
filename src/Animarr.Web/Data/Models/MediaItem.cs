@@ -186,6 +186,17 @@ public class MediaItem
     /// Null = never; re-walked after a long TTL (franchises change rarely).</summary>
     public DateTime? LastRelationsCheckAt { get; set; }
 
+    /// <summary>JSON {"filler":[..],"recap":[..]} — episode numbers MAL flags
+    /// as filler/recap (Jikan), in the MAL entry's own numbering: absolute for
+    /// long-runners (One Piece), per-season for seasonal entries. Display maps
+    /// via the file's AbsoluteEpisode first, then the season-1 episode number.
+    /// Null = none known / never checked.</summary>
+    public string? EpisodeFlagsJson { get; set; }
+    /// <summary>When Jikan episode flags were last fetched. Null = never;
+    /// re-checked on a long TTL, shorter while RELEASING (a fresh episode of a
+    /// long-runner can be filler).</summary>
+    public DateTime? LastFillerCheckAt { get; set; }
+
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];
     public ICollection<MediaItemCategory> Categories { get; set; } = [];

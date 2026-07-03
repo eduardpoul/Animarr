@@ -401,6 +401,9 @@ namespace Animarr.Web.Migrations
                     b.Property<int?>("EpisodeCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("EpisodeFlagsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FanartPath")
                         .HasColumnType("TEXT");
 
@@ -435,6 +438,9 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("LastAiringCheckAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastFillerCheckAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastMetadataRefreshedAt")

@@ -555,6 +555,8 @@
   "home.new_episode": "Nuevo episodio",
   "home.next_up": "A continuación",
   "home.new_badge": "NUEVO",
+  "episode.filler": "Relleno",
+  "episode.recap": "Resumen",
   "franchise.overline": "Franquicia",
   "franchise.progress": "vistos {0} de {1}",
   "franchise.you_are_here": "Estás aquí",

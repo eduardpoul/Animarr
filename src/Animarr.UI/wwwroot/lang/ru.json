@@ -556,6 +556,8 @@
   "home.new_episode": "Новая серия",
   "home.next_up": "Смотреть дальше",
   "home.new_badge": "Новое",
+  "episode.filler": "Филлер",
+  "episode.recap": "Рекап",
   "franchise.overline": "Франшиза",
   "franchise.progress": "просмотрено {0} из {1}",
   "franchise.you_are_here": "Вы здесь",
