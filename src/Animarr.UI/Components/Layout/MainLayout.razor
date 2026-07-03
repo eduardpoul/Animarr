@@ -187,12 +187,19 @@
         //     here so MAUI gets readable labels even when the user's pref
         //     is null/"en". Loc.LoadAsync transparently falls back to
         //     en.json if a non-English pack file is missing.
-        try { await Loc.LoadAsync("en"); } catch { /* keys-as-values fallback */ }
+        // The client Program.cs already booted the pack cached from last
+        // session; only (re)load when the server's stored pref differs — e.g.
+        // changed on another device, or a first-ever boot with an empty cache
+        // (LoadAsync falls back to en.json for missing packs, so English is
+        // still the floor). Then cache the resolved language so the NEXT boot
+        // paints it directly, with no English flash.
         var prefLang = UserCtx.Preferences?.Language;
-        if (!string.IsNullOrEmpty(prefLang) && prefLang != "en")
+        var wantLang = string.IsNullOrEmpty(prefLang) ? "en" : prefLang;
+        if (Loc.CurrentLanguage != wantLang)
         {
-            try { await Loc.LoadAsync(prefLang); } catch { /* keep English */ }
+            try { await Loc.LoadAsync(wantLang); } catch { /* keys-as-values fallback */ }
         }
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "animarr-lang", Loc.CurrentLanguage); } catch { }
 
         // 2b. Apply user's chosen personality theme. index.html paints a
         //     bootstrap data-theme from localStorage so first paint matches

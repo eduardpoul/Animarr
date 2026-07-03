@@ -661,6 +661,9 @@
         // current-page state (filter chip, scroll position) is acceptable —
         // language changes are rare and the user just asked for one.
         try { await Loc.LoadAsync(_language); } catch { /* fallback handled in Loc */ }
+        // Cache for the boot resolver (Program.cs) so the forced reload below —
+        // and every future boot — paints straight in the new language.
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "animarr-lang", _language); } catch { }
         Nav.NavigateTo(Nav.Uri, forceLoad: true);
     }
 
