@@ -141,6 +141,9 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default)
         => GetOrNullAsync<FranchiseDto>(ApiRoutes.MediaFranchiseFor(mediaItemId), ct);
 
+    public Task<StatsDto?> GetStatsAsync(CancellationToken ct = default)
+        => GetOrNullAsync<StatsDto>(ApiRoutes.MeStats, ct);
+
     public async Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeWatchlist, request, JsonOpts, ct);

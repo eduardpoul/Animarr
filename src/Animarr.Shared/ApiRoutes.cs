@@ -234,6 +234,9 @@ public static class ApiRoutes
     /// <summary>GET list / POST add for the user's "Хочу посмотреть" list.</summary>
     public const string MeWatchlist  = "/api/me/watchlist";
     public const string MeWatchlistById = "/api/me/watchlist/{id}";
+    /// <summary>GET — personal watch statistics (<c>StatsDto</c>): hours,
+    /// top genres/studios/titles, type split, activity heatmap.</summary>
+    public const string MeStats      = "/api/me/stats";
     /// <summary>GET <c>?back=&amp;ahead=</c> (days) — airing-calendar events
     /// (<c>CalendarEventDto[]</c>) for the window around now. Data is kept
     /// fresh by the AiringRefreshBackgroundService (AniList + TMDB).</summary>
