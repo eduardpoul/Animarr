@@ -170,6 +170,18 @@ builder.Services.AddHostedService<Animarr.Web.Services.Airing.AiringRefreshBackg
 builder.Services.AddScoped<Animarr.Web.Services.Franchise.FranchiseService>();
 builder.Services.AddHostedService<Animarr.Web.Services.Franchise.FranchiseBackgroundService>();
 
+// Filler/recap markers — Jikan (unofficial MAL) per-episode flags. Same WAF
+// caution as the other public APIs: explicit User-Agent.
+builder.Services.AddHttpClient(JikanClient.ClientName, c =>
+{
+    c.BaseAddress = new Uri("https://api.jikan.moe");
+    c.DefaultRequestHeaders.Add("Accept", "application/json");
+    c.DefaultRequestHeaders.Add("User-Agent", "Animarr/1.0 (+https://github.com/eduardpoul/animarr)");
+    c.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddScoped<JikanClient>();
+builder.Services.AddHostedService<FillerRefreshBackgroundService>();
+
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DlnaService>());
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DlnaCastService>();
