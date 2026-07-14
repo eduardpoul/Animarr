@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Animarr.Shared;
+using Animarr.Shared.Models;
 using Animarr.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -7,30 +9,31 @@ namespace Animarr.App;
 
 /// <summary>
 /// Native detail page matching the Blazor MediaDetail: hero (backdrop + poster +
-/// title + pills + meta + Play) → 3-column body (Synopsis / Details /
-/// Identification) → season tabs → rich episode grid (16:9 thumb + big number +
-/// OK/MISS chip + title + meta). Episodes from /api/media/{id}/files, thumbs
-/// from /api/media/{id}/episode-thumb. Self-contained (hard-coded LAN server).
+/// title + pills + meta + a Continue/Watch CTA + favorite star) → 3-column body
+/// (Synopsis / Details / Identification) → season tabs → episode grid with
+/// per-episode watched ticks and resume bars. Data via the shared authenticated
+/// HttpClient + IAnimarrApiClient; images / episode thumbs / playback URLs are
+/// built against the live server origin.
 /// </summary>
 public partial class NativeDetailPage : ContentPage
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // Shared cookie-carrying HttpClient + live server address from MAUI DI
-    // (see MauiProgram) — replaces the POC's throwaway client + hard-coded URL.
     private readonly HttpClient _http;
     private readonly ServerAddressProvider _addr;
-    // Absolute origin for Image.Source / ACTION_VIEW URLs (they can't ride the
-    // HttpClient handler pipeline, so they need a fully-qualified server base).
-    private string ImageBase => _addr.Current.ToString().TrimEnd('/');
+    private readonly IAnimarrApiClient _api;
+    private string ImageBase => _addr.Current!.ToString().TrimEnd('/');
 
     private readonly string _id;
+    private readonly Guid   _guid;
     private DetailDto? _item;
     private FileDto[]  _files = Array.Empty<FileDto>();
-    private int        _activeSeason = 1;
+    private ContinueWatchDto? _continue;
+    private WatchStateDto[] _watch = Array.Empty<WatchStateDto>();
+    private bool _isFav;
+    private int  _activeSeason = 1;
     private List<SeasonTabVm> _tabs = new();
 
-    // Dynamic lists bound from XAML.
     public static readonly BindableProperty PillsProperty =
         BindableProperty.Create(nameof(Pills), typeof(System.Collections.IList), typeof(NativeDetailPage));
     public System.Collections.IList? Pills { get => (System.Collections.IList?)GetValue(PillsProperty); set => SetValue(PillsProperty, value); }
@@ -51,10 +54,9 @@ public partial class NativeDetailPage : ContentPage
         BindableProperty.Create(nameof(Episodes), typeof(System.Collections.IList), typeof(NativeDetailPage));
     public System.Collections.IList? Episodes { get => (System.Collections.IList?)GetValue(EpisodesProperty); set => SetValue(EpisodesProperty, value); }
 
-    // Commands (not Tapped events) so TvFocusBehavior can run them from D-pad OK.
     public Command<int> SeasonCommand   { get; }
     public Command      BackCommand     { get; }
-    public Command      EditCommand     { get; }
+    public Command      FavoriteCommand { get; }
     public Command      PlayHeroCommand { get; }
 
     public NativeDetailPage(string id, string? title, string? backdropUrl)
@@ -66,15 +68,16 @@ public partial class NativeDetailPage : ContentPage
             ?? throw new InvalidOperationException("MAUI DI container not ready.");
         _http = services.GetRequiredService<HttpClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
+        _api  = services.GetRequiredService<IAnimarrApiClient>();
 
         _id = id;
+        Guid.TryParse(id, out _guid);
+
         SeasonCommand   = new Command<int>(SwitchSeason);
         BackCommand     = new Command(() => Navigation.PopAsync());
-        // Edit metadata isn't rebuilt natively — open the full Blazor detail
-        // (which carries the edit drawer) for this item in a pushed WebView host.
-        EditCommand     = new Command(() => Navigation.PushAsync(new BlazorHostPage($"/catalog/{_id}")));
-        PlayHeroCommand = new Command(() =>
-            Play(_files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath));
+        FavoriteCommand = new Command(async () => await ToggleFavoriteAsync());
+        PlayHeroCommand = new Command(PlayCta);
+
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         if (!string.IsNullOrEmpty(backdropUrl)) BackdropImage.Source = backdropUrl;
         EpisodesView.SelectionChanged += OnEpisodeSelected;
@@ -82,15 +85,19 @@ public partial class NativeDetailPage : ContentPage
         _ = LoadAsync();
     }
 
-    // D-pad OK on an episode (CollectionView selection) → play it.
     private void OnEpisodeSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (e.CurrentSelection.FirstOrDefault() is EpisodeVm ep && ep.Have) Play(ep.FilePath);
         EpisodesView.SelectedItem = null;
     }
 
-    // Raw passthrough (/api/file, designed for external native players) launched
-    // via ACTION_VIEW — the device's video player streams it with range support.
+    // Hero CTA: resume / next / first / rewatch, computed server-side.
+    private void PlayCta()
+        => Play(_continue?.FilePath ?? _files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath);
+
+    // Raw passthrough (/api/file) launched via ACTION_VIEW — the device's video
+    // player streams it with range support. (Phase 6 swaps this for an
+    // in-app ExoPlayer.)
     private void Play(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath)) return;
@@ -120,8 +127,62 @@ public partial class NativeDetailPage : ContentPage
             ApplyHero();
             ApplyBody();
             BuildSeasonTabs();
+
+            // Personalised bits — best-effort, don't block the page on them.
+            if (_guid != Guid.Empty)
+            {
+                _continue = await SafeAsync(_api.GetContinueAsync(_guid));
+                _watch    = await SafeAsync(_api.GetWatchStatesAsync(_guid)) ?? Array.Empty<WatchStateDto>();
+                var favs  = await SafeAsync(_api.GetFavoriteIdsAsync());
+                _isFav    = favs?.Contains(_guid) ?? false;
+
+                ApplyCta();
+                ApplyFavorite();
+                BuildEpisodes();   // re-render with watched ticks / resume bars
+            }
         }
-        catch { /* POC: leave partial UI on failure */ }
+        catch { /* leave partial UI on failure */ }
+    }
+
+    private static async Task<T?> SafeAsync<T>(Task<T> task)
+    {
+        try { return await task; } catch { return default; }
+    }
+
+    private void ApplyCta()
+    {
+        PlayLabel.Text = _continue?.Kind switch
+        {
+            "continue" => $"▶   Продолжить {EpLabel(_continue)}",
+            "next"     => $"▶   Следующая {EpLabel(_continue)}",
+            "rewatch"  => "↺   Пересмотреть",
+            _          => "▶   Смотреть",
+        };
+    }
+
+    private static string EpLabel(ContinueWatchDto? c)
+    {
+        if (c?.Episode is null) return "";
+        return c.Season is > 0 ? $"S{c.Season}·E{c.Episode}" : $"E{c.Episode}";
+    }
+
+    private async Task ToggleFavoriteAsync()
+    {
+        if (_guid == Guid.Empty) return;
+        try
+        {
+            if (_isFav) await _api.RemoveFavoriteAsync(_guid);
+            else        await _api.AddFavoriteAsync(_guid);
+            _isFav = !_isFav;
+            ApplyFavorite();
+        }
+        catch { }
+    }
+
+    private void ApplyFavorite()
+    {
+        FavLabel.Text = _isFav ? "★" : "☆";
+        FavLabel.TextColor = _isFav ? Color.FromArgb("#e8b34d") : Colors.White;
     }
 
     private void ApplyHero()
@@ -157,18 +218,18 @@ public partial class NativeDetailPage : ContentPage
     private void ApplyBody()
     {
         var it = _item!;
-        SynopsisLabel.Text = string.IsNullOrEmpty(it.Description) ? "No synopsis available." : it.Description;
+        SynopsisLabel.Text = string.IsNullOrEmpty(it.Description) ? "Нет описания." : it.Description;
 
         var kv = new List<KvVm>();
         void Add(string k, string? v) { if (!string.IsNullOrEmpty(v)) kv.Add(new KvVm(k, v!)); }
-        Add("Studio", it.Studio);
-        Add("Language", it.Language);
-        if (it.Runtime is > 0)      Add("Runtime", $"{it.Runtime} m");
-        if (it.EpisodeCount is > 0) Add("Episodes", it.EpisodeCount.ToString());
-        Add("Season", it.SeasonLabel);
-        Add("Status", it.Status);
-        Add("Rating", it.ContentRating);
-        if (it.Genres is { Length: > 0 }) Add("Tags", string.Join(" · ", it.Genres));
+        Add("Студия", it.Studio);
+        Add("Язык", it.Language);
+        if (it.Runtime is > 0)      Add("Хроно", $"{it.Runtime} м");
+        if (it.EpisodeCount is > 0) Add("Эпизодов", it.EpisodeCount.ToString());
+        Add("Сезон", it.SeasonLabel);
+        Add("Статус", it.Status);
+        Add("Рейтинг", it.ContentRating);
+        if (it.Genres is { Length: > 0 }) Add("Жанры", string.Join(" · ", it.Genres));
         DetailRows = kv;
 
         var ids = new List<IdVm>();
@@ -190,14 +251,14 @@ public partial class NativeDetailPage : ContentPage
         if (hasMeta)
         {
             foreach (var s in it.Seasons!.OrderBy(s => s.Number))
-                tabs.Add(new SeasonTabVm(s.Number, $"Season {s.Number}", s.EpisodeCount));
+                tabs.Add(new SeasonTabVm(s.Number, $"Сезон {s.Number}", s.EpisodeCount));
             foreach (var n in fileSeasons.Where(fs => it.Seasons!.All(s => s.Number != fs)))
-                tabs.Add(new SeasonTabVm(n, n == 0 ? "Specials" : $"Season {n}", _files.Count(f => (f.Season ?? 1) == n)));
+                tabs.Add(new SeasonTabVm(n, n == 0 ? "Спецвыпуски" : $"Сезон {n}", _files.Count(f => (f.Season ?? 1) == n)));
         }
         else
         {
             foreach (var n in fileSeasons)
-                tabs.Add(new SeasonTabVm(n, n == 0 ? "Specials" : $"Season {n}", _files.Count(f => (f.Season ?? 1) == n)));
+                tabs.Add(new SeasonTabVm(n, n == 0 ? "Спецвыпуски" : $"Сезон {n}", _files.Count(f => (f.Season ?? 1) == n)));
         }
 
         _tabs = tabs;
@@ -221,21 +282,23 @@ public partial class NativeDetailPage : ContentPage
     {
         var it = _item!;
 
-        // Movie / single flat file → one "Play movie" card (no episode grid).
         if (it.MediaType == "Movie" || (_files.Length == 1 && _files[0].Episode is null))
         {
             var mf = _files.FirstOrDefault();
+            var ws = _watch.FirstOrDefault();
             Episodes = new List<EpisodeVm>
             {
                 new()
                 {
                     Number   = "▶",
-                    Title    = "Play movie",
-                    Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Movie",
+                    Title    = "Смотреть фильм",
+                    Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Фильм",
                     ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
                         ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
                     Have     = mf is not null,
                     FilePath = mf?.FilePath,
+                    IsWatched   = ws?.IsWatched ?? false,
+                    WatchFraction = Frac(ws),
                 },
             };
             return;
@@ -252,29 +315,29 @@ public partial class NativeDetailPage : ContentPage
         {
             var f    = _files.FirstOrDefault(x => (x.Season ?? 1) == _activeSeason && x.Episode == i);
             var have = f is not null;
+            var ws   = _watch.FirstOrDefault(w => (w.Season ?? 1) == _activeSeason && w.Episode == i);
             var title = _activeSeason == 0
-                ? $"Special {i}"
-                : (f?.AbsoluteEpisode is int ab ? $"Episode {i}  ·  TMDB #{ab}" : $"Episode {i}");
+                ? $"Спецвыпуск {i}"
+                : (f?.AbsoluteEpisode is int ab ? $"Эпизод {i}  ·  TMDB #{ab}" : $"Эпизод {i}");
             eps.Add(new EpisodeVm
             {
                 Number   = i.ToString("00"),
                 Title    = title,
-                Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "On disk") : "Not downloaded",
+                Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "На диске") : "Нет файла",
                 ThumbUrl = have ? $"{ImageBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
                 Have     = have,
                 FilePath = f?.FilePath,
+                IsWatched   = ws?.IsWatched ?? false,
+                WatchFraction = Frac(ws),
             });
         }
         Episodes = eps;
+    }
 
-#if ANDROID
-        try
-        {
-            var rm = Bumptech.Glide.Glide.With(Android.App.Application.Context);
-            foreach (var ep in eps) if (ep.Have) { try { rm.Load(ep.ThumbUrl).Preload(); } catch { } }
-        }
-        catch { }
-#endif
+    private static double Frac(WatchStateDto? ws)
+    {
+        if (ws is null || ws.ProgressMs is not > 0 || ws.RuntimeMs is not > 0) return 0;
+        return Math.Clamp((double)ws.ProgressMs.Value / ws.RuntimeMs.Value, 0, 1);
     }
 
     private static string TypeLabel(string? t) => t switch
@@ -323,18 +386,26 @@ public partial class NativeDetailPage : ContentPage
 
     public sealed class EpisodeVm
     {
-        public string Number   { get; init; } = "";
-        public string Title    { get; init; } = "";
-        public string Meta     { get; init; } = "";
-        public string ThumbUrl { get; init; } = "";
-        public bool   Have     { get; init; }
-        public string? FilePath { get; init; }
+        public string  Number     { get; init; } = "";
+        public string  Title      { get; init; } = "";
+        public string  Meta       { get; init; } = "";
+        public string  ThumbUrl   { get; init; } = "";
+        public bool    Have       { get; init; }
+        public string? FilePath   { get; init; }
+        public bool    IsWatched     { get; init; }
+        public double  WatchFraction { get; init; }   // 0..1 resume position
 
         public Color  Strip    => Have ? Color.FromArgb("#56c596") : Color.FromArgb("#e8a33d");
-        public string ChipText => Have ? "✓" : "!";
-        public Color  ChipFg   => Have ? Color.FromArgb("#56c596") : Color.FromArgb("#e8a33d");
+        public string ChipText => IsWatched ? "✓" : Have ? "•" : "!";
+        public Color  ChipFg   => IsWatched ? Color.FromArgb("#56c596")
+                                : Have ? Color.FromArgb("#c7ccd4") : Color.FromArgb("#e8a33d");
         public Color  TitleFg  => Have ? Color.FromArgb("#e8eaed") : Color.FromArgb("#a8a097");
         public Color  MetaFg   => Have ? Color.FromArgb("#5d564f") : Color.FromArgb("#e8a33d");
-        public double ArtOpacity => Have ? 1.0 : 0.72;
+        public double ArtOpacity => Have ? (IsWatched ? 0.82 : 1.0) : 0.72;
+
+        // Resume bar: full green when watched, partial orange mid-episode.
+        public bool   HasBar     => IsWatched || WatchFraction > 0.01;
+        public double BarValue   => IsWatched ? 1.0 : WatchFraction;
+        public Color  BarColor   => IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e");
     }
 }

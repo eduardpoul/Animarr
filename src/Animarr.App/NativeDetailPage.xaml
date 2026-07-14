@@ -40,7 +40,7 @@
                                VerticalOptions="Center" />
                     </Border>
 
-                    <!-- edit → full Blazor detail (edit-metadata drawer) -->
+                    <!-- favorite star -->
                     <Border HorizontalOptions="End" VerticalOptions="Start" Margin="0,18,20,0"
                             WidthRequest="46" HeightRequest="46" StrokeThickness="0"
                             StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
@@ -48,10 +48,10 @@
                             <local:TvFocusBehavior Radius="10" />
                         </Border.Behaviors>
                         <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding EditCommand, Source={x:Reference Root}}" />
+                            <TapGestureRecognizer Command="{Binding FavoriteCommand, Source={x:Reference Root}}" />
                         </Border.GestureRecognizers>
-                        <Label Text="✎" TextColor="White" FontSize="18" HorizontalOptions="Center"
-                               VerticalOptions="Center" />
+                        <Label x:Name="FavLabel" Text="☆" TextColor="White" FontSize="20"
+                               HorizontalOptions="Center" VerticalOptions="Center" />
                     </Border>
 
                     <!-- poster + title block -->
@@ -95,7 +95,8 @@
                                 <Border.GestureRecognizers>
                                     <TapGestureRecognizer Command="{Binding PlayHeroCommand, Source={x:Reference Root}}" />
                                 </Border.GestureRecognizers>
-                                <Label Text="▶   Play" TextColor="White" FontFamily="Geist" FontSize="15" />
+                                <Label x:Name="PlayLabel" Text="▶   Смотреть" TextColor="White"
+                                       FontFamily="Geist" FontSize="15" />
                             </Border>
                         </VerticalStackLayout>
                     </Grid>
@@ -226,6 +227,9 @@
                                        FontSize="13" HorizontalOptions="Center"
                                        VerticalOptions="Center" />
                             </Border>
+                            <ProgressBar Progress="{Binding BarValue}" ProgressColor="{Binding BarColor}"
+                                         IsVisible="{Binding HasBar}" VerticalOptions="End"
+                                         InputTransparent="True" />
                         </Grid>
                         <!-- caption -->
                         <VerticalStackLayout Padding="12,8,12,10" Spacing="1">
