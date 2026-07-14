@@ -1,0 +1,75 @@
+/* Centered confirm modal for the "mark previous episodes watched" popup.
+   Sits above page content; the video player overlay (z 9000) never coexists
+   with it (the popup is fired from the episode grid, not during playback). */
+
+.mpd-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9500;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(4px);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    animation: mpd-fade var(--motion-fast);
+}
+
+.mpd-card {
+    width: min(420px, 100%);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-modal);
+    box-shadow: var(--shadow-modal);
+    padding: 28px 26px 22px;
+    text-align: center;
+    animation: mpd-rise var(--motion-base);
+}
+
+.mpd-icon {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 14px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+}
+
+.mpd-title {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.mpd-body {
+    margin: 0 0 22px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-dim);
+}
+
+.mpd-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Full-width stacked buttons read as a clear primary/secondary choice on
+   both desktop and the narrow mobile shell. */
+.mpd-actions ::deep .d-btn {
+    width: 100%;
+    justify-content: center;
+}
+
+@keyframes mpd-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes mpd-rise {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+}

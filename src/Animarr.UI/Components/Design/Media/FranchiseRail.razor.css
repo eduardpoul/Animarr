@@ -1,0 +1,254 @@
+/* Franchise watch-order rail — numbered cards, current-title outline,
+   dashed not-in-library members. Spec: feat-detail.jsx. */
+
+.frail { margin: var(--space-10) 0; }
+
+.frail__head {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+.frail__overline {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-hi);
+    margin-bottom: 5px;
+}
+.frail__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.frail__progress {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+.frail__row {
+    display: flex;
+    gap: var(--space-7);
+    overflow-x: auto;
+    padding: 10px 2px 6px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+}
+.frail__row::-webkit-scrollbar { display: none; }
+
+.frail__cell {
+    width: 164px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+}
+
+.frail__art-wrap { position: relative; border-radius: var(--radius-lg, 12px); }
+.frail__art-wrap.is-current {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.frail__order {
+    position: absolute;
+    top: -8px;
+    left: -8px;
+    z-index: 5;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-dim);
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+.frail__art-wrap.is-current .frail__order {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.frail__poster,
+.frail__ext {
+    position: relative;
+    display: block;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-lg, 12px);
+    overflow: hidden;
+    background: var(--surface);
+}
+.frail__poster { border: 1px solid var(--border); }
+.frail__poster:hover { border-color: var(--border-strong); }
+.frail__ext { border: 1px dashed var(--border-strong); }
+
+.frail__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.frail__img--dim { opacity: 0.78; }
+.frail__ph {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: var(--text-faint);
+}
+
+.frail__watched {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #15100b;
+    background: var(--success, oklch(0.74 0.15 150));
+}
+
+.frail__ext-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    padding: 2px 6px;
+    border-radius: 4px;
+    pointer-events: none;
+}
+
+.frail__want {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    appearance: none;
+    cursor: pointer;
+    padding: 7px 0;
+    border-radius: 9px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #15100b;
+    background: var(--accent);
+    border: 1px solid transparent;
+    transition: background var(--motion-base), color var(--motion-base);
+}
+.frail__want:hover { background: var(--accent-hi); }
+.frail__want.is-on {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    border-color: var(--accent-line, var(--accent));
+    cursor: default;
+}
+
+.frail__here {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    z-index: 4;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--accent);
+    padding: 3px 8px;
+    border-radius: 5px;
+}
+
+.frail__name {
+    margin-top: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.frail__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+}
+.frail__dot { color: var(--border-strong); }
+
+.frail__rel {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line, var(--accent));
+    padding: 2px 7px;
+    border-radius: 5px;
+}
+
+@media (max-width: 639px) {
+    .frail__cell { width: 138px; }
+    .frail__title { font-size: 19px; }
+}
+
+/* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
+.frail__viewport { position: relative; }
+.frail__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
+.frail__nav {
+    position: absolute;
+    /* The row carries 10px top padding for the order badges. */
+    top: 10px;
+    /* Cover the 2/3 posters of the 164px cells (~246px). */
+    height: 246px;
+    width: 44px;
+    z-index: 6;
+    display: grid;
+    place-items: center;
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    opacity: 0.75;
+    transition: opacity var(--motion-base);
+}
+.frail__nav:hover { opacity: 1; }
+.frail__nav--l { left: 0; border-radius: 12px 0 0 12px; }
+.frail__nav--r {
+    right: 0;
+    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
+    border-radius: 0 12px 12px 0;
+}
+@media (hover: none) {
+    .frail__nav { display: none; }
+}
+@media (max-width: 639px) {
+    /* 138px cells → shorter posters. */
+    .frail__nav { height: 207px; }
+}

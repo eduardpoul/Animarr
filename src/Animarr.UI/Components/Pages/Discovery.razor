@@ -28,19 +28,19 @@
 @inject UserContextState UserCtx
 @inject IJSRuntime JS
 
-<PageTitle>Animarr — Find your library</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 <div class="d-discovery">
     <button type="button" class="d-discovery__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> BACK
+        <DIcon Name="arrow-l" Size="13" /> @L["discovery.btn_back"]
     </button>
 
-    <div class="d-discovery__card" role="dialog" aria-label="Find your library">
+    <div class="d-discovery__card" role="dialog" aria-label="@L["discovery.dialog_aria"]">
         <header class="d-discovery__brand">
             <BrandMark Size="38" ExtraClass="d-discovery__brand-mark" />
             <div>
                 <div class="d-discovery__brand-name">Animarr</div>
-                <div class="d-discovery__brand-sub">Find your library</div>
+                <div class="d-discovery__brand-sub">@L["discovery.brand_sub"]</div>
             </div>
         </header>
 
@@ -49,14 +49,14 @@
             <div class="d-discovery__scanning">
                 <Spinner Size="sm" />
                 <span class="d-discovery__scanning-label">
-                    Looking for Animarr servers on your network<span class="d-discovery__dots">@_dots</span>
+                    @L["discovery.scanning_label"]<span class="d-discovery__dots">@_dots</span>
                 </span>
             </div>
-            <div class="d-discovery__scan-hint">SCANNING · @_elapsedSec s</div>
+            <div class="d-discovery__scan-hint">@L.Get("discovery.scan_hint_fmt", _elapsedSec)</div>
         }
         else if (_state == State.Found)
         {
-            <div class="d-discovery__found-label">@_found.Count server@(_found.Count == 1 ? "" : "s") found · pick one to sign in</div>
+            <div class="d-discovery__found-label">@L.Get("discovery.found_label_fmt", _found.Count)</div>
             <div class="d-discovery__server-list">
                 @{ var firstId = _found[0].ServerId; }
                 @foreach (var s in _found)
@@ -77,19 +77,19 @@
                             <span class="d-discovery__server-name">@server.Name</span>
                             <span class="d-discovery__server-meta">
                                 <span class="d-discovery__server-dot"></span>
-                                @server.BaseUrl · @server.TitleCount title@(server.TitleCount == 1 ? "" : "s") · v@(server.Version)
+                                @server.BaseUrl · @L.Get("discovery.title_count_fmt", server.TitleCount) · v@(server.Version)
                             </span>
                         </span>
-                        <span class="d-discovery__server-right">connect</span>
+                        <span class="d-discovery__server-right">@L["discovery.connect"]</span>
                     </button>
                 }
             </div>
             <div class="d-discovery__actions">
                 <Btn Variant="ghost" Size="md" OnClick="OpenManualAdd">
-                    <DIcon Name="plus" Size="13" /> Add manually
+                    <DIcon Name="plus" Size="13" /> @L["discovery.add_manually"]
                 </Btn>
                 <Btn Variant="ghost" Size="md" OnClick="Rescan">
-                    <DIcon Name="refresh" Size="13" /> Rescan
+                    <DIcon Name="refresh" Size="13" /> @L["discovery.rescan"]
                 </Btn>
             </div>
         }
@@ -98,11 +98,9 @@
             <div class="d-discovery__empty-ic">
                 <DIcon Name="globe" Size="22" />
             </div>
-            <div class="d-discovery__empty-title">No servers found</div>
+            <div class="d-discovery__empty-title">@L["discovery.empty_title"]</div>
             <p class="d-discovery__empty-body">
-                Make sure your Animarr server is running on the same network. You
-                can also enter the URL manually if you know it (IP, hostname, or
-                Tailscale magic DNS).
+                @L["discovery.empty_body"]
             </p>
             <div class="d-discovery__actions d-discovery__actions--centered">
                 @* Empty state's headline action is "Add manually" — the
@@ -110,27 +108,27 @@
                    parks the remote on this CTA so the user isn't stuck
                    somewhere irrelevant when the scan returns nothing. *@
                 <Btn Variant="primary" Size="md" OnClick="OpenManualAdd" data-tv-autofocus="true">
-                    <DIcon Name="plus" Size="13" /> Add manually
+                    <DIcon Name="plus" Size="13" /> @L["discovery.add_manually"]
                 </Btn>
                 @if (_canScan)
                 {
                     <Btn Variant="ghost" Size="md" OnClick="Rescan">
-                        <DIcon Name="refresh" Size="13" /> Scan again
+                        <DIcon Name="refresh" Size="13" /> @L["discovery.scan_again"]
                     </Btn>
                 }
             </div>
-            <a href="https://github.com/eduardpoul/Animarr/issues" target="_blank" rel="noopener" class="d-discovery__gh" aria-label="Animarr issues on GitHub">
-                github · issues
+            <a href="https://github.com/eduardpoul/Animarr/issues" target="_blank" rel="noopener" class="d-discovery__gh" aria-label="@L["discovery.gh_issues_aria"]">
+                @L["discovery.gh_issues_link"]
             </a>
         }
 
         @if (_manualOpen)
         {
             <div class="d-discovery__manual">
-                <div class="d-discovery__manual-label">Server URL</div>
+                <div class="d-discovery__manual-label">@L["discovery.manual_label"]</div>
                 <input type="text"
                        class="d-discovery__manual-input"
-                       placeholder="http://192.168.1.50:8080 or https://animarr.tailnet.ts.net"
+                       placeholder="@L["discovery.manual_placeholder"]"
                        value="@_manualUrl"
                        @oninput="@((ChangeEventArgs e) => _manualUrl = e.Value?.ToString() ?? "")"
                        @onkeypress="OnManualKeyPress" />
@@ -142,10 +140,10 @@
                     <Btn Variant="primary" Size="md" Loading="@_manualProbing"
                          OnClick="OnManualProbe"
                          Disabled="@(string.IsNullOrWhiteSpace(_manualUrl))">
-                        <DIcon Name="link" Size="13" /> Probe & add
+                        <DIcon Name="link" Size="13" /> @L["discovery.probe_add"]
                     </Btn>
                     <Btn Variant="flat" Size="md" OnClick="@(() => _manualOpen = false)">
-                        Cancel
+                        @L["common.btn_cancel"]
                     </Btn>
                 </div>
             </div>
@@ -153,8 +151,8 @@
     </div>
 
     <footer class="d-discovery__footer">
-        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-discovery__footer-link tv-focus" aria-label="Animarr on GitHub">
-            github
+        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-discovery__footer-link tv-focus" aria-label="@L["discovery.gh_aria"]">
+            @L["discovery.gh_link"]
         </a>
     </footer>
 </div>
@@ -420,7 +418,7 @@
         var url = _manualUrl.Trim();
         if (string.IsNullOrEmpty(url))
         {
-            _manualError = "Enter a URL.";
+            _manualError = L["discovery.err_enter_url"];
             return;
         }
         // Default to http:// when the user types a bare host. They can paste a
@@ -435,7 +433,7 @@
             var entry = await ServerReg.AddServerAsync(url);
             if (entry is null)
             {
-                _manualError = "Couldn't reach an Animarr server at that URL.";
+                _manualError = L["discovery.err_unreachable"];
                 return;
             }
             _manualUrl  = "";
@@ -445,7 +443,7 @@
         }
         catch (Exception ex)
         {
-            _manualError = $"Probe failed: {ex.Message}";
+            _manualError = L.Get("discovery.err_probe_failed_fmt", ex.Message);
         }
         finally
         {

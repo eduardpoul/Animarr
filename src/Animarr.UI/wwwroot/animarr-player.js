@@ -21,6 +21,46 @@
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
 
+    // ── User audio/subtitle preferences ─────────────────────────────────────
+    // Pushed once from MediaDetail via animarrPlayer.setPrefs(...) when the
+    // account prefs load. audioLang/subLang are ISO-639-1 codes ('ja','ru') or
+    // null; subSize is a pixel size or 0 (= leave Artplayer's default).
+    //   • subLang  → picks the initial subtitle track by language (client-side
+    //                overlay only — never touches the video/audio pipeline).
+    //   • subSize  → Artplayer cue font-size.
+    //   • audioLang→ auto-selects the matching audio track ONLY on a transcoding
+    //                HLS session (see attach). Direct Play is never disturbed:
+    //                we never force a transcode just to switch audio language.
+    let PREFS = { audioLang: null, subLang: null, subSize: 0 };
+    function setPrefs(p) {
+        PREFS = {
+            audioLang: (p && p.audioLang) ? String(p.audioLang).toLowerCase() : null,
+            subLang:   (p && p.subLang)   ? String(p.subLang).toLowerCase()   : null,
+            subSize:   (p && Number.isFinite(p.subSize)) ? Math.max(0, p.subSize) : 0,
+        };
+    }
+    // Normalise any track language tag (ISO-639-2/B or /T, ISO-639-1, or a full
+    // English name) to a 639-1 2-letter code so preference matching is tolerant
+    // of how a muxer tagged the stream. Scope mirrors LanguageNameMap.
+    const LANG_2TO1 = {
+        jpn:'ja', ja:'ja', eng:'en', en:'en', rus:'ru', ru:'ru',
+        ger:'de', deu:'de', de:'de', fre:'fr', fra:'fr', fr:'fr',
+        spa:'es', es:'es', ita:'it', it:'it', por:'pt', pt:'pt',
+        chi:'zh', zho:'zh', cmn:'zh', yue:'zh', zh:'zh', cn:'zh',
+        kor:'ko', ko:'ko', tha:'th', th:'th', vie:'vi', vi:'vi',
+        ind:'id', id:'id', ara:'ar', ar:'ar', hin:'hi', hi:'hi', tur:'tr', tr:'tr',
+        japanese:'ja', english:'en', russian:'ru', german:'de', french:'fr',
+        spanish:'es', italian:'it', portuguese:'pt', mandarin:'zh', chinese:'zh',
+        korean:'ko', thai:'th', vietnamese:'vi', indonesian:'id', arabic:'ar',
+        hindi:'hi', turkish:'tr',
+    };
+    function normLang(l) {
+        if (!l) return '';
+        const k = String(l).trim().toLowerCase();
+        if (k === 'und' || k === '') return '';
+        return LANG_2TO1[k] || (k.length === 2 ? k : '');
+    }
+
     // Prefer the MAUI loopback media-proxy base when present
     // (window.animarrLocalProxyBase = http://127.0.0.1:<port>, published by the
     // Android host). All WebView fetches then go to the proxy, which forwards to
@@ -303,6 +343,10 @@
     class ArtplayerAdapter {
         constructor(art) {
             this.art = art;
+            // Set by enableDirectStream() when the source is a progressive
+            // /api/video remux (no byte-Range → seek = reload). Null = a
+            // normal seekable source (Direct Play / HLS).
+            this._ds = null;
         }
 
         // Bridge map between abstract event names and Artplayer's. Anything
@@ -322,9 +366,31 @@
 
         // ── Properties ────────────────────────────────────────────────
         get playing()      { return !!this.art.playing; }
-        get currentTime()  { return this.art.currentTime || 0; }
-        set currentTime(t) { try { this.art.currentTime = t; } catch {} }
-        get duration()     { return this.art.duration || 0; }
+        get currentTime()  {
+            // Direct Stream: while a seek-reload is in flight, report the
+            // target so the scrub bar doesn't snap to the old position before
+            // the reloaded stream's PTS-shifted timeline catches up. Release
+            // only once the video actually lands NEAR the target — by absolute
+            // distance, NOT ">=": a backward seek's old position is already
+            // past the target, so ">=" cleared it instantly and the reload
+            // (which then read a null target) never fired.
+            if (this._ds && this._ds.target != null) {
+                const ct = this.art.currentTime || 0;
+                if (Math.abs(ct - this._ds.target) < 1.5) this._ds.target = null;
+                else return this._ds.target;
+            }
+            return this.art.currentTime || 0;
+        }
+        set currentTime(t) {
+            if (this._ds) { this._directStreamSeek(t); return; }
+            try { this.art.currentTime = t; } catch {}
+        }
+        get duration()     {
+            // Progressive remux has no Content-Length → video.duration is
+            // often Infinity. Report the server-probed total instead.
+            if (this._ds) return this._ds.dur || 0;
+            return this.art.duration || 0;
+        }
         get volume()       { return this.art.volume ?? 1; }
         set volume(v)      { try { this.art.volume = v; } catch {} }
         get muted()        { return !!this.art.muted; }
@@ -335,6 +401,73 @@
         // ── Playback ──────────────────────────────────────────────────
         play()  { try { return this.art.play();  } catch {} }
         pause() { try { this.art.pause(); } catch {} }
+
+        // ── Direct Stream (progressive remux) ─────────────────────────
+        // Turns on seek-by-reload for an /api/video source. baseUrl is the
+        // remux URL WITHOUT any ?seek (we append it per seek); totalDuration
+        // is the server-probed length the bar/clock read off.
+        enableDirectStream(baseUrl, totalDuration) {
+            this._ds = { base: baseUrl, dur: totalDuration || 0, target: null };
+        }
+        // True only when the browser will satisfy a seek to `t` instantly —
+        // the position is both already buffered AND inside a reported seekable
+        // range. For a no-Range progressive stream Chrome often exposes
+        // seekable = the buffered window, so most ±10s skips land here. When it
+        // doesn't (seekable empty), we fall back to a remux-reload — no regress.
+        _dsCanNativeSeek(v, t) {
+            try {
+                const s = v.seekable;
+                let inSeekable = false;
+                for (let i = 0; i < s.length; i++)
+                    if (t >= s.start(i) && t <= s.end(i)) { inSeekable = true; break; }
+                if (!inSeekable) return false;
+                const b = v.buffered;
+                for (let j = 0; j < b.length; j++)
+                    if (t >= b.start(j) && t <= b.end(j) - 0.5) return true;
+            } catch {}
+            return false;
+        }
+        _directStreamSeek(t) {
+            const ds = this._ds;
+            if (!ds) return;
+            const dur = ds.dur || 0;
+            t = Math.max(0, dur > 1 ? Math.min(t, dur - 1) : t);
+            const v = this.art.video;
+            // Fast path: already-buffered + seekable → native instant seek, no
+            // remux reload. Cancels any pending reload and clears the hold.
+            if (v && this._dsCanNativeSeek(v, t)) {
+                if (this._dsTimer) { clearTimeout(this._dsTimer); this._dsTimer = null; }
+                ds.target = null;
+                try { v.currentTime = t; } catch {}
+                return;
+            }
+            ds.target = t;
+            // Debounce the remux-reload: a scrub drag fires currentTime= on
+            // every pointermove and each reload spawns a fresh ffmpeg. The
+            // getter reports ds.target meanwhile so the bar tracks the drag —
+            // we only re-request once the user settles (~280ms).
+            if (this._dsTimer) clearTimeout(this._dsTimer);
+            this._dsTimer = setTimeout(() => {
+                this._dsTimer = null;
+                if (!this._ds) return;
+                const seekTo = this._ds.target;
+                if (seekTo == null) return;
+                const v = this.art.video;
+                if (!v) return;
+                const url = this._ds.base + (this._ds.base.includes('?') ? '&' : '?')
+                          + 'seek=' + seekTo.toFixed(3);
+                try {
+                    const wasPlaying = !v.paused;
+                    v.src = url;
+                    v.load();
+                    const onMeta = () => {
+                        v.removeEventListener('loadedmetadata', onMeta);
+                        if (wasPlaying) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+                    };
+                    v.addEventListener('loadedmetadata', onMeta);
+                } catch (e) { console.warn('direct-stream reload failed', e); }
+            }, 280);
+        }
 
         // ── Events ────────────────────────────────────────────────────
         on(event, fn) {
@@ -682,6 +815,7 @@
         fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
         info:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5" stroke-width="2.2"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/></svg>',
         quality:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.7 7.7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.5 6.5 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.5 6.5 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.9 6.9 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>',
+        settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 4.32c.42-1.76 2.92-1.76 3.34 0a1.72 1.72 0 0 0 2.58 1.07c1.54-.94 3.3.82 2.37 2.37a1.72 1.72 0 0 0 1.06 2.57c1.76.42 1.76 2.92 0 3.34a1.72 1.72 0 0 0-1.07 2.58c.94 1.54-.82 3.3-2.37 2.37a1.72 1.72 0 0 0-2.57 1.06c-.42 1.76-2.92 1.76-3.34 0a1.72 1.72 0 0 0-2.58-1.07c-1.54.94-3.3-.82-2.37-2.37a1.72 1.72 0 0 0-1.06-2.57c-1.76-.42-1.76-2.92 0-3.34a1.72 1.72 0 0 0 1.07-2.58c-.94-1.54.82-3.3 2.37-2.37a1.72 1.72 0 0 0 2.57-1.06z"/><circle cx="12" cy="12" r="3"/></svg>',
     };
 
     /** Fullscreen action. On the MAUI Android host this ROTATES the device
@@ -726,6 +860,12 @@
     <div class="vp-hud__meta" data-bind="meta"></div>
   </div>
 
+  <div class="vp-hud__center">
+    <button class="vp-hud__cplay" data-act="play" aria-label="Play / pause" title="Play / pause (Space)">
+      <span class="vp-glyph" data-bind="play-icon">${I.play}</span>
+    </button>
+  </div>
+
   <div class="vp-hud__bottom">
     <div class="vp-hud__progress">
       <span class="vp-hud__time" data-bind="cur">0:00</span>
@@ -733,6 +873,10 @@
         <div class="vp-hud__track-buffer" data-bind="buffer"></div>
         <div class="vp-hud__track-fill"   data-bind="fill"></div>
         <div class="vp-hud__thumb"        data-bind="thumb"></div>
+        <div class="vp-hud__preview" data-bind="preview">
+          <div class="vp-hud__preview-img"  data-bind="preview-img"></div>
+          <div class="vp-hud__preview-time" data-bind="preview-time">0:00</div>
+        </div>
       </div>
       <span class="vp-hud__time" data-bind="dur">0:00</span>
     </div>
@@ -809,6 +953,10 @@
           <span class="vp-label">Info</span>
         </button>
       </div>
+      <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__gear" data-act="settings"
+              aria-label="Settings" title="Settings">
+        <span class="vp-glyph">${I.settings}</span><span class="vp-label">Settings</span>
+      </button>
       <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__fs" data-act="fullscreen"
               aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
         <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
@@ -817,6 +965,56 @@
     </div>
   </div>
 </div>`.trim();
+    }
+
+    // ── settings menu (mobile gear) ───────────────────────────────────
+    // Worded list whose rows each fire a callback. Same popup shell + outside-
+    // click / toggle behaviour as the pickers; tapping a row opens that
+    // control's own picker (which replaces this menu — both are .vp-hud-popup).
+    function openMenuPopup(root, anchor, title, rows) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            // Touch devices fire the opener's click and then a synthesized
+            // "ghost" click ~300ms later (double-tap-zoom heuristic). Without
+            // this grace window that second click re-enters here and toggles the
+            // just-opened menu straight back shut ("appears and immediately
+            // disappears"). A deliberate re-tap to close still works afterwards.
+            if (wasFor === anchor && Date.now() - Number(existing.dataset.openedAt || 0) < 400) return;
+            existing.remove();
+            if (wasFor === anchor) return;   // gear tapped again → toggle closed
+        }
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--menu';
+        popup.setAttribute('data-anchor', anchor);
+        popup.innerHTML = `
+            <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
+            <div class="vp-hud-popup__list">
+                ${rows.map((r, i) => `
+                    <button class="vp-hud-popup__item" data-i="${i}">${escapeHtml(r.label)}</button>
+                `).join('')}
+            </div>`;
+        popup.addEventListener('click', (e) => {
+            const it = e.target.closest('[data-i]');
+            if (!it) return;
+            const i = parseInt(it.dataset.i, 10);
+            popup.remove();
+            const row = rows[i];
+            if (row && typeof row.run === 'function') row.run();
+        });
+        popup.dataset.openedAt = String(Date.now());
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) { document.removeEventListener('click', onDoc, true); return; }
+                if (Date.now() - Number(popup.dataset.openedAt || 0) < 400) return;  // ignore the opening tap's ghost click
+                if (!popup.contains(e.target) && !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
     }
 
     // ── popup picker (CC / Audio / Aspect) ────────────────────────────
@@ -845,6 +1043,7 @@
             onPick(i);
             popup.remove();
         });
+        popup.dataset.openedAt = String(Date.now());
         root.appendChild(popup);
         setTimeout(() => {
             const onDoc = (e) => {
@@ -852,6 +1051,7 @@
                     document.removeEventListener('click', onDoc, true);
                     return;
                 }
+                if (Date.now() - Number(popup.dataset.openedAt || 0) < 400) return;  // ignore the opening tap's ghost click
                 if (!popup.contains(e.target) &&
                     !e.target.closest(`[data-act="${anchor}"]`)) {
                     popup.remove();
@@ -1173,7 +1373,73 @@
             fsIcon:     $('[data-bind="fs-icon"]'),
             fsLabel:    $('[data-bind="fs-label"]'),
             track:      $('[data-act="seek"]'),
+            preview:     $('[data-bind="preview"]'),
+            previewImg:  $('[data-bind="preview-img"]'),
+            previewTime: $('[data-bind="preview-time"]'),
         };
+
+        // ── touch / phone layout gate ─────────────────────────────────
+        // The minimal mobile layout (centre play, ±10 double-tap, settings
+        // gear) is driven by [data-touch="1"] on the HUD: a coarse pointer OR
+        // a narrow viewport (so a resized desktop window previews it too), and
+        // NEVER the Android-TV host (the d-pad needs the full button bar).
+        const isTvHost = document.documentElement.classList.contains('animarr-tv-host');
+        const applyTouchMode = () => {
+            const mm = window.matchMedia;
+            const mq = (q) => !!mm && mm(q).matches;
+            // Detect a touch device robustly. The Android System WebView (MAUI
+            // host) does NOT report `pointer: coarse`, so relying on that left
+            // the mobile layout to `max-width:760` alone — true in portrait but
+            // FALSE in landscape (~964px wide), which dropped the phone back to
+            // the full desktop button bar on rotate. maxTouchPoints / ontouchstart
+            // are orientation- and width-independent and work in that WebView.
+            const hasTouch = (navigator.maxTouchPoints || 0) > 0
+                || ('ontouchstart' in window)
+                || mq('(pointer: coarse)') || mq('(any-pointer: coarse)');
+            const touch = !isTvHost && (hasTouch || mq('(max-width: 760px)'));
+            hud.setAttribute('data-touch', touch ? '1' : '0');
+        };
+        applyTouchMode();
+        let touchMql = null;
+        try {
+            touchMql = window.matchMedia('(max-width: 760px)');
+            touchMql.addEventListener('change', applyTouchMode);
+        } catch { try { touchMql && touchMql.addListener(applyTouchMode); } catch {} }
+
+        // Transient ±10 ripple shown on a double-tap seek (phone).
+        function showSeekRipple(side) {
+            const rip = document.createElement('div');
+            rip.className = 'vp-seek-ripple vp-seek-ripple--' + side;
+            rip.innerHTML = '<span>' + (side === 'left' ? '« −10' : '+10 »') + '</span>';
+            // Append to the player root (sibling of .vp-hud), NOT the HUD — the
+            // HUD fades to opacity:0 when controls are hidden, and a double-tap
+            // seek commonly happens with controls down, where the ripple must
+            // still be visible.
+            root.appendChild(rip);
+            setTimeout(() => { try { rip.remove(); } catch {} }, 600);
+        }
+
+        // Settings menu (mobile gear): consolidates the secondary controls into
+        // one worded list. Each row fires the same callback the (now hidden)
+        // bottom-bar button would, which opens its own picker popup. Rows whose
+        // button is currently unavailable (offset / cast hidden) are skipped.
+        function openSettingsMenu() {
+            const hidden = (act) => {
+                const b = hud.querySelector('[data-act="' + act + '"]');
+                return !b || b.style.display === 'none';
+            };
+            const rows = [
+                { act: 'cc',      label: 'Subtitles',    run: callbacks.cc },
+                { act: 'audio',   label: 'Audio',        run: callbacks.audio },
+                { act: 'quality', label: 'Quality',      run: callbacks.quality },
+                { act: 'aspect',  label: 'Aspect ratio', run: callbacks.aspect },
+                { act: 'offset',  label: 'Audio sync',   run: callbacks.offset },
+                { act: 'volume',  label: 'Volume',       run: callbacks.volume },
+                { act: 'cast',    label: 'Cast to TV',   run: callbacks.cast },
+                { act: 'info',    label: 'Media info',   run: callbacks.info },
+            ].filter(r => !hidden(r.act) && typeof r.run === 'function');
+            openMenuPopup(root, 'settings', 'Settings', rows);
+        }
 
         // ── auto-hide ─────────────────────────────────────────────────
         // Hide the controls after 3s with no mouse/remote activity (during
@@ -1230,7 +1496,16 @@
                 bar.addEventListener('mouseenter', () => { hovering = true;  show(); });
                 bar.addEventListener('mouseleave', () => { hovering = false; show(); });
             });
-        const onActivity = () => show();
+        // Ignore the synthetic "ghost" mousemove the browser fires ~300ms after
+        // a touch tap. On a phone that ghost called show() right as a deferred
+        // tap-toggle was deciding to hide — so the HUD flashed up and instantly
+        // vanished (and, on a tap-to-hide, the ghost re-revealed it). Real mouse
+        // moves on desktop are untouched (no preceding touch ⇒ lastTouchAt 0).
+        let lastTouchAt = 0;
+        const markTouch = () => { lastTouchAt = Date.now(); };
+        root.addEventListener('touchstart', markTouch, { passive: true });
+        root.addEventListener('touchend', markTouch, { passive: true });
+        const onActivity = () => { if (Date.now() - lastTouchAt < 700) return; show(); };
         // Desktop: mouse movement reveals the HUD (then it auto-hides).
         root.addEventListener('mousemove', onActivity);
         // Tap-catcher: a dedicated full-area layer (.vp-hud__tap, pointer-events
@@ -1247,16 +1522,61 @@
         const tapEl = hud.querySelector('.vp-hud__tap');
         if (tapEl) {
             let downX = 0, downY = 0;
+            let lastTapAt = 0, lastTapZone = '', sideTapTimer = null;
+            const DT_MS = 280;   // double-tap window
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
                 if (Math.hypot((e.clientX || 0) - downX, (e.clientY || 0) - downY) > 12) return;
                 const openPopup = root.querySelector('.vp-hud-popup');
-                if (openPopup) { openPopup.remove(); return; }  // first tap dismisses a popup
-                if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-                    toggleHud();      // phone: tap toggles the controls
-                } else {
-                    togglePlay();     // desktop/web: click toggles play/pause (togglePlay also calls show())
+                if (openPopup) {
+                    // Tap outside dismisses a popup — but not the very tap that
+                    // opened it (touch fires a ghost click ~300ms later).
+                    if (Date.now() - Number(openPopup.dataset.openedAt || 0) >= 350) openPopup.remove();
+                    return;
                 }
+                const isTouch = (e.pointerType === 'touch' || e.pointerType === 'pen');
+                // Mouse / desktop: click = play/pause, no gesture seeking.
+                if (!isTouch) { togglePlay(); return; }
+                // Single tap = show/hide the controls; a double tap on a side =
+                // ±10s seek. The only way to tell a lone tap from the first half
+                // of a double tap is to WAIT one double-tap window, so a side
+                // tap's toggle is DEFERRED: "no second tap ⇒ they wanted to hide
+                // the UI". The CENTRE band (where the play/pause button sits) is
+                // exempt and toggles INSTANTLY, so waking the controls makes the
+                // centre button reachable right away and a tap there pauses /
+                // hides with no lag — and there is no ±10 in the centre anyway.
+                const touchMode = hud.getAttribute('data-touch') === '1';
+                const rect = tapEl.getBoundingClientRect();
+                const x = (e.clientX || 0) - rect.left;
+                const zone = x < rect.width * 0.30 ? 'left'
+                           : x > rect.width * 0.70 ? 'right' : 'mid';
+                const now = Date.now();
+                if (!touchMode || zone === 'mid') {
+                    if (sideTapTimer) { clearTimeout(sideTapTimer); sideTapTimer = null; }
+                    lastTapAt = now; lastTapZone = zone;
+                    toggleHud();
+                    return;
+                }
+                // Second tap on the SAME side within the window → ±10 seek; this
+                // also cancels the lone-tap toggle the first tap had pending.
+                if ((now - lastTapAt < DT_MS) && zone === lastTapZone) {
+                    if (sideTapTimer) { clearTimeout(sideTapTimer); sideTapTimer = null; }
+                    lastTapAt = 0; lastTapZone = '';
+                    if (zone === 'left') { seekBy(-10); showSeekRipple('left'); }
+                    else                 { seekBy(+10); showSeekRipple('right'); }
+                    return;
+                }
+                // First (maybe only) side tap: defer the toggle one window. A
+                // matching second tap cancels this timer and seeks instead.
+                // Capture the show/hide intent NOW so a stray show() in the gap
+                // (ghost mouse event, auto-hide firing) can't invert it.
+                lastTapAt = now; lastTapZone = zone;
+                const wantShow = hud.getAttribute('data-visible') !== 'true';
+                if (sideTapTimer) clearTimeout(sideTapTimer);
+                sideTapTimer = setTimeout(() => {
+                    sideTapTimer = null;
+                    if (wantShow) show(); else hideNow();
+                }, DT_MS);
             });
         }
 
@@ -1383,6 +1703,7 @@
                 case 'cc':     callbacks.cc(); break;
                 case 'quality': callbacks.quality(); break;
                 case 'info':   callbacks.info(); break;
+                case 'settings': openSettingsMenu(); break;
                 case 'fullscreen':
                     callbacks.fullscreen();
                     break;
@@ -1406,25 +1727,207 @@
             refs.thumb.style.left = (pct * 100) + '%';
             refs.cur.textContent  = formatTime(t);
         }
+        // ── trickplay seek preview ────────────────────────────────────
+        // Sprite-sheet thumbnail bubble over the scrubber. Data arrives via
+        // setMediaSession → entry.trickplay (null → no bubble). Mouse: any
+        // hover over the track; touch: while scrubbing (pointermove only
+        // fires pressed on touch), hidden again when the finger lifts.
+        let previewSprite = null;
+        function hideSeekPreview() {
+            if (refs.preview) refs.preview.classList.remove('vp-hud__preview--on');
+        }
+        function seekPreviewAt(clientX) {
+            const tp = entry.trickplay;
+            if (!refs.preview || !tp || !tp.spriteUrl || !tp.count) { hideSeekPreview(); return; }
+            const dur = adapter.duration || entry.totalDuration || 0;
+            if (dur <= 0) { hideSeekPreview(); return; }
+            const rect = refs.track.getBoundingClientRect();
+            if (rect.width <= 0) return;
+            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const t   = dur * pct;
+            let idx = Math.floor(t / (tp.intervalSec || 10));
+            idx = Math.max(0, Math.min(tp.count - 1, idx));
+            const col = idx % tp.cols, row = Math.floor(idx / tp.cols);
+            if (previewSprite !== tp.spriteUrl) {
+                previewSprite = tp.spriteUrl;
+                refs.previewImg.style.width  = tp.tileWidth + 'px';
+                refs.previewImg.style.height = tp.tileHeight + 'px';
+                refs.previewImg.style.backgroundImage = 'url("' + tp.spriteUrl + '")';
+                // Natural sprite size keeps the tile math 1:1 — never scale it.
+                refs.previewImg.style.backgroundSize =
+                    (tp.cols * tp.tileWidth) + 'px ' + (tp.rows * tp.tileHeight) + 'px';
+            }
+            refs.previewImg.style.backgroundPosition =
+                (-(col * tp.tileWidth)) + 'px ' + (-(row * tp.tileHeight)) + 'px';
+            refs.previewTime.textContent = formatTime(t);
+            const half = (refs.preview.offsetWidth || tp.tileWidth) / 2;
+            refs.preview.style.left =
+                Math.max(half, Math.min(rect.width - half, clientX - rect.left)) + 'px';
+            refs.preview.classList.add('vp-hud__preview--on');
+        }
+
         refs.track.addEventListener('pointerdown', (e) => {
             dragging = true;
             try { refs.track.setPointerCapture(e.pointerId); } catch {}
+            seekPreviewAt(e.clientX);
             seekToPct(pctFromEvent(e));
             show();
         });
         refs.track.addEventListener('pointermove', (e) => {
+            seekPreviewAt(e.clientX);
             if (!dragging) return;
             seekToPct(pctFromEvent(e));
             show();
         });
+        refs.track.addEventListener('pointerleave', hideSeekPreview);
         const endDrag = (e) => {
             if (!dragging) return;
             dragging = false;
             try { refs.track.releasePointerCapture(e.pointerId); } catch {}
+            // Touch has no hover — drop the bubble as the finger lifts. The
+            // mouse re-shows it on the very next move over the track.
+            hideSeekPreview();
             show();
         };
         refs.track.addEventListener('pointerup',     endDrag);
         refs.track.addEventListener('pointercancel', endDrag);
+
+        // ── up-next overlay (end-of-episode autoplay card) ────────────
+        // Appended to the player root (a sibling of .vp-hud) so it stays
+        // visible while the HUD controls fade out near the end — Netflix
+        // style. Shows once playback crosses 90% (the same threshold the
+        // server uses to auto-mark "watched") AND a next episode exists on
+        // disk. In the last few seconds it shows a countdown and auto-advances;
+        // "Dismiss" cancels that for the rest of this episode.
+        const upNextEl = document.createElement('div');
+        upNextEl.className = 'vp-upnext vp-upnext--hidden';
+        upNextEl.innerHTML = `
+            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="Close">&times;</button>
+            <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
+            <div class="vp-upnext__name" data-bind="un-name"></div>
+            <div class="vp-upnext__actions">
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">Skip credits</button>
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
+                <span data-bind="un-play">Play next</span>
+              </button>
+            </div>`;
+        root.appendChild(upNextEl);
+        const unRefs = {
+            eyebrow: upNextEl.querySelector('[data-bind="un-eyebrow"]'),
+            name:    upNextEl.querySelector('[data-bind="un-name"]'),
+            play:    upNextEl.querySelector('[data-bind="un-play"]'),
+            skip:    upNextEl.querySelector('[data-bind="un-skip"]'),
+        };
+        // Next-up appears at the detected credits start; with no detection it
+        // falls back to this fraction of the runtime.
+        const UP_NEXT_FALLBACK_PCT = 0.95;
+        const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
+        let upNextShown = false, upNextDismissed = false, upNextDone = false, skipCreditsUsed = false;
+
+        function upNextLabels() { return entry.upNext || {}; }
+        function showUpNext() {
+            if (upNextShown) return;
+            upNextShown = true;
+            const m = upNextLabels();
+            unRefs.eyebrow.textContent = m.eyebrow || 'Up next';
+            unRefs.name.textContent    = m.name || '';
+            unRefs.play.textContent    = m.play || 'Play next';
+            unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
+            upNextEl.classList.remove('vp-upnext--hidden');
+        }
+        function hideUpNext() {
+            if (!upNextShown) return;
+            upNextShown = false;
+            upNextEl.classList.add('vp-upnext--hidden');
+        }
+        function dismissUpNext() { upNextDismissed = true; hideUpNext(); }
+        function triggerUpNext() {
+            if (upNextDone) return;
+            upNextDone = true;
+            hideUpNext();
+            try { callbacks.next(); } catch {}
+        }
+        // Called from updateProgress on every timeupdate (smooth countdown).
+        function updateUpNext(cTime, dTime) {
+            if (upNextDone || upNextDismissed) return;
+            if (!entry.nextAvailable || !(dTime > 0)) { hideUpNext(); return; }
+            // Show at the detected end-credits start; otherwise fall back to 95%.
+            const cs = entry.segments && entry.segments.creditsStart;
+            const triggerAt = (cs > 0 && cs < dTime) ? cs : dTime * UP_NEXT_FALLBACK_PCT;
+            if (cTime < triggerAt) { hideUpNext(); return; }  // not at credits / fallback yet
+            showUpNext();
+            // In-card Skip-credits button: only when there's content after the
+            // credits to jump to (e.g. a next-episode preview).
+            const sg = entry.segments;
+            const canSkip = !skipCreditsUsed && !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
+            unRefs.skip.style.display = canSkip ? '' : 'none';
+            const remaining = dTime - cTime;
+            const baseLabel = upNextLabels().play || 'Play next';
+            if (remaining <= UP_NEXT_COUNTDOWN) {
+                unRefs.play.textContent = baseLabel + ' · ' + Math.max(0, Math.ceil(remaining));
+                if (remaining <= 0.4) triggerUpNext();
+            } else {
+                unRefs.play.textContent = baseLabel;
+            }
+        }
+        upNextEl.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-act]');
+            if (!b) return;
+            e.stopPropagation();
+            if (b.dataset.act === 'un-next') triggerUpNext();
+            else if (b.dataset.act === 'un-dismiss') dismissUpNext();
+            else if (b.dataset.act === 'un-skip') {
+                const sg = entry.segments;
+                if (sg && sg.creditsEnd > 0) {
+                    skipCreditsUsed = true;
+                    unRefs.skip.style.display = 'none';
+                    adapter.currentTime = sg.creditsEnd;
+                }
+            }
+        });
+        // Belt-and-braces: timeupdate can stop firing right at EOF, so the
+        // genuine end also advances (unless the user dismissed the card).
+        adapter.on('ended', () => {
+            if (!upNextDismissed && entry.nextAvailable) triggerUpNext();
+        });
+
+        // ── skip-intro button ─────────────────────────────────────────
+        // Floating button shown only while currentTime is inside the detected
+        // intro [introStart, introEnd]; clicking seeks past it. Sibling of the
+        // HUD so it stays put while the controls fade. Stays hidden entirely
+        // when no intro was detected for this episode.
+        const skipEl = document.createElement('button');
+        skipEl.type = 'button';
+        skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
+        root.appendChild(skipEl);
+        let skipShown = false, skipTarget = 0, skipIntroUsed = false;
+        function setSkip(label, target) {
+            skipTarget = target;
+            if (skipEl.textContent !== label) skipEl.textContent = label;
+            if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
+        }
+        function hideSkip() {
+            if (!skipShown) return;
+            skipShown = false;
+            skipEl.classList.add('vp-skip--hidden');
+        }
+        // Floating pill for Skip intro only (the opening). Skip credits now lives
+        // inside the Up-Next card (the credits zone).
+        function updateSkip(cTime) {
+            const s = entry.segments;
+            if (!skipIntroUsed && s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
+                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
+            } else {
+                hideSkip();
+            }
+        }
+        skipEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // One-shot: mark used + hide immediately so the next timeupdate (which
+            // still sees the pre-seek currentTime, esp. on Direct Stream reload)
+            // doesn't flash the pill back on.
+            if (skipTarget > 0) { skipIntroUsed = true; hideSkip(); adapter.currentTime = skipTarget; }
+        });
 
         // ── adapter events ────────────────────────────────────────────
         function updateProgress() {
@@ -1437,6 +1940,9 @@
                 refs.cur.textContent   = formatTime(cTime);
             }
             refs.dur.textContent = formatTime(dTime);
+            // End-of-episode autoplay card (credits start → show; last 10s → countdown).
+            updateUpNext(cTime, dTime);
+            updateSkip(cTime);
             // Buffered range — only meaningful on the web adapter (raw <video>
             // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
             // rawVideoElement so we just skip the buffer paint.
@@ -1452,12 +1958,12 @@
         adapter.on('progress',       updateProgress);
         adapter.on('durationchange', updateProgress);
         adapter.on('play',  () => {
-            refs.playIcon.innerHTML    = I.pause;
+            hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.pause; });
             refs.playLabel.textContent = 'Pause';
             show();
         });
         adapter.on('pause', () => {
-            refs.playIcon.innerHTML    = I.play;
+            hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.play; });
             refs.playLabel.textContent = 'Play';
             // Paused → keep HUD visible.
             hud.classList.remove('vp-hud--hidden');
@@ -1480,7 +1986,10 @@
         const cleanup = () => {
             document.removeEventListener('keydown', onKey, { capture: true });
             document.removeEventListener('fullscreenchange', syncFsIcon);
+            try { touchMql && touchMql.removeEventListener('change', applyTouchMode); }
+            catch { try { touchMql && touchMql.removeListener(applyTouchMode); } catch {} }
             if (hideTimer) clearTimeout(hideTimer);
+            try { upNextEl.remove(); } catch {}
             // Restore the system bars + drop the orientation listener so other
             // (non-player) pages get the status bar back.
             if (immersiveMql && onOrient) {
@@ -1510,6 +2019,15 @@
             },
             setVolumeIcon(volume, muted) {
                 refs.volumeIcon.innerHTML = (muted || volume === 0) ? I.mute : I.volume;
+            },
+            // Hide prev / next when no adjacent episode exists on disk (movie,
+            // first / last episode). Driven from setMediaSession's prev/next
+            // availability flags. Applies to every layout, not just mobile.
+            setNav(hasPrev, hasNext) {
+                const p = hud.querySelector('[data-act="prev"]');
+                const n = hud.querySelector('[data-act="next"]');
+                if (p) p.style.display = hasPrev ? '' : 'none';
+                if (n) n.style.display = hasNext ? '' : 'none';
             },
         };
     }
@@ -1547,6 +2065,10 @@
         // Carried across re-attaches by switchQuality (mirrors audioTrackIndex).
         const maxHeight = (opts && Number.isFinite(opts.maxHeight))
             ? Math.max(0, opts.maxHeight) : 0;
+        // Output bitrate cap in Mbps (0 = no cap / original). Below source it
+        // forces a re-encode at the chosen bitrate; carried by switchQuality.
+        const maxBitrate = (opts && Number.isFinite(opts.maxBitrate))
+            ? Math.max(0, opts.maxBitrate) : 0;
         const forceResumeSec  = (opts && Number.isFinite(opts.forceResumeSec))
             ? Math.max(0, opts.forceResumeSec)  : null;
         // Absolute path to an external dub audio file to mux in place of the
@@ -1571,6 +2093,7 @@
             mediaInfo: null, subtitleList: [], audioList: [],
             currentSubIdx: null, currentAudIdx: audioTrackIndex,
             currentMaxHeight: maxHeight,
+            currentMaxBitrate: maxBitrate,
             // External-track state. currentExternalAudioPath != null means the
             // active audio is a sideload dub (not an in-file stream); the two
             // external lists are filled from /api/external-tracks below.
@@ -1619,12 +2142,36 @@
         // ── 3) Start session ──────────────────────────────────────────
         let manifestUrl = null;
         let directPlayUrl = null;
+        let directStreamUrl = null;
+        // HEVC decode capability — tell the server it can ship HEVC as a
+        // stream-copy (Direct Stream, original quality) rather than re-encoding
+        // it to H.264. Constant per browser → memoize on window. hls.js gates on
+        // MediaSource.isTypeSupported; Safari/native HLS via canPlayType.
+        if (window.__animarrHevcOk === undefined) {
+            let ok = false, ok10 = false;
+            try {
+                const t   = 'video/mp4; codecs="hvc1.1.6.L93.B0"';   // HEVC Main (8-bit)
+                const t10 = 'video/mp4; codecs="hvc1.2.4.L153.B0"';  // HEVC Main10 (HDR10)
+                const v = document.createElement('video');
+                const can = (s) =>
+                       (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(s))
+                    || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(s))
+                    || v.canPlayType(s) !== '';
+                ok   = can(t);
+                ok10 = can(t10);
+            } catch (e) { ok = false; ok10 = false; }
+            window.__animarrHevcOk   = ok;
+            window.__animarrHevc10Ok = ok10;
+        }
         const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + audioOffsetMsHw
             + '&audioOffsetSwMs=' + audioOffsetMsSw
             + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
             + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
+            + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
+            + (window.__animarrHevcOk ? '&clientHevc=1' : '')
+            + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '')
             + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
 
         // Kick the probe off IN PARALLEL with /api/hls/start. The probe is a
@@ -1657,6 +2204,9 @@
                 entry.output = data.output || null;
                 if (data.directPlayUrl) {
                     directPlayUrl = data.directPlayUrl;
+                } else if (data.directStreamUrl) {
+                    // Progressive remux (MKV → native fMP4). No HLS session.
+                    directStreamUrl = data.directStreamUrl;
                 } else {
                     entry.sessionToken = data.token;
                     manifestUrl = data.manifestUrl;
@@ -1671,7 +2221,7 @@
                 await new Promise(r => setTimeout(r, 500));
             }
         }
-        if (!manifestUrl && !directPlayUrl) return;
+        if (!manifestUrl && !directPlayUrl && !directStreamUrl) return;
         if (abort.signal.aborted) return;
 
         // ── 4) Probe ──────────────────────────────────────────────────
@@ -1748,7 +2298,7 @@
                             audioCodec:    a ? (a.codec_name || '') : '',
                             audioChannels: a ? (a.channels || 0) : 0,
                             audioLang:     audioList[0]?.lang || '',
-                            playbackTier:  directPlayUrl ? 'directplay' : 'hls',
+                            playbackTier:  directPlayUrl ? 'directplay' : (directStreamUrl ? 'directstream' : 'hls'),
                         };
                         dotnetRef.invokeMethodAsync('OnPlayerMediaInfo', mediaInfo)
                             .catch(() => {});
@@ -1794,10 +2344,19 @@
         if (externalAudioPath) offsetChannel = 'sw';
 
         // ── 5) Instantiate player + adapter ───────────────────────────
+        // Direct Stream base (no ?seek — the adapter appends one per seek). The
+        // initial load seeks straight to the resume point so playback starts
+        // there without spawning a second remux.
+        const directStreamBase = directStreamUrl
+            ? (directStreamUrl.startsWith('/') ? apiUrl(directStreamUrl) : directStreamUrl)
+            : null;
         const playUrl = directPlayUrl
             ? (directPlayUrl.startsWith('/') ? apiUrl(directPlayUrl) : directPlayUrl)
+            : directStreamBase
+            ? directStreamBase + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(3) : '')
             : (manifestUrl.startsWith('/')   ? apiUrl(manifestUrl)   : manifestUrl);
-        const isHls   = !directPlayUrl;
+        const isHls          = !directPlayUrl && !directStreamUrl;
+        const isDirectStream = !!directStreamUrl;
         const fileExt = mediaPath.toLowerCase().split('.').pop();
         const stylePref = readStylePref();
 
@@ -1856,10 +2415,24 @@
             adapter = native;
         } else {
             // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
+            // Initial subtitle track: prefer the user's subtitle language, then
+            // the container's `default`-disposition track, then the first. Pure
+            // client-side overlay — never influences the video/audio pipeline.
+            const prefSubIdx = (() => {
+                if (PREFS.subLang) {
+                    const i = subtitleList.findIndex(s => normLang(s.lang) === PREFS.subLang);
+                    if (i >= 0) return i;
+                }
+                const d = subtitleList.findIndex(s => s.default);
+                if (d >= 0) return d;
+                return subtitleList.length > 0 ? 0 : -1;
+            })();
             art = new window.Artplayer({
             container: el,
             url: playUrl,
-            type: isHls ? 'm3u8' : (fileExt || 'mp4'),
+            // Direct Stream is served as fMP4 by /api/video regardless of the
+            // source extension (.mkv), so force 'mp4' — never the source ext.
+            type: isHls ? 'm3u8' : (isDirectStream ? 'mp4' : (fileExt || 'mp4')),
             customType: isHls ? {
                 m3u8: (video, url) => {
                     if (!window.Hls || !window.Hls.isSupported()) {
@@ -1944,7 +2517,7 @@
             // undefined (i.e. media with NO subtitle tracks). Use {} for the
             // no-subtitle case instead of undefined.
             subtitle: subtitleList.length > 0 ? {
-                url: (subtitleList.find(s => s.default) || subtitleList[0]).url,
+                url: subtitleList[prefSubIdx >= 0 ? prefSubIdx : 0].url,
                 // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
                 // a recognised value and silently dropped on the loader path
                 // — fix landed 2026-05-27 after subtitle.switch() reported
@@ -1952,6 +2525,8 @@
                 type: 'vtt',
                 encoding: 'utf-8',
                 escape: false,
+                // User's subtitle size (px). Omitted (Artplayer default) when 0.
+                ...(PREFS.subSize > 0 ? { style: { fontSize: PREFS.subSize + 'px' } } : {}),
             } : {},
             layers: [{
                 name: 'animarr-hud',
@@ -1961,12 +2536,42 @@
             }],
             });
             adapter = new ArtplayerAdapter(art);
+            // Direct Stream: route seeks through a remux-reload (the source has
+            // no Range) and read duration off the server total, not the live
+            // stream (whose video.duration is Infinity).
+            if (isDirectStream) adapter.enableDirectStream(directStreamBase, entry.totalDuration);
         }
 
         entry.art = art;
         entry.adapter = adapter;
-        entry.currentSubIdx = subtitleList.findIndex(s => s.default);
+        entry.currentSubIdx = (typeof prefSubIdx === 'number') ? prefSubIdx
+            : (subtitleList.findIndex(s => s.default));
         if (entry.currentSubIdx < 0 && subtitleList.length > 0) entry.currentSubIdx = 0;
+
+        // ── Preferred audio language — HLS transcode path ONLY ──────────────
+        // Direct Play / Direct Stream serve the raw container and the browser
+        // plays its default audio track; switching to a non-default track there
+        // would require a transcode, so we deliberately DON'T touch those paths
+        // (Direct Play is never sacrificed for an audio-language preference).
+        // On a transcoding HLS session we're re-muxing anyway, so re-selecting
+        // the matching-language stream is free. Runs once per user-initiated
+        // open (opts.autoAudio) — never on switchAudio/switchQuality re-attaches.
+        if (opts && opts.autoAudio && entry.sessionToken && PREFS.audioLang
+            && Array.isArray(audioList) && audioList.length > 1) {
+            const want = audioList.findIndex(a => normLang(a.lang) === PREFS.audioLang);
+            if (want > 0 && want !== entry.currentAudIdx) {
+                // Defer past the rest of attach()'s wiring (autostart + HUD)
+                // before we tear the session down and restart with the preferred
+                // audio map. Only reached on a transcoding HLS file whose default
+                // audio isn't the preferred language, so the extra warm-up is
+                // rare; guard against the user navigating away meanwhile.
+                setTimeout(() => {
+                    if (WIRED.has(elementId)) {
+                        try { switchAudioTrack(elementId, want); } catch {}
+                    }
+                }, 600);
+            }
+        }
 
         // Autostart reliability (covers BOTH the HLS and Direct-Play paths).
         // Artplayer's autoplay can lose the race against media readiness, so we
@@ -2075,20 +2680,33 @@
                 });
             },
             quality: () => {
-                // Build the ladder from the SOURCE height (never upscale): the
-                // probe's height is the ceiling; offer standard rungs below it.
+                // One list, three kinds of entries (single-select picker):
+                //   • Original — stream-copy, no re-encode (lossless).
+                //   • Resolution rungs below source — downscale + re-encode at
+                //     the auto bitrate (shown in the label).
+                //   • Bitrate caps — re-encode at SOURCE resolution, capped at
+                //     N Mbps (trim bandwidth without dropping resolution).
                 const srcH = (entry.mediaInfo && entry.mediaInfo.height)
                           || (entry.output && entry.output.height) || 0;
-                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0 }];
+                const autoMbps = (h) => h <= 480 ? 2.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: 0 }];
                 [1440, 1080, 720, 480].forEach(r => {
-                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p', h: r });
+                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p · ~' + autoMbps(r) + ' Mbps', h: r, b: 0 });
+                });
+                // Bitrate-cap presets; ceiling scaled to the source resolution so
+                // a 1080p file doesn't offer 200 Mbps but a 4K file does.
+                const brCeil = srcH >= 2160 ? 200 : srcH >= 1440 ? 120 : srcH >= 1080 ? 40 : srcH >= 720 ? 25 : srcH > 0 ? 16 : 200;
+                [6, 10, 16, 25, 40, 80, 120, 200].forEach(b => {
+                    if (b <= brCeil) items.push({ label: '≤ ' + b + ' Mbps' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: b });
                 });
                 const curH = entry.currentMaxHeight || 0;
-                let curIdx = items.findIndex(o => o.h === curH);
+                const curB = entry.currentMaxBitrate || 0;
+                let curIdx = items.findIndex(o => o.h === curH && o.b === curB);
                 if (curIdx < 0) curIdx = 0;
                 openPickerPopup(hudRoot, 'quality', 'Quality', items.map(o => o.label), curIdx, (i) => {
-                    if (items[i].h === (entry.currentMaxHeight || 0)) return;
-                    switchQuality(elementId, items[i].h);
+                    const it = items[i];
+                    if (it.h === (entry.currentMaxHeight || 0) && it.b === (entry.currentMaxBitrate || 0)) return;
+                    switchQuality(elementId, it.h, it.b);
                 });
             },
             info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || []),
@@ -2135,7 +2753,14 @@
                 if (o.videoCodec) vparts.push(o.videoCodec.toUpperCase());
                 if (o.bitDepth >= 10) vparts.push('10-bit');
                 if (vparts.length) lines.push('Video: ' + vparts.join(' '));
-                const hdrs = (o.hdrFormats || []).map(fmt =>
+                // The Info block reports what's actually ON SCREEN, not the
+                // source's flags. No browser renders Dolby Vision — the web
+                // player plays the HDR10/HLG base layer — so drop the DV tag on
+                // the Artplayer path. Native ExoPlayer (art == null) keeps it:
+                // DV-capable TVs do render it.
+                let hdrFormats = o.hdrFormats || [];
+                if (art) hdrFormats = hdrFormats.filter(f => f !== 'dolbyvision');
+                const hdrs = hdrFormats.map(fmt =>
                     fmt === 'dolbyvision' ? 'Dolby Vision'
                   : fmt === 'hdr10' ? 'HDR10'
                   : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
@@ -2159,6 +2784,7 @@
                 }
                 const planTag = {
                     'directplay':     'Direct Play',
+                    'directstream':   'Direct Stream · remux',
                     'ts-copy':        'HLS · TS stream-copy',
                     'vaapi-reencode': 'HLS · VAAPI → H.264',
                     'nvenc-reencode': 'HLS · NVENC → H.264',
@@ -2232,7 +2858,9 @@
         } catch {}
 
         // ── 6) Resume seek + progress reporting ───────────────────────
-        if (resumeSec > 0) {
+        // Direct Stream bakes the resume point into the initial URL (?seek=),
+        // so seeking again here would spawn a redundant remux — skip it.
+        if (resumeSec > 0 && !isDirectStream) {
             adapter.once('loadedmetadata', () => {
                 adapter.currentTime = resumeSec;
             });
@@ -2361,6 +2989,7 @@
         // Preserve the current quality cap across an audio switch (the old
         // by-index helper dropped it, reverting to source resolution).
         const maxHeight = entry.currentMaxHeight || 0;
+        const maxBitrate = entry.currentMaxBitrate || 0;
         // Tear down the old session synchronously — detach() handles HLS
         // DELETE + Artplayer destroy + WIRED cleanup.
         detach(elementId);
@@ -2372,6 +3001,7 @@
             audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? sel.audioTrackIndex : 0,
             externalAudioPath: (sel && sel.externalAudioPath) || null,
             maxHeight,
+            maxBitrate,
             forceResumeSec:    pos,
         });
     }
@@ -2388,7 +3018,7 @@
      * source height), carrying current position + audio track over. 0 = original.
      * Same teardown+resume dance as switchAudioTrack (1-3s warm-up gap).
      */
-    async function switchQuality(elementId, maxHeight) {
+    async function switchQuality(elementId, maxHeight, maxBitrate) {
         const entry = WIRED.get(elementId);
         if (!entry || !entry.adapter) return;
         const pos       = entry.adapter.currentTime || 0;
@@ -2403,6 +3033,7 @@
             // Keep the active external dub across a quality change.
             externalAudioPath: entry.currentExternalAudioPath || null,
             maxHeight,
+            maxBitrate: maxBitrate || 0,
             forceResumeSec: pos,
         });
     }
@@ -2415,6 +3046,36 @@
             const name   = meta?.hudName   || meta?.title || '';
             entry.hud.setTitle(kicker, name);
         }
+        // Up-next overlay data (end-of-episode autoplay card). Read live by the
+        // HUD's updateUpNext on each timeupdate; stored on the entry so it
+        // survives until the next setMediaSession call (i.e. the next episode).
+        entry.nextAvailable = !!(meta && meta.nextAvailable);
+        if (entry.hud && entry.hud.setNav) {
+            entry.hud.setNav(!!(meta && meta.prevAvailable), !!(meta && meta.nextAvailable));
+        }
+        entry.upNext = {
+            eyebrow: (meta && meta.upNextEyebrow) || 'Up next',
+            name:    (meta && meta.upNextName)    || '',
+            play:    (meta && meta.upNextPlay)    || 'Play next',
+            dismiss: (meta && meta.upNextDismiss) || 'Dismiss',
+        };
+        // Skip-intro/credits segment times (seconds). Read live by updateUpNext
+        // (credits → next-up trigger) and updateSkipIntro (Skip button) on each
+        // timeupdate. null → no detected segments: Skip stays hidden and the
+        // next-up card falls back to 95% of the runtime.
+        entry.segments = (meta && meta.segments) || null;
+        // Trickplay sprite manifest (seek preview). Read live by the HUD's
+        // scrubber hover/drag handler; null → no preview bubble. Warm the
+        // sprite image so the first hover doesn't flash an empty box.
+        entry.trickplay = (meta && meta.trickplay) || null;
+        try {
+            if (entry.trickplay && entry.trickplay.spriteUrl) {
+                const im = new Image();
+                im.src = entry.trickplay.spriteUrl;
+            }
+        } catch { /* preload is best-effort */ }
+        entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || 'Skip intro';
+        entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || 'Skip credits';
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;
@@ -2497,7 +3158,7 @@
     window.animarrPlayer = {
         attach, flush, detach,
         setMediaSession, setWatchNextMeta, togglePictureInPicture,
-        setStyle, switchAudioTrack, switchAudio,
+        setStyle, switchAudioTrack, switchAudio, setPrefs,
     };
 })();
 

@@ -48,7 +48,7 @@
     margin-left: var(--space-2);
 }
 
-/* Folder chip strip — design uses 11.5px Geist buttons with regular case,
+/* Folder chip strip — 11.5px UI-font buttons with regular case,
    accent solid fill when active. Distinct from the all-caps mono Pill primitive. */
 .catalog-folders {
     display: flex;
@@ -193,3 +193,109 @@
     color: var(--text-faint);
 }
 @keyframes catalog-loading-spin { to { transform: rotate(360deg); } }
+
+/* ── Home library block ─────────────────────────────────────────────
+   Compact slice of the catalog: fixed column counts per breakpoint keep it
+   to exactly two poster rows on desktop (four on phones); posters past the
+   row budget are display:none'd so the "view all" tile — always the last
+   DOM child — lands right after the last visible poster. The full catalog
+   moved to /library. */
+.home-lib {
+    margin-bottom: var(--space-11);
+}
+.home-lib__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+.home-lib__title {
+    /* Same size as the rail titles (.recrail__title / .nur__title) — every
+       Home section header reads uniform. */
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.home-lib__count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-faint);
+}
+.home-lib__all {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent-hi);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.home-lib__all:hover { color: var(--accent); }
+
+/* Fixed-size cards (the For-you rail's 210px), as many columns as fit —
+   never stretched. Two-row clamp without knowing the column count: rows
+   past the second collapse to 0 height and are clipped by overflow:hidden;
+   row spacing comes from item margins (row-gap would leak into the
+   collapsed rows as phantom bottom padding). */
+.home-lib__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 210px);
+    grid-template-rows: repeat(2, auto);
+    grid-auto-rows: 0;
+    column-gap: var(--space-9);
+    row-gap: 0;
+    justify-content: start;
+    overflow: hidden;
+}
+.home-lib__grid ::deep > * {
+    margin-bottom: var(--space-6);
+}
+
+/* "View all" tile — poster-shaped card closing the grid. */
+.home-lib__more {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-lg, 12px);
+    border: 1px dashed var(--border-strong);
+    background: var(--surface);
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: border-color var(--motion-base), color var(--motion-base), background var(--motion-base);
+}
+.home-lib__more:hover {
+    border-color: var(--accent-line, var(--accent));
+    color: var(--text);
+    background: var(--surface-2);
+}
+.home-lib__more-icon { color: var(--accent-hi); }
+.home-lib__more-label {
+    font-size: 13px;
+    font-weight: 600;
+}
+.home-lib__more-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+}
+
+/* The "view all" tile is NOT pinned: the collocated Home.razor.js shows
+   exactly (columns × rows − 1) posters, so the tile flows into the very
+   next cell — the rows fill completely, and when the library runs out it
+   sits right after the last poster instead of hugging the far edge. The
+   collapsed-rows clamp above stays as the no-JS/first-paint fallback. */
+
+/* Phone: fixed 210px would leave a single column — switch to the classic
+   2 stretched columns × 4 rows. */
+@media (max-width: 639px) {
+    .home-lib__grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(4, auto);
+        column-gap: var(--space-5);
+    }
+    .home-lib__title { font-size: 19px; }
+}

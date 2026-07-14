@@ -34,24 +34,29 @@
         </div>
 
         <div class="d-chero__content">
-            <div class="d-chero__eyebrow">Continue watching</div>
+            <div class="d-chero__eyebrow">@(item.IsNew ? L["home.new_episode"] : L["home.continue_watching"])</div>
             <h1 class="d-chero__title">@item.Title</h1>
 
             <div class="d-chero__meta">
                 @if (item.Year is not null) { <span>@item.Year</span> }
                 @if (item.Season is not null) { <span>@($"S{item.Season:D2}")</span> }
                 @if (item.Episode is not null) { <span>@($"E{item.Episode:D2}")</span> }
-                <span class="d-chero__meta-pct">@($"{item.Progress:P0}")</span>
+                @* New / next-up items carry no progress (0%) — hide the badge so
+                   the hero doesn't read "0%" on a freshly-landed episode. *@
+                @if (item.Progress > 0) { <span class="d-chero__meta-pct">@($"{item.Progress:P0}")</span> }
             </div>
 
-            <div class="d-chero__progress" aria-hidden="true">
-                @* Invariant culture is REQUIRED: in ru-RU (and most non-en
-                   locales) {:F1} renders "43,0" with a comma, producing the
-                   invalid CSS `width: 43,0%`. The browser drops it and the
-                   block fill falls back to width:auto = 100% — so the bar
-                   looked full at 43%. Force a dot. *@
-                <div class="d-chero__progress-fill" style="@(System.FormattableString.Invariant($"width: {item.Progress * 100:F1}%"))"></div>
-            </div>
+            @if (item.Progress > 0)
+            {
+                <div class="d-chero__progress" aria-hidden="true">
+                    @* Invariant culture is REQUIRED: in ru-RU (and most non-en
+                       locales) {:F1} renders "43,0" with a comma, producing the
+                       invalid CSS `width: 43,0%`. The browser drops it and the
+                       block fill falls back to width:auto = 100% — so the bar
+                       looked full at 43%. Force a dot. *@
+                    <div class="d-chero__progress-fill" style="@(System.FormattableString.Invariant($"width: {item.Progress * 100:F1}%"))"></div>
+                </div>
+            }
 
             <div class="d-chero__actions">
                 @* data-tv-autofocus parks the remote on Resume when Home mounts —
@@ -60,9 +65,9 @@
                    (CatalogHero's Open detail, or first focusable in main) when
                    this hero isn't rendered. *@
                 <Btn Variant="primary" Size="lg"
-                     OnClick="@(() => Nav.NavigateTo($"/catalog/{item.MediaItemId}"))"
+                     OnClick="@(() => Nav.NavigateTo(PlayHref(item)))"
                      data-tv-autofocus="true">
-                    <DIcon Name="play" Size="16" /> Resume
+                    <DIcon Name="play" Size="16" /> @L["continue.resume"]
                 </Btn>
             </div>
         </div>
@@ -78,7 +83,7 @@
         {
             @if (pager == "f")
             {
-                <nav class="d-chero__pager" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager" role="tablist" aria-label="@L["continue.slots_aria"]">
                     @for (int i = 0; i < Items.Length; i++)
                     {
                         var idx = i;
@@ -97,9 +102,9 @@
             }
             else if (pager == "g")
             {
-                <nav class="d-chero__pager-g" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager-g" role="tablist" aria-label="@L["continue.slots_aria"]">
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
-                            @onclick="PrevSlide" aria-label="Previous slot">
+                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
                         <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-dashes">
@@ -111,20 +116,20 @@
                                     class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
                                     @onclick="@(() => SetActive(idx))"
                                     role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@($"Slot {idx + 1}")"></button>
+                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)"></button>
                         }
                     </div>
                     <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
-                            @onclick="NextSlideManual" aria-label="Next slot">
+                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
                         <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>
             }
             else // pager == "h"
             {
-                <nav class="d-chero__pager-h" role="tablist" aria-label="Continue watching slots">
+                <nav class="d-chero__pager-h" role="tablist" aria-label="@L["continue.slots_aria"]">
                     <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="PrevSlide" aria-label="Previous slot">
+                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
                         <DIcon Name="chev-l" Size="20" />
                     </button>
                     <div class="d-chero__pager-pills">
@@ -136,11 +141,11 @@
                                     class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
                                     @onclick="@(() => SetActive(idx))"
                                     role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@($"Slot {idx + 1}")">@(idx + 1)</button>
+                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)">@(idx + 1)</button>
                         }
                     </div>
                     <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="NextSlideManual" aria-label="Next slot">
+                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
                         <DIcon Name="chev-r" Size="20" />
                     </button>
                 </nav>
@@ -159,6 +164,16 @@
     private int _index;
     private ContinueWatchItemDto? _active;
     private System.Threading.Timer? _timer;
+
+    /// <summary>Detail URL that auto-plays on arrival (mirrors NextUpRail): an
+    /// episode carries <c>?s=&amp;e=</c> so MediaDetail opens the player straight
+    /// on it (resuming from the stored position for in-progress items); a movie
+    /// carries <c>?play=1</c>. So "Resume" lands the user in playback, not on the
+    /// detail page.</summary>
+    private static string PlayHref(ContinueWatchItemDto it)
+        => it.Episode is int e
+            ? $"/catalog/{it.MediaItemId}?s={it.Season ?? 1}&e={e}"
+            : $"/catalog/{it.MediaItemId}?play=1";
 
     /// <summary>Lower-cased pager style: "f" / "g" (default) / "h". Read on every
     /// render so a change to <c>UserCtx.Preferences.HeroPagerStyle</c> from

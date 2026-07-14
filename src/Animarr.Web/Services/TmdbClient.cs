@@ -98,18 +98,56 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
         return resp?.Results ?? [];
     }
 
+    // ── Localisation helpers ─────────────────────────────────────────────────
+
+    /// <summary>Map a UI language code (en/ru/uk/de/es) to a TMDB locale.
+    /// Unknown/empty → en-US, preserving the historical default.</summary>
+    public static string ToTmdbLocale(string? code) => code switch
+    {
+        "ru" => "ru-RU",
+        "uk" => "uk-UA",
+        "de" => "de-DE",
+        "es" => "es-ES",
+        _    => "en-US",
+    };
+
+    /// <summary>Build the <c>include_image_language</c> value: the selected
+    /// language first (so its localized posters/logos are returned), then English
+    /// as a fallback, the CJK originals, and language-neutral ("null") art.</summary>
+    private static string ImageLangParam(string? code)
+    {
+        var lang  = string.IsNullOrEmpty(code) ? "en" : code;
+        var parts = new List<string> { lang };
+        foreach (var p in new[] { "en", "ja", "zh", "null" })
+            if (!parts.Contains(p)) parts.Add(p);
+        return string.Join(",", parts);
+    }
+
     // ── TV series detail ─────────────────────────────────────────────────────
 
-    public Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, CancellationToken ct = default)
-        => GetJsonAsync<TmdbTvDetail>($"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids,credits,keywords&language=en-US&include_image_language=en,ja,zh,ru,null", ct);
+    /// <param name="language">UI language code (en/ru/uk/de/es). null → English.</param>
+    public Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbTvDetail>($"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids,credits,keywords&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
-    public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, CancellationToken ct = default)
-        => GetJsonAsync<TmdbSeasonDetail>($"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language=en-US&include_image_language=en,ja,zh,ru,null", ct);
+    /// <param name="language">UI language code (en/ru/uk/de/es). null → English.
+    /// Controls episode Name/Overview localization.</param>
+    public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbSeasonDetail>($"{BaseUrl}/tv/{tmdbId}/season/{seasonNumber}?append_to_response=images&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
     // ── Movie detail ─────────────────────────────────────────────────────────
 
-    public Task<TmdbMovieDetail?> GetMovieDetailAsync(int tmdbId, CancellationToken ct = default)
-        => GetJsonAsync<TmdbMovieDetail>($"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids,credits,keywords&language=en-US&include_image_language=en,ja,zh,ru,null", ct);
+    /// <param name="language">UI language code (en/ru/uk/de/es). null → English.</param>
+    public Task<TmdbMovieDetail?> GetMovieDetailAsync(int tmdbId, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbMovieDetail>($"{BaseUrl}/movie/{tmdbId}?append_to_response=images,release_dates,external_ids,credits,keywords&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
+
+    // ── Movie collection (franchise) ─────────────────────────────────────────
+
+    /// <summary>All entries of a TMDB movie collection ("Mission: Impossible
+    /// Collection", …) — the franchise source for live-action films AniList
+    /// doesn't cover. Parts carry title/release date/poster for a release-order
+    /// rail; localized via <paramref name="language"/>.</summary>
+    public Task<TmdbCollectionDetail?> GetCollectionAsync(int collectionId, string? language = null, CancellationToken ct = default)
+        => GetJsonAsync<TmdbCollectionDetail>($"{BaseUrl}/collection/{collectionId}?language={ToTmdbLocale(language)}", ct);
 
     // ── Translations (for CJK / English alternative titles) ──────────────────
 
@@ -126,6 +164,24 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
     /// <param name="source">"imdb_id" or "tvdb_id"</param>
     public Task<TmdbFindResponse?> FindByExternalIdAsync(string externalId, string source, CancellationToken ct = default)
         => GetJsonAsync<TmdbFindResponse>($"{BaseUrl}/find/{Uri.EscapeDataString(externalId)}?external_source={source}&language=en-US", ct);
+
+    // ── Related titles (similar + recommendations) ──────────────────────────
+
+    /// <summary>TMDB's two relatedness feeds for one title, merged and deduped
+    /// (recommendations first — they're behaviour-based and noticeably better
+    /// than the tag-based /similar). This is the external backfill pool for the
+    /// "More like this" / "For you" rails.</summary>
+    public async Task<List<TmdbSearchResult>> GetRelatedAsync(int tmdbId, bool isMovie, CancellationToken ct = default)
+    {
+        var kind = isMovie ? "movie" : "tv";
+        var rec = await GetJsonAsync<TmdbPagedResponse<TmdbSearchResult>>($"{BaseUrl}/{kind}/{tmdbId}/recommendations?language=en-US", ct);
+        var sim = await GetJsonAsync<TmdbPagedResponse<TmdbSearchResult>>($"{BaseUrl}/{kind}/{tmdbId}/similar?language=en-US", ct);
+        return (rec?.Results ?? []).Concat(sim?.Results ?? [])
+            .Where(r => r.Id > 0 && !string.IsNullOrEmpty(r.DisplayTitle))
+            .GroupBy(r => r.Id)
+            .Select(g => g.First())
+            .ToList();
+    }
 
     // ── All images for a given TMDB entity ───────────────────────────────────
 
@@ -227,6 +283,11 @@ public class TmdbTvDetail
     public TmdbKeywords? Keywords { get; set; }
     [JsonPropertyName("in_production")] public bool InProduction { get; set; }
     [JsonPropertyName("type")] public string? ShowType { get; set; }
+    /// <summary>Next scheduled episode — the airing-calendar fallback for
+    /// live-action shows AniList doesn't know. Present in the default TV
+    /// detail payload; date-only precision (no air time).</summary>
+    [JsonPropertyName("next_episode_to_air")] public TmdbEpisodeBrief? NextEpisodeToAir { get; set; }
+    [JsonPropertyName("last_episode_to_air")] public TmdbEpisodeBrief? LastEpisodeToAir { get; set; }
 
     public int? Year => int.TryParse((FirstAirDate ?? "").Split('-')[0], out var y) ? y : null;
     public string? ContentRating => ContentRatings?.Results?.FirstOrDefault(r => r.Iso31661 == "US")?.Rating;
@@ -236,6 +297,14 @@ public class TmdbTvDetail
                                   ?? Images?.Backdrops?.OrderByDescending(b => b.VoteAverage).FirstOrDefault()?.FilePath;
     /// <summary>Prefer Networks[0] (HBO, Bilibili, …) — users recognise these — fall back to ProductionCompanies[0].</summary>
     public string? StudioName => Networks.FirstOrDefault()?.Name ?? ProductionCompanies.FirstOrDefault()?.Name;
+
+    /// <summary>Localized poster path: prefer one tagged with <paramref name="lang"/>,
+    /// then TMDB's default poster (already language-aware), then any — so we never
+    /// fall back to no poster when a translation lacks localized art.</summary>
+    public string? PickPosterPath(string? lang) =>
+        (string.IsNullOrEmpty(lang) ? null : Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath)
+        ?? PosterPath
+        ?? Images?.Posters?.FirstOrDefault()?.FilePath;
 }
 
 public class TmdbMovieDetail
@@ -262,6 +331,9 @@ public class TmdbMovieDetail
     [JsonPropertyName("production_companies")] public List<TmdbCompany> ProductionCompanies { get; set; } = [];
     public TmdbCredits? Credits { get; set; }
     public TmdbKeywords? Keywords { get; set; }
+    /// <summary>Present when the film is part of a TMDB collection (franchise);
+    /// its <c>Id</c> feeds <see cref="TmdbClient.GetCollectionAsync"/>.</summary>
+    [JsonPropertyName("belongs_to_collection")] public TmdbCollectionRef? BelongsToCollection { get; set; }
 
     public int? Year => int.TryParse((ReleaseDate ?? "").Split('-')[0], out var y) ? y : null;
     public string? ContentRating => ReleaseDates?.Results?.FirstOrDefault(r => r.Iso31661 == "US")
@@ -269,6 +341,43 @@ public class TmdbMovieDetail
     public string? BestLogoPath   => Images?.Logos?.FirstOrDefault(i => i.Iso6391 == "en")?.FilePath
                                   ?? Images?.Logos?.FirstOrDefault()?.FilePath;
     public string? StudioName => ProductionCompanies.FirstOrDefault()?.Name;
+
+    /// <summary>Localized poster path: prefer one tagged with <paramref name="lang"/>,
+    /// then TMDB's default poster (already language-aware), then any — so we never
+    /// fall back to no poster when a translation lacks localized art.</summary>
+    public string? PickPosterPath(string? lang) =>
+        (string.IsNullOrEmpty(lang) ? null : Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath)
+        ?? PosterPath
+        ?? Images?.Posters?.FirstOrDefault()?.FilePath;
+}
+
+/// <summary>Stub returned inside a movie's <c>belongs_to_collection</c>.</summary>
+public class TmdbCollectionRef
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    [JsonPropertyName("poster_path")]   public string? PosterPath   { get; set; }
+    [JsonPropertyName("backdrop_path")] public string? BackdropPath { get; set; }
+}
+
+/// <summary>Full collection with its member films (GET /collection/{id}).</summary>
+public class TmdbCollectionDetail
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public List<TmdbCollectionPart> Parts { get; set; } = [];
+}
+
+public class TmdbCollectionPart
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    [JsonPropertyName("original_title")] public string? OriginalTitle { get; set; }
+    [JsonPropertyName("release_date")]   public string? ReleaseDate   { get; set; }
+    [JsonPropertyName("poster_path")]    public string? PosterPath    { get; set; }
+    [JsonPropertyName("media_type")]     public string? MediaType     { get; set; }
+
+    public int? Year => int.TryParse((ReleaseDate ?? "").Split('-')[0], out var y) && y > 0 ? y : null;
 }
 
 public class TmdbSeasonDetail
@@ -287,6 +396,15 @@ public class TmdbSeasonSummary
     [JsonPropertyName("poster_path")]   public string? PosterPath { get; set; }
 }
 
+/// <summary>Slim episode ref used by next/last_episode_to_air on the TV detail.</summary>
+public class TmdbEpisodeBrief
+{
+    [JsonPropertyName("episode_number")] public int EpisodeNumber { get; set; }
+    [JsonPropertyName("season_number")]  public int SeasonNumber  { get; set; }
+    [JsonPropertyName("air_date")]       public string? AirDate   { get; set; }
+    public string? Name { get; set; }
+}
+
 public class TmdbEpisode
 {
     [JsonPropertyName("episode_number")] public int EpisodeNumber { get; set; }
@@ -303,6 +421,39 @@ public class TmdbGenre
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
+}
+
+/// <summary>
+/// TMDB's genre taxonomy is stable and id-keyed; the <c>name</c> in a detail
+/// response is localized to the requested language. We persist genres canonically
+/// in English because catalog logic — anime detection, category classification,
+/// theme-music matching — keys off these exact names. This maps the stable id back
+/// to its English label regardless of the language the detail was fetched in.
+/// </summary>
+public static class TmdbGenreCatalog
+{
+    // The full TMDB movie + TV genre list (ids are universal across both).
+    private static readonly Dictionary<int, string> _en = new()
+    {
+        [28] = "Action",            [12] = "Adventure",          [16] = "Animation",
+        [35] = "Comedy",            [80] = "Crime",              [99] = "Documentary",
+        [18] = "Drama",             [10751] = "Family",          [14] = "Fantasy",
+        [36] = "History",           [27] = "Horror",             [10402] = "Music",
+        [9648] = "Mystery",         [10749] = "Romance",         [878] = "Science Fiction",
+        [10770] = "TV Movie",       [53] = "Thriller",           [10752] = "War",
+        [37] = "Western",           [10759] = "Action & Adventure", [10762] = "Kids",
+        [10763] = "News",           [10764] = "Reality",         [10765] = "Sci-Fi & Fantasy",
+        [10766] = "Soap",           [10767] = "Talk",            [10768] = "War & Politics",
+    };
+
+    /// <summary>English label for a TMDB genre id, falling back to the (possibly
+    /// localized) name when the id is unknown.</summary>
+    public static string English(int id, string fallback)
+        => _en.TryGetValue(id, out var name) ? name : fallback;
+
+    /// <summary>Project a detail's genre list to canonical English names.</summary>
+    public static List<string> English(IEnumerable<TmdbGenre> genres)
+        => genres.Select(g => English(g.Id, g.Name)).ToList();
 }
 
 public class TmdbExternalIds

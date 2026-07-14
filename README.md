@@ -37,7 +37,15 @@ This is what makes non‑English content — most donghua, untranslated anime, t
 - **Built‑in LLM** — embedded llama.cpp server with a curated model catalog (Qwen2.5 0.5B/1.5B/3B, Llama 3.2 3B, or any custom Hugging Face GGUF). Downloads on demand, runs in‑container, optional Vulkan GPU offload. Or use any external OpenAI‑compatible endpoint.
 - **Never touches your files** — identification only updates DB associations; nothing on disk is renamed or moved.
 - **Smart episode resolution** — files are mapped to (season, episode) by a layered resolver: deterministic regex/path parsing → optional one‑click **Resolve with AI** for files that don't parse → manual per‑file override. Split‑season donghua (one absolute TMDB season spread across several disk folders) is handled with automatic season offsets.
-- **Media catalog** — poster grid with a fanart backdrop hero, **Continue Watching**, detail pages with seasons/episodes, ratings, tags and external links.
+- **Media catalog** — poster grid with a fanart backdrop hero, **Continue Watching** / **Next Up**, a compact library block on Home (full grid on `/library`), detail pages with seasons/episodes, ratings, tags and external links. The Home section order + visibility is per‑user (drag to reorder in Profile).
+- **Recommendations & watchlist** — heuristic **"For you"** and **"More like this"** rails, local library first with a TMDB backfill (scope is per‑user: everywhere vs library‑only). A **"Хочу посмотреть" / watchlist** collects titles you want to get to; dismiss anything you're not interested in.
+- **Airing calendar** — a week view (`/calendar`) of when the next episodes of your ongoing titles drop (AniList/TMDB schedule), plus a **"This week"** rail on Home. Handles the donghua case where a title airs weekly under a later entry than the one it matched.
+- **Franchises / watch order** — on a title page, a **release‑order rail** of the whole franchise with "you are here", watched ticks, and a **Want** button on parts you don't own yet. Built from **AniList relations** (anime — sequels/prequels/side‑stories) *and* **TMDB collections** (live‑action / film series like Mission: Impossible), merged.
+- **Filler markers** — episodes MAL flags as **filler / recap** (via Jikan) get a chip in the episode grid & list; a per‑title (or global) **hide fillers** toggle drops them from the list and **skips them on next‑episode advance**.
+- **Personal statistics** — a `/stats` dashboard: hours watched, episodes/titles, top genres & studios, most‑watched titles, a type split, a GitHub‑style **activity heatmap**, streaks and hours‑per‑month.
+- **Metadata language** — fetch titles, overviews and genres from TMDB in your language; switching the language re‑localizes the whole library in the background (with a progress bar), prefers localized posters, and falls back to English per field when there's no translation.
+- **In‑browser & native playback** — a custom player streams your files right in the browser (and via native ExoPlayer on Android TV), keeping the **original video bitstream and HDR** whenever the client can decode them; it only re‑encodes (hardware‑accelerated) as a last resort. See [Playback](#playback).
+- **Skip intro & credits** — opening and ending segments are auto‑detected (AniSkip → embedded chapters → audio fingerprint → black‑frame cascade); a **Skip** button appears over the intro, and an **Up Next** card at the credits auto‑advances to the next episode.
 - **Categories** — items are auto‑classified by the LLM at identification time into category chips on the home screen; you can pin categories manually per title.
 - **Full‑text search** — instant client‑side filter across title / original / English / CJK names.
 - **Theme music** — fetches the anime OP/ED from [AnimeThemes.moe](https://animethemes.moe) and plays it on the detail page (per‑user opt‑in + volume).
@@ -47,7 +55,7 @@ This is what makes non‑English content — most donghua, untranslated anime, t
 - **Native apps** — Android phone, **Android TV** (D‑pad / leanback), and Windows (.NET MAUI). Auto‑discovers servers on your LAN (mDNS + subnet probe) and pairs a TV to your account by **QR code or 6‑digit code**.
 - **Multi‑user** — roles & permissions (view / upload / system settings / manage users), fast per‑device user switch with optional PIN.
 - **Multi‑server** — register several Animarr servers and switch between them from the profile menu.
-- **Themeable, multi‑language UI** — English & Russian, five palettes + accent colour, animated backdrop toggle.
+- **Themeable, multi‑language UI** — five interface languages (English, Русский, Українська, Deutsch, Español), five palettes + accent colour, animated backdrop toggle.
 - **Persistent state** — SQLite DB, MonoTorrent fastresume, image cache and encryption keys live in `/app/data` and survive restarts. Images stay **out of your media tree**.
 
 ## Quick start
@@ -185,6 +193,16 @@ Patterns have a **priority** (lower = checked first) and a **scope**: **global**
 - **Search** (`/search`) — instant filter across all title forms.
 - **Detail page** — hero, season tabs + episode grid (or a movie card), studio/runtime/rating/tags, TMDB/MAL/IMDb links, theme music, and the **Unmatched files** resolver.
 - **Edit metadata** drawer — tabs for **Source IDs** (paste a TMDB/MAL/IMDb URL or id and re‑identify), **Basics**, **Poster** & **Backdrop** (all‑language galleries — pick any artwork you like), **Tags**, **Categories**, and **Manage** (re‑identify / delete from catalog). A read‑only line shows the original on‑disk folder/file the scanner matched, so a wrong match is easy to spot.
+
+## Playback
+
+Animarr plays your files directly in the browser — no companion app required — and picks the lightest delivery path the client can handle, so original quality is preserved whenever possible:
+
+- **Direct Play** — browser‑friendly MP4 (H.264 / HEVC + AAC) streams as the raw file: instant start, perfect A/V sync, zero transcoding.
+- **Direct Stream** — MKV and other containers are **remuxed on the fly** to a native MP4 stream (video copied untouched, audio to AAC), so the **original video bitstream and HDR pass through unchanged**. Browser HDR output is more reliable on this native path than via MSE.
+- **HLS** — only when the browser genuinely can't decode the codec (or you cap the quality) does Animarr re‑encode, **hardware‑accelerated** via VAAPI (AMD/Intel) or NVENC (NVIDIA), auto‑detected at deploy.
+
+The player has a custom HUD (two‑row controls, scrim, tap‑to‑toggle), a **quality menu** with bitrate presets, embedded **+ sideloaded audio / subtitle** track switching, an **audio‑sync** offset control, ultrawide letterbox auto‑crop, **DLNA cast** to a TV, and **Skip intro / Skip credits** buttons with an **Up Next** card that auto‑advances at the end. On **phones** the controls switch to a touch layout — a big centre play/pause, **double‑tap the left/right edge to skip ±10s**, a full‑width scrubber, and a settings gear that holds the secondary controls. Android TV gets a native **ExoPlayer** path with D‑pad navigation. The MEDIA INFO panel reports exactly what's playing — codec, bit depth, HDR format, and which delivery path is in use.
 
 ## Torrent client
 

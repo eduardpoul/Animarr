@@ -50,6 +50,20 @@ public class FolderWatcherService(
 
         logger.LogInformation("Started {Count} folder watchers.", _watchers.Count);
 
+        // Startup reconcile: drop FolderWatcher rows whose folder/file vanished
+        // from disk while we were down. Per-section + skips unreachable roots, so
+        // a temporary unmount can't wipe the library. Fire-and-forget so a slow
+        // mount doesn't delay startup.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var removed = await CleanupOrphanedChildrenAllAsync();
+                if (removed > 0) logger.LogInformation("Startup reconcile removed {Count} orphaned folder rows.", removed);
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "startup orphan cleanup failed"); }
+        });
+
         // H-2: prune expired _suppressedPaths every 60s
         _suppressedGcTimer = new Timer(_ =>
         {
@@ -262,12 +276,7 @@ public class FolderWatcherService(
 
     private void OnVideoFileCreated(string filePath, Guid sectionId)
     {
-        // Only handle video files directly in the section root
         if (!_videoExtensions.Contains(Path.GetExtension(filePath))) return;
-        if (!string.Equals(Path.GetDirectoryName(filePath), null, StringComparison.OrdinalIgnoreCase))
-        {
-            // Ensure the file is directly in the section root (not a subfolder)
-        }
 
         _ = Task.Run(async () =>
         {
@@ -283,6 +292,18 @@ public class FolderWatcherService(
 
                 var section = await db.FolderWatchers.FindAsync(sectionId);
                 if (section is null) return;
+
+                // Only auto-register files sitting DIRECTLY in the flat-section
+                // root — a file one level down belongs to a subfolder title,
+                // which OnDirectoryCreated handles. The backing FileSystemWatcher
+                // already sets IncludeSubdirectories=false, but a bulk rescan or
+                // a future caller could route a nested path here, so we re-check
+                // against the section root rather than trusting the watcher.
+                var fileDir  = Path.GetDirectoryName(filePath);
+                var rootNorm = section.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(fileDir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        rootNorm, StringComparison.OrdinalIgnoreCase))
+                    return;
 
                 var newFolder = new FolderWatcher
                 {
@@ -420,6 +441,12 @@ public class FolderWatcherService(
             logger.LogWarning("DiscoverChildrenAsync: section path missing — {Path}", section.Path);
             return [];
         }
+
+        // Prune children whose folder/file vanished from disk BEFORE discovering
+        // new ones, so a scan both adds and removes. Safe: CleanupOrphanedChildren
+        // bails when the section root itself is unreachable (temporary unmount).
+        try { await CleanupOrphanedChildrenAsync(sectionId); }
+        catch (Exception ex) { logger.LogWarning(ex, "orphan cleanup failed for {Path}", section.Path); }
 
         string[] dirs;
         string[] files;

@@ -3,6 +3,7 @@ using Animarr.Shared.Models;
 using Animarr.Shared.Requests;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
+using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -160,6 +161,14 @@ internal static class AuthEndpoints
             if (req.HeroPagerStyle is string hps)         prefs.HeroPagerStyle     = ValidatePagerStyle(hps);
             if (req.ThemeMusicEnabled is bool tme)        prefs.ThemeMusicEnabled  = tme;
             if (req.ThemeMusicVolume is int tmv)          prefs.ThemeMusicVolume   = Math.Clamp(tmv, 0, 100);
+            if (req.EpisodeListView is string elv)        prefs.EpisodeListView    = ValidateEpisodeListView(elv);
+            // Canonicalise through the shared parser: unknown keys drop out,
+            // missing known keys are appended, broken JSON falls back to null
+            // (= defaults). Bounded by the parser, so no length games.
+            if (req.HomeSectionsJson is string hsj)       prefs.HomeSectionsJson   = HomeSections.Normalize(hsj);
+            if (req.RecsScope is string rs)               prefs.RecsScope          = rs.ToLowerInvariant() == "library" ? "library" : "everywhere";
+            if (req.HideFillers is bool hfil)             prefs.HideFillers        = hfil;
+            if (req.FillerOverridesJson is string foj)    prefs.FillerOverridesJson = NormalizeFillerOverrides(foj);
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToDto(prefs));
@@ -519,6 +528,145 @@ internal static class AuthEndpoints
             return Results.Ok(result);
         }).RequireAuthorization();
 
+        // ─── Next Up (v5) ────────────────────────────────────────────────
+        // GET /api/me/next-up?take=N → the next episode to watch per series the
+        // user is engaged with (has ≥1 watched episode). "Next" = first on-disk
+        // episode AFTER the user's highest watched one that is itself unwatched,
+        // rolling across season boundaries. Covers BOTH "continue to the next
+        // episode" and "you finished the run, a fresh episode just dropped".
+        //
+        // The latter is flagged IsNew (the next-up is the on-disk finale with
+        // everything before it watched) so the Home hero can badge it as a "New
+        // episode" update. Without per-file add timestamps this is a heuristic,
+        // but it cleanly separates a mid-binge next-up from a freshly-landed one.
+        app.MapGet(ApiRoutes.MeNextUp, async (
+            int? take,
+            IUserContext userCtx,
+            IDbContextFactory<AppDbContext> dbFactory,
+            MediaFileResolver resolver,
+            CancellationToken ct) =>
+        {
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
+            var limit = Math.Clamp(take ?? 12, 1, 24);
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+            // Engaged series, newest activity first. Cap the candidate pool —
+            // each survivor triggers an on-disk file enumeration below, so we
+            // don't want to walk the whole library on a Home load.
+            const int candidateCap = 30;
+            var rows = await db.WatchStates
+                .AsNoTracking()
+                .Where(w => w.UserId == uid && w.Episode != null)
+                .Select(w => new { w.MediaItemId, w.Season, w.Episode, w.IsWatched, w.ProgressMs, w.RuntimeMs, w.LastSeenAt })
+                .ToListAsync(ct);
+
+            var engaged = rows
+                .GroupBy(w => w.MediaItemId)
+                .Where(g => g.Any(w => w.IsWatched))
+                .Select(g => new
+                {
+                    MediaItemId = g.Key,
+                    LastSeenAt  = g.Max(w => w.LastSeenAt) ?? DateTime.MinValue,
+                    Watched     = g.Where(w => w.IsWatched)
+                                   .Select(w => (Season: w.Season ?? 1, Episode: w.Episode!.Value))
+                                   .ToHashSet(),
+                })
+                .OrderByDescending(x => x.LastSeenAt)
+                .Take(candidateCap)
+                .ToList();
+
+            var hits = new List<(Guid Id, int Season, int Episode, bool IsNew, DateTime LastSeenAt)>();
+            foreach (var e in engaged)
+            {
+                MediaFileDto[] files;
+                try { files = await resolver.ResolveAsync(e.MediaItemId, ct); }
+                catch { continue; }
+
+                var onDisk = files
+                    .Where(f => f.Episode is not null)
+                    .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+                    .Distinct()
+                    .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+                    .ToList();
+                if (onDisk.Count == 0) continue;
+
+                var maxWatched = e.Watched
+                    .OrderByDescending(x => x.Season).ThenByDescending(x => x.Episode)
+                    .First();
+
+                // First on-disk episode after the highest watched one that's
+                // still unwatched.
+                (int Season, int Episode)? next = null;
+                foreach (var k in onDisk)
+                {
+                    var after = k.Season > maxWatched.Season
+                             || (k.Season == maxWatched.Season && k.Episode > maxWatched.Episode);
+                    if (after && !e.Watched.Contains(k)) { next = k; break; }
+                }
+                if (next is null) continue;
+
+                // IsNew = caught up (everything before next-up watched) AND
+                // next-up is the on-disk finale → a fresh episode landed.
+                var caughtUp = onDisk
+                    .Where(k => k.Season < next.Value.Season
+                             || (k.Season == next.Value.Season && k.Episode < next.Value.Episode))
+                    .All(k => e.Watched.Contains(k));
+                var maxOnDisk = onDisk[^1];
+                var isNew = caughtUp
+                    && next.Value.Season == maxOnDisk.Season
+                    && next.Value.Episode == maxOnDisk.Episode;
+
+                hits.Add((e.MediaItemId, next.Value.Season, next.Value.Episode, isNew, e.LastSeenAt));
+            }
+
+            var ordered = hits.OrderByDescending(h => h.LastSeenAt).Take(limit).ToList();
+            var ids = ordered.Select(h => h.Id).ToList();
+            var titles = await db.MediaItems
+                .AsNoTracking()
+                .Where(m => ids.Contains(m.Id))
+                .Select(m => new { m.Id, m.Title, m.PosterPath, m.FanartPath, m.Year })
+                .ToListAsync(ct);
+            var titleMap = titles.ToDictionary(t => t.Id);
+
+            var result = ordered
+                .Where(h => titleMap.ContainsKey(h.Id))
+                .Select(h =>
+                {
+                    var t = titleMap[h.Id];
+                    // Carry the next-up episode's own watch progress, if any —
+                    // so a "next" episode the user already started (e.g. 30s in,
+                    // below the 5% continue-feed cut-off) still shows the hero
+                    // progress bar. Any real progress also means it's no longer a
+                    // pristine "new episode" → drop the IsNew badge.
+                    var prog = rows.FirstOrDefault(w =>
+                        w.MediaItemId == h.Id && (w.Season ?? 1) == h.Season && w.Episode == h.Episode);
+                    long? pMs = prog?.ProgressMs;
+                    long? rMs = prog?.RuntimeMs;
+                    var pct = (pMs is > 0 && rMs is > 0)
+                        ? Math.Clamp((double)pMs.Value / rMs.Value, 0, 1)
+                        : 0;
+                    var started = pMs is > 0;
+                    return new ContinueWatchItemDto(
+                        MediaItemId: h.Id,
+                        Title:       t.Title,
+                        PosterPath:  t.PosterPath,
+                        FanartPath:  t.FanartPath,
+                        Year:        t.Year,
+                        Season:      h.Season,
+                        Episode:     h.Episode,
+                        ProgressMs:  pMs,
+                        RuntimeMs:   rMs,
+                        Progress:    pct,
+                        LastSeenAt:  h.LastSeenAt,
+                        IsNew:       h.IsNew && !started);
+                })
+                .ToArray();
+
+            return Results.Ok(result);
+        }).RequireAuthorization();
+
         return app;
     }
 
@@ -539,7 +687,31 @@ internal static class AuthEndpoints
         p.Theme,
         p.HeroPagerStyle,
         p.ThemeMusicEnabled,
-        p.ThemeMusicVolume);
+        p.ThemeMusicVolume,
+        p.EpisodeListView,
+        p.HomeSectionsJson,
+        p.RecsScope,
+        p.HideFillers,
+        p.FillerOverridesJson);
+
+    /// <summary>Canonicalise the per-title filler override map: keep only valid
+    /// GUID keys with bool values, re-serialise compactly, null when empty.
+    /// Guards the JSON column against client-sent garbage and unbounded growth.</summary>
+    private static string? NormalizeFillerOverrides(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var raw = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(json);
+            if (raw is null || raw.Count == 0) return null;
+            var clean = raw
+                .Where(kv => Guid.TryParse(kv.Key, out _))
+                .Take(2000)   // sanity cap; a real single-user library never approaches this
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            return clean.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(clean);
+        }
+        catch { return null; }
+    }
 
     // Whitelist of valid theme slugs — must match the [data-theme] keys in
     // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale
@@ -556,4 +728,11 @@ internal static class AuthEndpoints
     private static readonly HashSet<string> ValidPagerStyles = new(StringComparer.OrdinalIgnoreCase) { "f", "g", "h" };
     private static string ValidatePagerStyle(string s)
         => ValidPagerStyles.Contains(s) ? s.ToLowerInvariant() : "g";
+
+    // Episode-list layout on the detail page — "grid" (poster cards) or "list"
+    // (detailed rows). Unknown values fall back to "grid" so a stale client
+    // can't write a layout the page doesn't render.
+    private static readonly HashSet<string> ValidEpisodeViews = new(StringComparer.OrdinalIgnoreCase) { "grid", "list" };
+    private static string ValidateEpisodeListView(string s)
+        => ValidEpisodeViews.Contains(s) ? s.ToLowerInvariant() : "grid";
 }

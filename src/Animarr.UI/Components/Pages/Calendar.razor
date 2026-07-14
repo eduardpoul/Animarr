@@ -1,0 +1,147 @@
+@page "/calendar"
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>@L["calendar.title"] — Animarr</PageTitle>
+
+@*
+    Ongoing calendar — when the next episode of each releasing library title
+    airs, and in which state it is: upcoming / aired-but-no-file-yet / already
+    in the library. One wide fetch (2 weeks back, 60 days ahead); week
+    navigation filters client-side. Spec: design feat-calendar.jsx.
+*@
+<div class="cal-page">
+    <div class="cal-head">
+        <PageBack Fallback="/" />
+        <div class="cal-head__text">
+            <h1 class="cal-title">@L["calendar.title"]</h1>
+            <div class="cal-sub">@L["calendar.sub"]</div>
+        </div>
+        <div class="cal-nav">
+            <span class="cal-range">@RangeLabel</span>
+            <button type="button" class="cal-nav__btn tv-focus" @onclick="@(() => ShiftWeek(-1))" aria-label="‹">‹</button>
+            <button type="button" class="@($"cal-nav__btn cal-nav__btn--today tv-focus {(_weekOffset == 0 ? "is-active" : "")}")"
+                    @onclick="@(() => { _weekOffset = 0; })">@L["calendar.today"]</button>
+            <button type="button" class="cal-nav__btn tv-focus" @onclick="@(() => ShiftWeek(1))" aria-label="›">›</button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="cal-empty">…</div>
+    }
+    else if (WeekTotal == 0)
+    {
+        <div class="cal-empty">
+            <div class="cal-empty__title">@L["calendar.empty_title"]</div>
+            <div class="cal-empty__text">@L["calendar.empty_text"]</div>
+        </div>
+    }
+    else
+    {
+        <div class="cal-grid">
+            @foreach (var day in WeekDays)
+            {
+                var isToday = day.Date == DateTime.Now.Date;
+                var events = EventsFor(day);
+                <div class="cal-day">
+                    <div class="@($"cal-day__head {(isToday ? "is-today" : "")}")">
+                        <span class="cal-day__num">@day.Day</span>
+                        <span class="cal-day__dow">@DowName(day.DayOfWeek)</span>
+                    </div>
+                    <div class="cal-day__list">
+                        @if (events.Count == 0)
+                        {
+                            <div class="cal-day__none">—</div>
+                        }
+                        @foreach (var ev in events)
+                        {
+                            var e = ev;
+                            <button type="button" class="cal-card tv-focus" title="@e.Title"
+                                    @onclick="@(() => Nav.NavigateTo($"/catalog/{e.MediaItemId}"))">
+                                <span class="cal-card__art" style="@ArtStyle(e)">
+                                    <span class="cal-card__time">@e.AiringAtUtc.ToLocalTime().ToString("HH:mm")</span>
+                                    <span class="cal-card__title">@e.Title</span>
+                                </span>
+                                <span class="cal-card__meta">
+                                    <span class="cal-card__ep">EP @e.Episode</span>
+                                    <span class="@($"cal-chip cal-chip--{e.Status}")">@StatusLabel(e.Status)</span>
+                                </span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private CalendarEventDto[] _events = Array.Empty<CalendarEventDto>();
+    private bool _loading = true;
+    private int  _weekOffset;
+
+    // Day/month names come from the lang packs — WASM's sharded ICU quietly
+    // falls back to English when the culture data isn't loaded, so
+    // CultureInfo can't be trusted here.
+    private string DowName(DayOfWeek dow)
+    {
+        var parts = L["calendar.weekdays_short"].Split(',');
+        return parts.Length == 7 ? parts[(int)dow] : dow.ToString()[..3];
+    }
+
+    private string MonthName(int month)
+    {
+        var parts = L["calendar.months_short"].Split(',');
+        return parts.Length == 12 ? parts[month - 1] : month.ToString();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _events = await Api.GetCalendarAsync(back: 14, ahead: 60); }
+        catch { _events = Array.Empty<CalendarEventDto>(); }
+        _loading = false;
+    }
+
+    private DateTime Monday
+    {
+        get
+        {
+            var d = DateTime.Now.Date;
+            var dow = ((int)d.DayOfWeek + 6) % 7;   // Monday = 0
+            return d.AddDays(-dow + _weekOffset * 7);
+        }
+    }
+
+    private IEnumerable<DateTime> WeekDays => Enumerable.Range(0, 7).Select(i => Monday.AddDays(i));
+
+    private List<CalendarEventDto> EventsFor(DateTime day) => _events
+        .Where(e => e.AiringAtUtc.ToLocalTime().Date == day.Date)
+        .OrderBy(e => e.AiringAtUtc)
+        .ToList();
+
+    private int WeekTotal => WeekDays.Sum(d => EventsFor(d).Count);
+
+    private string RangeLabel
+    {
+        get
+        {
+            var sun = Monday.AddDays(6);
+            return $"{Monday.Day} {MonthName(Monday.Month)} — {sun.Day} {MonthName(sun.Month)}";
+        }
+    }
+
+    private void ShiftWeek(int dir) => _weekOffset += dir;
+
+    private string StatusLabel(string status) => status switch
+    {
+        "in-library"    => L["calendar.in_library"],
+        "aired-waiting" => L["calendar.aired_waiting"],
+        _               => L["calendar.upcoming"],
+    };
+
+    private static string ArtStyle(CalendarEventDto e)
+        => string.IsNullOrEmpty(e.BackdropUrl ?? e.PosterUrl)
+            ? ""
+            : $"background-image:url('{(e.BackdropUrl ?? e.PosterUrl)!.Replace("'", "%27")}')";
+}

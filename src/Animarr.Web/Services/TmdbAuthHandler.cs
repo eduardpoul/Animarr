@@ -12,7 +12,7 @@ public class TmdbAuthHandler(IAppConfigService appConfig) : DelegatingHandler
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var apiKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, cancellationToken);
+        var apiKey = await appConfig.GetTmdbApiKeyAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
             if (apiKey.StartsWith("eyJ", StringComparison.Ordinal))

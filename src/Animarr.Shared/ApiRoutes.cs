@@ -38,7 +38,34 @@ public static class ApiRoutes
     /// <summary>GET — per-episode thumbnail: TMDB episode still when available,
     /// else an ffmpeg frame grabbed from the local video. Lazy + cached.</summary>
     public const string MediaEpisodeThumb = "/api/media/{id}/episode-thumb";
+    /// <summary>GET — per-episode TMDB metadata (title / synopsis / air date /
+    /// rating / runtime) for the detailed-list episode view. Lazy-fetched +
+    /// cached in EpisodeMetadata; re-fetched when the metadata language or the
+    /// title's identification changes. Returns <c>EpisodeMetaDto[]</c>.</summary>
+    public const string MediaEpisodes     = "/api/media/{id}/episodes";
     public const string MediaApplyImage   = "/api/media/{id}/apply-image";
+    /// <summary>GET — skip-intro/credits segments. With <c>?season=&amp;episode=</c>
+    /// returns one <c>EpisodeSegmentsDto</c> (lazy-detecting via AniSkip on a
+    /// miss); without, returns all known <c>EpisodeSegmentsDto[]</c> for the item.
+    /// PUT writes a manual override (Source=Manual, never clobbered by detection).</summary>
+    public const string MediaSegments     = "/api/media/{id}/segments";
+    /// <summary>GET — skip-intro/credits scan progress (<c>SegmentScanStatusDto</c>).</summary>
+    public const string SegmentsStatus    = "/api/segments/status";
+    /// <summary>POST — reset scan flags so the background pass reprocesses all titles.</summary>
+    public const string SegmentsRescan    = "/api/segments/rescan";
+    /// <summary>GET <c>?season=&amp;episode=</c> (omit both for movies) — the
+    /// episode's seek-preview sprite manifest (<c>TrickplayDto</c>), or 204
+    /// when no sprite has been generated yet. Sprites are pre-built by the
+    /// trickplay background pass; this endpoint never generates inline.</summary>
+    public const string MediaTrickplay    = "/api/media/{id}/trickplay";
+    /// <summary>GET — "More like this" rail for a title (<c>RecCardDto[]</c>):
+    /// library matches first, TMDB backfill for the remaining slots (subject
+    /// to the user's RecsScope preference).</summary>
+    public const string MediaSimilar      = "/api/media/{id}/similar";
+    /// <summary>GET — franchise watch-order rail (<c>FranchiseDto</c>); 204
+    /// when the graph is unknown/trivial (never-checked titles lazily kick a
+    /// background AniList walk).</summary>
+    public const string MediaFranchise    = "/api/media/{id}/franchise";
     public const string MediaTheme        = "/api/media/{id}/theme";
     public const string MediaThemeRefresh = "/api/media/{id}/theme/refresh";
     public const string MediaThemeManual  = "/api/media/{id}/theme/manual";
@@ -75,6 +102,7 @@ public static class ApiRoutes
     public const string WatchStateProgress  = "/api/watch-states/progress";
     public const string WatchStateToggle    = "/api/watch-states/toggle";
     public const string WatchStateReset     = "/api/watch-states/reset";
+    public const string WatchStateMarkBulk  = "/api/watch-states/mark-bulk";
 
     // ─── Patterns ────────────────────────────────────────────────────────
     public const string Patterns           = "/api/patterns";
@@ -105,6 +133,11 @@ public static class ApiRoutes
     // ─── App config + hardware probe ─────────────────────────────────────
     public const string AppConfig          = "/api/app-config";
     public const string AppConfigByKey     = "/api/app-config/{key}";
+
+    /// <summary>GET — current metadata language + relocalisation progress
+    /// (<c>MetadataLanguageStatusDto</c>). PUT <c>{ language }</c> — change the
+    /// language and kick off re-fetching TMDB texts/posters for the library.</summary>
+    public const string MetadataLanguage   = "/api/metadata/language";
 
     // ─── LLM diagnostics ──────────────────────────────────────────────────
     /// <summary>Live "ping" test against the configured LLM endpoint. Returns
@@ -192,6 +225,23 @@ public static class ApiRoutes
     /// joined to their MediaItem rows. Drives the v5 Continue Watching
     /// hero on Home.</summary>
     public const string MeContinue   = "/api/me/continue";
+    public const string MeNextUp     = "/api/me/next-up";
+    /// <summary>GET — the "For you" Home rail (<c>RecCardDto[]</c>): heuristic
+    /// profile from the user's watch history, library candidates first, TMDB
+    /// backfill per RecsScope.</summary>
+    public const string MeForYou     = "/api/me/for-you";
+    /// <summary>POST — "don't suggest this again" (one of MediaItemId/TmdbId).</summary>
+    public const string MeRecsDismiss = "/api/me/recs/dismiss";
+    /// <summary>GET list / POST add for the user's "Хочу посмотреть" list.</summary>
+    public const string MeWatchlist  = "/api/me/watchlist";
+    public const string MeWatchlistById = "/api/me/watchlist/{id}";
+    /// <summary>GET — personal watch statistics (<c>StatsDto</c>): hours,
+    /// top genres/studios/titles, type split, activity heatmap.</summary>
+    public const string MeStats      = "/api/me/stats";
+    /// <summary>GET <c>?back=&amp;ahead=</c> (days) — airing-calendar events
+    /// (<c>CalendarEventDto[]</c>) for the window around now. Data is kept
+    /// fresh by the AiringRefreshBackgroundService (AniList + TMDB).</summary>
+    public const string Calendar     = "/api/calendar";
 
     // ─── Server identity (v5 multi-server) ───────────────────────────────
     /// <summary>Anonymous probe — returns <c>ServerInfoDto</c>. Hit by the
@@ -244,6 +294,12 @@ public static class ApiRoutes
     public static string MediaResolveEpisodesFor(Guid id) => MediaResolveEpisodes.Replace("{id}", id.ToString());
     public static string MediaResolveSeasonsFor(Guid id) => MediaResolveSeasons.Replace("{id}", id.ToString());
     public static string MediaEpisodeThumbFor(Guid id) => MediaEpisodeThumb.Replace("{id}", id.ToString());
+    public static string MediaEpisodesFor(Guid id)     => MediaEpisodes.Replace("{id}", id.ToString());
+    public static string MediaSegmentsFor(Guid id)     => MediaSegments.Replace("{id}", id.ToString());
+    public static string MediaTrickplayFor(Guid id)    => MediaTrickplay.Replace("{id}", id.ToString());
+    public static string MediaSimilarFor(Guid id)      => MediaSimilar.Replace("{id}", id.ToString());
+    public static string MediaFranchiseFor(Guid id)    => MediaFranchise.Replace("{id}", id.ToString());
+    public static string MeWatchlistItem(Guid id)      => MeWatchlistById.Replace("{id}", id.ToString());
     public static string MediaApplyImageFor(Guid id)   => MediaApplyImage.Replace("{id}", id.ToString());
 
     public static string Folder(Guid id)               => FolderById.Replace("{id}", id.ToString());
@@ -293,6 +349,11 @@ public static class AppConfigKeys
     /// under one "TMDb" toggle for clarity.</summary>
     public const string SearchSourceOrder  = "metadata.search_source_order";
 
+    /// <summary>Preferred metadata language (UI codes en/ru/uk/de/es; default en).
+    /// Server re-fetches TMDB title/overview/genres (+ localized posters) in this
+    /// language; missing fields fall back to English.</summary>
+    public const string MetadataLanguage   = "metadata.language";
+
     // ─── Auto-identification ──────────────────────────────────────────────
     public const string AutoIdentifyEnabled   = "metadata.auto_identify_enabled";
     public const string DownloadEpisodeThumbs = "metadata.download_episode_thumbs";
@@ -332,4 +393,10 @@ public static class AppConfigKeys
     // ─── External player handoff ──────────────────────────────────────────
     public const string ExternalPlayer       = "playback.external_player";
     public const string ExternalPlayerCustom = "playback.external_player_custom";
+
+    // ─── Skip intro / credits (segment detection) ─────────────────────────
+    public const string SegmentsAniSkipEnabled     = "segments.aniskip_enabled";
+    public const string SegmentsChaptersEnabled    = "segments.chapters_enabled";
+    public const string SegmentsChromaprintEnabled = "segments.chromaprint_enabled";
+    public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
 }

@@ -4,6 +4,7 @@ using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -51,7 +52,7 @@ internal static class RenameEndpoints
             db.RenamePatterns.Add(entity);
             await db.SaveChangesAsync(ct);
             return Results.Created(ApiRoutes.Pattern(entity.Id), entity.ToDto());
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPut(ApiRoutes.PatternById, async (
             Guid id,
@@ -76,7 +77,7 @@ internal static class RenameEndpoints
             entity.FolderId        = request.FolderId;
             await db.SaveChangesAsync(ct);
             return Results.Ok(entity.ToDto());
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapDelete(ApiRoutes.PatternById, async (
             Guid id,
@@ -90,7 +91,7 @@ internal static class RenameEndpoints
             db.RenamePatterns.Remove(entity);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         // ─── Identification queue ────────────────────────────────────────
         app.MapGet(ApiRoutes.IdentificationQueue, async (

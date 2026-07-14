@@ -69,12 +69,65 @@
     margin-top: 32px;
 }
 
+/* Season tabs + episode-view toggle share one baseline; the row owns the
+   underline so the toggle sits flush with the tab strip (Episode View Modes). */
+.md-season-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #21262d;
+    margin-bottom: 16px;
+}
+
 .md-season-tabs {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
-    border-bottom: 1px solid #21262d;
-    margin-bottom: 16px;
+}
+
+/* ── grid ⇄ detailed-list segmented toggle ─────────────────── */
+.md-view-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    margin-bottom: 8px;          /* lift off the row's underline */
+    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.md-view-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 28px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: color var(--motion-base), background var(--motion-base);
+}
+.md-view-btn:hover { color: var(--text-dim); }
+.md-view-btn--active {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* ── Section meta — "X of Y watched · all on disk" ─────────── */
+.md-secmeta {
+    margin: 0 0 18px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.4px;
+    color: var(--text-faint);
+}
+.md-secmeta b {
+    color: var(--text-dim);
+    font-weight: 600;
 }
 
 .md-season-tab {
@@ -118,6 +171,19 @@
        once. DOM stays intact so D-pad navigation still reaches every episode. */
     content-visibility: auto;
     contain-intrinsic-size: auto 200px;
+}
+
+/* Detailed-list container — one full-width row per episode (the EpisodeCard
+   renders its .d-ep--list layout inside each .md-episode-card wrapper, which
+   keeps the same focus/click/keydown target the grid uses). */
+.md-episode-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: var(--space-7);
+}
+@media (max-width: 639px) {
+    .md-episode-rows { gap: 8px; margin-top: var(--space-5); }
 }
 
 @media (max-width: 959px) {
@@ -992,3 +1058,30 @@
     background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; font-size: 13px;
 }
 .md-unmatched__save:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* ── Hide-fillers toggle (next to the view toggle; only when flags exist) ── */
+.md-filler-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    height: 34px;
+    /* Push off the season tabs so the toggle sits next to the view switcher on
+       the right, not stranded in the middle of the space-between row. */
+    margin-left: auto;
+    margin-bottom: 8px;          /* aligns with .md-view-toggle */
+    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--motion-base), border-color var(--motion-base), background var(--motion-base);
+}
+.md-filler-toggle:hover { color: var(--text-dim); border-color: var(--border-strong); }
+.md-filler-toggle--on {
+    color: var(--accent-hi);
+    background: var(--accent-soft);
+    border-color: var(--accent-line, var(--accent));
+}

@@ -9,23 +9,10 @@
     <link rel="preload" id="webassembly" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 
-    <!-- Inline @font-face declarations at the top of HEAD so the browser
-         discovers them before parsing any other stylesheet, matching what
-         the original Razor App.razor did. The .ttf files ship as static
-         web assets from Animarr.UI's wwwroot. -->
-    <style>
-        @@font-face { font-family: 'Geist';         font-weight: 400; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-400.ttf')         format('truetype'); }
-        @@font-face { font-family: 'Geist';         font-weight: 500; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-500.ttf')         format('truetype'); }
-        @@font-face { font-family: 'Geist';         font-weight: 600; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-600.ttf')         format('truetype'); }
-        @@font-face { font-family: 'Geist';         font-weight: 700; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-700.ttf')         format('truetype'); }
-        @@font-face { font-family: 'Geist Mono';    font-weight: 400; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-mono-400.ttf')    format('truetype'); }
-        @@font-face { font-family: 'Geist Mono';    font-weight: 500; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/geist-mono-500.ttf')    format('truetype'); }
-        @@font-face { font-family: 'Archivo Black'; font-weight: 400; font-style: normal; font-display: swap; src: url('_content/Animarr.UI/lib/fonts/archivo-black-400.ttf') format('truetype'); }
-    </style>
-    <link rel="preload" href="_content/Animarr.UI/lib/fonts/geist-400.ttf"         as="font" type="font/ttf" crossorigin />
-    <link rel="preload" href="_content/Animarr.UI/lib/fonts/geist-500.ttf"         as="font" type="font/ttf" crossorigin />
-    <link rel="preload" href="_content/Animarr.UI/lib/fonts/geist-600.ttf"         as="font" type="font/ttf" crossorigin />
-    <link rel="preload" href="_content/Animarr.UI/lib/fonts/archivo-black-400.ttf" as="font" type="font/ttf" crossorigin />
+    <!-- Self-hosted Geist / Geist Mono / Archivo Black @font-face + preloads
+         were removed when the display + mono identity moved to Hanken
+         Grotesk. All fonts now load from the Google Fonts CDN below. For
+         an offline / air-gapped install, see lib/fonts/fonts.css + README. -->
     <!-- v5 multi-theme CDN fonts.
 
          Tailwind CLI v4 strips @import url() statements from tokens.css
@@ -39,7 +26,7 @@
          a bandwidth-sensitive SaaS landing page. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Quicksand:wght@500;600;700&family=Noto+Serif+SC:wght@500;700;900&family=Noto+Serif+JP:wght@500;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Quicksand:wght@500;600;700&family=Noto+Serif+SC:wght@500;700;900&family=Noto+Serif+JP:wght@500;700&display=swap" />
 
     <!-- Global design tokens + component classes (Tailwind output baked in
          to Animarr.UI/wwwroot/app.css). -->
@@ -91,6 +78,14 @@
                 window.animarr_setAccentHue(parseInt(storedHue, 10));
             var storedTheme = localStorage.getItem('animarr-theme');
             document.documentElement.setAttribute('data-theme', storedTheme || 'quietude');
+            // Interface language cached from last session. Program.cs loads this
+            // exact pack before the first render, so a non-English user never
+            // sees an English flash before /api/me/preferences comes back.
+            // <html lang> is updated for a11y / correct hyphenation too.
+            try {
+                var storedLang = localStorage.getItem('animarr-lang');
+                if (storedLang) document.documentElement.setAttribute('lang', storedLang);
+            } catch (_) {}
         })();
 
         // ── TV-mode boot resolver ───────────────────────────────────────
@@ -149,7 +144,7 @@
         .animarr-boot {
             display: flex; flex-direction: column;
             align-items: center; gap: 18px;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            font-family: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
         }
         .animarr-boot__mark {
             width: 84px; height: 84px;

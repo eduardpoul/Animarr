@@ -31,7 +31,7 @@
             {
                 <button type="button" class="emd__back tv-focus"
                         @onclick="@(() => _mobileShowingDetail = false)"
-                        aria-label="Back to metadata sections">
+                        aria-label="@L["edit_metadata.aria_back_sections"]">
                     <DIcon Name="chev-l" Size="18" />
                 </button>
             }
@@ -40,14 +40,14 @@
                 <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
             }
             <div class="emd__header-text">
-                <div class="emd__overline">@(_mobileShowingDetail ? CurrentTabLabel.ToUpperInvariant() : "EDIT METADATA")</div>
+                <div class="emd__overline">@(_mobileShowingDetail ? CurrentTabLabel.ToUpperInvariant() : L["edit_metadata.overline"])</div>
                 <div class="emd__title">@Item.Title</div>
                 @if (!_mobileShowingDetail)
                 {
-                    <div class="emd__hint">SQLite metadata only — folders on disk stay untouched</div>
+                    <div class="emd__hint">@L["edit_metadata.header_hint"]</div>
                 }
             </div>
-            <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="Close">
+            <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="@L["edit_metadata.aria_close"]">
                 <DIcon Name="x" Size="20" />
             </button>
         </header>
@@ -69,7 +69,7 @@
 
         @* Mobile drilldown list — vertical cards. Click → set tab + flip to
            detail mode. CSS toggles list ⇄ body via data-mobile-detail. *@
-        <nav class="emd__mlist" aria-label="Metadata sections">
+        <nav class="emd__mlist" aria-label="@L["edit_metadata.aria_sections"]">
             @foreach (var t in _tabDefs)
             {
                 var key = t.Key;
@@ -99,12 +99,12 @@
                     @onclick="SaveAsync" disabled="@_saving">
                 @if (_saving) { <Spinner Size="sm" Tone="light" /> }
                 else          { <DIcon Name="check" Size="14" /> }
-                @(_saving ? "Saving…" : "Save changes")
+                @(_saving ? L["edit_metadata.btn_saving"] : L["edit_metadata.btn_save_changes"])
             </button>
-            <button type="button" class="emd__btn emd__btn--ghost" @onclick="OnCloseAsync">Cancel</button>
+            <button type="button" class="emd__btn emd__btn--ghost" @onclick="OnCloseAsync">@L["edit_metadata.btn_cancel"]</button>
             <div class="emd__footer-spacer"></div>
             <button type="button" class="emd__btn emd__btn--flat emd__btn--xs" @onclick="ReidentifyAsync">
-                <DIcon Name="magic" Size="13" /> Re-run LLM
+                <DIcon Name="magic" Size="13" /> @L["edit_metadata.btn_rerun_llm"]
             </button>
         </footer>
     </div>
@@ -124,15 +124,15 @@
     /// horizontal tab strip is always visible there.</summary>
     private bool _mobileShowingDetail;
 
-    private static readonly KeyValuePair<string, string>[] _tabDefs =
+    private KeyValuePair<string, string>[] _tabDefs =>
     [
-        new("ids",        "Source IDs"),
-        new("basics",     "Basics"),
-        new("poster",     "Poster"),
-        new("backdrop",   "Backdrop"),
-        new("tags",       "Tags"),
-        new("categories", "Categories"),
-        new("manage",     "Manage"),
+        new("ids",        L["edit_metadata.tab_source_ids"]),
+        new("basics",     L["edit_metadata.tab_basics"]),
+        new("poster",     L["edit_metadata.tab_poster"]),
+        new("backdrop",   L["edit_metadata.tab_backdrop"]),
+        new("tags",       L["edit_metadata.tab_tags"]),
+        new("categories", L["edit_metadata.tab_categories"]),
+        new("manage",     L["edit_metadata.tab_manage"]),
     ];
 
     /// <summary>Friendly label of the currently-active tab — shown in the
@@ -143,7 +143,7 @@
         {
             foreach (var t in _tabDefs)
                 if (t.Key == _tab) return t.Value;
-            return "Edit";
+            return L["edit_metadata.tab_fallback"];
         }
     }
 
@@ -451,7 +451,7 @@
             await OnSaved.InvokeAsync();
             await OnClose.InvokeAsync();
         }
-        catch (Exception ex) { Toasts.ShowError($"Save failed: {ex.Message}"); }
+        catch (Exception ex) { Toasts.ShowError(L.Get("edit_metadata.toast_save_failed_fmt", ex.Message)); }
         finally { _saving = false; StateHasChanged(); }
     }
 
@@ -486,9 +486,9 @@
             await Api.ResolveMediaCandidateAsync(Item.Id,
                 new ResolveCandidateRequest(source, externalId.Trim()));
             await OnSaved.InvokeAsync();
-            Toasts.ShowSuccess("Re-identified from the new source ID.");
+            Toasts.ShowSuccess(L["edit_metadata.toast_reidentified_source"]);
         }
-        catch (Exception ex) { Toasts.ShowError($"Apply failed: {ex.Message}"); }
+        catch (Exception ex) { Toasts.ShowError(L.Get("edit_metadata.toast_apply_failed_fmt", ex.Message)); }
     }
 
     private Task ApplyTmdbAsync() => ApplySourceAsync(_tmdbIsTv ? "tmdb_tv" : "tmdb_movie", _tmdbIdInput ?? "");
@@ -503,10 +503,10 @@
         try
         {
             var ok = await Api.RefreshThemeAsync(Item.Id);
-            if (ok) { Toasts.ShowSuccess("Theme re-fetched from AnimeThemes."); await OnSaved.InvokeAsync(); }
-            else    { Toasts.ShowError("No theme found for this title on AnimeThemes."); }
+            if (ok) { Toasts.ShowSuccess(L["edit_metadata.toast_theme_refetched"]); await OnSaved.InvokeAsync(); }
+            else    { Toasts.ShowError(L["edit_metadata.toast_theme_not_found"]); }
         }
-        catch (Exception ex) { Toasts.ShowError($"Theme rescan failed: {ex.Message}"); }
+        catch (Exception ex) { Toasts.ShowError(L.Get("edit_metadata.toast_theme_rescan_failed_fmt", ex.Message)); }
         finally { _themeBusy = false; StateHasChanged(); }
     }
 
@@ -517,10 +517,10 @@
         try
         {
             var ok = await Api.SetThemeUrlAsync(Item.Id, _themeUrlInput.Trim());
-            if (ok) { Toasts.ShowSuccess("Theme set from URL."); _themeUrlInput = ""; await OnSaved.InvokeAsync(); }
-            else    { Toasts.ShowError("Couldn't download audio from that URL."); }
+            if (ok) { Toasts.ShowSuccess(L["edit_metadata.toast_theme_set_url"]); _themeUrlInput = ""; await OnSaved.InvokeAsync(); }
+            else    { Toasts.ShowError(L["edit_metadata.toast_theme_url_fail"]); }
         }
-        catch (Exception ex) { Toasts.ShowError($"Set theme failed: {ex.Message}"); }
+        catch (Exception ex) { Toasts.ShowError(L.Get("edit_metadata.toast_theme_set_failed_fmt", ex.Message)); }
         finally { _themeBusy = false; StateHasChanged(); }
     }
 
@@ -560,63 +560,63 @@
         <div class="emd-automatch">
             <div class="emd-automatch__icon"><DIcon Name="sparkle" Size="14" /></div>
             <div>
-                <div class="emd-automatch__title">Auto-match · @($"{(Item!.LlmConfidence ?? 0):P0}")</div>
+                <div class="emd-automatch__title">@L.Get("edit_metadata.automatch_title_fmt", $"{(Item!.LlmConfidence ?? 0):P0}")</div>
                 <div class="emd-automatch__hint">@(Item.LlmIdentifiedTitle ?? Item.Title) → @Item.Title</div>
             </div>
         </div>
 
         <div class="emd-idfield">
             <div class="emd-idfield__head">
-                <span class="emd-idfield__label">TMDB ID</span>
+                <span class="emd-idfield__label">@L["edit_metadata.id_tmdb_label"]</span>
                 @if (Item.TmdbId is not null)
                 {
                     var url = $"https://www.themoviedb.org/{(Item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{Item.TmdbId}";
-                    <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
-                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.id_not_linked"]"
                        value="@(_tmdbIdInput ?? "")"
                        @oninput="@(e => _tmdbIdInput = e.Value?.ToString())" />
-                <div class="emd-segmented" role="group" aria-label="TMDB kind">
+                <div class="emd-segmented" role="group" aria-label="@L["edit_metadata.id_aria_tmdb_kind"]">
                     <button type="button" class="@($"emd-segmented__btn {(_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
-                            @onclick="@(() => _tmdbIsTv = true)">TV</button>
+                            @onclick="@(() => _tmdbIsTv = true)">@L["edit_metadata.id_tmdb_tv"]</button>
                     <button type="button" class="@($"emd-segmented__btn {(!_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
-                            @onclick="@(() => _tmdbIsTv = false)">Movie</button>
+                            @onclick="@(() => _tmdbIsTv = false)">@L["edit_metadata.id_tmdb_movie"]</button>
                 </div>
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyTmdbAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyTmdbAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
             </div>
         </div>
 
         <div class="emd-idfield">
             <div class="emd-idfield__head">
-                <span class="emd-idfield__label">MAL ID</span>
+                <span class="emd-idfield__label">@L["edit_metadata.id_mal_label"]</span>
                 @if (Item.MalId is not null)
                 {
-                    <a href="@($"https://myanimelist.net/anime/{Item.MalId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    <a href="@($"https://myanimelist.net/anime/{Item.MalId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
-                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.id_not_linked"]"
                        value="@(_malIdInput ?? "")"
                        @oninput="@(e => _malIdInput = e.Value?.ToString())" />
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyMalAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyMalAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
             </div>
         </div>
 
         <div class="emd-idfield">
             <div class="emd-idfield__head">
-                <span class="emd-idfield__label">IMDb ID</span>
+                <span class="emd-idfield__label">@L["edit_metadata.id_imdb_label"]</span>
                 @if (!string.IsNullOrEmpty(Item.ImdbId))
                 {
-                    <a href="@($"https://www.imdb.com/title/{Item.ImdbId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> open source</a>
+                    <a href="@($"https://www.imdb.com/title/{Item.ImdbId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
-                <input class="emd-input emd-input--mono" placeholder="(not linked)"
+                <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.id_not_linked"]"
                        value="@(_imdbIdInput ?? "")"
                        @oninput="@(e => _imdbIdInput = e.Value?.ToString())" />
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyImdbAsync"><DIcon Name="refresh" Size="13" /> Apply</button>
+                <button class="emd__btn emd__btn--solid" @onclick="ApplyImdbAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
             </div>
         </div>
 
@@ -625,21 +625,21 @@
            direct audio URL and Add to set it manually. *@
         <div class="emd-idfield">
             <div class="emd-idfield__head">
-                <span class="emd-idfield__label">THEME MUSIC</span>
+                <span class="emd-idfield__label">@L["edit_metadata.theme_label"]</span>
                 @if (!string.IsNullOrEmpty(Item.ThemePath))
                 {
-                    <a href="@Animarr.UI.Services.MediaUrl.Theme(Item.Id)" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="play" Size="10" /> play theme</a>
+                    <a href="@Animarr.UI.Services.MediaUrl.Theme(Item.Id)" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="play" Size="10" /> @L["edit_metadata.theme_play"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
-                <input class="emd-input emd-input--mono" placeholder="paste a direct audio URL (manual add)"
+                <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.theme_url_placeholder"]"
                        value="@_themeUrlInput"
                        @oninput="@(e => _themeUrlInput = e.Value?.ToString() ?? "")" />
-                <button class="emd__btn emd__btn--solid" disabled="@_themeBusy" @onclick="RescanThemeAsync" title="Re-fetch the OP/ED from AnimeThemes">
-                    <DIcon Name="refresh" Size="13" /> Rescan
+                <button class="emd__btn emd__btn--solid" disabled="@_themeBusy" @onclick="RescanThemeAsync" title="@L["edit_metadata.theme_rescan_title"]">
+                    <DIcon Name="refresh" Size="13" /> @L["edit_metadata.theme_btn_rescan"]
                 </button>
                 <button class="emd__btn emd__btn--solid" disabled="@(_themeBusy || string.IsNullOrWhiteSpace(_themeUrlInput))" @onclick="ApplyThemeUrlAsync">
-                    <DIcon Name="check" Size="13" /> Add
+                    <DIcon Name="check" Size="13" /> @L["edit_metadata.theme_btn_add"]
                 </button>
             </div>
             @* Provenance — keyed off ThemePath (a theme can be set without a song
@@ -650,36 +650,35 @@
             {
                 <div class="emd__hint" style="margin-top: 6px;">
                     @if (!string.IsNullOrEmpty(Item.ThemeTitle)) { <text>♪ @Item.ThemeTitle</text> }
-                    else { <text>♪ Theme set (untitled)</text> }
+                    else { <text>♪ @L["edit_metadata.theme_untitled"]</text> }
                     <text> · </text>
                     <a href="@($"https://animethemes.moe/search?q={Uri.EscapeDataString(Item.Title)}")"
                        target="_blank" rel="noopener" class="emd-idfield__link">
-                        <DIcon Name="external" Size="10" /> find on AnimeThemes
+                        <DIcon Name="external" Size="10" /> @L["edit_metadata.theme_find"]
                     </a>
                 </div>
                 <div class="emd-source" style="margin-top: 6px;">@Item.ThemePath</div>
                 <div class="emd__hint" style="margin-top: 4px;">
-                    On-disk file. The exact remote source URL isn't stored yet — use
-                    "find on AnimeThemes" above to verify the match.
+                    @L["edit_metadata.theme_ondisk_hint"]
                 </div>
             }
             else
             {
                 <div class="emd__hint" style="margin-top: 6px;">
-                    No theme set. Rescan tries AnimeThemes (anime only); or paste a direct audio URL to add manually.
+                    @L["edit_metadata.theme_none_hint"]
                 </div>
             }
         </div>
 
         <div class="emd-idfield">
             <div class="emd-idfield__head">
-                <span class="emd-idfield__label">Paste URL</span>
+                <span class="emd-idfield__label">@L["edit_metadata.id_paste_url_short"]</span>
             </div>
             <div class="emd-idfield__row">
                 <input class="emd-input" placeholder="https://www.themoviedb.org/tv/12345"
                        value="@_pasteUrl"
                        @oninput="@(e => _pasteUrl = e.Value?.ToString() ?? "")" />
-                <button class="emd__btn emd__btn--solid" @onclick="ParsePastedUrl">Parse</button>
+                <button class="emd__btn emd__btn--solid" @onclick="ParsePastedUrl">@L["edit_metadata.id_btn_parse"]</button>
             </div>
         </div>
     </div>;
@@ -691,8 +690,8 @@
         @if (!string.IsNullOrEmpty(_sourceName))
         {
             <div class="emd-field">
-                <span class="emd-field__label">@(_sourceIsFile ? "Source file (on disk)" : "Source folder (on disk)")</span>
-                <div class="emd-source" title="What the scanner parsed for identification">@_sourceName</div>
+                <span class="emd-field__label">@(_sourceIsFile ? L["edit_metadata.basics_source_file"] : L["edit_metadata.basics_source_folder"])</span>
+                <div class="emd-source" title="@L["edit_metadata.basics_source_title"]">@_sourceName</div>
                 @if (!string.IsNullOrEmpty(_sourceDetail))
                 {
                     <span class="emd-source__detail">@_sourceDetail</span>
@@ -700,53 +699,53 @@
             </div>
         }
         <label class="emd-field">
-            <span class="emd-field__label">Title</span>
+            <span class="emd-field__label">@L["edit_metadata.basics_title"]</span>
             <input class="emd-input" value="@_bTitle" @oninput="@(e => _bTitle = e.Value?.ToString() ?? "")" />
         </label>
         <label class="emd-field">
-            <span class="emd-field__label">English title</span>
+            <span class="emd-field__label">@L["edit_metadata.basics_english_title"]</span>
             <input class="emd-input" value="@(_bEnglish ?? "")" @oninput="@(e => _bEnglish = e.Value?.ToString())" />
         </label>
         <label class="emd-field">
-            <span class="emd-field__label">Original / CJK title</span>
+            <span class="emd-field__label">@L["edit_metadata.basics_cjk_title_slash"]</span>
             <input class="emd-input" value="@(_bCjk ?? "")" @oninput="@(e => _bCjk = e.Value?.ToString())" />
         </label>
         <div class="emd-grid-2">
             <label class="emd-field">
-                <span class="emd-field__label">Year</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_year"]</span>
                 <input class="emd-input emd-input--narrow" type="number" value="@(_bYear?.ToString() ?? "")"
                        @oninput="@(e => _bYear = int.TryParse(e.Value?.ToString(), out var y) ? y : null)" />
             </label>
             <label class="emd-field">
-                <span class="emd-field__label">Type</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_type"]</span>
                 <select class="emd-input" value="@_bType.ToString()"
                         @onchange="@(e => _bType = Enum.TryParse<MediaItemType>(e.Value?.ToString(), out var t) ? t : MediaItemType.Unknown)">
-                    <option value="Unknown">Unknown</option>
-                    <option value="Anime">Anime</option>
-                    <option value="Series">Series</option>
-                    <option value="Movie">Movie</option>
-                    <option value="Multserials">Multserials</option>
+                    <option value="Unknown">@L["edit_metadata.basics_type_unknown"]</option>
+                    <option value="Anime">@L["edit_metadata.basics_type_anime"]</option>
+                    <option value="Series">@L["edit_metadata.basics_type_series"]</option>
+                    <option value="Movie">@L["edit_metadata.basics_type_movie"]</option>
+                    <option value="Multserials">@L["edit_metadata.basics_type_multserials"]</option>
                 </select>
             </label>
         </div>
         <div class="emd-grid-2">
             <label class="emd-field">
-                <span class="emd-field__label">Language</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_language"]</span>
                 <input class="emd-input" value="@(_bLanguage ?? "")" @oninput="@(e => _bLanguage = e.Value?.ToString())" />
             </label>
             <label class="emd-field">
-                <span class="emd-field__label">Studio</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_studio"]</span>
                 <input class="emd-input" value="@(_bStudio ?? "")" @oninput="@(e => _bStudio = e.Value?.ToString())" />
             </label>
         </div>
         <div class="emd-grid-2">
             <label class="emd-field">
-                <span class="emd-field__label">Runtime (min)</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_runtime_min"]</span>
                 <input class="emd-input emd-input--narrow" type="number" value="@(_bRuntime?.ToString() ?? "")"
                        @oninput="@(e => _bRuntime = int.TryParse(e.Value?.ToString(), out var r) ? r : null)" />
             </label>
             <label class="emd-field">
-                <span class="emd-field__label">Hue (0–360)</span>
+                <span class="emd-field__label">@L["edit_metadata.basics_hue"]</span>
                 <input class="emd-input emd-input--narrow" type="number" min="0" max="360"
                        value="@(_bHue?.ToString() ?? "")"
                        @oninput="@(e => _bHue = int.TryParse(e.Value?.ToString(), out var h) ? h : null)" />
@@ -755,20 +754,18 @@
     </div>;
 
     private RenderFragment CategoriesTab() => @<div class="emd-form">
-        <div class="emd-field__label">CATEGORIES — manual override</div>
+        <div class="emd-field__label">@L["edit_metadata.categories_label"]</div>
         <p class="emd__hint" style="margin: 2px 0 12px;">
-            Ticked categories pin this item to those chips on Home regardless of
-            what the LLM classifier decides. Untick all to let the auto-classifier
-            decide. Changes save with the rest of the metadata.
+            @L["edit_metadata.categories_hint"]
         </p>
         @if (_categoriesLoading)
         {
-            <div class="emd-gallery-loading"><InlineDots Label="Loading categories" /></div>
+            <div class="emd-gallery-loading"><InlineDots Label="@L["edit_metadata.categories_loading"]" /></div>
         }
         else if (_allCategories is null || _allCategories.Length == 0)
         {
             <div class="emd-gallery-empty">
-                No categories defined. Admin can create them in Server Settings → Categories.
+                @L["edit_metadata.categories_empty"]
             </div>
         }
         else
@@ -790,7 +787,7 @@
                         </span>
                         @if (c.BuiltIn)
                         {
-                            <span class="emd-cat-row__builtin">BUILT-IN</span>
+                            <span class="emd-cat-row__builtin">@L["edit_metadata.categories_builtin"]</span>
                         }
                     </label>
                 }
@@ -805,7 +802,7 @@
         <div class="emd-tags">
             @if (_tags.Count == 0)
             {
-                <span class="emd-tags__empty">No tags yet — add one below or pick a suggestion.</span>
+                <span class="emd-tags__empty">@L["edit_metadata.tags_empty_hint"]</span>
             }
             else
             {
@@ -816,7 +813,7 @@
                         @tag
                         <button type="button" class="emd-tag__x"
                                 @onclick="@(() => RemoveTag(tag))"
-                                aria-label="@($"Remove tag {tag}")">
+                                aria-label="@L.Get("edit_metadata.tags_remove_tag_aria_fmt", tag)">
                             <DIcon Name="x" Size="10" />
                         </button>
                     </span>
@@ -824,14 +821,14 @@
             }
         </div>
         <div class="emd-idfield__row">
-            <input class="emd-input" placeholder="Add tag…"
+            <input class="emd-input" placeholder="@L["edit_metadata.tags_add_placeholder"]"
                    value="@_newTag"
                    @oninput="@(e => _newTag = e.Value?.ToString() ?? "")"
                    @onkeydown="OnTagKeyDown" />
-            <button class="emd__btn emd__btn--solid" @onclick="AddTag">Add</button>
+            <button class="emd__btn emd__btn--solid" @onclick="AddTag">@L["edit_metadata.tags_btn_add"]</button>
         </div>
         <div class="emd-tags-suggest">
-            <div class="emd-tags-suggest__label">SUGGESTED</div>
+            <div class="emd-tags-suggest__label">@L["edit_metadata.tags_suggested_label"]</div>
             <div class="emd-tags-suggest__list">
                 @foreach (var t in _suggestedTags.Where(s => !_tags.Contains(s, StringComparer.OrdinalIgnoreCase)))
                 {
@@ -847,11 +844,11 @@
     private RenderFragment PosterTab() => @<div class="emd-form">
         @if (_postersLoading)
         {
-            <div class="emd-gallery-loading"><InlineDots Label="Fetching posters" /></div>
+            <div class="emd-gallery-loading"><InlineDots Label="@L["edit_metadata.poster_loading"]" /></div>
         }
         else if (_posterCandidates is null || _posterCandidates.Length == 0)
         {
-            <div class="emd-gallery-empty">No alternative posters available — TMDB / MAL haven't surfaced any for this title.</div>
+            <div class="emd-gallery-empty">@L["edit_metadata.poster_empty"]</div>
         }
         else
         {
@@ -863,7 +860,7 @@
                     <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
                             disabled="@busy"
                             @onclick="@(() => ApplyImageAsync("poster", c.Url))">
-                        <img loading="lazy" src="@c.Url" alt="poster candidate" />
+                        <img loading="lazy" src="@c.Url" alt="@L["edit_metadata.poster_alt"]" />
                         @if (c.Width > 0 && c.Height > 0)
                         {
                             <span class="emd-gallery__dim">@c.Width&times;@c.Height</span>
@@ -878,11 +875,11 @@
     private RenderFragment BackdropTab() => @<div class="emd-form">
         @if (_backdropsLoading)
         {
-            <div class="emd-gallery-loading"><InlineDots Label="Fetching backdrops" /></div>
+            <div class="emd-gallery-loading"><InlineDots Label="@L["edit_metadata.backdrop_loading"]" /></div>
         }
         else if (_backdropCandidates is null || _backdropCandidates.Length == 0)
         {
-            <div class="emd-gallery-empty">No alternative backdrops available.</div>
+            <div class="emd-gallery-empty">@L["edit_metadata.backdrop_empty"]</div>
         }
         else
         {
@@ -894,7 +891,7 @@
                     <button type="button" class="@($"emd-gallery__card {(busy ? "emd-gallery__card--busy" : "")}")"
                             disabled="@busy"
                             @onclick="@(() => ApplyImageAsync("fanart", c.Url))">
-                        <img loading="lazy" src="@c.Url" alt="backdrop candidate" />
+                        <img loading="lazy" src="@c.Url" alt="@L["edit_metadata.backdrop_alt"]" />
                         @if (c.Width > 0 && c.Height > 0)
                         {
                             <span class="emd-gallery__dim">@c.Width&times;@c.Height</span>
@@ -908,26 +905,24 @@
 
     private RenderFragment ManageTab() => @<div class="emd-form">
         <div class="emd-manage-block">
-            <h4>Re-identify</h4>
-            <p>Queue this folder for a fresh LLM + TMDB/MAL/IMDb lookup, ignoring any
-               prior match. Useful when an automatic identification picked the wrong show.</p>
+            <h4>@L["edit_metadata.manage_reidentify_title"]</h4>
+            <p>@L["edit_metadata.manage_reidentify_body"]</p>
             <button class="emd__btn emd__btn--solid" @onclick="ReidentifyAsync">
-                <DIcon Name="magic" Size="13" /> Queue re-identify
+                <DIcon Name="magic" Size="13" /> @L["edit_metadata.manage_btn_queue_reidentify"]
             </button>
         </div>
 
         <div class="emd-manage-block emd-manage-block--danger">
-            <h4>Delete from catalog</h4>
-            <p>Removes the item from Animarr's SQLite catalog. Files on disk are
-               <strong>preserved</strong>. This action cannot be undone from the UI.</p>
+            <h4>@L["edit_metadata.manage_delete_title"]</h4>
+            <p>@((MarkupString)L["edit_metadata.manage_delete_body_html"])</p>
             <label class="emd-manage-block__confirm">
                 <input type="checkbox" checked="@_confirmDelete"
                        @onchange="@(e => _confirmDelete = e.Value is bool b && b)" />
                 <span class="emd-manage-block__confirm-box" aria-hidden="true"></span>
-                <span class="emd-manage-block__confirm-label">I understand</span>
+                <span class="emd-manage-block__confirm-label">@L["edit_metadata.manage_confirm_understand"]</span>
             </label>
             <button class="emd__btn emd__btn--danger" disabled="@(!_confirmDelete)" @onclick="DeleteAsync">
-                <DIcon Name="trash" Size="13" /> Delete from catalog
+                <DIcon Name="trash" Size="13" /> @L["edit_metadata.manage_btn_delete"]
             </button>
         </div>
     </div>;

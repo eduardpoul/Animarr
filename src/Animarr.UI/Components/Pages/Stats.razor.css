@@ -1,0 +1,168 @@
+/* Personal stats dashboard. Uses the shared design tokens; charts are pure
+   CSS (flex/height bars + a heatmap grid) so nothing external is pulled in. */
+
+.st-page {
+    /* Match the Torrents / Server shell width (.tor-page / .d-server: 1480). */
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 20px 20px 64px;
+}
+
+.st-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+    margin-bottom: var(--space-8);
+}
+.st-head__text { display: flex; flex-direction: column; gap: 2px; }
+.st-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.st-sub { color: var(--text-faint); font-size: 13px; }
+
+/* ── empty ─────────────────────────────────────────────────────────── */
+.st-empty { text-align: center; padding: 80px 20px; color: var(--text-faint); }
+.st-empty__title { font-size: 18px; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; }
+.st-empty__text { font-size: 13px; }
+
+/* ── KPI cards ─────────────────────────────────────────────────────── */
+.st-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--space-5);
+    margin-bottom: var(--space-9);
+}
+.st-kpi {
+    position: relative;
+    padding: 18px 16px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.st-kpi__val {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+.st-kpi__unit { font-size: 15px; font-weight: 700; color: var(--text-faint); margin-left: 3px; }
+.st-kpi__lbl { margin-top: 8px; font-size: 12px; color: var(--text-faint); }
+.st-kpi__note { margin-top: 4px; font-size: 10.5px; color: var(--accent-hi); font-family: var(--font-mono); }
+
+/* ── blocks ────────────────────────────────────────────────────────── */
+.st-block { margin-bottom: var(--space-9); }
+.st-block__title {
+    margin: 0 0 var(--space-5);
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+.st-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-7);
+}
+.st-cols .st-block { margin-bottom: var(--space-9); }
+
+/* ── bar rows (genres / studios) ───────────────────────────────────── */
+.st-bars { display: flex; flex-direction: column; gap: 9px; }
+.st-row { display: grid; grid-template-columns: 116px 1fr 58px; align-items: center; gap: 10px; }
+.st-row__lbl { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-row__val { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); text-align: right; }
+
+.st-bar { height: 10px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.st-bar__fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+    min-width: 3px;
+}
+.st-bar__fill--alt { background: linear-gradient(90deg, oklch(0.62 0.13 260), oklch(0.72 0.13 260)); }
+
+/* ── type split ────────────────────────────────────────────────────── */
+.st-types { display: flex; flex-direction: column; gap: 12px; }
+.st-type__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+.st-type__name { font-size: 13px; font-weight: 600; }
+.st-type__meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
+.st-bar__fill--anime   { background: linear-gradient(90deg, oklch(0.65 0.16 25),  oklch(0.74 0.16 25)); }
+.st-bar__fill--series  { background: linear-gradient(90deg, oklch(0.63 0.14 155), oklch(0.73 0.14 155)); }
+.st-bar__fill--movie   { background: linear-gradient(90deg, oklch(0.62 0.14 285), oklch(0.72 0.14 285)); }
+.st-bar__fill--cartoon { background: linear-gradient(90deg, oklch(0.68 0.15 55),  oklch(0.77 0.15 55)); }
+
+/* ── top titles ────────────────────────────────────────────────────── */
+.st-titles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-5);
+}
+.st-title-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+}
+.st-title-card__rank {
+    position: absolute;
+    top: -6px; left: -6px;
+    z-index: 3;
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    border-radius: 8px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+    color: #15100b; background: var(--accent);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+}
+.st-title-card__art {
+    display: block;
+    aspect-ratio: 2 / 3;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.st-title-card:hover .st-title-card__art { border-color: var(--border-strong); }
+.st-title-card__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.st-title-card__ph { width: 100%; height: 100%; display: grid; place-items: center; color: var(--text-faint); }
+.st-title-card__name { margin-top: 8px; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-title-card__meta { margin-top: 2px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+
+/* ── heatmap ───────────────────────────────────────────────────────── */
+.st-heat { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+.st-heat__col { display: flex; flex-direction: column; gap: 3px; }
+.st-heat__cell { width: 13px; height: 13px; border-radius: 3px; background: var(--surface-3); }
+.st-heat__cell--l0 { background: var(--surface-2, var(--surface-3)); }
+.st-heat__cell--l1 { background: oklch(0.42 0.09 var(--accent-hue)); }
+.st-heat__cell--l2 { background: oklch(0.55 0.13 var(--accent-hue)); }
+.st-heat__cell--l3 { background: oklch(0.68 0.16 var(--accent-hue)); }
+.st-heat__cell--l4 { background: oklch(0.80 0.18 var(--accent-hue)); }
+/* level -1 (before first day / future) stays the faint base */
+.st-heat__cell--l-1 { background: transparent; }
+.st-heat-empty { color: var(--text-faint); font-size: 13px; padding: 12px 0; }
+
+/* ── monthly bars ──────────────────────────────────────────────────── */
+.st-months { display: flex; align-items: flex-end; gap: 10px; height: 160px; }
+.st-month { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; height: 100%; }
+.st-month__bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.st-month__bar {
+    width: 60%;
+    min-height: 3px;
+    border-radius: 5px 5px 0 0;
+    background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+}
+.st-month__lbl { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+
+@media (max-width: 820px) {
+    .st-kpis { grid-template-columns: repeat(2, 1fr); }
+    .st-cols { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+    .st-title { font-size: 24px; }
+    .st-row { grid-template-columns: 92px 1fr 48px; }
+}

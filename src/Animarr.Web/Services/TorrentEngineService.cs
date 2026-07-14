@@ -296,13 +296,21 @@ public class TorrentEngineService : BackgroundService
 
     private void SubscribeEvents(TorrentManager mgr, string infoHash)
     {
-        var sem = _torrentLocks.GetOrAdd(infoHash, _ => new SemaphoreSlim(1, 1));
+        // Ensure the lock exists up front, but DON'T capture it — resolve it
+        // inside the callback instead. A state-change event can fire after
+        // RemoveAsync has removed+disposed this torrent's semaphore (C-1); a
+        // captured reference would then WaitAsync on a disposed object and
+        // throw ObjectDisposedException on a background thread. Re-fetching by
+        // infoHash means a removed torrent simply drops the late event.
+        _torrentLocks.GetOrAdd(infoHash, _ => new SemaphoreSlim(1, 1));
         mgr.TorrentStateChanged += (_, e) =>
         {
             var oldState = e.OldState;
             Task.Run(async () =>
             {
-                await sem.WaitAsync();
+                if (!_torrentLocks.TryGetValue(infoHash, out var sem)) return;
+                try { await sem.WaitAsync(); }
+                catch (ObjectDisposedException) { return; } // removed mid-flight
                 try
                 {
                     // When a magnet torrent transitions from Metadata state, metadata has just arrived.
@@ -314,7 +322,7 @@ public class TorrentEngineService : BackgroundService
                 }
                 finally
                 {
-                    sem.Release();
+                    try { sem.Release(); } catch (ObjectDisposedException) { /* removed mid-flight */ }
                 }
             });
         };
@@ -346,6 +354,23 @@ public class TorrentEngineService : BackgroundService
                 record.CompletedAt = DateTime.UtcNow;
                 record.State = TorrentRecordState.Seeding;
                 await ctx.SaveChangesAsync();
+
+                // A finished download is the precise "files are fully on disk" signal
+                // (unlike a FileSystemWatcher, which fires mid-download). New episodes
+                // may have landed in an already-scanned title, which the segment batch
+                // pass skips for 30 days (LastSegmentScanAt). Clear that gate so the
+                // background pass revisits the title and fingerprints the new files —
+                // covered-skip keeps it cheap (only new/uncovered episodes run).
+                if (record.FolderWatcherId is Guid fwId)
+                {
+                    var cleared = await ctx.MediaItems
+                        .Where(m => m.FolderId == fwId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(m => m.LastSegmentScanAt,   (DateTime?)null)
+                            .SetProperty(m => m.LastTrickplayScanAt, (DateTime?)null));
+                    if (cleared > 0)
+                        _logger.LogInformation("[Segments] torrent {Hash} done → cleared segment/trickplay scan gates for its title", infoHash);
+                }
             }
 
             // Stop seeding check

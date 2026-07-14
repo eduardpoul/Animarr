@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Animarr TV — lightweight 10-foot UI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesque:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@700;900&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg-0: #0a0807; --bg-1: #100d0b;
+    --surface: #15110e; --surface-2: #1c1814; --surface-3: #25201b;
+    --border: rgba(255, 240, 220, 0.08);
+    --border-strong: rgba(255, 240, 220, 0.16);
+    --text: #f4eee6; --text-dim: #b3aaa0; --text-faint: #6b635b;
+    --accent: oklch(0.66 0.20 25);
+    --accent-hi: oklch(0.76 0.21 25);
+    --accent-soft: oklch(0.66 0.20 25 / 0.18);
+    --accent-line: oklch(0.66 0.20 25 / 0.45);
+    --font-ui: 'Hanken Grotesque', system-ui, sans-serif;
+    --font-display: 'Hanken Grotesque', system-ui, sans-serif;
+    --font-cjk: 'Noto Serif SC', serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  body {
+    color: var(--text); font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* TV stage — fixed 1920×1080 canvas, scaled to fit the viewport, letterboxed on black */
+  #fit { position: fixed; inset: 0; background: #000; }
+  #stage {
+    position: absolute; width: 1920px; height: 1080px;
+    transform-origin: top left; background: var(--bg-0); overflow: hidden;
+  }
+
+  button { font-family: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+
+  /* Focus ring — TV first. Every focusable is .tvf; the focused one lights up. */
+  .tvf { transition: transform .16s cubic-bezier(.3,.7,.4,1), box-shadow .16s, background .16s; outline: none; }
+  .tvf[data-f="1"] {
+    box-shadow: 0 0 0 4px var(--accent-hi), 0 18px 50px -10px rgba(0,0,0,.7);
+    transform: scale(1.045); z-index: 5; position: relative;
+  }
+  /* Flat focus — for cards inside overflow:hidden grids, where a scaled outer
+     ring would be clipped. Inset ring can't be clipped, no scale. */
+  .tvf-flat { transition: box-shadow .16s, background .16s; outline: none; }
+  .tvf-flat[data-f="1"] {
+    box-shadow: inset 0 0 0 3px var(--accent-hi), 0 10px 30px -10px rgba(0,0,0,.6);
+    z-index: 5; position: relative;
+  }
+
+  .grain {
+    position: absolute; inset: 0; pointer-events: none; z-index: 60;
+    opacity: 0.05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+</head>
+<body>
+
+<div id="fit">
+  <div id="stage">
+    <div id="root"></div>
+    <div class="grain"></div>
+  </div>
+</div>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" rx="22" fill="#15110e"/>
+    <rect x="48" y="78" width="104" height="64" rx="10" fill="#e85a3a"/>
+    <rect x="78" y="142" width="44" height="8" rx="4" fill="#e85a3a"/>
+    <text x="100" y="122" text-anchor="middle" font-family="Hanken Grotesque, sans-serif" font-weight="800" font-size="40" fill="#fff">TV</text>
+  </svg>
+</template>
+
+<script>
+  // Fit the 1920×1080 stage into the viewport, letterboxed.
+  (function () {
+    var stage = document.getElementById('stage');
+    function fit() {
+      var vw = window.innerWidth, vh = window.innerHeight;
+      if (!vw || !vh) { requestAnimationFrame(fit); return; } // layout not ready — retry
+      var s = Math.min(vw / 1920, vh / 1080);
+      stage.style.transform = 'scale(' + s + ')';
+      stage.style.left = ((vw - 1920 * s) / 2) + 'px';
+      stage.style.top = ((vh - 1080 * s) / 2) + 'px';
+    }
+    window.addEventListener('resize', fit);
+    window.addEventListener('load', fit);
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(fit).observe(document.documentElement);
+    }
+    requestAnimationFrame(fit);
+    fit();
+  })();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="data-v4.jsx"></script>
+<script type="text/babel" src="tv-app.jsx"></script>
+
+</body>
+</html>

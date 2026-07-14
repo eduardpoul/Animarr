@@ -42,6 +42,8 @@ public sealed record MediaItemDto
     public string?  Description    { get; init; }
     public string?  Tagline        { get; init; }
     public string[] Genres         { get; init; } = Array.Empty<string>();
+    /// <summary>Genres localized to the metadata language, for display. Empty → fall back to <see cref="Genres"/> (English).</summary>
+    public string[] GenresLocalized { get; init; } = Array.Empty<string>();
     public string[] Tags           { get; init; } = Array.Empty<string>();
     public double?  Rating         { get; init; }
     public int?     RatingCount    { get; init; }
@@ -92,6 +94,14 @@ public sealed record MediaItemDto
     /// IUserContext so each user sees their own ★ state. Anonymous requests
     /// always see false.</summary>
     public bool IsFavorite { get; init; }
+
+    /// <summary>Episode numbers MAL flags as filler (Jikan), in the MAL
+    /// entry's own numbering — match display episodes via the file's
+    /// AbsoluteEpisode first, then the season-1 episode number.</summary>
+    public int[] FillerEpisodes { get; init; } = Array.Empty<int>();
+    /// <summary>Episode numbers MAL flags as recap — same numbering rules as
+    /// <see cref="FillerEpisodes"/>.</summary>
+    public int[] RecapEpisodes { get; init; } = Array.Empty<int>();
 }
 
 public sealed record SeasonMetaDto(

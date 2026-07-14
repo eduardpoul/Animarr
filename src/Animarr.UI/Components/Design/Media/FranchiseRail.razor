@@ -1,0 +1,199 @@
+@*
+    Franchise watch-order rail (MediaDetail). Cards come pre-sorted in release
+    order; library members are clickable posters with a watched tick, the
+    current title gets an accent outline + "вы здесь", missing members render
+    dashed with an AniList cover and a Want button (watchlist by AniList id).
+    Spec: design feat-detail.jsx (FranchiseRail/FranchiseNode).
+*@
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@if (Franchise is { Cards.Count: > 1 } fr)
+{
+    <section class="frail">
+        <div class="frail__head">
+            <div>
+                <div class="frail__overline">@L["franchise.overline"]</div>
+                <h2 class="frail__title">@fr.Title</h2>
+            </div>
+            <span class="frail__progress">@L.Get("franchise.progress", fr.WatchedCount, fr.Total)</span>
+        </div>
+        <div class="frail__viewport">
+        @if (_canLeft)
+        {
+            <button type="button" class="frail__nav frail__nav--l tv-focus" aria-label="‹"
+                    @onclick="@(() => ScrollRailAsync(-1))">‹</button>
+        }
+        @if (_canRight)
+        {
+            <button type="button" class="frail__nav frail__nav--r tv-focus" aria-label="›"
+                    @onclick="@(() => ScrollRailAsync(1))">›</button>
+        }
+        <div class="frail__row" @ref="_rowRef">
+            @for (var i = 0; i < fr.Cards.Count; i++)
+            {
+                var card = fr.Cards[i];
+                var order = i + 1;
+                <div class="frail__cell">
+                    <div class="@($"frail__art-wrap {(card.IsCurrent ? "is-current" : "")}")">
+                        <span class="frail__order">@order</span>
+                        @if (card.InLibrary && card.MediaItemId is Guid mid)
+                        {
+                            <a class="frail__poster tv-focus" href="/catalog/@mid" title="@card.Title">
+                                @if (!string.IsNullOrEmpty(card.CoverUrl))
+                                {
+                                    <img loading="lazy" src="@card.CoverUrl" alt="@card.Title" class="frail__img" />
+                                }
+                                else
+                                {
+                                    <div class="frail__ph"><DIcon Name="video" Size="28" /></div>
+                                }
+                                @if (card.Watched)
+                                {
+                                    <span class="frail__watched" title="@L["home.continue_watching"]">✓</span>
+                                }
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="frail__ext" title="@card.Title">
+                                @if (!string.IsNullOrEmpty(card.CoverUrl))
+                                {
+                                    <img loading="lazy" src="@card.CoverUrl" alt="@card.Title" class="frail__img frail__img--dim" />
+                                }
+                                else
+                                {
+                                    <div class="frail__ph"><DIcon Name="video" Size="28" /></div>
+                                }
+                                <span class="frail__ext-badge">@L["recs.not_in_library"]</span>
+                                <button type="button"
+                                        class="@($"frail__want tv-focus {(IsWanted(card) ? "is-on" : "")}")"
+                                        @onclick="@(() => WantAsync(card))">
+                                    @(IsWanted(card) ? L["recs.in_list"] : L["recs.want"])
+                                </button>
+                            </div>
+                        }
+                        @if (card.IsCurrent)
+                        {
+                            <span class="frail__here">@L["franchise.you_are_here"]</span>
+                        }
+                    </div>
+                    <div class="frail__name">@card.Title</div>
+                    <div class="frail__meta">
+                        @if (card.Year is int y) { <span>@y</span> <span class="frail__dot">·</span> }
+                        <span>@FormatLabel(card.Format)</span>
+                        @if (card.SpanCount > 1) { <span class="frail__dot">·</span> <span>S1–S@(card.SpanCount)</span> }
+                        else if (card.Episodes is > 1) { <span class="frail__dot">·</span> <span>@card.Episodes EP</span> }
+                    </div>
+                    @if (RelationLabel(card.Relation) is string rel)
+                    {
+                        <span class="frail__rel">@rel</span>
+                    }
+                </div>
+            }
+        </div>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public FranchiseDto? Franchise { get; set; }
+
+    // Keyed by source so an AniList id and a TMDB id can't collide: "t123" /
+    // "a123". A card is either a TMDB-collection film (TmdbId set) or an
+    // AniList node.
+    private readonly HashSet<string> _wanted = new();
+    private static string WantKey(FranchiseCardDto c) => c.TmdbId is int t ? $"t{t}" : $"a{c.AniListId}";
+    private bool IsWanted(FranchiseCardDto c) => _wanted.Contains(WantKey(c));
+
+    // Drag-to-scroll + ‹ › paging, shared module with the other rails. The
+    // rail renders lazily (Franchise arrives async), so init keys off the
+    // first render that actually has cards, not firstRender.
+    private ElementReference _rowRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<FranchiseRail>? _selfRef;
+    private bool _canLeft, _canRight, _railInit;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_railInit || Franchise is not { Cards.Count: > 1 }) return;
+        _railInit = true;
+        try
+        {
+            _js = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Design/Media/RecRail.razor.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("init", _rowRef, _selfRef);
+        }
+        catch { /* drag/arrows are enhancement — wheel scroll still works */ }
+    }
+
+    [JSInvokable]
+    public void OnRailScrollState(bool canLeft, bool canRight)
+    {
+        if (_canLeft == canLeft && _canRight == canRight) return;
+        _canLeft = canLeft;
+        _canRight = canRight;
+        StateHasChanged();
+    }
+
+    private async Task ScrollRailAsync(int dir)
+    {
+        if (_js is null) return;
+        try { await _js.InvokeVoidAsync("scrollRail", _rowRef, dir); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_js is not null)
+            {
+                await _js.InvokeVoidAsync("destroy", _rowRef);
+                await _js.DisposeAsync();
+            }
+        }
+        catch { /* circuit teardown */ }
+        _selfRef?.Dispose();
+    }
+
+    private async Task WantAsync(FranchiseCardDto card)
+    {
+        var key = WantKey(card);
+        if (_wanted.Contains(key)) return;
+        _wanted.Add(key);
+        try
+        {
+            // TMDB-collection films go on the watchlist by TmdbId; AniList nodes
+            // by AniListId (they carry no TMDB id).
+            var req = card.TmdbId is int tid
+                ? new WatchlistAddRequest(null, tid, card.Title, card.Year, card.CoverUrl, "movie")
+                : new WatchlistAddRequest(null, null, card.Title, card.Year, card.CoverUrl,
+                    card.Format == "MOVIE" ? "movie" : "tv", AniListId: card.AniListId);
+            await Api.AddWatchlistAsync(req);
+        }
+        catch { _wanted.Remove(key); }
+        StateHasChanged();
+    }
+
+    private static string FormatLabel(string? format) => format?.ToUpperInvariant() switch
+    {
+        "MOVIE"    => "Movie",
+        "OVA"      => "OVA",
+        "ONA"      => "ONA",
+        "SPECIAL"  => "Special",
+        "TV_SHORT" => "TV",
+        _          => "TV",
+    };
+
+    private string? RelationLabel(string? relation) => relation?.ToUpperInvariant() switch
+    {
+        "SIDE_STORY"  => L["franchise.rel_side_story"],
+        "SPIN_OFF"    => L["franchise.rel_spin_off"],
+        "ALTERNATIVE" => L["franchise.rel_alternative"],
+        "SUMMARY"     => L["franchise.rel_summary"],
+        _             => null,
+    };
+}

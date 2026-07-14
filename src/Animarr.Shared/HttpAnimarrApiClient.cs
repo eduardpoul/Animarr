@@ -100,6 +100,72 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<MediaFileDto[]>(ApiRoutes.MediaFilesFor(mediaItemId), JsonOpts, ct)
             ?? Array.Empty<MediaFileDto>();
 
+    public async Task<EpisodeMetaDto[]> GetEpisodeMetadataAsync(Guid mediaItemId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<EpisodeMetaDto[]>(ApiRoutes.MediaEpisodesFor(mediaItemId), JsonOpts, ct)
+            ?? Array.Empty<EpisodeMetaDto>();
+
+    public Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default)
+        => GetOrNullAsync<EpisodeSegmentsDto>(
+            ApiRoutes.MediaSegmentsFor(mediaItemId) + $"?season={season}&episode={episode}", ct);
+
+    public Task<TrickplayDto?> GetTrickplayAsync(Guid mediaItemId, int? season, int? episode, CancellationToken ct = default)
+    {
+        var url = ApiRoutes.MediaTrickplayFor(mediaItemId);
+        if (episode is int e) url += $"?season={season ?? 1}&episode={e}";
+        return GetOrNullAsync<TrickplayDto>(url, ct);
+    }
+
+    public async Task<RecCardDto[]> GetSimilarAsync(Guid mediaItemId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<RecCardDto[]>(ApiRoutes.MediaSimilarFor(mediaItemId), JsonOpts, ct)
+            ?? Array.Empty<RecCardDto>();
+
+    public async Task<RecCardDto[]> GetForYouAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<RecCardDto[]>(ApiRoutes.MeForYou, JsonOpts, ct)
+            ?? Array.Empty<RecCardDto>();
+
+    public async Task DismissRecAsync(Guid? mediaItemId, int? tmdbId, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeRecsDismiss,
+            new RecDismissRequest(mediaItemId, tmdbId), JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<WatchlistItemDto[]> GetWatchlistAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<WatchlistItemDto[]>(ApiRoutes.MeWatchlist, JsonOpts, ct)
+            ?? Array.Empty<WatchlistItemDto>();
+
+    public async Task<CalendarEventDto[]> GetCalendarAsync(int back = 14, int ahead = 60, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<CalendarEventDto[]>($"{ApiRoutes.Calendar}?back={back}&ahead={ahead}", JsonOpts, ct)
+            ?? Array.Empty<CalendarEventDto>();
+
+    public Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default)
+        => GetOrNullAsync<FranchiseDto>(ApiRoutes.MediaFranchiseFor(mediaItemId), ct);
+
+    public Task<StatsDto?> GetStatsAsync(CancellationToken ct = default)
+        => GetOrNullAsync<StatsDto>(ApiRoutes.MeStats, ct);
+
+    public async Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MeWatchlist, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<WatchlistItemDto>(JsonOpts, ct))!;
+    }
+
+    public async Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.MeWatchlistItem(watchlistItemId), ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default)
+        => GetOrNullAsync<SegmentScanStatusDto>(ApiRoutes.SegmentsStatus, ct);
+
+    public async Task RescanSegmentsAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.SegmentsRescan, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public async Task SetEpisodeMappingAsync(Guid mediaItemId, EpisodeMappingRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PutAsJsonAsync(ApiRoutes.MediaFileMappingFor(mediaItemId), request, JsonOpts, ct);
@@ -315,6 +381,14 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
             ?? new WatchStateDto();
     }
 
+    public async Task<WatchStateDto[]> MarkBulkWatchedAsync(MarkBulkWatchedRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync(ApiRoutes.WatchStateMarkBulk, request, JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<WatchStateDto[]>(JsonOpts, ct)
+            ?? Array.Empty<WatchStateDto>();
+    }
+
     public async Task ResetProgressAsync(ResetProgressRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.WatchStateReset, request, JsonOpts, ct);
@@ -442,6 +516,18 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         using var resp = await _http.PutAsJsonAsync(
             ApiRoutes.AppConfigKey(key),
             new AppConfigEntryDto(key, value),
+            JsonOpts, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public Task<MetadataLanguageStatusDto?> GetMetadataLanguageStatusAsync(CancellationToken ct = default)
+        => GetOrNullAsync<MetadataLanguageStatusDto>(ApiRoutes.MetadataLanguage, ct);
+
+    public async Task SetMetadataLanguageAsync(string language, CancellationToken ct = default)
+    {
+        using var resp = await _http.PutAsJsonAsync(
+            ApiRoutes.MetadataLanguage,
+            new MetadataLanguageRequest(language),
             JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
     }
@@ -759,6 +845,11 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default)
         => (await _http.GetFromJsonAsync<ContinueWatchItemDto[]>(
                 $"{ApiRoutes.MeContinue}?take={take}", JsonOpts, ct))
+            ?? Array.Empty<ContinueWatchItemDto>();
+
+    public async Task<ContinueWatchItemDto[]> GetNextUpAsync(int take = 12, CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<ContinueWatchItemDto[]>(
+                $"{ApiRoutes.MeNextUp}?take={take}", JsonOpts, ct))
             ?? Array.Empty<ContinueWatchItemDto>();
 
     // ─── User + Role admin ──────────────────────────────────────────────

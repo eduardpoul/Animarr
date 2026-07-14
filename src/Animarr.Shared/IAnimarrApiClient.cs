@@ -34,6 +34,36 @@ public interface IAnimarrApiClient
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Per-episode TMDB metadata (title/synopsis/air date/rating/runtime)
+    /// for the detailed-list view. Lazy-fetched + cached server-side; empty for
+    /// movies or titles without a TMDB id.</summary>
+    Task<EpisodeMetaDto[]> GetEpisodeMetadataAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Skip-intro/credits segment times for one episode (lazy-detected
+    /// via AniSkip on a miss). Null when the item is unknown or has none.</summary>
+    Task<EpisodeSegmentsDto?> GetEpisodeSegmentsAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default);
+    /// <summary>Seek-preview sprite manifest for one episode (pass null/null for
+    /// movies). Null when the background pass hasn't generated one yet.</summary>
+    Task<TrickplayDto?> GetTrickplayAsync(Guid mediaItemId, int? season, int? episode, CancellationToken ct = default);
+    /// <summary>"More like this" rail for a title — library matches first,
+    /// TMDB backfill per the user's RecsScope preference.</summary>
+    Task<RecCardDto[]> GetSimilarAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>"For you" Home rail for the current user.</summary>
+    Task<RecCardDto[]> GetForYouAsync(CancellationToken ct = default);
+    /// <summary>"Don't suggest this again" — one of the ids set.</summary>
+    Task DismissRecAsync(Guid? mediaItemId, int? tmdbId, CancellationToken ct = default);
+    Task<WatchlistItemDto[]> GetWatchlistAsync(CancellationToken ct = default);
+    /// <summary>Airing-calendar events for [now-back, now+ahead] days.</summary>
+    Task<CalendarEventDto[]> GetCalendarAsync(int back = 14, int ahead = 60, CancellationToken ct = default);
+    /// <summary>Franchise watch-order rail; null until the AniList walk ran.</summary>
+    Task<FranchiseDto?> GetFranchiseAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>Personal watch statistics dashboard for the signed-in user.</summary>
+    Task<StatsDto?> GetStatsAsync(CancellationToken ct = default);
+    Task<WatchlistItemDto> AddWatchlistAsync(WatchlistAddRequest request, CancellationToken ct = default);
+    Task RemoveWatchlistAsync(Guid watchlistItemId, CancellationToken ct = default);
+    /// <summary>Skip-intro/credits background-scan progress for the Settings indicator.</summary>
+    Task<SegmentScanStatusDto?> GetSegmentScanStatusAsync(CancellationToken ct = default);
+    /// <summary>Reset scan flags so the background pass reprocesses all titles.</summary>
+    Task RescanSegmentsAsync(CancellationToken ct = default);
     /// <summary>Tier 2 — set a manual (season, episode) override for one file of
     /// this item. Null season/episode keeps the deterministic value for that
     /// field. The override survives re-scans and AI re-resolution.</summary>
@@ -92,6 +122,9 @@ public interface IAnimarrApiClient
     Task<WatchStateDto>   RecordProgressAsync(RecordProgressRequest request, CancellationToken ct = default);
     Task<WatchStateDto>   ToggleWatchedAsync(ToggleWatchedRequest request, CancellationToken ct = default);
     Task                  ResetProgressAsync(ResetProgressRequest request, CancellationToken ct = default);
+    /// <summary>Bulk (un)mark a set of (season, episode) rows — the "mark
+    /// earlier episodes too?" popup. Returns the affected rows.</summary>
+    Task<WatchStateDto[]> MarkBulkWatchedAsync(MarkBulkWatchedRequest request, CancellationToken ct = default);
 
     // ─── Identification queue ────────────────────────────────────────────
     Task<IdentificationQueueEntryDto[]> GetIdentificationQueueAsync(CancellationToken ct = default);
@@ -117,6 +150,10 @@ public interface IAnimarrApiClient
     Task<AppConfigEntryDto[]> GetAppConfigAsync(CancellationToken ct = default);
     Task<AppConfigEntryDto?>  GetAppConfigValueAsync(string key, CancellationToken ct = default);
     Task                      SetAppConfigValueAsync(string key, string? value, CancellationToken ct = default);
+    /// <summary>Current metadata language + progress of the library re-localisation pass.</summary>
+    Task<MetadataLanguageStatusDto?> GetMetadataLanguageStatusAsync(CancellationToken ct = default);
+    /// <summary>Persist the metadata language and start re-fetching texts/posters for the library.</summary>
+    Task                      SetMetadataLanguageAsync(string language, CancellationToken ct = default);
     Task<HardwareReportDto>   GetHardwareReportAsync(bool rescan, CancellationToken ct = default);
 
     // ─── Search ──────────────────────────────────────────────────────────
@@ -208,6 +245,9 @@ public interface IAnimarrApiClient
     Task                    RemoveFavoriteAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<Guid[]>            GetFavoriteIdsAsync(CancellationToken ct = default);
     Task<ContinueWatchItemDto[]> GetContinueWatchingAsync(int take = 8, CancellationToken ct = default);
+    /// <summary>"Next Up" feed — the next episode to watch per engaged series
+    /// (next-in-line or a freshly-landed episode flagged <c>IsNew</c>).</summary>
+    Task<ContinueWatchItemDto[]> GetNextUpAsync(int take = 12, CancellationToken ct = default);
 
     // ─── User + Role admin (v4, manageUsers permission required) ────────
     Task<UserDto[]>         GetUsersAsync(CancellationToken ct = default);

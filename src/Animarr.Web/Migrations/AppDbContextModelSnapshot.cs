@@ -110,6 +110,92 @@ namespace Animarr.Web.Migrations
                     b.ToTable("EpisodeFileMappings");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeMetadata", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AirDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("FetchedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Overview")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("Rating")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("RuntimeMin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "Season", "Episode")
+                        .IsUnique();
+
+                    b.ToTable("EpisodeMetadata");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeSegment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DetectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("EndSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("StartSec")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "Season", "Episode", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("EpisodeSegments");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.FolderWatcher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -170,6 +256,81 @@ namespace Animarr.Web.Migrations
                     b.ToTable("FolderWatchers");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.FranchiseEdge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FromAniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RelationType")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ToAniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ToAniListId");
+
+                    b.HasIndex("FromAniListId", "ToAniListId", "RelationType")
+                        .IsUnique();
+
+                    b.ToTable("FranchiseEdges");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.FranchiseNode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CoverUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Episodes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("FetchedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Format")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("MalId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AniListId")
+                        .IsUnique();
+
+                    b.HasIndex("MalId");
+
+                    b.ToTable("FranchiseNodes");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.IdentificationQueue", b =>
                 {
                     b.Property<Guid>("Id")
@@ -213,6 +374,12 @@ namespace Animarr.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AiringStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AniListId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CandidatesJson")
                         .HasColumnType("TEXT");
 
@@ -234,6 +401,9 @@ namespace Animarr.Web.Migrations
                     b.Property<int?>("EpisodeCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("EpisodeFlagsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FanartPath")
                         .HasColumnType("TEXT");
 
@@ -241,6 +411,9 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("GenresJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GenresLocalizedJson")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("Hue")
@@ -258,7 +431,28 @@ namespace Animarr.Web.Migrations
                     b.Property<string>("Language")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastAiredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastAiredEpisode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastAiringCheckAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastFillerCheckAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastMetadataRefreshedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastRelationsCheckAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSegmentScanAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastTrickplayScanAt")
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("LlmConfidence")
@@ -277,6 +471,12 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("MediaType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("NextAirAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NextEpisodeNumber")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("OriginalTitle")
@@ -341,6 +541,8 @@ namespace Animarr.Web.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AniListId");
 
                     b.HasIndex("FolderId")
                         .IsUnique();
@@ -421,6 +623,35 @@ namespace Animarr.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("MediaTags");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.RecDismissal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId");
+
+                    b.HasIndex("UserId", "TmdbId");
+
+                    b.ToTable("RecDismissals");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
@@ -658,6 +889,66 @@ namespace Animarr.Web.Migrations
                     b.ToTable("TorrentRecords");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Cols")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("DurationSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("GeneratedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IntervalSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SourceWriteTimeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpritePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TileHeight")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TileWidth")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "FilePath")
+                        .IsUnique();
+
+                    b.HasIndex("MediaItemId", "Season", "Episode");
+
+                    b.ToTable("TrickplayAssets");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -761,8 +1052,21 @@ namespace Animarr.Web.Migrations
                     b.Property<int>("DefaultVolume")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("EpisodeListView")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FillerOverridesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HeroPagerStyle")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("HideFillers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HomeSectionsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Language")
@@ -772,6 +1076,10 @@ namespace Animarr.Web.Migrations
 
                     b.Property<bool>("NormalizeVolume")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecsScope")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("SubtitlePreferredLanguage")
                         .IsRequired()
@@ -800,6 +1108,45 @@ namespace Animarr.Web.Migrations
                     b.HasKey("UserId");
 
                     b.ToTable("UserPreferences");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SecondsWatched")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "Date");
+
+                    b.HasIndex("UserId", "MediaItemId", "Season", "Episode", "Date")
+                        .IsUnique();
+
+                    b.ToTable("WatchEvents");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.WatchState", b =>
@@ -858,7 +1205,77 @@ namespace Animarr.Web.Migrations
                     b.ToTable("WatchStates");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchlistItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AniListId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MediaType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PosterUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId");
+
+                    b.HasIndex("UserId", "TmdbId");
+
+                    b.ToTable("WatchlistItems");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeMetadata", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeSegment", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
                         .WithMany()
@@ -929,6 +1346,24 @@ namespace Animarr.Web.Migrations
                     b.Navigation("MediaTag");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.RecDismissal", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.RenamePattern", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.FolderWatcher", "Folder")
@@ -958,6 +1393,17 @@ namespace Animarr.Web.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("FolderWatcher");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.User", b =>
@@ -1001,6 +1447,24 @@ namespace Animarr.Web.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchEvent", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.WatchState", b =>
                 {
                     b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
@@ -1013,6 +1477,24 @@ namespace Animarr.Web.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.WatchlistItem", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("MediaItem");
 
