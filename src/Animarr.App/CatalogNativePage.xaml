@@ -5,20 +5,14 @@
              x:Class="Animarr.App.CatalogNativePage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <!-- POC: native MAUI catalog matching the Blazor web — cinematic hero +
-         category chips (CollectionView.Header, scrolls with the grid) + an
-         8-column 2:3 poster grid. RecyclerView gives native recycling + D-pad
-         focus (no tv-nav.js). -->
-    <CollectionView x:Name="PostersView" SelectionMode="Single">
+    <Grid>
+        <ScrollView>
+            <VerticalStackLayout Spacing="6">
 
-        <CollectionView.Header>
-            <Grid RowDefinitions="Auto,Auto">
-
-                <!-- ── HERO ───────────────────────────────────────────── -->
-                <Grid Grid.Row="0" HeightRequest="320">
+                <!-- ── HERO ─────────────────────────────────────────────── -->
+                <Grid HeightRequest="360">
                     <Image Source="{Binding Hero.Backdrop, Source={x:Reference Root}}"
                            Aspect="AspectFill" />
-                    <!-- left→right scrim for text legibility -->
                     <BoxView InputTransparent="True">
                         <BoxView.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
@@ -27,143 +21,139 @@
                             </LinearGradientBrush>
                         </BoxView.Background>
                     </BoxView>
-                    <!-- bottom fade into the page -->
                     <BoxView InputTransparent="True">
                         <BoxView.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                <GradientStop Color="Transparent" Offset="0.45" />
+                                <GradientStop Color="Transparent" Offset="0.4" />
                                 <GradientStop Color="#FF0a0c10" Offset="1" />
                             </LinearGradientBrush>
                         </BoxView.Background>
                     </BoxView>
                     <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
-                                         Padding="40,0,0,34" Spacing="8"
-                                         MaximumWidthRequest="780">
+                                         Padding="56,0,0,30" Spacing="8" MaximumWidthRequest="820">
                         <Label Text="{Binding Hero.Eyebrow, Source={x:Reference Root}}"
                                TextColor="#e8a33d" FontFamily="GeistMono" FontSize="11"
                                CharacterSpacing="2.5" />
                         <Label Text="{Binding Hero.Title, Source={x:Reference Root}}"
-                               TextColor="White" FontFamily="ArchivoBlack" FontSize="40"
+                               TextColor="White" FontFamily="ArchivoBlack" FontSize="42"
                                MaxLines="2" LineBreakMode="TailTruncation" />
                         <Label Text="{Binding Hero.Meta, Source={x:Reference Root}}"
                                TextColor="#cfd3da" FontFamily="GeistMono" FontSize="13"
                                CharacterSpacing="0.5" Margin="0,2,0,0" />
                         <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
-                                BackgroundColor="#e8772e" Padding="24,11"
-                                HorizontalOptions="Start" Margin="0,10,0,0">
+                                BackgroundColor="#e8772e" Padding="26,12"
+                                HorizontalOptions="Start" Margin="0,12,0,0">
                             <Border.Behaviors>
                                 <local:TvFocusBehavior Radius="8" />
                             </Border.Behaviors>
                             <Border.GestureRecognizers>
                                 <TapGestureRecognizer Command="{Binding HeroPlayCommand, Source={x:Reference Root}}" />
                             </Border.GestureRecognizers>
-                            <Label Text="▶   Play" TextColor="White"
-                                   FontFamily="Geist" FontSize="15" />
+                            <Label Text="▶   Смотреть" TextColor="White" FontFamily="Geist" FontSize="15" />
                         </Border>
                     </VerticalStackLayout>
-
-                    <!-- top-right: search + settings → existing Blazor screens -->
-                    <HorizontalStackLayout HorizontalOptions="End" VerticalOptions="Start"
-                                           Margin="0,18,22,0" Spacing="12">
-                        <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
-                                StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior Radius="10" />
-                            </Border.Behaviors>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding SearchCommand, Source={x:Reference Root}}" />
-                            </Border.GestureRecognizers>
-                            <Label Text="🔍" FontSize="17" HorizontalOptions="Center"
-                                   VerticalOptions="Center" />
-                        </Border>
-                        <Border WidthRequest="44" HeightRequest="44" StrokeThickness="0"
-                                StrokeShape="RoundRectangle 10" BackgroundColor="#99000000">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior Radius="10" />
-                            </Border.Behaviors>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Command="{Binding SettingsCommand, Source={x:Reference Root}}" />
-                            </Border.GestureRecognizers>
-                            <Label Text="⚙" FontSize="20" TextColor="White"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
-                        </Border>
-                    </HorizontalStackLayout>
                 </Grid>
 
-                <!-- ── CATEGORY CHIPS ──────────────────────────────────── -->
-                <ScrollView Grid.Row="1" Orientation="Horizontal" Padding="20,14,20,18"
-                            HorizontalScrollBarVisibility="Never">
-                    <HorizontalStackLayout Spacing="10"
-                            BindableLayout.ItemsSource="{Binding Chips, Source={x:Reference Root}}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
-                                        Padding="15,7" BackgroundColor="{Binding Bg}">
-                                    <Border.Behaviors>
-                                        <local:TvFocusBehavior Radius="16" />
-                                    </Border.Behaviors>
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer
-                                            Command="{Binding ChipCommand, Source={x:Reference Root}}"
-                                            CommandParameter="{Binding Category}" />
-                                    </Border.GestureRecognizers>
-                                    <HorizontalStackLayout Spacing="7">
-                                        <Label Text="{Binding Label}" TextColor="{Binding Fg}"
-                                               FontFamily="Geist" FontSize="13" />
-                                        <Label Text="{Binding Count}" TextColor="{Binding CountFg}"
-                                               FontFamily="GeistMono" FontSize="11"
-                                               VerticalOptions="Center" />
-                                    </HorizontalStackLayout>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
-                </ScrollView>
-            </Grid>
-        </CollectionView.Header>
+                <!-- ── RAILS ────────────────────────────────────────────── -->
+                <VerticalStackLayout Spacing="26" Padding="0,10,0,60"
+                        BindableLayout.ItemsSource="{Binding Rails, Source={x:Reference Root}}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate>
+                            <VerticalStackLayout Spacing="12">
+                                <Label Text="{Binding Title}" TextColor="#e8eaed"
+                                       FontFamily="Geist" FontSize="19" Margin="56,0,0,0" />
+                                <CollectionView ItemsSource="{Binding Items}"
+                                                HeightRequest="272">
+                                    <CollectionView.ItemsLayout>
+                                        <LinearItemsLayout Orientation="Horizontal"
+                                                           ItemSpacing="14" />
+                                    </CollectionView.ItemsLayout>
+                                    <CollectionView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                                                    BackgroundColor="#15171d" Margin="2" WidthRequest="164">
+                                                <Border.Behaviors>
+                                                    <local:TvFocusBehavior Radius="10" />
+                                                </Border.Behaviors>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer
+                                                        Command="{Binding OpenCommand, Source={x:Reference Root}}"
+                                                        CommandParameter="{Binding .}" />
+                                                </Border.GestureRecognizers>
+                                                <Grid RowDefinitions="246,Auto">
+                                                    <!-- 2:3 art -->
+                                                    <Grid Grid.Row="0">
+                                                        <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
+                                                        <BoxView InputTransparent="True">
+                                                            <BoxView.Background>
+                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                                    <GradientStop Color="Transparent" Offset="0.55" />
+                                                                    <GradientStop Color="#D90A0807" Offset="1.0" />
+                                                                </LinearGradientBrush>
+                                                            </BoxView.Background>
+                                                        </BoxView>
+                                                        <!-- type badge -->
+                                                        <Border InputTransparent="True" HorizontalOptions="Start"
+                                                                VerticalOptions="Start" Margin="8" Padding="6,2"
+                                                                IsVisible="{Binding HasType}"
+                                                                StrokeThickness="1" Stroke="#1FFFFFFF"
+                                                                StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
+                                                            <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
+                                                                   FontSize="8" TextColor="White" CharacterSpacing="1.4" />
+                                                        </Border>
+                                                        <!-- resume bar (continue rail) -->
+                                                        <ProgressBar Progress="{Binding Progress}"
+                                                                     IsVisible="{Binding HasProgress}"
+                                                                     ProgressColor="#e8772e"
+                                                                     VerticalOptions="End" Margin="0,0,0,0" />
+                                                    </Grid>
+                                                    <!-- title + meta -->
+                                                    <VerticalStackLayout Grid.Row="1" Spacing="1" Padding="9,7,9,9">
+                                                        <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
+                                                               FontSize="12" TextColor="White" MaxLines="2"
+                                                               LineBreakMode="TailTruncation" />
+                                                        <Label Text="{Binding Meta}" FontFamily="GeistMono"
+                                                               FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
+                                                    </VerticalStackLayout>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </CollectionView.ItemTemplate>
+                                </CollectionView>
+                            </VerticalStackLayout>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+        </ScrollView>
 
-        <CollectionView.ItemsLayout>
-            <GridItemsLayout Orientation="Vertical" Span="8"
-                             HorizontalItemSpacing="16" VerticalItemSpacing="20" />
-        </CollectionView.ItemsLayout>
+        <!-- ── TOP BAR (overlay) ────────────────────────────────────────── -->
+        <Grid VerticalOptions="Start" Padding="56,20,28,0" ColumnDefinitions="Auto,*,Auto,Auto"
+              ColumnSpacing="12" InputTransparent="False">
+            <Label Grid.Column="0" Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack"
+                   FontSize="22" CharacterSpacing="3" VerticalOptions="Center" />
 
-        <CollectionView.ItemTemplate>
-            <DataTemplate>
-                <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                        Padding="0" BackgroundColor="#15171d" Margin="2">
-                    <Grid HeightRequest="{Binding ArtHeight, Source={x:Reference Root}}">
-                        <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
-                        <BoxView Background="{Binding HueGlow}" InputTransparent="True" />
-                        <BoxView InputTransparent="True">
-                            <BoxView.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                    <GradientStop Color="Transparent" Offset="0.45" />
-                                    <GradientStop Color="#D90A0807" Offset="1.0" />
-                                </LinearGradientBrush>
-                            </BoxView.Background>
-                        </BoxView>
-                        <Label Text="{Binding Cjk}" InputTransparent="True"
-                               HorizontalOptions="End" VerticalOptions="Start"
-                               Margin="0,6,8,0" FontSize="22" TextColor="#30FFFFFF"
-                               MaxLines="1" LineBreakMode="TailTruncation" />
-                        <Border InputTransparent="True" HorizontalOptions="Start"
-                                VerticalOptions="Start" Margin="8" Padding="6,2"
-                                StrokeThickness="1" Stroke="#1FFFFFFF"
-                                StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
-                            <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
-                                   FontSize="8" TextColor="White" CharacterSpacing="1.4" />
-                        </Border>
-                        <VerticalStackLayout InputTransparent="True" VerticalOptions="End"
-                                             Spacing="2" Padding="10,8,10,10">
-                            <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
-                                   FontSize="12" TextColor="White" MaxLines="2"
-                                   LineBreakMode="TailTruncation" />
-                            <Label Text="{Binding Meta}" FontFamily="GeistMono"
-                                   FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
-                        </VerticalStackLayout>
-                    </Grid>
-                </Border>
-            </DataTemplate>
-        </CollectionView.ItemTemplate>
-    </CollectionView>
+            <Border Grid.Column="2" WidthRequest="46" HeightRequest="46" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 12" BackgroundColor="#B3151a21">
+                <Border.Behaviors>
+                    <local:TvFocusBehavior Radius="12" />
+                </Border.Behaviors>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding SearchCommand, Source={x:Reference Root}}" />
+                </Border.GestureRecognizers>
+                <Label Text="🔍" FontSize="18" HorizontalOptions="Center" VerticalOptions="Center" />
+            </Border>
+
+            <Border Grid.Column="3" WidthRequest="46" HeightRequest="46" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 23" BackgroundColor="#e8772e">
+                <Border.Behaviors>
+                    <local:TvFocusBehavior Radius="23" />
+                </Border.Behaviors>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding ProfileCommand, Source={x:Reference Root}}" />
+                </Border.GestureRecognizers>
+                <Label Text="👤" FontSize="18" HorizontalOptions="Center" VerticalOptions="Center" />
+            </Border>
+        </Grid>
+    </Grid>
 </ContentPage>

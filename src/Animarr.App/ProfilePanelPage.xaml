@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Animarr.App"
+             x:Class="Animarr.App.ProfilePanelPage"
+             x:Name="Root"
+             BackgroundColor="#0a0c10">
+    <ScrollView>
+        <VerticalStackLayout Padding="56,44,56,60" Spacing="36"
+                             MaximumWidthRequest="1100" HorizontalOptions="Center">
+            <Label Text="ПРОФИЛЬ" TextColor="#e8a33d" FontFamily="GeistMono"
+                   FontSize="12" CharacterSpacing="3" />
+
+            <!-- who's watching -->
+            <VerticalStackLayout Spacing="16">
+                <Label Text="Кто смотрит" TextColor="White" FontFamily="ArchivoBlack" FontSize="24" />
+                <FlexLayout x:Name="RosterHost" Wrap="Wrap" Direction="Row" />
+            </VerticalStackLayout>
+
+            <!-- interface language -->
+            <VerticalStackLayout Spacing="16">
+                <Label Text="Язык интерфейса" TextColor="White" FontFamily="ArchivoBlack" FontSize="24" />
+                <FlexLayout x:Name="LanguageHost" Wrap="Wrap" Direction="Row" />
+            </VerticalStackLayout>
+
+            <!-- server + logout -->
+            <VerticalStackLayout Spacing="16">
+                <Label Text="Сервер" TextColor="White" FontFamily="ArchivoBlack" FontSize="24" />
+                <HorizontalStackLayout Spacing="12">
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                            BackgroundColor="#151a21" Padding="22,13">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior Radius="10" />
+                        </Border.Behaviors>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding ChangeServerCommand, Source={x:Reference Root}}" />
+                        </Border.GestureRecognizers>
+                        <Label Text="Сменить сервер" TextColor="White" FontFamily="Geist" FontSize="15" />
+                    </Border>
+                    <Border StrokeThickness="1" Stroke="#3a2020" StrokeShape="RoundRectangle 10"
+                            BackgroundColor="#1a1315" Padding="22,13">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior Radius="10" />
+                        </Border.Behaviors>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding LogoutCommand, Source={x:Reference Root}}" />
+                        </Border.GestureRecognizers>
+                        <Label Text="Выйти" TextColor="#e0908f" FontFamily="Geist" FontSize="15" />
+                    </Border>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+
+            <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
+                   FontFamily="GeistMono" FontSize="12" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
