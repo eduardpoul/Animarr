@@ -2,15 +2,30 @@
 const { useState: u4S, useEffect: u4E, useMemo: u4M, useCallback: u4C, useRef: u4R } = React;
 
 const TWEAK_DEFAULTS_V4 = /*EDITMODE-BEGIN*/{
-  "accent": "crimson",
+  "accent": "amber",
   "showBackdrop": true,
   "backdropBlur": 14,
   "backdropBrightness": 38,
   "rotateSec": 18,
   "tvMode": false,
   "asUser": "u-admin",
-  "heroPager": "F"
+  "heroPager": "F",
+  "fontSet": "soft",
+  "badgeStyle": "chips",
+  "llmRecs": "on",
+  "recHistory": "rich"
 }/*EDITMODE-END*/;
+
+// Type personalities. "original" restores the old Archivo Black + Geist Mono
+// (blocky/digital) look; the rest are warmer, more editorial — and route the
+// label slot (--font-mono) onto a proportional sans so caption labels stop
+// reading like terminal text.
+const FONT_MAP_V4 = {
+  editorial: { ui: "'Hanken Grotesque', system-ui, sans-serif", display: "'Bricolage Grotesque', 'Hanken Grotesque', sans-serif", label: "'Hanken Grotesque', system-ui, sans-serif" },
+  soft:      { ui: "'Hanken Grotesque', system-ui, sans-serif", display: "'Hanken Grotesque', system-ui, sans-serif",             label: "'Hanken Grotesque', system-ui, sans-serif" },
+  clean:     { ui: "'Schibsted Grotesk', system-ui, sans-serif", display: "'Schibsted Grotesk', system-ui, sans-serif",          label: "'Schibsted Grotesk', system-ui, sans-serif" },
+  original:  { ui: "'Geist', system-ui, sans-serif",            display: "'Archivo Black', 'Geist', sans-serif",                label: "'Geist Mono', ui-monospace, monospace" },
+};
 
 const ACCENT_MAP_V4 = {
   crimson: { base: "oklch(0.66 0.20 25)",  hi: "oklch(0.74 0.21 25)",  line: "oklch(0.66 0.20 25 / 0.40)", soft: "oklch(0.66 0.20 25 / 0.16)" },
@@ -57,6 +72,15 @@ const AppV4 = () => {
     r.setProperty("--accent-soft", a.soft);
   }, [tweaks.accent]);
 
+  // Apply typography set
+  u4E(() => {
+    const f = FONT_MAP_V4[tweaks.fontSet] || FONT_MAP_V4.editorial;
+    const r = document.documentElement.style;
+    r.setProperty("--font-ui", f.ui);
+    r.setProperty("--font-display", f.display);
+    r.setProperty("--font-mono", f.label);
+  }, [tweaks.fontSet]);
+
   // TV mode: bumps min focus-target sizes globally
   u4E(() => {
     document.documentElement.classList.toggle("tv-mode", !!tweaks.tvMode);
@@ -66,9 +90,13 @@ const AppV4 = () => {
   // CatalogV3 can read it without an extra prop chain.
   u4E(() => { window.__heroPager = tweaks.heroPager || "F"; }, [tweaks.heroPager]);
 
+  // Feature flags (badge style A/B) — read at render by feature components.
+  u4E(() => { window.__feat = { badgeStyle: tweaks.badgeStyle || "chips", llm: tweaks.llmRecs || "on", history: tweaks.recHistory || "rich" }; }, [tweaks.badgeStyle, tweaks.llmRecs, tweaks.recHistory]);
+
   const handleOpen = (id) => { setOpenId(id); setRoute("media"); };
   const handleBack = () => { setOpenId(null); setRoute("catalog"); };
   const goRoute = (r) => { setOpenId(null); setRoute(r); };
+  window.__nav = goRoute;
 
   // ── WELCOME ──────────────────────────────────────────────────
   if (view === "welcome") {
@@ -102,9 +130,19 @@ const AppV4 = () => {
 
       <main style={{ position:"relative", zIndex: 2, paddingTop: 60, paddingBottom: 100 }}>
         {route === "media" && openId
-          ? <window.MediaDetailV3 id={openId} onBack={handleBack} setBdImage={setBdImage} />
+          ? <window.MediaDetailV3 id={openId} onBack={handleBack} setBdImage={setBdImage} onOpen={handleOpen} />
           : route === "catalog"
           ? <window.CatalogV3 onOpen={handleOpen} rotateSec={tweaks.rotateSec} setBdImage={setBdImage} />
+          : route === "player" && window.PlayerScreen
+          ? <window.PlayerScreen onClose={() => { const c = window.__playCtx; if (c && c.id) { setOpenId(c.id); setRoute("media"); } else setRoute("catalog"); }} />
+          : route === "stats" && window.StatsPage
+          ? <window.StatsPage onOpen={handleOpen} />
+          : route === "calendar" && window.CalendarPage
+          ? <window.CalendarPage onOpen={handleOpen} />
+          : route === "discover" && window.DiscoverPage
+          ? <window.DiscoverPage />
+          : route === "watchlist" && window.WatchlistPage
+          ? <window.WatchlistPage onOpen={handleOpen} />
           : route === "downloads"
           ? <window.DownloadsRoute />
           : route === "server" && window.can(user, "systemSettings")
@@ -141,6 +179,17 @@ const TweaksUIV4 = ({ tweaks, setTweak }) => {
         />
       </window.TweakSection>
       <window.TweakSection label="Display">
+        <window.TweakSelect
+          label="Typography"
+          value={tweaks.fontSet}
+          onChange={v => setTweak("fontSet", v)}
+          options={[
+            { value: "editorial", label: "Editorial · Bricolage" },
+            { value: "soft",      label: "Soft · Hanken"        },
+            { value: "clean",     label: "Clean · Schibsted"    },
+            { value: "original",  label: "Original (gamer)"     },
+          ]}
+        />
         <window.TweakToggle label="TV mode" value={tweaks.tvMode} onChange={v => setTweak("tvMode", v)} />
         <window.TweakSelect
           label="Accent"
@@ -154,6 +203,19 @@ const TweaksUIV4 = ({ tweaks, setTweak }) => {
             { value: "violet",  label: "Violet"  },
           ]}
         />
+      </window.TweakSection>
+      <window.TweakSection label="Функции">
+        <window.TweakSelect
+          label="Бейджи серий"
+          value={tweaks.badgeStyle}
+          onChange={v => setTweak("badgeStyle", v)}
+          options={[
+            { value: "chips", label: "Чипы (ярко)" },
+            { value: "meta",  label: "Тихо" },
+          ]}
+        />
+        <window.TweakSelect label="LLM-рекомендации" value={tweaks.llmRecs} onChange={v => setTweak("llmRecs", v)} options={[{ value: "on", label: "Включены" }, { value: "off", label: "Выкл (эвристика)" }]} />
+        <window.TweakSelect label="История просмотра" value={tweaks.recHistory} onChange={v => setTweak("recHistory", v)} options={[{ value: "rich", label: "Много (активный)" }, { value: "thin", label: "Мало (новый юзер)" }]} />
       </window.TweakSection>
       <window.TweakSection label="Backdrop">
         <window.TweakToggle label="Show on all pages" value={tweaks.showBackdrop} onChange={v => setTweak("showBackdrop", v)} />

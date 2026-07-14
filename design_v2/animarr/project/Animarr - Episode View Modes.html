@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="design_doc_mode" content="canvas" />
+<title>Animarr — Episode View Modes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg-0:#0a0a0c; --bg-1:#101013; --surface:#15151a; --surface-2:#1b1b21; --surface-3:#23232b;
+    --border:rgba(255,255,255,0.07); --border-strong:rgba(255,255,255,0.13);
+    --text:#ececef; --text-dim:#9a9aa3; --text-faint:#5d5d67;
+    /* warm orange accent — matches the live app */
+    --accent:oklch(0.71 0.16 52); --accent-hi:oklch(0.80 0.14 60);
+    --accent-soft:oklch(0.71 0.16 52 / 0.16); --accent-line:oklch(0.71 0.16 52 / 0.42);
+    --success:oklch(0.72 0.13 155); --success-soft:oklch(0.72 0.13 155 / 0.18);
+    --warn:oklch(0.78 0.12 75); --star:oklch(0.82 0.13 75);
+    --font-ui:'Inter',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono','SF Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-0);font-family:var(--font-ui);color:var(--text);-webkit-font-smoothing:antialiased;}
+
+  /* canvas frame wrappers */
+  .wrap{position:absolute;}
+  .cap{font-family:var(--font-mono);font-size:13px;letter-spacing:0.4px;color:var(--text-dim);margin-bottom:14px;display:flex;align-items:center;gap:10px;}
+  .cap b{color:var(--text);font-weight:700;}
+  .cap .tag{font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;padding:3px 8px;border-radius:5px;background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);}
+  .cap .tag.cur{background:rgba(255,255,255,0.05);color:var(--text-dim);border-color:var(--border);}
+
+  /* ── desktop frame ── */
+  .desktop{width:1400px;border-radius:16px;overflow:hidden;border:1px solid var(--border-strong);background:var(--bg-0);box-shadow:0 50px 120px -40px rgba(0,0,0,0.8);position:relative;}
+  .nav{height:58px;display:flex;align-items:center;gap:16px;padding:0 26px;background:linear-gradient(180deg,rgba(10,10,12,0.92),rgba(10,10,12,0.7));border-bottom:1px solid var(--border);}
+  .nav .mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#2dd4bf,var(--accent));display:grid;place-items:center;color:#0a0a0c;font-weight:900;font-size:15px;}
+  .nav .br{font-weight:800;letter-spacing:1px;font-size:14px;}
+  .nav .tabs{display:flex;gap:6px;margin-left:14px;flex:1;}
+  .nav .tab{padding:6px 13px;border-radius:7px;font-size:13px;color:var(--text-dim);font-weight:600;}
+  .nav .tab.on{background:var(--surface-3);color:var(--text);box-shadow:inset 0 -1px 0 var(--accent);}
+  .nav .ic{width:30px;height:30px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;color:var(--text-dim);}
+  .nav .pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border-radius:999px;background:var(--surface);border:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--text-dim);}
+  .nav .pill .dot{width:6px;height:6px;border-radius:6px;background:var(--success);box-shadow:0 0 8px var(--success);}
+  .nav .av{width:28px;height:28px;border-radius:999px;background:linear-gradient(135deg,var(--accent),#b5481f);display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;}
+
+  /* condensed hero */
+  .hero{position:relative;height:300px;}
+  .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center 28%;}
+  .hero .vig{position:absolute;inset:0;background:linear-gradient(0deg,var(--bg-0) 3%,transparent 60%),linear-gradient(90deg,rgba(10,10,12,0.78),transparent 62%);}
+  .hero .ct{position:absolute;left:30px;bottom:24px;right:30px;z-index:2;}
+  .hero .poster{width:96px;height:138px;border-radius:9px;background-size:cover;background-position:center;border:1px solid var(--border-strong);box-shadow:0 16px 40px -12px rgba(0,0,0,0.7);flex-shrink:0;}
+  .hero .tags{display:flex;gap:7px;margin-bottom:9px;}
+  .hero .tags .t{font-size:9.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:3px 9px;border-radius:5px;background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.7);border:1px solid var(--border);}
+  .hero h1{margin:0;font-size:42px;font-weight:800;letter-spacing:-1.2px;line-height:1.02;text-shadow:0 3px 24px rgba(0,0,0,0.6);}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:13px;margin-top:11px;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);align-items:center;}
+  .hero .meta .star{color:var(--star);font-weight:600;}
+  .hero .meta .match{color:var(--success);font-weight:700;letter-spacing:0.4px;}
+  .play{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:9px;background:var(--accent);color:#15100b;font-weight:700;font-size:14px;padding:11px 20px;border-radius:9px;margin-top:15px;box-shadow:0 10px 26px -10px var(--accent-soft);}
+
+  /* episode section */
+  .eps{padding:26px 30px 34px;}
+  .seasonrow{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--border);margin-bottom:22px;}
+  .seasontabs{display:flex;gap:28px;}
+  .stab{all:unset;cursor:pointer;padding:11px 0;font-size:14.5px;font-weight:600;color:var(--text-faint);position:relative;display:inline-flex;align-items:center;gap:8px;}
+  .stab .ct{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);}
+  .stab.on{color:var(--text);}
+  .stab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);border-radius:2px;}
+
+  /* the NEW view toggle */
+  .vtoggle{display:flex;align-items:center;gap:4px;padding:3px;border-radius:9px;background:var(--surface);border:1px solid var(--border);margin-bottom:8px;}
+  .vbtn{all:unset;cursor:pointer;width:32px;height:28px;border-radius:6px;display:grid;place-items:center;color:var(--text-faint);transition:.15s;}
+  .vbtn:hover{color:var(--text-dim);}
+  .vbtn.on{background:var(--accent-soft);color:var(--accent-hi);box-shadow:inset 0 0 0 1px var(--accent-line);}
+  .vbtn svg{display:block;}
+
+  .secmeta{font-family:var(--font-mono);font-size:11.5px;color:var(--text-faint);letter-spacing:0.4px;margin:0 0 18px;}
+  .secmeta b{color:var(--text-dim);font-weight:500;}
+
+  /* GRID view */
+  .grid{display:grid;gap:14px;}
+  .gcard{position:relative;border-radius:9px;overflow:hidden;background:var(--surface);border:1px solid var(--border);cursor:pointer;transition:.18s;}
+  .gcard:hover{transform:translateY(-2px);border-color:var(--accent-line);}
+  .gthumb{position:relative;aspect-ratio:16/9;overflow:hidden;}
+  .gthumb .img{position:absolute;inset:0;background-size:cover;}
+  .gthumb .scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.45) 0%,transparent 30%,transparent 55%,rgba(0,0,0,0.55) 100%);}
+  .gthumb .num{position:absolute;top:7px;left:9px;font-family:var(--font-mono);font-size:14px;font-weight:700;color:#fff;letter-spacing:1px;text-shadow:0 2px 6px rgba(0,0,0,0.7);}
+  .gthumb .check{position:absolute;top:6px;right:6px;width:19px;height:19px;border-radius:6px;background:var(--success-soft);border:1px solid var(--success);color:var(--success);display:grid;place-items:center;backdrop-filter:blur(4px);}
+  .gthumb .warn{position:absolute;top:6px;right:6px;width:19px;height:19px;border-radius:6px;background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);display:grid;place-items:center;font-weight:800;font-size:12px;}
+  .gthumb .eye{position:absolute;bottom:6px;right:6px;width:24px;height:24px;border-radius:6px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.18);color:#fff;display:grid;place-items:center;opacity:0;transition:.15s;backdrop-filter:blur(4px);}
+  .gcard:hover .eye{opacity:1;}
+  .gthumb .prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,0.45);}
+  .gthumb .prog i{display:block;height:100%;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+  .gfoot{padding:8px 11px 10px;}
+  .gfoot .gt{font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .gfoot .gr{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:3px;display:flex;gap:8px;align-items:center;}
+  .gfoot .gr .gstar{color:var(--star);}
+
+  /* LIST view */
+  .list{display:flex;flex-direction:column;gap:10px;}
+  .lrow{display:grid;grid-template-columns:230px 1fr auto;gap:20px;align-items:stretch;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:pointer;transition:.18s;}
+  .lrow:hover{border-color:var(--accent-line);background:var(--surface-2);}
+  .lthumb{position:relative;overflow:hidden;}
+  .lthumb .img{position:absolute;inset:0;background-size:cover;}
+  .lthumb .scrim{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,0.5),transparent 55%),linear-gradient(0deg,rgba(0,0,0,0.5),transparent 45%);}
+  .lthumb .num{position:absolute;top:9px;left:11px;font-family:var(--font-mono);font-size:15px;font-weight:700;color:#fff;letter-spacing:1px;text-shadow:0 2px 6px rgba(0,0,0,0.7);}
+  .lthumb .play-o{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:.15s;}
+  .lrow:hover .lthumb .play-o{opacity:1;}
+  .lthumb .play-o span{width:42px;height:42px;border-radius:999px;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.35);display:grid;place-items:center;color:#fff;backdrop-filter:blur(6px);}
+  .lthumb .prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,0.45);}
+  .lthumb .prog i{display:block;height:100%;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+  .lmain{padding:15px 4px 15px 0;min-width:0;display:flex;flex-direction:column;}
+  .ltop{display:flex;align-items:center;gap:10px;}
+  .lnum{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-hi);letter-spacing:0.5px;}
+  .ltitle{font-size:16px;font-weight:700;letter-spacing:-0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lbadge{font-size:9.5px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;padding:2px 7px;border-radius:5px;flex-shrink:0;}
+  .lbadge.w{background:var(--success-soft);color:var(--success);border:1px solid var(--success);}
+  .lbadge.p{background:var(--accent-soft);color:var(--accent-hi);border:1px solid var(--accent-line);}
+  .lmeta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);}
+  .lmeta .sep{color:var(--text-faint);}
+  .lmeta .star{color:var(--star);font-weight:600;}
+  .lmeta .res{color:var(--text-dim);border:1px solid var(--border-strong);border-radius:4px;padding:1px 6px;font-size:10px;letter-spacing:0.5px;}
+  .ldesc{margin-top:9px;font-size:13px;line-height:1.55;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-wrap:pretty;}
+  .lright{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;padding:15px 16px 15px 0;gap:12px;}
+  .lscore{display:flex;flex-direction:column;align-items:flex-end;}
+  .lscore .v{font-family:var(--font-mono);font-size:19px;font-weight:700;color:var(--text);line-height:1;}
+  .lscore .v .st{color:var(--star);font-size:14px;}
+  .lscore .l{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);letter-spacing:0.8px;margin-top:4px;}
+  .lacts{display:flex;gap:7px;}
+  .lact{all:unset;cursor:pointer;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);}
+  .lact:hover{color:var(--text);border-color:var(--border-strong);}
+  .lact.pri{background:var(--accent);color:#15100b;border-color:transparent;}
+  .lact.on{background:var(--success-soft);border-color:var(--success);color:var(--success);}
+
+  /* ── phone frame ── */
+  .phone{width:392px;border-radius:42px;overflow:hidden;border:11px solid #1d1d22;background:var(--bg-0);box-shadow:0 50px 120px -40px rgba(0,0,0,0.8),inset 0 0 0 1px rgba(255,255,255,0.05);position:relative;}
+  .pstatus{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px 0 30px;font-size:13px;font-weight:600;color:#fff;position:relative;z-index:3;}
+  .pstatus .dots{display:flex;gap:5px;align-items:center;font-family:var(--font-mono);font-size:11px;}
+  .pnav{position:absolute;top:46px;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:3;}
+  .pnav .b{width:34px;height:34px;border-radius:999px;background:rgba(10,10,12,0.5);backdrop-filter:blur(10px);border:1px solid var(--border);display:grid;place-items:center;color:#fff;}
+  .phero{position:relative;height:300px;margin-top:-92px;}
+  .phero .bg{position:absolute;inset:0;background-size:cover;background-position:center 25%;}
+  .phero .vig{position:absolute;inset:0;background:linear-gradient(0deg,var(--bg-0) 4%,transparent 70%);}
+  .phero .ct{position:absolute;left:18px;right:18px;bottom:14px;z-index:2;}
+  .phero .tags{display:flex;gap:6px;margin-bottom:8px;}
+  .phero .tags .t{font-size:8.5px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.72);}
+  .phero h1{margin:0;font-size:26px;font-weight:800;letter-spacing:-0.6px;line-height:1.05;}
+  .phero .meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);}
+  .phero .meta .star{color:var(--star);}
+  .pplay{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#15100b;font-weight:700;font-size:14px;padding:12px 0;border-radius:10px;margin:14px 18px 0;}
+  .peps{padding:18px 16px 26px;}
+  .pseasonrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);margin-bottom:16px;}
+  .pseasontabs{display:flex;gap:18px;}
+  .pstab{all:unset;cursor:pointer;padding:9px 0;font-size:13.5px;font-weight:600;color:var(--text-faint);position:relative;display:inline-flex;gap:6px;align-items:center;}
+  .pstab .ct{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);}
+  .pstab.on{color:var(--text);}
+  .pstab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);}
+  .pvtoggle{display:flex;gap:3px;padding:3px;border-radius:8px;background:var(--surface);border:1px solid var(--border);}
+  .pvbtn{all:unset;cursor:pointer;width:30px;height:26px;border-radius:5px;display:grid;place-items:center;color:var(--text-faint);}
+  .pvbtn.on{background:var(--accent-soft);color:var(--accent-hi);box-shadow:inset 0 0 0 1px var(--accent-line);}
+
+  .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+  .plist{display:flex;flex-direction:column;gap:10px;}
+  .prow{display:grid;grid-template-columns:128px 1fr;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:11px;overflow:hidden;}
+  .pthumb{position:relative;aspect-ratio:16/10;overflow:hidden;}
+  .pthumb .img{position:absolute;inset:0;background-size:cover;}
+  .pthumb .scrim{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,0.5),transparent 50%);}
+  .pthumb .num{position:absolute;top:6px;left:8px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.7);}
+  .pthumb .check{position:absolute;top:5px;right:5px;width:17px;height:17px;border-radius:5px;background:var(--success-soft);border:1px solid var(--success);color:var(--success);display:grid;place-items:center;}
+  .pthumb .prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,0.45);}
+  .pthumb .prog i{display:block;height:100%;background:var(--accent);}
+  .pbody{padding:9px 11px;min-width:0;display:flex;flex-direction:column;}
+  .pbody .pt{display:flex;align-items:center;gap:6px;}
+  .pbody .ptitle{font-size:13px;font-weight:700;letter-spacing:-0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pbody .pm{display:flex;align-items:center;gap:7px;margin-top:5px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim);}
+  .pbody .pm .star{color:var(--star);}
+  .pbody .pd{margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .pgfoot{padding:7px 9px 9px;}
+  .pgfoot .gt{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pgfoot .gr{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);margin-top:2px;display:flex;gap:6px;}
+  .pgfoot .gr .gstar{color:var(--star);}
+</style>
+</head>
+<body>
+
+<div class="wrap" style="left:48px;top:48px;">
+  <div class="cap"><b>Desktop</b> · Detailed list view <span class="tag">New</span></div>
+  <div id="frame-desktop-list"></div>
+</div>
+
+<div class="wrap" style="left:1520px;top:48px;">
+  <div class="cap"><b>Desktop</b> · Grid view <span class="tag cur">Current</span></div>
+  <div id="frame-desktop-grid"></div>
+</div>
+
+<div class="wrap" style="left:48px;top:1360px;">
+  <div class="cap"><b>Phone</b> · Detailed list <span class="tag">New</span></div>
+  <div id="frame-phone-list"></div>
+</div>
+
+<div class="wrap" style="left:492px;top:1360px;">
+  <div class="cap"><b>Phone</b> · Grid <span class="tag cur">Current</span></div>
+  <div id="frame-phone-grid"></div>
+</div>
+
+<script>
+const IMGS = [
+  "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1517976487492-5750f3195933?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1614728263952-84ea256f9679?auto=format&fit=crop&w=600&q=70",
+];
+const HERO = "https://images.unsplash.com/photo-1614314107768-6018061b5b72?auto=format&fit=crop&w=2200&q=70";
+
+const TITLES = [
+  "Celestial Being","Gundam Meisters","The Changing World","Tactical Forecast",
+  "Operation Fallen Angels","Seven Swords","The Scream of Earth","An Inevitable Conflict",
+  "The Tactician's Wager","Wedge of Suspicion","The Frozen Glory","Boys Bearing Banners",
+  "The Northern Front","The Roots of Hatred","Stigmata of the Sky","Trinity",
+  "Beyond the Veil","Reconnaissance","The Acatama Manoeuvre","God's Vessel",
+  "Returning to the Battlefield","Trans-Am","Demise of the Meisters","The Distance Between",
+  "End of the World",
+];
+const OVERVIEWS = [
+  "A private armed organisation calling itself Celestial Being unveils four advanced mobile suits and declares it will end all war through armed intervention.",
+  "The Gundam Meisters strike simultaneously across three conflicts, drawing the attention — and fury — of the world's three great economic blocs.",
+  "As nations scramble to identify the source of the Gundams, the pilots wrestle with the cost of the path they have chosen.",
+  "Celestial Being's tactical forecaster predicts the next flashpoint, sending the Meisters into a coordinated pre-emptive operation.",
+  "A joint task force lays a trap for the Gundams, and one of the Meisters is pushed to the edge of his limits.",
+  "An elite squadron wielding seven blades is deployed specifically to hunt and dismantle the Gundams one by one.",
+  "An orbital accident threatens millions below; the Meisters must decide whether intervention means more than just war.",
+  "Old rivalries resurface as the great powers move from suspicion toward open coordination against a common enemy.",
+];
+
+function epData(season){
+  const total = 25;
+  return Array.from({length: total}, (_, i) => {
+    const n = i + 1;
+    const watched = n <= 8;
+    const inProg = n === 9;
+    const d = new Date(2007, 9, 6 + (n - 1) * 7);
+    const date = d.toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+    const rating = (7.4 + ((n * 37) % 11) / 10).toFixed(1);
+    const res = (n % 6 === 0) ? "720p" : "1080p";
+    return {
+      n, watched, inProg,
+      progress: inProg ? 0.42 : 0,
+      title: season === 1 ? (TITLES[i] || `Episode ${n}`) : `Second Season — ${n}`,
+      overview: OVERVIEWS[i % OVERVIEWS.length],
+      date, runtime: "25m", res, rating,
+      img: IMGS[i % IMGS.length],
+      pos: ((n * 17) % 100),
+    };
+  });
+}
+
+const IC/**/ = {
+  grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>',
+  list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="6" height="5" rx="1" fill="currentColor" stroke="none"/><rect x="3" y="15" width="6" height="5" rx="1" fill="currentColor" stroke="none"/><line x1="12" y1="6" x2="21" y2="6"/><line x1="12" y1="9.5" x2="18" y2="9.5"/><line x1="12" y1="17" x2="21" y2="17"/><line x1="12" y1="20.5" x2="18" y2="20.5"/></svg>',
+  check: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  eye: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  play: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  playsm: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  search:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  dl:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>',
+  gear:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L16.5 2h-4l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.6h4l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg>',
+  chev:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>',
+  star:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3 6.5 7 .7-5.2 4.7 1.5 6.9L12 17.8 5.2 20.8l1.5-6.9L1.5 9.2l7-.7z"/></svg>',
+};
+
+/* ── grid card ── */
+function gridCard(ep){
+  const status = ep.watched
+    ? `<div class="check">${IC.check}</div>`
+    : (ep.n > 9 ? "" : "");
+  const prog = ep.inProg ? `<div class="prog"><i style="width:${ep.progress*100}%"></i></div>` : "";
+  return `<div class="gcard">
+    <div class="gthumb">
+      <div class="img" style="background-image:url('${ep.img}');background-position:${ep.pos}% center;filter:${ep.watched?'brightness(.62) saturate(.8)':'brightness(.82)'}"></div>
+      <div class="scrim"></div>
+      <div class="num">${String(ep.n).padStart(2,"0")}</div>
+      ${status}
+      <button class="eye">${IC.eye}</button>
+      ${prog}
+    </div>
+    <div class="gfoot">
+      <div class="gt">${ep.title}</div>
+      <div class="gr"><span class="gstar">★ ${ep.rating}</span><span>${ep.runtime}</span></div>
+    </div>
+  </div>`;
+}
+
+/* ── list row ── */
+function listRow(ep){
+  const badge = ep.watched ? `<span class="lbadge w">Watched</span>`
+    : ep.inProg ? `<span class="lbadge p">${Math.round(ep.progress*100)}% · Resume</span>` : "";
+  const prog = ep.inProg ? `<div class="prog"><i style="width:${ep.progress*100}%"></i></div>` : "";
+  const eyeOn = ep.watched ? "on" : "";
+  return `<div class="lrow">
+    <div class="lthumb">
+      <div class="img" style="background-image:url('${ep.img}');background-position:${ep.pos}% center;filter:${ep.watched?'brightness(.6) saturate(.8)':'brightness(.85)'}"></div>
+      <div class="scrim"></div>
+      <div class="num">${String(ep.n).padStart(2,"0")}</div>
+      <div class="play-o"><span>${IC.play}</span></div>
+      ${prog}
+    </div>
+    <div class="lmain">
+      <div class="ltop">
+        <span class="lnum">EP ${String(ep.n).padStart(2,"0")}</span>
+        <span class="ltitle">${ep.title}</span>
+        ${badge}
+      </div>
+      <div class="lmeta">
+        <span>${ep.date}</span><span class="sep">·</span>
+        <span>${ep.runtime}</span><span class="sep">·</span>
+        <span class="res">${ep.res}</span>
+        <span class="sep">·</span><span class="star">${IC.star} ${ep.rating}</span>
+      </div>
+      <div class="ldesc">${ep.overview}</div>
+    </div>
+    <div class="lright">
+      <div class="lscore"><div class="v"><span class="st">★</span> ${ep.rating}</div><div class="l">TMDB</div></div>
+      <div class="lacts">
+        <button class="lact ${eyeOn}" title="Watched">${IC.eye}</button>
+        <button class="lact pri" title="Play">${IC.playsm}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ── desktop frame ── */
+function desktopFrame(view){
+  const cols = 8;
+  return `<div class="desktop">
+    <div class="nav">
+      <div class="mark">A</div><div class="br">ANIMARR</div>
+      <div class="tabs"><div class="tab">All</div><div class="tab on">Anime</div><div class="tab">Doramas</div><div class="tab">Movies</div><div class="tab">Multserials</div><div class="tab">Serials</div></div>
+      <div class="pill"><span class="dot"></span>87/87</div>
+      <div class="ic">${IC.search}</div><div class="ic">${IC.dl}</div><div class="ic">${IC.gear}</div>
+      <div class="av">E</div>
+    </div>
+    <div class="hero">
+      <div class="bg" style="background-image:url('${HERO}')"></div>
+      <div class="vig"></div>
+      <div class="ct" style="display:flex;gap:22px;align-items:flex-end;">
+        <div class="poster" style="background-image:url('${HERO}')"></div>
+        <div>
+          <div class="tags"><span class="t">Series</span><span class="t">Middle East</span><span class="t">Future</span><span class="t">Mecha</span></div>
+          <h1>Mobile Suit Gundam 00</h1>
+          <div class="meta"><span class="star">★ 7.6</span><span>2007</span><span>MBS</span><span>25 m</span><span>50 EP</span><span>Japanese</span><span class="match">100% MATCH</span></div>
+          <button class="play">${IC.play} Play first episode</button>
+        </div>
+      </div>
+    </div>
+    <div class="eps">
+      <div class="seasonrow">
+        <div class="seasontabs">
+          <button class="stab on" data-season="1">Season 1 <span class="ct">25</span></button>
+          <button class="stab" data-season="2">Season 2 <span class="ct">25</span></button>
+        </div>
+        <div class="vtoggle">
+          <button class="vbtn ${view==='grid'?'on':''}" data-view="grid" title="Grid view">${IC.grid}</button>
+          <button class="vbtn ${view==='list'?'on':''}" data-view="list" title="Detailed list">${IC.list}</button>
+        </div>
+      </div>
+      <div class="secmeta"></div>
+      <div class="epbox"></div>
+    </div>
+  </div>`;
+}
+
+/* ── phone frame ── */
+function phoneFrame(view){
+  return `<div class="phone">
+    <div class="pstatus"><span>9:41</span><span class="dots">87/87 ▪ ▪▪</span></div>
+    <div class="pnav"><div class="b">${IC.chev}</div><div style="display:flex;gap:8px;"><div class="b">${IC.search}</div><div class="b" style="background:linear-gradient(135deg,var(--accent),#b5481f);border:none;font-weight:700;font-size:13px;">E</div></div></div>
+    <div class="phero">
+      <div class="bg" style="background-image:url('${HERO}')"></div>
+      <div class="vig"></div>
+      <div class="ct">
+        <div class="tags"><span class="t">Series</span><span class="t">Future</span><span class="t">Mecha</span></div>
+        <h1>Mobile Suit Gundam 00</h1>
+        <div class="meta"><span class="star">★ 7.6</span><span>2007 · MBS</span><span>50 EP · 25m</span></div>
+      </div>
+    </div>
+    <button class="pplay">${IC.play} Play first episode</button>
+    <div class="peps">
+      <div class="pseasonrow">
+        <div class="pseasontabs">
+          <button class="pstab on" data-season="1">Season 1 <span class="ct">25</span></button>
+          <button class="pstab" data-season="2">Season 2 <span class="ct">25</span></button>
+        </div>
+        <div class="pvtoggle">
+          <button class="pvbtn ${view==='grid'?'on':''}" data-view="grid">${IC.grid}</button>
+          <button class="pvbtn ${view==='list'?'on':''}" data-view="list">${IC.list}</button>
+        </div>
+      </div>
+      <div class="epbox"></div>
+    </div>
+  </div>`;
+}
+
+/* ── phone cards ── */
+function pGridCard(ep){
+  const check = ep.watched ? `<div class="check">${IC.check}</div>` : "";
+  const prog = ep.inProg ? `<div class="prog"><i style="width:${ep.progress*100}%"></i></div>` : "";
+  return `<div class="prow" style="grid-template-columns:1fr;border-radius:11px;">
+    <div class="pthumb" style="aspect-ratio:16/9;">
+      <div class="img" style="background-image:url('${ep.img}');background-position:${ep.pos}% center;filter:${ep.watched?'brightness(.62)':'brightness(.85)'}"></div>
+      <div class="scrim"></div><div class="num">${String(ep.n).padStart(2,"0")}</div>${check}${prog}
+    </div>
+    <div class="pgfoot"><div class="gt">${ep.title}</div><div class="gr"><span class="gstar">★ ${ep.rating}</span><span>${ep.runtime}</span></div></div>
+  </div>`;
+}
+function pListRow(ep){
+  const check = ep.watched ? `<div class="check">${IC.check}</div>` : "";
+  const prog = ep.inProg ? `<div class="prog"><i style="width:${ep.progress*100}%"></i></div>` : "";
+  const badge = ep.inProg ? `<span class="lbadge p" style="font-size:8.5px;padding:1px 5px;">${Math.round(ep.progress*100)}%</span>` : "";
+  return `<div class="prow">
+    <div class="pthumb">
+      <div class="img" style="background-image:url('${ep.img}');background-position:${ep.pos}% center;filter:${ep.watched?'brightness(.6)':'brightness(.85)'}"></div>
+      <div class="scrim"></div><div class="num">${String(ep.n).padStart(2,"0")}</div>${check}${prog}
+    </div>
+    <div class="pbody">
+      <div class="pt"><span class="ptitle">${ep.title}</span>${badge}</div>
+      <div class="pm"><span class="star">★ ${ep.rating}</span><span>${ep.date}</span><span>${ep.runtime}</span></div>
+      <div class="pd">${ep.overview}</div>
+    </div>
+  </div>`;
+}
+
+/* ── mount + wiring ── */
+function mount(hostId, kind){
+  const host = document.getElementById(hostId);
+  const state = { season: 1, view: kind.endsWith("list") ? "list" : "grid" };
+  const isPhone = kind.startsWith("phone");
+
+  function render(){
+    host.innerHTML = isPhone ? phoneFrame(state.view) : desktopFrame(state.view);
+    const eps = epData(state.season);
+    const box = host.querySelector(".epbox");
+
+    if (isPhone){
+      if (state.view === "grid"){
+        box.className = "epbox pgrid";
+        box.innerHTML = eps.map(pGridCard).join("");
+      } else {
+        box.className = "epbox plist";
+        box.innerHTML = eps.slice(0, 7).map(pListRow).join("");
+      }
+      host.querySelectorAll(".pvbtn").forEach(b => b.onclick = () => { state.view = b.dataset.view; render(); });
+      host.querySelectorAll(".pstab").forEach(b => b.onclick = () => { state.season = +b.dataset.season; render(); });
+    } else {
+      const secmeta = host.querySelector(".secmeta");
+      const watched = eps.filter(e => e.watched).length;
+      secmeta.innerHTML = `<b>${watched}</b> of ${eps.length} watched · all episodes on disk`;
+      if (state.view === "grid"){
+        box.className = "epbox grid";
+        box.style.gridTemplateColumns = "repeat(8, 1fr)";
+        box.innerHTML = eps.map(gridCard).join("");
+      } else {
+        box.className = "epbox list";
+        box.style.gridTemplateColumns = "";
+        box.innerHTML = eps.slice(0, 7).map(listRow).join("");
+      }
+      host.querySelectorAll(".vbtn").forEach(b => b.onclick = () => { state.view = b.dataset.view; render(); });
+      host.querySelectorAll(".stab").forEach(b => b.onclick = () => { state.season = +b.dataset.season; render(); });
+    }
+  }
+  render();
+}
+
+mount("frame-desktop-list", "desktop-list");
+mount("frame-desktop-grid", "desktop-grid");
+mount("frame-phone-list", "phone-list");
+mount("frame-phone-grid", "phone-grid");
+</script>
+</body>
+</html>

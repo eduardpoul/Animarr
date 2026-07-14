@@ -84,7 +84,7 @@ internal static class PairEndpoints
                 Code:      code,
                 QrPayload: qrPayload,
                 ExpiresAt: DateTime.UtcNow.Add(PairTtl)));
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Pair);
 
         // ─── Poll: TV checks if a phone has confirmed ────────────────────
         // Critical detail: when the entry flips to "confirmed" we ALSO sign
@@ -135,7 +135,7 @@ internal static class PairEndpoints
             }
 
             return Results.Ok(new PairPollDto(Status: "pending", UserId: null));
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Pair);
 
         // ─── Confirm: phone (already signed in) authorises the TV ───────
         // Requires the phone's cookie. UserId is read from the request
@@ -171,7 +171,7 @@ internal static class PairEndpoints
                 AbsoluteExpirationRelativeToNow = PairTtl,
             });
             return Results.NoContent();
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Pair);
 
         // ─── QR image: server-generated PNG for the /pair page ──────────
         // Returns the QR encoding of the same animarr:// payload that
@@ -202,7 +202,7 @@ internal static class PairEndpoints
             var bytes = png.GetGraphic(pixelsPerModule: 10);
 
             return Results.File(bytes, "image/png");
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Pair);
 
         return app;
     }

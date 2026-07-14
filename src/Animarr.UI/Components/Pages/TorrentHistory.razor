@@ -12,9 +12,9 @@
 <header class="d-page-header">
     <PageBack />
     <div class="d-page-header__main">
-        <div class="d-page-header__overline">TRANSFERS</div>
+        <div class="d-page-header__overline">@L["torrents.page_overline"]</div>
         <h1 class="d-page-header__title">@L["torrent_history.title"]</h1>
-        <div class="d-page-header__sub">Completed, stopped and errored transfers.</div>
+        <div class="d-page-header__sub">@L["torrent_history.page_sub"]</div>
     </div>
     <div class="d-page-header__right">
         <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents"))">
@@ -25,7 +25,7 @@
 
 @if (_loading)
 {
-    <div class="th-loading"><InlineDots Label="Loading torrent history" /></div>
+    <div class="th-loading"><InlineDots Label="@L["torrent_history.loading_inline"]" /></div>
 }
 else if (_records.Count == 0)
 {

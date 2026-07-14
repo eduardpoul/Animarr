@@ -20,65 +20,20 @@
    based on the data-theme attribute.
    ============================================================ */
 
-/* ── Self-hosted fonts (already in lib/fonts/) ─────────── */
-@font-face {
-    font-family: 'Geist';
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-400.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-500.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 600;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-600.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist';
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-700.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist Mono';
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-mono-400.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Geist Mono';
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/geist-mono-500.ttf') format('truetype');
-}
-@font-face {
-    font-family: 'Archivo Black';
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-    src: url('/_content/Animarr.UI/lib/fonts/archivo-black-400.ttf') format('truetype');
-}
+/* ── Self-hosted fonts removed ─────────────────────────
+   The old Geist / Geist Mono / Archivo Black faces were dropped when
+   the display + mono identity moved to Hanken Grotesk. For an offline
+   / air-gapped Docker install, the self-hosted equivalents live in
+   lib/fonts/fonts.css (see its README for the binaries to drop in). */
 
-/* CDN-hosted fonts for new themes (Inter, JetBrains Mono, Quicksand,
-   Noto Serif SC, Noto Serif JP) are now loaded via explicit
-   <link rel="stylesheet"> tags in both index.html files. We used to
-   @import them here, but Tailwind CLI v4 strips @import url() during
-   `--minify`, leaving the compiled app.css with no font references — so
-   var(--font-ui), var(--font-display) etc. fell back to system-ui (which
-   on Android Chrome paints as Roboto, and at heading weights looks like
-   a serif). Hoisting the <link> into <head> guarantees they're parsed
+/* CDN-hosted fonts (Hanken Grotesk + the per-theme families Inter,
+   JetBrains Mono, Quicksand, Noto Serif SC, Noto Serif JP) are loaded
+   via explicit <link rel="stylesheet"> tags in both index.html files.
+   We used to @import them here, but Tailwind CLI v4 strips @import url()
+   during `--minify`, leaving the compiled app.css with no font references
+   — so var(--font-ui), var(--font-display) etc. fell back to system-ui
+   (which on Android Chrome paints as Roboto, and at heading weights looks
+   like a serif). Hoisting the <link> into <head> guarantees they're parsed
    before app.css evaluates the var() chains. */
 
 /* ============================================================
@@ -118,17 +73,22 @@
     --warn:    oklch(0.78 0.14  80);
     --info:    oklch(0.70 0.09 230);
 
-    /* ── Typography — Inter everywhere.
+    /* ── Typography — Hanken Grotesk everywhere (humanist sans).
+
+       Hanken carries UI, display AND the old "mono"/label role — the
+       gamer/digital Archivo Black + Geist Mono look is gone. The mono
+       token is now a proportional sans (labels, not code alignment), so
+       its fallback is sans-serif, not monospace.
 
        Fallback chain explicitly names sans-serif families (Roboto, Helvetica
        Neue, Arial) before generic `sans-serif`. On Android Chrome,
-       `system-ui` resolves to Roboto which renders Inter-substitute
+       `system-ui` resolves to Roboto which renders the Hanken substitute
        headings as a wide serif-feeling face at heavy weights. Naming
-       Arial / Helvetica Neue earlier gives a closer Inter facsimile while
+       Arial / Helvetica Neue earlier gives a closer humanist facsimile while
        the CDN font is still loading. */
-    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-mono:    'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    --font-ui:      'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
 
     /* Casing — Quietude uses sentence case. Cinematic & friends
@@ -188,9 +148,9 @@
 /* ============================================================
    [data-theme="cinematic"] — legacy v3/v4 identity
 
-   Warm leather brown bg + crimson accent + Archivo Black display
-   + Geist UI/mono + CJK watermark. Preserved as a user-selectable
-   theme so anyone preferring the old look can keep it.
+   Warm leather brown bg + crimson accent + Hanken Grotesk
+   display/UI + CJK watermark. Preserved as a user-selectable theme
+   so anyone preferring the old palette can keep it.
    ============================================================ */
 /* `html[data-theme="cinematic"]` (specificity 0,0,1,1) is intentional —
    Tailwind v4's @theme block in Styles/app.css emits `:root, :host`
@@ -222,9 +182,9 @@ html[data-theme="cinematic"] {
     --warn:    oklch(0.80 0.17  75);
     --info:    oklch(0.74 0.10 240);
 
-    --font-ui:      'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-display: 'Archivo Black', 'Geist', system-ui, sans-serif;
-    --font-mono:    'Geist Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+    --font-ui:      'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Hanken Grotesk', system-ui, sans-serif;
+    --font-mono:    'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-cjk:     'Noto Serif SC', serif;
 
     --label-casing: uppercase;
@@ -232,6 +192,21 @@ html[data-theme="cinematic"] {
 
     --decor-grain: block;
     --decor-cjk:   block;
+}
+
+/* Cinematic's display used to be Archivo Black — a single ultra-heavy
+   face, so headings looked bold even though the base h1–h6 rule sets
+   `font-weight: normal`. Hanken Grotesk is a full family; at normal
+   weight those headings render too light. Restore the cinematic display
+   weight with an explicit 700. Scoped to cinematic so the calm default
+   (Quietude) and the serif/terminal themes keep their intended heading
+   weights. Unlayered (tokens.css isn't in an @layer) so it beats the
+   @layer base h1–h6 rule in app.css regardless of specificity. */
+html[data-theme="cinematic"] :is(h1, h2, h3, h4, h5, h6),
+html[data-theme="cinematic"] .text-display-xl,
+html[data-theme="cinematic"] .text-display-l,
+html[data-theme="cinematic"] .text-display-m {
+    font-weight: 700;
 }
 
 /* ============================================================

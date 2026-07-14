@@ -18,13 +18,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
     public DbSet<IdentificationQueue> IdentificationQueues => Set<IdentificationQueue>();
     public DbSet<WatchState> WatchStates => Set<WatchState>();
+    public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
     public DbSet<EpisodeFileMapping> EpisodeFileMappings => Set<EpisodeFileMapping>();
+    public DbSet<EpisodeSegment> EpisodeSegments => Set<EpisodeSegment>();
+    public DbSet<TrickplayAsset> TrickplayAssets => Set<TrickplayAsset>();
+    public DbSet<EpisodeMetadata> EpisodeMetadata => Set<EpisodeMetadata>();
 
     // ─── Multi-user (v4) ──────────────────────────────────────────────────────
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
+    public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
+    public DbSet<RecDismissal> RecDismissals => Set<RecDismissal>();
+    public DbSet<FranchiseNode> FranchiseNodes => Set<FranchiseNode>();
+    public DbSet<FranchiseEdge> FranchiseEdges => Set<FranchiseEdge>();
 
     // ─── Categories ────────────────────────────────────────────────────────────
     public DbSet<Category> Categories => Set<Category>();
@@ -102,6 +110,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.FolderId).IsUnique();
             e.HasIndex(x => x.TmdbId);
             e.HasIndex(x => x.MalId);
+            e.HasIndex(x => x.AniListId);
             e.HasIndex(x => x.IdentificationStatus);
         });
 
@@ -162,6 +171,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.LastSeenAt);
         });
 
+        modelBuilder.Entity<WatchEvent>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+            // One bucket per (user, item, season, episode, day) — the recorder
+            // upserts against this key. SQLite treats NULL as distinct here,
+            // but the recorder always SELECTs before INSERT so the anonymous
+            // (UserId=null) external-player rows don't duplicate either.
+            e.HasIndex(x => new { x.UserId, x.MediaItemId, x.Season, x.Episode, x.Date }).IsUnique();
+            // Stats queries scan a user's date range.
+            e.HasIndex(x => new { x.UserId, x.Date });
+        });
+
         modelBuilder.Entity<EpisodeFileMapping>(e =>
         {
             e.HasKey(x => x.Id);
@@ -173,6 +204,48 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Cascade);
             // One override per (item, file). Upserts target this key.
             e.HasIndex(x => new { x.MediaItemId, x.FilePath }).IsUnique();
+        });
+
+        modelBuilder.Entity<EpisodeSegment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One segment per (item, season, episode, kind). The detection pass
+            // upserts against this key, so re-running is idempotent.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode, x.Kind }).IsUnique();
+        });
+
+        modelBuilder.Entity<TrickplayAsset>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One sprite per (item, file) — the generator upserts against this.
+            e.HasIndex(x => new { x.MediaItemId, x.FilePath }).IsUnique();
+            // Player lookup: (item, season, episode). Non-unique — alt versions
+            // of the same episode each carry a sprite; the endpoint picks one.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode });
+        });
+
+        modelBuilder.Entity<EpisodeMetadata>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // One metadata row per (item, TMDB season, TMDB episode). The lazy
+            // fetch replaces the item's rows wholesale, but the unique key keeps
+            // the table clean if a partial write ever races.
+            e.HasIndex(x => new { x.MediaItemId, x.Season, x.Episode }).IsUnique();
         });
 
         // ─── Multi-user (v4) ────────────────────────────────────────────────
@@ -227,6 +300,67 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.MediaItemId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.UserId);
+        });
+
+        modelBuilder.Entity<WatchlistItem>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Title).HasMaxLength(512);
+            e.Property(x => x.MediaType).HasMaxLength(16);
+            e.Property(x => x.PosterUrl).HasMaxLength(1024);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Adds upsert against these keys in code (select-first); the
+            // indexes just make the lookups + per-user list cheap.
+            e.HasIndex(x => new { x.UserId, x.MediaItemId });
+            e.HasIndex(x => new { x.UserId, x.TmdbId });
+        });
+
+        modelBuilder.Entity<RecDismissal>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.UserId, x.MediaItemId });
+            e.HasIndex(x => new { x.UserId, x.TmdbId });
+        });
+
+        modelBuilder.Entity<FranchiseNode>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Title).HasMaxLength(512);
+            e.Property(x => x.Format).HasMaxLength(16);
+            e.Property(x => x.Status).HasMaxLength(24);
+            e.Property(x => x.CoverUrl).HasMaxLength(1024);
+            e.HasIndex(x => x.AniListId).IsUnique();
+            e.HasIndex(x => x.MalId);
+        });
+
+        modelBuilder.Entity<FranchiseEdge>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.RelationType).HasMaxLength(24);
+            // The BFS upserts against this triple.
+            e.HasIndex(x => new { x.FromAniListId, x.ToAniListId, x.RelationType }).IsUnique();
+            e.HasIndex(x => x.ToAniListId);
         });
 
         // ─── Categories ────────────────────────────────────────────────────────

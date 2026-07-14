@@ -23,6 +23,7 @@ internal static class MediaMappings
     public static MediaItemDto ToDto(this EntityMediaItem entity,
         HashSet<Guid>? favoriteIds = null)
     {
+        var flags = DeserialiseEpisodeFlags(entity.EpisodeFlagsJson);
         return new MediaItemDto
         {
             IsFavorite      = favoriteIds is not null && favoriteIds.Contains(entity.Id),
@@ -46,6 +47,7 @@ internal static class MediaMappings
             Description     = entity.Description,
             Tagline         = entity.Tagline,
             Genres          = DeserialiseStrings(entity.GenresJson),
+            GenresLocalized = DeserialiseStrings(entity.GenresLocalizedJson),
             Tags            = DeserialiseStrings(entity.TagsJson),
             Rating          = entity.Rating,
             RatingCount     = entity.RatingCount,
@@ -75,6 +77,8 @@ internal static class MediaMappings
                                 .OrderBy(c => c.Category!.SortOrder)
                                 .Select(c => c.Category!.Name)
                                 .ToArray(),
+            FillerEpisodes  = flags.Filler,
+            RecapEpisodes   = flags.Recap,
         };
     }
 
@@ -104,6 +108,17 @@ internal static class MediaMappings
             return JsonSerializer.Deserialize<SeasonMetaDto[]>(json, JsonOpts) ?? Array.Empty<SeasonMetaDto>();
         }
         catch { return Array.Empty<SeasonMetaDto>(); }
+    }
+
+    private static (int[] Filler, int[] Recap) DeserialiseEpisodeFlags(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return (Array.Empty<int>(), Array.Empty<int>());
+        try
+        {
+            var d = JsonSerializer.Deserialize<Services.EpisodeFlagsData>(json, JsonOpts);
+            return (d?.Filler ?? Array.Empty<int>(), d?.Recap ?? Array.Empty<int>());
+        }
+        catch { return (Array.Empty<int>(), Array.Empty<int>()); }
     }
 
     private static IdentificationCandidateDto[] DeserialiseCandidates(string? json)

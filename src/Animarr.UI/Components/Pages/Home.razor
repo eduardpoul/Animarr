@@ -4,75 +4,14 @@
 @inject NavigationManager Nav
 @inject CategoryNavService CategoryNav
 @inject FolderJumpService FolderJump
+@inject UserContextState UserCtx
+@inject IJSRuntime JS
 @inject Animarr.UI.Services.ServerRegistryState ServerReg
 
-<PageTitle>Animarr — @L["catalog.title"]</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 <div class="catalog-page">
 
-    @* ── Hero — Continue Watching takes priority over Featured. v5
-       design board ships this as the default top-of-page experience; if
-       the user has nothing in progress, the older Featured-by-rating
-       carousel takes over so the slot doesn't go blank.
-       Both bind to the section-filtered slice (_filteredContinue /
-       _filteredFeatured) so a TopBar folder pill narrows the hero to
-       that folder's items, not the global library. *@
-    @if (_filteredContinue.Length > 0)
-    {
-        <CatalogContinueHero Items="@_filteredContinue" IntervalSec="@_heroInterval" />
-    }
-    else if (_filteredFeatured.Count > 0)
-    {
-        <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
-    }
-
-    @* NeedsReview pulse-chip moved to the TopBar (top-right, next to the AI
-       pill) — it read as out of place above the category strip. *@
-
-    @* ── Category chip strip (replaces v3 type tabs + folder chips) ────── *@
-    @* Categories come from /api/categories (admin manages them in
-       Server Settings → Categories). Items are auto-classified by the LLM
-       at identification time. Hide chips that have zero matching items
-       so the strip doesn't accumulate empty filters as the library
-       evolves. *@
-    @if (_categories.Count > 0)
-    {
-        <div class="catalog-folders">
-            <button type="button"
-                    class="@($"catalog-chip {(_activeCategory is null ? "catalog-chip--active" : "")}")"
-                    @onclick="@(() => SetActiveCategory(null))">All</button>
-            @foreach (var cat in _categories.Where(c => c.Enabled && c.ItemCount > 0).OrderBy(c => c.SortOrder))
-            {
-                var name = cat.Name;
-                <button type="button"
-                        class="@($"catalog-chip {(_activeCategory == name ? "catalog-chip--active" : "")}")"
-                        @onclick="@(() => SetActiveCategory(name))">
-                    @name
-                    <span class="catalog-chip__count">@cat.ItemCount</span>
-                </button>
-            }
-        </div>
-    }
-    else if (_sections.Count > 0)
-    {
-        @* Fallback: until categories exist (fresh install before the
-           first identification batch lands), keep the v3 folder strip so
-           the catalog isn't a flat list. *@
-        <div class="catalog-folders">
-            <button type="button"
-                    class="@($"catalog-chip {(_activeSection is null ? "catalog-chip--active" : "")}")"
-                    @onclick="@(() => SetActiveSection(null))">@L["catalog.tab_all"]</button>
-            @foreach (var sec in _sections)
-            {
-                var id = sec.Id;
-                <button type="button"
-                        class="@($"catalog-chip {(_activeSection == id ? "catalog-chip--active" : "")}")"
-                        @onclick="@(() => SetActiveSection(id))">@sec.Label</button>
-            }
-        </div>
-    }
-
-    @* ── Grid ─────────────────────────────────────────────────────────── *@
     @if (_loading)
     {
         @* Centered loading screen with branded ring spinner — the previous
@@ -85,27 +24,103 @@
             <div class="catalog-loading__label">@L["catalog.loading"]</div>
         </div>
     }
-    else if (_filtered.Count == 0)
-    {
-        <div class="catalog-empty">
-            <DIcon Name="video" Size="48" />
-            <div class="catalog-empty__text">@L["catalog.empty"]</div>
-        </div>
-    }
     else
     {
-        <div class="catalog-grid">
-            @* H-7: cap rendered items to 240 so the catalog stays snappy at 1000+ entries. *@
-            @foreach (var item in _filtered.Take(240))
-            {
-                <Poster Item="@item" />
-            }
-        </div>
-        @if (_filtered.Count > 240)
+        @* ── Section stack ─────────────────────────────────────────────
+           Home is a stack of per-user reorderable sections (ProfilePanel →
+           Appearance → "Home screen"): order + visibility come from
+           UserPreferences.HomeSectionsJson via the shared HomeSections
+           schema. Keys the schema knows but the app hasn't shipped yet
+           (thisweek / foryou / discover) are skipped silently — they'll
+           light up here when those features land. *@
+        @foreach (var section in _homeSections)
         {
-            <div class="catalog-more">
-                @L.Get("catalog.shown_of_total", 240, _filtered.Count)
-            </div>
+            @switch (section)
+            {
+                case "continue":
+                    @* Hero — Continue Watching takes priority over Featured. If the
+                       user has nothing in progress, the Featured-by-rating carousel
+                       takes over so the slot doesn't go blank. Both bind to the
+                       section-filtered slice so a TopBar folder pill narrows the
+                       hero to that folder's items. *@
+                    @if (_heroItems.Length > 0)
+                    {
+                        <CatalogContinueHero Items="@_heroItems" IntervalSec="@_heroInterval" />
+                    }
+                    else if (_filteredFeatured.Count > 0)
+                    {
+                        <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
+                    }
+                    break;
+
+                case "nextup":
+                    @if (_filteredNextUp.Length > 0)
+                    {
+                        <NextUpRail Items="@_filteredNextUp" />
+                    }
+                    break;
+
+                case "thisweek":
+                    <ThisWeekRail Items="@_thisWeek" />
+                    break;
+
+                case "foryou":
+                    @* Heuristic recommendations: unwatched library titles scored
+                       against the user's watch-time genre profile, TMDB backfill
+                       for the free slots (dashed cards with a Want button).
+                       Dismiss ✕ persists per user. *@
+                    @if (_forYou.Length > 0)
+                    {
+                        <RecRail Title="@L["home.for_you"]"
+                                 Hint="@L["recs.foryou_hint"]"
+                                 Items="@_forYou"
+                                 Dismissable="true" />
+                    }
+                    break;
+
+                case "library":
+                    @* Compact library block — a poster grid capped to two rows on
+                       desktop (four on phones) with a "view all" tile as the last
+                       cell. The full chip-filtered catalog lives on /library now;
+                       this block still follows the TopBar folder pill filter so
+                       the two stay consistent. Row capping is pure CSS: fixed
+                       column counts per breakpoint + nth-child hides, so the tile
+                       always lands right after the last visible poster. *@
+                    <section class="home-lib">
+                        @* Header link removed per feedback — the poster-shaped
+                           "view all" tile at the end of the grid is the single
+                           entry into /library. *@
+                        <div class="home-lib__head">
+                            <h2 class="home-lib__title">@L["home.library_title"]</h2>
+                            <span class="home-lib__count">@_filtered.Count</span>
+                        </div>
+                        @if (_filtered.Count == 0)
+                        {
+                            <div class="catalog-empty">
+                                <DIcon Name="video" Size="48" />
+                                <div class="catalog-empty__text">@L["catalog.empty"]</div>
+                            </div>
+                        }
+                        else
+                        {
+                            @* Render with headroom (41 covers ~21 columns × 2
+                               rows); the collocated JS trims to the exact slot
+                               count for the current width. *@
+                            <div class="home-lib__grid" @ref="_libGridRef">
+                                @foreach (var item in _filtered.Take(41))
+                                {
+                                    <Poster Item="@item" />
+                                }
+                                <a class="home-lib__more tv-focus" href="/library" aria-label="@L["home.view_all"]">
+                                    <span class="home-lib__more-icon"><DIcon Name="grid" Size="26" /></span>
+                                    <span class="home-lib__more-label">@L["home.view_all"]</span>
+                                    <span class="home-lib__more-count">@_filtered.Count</span>
+                                </a>
+                            </div>
+                        }
+                    </section>
+                    break;
+            }
         }
     }
 </div>
@@ -115,32 +130,40 @@
     private List<MediaItemDto>      _filtered   = new();
     private List<MediaItemDto>      _featured   = new();
     private List<FolderWatcherDto>  _sections   = new();
-    private List<CategoryDto>       _categories = new();
     private ContinueWatchItemDto[]  _continueItems = Array.Empty<ContinueWatchItemDto>();
-    /// <summary>Continue-watching slice after section + category filters.
-    /// Hero binds to this so a TopBar folder pill narrows the hero alongside
-    /// the grid below. Falls back to the full list when no filter is set.</summary>
+    /// <summary>Continue-watching slice after the section filter. Hero binds to
+    /// this so a TopBar folder pill narrows the hero alongside the library block.</summary>
     private ContinueWatchItemDto[]  _filteredContinue = Array.Empty<ContinueWatchItemDto>();
-    /// <summary>Featured-by-rating slice after section + category filters.
-    /// Same rationale as <see cref="_filteredContinue"/>.</summary>
+    /// <summary>Featured-by-rating slice after the section filter.</summary>
     private List<MediaItemDto>      _filteredFeatured = new();
+    /// <summary>Next-up feed (next episode per engaged series) — raw, then the
+    /// section-filtered rail slice.</summary>
+    private ContinueWatchItemDto[]  _nextUpItems    = Array.Empty<ContinueWatchItemDto>();
+    private ContinueWatchItemDto[]  _filteredNextUp = Array.Empty<ContinueWatchItemDto>();
+    /// <summary>Hero feed = in-progress continue items + freshly-landed episodes
+    /// (IsNew next-up). What <see cref="CatalogContinueHero"/> rotates through.</summary>
+    private ContinueWatchItemDto[]  _heroItems      = Array.Empty<ContinueWatchItemDto>();
     private bool   _loading = true;
-    private Guid?  _activeSection;     // legacy v3 folder filter (fallback)
-    // v5: source of truth for catalog filter is CategoryNavService.ActiveCategoryName
-    // (TopBar tabs write to it; Home reads it via the property below). Computed
-    // straight off the shared service so a TopBar click → ApplyFilter loop sees
-    // the freshly-set value without an intermediate local field.
-    private string? _activeCategory => CategoryNav.ActiveCategoryName;
+    private Guid?  _activeSection;     // TopBar folder pill filter
     private int    _heroInterval = 30;
+    /// <summary>Enabled + implemented section keys in the user's order —
+    /// drives the render stack above. Recomputed whenever preferences change
+    /// (saving the editor in ProfilePanel reorders Home live).</summary>
+    private List<string> _homeSections = new();
+    private RecCardDto[] _forYou = Array.Empty<RecCardDto>();
+    private CalendarEventDto[] _thisWeek = Array.Empty<CalendarEventDto>();
 
     protected override async Task OnInitializedAsync()
     {
-        // Re-render whenever TopBar (or anyone) changes the active category.
+        RebuildHomeSections();
+        // v5: catalog category filter is shared state (Library page chips /
+        // anything else may set it) — hero + library block follow it here.
         CategoryNav.OnChange += OnCategoryChanged;
         // TopBar folder pills write to FolderJump. Resolve name → section Id
-        // via _sections lookup and reapply the same chip-style filter the
-        // legacy v3 strip uses, so hero + grid both narrow to that folder.
+        // via _sections lookup so hero + block both narrow to that folder.
         FolderJump.OnChange  += OnFolderJumpChanged;
+        // Preferences changes (section order editor) re-stack Home live.
+        UserCtx.OnChange     += OnUserChanged;
 
         // Hydrate the server registry FIRST. Without this, a cold-start
         // that lands on /home directly (cookie-restored boot bypasses
@@ -148,45 +171,52 @@
         // compile-time placeholder URL — every Api.* call below fires
         // against tower.one and times out. ServerReg.LoadAsync is
         // idempotent (early-returns when already loaded) so this is safe
-        // to call from any page that fetches at boot, and it sequences
-        // BEFORE MainLayout.OnAfterRender because OnInitializedAsync runs
-        // on the child render pass.
+        // to call from any page that fetches at boot.
         try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup — fall through */ }
 
         try
         {
-            // Categories — drive the chip strip. Admin manages them in
-            // Server Settings → Categories; the LLM classifier auto-tags
-            // items on identification.
-            try
-            {
-                var cats = await Api.GetCategoriesAsync();
-                _categories = cats.ToList();
-            }
-            catch { _categories.Clear(); }
-
             // Continue Watching — v5 hero source of truth. Returns at most 5
             // in-progress titles for the current user; empty array if the
             // user hasn't started anything (Home falls back to Featured).
             try { _continueItems = await Api.GetContinueWatchingAsync(take: 5); }
             catch { _continueItems = Array.Empty<ContinueWatchItemDto>(); }
 
-            // One wide fetch — server query is a single SELECT with eager
-            // Tags include; client-side filtering is cheap on the resulting
-            // DTOs since they're already projections.
+            // Next Up — next episode per engaged series. Folds "new episode"
+            // items into the hero and fills the rail under it.
+            try { _nextUpItems = await Api.GetNextUpAsync(take: 12); }
+            catch { _nextUpItems = Array.Empty<ContinueWatchItemDto>(); }
+
+            // "For you" — heuristic recommendations (skipped entirely when the
+            // user hid the section, so no wasted TMDB round-trips).
+            if (_homeSections.Contains("foryou"))
+            {
+                try { _forYou = await Api.GetForYouAsync(); }
+                catch { _forYou = Array.Empty<RecCardDto>(); }
+            }
+
+            // "This week" — airing events for the current week (rail collapses
+            // when the week is empty).
+            if (_homeSections.Contains("thisweek"))
+            {
+                try
+                {
+                    var events = await Api.GetCalendarAsync(back: 1, ahead: 7);
+                    var weekEnd = DateTime.Now.Date.AddDays(7);
+                    _thisWeek = events
+                        .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
+                        .OrderBy(e => e.AiringAtUtc)
+                        .ToArray();
+                }
+                catch { _thisWeek = Array.Empty<CalendarEventDto>(); }
+            }
+
             var sections = await Api.GetSectionFoldersAsync();
             _sections = sections.OrderBy(f => f.Label).ToList();
 
             // Build the section → child-folder-id map HERE, right after _sections
-            // loads — NOT in OnAfterRenderAsync. OnAfterRenderAsync(firstRender)
-            // fires after the FIRST (loading-state) render, which happens at the
-            // first await in this method — long before _sections is populated. So
-            // the old code looped an empty _sections and left the map empty
-            // forever, which made every TopBar folder pill filter the grid down
-            // to ZERO items (the lookup fell back to an empty set). Populating it
-            // inline removes that lifecycle race. Defensive: include the section's
-            // own Id too, so an item filed directly under the section root (not a
-            // child folder) still matches.
+            // loads — NOT in OnAfterRenderAsync (see git history: lifecycle race
+            // left the map empty forever and folder pills filtered to zero).
             try
             {
                 var allFolders = await Api.GetFoldersAsync();
@@ -203,16 +233,9 @@
             catch { /* section filter degrades to no-op */ }
 
             var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
-            // Hide rows whose Folder is itself a section (those are containers,
-            // not catalog entries). The /api/media endpoint already filters out
-            // section-roots; this is belt-and-braces.
-            //
-            // De-duplication: two MediaItems can legitimately share the same
-            // Title/Year if the same movie lives in two folders (e.g. user
-            // moved a file but the old folder still has it). For visual
-            // catalog purposes that's a duplicate — collapse by Id first
-            // (defensive), then by (lowercased trimmed Title, Year) so the
-            // grid never shows the same logical title twice.
+            // De-duplication: collapse by Id first (defensive), then by
+            // (lowercased trimmed Title, Year) so the block never shows the
+            // same logical title twice.
             _allItems = items
                 .GroupBy(m => m.Id)
                 .Select(g => g.First())
@@ -232,30 +255,32 @@
             var intStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
             if (int.TryParse(intStr?.Value, out var iv)) _heroInterval = iv;
         }
-        catch { /* offline — empty grid */ }
+        catch { /* offline — empty sections */ }
 
         _loading = false;
         ApplyFilter();
     }
 
-    private void SetActiveCategory(string? name)
+    /// <summary>Recompute the render stack from the stored preference —
+    /// enabled entries only, filtered down to sections the app actually ships.</summary>
+    private void RebuildHomeSections()
     {
-        // Delegates to the shared service so TopBar and the page chip strip
-        // stay in lockstep — clicking either updates both displays.
-        CategoryNav.SetActiveCategory(name);
-        // No explicit ApplyFilter() here: OnCategoryChanged handles it.
+        _homeSections = HomeSections.Parse(UserCtx.Preferences?.HomeSectionsJson)
+            .Where(e => e.Enabled && HomeSections.ImplementedKeys.Contains(e.Key))
+            .Select(e => e.Key)
+            .ToList();
+    }
+
+    private void OnUserChanged()
+    {
+        RebuildHomeSections();
+        StateHasChanged();
     }
 
     private void OnCategoryChanged()
     {
         ApplyFilter();
         StateHasChanged();
-    }
-
-    private void SetActiveSection(Guid? sectionId)
-    {
-        _activeSection = sectionId;
-        ApplyFilter();
     }
 
     /// <summary>Reconcile <see cref="_activeSection"/> with the new value of
@@ -283,11 +308,8 @@
     {
         IEnumerable<MediaItemDto> src = _allItems;
 
-        // Category chip — match by CategoryNames on the DTO (server-projected
-        // from MediaItemCategory join). Read straight from the shared
-        // CategoryNavService so a TopBar click is reflected here without
-        // depending on Blazor re-rendering Home first. Case-insensitive so
-        // chip clicks match category names regardless of capitalisation.
+        // Category filter — shared state set by the Library page chips (and
+        // deep links). Case-insensitive match on the DTO's CategoryNames.
         var activeCat = CategoryNav.ActiveCategoryName;
         if (!string.IsNullOrWhiteSpace(activeCat))
         {
@@ -296,11 +318,6 @@
         }
 
         // Section filter — items whose Folder is under the chosen section.
-        // The lookup set is precomputed by OnAfterRenderAsync's /api/folders
-        // walk into _childFolderIdsBySection. Was a stray `var childIds = ...`
-        // declaration above that shadowed the later `out var childIds` in
-        // the hero-slice branch — both useless here because the actual
-        // membership test reads from _childFolderIdsBySection directly.
         if (_activeSection.HasValue)
         {
             src = src.Where(m => _childFolderIdsBySection
@@ -308,56 +325,92 @@
                 .Contains(m.FolderId));
         }
 
-        // NOTE: we used to drop the Featured hero titles from the grid when no
-        // category/section filter was active ("All"), to avoid showing them
-        // twice. But that made high-rated titles (e.g. Bleach: TYBW, rating 10)
-        // silently vanish from "All" — the user reads "All" as "everything is
-        // here", and a title rotating in the hero isn't an obvious substitute.
-        // So the grid now always lists every item; the hero is an additional
-        // highlight on top, not a replacement for the grid rows.
-
-        // Belt-and-braces dedup: if the API ever returns the same MediaItem
-        // twice (rare, but folder rescans during the request can race), keep
-        // the first occurrence so the grid doesn't show visible duplicates.
+        // Belt-and-braces dedup — keep the first occurrence so the block
+        // doesn't show visible duplicates if the API races a rescan.
         _filtered = src
             .GroupBy(m => m.Id)
             .Select(g => g.First())
             .ToList();
 
         // ── Hero slices follow the same section filter ────────────────────
-        // Featured is a MediaItemDto[] subset of _allItems — apply the same
-        // section-membership predicate so the rotating fanart matches the
-        // chosen folder. Category filter would also narrow this; for now
-        // we keep featured drawn from the cross-category top-rated pool, only
-        // intersected with the folder filter (matches user expectation that
-        // "this folder's best titles" still rotate when filtering by folder).
         if (_activeSection.HasValue && _childFolderIdsBySection.TryGetValue(_activeSection.Value, out var secChildIds))
         {
             _filteredFeatured = _featured.Where(m => secChildIds.Contains(m.FolderId)).ToList();
 
-            // Continue items don't carry FolderId on the DTO, so resolve via
-            // _allItems by mediaId (fast — _allItems is already in memory and
-            // dictionary-friendly by Id).
             var folderByMediaId = _allItems.ToDictionary(m => m.Id, m => m.FolderId);
-            _filteredContinue = _continueItems
-                .Where(c => folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid))
-                .ToArray();
+            bool InSection(ContinueWatchItemDto c) =>
+                folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid);
+            _filteredContinue = _continueItems.Where(InSection).ToArray();
+            _filteredNextUp   = _nextUpItems.Where(InSection).ToArray();
         }
         else
         {
             _filteredFeatured = _featured;
             _filteredContinue = _continueItems;
+            _filteredNextUp   = _nextUpItems;
         }
+
+        // One merged feed drives BOTH the hero (rotates through it) and the
+        // rail below (lists it) so the two always show the SAME titles in the
+        // SAME order. In-progress "continue" items come first and win on dedup;
+        // next-up items (next-in-line / freshly-landed) follow.
+        const int feedCap = 12;
+        var feed     = new List<ContinueWatchItemDto>();
+        var seenFeed = new HashSet<Guid>();
+        foreach (var c in _filteredContinue)
+            if (seenFeed.Add(c.MediaItemId)) feed.Add(c);
+        foreach (var n in _filteredNextUp)
+            if (seenFeed.Add(n.MediaItemId)) feed.Add(n);
+
+        var feedArr     = feed.Take(feedCap).ToArray();
+        _heroItems      = feedArr;   // hero rotates the same list…
+        _filteredNextUp = feedArr;   // …the rail shows it.
     }
 
     // Section → set of child FolderWatcher Ids. Built eagerly in
-    // OnInitializedAsync (right after _sections loads) — see the note there for
-    // why this must NOT live in OnAfterRenderAsync.
+    // OnInitializedAsync (right after _sections loads).
     private readonly Dictionary<Guid, HashSet<Guid>> _childFolderIdsBySection = new();
+
+    // ── library-block fill (see Home.razor.js) ────────────────────────────
+    private ElementReference _libGridRef;
+    private IJSObjectReference? _libJs;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Init is idempotent (the JS guards on a per-element flag), and the
+        // grid element can be re-created by a section re-order — so re-run it
+        // on every render while the grid exists.
+        if (_loading || _libGridRef.Id is null) return;
+        try
+        {
+            _libJs ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Pages/Home.razor.js");
+            await _libJs.InvokeVoidAsync("initLibGrid", _libGridRef);
+        }
+        catch { /* fill trim is an enhancement — the CSS clamp still holds */ }
+    }
 
     public void Dispose()
     {
         CategoryNav.OnChange -= OnCategoryChanged;
         FolderJump.OnChange  -= OnFolderJumpChanged;
+        UserCtx.OnChange     -= OnUserChanged;
+        if (_libJs is not null)
+        {
+            // Sync Dispose — fire-and-forget the JS teardown; the observer
+            // dies with the element anyway on full page teardown.
+            _ = SafeDisposeJsAsync(_libJs, _libGridRef);
+            _libJs = null;
+        }
+    }
+
+    private static async Task SafeDisposeJsAsync(IJSObjectReference js, ElementReference grid)
+    {
+        try
+        {
+            await js.InvokeVoidAsync("destroyLibGrid", grid);
+            await js.DisposeAsync();
+        }
+        catch { /* circuit teardown */ }
     }
 }

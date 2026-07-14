@@ -4,6 +4,7 @@ using Animarr.Web.Data.Models;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using System.ClientModel;
+using NaturalStringComparer = Animarr.Shared.NaturalStringComparer;
 
 namespace Animarr.Web.Services;
 

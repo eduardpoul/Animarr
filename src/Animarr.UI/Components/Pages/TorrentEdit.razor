@@ -25,8 +25,8 @@
 
 <SettingsEditDrawer IsOpen="true"
                     Title="@(_record?.Name ?? Hash)"
-                    Overline="TORRENT"
-                    Hint="@(_live?.State is { } s ? $"State · {s}" : "Loading state…")"
+                    Overline="@L["torrent_edit.drawer_overline"]"
+                    Hint="@(_live?.State is { } s ? L.Get("torrent_edit.drawer_state_fmt", s) : L["torrent_edit.drawer_loading_state"])"
                     Icon="torrent"
                     OnClose="OnCloseAsync">
     <Body>
@@ -49,7 +49,7 @@
                     @if (_live is not null)
                     {
                         <div class="te-stats__row">
-                            <span class="te-stats__label">State</span>
+                            <span class="te-stats__label">@L["torrent_edit.stat_state"]</span>
                             <span class="te-stats__state">
                                 <span class="@($"tor-dot tor-dot--{StateColorClass()}")"></span>
                                 @_live.State
@@ -159,7 +159,7 @@
             <DIcon Name="check" Size="13" />
             @(_saving ? L["torrent_edit.btn_saving"] : L["torrent_edit.btn_save"])
         </Btn>
-        <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">Cancel</Btn>
+        <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">@L["common.btn_cancel"]</Btn>
         <div class="te-footer__spacer"></div>
         @if (_record is not null)
         {
@@ -167,7 +167,7 @@
                 <DIcon Name="refresh" Size="13" /> Recheck
             </Btn>
             <Btn Variant="danger" Size="md" OnClick="DeleteAsync">
-                <DIcon Name="trash" Size="13" /> Remove
+                <DIcon Name="trash" Size="13" /> @L["common.btn_remove"]
             </Btn>
         }
     </Footer>

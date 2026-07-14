@@ -19,6 +19,110 @@
     Spec: design_v2/animarr/project/design_handoff_animarr/CHANGELOG_FOR_CLAUDE_CODE.md §4.
 *@
 
+@if (Layout == "list")
+{
+    @* ── DETAILED LIST ROW (Layout="list") ───────────────────────────
+       Reuses the card's thumb / number / progress / play-overlay elements,
+       reflowed by .d-ep--list into a horizontal grid (thumb · main · acts).
+       Richer per-episode metadata (synopsis, air date, rating) lands in
+       Stage B; for now the row shows exactly what the grid already has. *@
+    <div class="@CssClass" title="@Title">
+        <div class="d-ep__strip"></div>
+
+        <div class="d-ep__art">
+            @if (!string.IsNullOrEmpty(ThumbUrl))
+            {
+                <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" />
+            }
+            else
+            {
+                <div class="d-ep__placeholder"><DIcon Name="video" Size="20" /></div>
+            }
+            <div class="d-ep__num">@Number.ToString("00")</div>
+            @if (Have)
+            {
+                <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="22" /></div>
+            }
+            @if (Have && (IsWatched || ProgressPct > 0))
+            {
+                <div class="d-ep__pb">
+                    <div class="@ProgressFillClass" style="width: @(IsWatched ? 100 : ProgressPct)%"></div>
+                </div>
+            }
+        </div>
+
+        <div class="d-eplist__main">
+            <div class="d-eplist__top">
+                <span class="d-eplist__epnum">EP @Number.ToString("00")</span>
+                <span class="d-eplist__title">@Title</span>
+                @if (FlagLabel is not null)
+                {
+                    <span class="@($"d-eplist__badge d-eplist__badge--{Flag}")">@FlagLabel</span>
+                }
+                @if (Have && IsWatched)
+                {
+                    <span class="d-eplist__badge d-eplist__badge--watched">Watched</span>
+                }
+                else if (Have && ProgressPct > 0)
+                {
+                    <span class="d-eplist__badge d-eplist__badge--progress">@ProgressPct% · Resume</span>
+                }
+            </div>
+            <div class="d-eplist__meta">
+                @if (FormattedAirDate is { } airdate)
+                {
+                    <span>@airdate</span>
+                    <span class="d-eplist__sep">·</span>
+                }
+                <span>@Meta</span>
+                @if (!string.IsNullOrEmpty(Resolution))
+                {
+                    <span class="d-eplist__sep">·</span>
+                    <span class="d-eplist__res">@Resolution</span>
+                }
+                @if (RatingText is { } rating)
+                {
+                    <span class="d-eplist__sep">·</span>
+                    <span class="d-eplist__star">★ @rating</span>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Overview))
+            {
+                <p class="d-eplist__desc">@Overview</p>
+            }
+        </div>
+
+        @if (Have)
+        {
+            <div class="d-eplist__right">
+                @if (RatingText is { } scoreVal)
+                {
+                    <div class="d-eplist__score">
+                        <span class="d-eplist__score-v"><span class="d-eplist__score-star">★</span> @scoreVal</span>
+                        <span class="d-eplist__score-l">TMDB</span>
+                    </div>
+                }
+                <div class="d-eplist__acts">
+                    <button type="button"
+                            class="@($"d-eplist__act {(IsWatched ? "is-on" : "")}")"
+                            title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
+                            @onclick="OnEyeClick"
+                            @onclick:stopPropagation="true">
+                        <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="15" />
+                    </button>
+                    @* No @onclick — the click bubbles to the parent .md-episode-card
+                       wrapper, whose handler plays the episode (same target as the
+                       whole-card click used in the grid). *@
+                    <button type="button" class="d-eplist__act d-eplist__act--pri" title="Play">
+                        <DIcon Name="play" Size="15" />
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+else
+{
 <div class="@CssClass" title="@Title">
     <div class="d-ep__strip"></div>
     <div class="d-ep__art">
@@ -74,6 +178,13 @@
             </div>
         }
 
+        @* Filler/recap marker — bottom-left over the thumb, opposite the
+           watched-eye. MAL data via Jikan; helps decide "can I skip this?". *@
+        @if (FlagLabel is not null)
+        {
+            <div class="@($"d-ep__flag d-ep__flag--{Flag}")">@FlagLabel</div>
+        }
+
         @* Progress bar — 3px on episode card. Pinned to thumb bottom edge.
            Inline width is the only data-bound style allowed (spec §constraints). *@
         @if (Have && (IsWatched || ProgressPct > 0))
@@ -89,13 +200,71 @@
         <div class="d-ep__meta">@Meta</div>
     </div>
 </div>
+}
 
 @code {
+    /// <summary>"card" (default poster-card grid) or "list" (detailed
+    /// horizontal row). Driven by the user's EpisodeListView preference via
+    /// the parent (MediaDetail). The list layout reuses the same data + state
+    /// helpers — only the markup + .d-ep--list CSS differ.</summary>
+    [Parameter] public string Layout { get; set; } = "card";
+
+    // ── Per-episode TMDB metadata (list layout only; Stage B) ──────────────
+    /// <summary>Episode synopsis — rendered as a 2-line clamp in the list row.</summary>
+    [Parameter] public string? Overview { get; set; }
+    /// <summary>Air date as a raw ISO string (yyyy-MM-dd); formatted for display.</summary>
+    [Parameter] public string? AirDate  { get; set; }
+    /// <summary>TMDB vote average (&gt; 0) shown as a ★ score.</summary>
+    [Parameter] public double? Rating   { get; set; }
+    /// <summary>Video resolution parsed from the file name ("1080p"/"720p"/"4K"),
+    /// shown as a chip. Null when missing/unknown.</summary>
+    [Parameter] public string? Resolution { get; set; }
+    /// <summary>UI language code (en/ru/uk/de/es) for localizing the air date's
+    /// month names. Null → English.</summary>
+    [Parameter] public string? Lang { get; set; }
+
+    /// <summary>Culture for the air-date month names, mapped from <see cref="Lang"/>.
+    /// Falls back to invariant if the runtime lacks the culture.</summary>
+    private System.Globalization.CultureInfo DateCulture
+    {
+        get
+        {
+            var code = Lang switch
+            {
+                "ru" => "ru-RU", "uk" => "uk-UA", "de" => "de-DE", "es" => "es-ES", _ => "en-US",
+            };
+            try { return System.Globalization.CultureInfo.GetCultureInfo(code); }
+            catch { return System.Globalization.CultureInfo.InvariantCulture; }
+        }
+    }
+
+    /// <summary>Air date as "6 Oct 2007", with month names localized to the UI
+    /// language. Parsed as invariant ISO; null when absent/unparseable.</summary>
+    private string? FormattedAirDate =>
+        !string.IsNullOrWhiteSpace(AirDate)
+        && DateTime.TryParse(AirDate, System.Globalization.CultureInfo.InvariantCulture,
+               System.Globalization.DateTimeStyles.None, out var d)
+            ? d.ToString("d MMM yyyy", DateCulture)
+            : null;
+
+    /// <summary>Rating as "7.6" (invariant — ru/uk locales must not emit "7,6"),
+    /// or null when there's no rating.</summary>
+    private string? RatingText =>
+        Rating is > 0
+            ? Rating.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
     [Parameter] public int     Number   { get; set; }
     [Parameter] public string  Title    { get; set; } = "";
     [Parameter] public string? ThumbUrl { get; set; }
     [Parameter] public string  Meta     { get; set; } = "";
     [Parameter] public bool    Have     { get; set; }
+
+    /// <summary>Episode marker kind: "filler" | "recap" | null (drives the
+    /// chip color); <see cref="FlagLabel"/> is the localized text supplied by
+    /// the parent (this component stays localization-free).</summary>
+    [Parameter] public string? Flag      { get; set; }
+    [Parameter] public string? FlagLabel { get; set; }
 
     /// <summary>Per-episode WatchStateDto as resolved by the parent (MediaDetail).
     /// Null = user hasn't touched this episode yet (no row in WatchStates).</summary>
@@ -128,6 +297,7 @@
         {
             var cls = Have ? "d-ep d-ep--have" : "d-ep d-ep--miss";
             if (Have && IsWatched) cls += " d-ep--watched";
+            if (Layout == "list")  cls += " d-ep--list";
             return cls;
         }
     }

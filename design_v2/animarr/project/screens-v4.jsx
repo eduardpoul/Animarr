@@ -237,6 +237,7 @@ const LoginScreen = ({ onLogin, onBack }) => {
 const TopBarV4 = ({ user, route, onRoute, onProfile, onLLM }) => {
   const isAdmin = window.can(user, "systemSettings");
   const canDownload = window.can(user, "uploadContent");
+  const wl = window.useWatchlist ? window.useWatchlist() : null;
   const activeBtn = (key) => route === key;
   const [folder, setFolder] = s4S("All");
   const folders = ["All", ...window.FOLDERS.map(f => f.title)];
@@ -308,6 +309,65 @@ const TopBarV4 = ({ user, route, onRoute, onProfile, onLLM }) => {
         <span style={{ fontFamily:"var(--font-mono)", fontSize: 10.5, color:"var(--text-dim)", letterSpacing: 0.6 }}>17/25</span>
       </button>
 
+      <button className="tv-focus" title="Поиск" style={{
+        all:"unset", cursor:"pointer", flexShrink: 0, width: 36, height: 36, borderRadius: 8,
+        background:"var(--surface)", border:"1px solid var(--border)", color:"var(--text-dim)",
+        display:"grid", placeItems:"center",
+      }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
+      </button>
+      {window.CalendarPage && (
+        <button onClick={() => onRoute("calendar")} className="tv-focus" title={window.RU ? window.RU.calendar : "Calendar"} style={{
+          all:"unset", cursor:"pointer", flexShrink: 0,
+          width: 36, height: 36, borderRadius: 8,
+          background: activeBtn("calendar") ? "var(--accent-soft)" : "var(--surface)",
+          border:`1px solid ${activeBtn("calendar") ? "var(--accent-line)" : "var(--border)"}`,
+          color: activeBtn("calendar") ? "var(--accent-hi)" : "var(--text-dim)",
+          display:"grid", placeItems:"center",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/></svg>
+        </button>
+      )}
+
+      {window.DiscoverPage && (
+        <button onClick={() => onRoute("discover")} className="tv-focus" title={window.RU ? window.RU.discover : "Discover"} style={{
+          all:"unset", cursor:"pointer", flexShrink: 0, width: 36, height: 36, borderRadius: 8,
+          background: activeBtn("discover") ? "var(--accent-soft)" : "var(--surface)",
+          border:`1px solid ${activeBtn("discover") ? "var(--accent-line)" : "var(--border)"}`,
+          color: activeBtn("discover") ? "var(--accent-hi)" : "var(--text-dim)",
+          display:"grid", placeItems:"center",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="16 8 13.5 13.5 8 16 10.5 10.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+      )}
+
+      {window.WatchlistPage && (
+        <button onClick={() => onRoute("watchlist")} className="tv-focus" title={window.RU ? window.RU.watchlist : "Watchlist"} style={{
+          all:"unset", cursor:"pointer", position:"relative", flexShrink: 0,
+          width: 36, height: 36, borderRadius: 8,
+          background: activeBtn("watchlist") ? "var(--accent-soft)" : "var(--surface)",
+          border:`1px solid ${activeBtn("watchlist") ? "var(--accent-line)" : "var(--border)"}`,
+          color: activeBtn("watchlist") ? "var(--accent-hi)" : "var(--text-dim)",
+          display:"grid", placeItems:"center",
+        }}>
+          {window.BookmarkPlus ? <window.BookmarkPlus size={15} /> : null}
+          {wl && wl.count() > 0 && (
+            <span style={{ position:"absolute", top:-3, right:-3, background:"var(--accent)", color:"#fff", fontSize:9, fontWeight:700, fontFamily:"var(--font-mono)", minWidth:14, height:14, padding:"0 3px", borderRadius:14, display:"grid", placeItems:"center", border:"1.5px solid var(--bg-0)", lineHeight:1 }}>{wl.count()}</span>
+          )}
+        </button>
+      )}
+
+      {window.StatsPage && (
+        <button onClick={() => onRoute("stats")} className="tv-focus" title={window.RU ? window.RU.stats : "Stats"} style={{
+          all:"unset", cursor:"pointer", flexShrink: 0, width: 36, height: 36, borderRadius: 8,
+          background: activeBtn("stats") ? "var(--accent-soft)" : "var(--surface)",
+          border:`1px solid ${activeBtn("stats") ? "var(--accent-line)" : "var(--border)"}`,
+          color: activeBtn("stats") ? "var(--accent-hi)" : "var(--text-dim)",
+          display:"grid", placeItems:"center",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg>
+        </button>
+      )}
       {/* Downloads */}
       {canDownload && (
         <button onClick={() => onRoute("downloads")} className="tv-focus" title="Downloads" style={{
@@ -345,20 +405,10 @@ const TopBarV4 = ({ user, route, onRoute, onProfile, onLLM }) => {
       )}
 
       {/* Profile */}
-      <button onClick={onProfile} className="tv-focus" style={{
-        all:"unset", cursor:"pointer", flexShrink: 0,
-        display:"inline-flex", alignItems:"center", gap: 10,
-        padding:"4px 10px 4px 4px", borderRadius: 999,
-        background:"var(--surface)", border:"1px solid var(--border)",
-        height: 36, boxSizing:"border-box",
+      <button onClick={onProfile} className="tv-focus" title={user?.name} style={{
+        all:"unset", cursor:"pointer", flexShrink: 0, borderRadius: 999,
       }}>
-        <window.Avatar user={user} size={28} />
-        <span style={{ display:"flex", flexDirection:"column", lineHeight: 1.1, alignItems:"flex-start" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color:"var(--text)" }}>{user?.name}</span>
-          <span style={{ fontFamily:"var(--font-mono)", fontSize: 9.5, color:"var(--text-faint)", letterSpacing: 0.6, textTransform:"uppercase" }}>
-            {user?.role}
-          </span>
-        </span>
+        <window.Avatar user={user} size={34} />
       </button>
       <style>{`@keyframes llm-pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }`}</style>
     </header>

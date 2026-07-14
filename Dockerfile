@@ -78,6 +78,34 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /src/llama.cpp && 
     cp /src/llama.cpp/build/bin/llama-server /opt/out/ && \
     find /src/llama.cpp/build -name '*.so*' -exec cp -n {} /opt/out/ \;
 
+# FFmpeg stage — pinned static build (security fix for CVE-2026-8461)
+# -------------------------------------------------------------------
+# Ubuntu Noble's apt ffmpeg is 6.1.1, vulnerable to CVE-2026-8461 ("PixelSmash":
+# heap out-of-bounds write in the MagicYUV decoder, CVSS 8.8), fixed upstream in
+# 8.1.2 — and Ubuntu has shipped no backport. We instead drop in the static
+# n8.1.2 build from BtbN/FFmpeg-Builds: the Linux build the official
+# ffmpeg.org/download page recommends, maintained by FFmpeg upstream developer
+# Timo Rothenpieler ("BtbN"). Pinned to a dated autobuild tag + sha256 so the
+# binary is reproducible and changes only when we consciously bump it. The gpl
+# static binaries link only glibc (verified via ldd); hwaccel (vaapi/nvenc/qsv)
+# is dlopen'd at runtime against the driver libs the final stage installs.
+#
+# To bump: pick a newer tag at https://github.com/BtbN/FFmpeg-Builds/releases
+# and update FFMPEG_URL + FFMPEG_SHA256. The `-version` check below fails the
+# build if the archive is corrupt or the wrong arch.
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS ffmpeg
+ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-13-52/ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz
+ARG FFMPEG_SHA256=0c6772b77fdbf127cc1498eca39a40e20b88817f36b66d553cebcfcca32b6d78
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl xz-utils ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" && \
+    echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
+    mkdir -p /opt/ffmpeg/bin && \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp && \
+    cp /tmp/ffmpeg-*/bin/ffmpeg /tmp/ffmpeg-*/bin/ffprobe /opt/ffmpeg/bin/ && \
+    /opt/ffmpeg/bin/ffmpeg -version
+
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
@@ -111,9 +139,11 @@ WORKDIR /app
 # Deploy script (deploy.ps1) detects host capabilities and adds the matching
 # docker run flags (`--device /dev/dri --group-add video` for VAAPI,
 # `--gpus all` for NVIDIA). One image, any GPU.
+# NOTE: ffmpeg/ffprobe are NOT installed from apt anymore — they come from the
+# pinned static BtbN stage above (CVE-2026-8461 fix; see the COPY below). apt
+# here installs only the hwaccel userspace those static binaries dlopen at runtime.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ffmpeg \
         mesa-va-drivers \
         intel-media-va-driver \
         vainfo \
@@ -122,6 +152,12 @@ RUN apt-get update && \
         libvulkan1 \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+
+# Drop in the pinned static ffmpeg/ffprobe (see the FFmpeg stage above). They
+# land in /usr/local/bin — ahead of /usr/bin on PATH — so the app's `ffmpeg`/
+# `ffprobe` child processes resolve to the patched 8.1.2 build. COPY preserves
+# the +x bits set during extraction.
+COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data && chmod 777 /app/data

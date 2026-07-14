@@ -13,31 +13,31 @@
 @inject UserContextState UserCtx
 @inject DeviceProfilesState DeviceProfiles
 
-<PageTitle>Animarr — Set up your master account</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 <div class="d-setup">
     <button type="button" class="d-setup__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> BACK
+        <DIcon Name="arrow-l" Size="13" /> @L["setup.back"]
     </button>
 
-    <div class="d-setup__card" role="dialog" aria-label="First-run setup">
+    <div class="d-setup__card" role="dialog" aria-label="@L["setup.aria_first_run"]">
         <header class="d-setup__brand">
             <BrandMark Size="38" ExtraClass="d-setup__brand-mark" />
             <div>
                 <div class="d-setup__brand-name">Animarr</div>
-                <div class="d-setup__brand-sub">First-run setup — create the master account</div>
+                <div class="d-setup__brand-sub">@L["setup.brand_sub"]</div>
             </div>
         </header>
 
         <form class="d-setup__form" @onsubmit="OnSubmit" @onsubmit:preventDefault>
             <div class="d-setup__row">
-                <Input @bind-Value="_name"     Placeholder="Your name"        Label="Name"     Disabled="@_loading" />
-                <Input @bind-Value="_username" Placeholder="username"         Label="Username" Disabled="@_loading" Autocomplete="username" />
+                <Input @bind-Value="_name"     Placeholder="@L["setup.field_name_placeholder"]"     Label="@L["setup.field_name_label"]"     Disabled="@_loading" />
+                <Input @bind-Value="_username" Placeholder="@L["setup.field_username_placeholder"]"  Label="@L["setup.field_username_label"]" Disabled="@_loading" Autocomplete="username" />
             </div>
-            <Input @bind-Value="_email" Placeholder="you@example.com (optional)" Label="Email" Type="email" Disabled="@_loading" />
+            <Input @bind-Value="_email" Placeholder="@L["setup.field_email_placeholder"]" Label="@L["setup.field_email_label"]" Type="email" Disabled="@_loading" />
             <div class="d-setup__row">
-                <Input @bind-Value="_password"        Placeholder="At least 6 characters" Label="Password"  Type="password" Disabled="@_loading" Autocomplete="new-password" />
-                <Input @bind-Value="_passwordConfirm" Placeholder="Repeat"                Label="Repeat"    Type="password" Disabled="@_loading" Autocomplete="new-password" />
+                <Input @bind-Value="_password"        Placeholder="@L["setup.field_password_placeholder"]" Label="@L["setup.field_password_label"]"  Type="password" Disabled="@_loading" Autocomplete="new-password" />
+                <Input @bind-Value="_passwordConfirm" Placeholder="@L["setup.field_repeat_placeholder"]"    Label="@L["setup.field_repeat_label"]"    Type="password" Disabled="@_loading" Autocomplete="new-password" />
             </div>
 
             @if (!string.IsNullOrEmpty(_error))
@@ -46,16 +46,14 @@
             }
 
             <div class="d-setup__hint">
-                Master users have full access to every folder, the server settings,
-                and user management. You can create restricted accounts later from
-                Server Settings → Users &amp; Roles.
+                @L["setup.hint"]
             </div>
 
             <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || !CanSubmit)">
-                @if (_loading) { <Spinner Size="14" /><text>Creating…</text> }
+                @if (_loading) { <Spinner Size="14" /><text>@L["setup.btn_creating"]</text> }
                 else
                 {
-                    <text>Create master account</text>
+                    <text>@L["setup.btn_create_master"]</text>
                     <DIcon Name="arrow-r" Size="13" />
                 }
             </Btn>
@@ -105,7 +103,7 @@
             var created = await Api.SetupInitialMasterAsync(req);
             if (created is null)
             {
-                _error = "Setup failed — check the fields and try again";
+                _error = L["setup.error_failed_check_fields"];
                 _loading = false;
                 return;
             }
@@ -116,7 +114,7 @@
         }
         catch (Exception ex)
         {
-            _error = $"Setup failed: {ex.Message}";
+            _error = L.Get("setup.error_failed_fmt", ex.Message);
             _loading = false;
         }
     }

@@ -1,0 +1,228 @@
+@page "/library"
+@implements IDisposable
+@inject IAnimarrApiClient Api
+@inject CategoryNavService CategoryNav
+@inject FolderJumpService FolderJump
+@inject Animarr.UI.Services.ServerRegistryState ServerReg
+
+<PageTitle>@L["home.library_title"] — Animarr</PageTitle>
+
+@*
+    Full catalog page — the chip-filtered poster grid that used to live on
+    Home. Home now shows a two-row "Библиотека" teaser; the "view all" tile
+    lands here. No hero — this page is for browsing, chips at the top:
+    category chips (LLM-classified) with the v3 folder strip as a fallback
+    until categories exist. Filter state is the SAME shared services Home
+    uses (CategoryNavService / FolderJumpService), so a filter picked on
+    either page follows to the other.
+*@
+<div class="catalog-page catalog-page--library">
+
+    <div class="library-head">
+        @* Unified back affordance — the same PageBack arrow as /search and
+           the detail hero (history.back with a "/" fallback). *@
+        <PageBack Fallback="/" />
+    </div>
+
+    @if (_categories.Count > 0)
+    {
+        <div class="catalog-folders">
+            <button type="button"
+                    class="@($"catalog-chip {(_activeCategory is null ? "catalog-chip--active" : "")}")"
+                    @onclick="@(() => SetActiveCategory(null))">@L["catalog.tab_all"]</button>
+            @foreach (var cat in _categories.Where(c => c.Enabled && c.ItemCount > 0).OrderBy(c => c.SortOrder))
+            {
+                var name = cat.Name;
+                <button type="button"
+                        class="@($"catalog-chip {(_activeCategory == name ? "catalog-chip--active" : "")}")"
+                        @onclick="@(() => SetActiveCategory(name))">
+                    @name
+                    <span class="catalog-chip__count">@cat.ItemCount</span>
+                </button>
+            }
+        </div>
+    }
+    else if (_sections.Count > 0)
+    {
+        @* Fallback: until categories exist (fresh install before the first
+           identification batch lands), keep the v3 folder strip so the
+           catalog isn't a flat list. *@
+        <div class="catalog-folders">
+            <button type="button"
+                    class="@($"catalog-chip {(_activeSection is null ? "catalog-chip--active" : "")}")"
+                    @onclick="@(() => SetActiveSection(null))">@L["catalog.tab_all"]</button>
+            @foreach (var sec in _sections)
+            {
+                var id = sec.Id;
+                <button type="button"
+                        class="@($"catalog-chip {(_activeSection == id ? "catalog-chip--active" : "")}")"
+                        @onclick="@(() => SetActiveSection(id))">@sec.Label</button>
+            }
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="catalog-loading">
+            <div class="catalog-loading__ring"></div>
+            <div class="catalog-loading__label">@L["catalog.loading"]</div>
+        </div>
+    }
+    else if (_filtered.Count == 0)
+    {
+        <div class="catalog-empty">
+            <DIcon Name="video" Size="48" />
+            <div class="catalog-empty__text">@L["catalog.empty"]</div>
+        </div>
+    }
+    else
+    {
+        <div class="catalog-grid">
+            @* Cap rendered items so the catalog stays snappy at 1000+ entries. *@
+            @foreach (var item in _filtered.Take(240))
+            {
+                <Poster Item="@item" />
+            }
+        </div>
+        @if (_filtered.Count > 240)
+        {
+            <div class="catalog-more">
+                @L.Get("catalog.shown_of_total", 240, _filtered.Count)
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<MediaItemDto>     _allItems   = new();
+    private List<MediaItemDto>     _filtered   = new();
+    private List<FolderWatcherDto> _sections   = new();
+    private List<CategoryDto>      _categories = new();
+    private bool  _loading = true;
+    private Guid? _activeSection;
+    private string? _activeCategory => CategoryNav.ActiveCategoryName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CategoryNav.OnChange += OnCategoryChanged;
+        FolderJump.OnChange  += OnFolderJumpChanged;
+
+        try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup */ }
+
+        try
+        {
+            try
+            {
+                var cats = await Api.GetCategoriesAsync();
+                _categories = cats.ToList();
+            }
+            catch { _categories.Clear(); }
+
+            var sections = await Api.GetSectionFoldersAsync();
+            _sections = sections.OrderBy(f => f.Label).ToList();
+
+            try
+            {
+                var allFolders = await Api.GetFoldersAsync();
+                foreach (var sec in _sections)
+                {
+                    var ids = allFolders
+                        .Where(f => f.ParentSectionId == sec.Id)
+                        .Select(f => f.Id)
+                        .ToHashSet();
+                    ids.Add(sec.Id);
+                    _childFolderIdsBySection[sec.Id] = ids;
+                }
+            }
+            catch { /* folder filter degrades to no-op */ }
+
+            // A TopBar folder pill may already be active when we land here —
+            // adopt it so the grid matches the pill highlight.
+            SyncSectionFromFolderJump();
+
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            _allItems = items
+                .GroupBy(m => m.Id)
+                .Select(g => g.First())
+                .GroupBy(m => (m.Title?.Trim().ToLowerInvariant() ?? "", m.Year))
+                .Select(g => g.First())
+                .ToList();
+        }
+        catch { /* offline — empty grid */ }
+
+        _loading = false;
+        ApplyFilter();
+    }
+
+    private void SetActiveCategory(string? name)
+    {
+        CategoryNav.SetActiveCategory(name);
+        // No explicit ApplyFilter() here: OnCategoryChanged handles it.
+    }
+
+    private void OnCategoryChanged()
+    {
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void SetActiveSection(Guid? sectionId)
+    {
+        _activeSection = sectionId;
+        ApplyFilter();
+    }
+
+    private void SyncSectionFromFolderJump()
+    {
+        var name = FolderJump.ActiveFolderName;
+        Guid? newSection = null;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var match = _sections.FirstOrDefault(s =>
+                string.Equals(s.Label, name, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) newSection = match.Id;
+        }
+        _activeSection = newSection;
+    }
+
+    private void OnFolderJumpChanged()
+    {
+        var prev = _activeSection;
+        SyncSectionFromFolderJump();
+        if (prev == _activeSection) return;
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void ApplyFilter()
+    {
+        IEnumerable<MediaItemDto> src = _allItems;
+
+        var activeCat = CategoryNav.ActiveCategoryName;
+        if (!string.IsNullOrWhiteSpace(activeCat))
+        {
+            src = src.Where(m => m.CategoryNames is { Length: > 0 }
+                              && m.CategoryNames.Any(n => string.Equals(n, activeCat, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (_activeSection.HasValue)
+        {
+            src = src.Where(m => _childFolderIdsBySection
+                .GetValueOrDefault(_activeSection.Value, new HashSet<Guid>())
+                .Contains(m.FolderId));
+        }
+
+        _filtered = src
+            .GroupBy(m => m.Id)
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    private readonly Dictionary<Guid, HashSet<Guid>> _childFolderIdsBySection = new();
+
+    public void Dispose()
+    {
+        CategoryNav.OnChange -= OnCategoryChanged;
+        FolderJump.OnChange  -= OnFolderJumpChanged;
+    }
+}

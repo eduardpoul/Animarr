@@ -4,6 +4,7 @@ using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -76,7 +77,7 @@ internal static class FolderEndpoints
             await watcher.StartWatcherAsync(entity.Id);
 
             return Results.Created(ApiRoutes.Folder(entity.Id), entity.ToDto());
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPut(ApiRoutes.FolderById, async (
             Guid id,
@@ -101,7 +102,7 @@ internal static class FolderEndpoints
             if (request.WatchEnabled) await watcher.StartWatcherAsync(id);
             else                      await watcher.StopWatcherAsync(id);
             return Results.Ok(entity.ToDto());
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapDelete(ApiRoutes.FolderById, async (
             Guid id,
@@ -126,7 +127,7 @@ internal static class FolderEndpoints
 
             await watcher.StopWatcherAsync(id);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPost(ApiRoutes.FolderScan, async (
             Guid id,
@@ -212,7 +213,7 @@ internal static class FolderEndpoints
                 await watcher.StartWatcherAsync(id);
             }
             return Results.Accepted();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapGet(ApiRoutes.FolderChildren, async (
             Guid id,
@@ -272,7 +273,7 @@ internal static class FolderEndpoints
             }
             catch (UnauthorizedAccessException) { return Results.Forbid(); }
             catch (Exception) { return Results.Problem("Couldn't read directory."); }
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         // v5: multipart upload — drop arbitrary files into a watcher's folder
         // without going through the torrent engine. Third tab of the Add
@@ -317,7 +318,7 @@ internal static class FolderEndpoints
                 }
             }
             return Results.Ok(new { Written = written });
-        }).DisableAntiforgery();
+        }).DisableAntiforgery().RequireAuthorization(AuthConstants.Policies.UploadContent);
 
         return app;
     }

@@ -22,4 +22,9 @@ public sealed record UserPreferencesDto(
     string Theme,
     string HeroPagerStyle,
     bool   ThemeMusicEnabled,
-    int    ThemeMusicVolume);
+    int    ThemeMusicVolume,
+    string EpisodeListView,
+    string? HomeSectionsJson = null,
+    string  RecsScope        = "everywhere",
+    bool    HideFillers      = false,
+    string? FillerOverridesJson = null);

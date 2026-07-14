@@ -3,6 +3,7 @@ using Animarr.UI;
 using Animarr.UI.Services;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.JSInterop;
 using Animarr.Web.Client;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -45,8 +46,23 @@ builder.Services.AddSingleton<ToastService>();
 var host = builder.Build();
 
 // Load the active language pack before the first render so L["..."] returns
-// real strings instead of keys on initial paint.
+// real strings instead of keys on initial paint. Prefer the language cached in
+// localStorage by the previous session (written by MainLayout / ProfilePanel):
+// a non-English user's first paint is then already localized instead of
+// flashing English until /api/me/preferences resolves. Falls back to "en" on
+// an empty cache or any interop hiccup; LoadAsync itself falls back to en.json
+// for a missing pack.
 var loc = host.Services.GetRequiredService<LocalizationService>();
-await loc.LoadAsync("en");
+var bootLang = "en";
+try
+{
+    if (host.Services.GetRequiredService<IJSRuntime>() is IJSInProcessRuntime jsSync)
+    {
+        var cached = jsSync.Invoke<string?>("localStorage.getItem", "animarr-lang");
+        if (!string.IsNullOrWhiteSpace(cached)) bootLang = cached;
+    }
+}
+catch { /* keep "en" */ }
+await loc.LoadAsync(bootLang);
 
 await host.RunAsync();

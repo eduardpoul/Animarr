@@ -46,7 +46,7 @@ namespace Animarr.Web.Services;
 /// headaches, (2) browsers + TVs have decoded TS for two decades, (3) audio
 /// passthrough Just Works inside TS without container-level mangling.
 /// </summary>
-public sealed class HlsSessionService : IDisposable
+public sealed partial class HlsSessionService : IDisposable
 {
     /// <summary>How long a session can have no keepalive ping before the GC
     /// reaps it. The JS bridge pings every 30s while the player is mounted,
@@ -75,6 +75,11 @@ public sealed class HlsSessionService : IDisposable
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
     private readonly Timer _gcTimer;
+
+    /// <summary>Live HLS transcode sessions right now (idle-but-not-yet-reaped
+    /// included). Background jobs (trickplay) poll this to yield the CPU to
+    /// playback.</summary>
+    public int ActiveSessionCount => _sessions.Count;
 
     public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null)
     {
@@ -113,13 +118,20 @@ public sealed class HlsSessionService : IDisposable
         PlayerOutputInfo Output);
 
     /// <summary>
-    /// Returned from <see cref="ChoosePlaybackAsync"/>. When <c>DirectPlay</c>
-    /// is true, the client should set the player's src to <c>DirectUrl</c>
-    /// directly and skip the HLS session entirely. Otherwise the caller falls
-    /// through to <see cref="StartAsync"/> for the HLS path.
+    /// Returned from <see cref="ChoosePlaybackAsync"/>. Two native paths and an
+    /// HLS fallback:
+    ///   • <c>DirectPlay</c> — raw file via /api/file (Range-seekable). MP4 +
+    ///     browser codec + AAC. Client sets src to <c>DirectUrl</c> directly.
+    ///   • <c>DirectStream</c> — on-the-fly remux to progressive fMP4 via
+    ///     /api/video (video stream-copy, audio→AAC). Non-MP4 containers (MKV)
+    ///     whose video the browser decodes. Original video + HDR preserved;
+    ///     plays on a real &lt;video&gt; (better HDR output than MSE). No Range,
+    ///     so the client seeks by re-requesting at ?seek=N. <c>DirectUrl</c>
+    ///     holds the /api/video URL.
+    ///   • Neither — caller falls through to <see cref="StartAsync"/> (HLS).
     /// </summary>
     public sealed record PlaybackDecision(bool DirectPlay, string? DirectUrl, double DurationSec,
-        PlayerOutputInfo? Output);
+        PlayerOutputInfo? Output, bool DirectStream = false);
 
     /// <summary>
     /// Describes what the player actually receives — NOT what's on disk. The
@@ -162,22 +174,37 @@ public sealed class HlsSessionService : IDisposable
     /// else (MKV containers, HEVC video, AC3/DTS/TrueHD audio) goes through
     /// our HLS pipeline where the appropriate <see cref="HlsPlan"/> is picked.
     /// </summary>
-    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath, CancellationToken ct = default)
+    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath,
+        bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
         if (probe is null) return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
-        if (!IsDirectPlayEligible(container, probe))
-            return new PlaybackDecision(false, null, duration, null);
+        if (IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
+        {
+            // /api/file serves the raw bytes with Range support — exactly what
+            // <video> needs for native seek. URL-escape the path so spaces and
+            // unicode survive (file paths frequently have both).
+            var directUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
+            var output = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
+            return new PlaybackDecision(true, directUrl, duration, output);
+        }
 
-        // /api/file serves the raw bytes with Range support — exactly what
-        // <video> needs for native seek. URL-escape the path so spaces and
-        // unicode survive (file paths frequently have both).
-        var directUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
-        var output = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
-        return new PlaybackDecision(true, directUrl, duration, output);
+        if (IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
+        {
+            // /api/video remuxes the source to progressive fMP4 (video copy,
+            // audio→AAC). The browser plays it as a native <video>, which is
+            // why we route MKV here instead of HLS: original video bitstream +
+            // HDR are preserved, and native playback outputs HDR more reliably
+            // than MSE. The client owns the seek-reload dance (?seek=N).
+            var streamUrl = "/api/video?path=" + Uri.EscapeDataString(fullPath);
+            var output = BuildOutputInfo(probe, plan: null, isDirectPlay: false, isDirectStream: true);
+            return new PlaybackDecision(false, streamUrl, duration, output, DirectStream: true);
+        }
+
+        return new PlaybackDecision(false, null, duration, null);
     }
 
     /// <summary>
@@ -186,7 +213,8 @@ public sealed class HlsSessionService : IDisposable
     /// direct play and stream-copy paths it mirrors the source; for re-encode
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
-    private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay)
+    private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
+        bool isDirectStream = false)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -207,11 +235,12 @@ public sealed class HlsSessionService : IDisposable
         string videoCodec = isReencode ? "h264" : (probe.VideoCodec ?? "");
         int    bitDepth   = isReencode ? 8       : (probe.Is10Bit ? 10 : 8);
 
-        string container = isDirectPlay      ? "mp4"
-                         : plan == HlsPlan.TsStreamCopy ? "mpegts"
-                         :                                "fmp4";
+        string container = isDirectPlay || isDirectStream ? "mp4"
+                         : plan == HlsPlan.TsStreamCopy   ? "mpegts"
+                         :                                  "fmp4";
 
-        string planName = isDirectPlay ? "directplay"
+        string planName = isDirectPlay   ? "directplay"
+            : isDirectStream             ? "directstream"
             : plan switch
             {
                 HlsPlan.TsStreamCopy         => "ts-copy",
@@ -222,15 +251,23 @@ public sealed class HlsSessionService : IDisposable
                 _                            => "unknown",
             };
 
-        string? reason = isDirectPlay ? null : plan switch
+        string? reason = isDirectPlay || isDirectStream ? null : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
             HlsPlan.Fmp4VaapiReencode => "HEVC 8-bit re-encoded to H.264 via VAAPI for browser compatibility (HDR lost)",
             HlsPlan.Fmp4NvencReencode => "HEVC re-encoded to H.264 via NVENC for browser compatibility (HDR lost)",
             HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality (HDR lost)",
-            HlsPlan.Fmp4StreamCopy    => "HEVC 10-bit / HDR / DV stream-copied to fMP4 (HDR preserved if browser can decode)",
+            HlsPlan.Fmp4StreamCopy    => "HEVC stream-copied to fMP4 — original bitstream, no re-encode (browser decodes HEVC; HDR/10-bit preserved)",
             _                          => null,
         };
+
+        // Audio output reflects what the player actually receives, not the
+        // source. Audio is copied as-is only on Direct Play (raw file) and the
+        // TS path with a browser-native source codec; every other path — Direct
+        // Stream, fMP4 copy/reencode, TS with incompatible audio — transcodes to
+        // AAC stereo, so the Info block reports AAC 2.0 there, not e.g. TrueHD 7.1.
+        bool audioCopied = isDirectPlay
+            || (plan == HlsPlan.TsStreamCopy && IsBrowserCompatibleAudioInTs(probe.AudioCodec));
 
         return new PlayerOutputInfo(
             Plan:            planName,
@@ -241,33 +278,70 @@ public sealed class HlsSessionService : IDisposable
             HdrFormats:      hdrFormats.ToArray(),
             Width:           probe.Width,
             Height:          probe.Height,
-            AudioCodec:      probe.AudioCodec ?? "",
-            AudioChannels:   probe.AudioChannels,
+            AudioCodec:      audioCopied ? (probe.AudioCodec ?? "") : "aac",
+            AudioChannels:   audioCopied ? probe.AudioChannels      : 2,
             AudioLanguage:   probe.AudioLanguage ?? "",
-            Transcoded:      !isDirectPlay,
+            Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason);
     }
 
-    private static bool IsDirectPlayEligible(string container, ProbeInfo probe)
+    private static bool IsDirectPlayEligible(string container, ProbeInfo probe, bool clientHevc, bool clientHevc10)
     {
-        // Container must be browser-native MP4. MKV plays in Chrome but not
-        // Safari/Firefox; .mov works in Safari only. Sticking to .mp4/.m4v
-        // gives us the widest cross-browser coverage with zero risk.
-        if (container != "mp4" && container != "m4v") return false;
+        // Native <video src> needs a browser-demuxable MP4-family container.
+        // MKV isn't demuxable in-browser (→ HLS); .mov is fine in Safari/Chrome.
+        if (container != "mp4" && container != "m4v" && container != "mov") return false;
 
-        // H.264 8-bit only. HEVC in MP4 plays on Safari/iOS but not on
-        // Chrome/Firefox; 10-bit isn't universally supported even where the
-        // codec is; DV layer needs a DV-aware decoder.
-        if (!string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase)) return false;
-        if (probe.Is10Bit) return false;
+        // Dolby Vision: browsers can't decode the DV layer → never native-play
+        // (falls to HLS stream-copy / re-encode instead).
         if (probe.HasDolbyVision) return false;
 
-        // Audio: AAC and MP3 are the only universally-supported codecs inside
-        // MP4. AC3/E-AC3 in MP4 is browser-spotty; DTS/TrueHD not at all.
+        // Video must be something the browser decodes natively. Direct Play is
+        // what gets the file onto a real <video> element — the only path where
+        // client-GPU features (NVIDIA RTX VSR / Video HDR) engage; MSE/HLS
+        // doesn't trigger them. HEVC is gated on the capability the client
+        // reported: 8-bit → clientHevc, 10-bit (HDR10) → clientHevc10.
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        bool videoOk = vc switch
+        {
+            "h264" => !probe.Is10Bit,                              // 10-bit High10 isn't browser-safe
+            "hevc" => probe.Is10Bit ? clientHevc10 : clientHevc,
+            _      => false,
+        };
+        if (!videoOk) return false;
+
+        // Audio: native playback can't transcode, so the track must be a codec
+        // every browser decodes inside MP4. AC3/E-AC3 is spotty, DTS/TrueHD not
+        // at all → those keep the file on the HLS path (audio re-encoded there).
         var ac = (probe.AudioCodec ?? "").ToLowerInvariant();
         if (ac != "aac" && ac != "mp3" && ac != "mp4a") return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Direct Stream eligibility — the file the browser can't open as a raw
+    /// &lt;video src&gt; (non-MP4 container, e.g. MKV/AVI) but whose VIDEO codec
+    /// it CAN decode. /api/video remuxes it to progressive fMP4 (video copy,
+    /// audio→AAC), so the only gate is the video codec/bit-depth vs the client's
+    /// reported HEVC support. Audio codec is irrelevant (always transcoded),
+    /// which makes this wider than Direct Play. Dolby Vision is allowed here
+    /// (unlike Direct Play): the remux tags HEVC as hvc1 and DV profile 8.1
+    /// plays as HDR10 — exactly the "keep the HDR" case we want native.
+    /// </summary>
+    private static bool IsDirectStreamEligible(string container, ProbeInfo probe,
+        bool clientHevc, bool clientHevc10)
+    {
+        // Browser-native containers never come here: they're either Direct Play
+        // (raw, Range-seekable) or HLS. Only non-native containers need a remux.
+        if (container is "mp4" or "m4v" or "mov" or "webm") return false;
+
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        return vc switch
+        {
+            "h264" => !probe.Is10Bit,                              // 8-bit H.264 plays everywhere
+            "hevc" => probe.Is10Bit ? clientHevc10 : clientHevc,   // gate on browser HEVC support
+            _      => false,                                       // VP9/AV1/MPEG-2/… → HLS
+        };
     }
 
     public async Task<StartResult> StartAsync(string fullPath, double seekSec, CancellationToken ct = default,
@@ -288,7 +362,16 @@ public sealed class HlsSessionService : IDisposable
         // input and maps `1:a:{audioTrackIndex}` instead of the source's audio
         // — see BuildFfmpegArgs. The video plan (TS vs fMP4) is unaffected; only
         // the audio mapping changes. null = use the source's own audio.
-        string? externalAudioPath = null)
+        string? externalAudioPath = null,
+        // True when the client reported it can decode HEVC (via
+        // MediaSource.isTypeSupported). Lets ChoosePlan ship HEVC as a
+        // stream-copy (Direct Stream — original bitstream, no re-encode)
+        // instead of transcoding it to H.264.
+        bool clientHevc = false,
+        // Cap output video bitrate in Mbps (player Bitrate menu). >0 forces a
+        // re-encode at this bitrate; 0 = no cap. Carried on the session so
+        // seek-restarts keep it (mirrors maxHeight).
+        int maxBitrate = 0)
     {
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
         // 1) Kill EXISTING sessions for the same source file — a second Play
@@ -356,7 +439,7 @@ public sealed class HlsSessionService : IDisposable
         // source height. 0 = native resolution (no scaling).
         var targetHeight = (maxHeight > 0 && (probe?.Height ?? 0) > 0 && maxHeight < probe!.Height)
             ? maxHeight : 0;
-        var plan = probe is not null ? ChoosePlan(probe, maxHeight) : HlsPlan.Fmp4StreamCopy;
+        var plan = probe is not null ? ChoosePlan(probe, maxHeight, clientHevc, maxBitrate) : HlsPlan.Fmp4StreamCopy;
         ProbeInfo? probeForPlaylist = probe;
         if (probe is not null && plan is HlsPlan.Fmp4VaapiReencode
                                       or HlsPlan.Fmp4NvencReencode
@@ -438,7 +521,14 @@ public sealed class HlsSessionService : IDisposable
         //   calibration test clip isn't representative of stream-copy timing).
         //   TS stream-copy → uses 0; PCR inside TS handles A/V sync natively
         //   and any -itsoffset would just throw it off.
-        var audioOffsetSec = externalAudioPath is not null
+        // fMP4 stream-copy keeps the source's B-frames, so video presentation
+        // lags decode by the reorder delay while audio plays on time → audio
+        // runs ahead. Pre-load the measured delay (from probe) as the baseline
+        // itsoffset; the SW slider then trims on top. 0 for every other plan
+        // (re-encode strips B-frames via -bf 0; TS carries PCR timing).
+        var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy
+            ? Math.Clamp(probe?.ReorderDelaySec ?? 0.0, 0.0, 1.0) : 0.0;
+        var audioOffsetSec = reorderDelaySec + (externalAudioPath is not null
             // External dub sync is a different problem from the source's own A/V
             // wobble (it depends on how the dub was authored vs the video cut),
             // so we route it through the manual SW slider for EVERY video plan —
@@ -454,7 +544,7 @@ public sealed class HlsSessionService : IDisposable
                 HlsPlan.Fmp4StreamCopy       => audioOffsetSwSec,
                 HlsPlan.TsStreamCopy         => 0.0,
                 _                            => 0.0,
-            };
+            });
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
@@ -465,7 +555,7 @@ public sealed class HlsSessionService : IDisposable
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
-            externalAudioPath: externalAudioPath);
+            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate);
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
@@ -493,7 +583,7 @@ public sealed class HlsSessionService : IDisposable
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
-            externalAudioPath);
+            externalAudioPath, maxBitrate: maxBitrate);
         _sessions[token] = session;
 
         // Drain stderr — visible at Warning level so genuine encoder issues
@@ -548,7 +638,8 @@ public sealed class HlsSessionService : IDisposable
             if (ready) break;
             if (proc.HasExited)
             {
-                _sessions.TryRemove(token, out _);
+                if (_sessions.TryRemove(token, out var dead))
+                    try { dead.RestartLock.Dispose(); } catch { }
                 TryRemoveDir(dir);
                 throw new InvalidOperationException($"ffmpeg exited before producing init/first segment (code {proc.ExitCode}).");
             }
@@ -706,14 +797,14 @@ public sealed class HlsSessionService : IDisposable
     private static string SegmentExtension(HlsPlan plan) =>
         plan == HlsPlan.TsStreamCopy ? "ts" : "m4s";
 
-    private readonly SemaphoreSlim _restartLock = new(1, 1);
-
     private async Task RestartFfmpegAtSegmentAsync(HlsSession session, int targetSegment, CancellationToken ct)
     {
         // Serialise restarts so a flurry of player seeks (the seek bar fires
         // multiple `seeking` events as the user drags) can't spawn racing
-        // ffmpegs that overwrite each other's output.
-        await _restartLock.WaitAsync(ct);
+        // ffmpegs that overwrite each other's output. The lock is PER SESSION —
+        // a shared one made a seek in one playback stall the restart of every
+        // other concurrent viewer.
+        await session.RestartLock.WaitAsync(ct);
         try
         {
             // Double-check after acquiring the lock — if another scrub
@@ -768,7 +859,8 @@ public sealed class HlsSessionService : IDisposable
                 targetHeight: session.MaxHeight,
                 audioOffsetSec: session.AudioOffsetSec,
                 audioTrackIndex: session.AudioTrackIndex,
-                externalAudioPath: session.ExternalAudioPath);
+                externalAudioPath: session.ExternalAudioPath,
+                maxBitrate: session.MaxBitrate);
 
             var psi = new ProcessStartInfo
             {
@@ -813,7 +905,7 @@ public sealed class HlsSessionService : IDisposable
         }
         finally
         {
-            _restartLock.Release();
+            session.RestartLock.Release();
         }
     }
 
@@ -822,1018 +914,9 @@ public sealed class HlsSessionService : IDisposable
         if (!_sessions.TryRemove(token, out var s)) return;
         try { if (!s.Process.HasExited) s.Process.Kill(true); } catch { }
         try { s.Process.Dispose(); } catch { }
+        try { s.RestartLock.Dispose(); } catch { }
         TryRemoveDir(s.OutputDir);
         _logger.LogInformation("HLS session {Token} stopped (by client / GC).", token);
     }
 
-    // ─── Synthetic playlist generation ─────────────────────────────────────
-
-    private sealed record ProbeInfo(double DurationSec, string? VideoCodec, string? AudioCodec,
-        int Width, int Height, string? CodecsAttribute, bool HasDolbyVision, bool Is10Bit,
-        // 2026-05-27: extended for PlayerOutputInfo. ColorTransfer drives
-        // HDR10 / HLG detection (smpte2084 vs arib-std-b67), AudioChannels +
-        // AudioLanguage feed the right-side meta plashka in the player HUD.
-        string? ColorTransfer, int AudioChannels, string? AudioLanguage);
-
-    /// <summary>
-    /// What ffmpeg invocation + segment shape this session needs. Decided once
-    /// from the probe and stuck to for the session's lifetime.
-    /// </summary>
-    private enum HlsPlan
-    {
-        /// <summary>H.264 video → MPEG-TS HLS with stream-copy video + audio.
-        /// PCR-based A/V sync inside TS solves the "audio ahead" wobble that
-        /// our fMP4 path has. No GPU needed.</summary>
-        TsStreamCopy,
-
-        /// <summary>HEVC 8-bit → fMP4 HLS with VAAPI re-encode to H.264 +bf 0.
-        /// AMD GCN+/Intel Gen9+ can encode 8-bit; re-encode flattens B-frame
-        /// reorder.</summary>
-        Fmp4VaapiReencode,
-
-        /// <summary>HEVC 8/10-bit → fMP4 HLS with NVENC re-encode to H.264.
-        /// NVIDIA NVENC can handle BOTH 8-bit and 10-bit HEVC decode + H.264
-        /// encode (Pascal+), so this plan beats Fmp4StreamCopy for any HEVC
-        /// content when an NVIDIA GPU is available.</summary>
-        Fmp4NvencReencode,
-
-        /// <summary>HEVC 10-bit HDR / DV → fMP4 HLS with stream-copy video.
-        /// Used when neither VAAPI (Vega 11 can't encode Main10) nor NVENC
-        /// is available. Some residual A/V wobble; recommend DLNA cast or
-        /// mpv for sync-critical HDR/DV playback.</summary>
-        Fmp4StreamCopy,
-
-        /// <summary>Software (libx264) re-encode to H.264 + optional downscale.
-        /// The universal CPU fallback for the quality-ladder downscale path when
-        /// no usable GPU encoder is present (no NVENC, no VAAPI). CPU-heavy —
-        /// especially decoding 4K HEVC 10-bit in software — but it's the only
-        /// way to honour a "give me 1080p" request on a GPU-less host. Per the
-        /// project rule: GPU if present, else CPU, and if the box can't keep up
-        /// that's on the operator (don't downscale).</summary>
-        Fmp4SoftwareReencode,
-    }
-
-    /// <summary>H.264 bitrate ladder by OUTPUT height (video / maxrate / bufsize).
-    /// Used by every re-encode plan so a 720p stream isn't shipped at 4K
-    /// bitrate (and vice-versa). Conservative-ish for LAN delivery.</summary>
-    private static (string V, string Max, string Buf) RateForHeight(int h) => h switch
-    {
-        <= 0    => ("5M",     "6500k",  "10M"),   // unknown → 1080-ish default
-        <= 480  => ("1200k",  "1600k",  "2400k"),
-        <= 576  => ("1800k",  "2400k",  "3600k"),
-        <= 720  => ("2800k",  "3600k",  "5600k"),
-        <= 1080 => ("5M",     "6500k",  "10M"),
-        <= 1440 => ("9M",     "11M",    "18M"),
-        _       => ("16M",    "20M",    "32M"),   // 2160p+
-    };
-
-    /// <summary>Pick the playback plan from the probe + detected hardware.
-    ///   • H.264 (any bit depth) → MPEG-TS stream-copy. Works without any GPU.
-    ///   • HEVC + NVENC present  → NVIDIA path (handles 8 AND 10-bit decode).
-    ///   • HEVC 8-bit + VAAPI    → AMD/Intel path (can encode 8-bit).
-    ///   • HEVC 10-bit, no NVENC → fMP4 stream-copy fallback.</summary>
-    private HlsPlan ChoosePlan(ProbeInfo probe, int maxHeight = 0)
-    {
-        // Quality-ladder downscale: the user picked a resolution below the
-        // source. Downscaling REQUIRES a re-encode (a stream-copy can't be
-        // shrunk), so pick the best available encoder regardless of source
-        // codec/bit-depth:
-        //   NVENC  — decodes H.264 + HEVC 8/10-bit, encodes H.264. Preferred.
-        //   VAAPI  — Vega/Intel decode H.264 + HEVC (incl. 10-bit on VCN); we
-        //            encode H.264 8-bit so the Main10-ENCODE limitation doesn't
-        //            apply. HDR is flattened to SDR (acceptable for a smaller
-        //            rung; proper tonemap is a later refinement).
-        //   libx264 — CPU fallback when no GPU encoder is present.
-        if (maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height)
-        {
-            if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
-            if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;
-            return HlsPlan.Fmp4SoftwareReencode;
-        }
-
-        // No downscale → original codec-driven choice.
-        if (string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase))
-            return HlsPlan.TsStreamCopy;
-
-        // HEVC or anything else — need a HW path or fall back to stream-copy.
-        // NVENC first (handles HEVC 10-bit Main10 decode, which VAAPI on Vega
-        // can't); then VAAPI for 8-bit only; finally stream-copy.
-        if (string.Equals(probe.VideoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
-        {
-            if (_hardware?.Current.Nvenc.Available == true)
-                return HlsPlan.Fmp4NvencReencode;
-            if (!probe.Is10Bit && _hardware?.Current.Vaapi.Available == true)
-                return HlsPlan.Fmp4VaapiReencode;
-        }
-        return HlsPlan.Fmp4StreamCopy;
-    }
-
-    /// <summary>Audio codecs decoded natively by every MSE-capable browser
-    /// inside an MPEG-TS HLS stream. Conservative — AC3/E-AC3 work in
-    /// Chrome but not Firefox, and DTS/TrueHD/Atmos work nowhere; those
-    /// all fall through to AAC re-encoding. AAC + MP3 is the safe universe
-    /// for "the user's browser will definitely decode this passthrough".</summary>
-    private static bool IsBrowserCompatibleAudioInTs(string? codec) => (codec ?? "").ToLowerInvariant() switch
-    {
-        "aac" or "mp3" or "mp2" => true,
-        _ => false,
-    };
-
-    private static string BuildMasterPlaylist(ProbeInfo p)
-    {
-        // BANDWIDTH is a rough estimate based on resolution. hls.js requires
-        // the attribute to exist; it doesn't have to be exact.
-        var bandwidth = EstimatedBandwidth(p.Width, p.Height);
-        var codecs = p.CodecsAttribute ?? "avc1.640028,mp4a.40.2";
-        var sb = new StringBuilder();
-        sb.Append("#EXTM3U\n");
-        sb.Append("#EXT-X-VERSION:7\n");
-        sb.Append($"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={p.Width}x{p.Height},CODECS=\"{codecs}\"\n");
-        sb.Append("media.m3u8\n");
-        return sb.ToString();
-    }
-
-    private static string BuildMediaPlaylist(double totalDuration, int segCount, HlsPlan plan,
-        double startOffsetSec = 0, IReadOnlyCollection<int>? restartBoundaries = null)
-    {
-        // TARGETDURATION must be >= every #EXTINF value (HLS spec). We round
-        // up the segment length to be safe.
-        var target = (int)Math.Ceiling(SegmentDurationSec) + 1;
-
-        var sb = new StringBuilder();
-        sb.Append("#EXTM3U\n");
-        // VERSION 7 needed for fMP4 (#EXT-X-MAP). MPEG-TS works at 3 and is the
-        // version Plex/Jellyfin/Emby emit — keeps maximum smart-TV compat.
-        sb.Append(plan == HlsPlan.TsStreamCopy ? "#EXT-X-VERSION:3\n" : "#EXT-X-VERSION:7\n");
-        sb.Append($"#EXT-X-TARGETDURATION:{target}\n");
-        sb.Append("#EXT-X-MEDIA-SEQUENCE:0\n");
-        sb.Append("#EXT-X-PLAYLIST-TYPE:VOD\n");
-        sb.Append("#EXT-X-INDEPENDENT-SEGMENTS\n");
-        if (startOffsetSec > 0)
-            sb.Append($"#EXT-X-START:TIME-OFFSET={startOffsetSec.ToString("F3", CultureInfo.InvariantCulture)},PRECISE=YES\n");
-        // MPEG-TS segments are self-contained (each carries its own PAT/PMT and
-        // codec bootstrap data) — no init segment, no EXT-X-MAP. fMP4 needs
-        // both. This is the whole reason MPEG-TS is so robust across decoders.
-        if (plan != HlsPlan.TsStreamCopy)
-            sb.Append("#EXT-X-MAP:URI=\"init.mp4\"\n");
-
-        // EXT-X-DISCONTINUITY policy is plan-specific:
-        //
-        // • fMP4 (`Fmp4*`): emit BEFORE EVERY segment after seg-0. Reason:
-        //   seek-restart spawns a fresh ffmpeg whose encoder may emit
-        //   slightly different codec parameters (SPS/PPS, SAR bytes, etc.).
-        //   The fMP4 TFDT box bug also means new-encoder segments may have
-        //   the wrong fragment start time. hls.js detects mid-segment drift
-        //   and reloading the decoder produces the ~200ms audio-ahead
-        //   wobble. Pre-emptive markers tell hls.js to plan for a fresh
-        //   decoder at every boundary — when codec params match (the
-        //   common case within one run), the decoder doesn't actually
-        //   reload, cost is well under 1 ms per segment.
-        //
-        // • MPEG-TS (`TsStreamCopy`): emit ONLY at actual restart points.
-        //   Reason: TS carries absolute time via PCR in every packet, and
-        //   stream-copy from a single ffmpeg run produces monotonically
-        //   increasing PCR with no genuine discontinuity. Marking every
-        //   segment as discontinuous makes hls.js EXPECT a PCR reset at
-        //   each boundary, see that it doesn't happen, and stall trying to
-        //   resync. This is what was causing the "plays 2 sec then freezes
-        //   solid" bug. Plex/Jellyfin/Emby's TS playlists confirm: they
-        //   only emit DISCONTINUITY at real codec/seek transitions.
-        var boundarySet = restartBoundaries is { Count: > 0 }
-            ? new HashSet<int>(restartBoundaries)
-            : null;
-        bool emitDiscontinuityEverywhere = plan != HlsPlan.TsStreamCopy;
-
-        var ext = SegmentExtension(plan);
-        var remaining = totalDuration;
-        for (int i = 0; i < segCount; i++)
-        {
-            bool emitMarker = i > 0 && (emitDiscontinuityEverywhere
-                                     || (boundarySet?.Contains(i) ?? false));
-            if (emitMarker) sb.Append("#EXT-X-DISCONTINUITY\n");
-            var dur = Math.Min(SegmentDurationSec, remaining);
-            sb.Append($"#EXTINF:{dur.ToString("F3", CultureInfo.InvariantCulture)},\n");
-            sb.Append($"seg-{i:D5}.{ext}\n");
-            remaining -= SegmentDurationSec;
-        }
-        sb.Append("#EXT-X-ENDLIST\n");
-        return sb.ToString();
-    }
-
-    /// <summary>Atomically rewrite media.m3u8 with the current set of restart
-    /// boundaries baked in as EXT-X-DISCONTINUITY markers. Atomic so a
-    /// concurrent player fetch can never see a half-written playlist.</summary>
-    private void RegenerateMediaPlaylist(HlsSession session, double totalDurationForPlaylist)
-    {
-        var path = Path.Combine(session.OutputDir, "media.m3u8");
-        var tmp  = path + ".tmp";
-        try
-        {
-            var content = BuildMediaPlaylist(totalDurationForPlaylist, session.SegmentCount,
-                session.Plan,
-                startOffsetSec: session.SeekSec,
-                restartBoundaries: session.GetRestartBoundaries());
-            File.WriteAllText(tmp, content, Encoding.ASCII);
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "HLS: media.m3u8 regeneration failed for session {Token}", session.Token);
-        }
-    }
-
-    private static int EstimatedBandwidth(int width, int height)
-    {
-        // VBR HEVC very rough table — exact numbers don't matter for single-
-        // variant streams, hls.js just wants the field present.
-        long pixels = (long)Math.Max(width, 1) * Math.Max(height, 1);
-        if (pixels >= 3840L * 2160) return 25_000_000;
-        if (pixels >= 1920L * 1080) return 8_000_000;
-        if (pixels >= 1280L *  720) return 4_000_000;
-        return 2_000_000;
-    }
-
-    // ─── ffmpeg argv ─────────────────────────────────────────────────────────
-
-    /// <summary>Build the ffmpeg command line for a session/restart. The plan
-    /// determines container (TS vs fMP4), encoding (stream-copy vs VAAPI), and
-    /// audio handling (passthrough vs AAC re-encode + itsoffset).</summary>
-    private static List<string> BuildFfmpegArgs(
-        string fullPath, double seekSec, string sessionDir, string mediaPlaylist,
-        string masterPlaylistName, ProbeInfo? probe, HlsPlan plan,
-        int startNumber = 0, bool reuseInit = false,
-        int targetHeight = 0,
-        double audioOffsetSec = 0.04,
-        // Audio stream index inside the source (0 = first). Threaded through
-        // to each Build*Args branch which substitutes it in the `-map` arg.
-        // When externalAudioPath is set, this is the index WITHIN the external
-        // file instead (almost always 0 — dub files carry a single stream).
-        int audioTrackIndex = 0,
-        // External sideload audio file. When non-null, every plan takes it as a
-        // SECOND ffmpeg input and maps its audio (`-map 1:a:{audioTrackIndex}`)
-        // — re-encoded to browser-safe AAC — instead of the source's own audio.
-        // The video pipeline (TS copy / fMP4 / re-encode) is unchanged.
-        string? externalAudioPath = null)
-    {
-        var args = new List<string>();
-        var videoCodec = probe?.VideoCodec;
-        var audioCodec = probe?.AudioCodec;
-
-        // PTS positioning rules (applies to fMP4 paths; TS doesn't need
-        // -copyts because PCR carries absolute time inside each segment):
-        //   • Initial run (startNumber=0): default rebase-to-0 is correct.
-        //   • Restart (startNumber=K): we need output PTS to start at
-        //     K*segDur or fMP4's TFDT box claims time 0 while the playlist
-        //     says seg-K starts at K*6s, and hls.js drops the segment as a
-        //     duplicate/discontinuity. -copyts is the only flag the HLS
-        //     muxer actually respects for this.
-
-        switch (plan)
-        {
-            case HlsPlan.TsStreamCopy:
-                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex,
-                    externalAudioPath, audioOffsetSec);
-                break;
-            case HlsPlan.Fmp4VaapiReencode:
-                BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath);
-                break;
-            case HlsPlan.Fmp4NvencReencode:
-                BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath);
-                break;
-            case HlsPlan.Fmp4StreamCopy:
-                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
-                    externalAudioPath);
-                break;
-            case HlsPlan.Fmp4SoftwareReencode:
-                BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath);
-                break;
-        }
-
-        // ── HLS muxer options ────────────────────────────────────────────
-        args.AddRange(new[]
-        {
-            "-f", "hls",
-            "-hls_time", SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture),
-            "-hls_segment_type", plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
-            // Sliding window: keep the last 50 segments physically on disk
-            // (= ~5 min of content). Old ones get deleted via the
-            // delete_segments flag below. WITHOUT this every UHD HEVC
-            // session would fill the 8GB tmpfs in ~7 min and choke ffmpeg.
-            // Scrub-back past the deleted window triggers our seek-restart
-            // (RestartFfmpegAtSegmentAsync), which re-produces the needed
-            // range from source.
-            "-hls_list_size", "50",
-            "-hls_playlist_type", "vod",
-        });
-        if (startNumber > 0)
-        {
-            args.Add("-start_number");
-            args.Add(startNumber.ToString(CultureInfo.InvariantCulture));
-        }
-        var segExt = SegmentExtension(plan);
-        args.AddRange(new[]
-        {
-            // delete_segments: physically remove segment files that fall off
-            // the sliding window. Without this `-hls_list_size 50` only
-            // trims the m3u8 (which we ignore — we have our own playlist),
-            // leaving disk usage unbounded. WITH it, ffmpeg actively reclaims
-            // tmpfs as it goes.
-            "-hls_flags", "temp_file+delete_segments",
-            "-hls_segment_filename", Path.Combine(sessionDir, $"seg-%05d.{segExt}"),
-        });
-        // fMP4 needs an init segment carrying decoder config; MPEG-TS is
-        // self-bootstrapping (PAT/PMT/SPS in every segment).
-        if (plan != HlsPlan.TsStreamCopy)
-        {
-            // For a restart, init.mp4 already exists from the original run.
-            // Writing it again creates a race window where the file briefly
-            // disappears (temp_file rename) and any concurrent fetch sees a
-            // 0-byte response. Use a per-run sentinel filename to avoid
-            // stomping the working init.
-            var initName = reuseInit ? "_init_restart.mp4" : "init.mp4";
-            args.AddRange(new[] { "-hls_fmp4_init_filename", initName });
-        }
-        args.AddRange(new[]
-        {
-            "-master_pl_name", masterPlaylistName,
-            mediaPlaylist,
-        });
-        return args;
-    }
-
-    /// <summary>MPEG-TS HLS with stream-copy video and audio passthrough where
-    /// possible. This is the Jellyfin/Emby/Plex Direct Stream path — works for
-    /// every H.264 file (the most common case by far) with zero GPU usage and
-    /// rock-solid A/V sync because the PCR field in each TS packet carries
-    /// absolute clock-time the player can chase. Audio gets AAC re-encoded
-    /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
-    private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        string? audioCodec, int startNumber, int audioTrackIndex,
-        string? externalAudioPath = null, double audioOffsetSec = 0.0)
-    {
-        bool ext = externalAudioPath is not null;
-
-        // Input #0 — source. Video always; its own audio too unless an external
-        // dub replaces it.
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
-
-        // Input #1 — external dub audio (a second input), sync-shifted via
-        // -itsoffset exactly like the fMP4 paths. The TS path is normally
-        // single-input, so this is only wired in when a dub is selected.
-        if (ext)
-        {
-            if (seekSec > 0)
-            {
-                args.Add("-ss");
-                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-            }
-            args.Add("-itsoffset");
-            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-            args.Add("-i");
-            args.Add(externalAudioPath!);
-        }
-
-        // -copyts so the output PCR carries the SOURCE position (= K*segDur
-        // for a seg-K restart) instead of being rebased to 0. Without this,
-        // a resume/scrub-restart writes seg-K with PCR=0 while the playlist
-        // claims seg-K is at K*6s timeline — hls.js sees the mismatch and
-        // either drops the segment or stalls. Only needed when startNumber>0
-        // (we're not starting from seg-0); for fresh playback PCR=0 is
-        // already correct.
-        if (startNumber > 0)
-        {
-            args.Add("-copyts");
-        }
-        args.AddRange(new[]
-        {
-            "-map", "0:v:0?",
-            "-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
-            "-c:v", "copy",
-        });
-        // Audio: an external dub is always AAC-transcoded — its codec is
-        // unknown here (.mka can hold FLAC/AC3/DTS/…) so we can't risk a copy.
-        // For the source's own audio, passthrough when the browser can decode
-        // it inside MPEG-TS (AAC/MP3 only across all browsers; AC3/E-AC3 work
-        // in Chrome but break Firefox/Safari, so those re-encode to AAC).
-        if (!ext && IsBrowserCompatibleAudioInTs(audioCodec))
-        {
-            args.AddRange(new[] { "-c:a", "copy" });
-        }
-        else
-        {
-            args.AddRange(new[] { "-c:a", "aac", "-ac", "2", "-b:a", "192k" });
-        }
-    }
-
-    /// <summary>fMP4 HLS with VAAPI re-encode to H.264 + B-frames disabled.
-    /// Used for HEVC 8-bit on hosts with /dev/dri available. Combined with
-    /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
-    private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null)
-    {
-        // Re-encoding the video stream eliminates the B-frame display reorder
-        // that puts the first reorderable frame ~83ms past the segment
-        // boundary in stream-copy output. With -bf 0 + IDR-per-segment GOP we
-        // get genuinely byte-aligned A/V at every segment edge.
-        //
-        // We additionally nudge audio later by `audioOffsetSec` (default 40ms,
-        // overrideable per-client via the calibration result the browser
-        // computes once on first play). Humans tolerate audio behind the
-        // picture (~125ms threshold) much better than ahead (~45ms), so we
-        // always err on the late side. Implementation: a second ffmpeg input
-        // with -itsoffset — the only PTS-shift mechanism the HLS fMP4 muxer
-        // respects (filter-graph adelay/aresample get re-aligned away).
-        args.Add("-vaapi_device");
-        args.Add("/dev/dri/renderD128");
-        args.Add("-hwaccel"); args.Add("vaapi");
-        args.Add("-hwaccel_output_format"); args.Add("vaapi");
-
-        // Input #0 — video (GPU-decoded).
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
-
-        // Input #1 — audio only, sync-offset baked in via -itsoffset. Software
-        // demuxes audio so we don't fight VAAPI's audio path. When an external
-        // dub is selected this input points at THAT file instead of the source
-        // (its audio is mapped below); the same -ss/-itsoffset apply.
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
-
-        if (startNumber > 0)
-        {
-            args.Add("-copyts");
-        }
-        var vf = "format=nv12|vaapi,hwupload";
-        if (targetHeight > 0)
-            vf = $"scale_vaapi=w=-2:h={targetHeight}:format=nv12,{vf}";
-        var rate = RateForHeight(targetHeight);
-        args.AddRange(new[]
-        {
-            "-map", "0:v:0?",
-            "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
-            "-c:v", "h264_vaapi",
-            "-profile:v", "main",
-            "-bf",     "0",
-            "-b:v",    rate.V,
-            "-maxrate",rate.Max,
-            "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-        });
-    }
-
-    /// <summary>fMP4 HLS with NVIDIA NVENC re-encode to H.264 + B-frames
-    /// disabled. Used when NVENC is available (any RTX / GTX 10-series+).
-    /// Unlike VAAPI on Vega, NVENC can decode AND encode HEVC Main10 →
-    /// this plan is the preferred re-encode path for HDR/DV content on
-    /// NVIDIA hosts. -bf 0 still applied so B-frame reorder doesn't
-    /// reintroduce the fMP4 TFDT sync wobble.</summary>
-    private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null)
-    {
-        // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
-        // keeps frames on the GPU between decode and encode, avoiding a
-        // CPU↔GPU bounce. `auto` lets ffmpeg pick the right NVDEC for the
-        // source codec (h264_nvdec, hevc_nvdec, etc.).
-        args.Add("-hwaccel"); args.Add("cuda");
-        args.Add("-hwaccel_output_format"); args.Add("cuda");
-
-        // Input #0 — video, GPU-decoded.
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
-
-        // Input #1 — audio with -itsoffset (same trick as VAAPI/SW paths).
-        // Points at the external dub file when one is selected.
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
-
-        if (startNumber > 0)
-        {
-            args.Add("-copyts");
-        }
-        // Optional scale on GPU via scale_cuda. nv12 output format for
-        // NVENC compatibility.
-        var vf = targetHeight > 0
-            ? $"scale_cuda=w=-2:h={targetHeight}:format=nv12"
-            : "scale_cuda=format=nv12";
-        var rate = RateForHeight(targetHeight);
-        args.AddRange(new[]
-        {
-            "-map", "0:v:0?",
-            "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",          // p1=fastest, p7=highest quality; p4 is balanced
-            "-tune", "hq",
-            "-profile:v", "main",
-            "-bf",     "0",           // no B-frames → tight A/V sync per segment
-            "-b:v",    rate.V,
-            "-maxrate",rate.Max,
-            "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-        });
-    }
-
-    /// <summary>fMP4 HLS via SOFTWARE libx264 re-encode + optional downscale.
-    /// The CPU fallback for the quality-ladder when no GPU encoder is present.
-    /// Software-decodes the source (so it handles any codec incl. HEVC 10-bit),
-    /// scales with the CPU `scale` filter, and encodes H.264 8-bit (yuv420p) at
-    /// the ladder bitrate. -bf 0 + IDR-per-segment matches the GPU paths' A/V
-    /// sync. veryfast preset to give the best shot at real-time on a CPU; if the
-    /// box still can't keep up, that's on the operator (don't pick a lower rung
-    /// than the source). HDR is flattened to SDR (no tonemap) — fine for a
-    /// downscaled rung on a small screen.</summary>
-    private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex,
-        string? externalAudioPath = null)
-    {
-        // Input #0 — video (software decode).
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
-
-        // Input #1 — audio with -itsoffset (same A/V-sync trick as the GPU paths).
-        // Points at the external dub file when one is selected.
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
-
-        if (startNumber > 0)
-        {
-            args.Add("-copyts");
-        }
-        var outH = targetHeight > 0 ? targetHeight : sourceHeight;
-        var rate = RateForHeight(outH);
-        var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-        args.AddRange(new[]
-        {
-            "-map", "0:v:0?",
-            "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-profile:v", "main",
-            "-pix_fmt", "yuv420p",    // 10-bit/HDR source → 8-bit SDR H.264
-            "-bf",     "0",
-            "-b:v",    rate.V,
-            "-maxrate",rate.Max,
-            "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-        });
-    }
-
-    /// <summary>fMP4 HLS with full stream-copy. Used for 10-bit HEVC HDR / DV
-    /// where Vega 11 can't encode Main10. B-frames stay in the bitstream
-    /// → first decoded sample's TFDT in fMP4 is the IDR's decode time but
-    /// its display time is later, so audio reaches the user ~50ms before
-    /// video. Compensate by shifting audio via -itsoffset on a separate
-    /// input — same trick the VAAPI path uses. Without this knob the user
-    /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
-    private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
-        string? externalAudioPath = null)
-    {
-        // A second input is needed either to shift the source's own audio
-        // (-itsoffset) OR to pull audio from an external dub file. The external
-        // case forces dual-input regardless of offset.
-        bool ext          = externalAudioPath is not null;
-        bool useDualInput = audioOffsetSec != 0.0 || ext;
-
-        // Input #0 — video (and audio when not using a second input)
-        if (seekSec > 0)
-        {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-        }
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath });
-
-        // Input #1 — audio with -itsoffset. The source file itself for a pure
-        // sync nudge, or the external dub file when one is selected.
-        if (useDualInput)
-        {
-            if (seekSec > 0)
-            {
-                args.Add("-ss");
-                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
-            }
-            args.Add("-itsoffset");
-            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-            args.Add("-i");
-            args.Add(externalAudioPath ?? fullPath);
-        }
-        if (startNumber > 0)
-        {
-            args.Add("-copyts");
-        }
-        args.AddRange(new[]
-        {
-            "-map", "0:v:0?",
-            "-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
-            "-c:v", "copy",
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-        });
-        if (string.Equals(videoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
-        {
-            args.Add("-tag:v"); args.Add("hvc1");
-        }
-    }
-
-    // ─── ffprobe ────────────────────────────────────────────────────────────
-
-    private async Task<ProbeInfo?> ProbeMediaAsync(string fullPath, CancellationToken ct)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in new[]
-            {
-                "-v", "error",
-                "-print_format", "json",
-                "-show_format",
-                "-show_streams",
-                fullPath,
-            }) psi.ArgumentList.Add(a);
-
-            using var p = Process.Start(psi);
-            if (p is null) return null;
-            var json = await p.StandardOutput.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            if (p.ExitCode != 0) return null;
-
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            double duration = 0;
-            if (root.TryGetProperty("format", out var fmt)
-                && fmt.TryGetProperty("duration", out var durEl)
-                && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                duration = d;
-
-            string? vCodec = null;
-            string? aCodec = null;
-            int width = 1280, height = 720;
-            bool hasDv = false;
-            bool is10Bit = false;
-            string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
-            int audioChannels = 0;
-            string? audioLanguage = null;
-            string? videoCodecsAttr = null;
-            string? audioCodecsAttr = null;
-
-            if (root.TryGetProperty("streams", out var streams))
-            {
-                foreach (var s in streams.EnumerateArray())
-                {
-                    if (!s.TryGetProperty("codec_type", out var ct2)) continue;
-                    var type = ct2.GetString();
-                    if (type == "video" && vCodec is null)
-                    {
-                        if (s.TryGetProperty("codec_name", out var cn)) vCodec = cn.GetString();
-                        if (s.TryGetProperty("width",  out var w) && w.TryGetInt32(out var wi)) width  = wi;
-                        if (s.TryGetProperty("height", out var h) && h.TryGetInt32(out var hi)) height = hi;
-                        // Capture color transfer characteristic so BuildOutputInfo
-                        // can mark the stream as HDR10 / HLG. Distinct from
-                        // bit-depth — 10-bit alone isn't HDR.
-                        if (s.TryGetProperty("color_transfer", out var ctEl))
-                            colorTransfer = ctEl.GetString();
-                        // pix_fmt yuv420p10le / yuv444p10le etc. — anything containing
-                        // "10le" or "10be" is 10-bit. Profile strings like "Main 10"
-                        // are also a tell.
-                        if (s.TryGetProperty("pix_fmt", out var pf))
-                        {
-                            var pix = pf.GetString() ?? "";
-                            if (pix.Contains("10le", StringComparison.OrdinalIgnoreCase)
-                             || pix.Contains("10be", StringComparison.OrdinalIgnoreCase))
-                                is10Bit = true;
-                        }
-                        if (s.TryGetProperty("profile", out var pr))
-                        {
-                            var prof = pr.GetString() ?? "";
-                            if (prof.Contains("Main 10", StringComparison.OrdinalIgnoreCase))
-                                is10Bit = true;
-                        }
-                        if (s.TryGetProperty("side_data_list", out var sd))
-                        {
-                            foreach (var sdEl in sd.EnumerateArray())
-                                if (sdEl.TryGetProperty("side_data_type", out var sdt)
-                                    && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
-                                    hasDv = true;
-                        }
-                        videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
-                    }
-                    else if (type == "audio" && aCodec is null)
-                    {
-                        // Capture the FIRST audio stream's codec name. ChoosePlan
-                        // uses this to decide passthrough vs AAC re-encode on the
-                        // MPEG-TS branch. We still default the MSE CODECS=… string
-                        // to mp4a.40.2 because the fMP4 path always transcodes;
-                        // the TS branch sidesteps the master playlist's codecs
-                        // attribute entirely (browsers infer from segment bytes).
-                        if (s.TryGetProperty("codec_name", out var acn)) aCodec = acn.GetString();
-                        if (s.TryGetProperty("channels",   out var ach) && ach.TryGetInt32(out var ci))
-                            audioChannels = ci;
-                        // Language tag: ffprobe puts it under tags.language, but
-                        // MKV-from-Matroska sometimes uses LANGUAGE (uppercase).
-                        if (s.TryGetProperty("tags", out var tags))
-                        {
-                            if (tags.TryGetProperty("language", out var langEl))
-                                audioLanguage = langEl.GetString();
-                            else if (tags.TryGetProperty("LANGUAGE", out var langElU))
-                                audioLanguage = langElU.GetString();
-                        }
-                        audioCodecsAttr = "mp4a.40.2";
-                    }
-                }
-            }
-
-            var combined = (videoCodecsAttr, audioCodecsAttr) switch
-            {
-                (string v, string a) => $"{v},{a}",
-                (string v, null)     => v,
-                (null,     string a) => a,
-                _                    => null,
-            };
-
-            return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
-                colorTransfer, audioChannels, audioLanguage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "ffprobe failed for {Path}", fullPath);
-            return null;
-        }
-    }
-
-    private static string? BuildVideoCodecsAttribute(string? codecName, JsonElement stream)
-    {
-        // Build a `CODECS=…` string MSE can match. For HEVC we always re-tag
-        // to hvc1 in ffmpeg args, so the attribute must use hvc1 too.
-        if (string.Equals(codecName, "hevc", StringComparison.OrdinalIgnoreCase))
-        {
-            // hvc1.{profile}.{compat}.L{level}.{constraints}
-            // Defaults match Main10 L5.0 — the most common 4K profile.
-            int profile = 2; // 1=Main, 2=Main10
-            if (stream.TryGetProperty("profile", out var p))
-            {
-                var pn = p.GetString() ?? "";
-                if (pn.Contains("Main 10", StringComparison.OrdinalIgnoreCase)) profile = 2;
-                else if (pn.Contains("Main", StringComparison.OrdinalIgnoreCase)) profile = 1;
-            }
-            int level = 150;
-            if (stream.TryGetProperty("level", out var l) && l.TryGetInt32(out var lvl))
-                level = lvl;
-            return $"hvc1.{profile}.4.L{level}.B0";
-        }
-        if (string.Equals(codecName, "h264", StringComparison.OrdinalIgnoreCase))
-        {
-            // avc1.{profile_idc:x2}{constraint:x2}{level_idc:x2}
-            int profileIdc = 0x64;  // 100 = High
-            int levelIdc   = 0x28;  // 40 = level 4.0
-            if (stream.TryGetProperty("level", out var l) && l.TryGetInt32(out var lvl))
-                levelIdc = lvl;
-            return $"avc1.{profileIdc:X2}00{levelIdc:X2}".ToLowerInvariant();
-        }
-        if (string.Equals(codecName, "av1", StringComparison.OrdinalIgnoreCase))
-            return "av01.0.05M.08"; // Main profile, level 5.0, 8-bit
-        if (string.Equals(codecName, "vp9", StringComparison.OrdinalIgnoreCase))
-            return "vp09.00.50.08";
-        return null;
-    }
-
-    // ─── GC ──────────────────────────────────────────────────────────────────
-
-    private void GarbageCollect()
-    {
-        var cutoff = DateTime.UtcNow - IdleTimeout;
-        foreach (var (token, session) in _sessions)
-        {
-            if (session.LastActive < cutoff)
-            {
-                _logger.LogInformation("Reaping idle HLS session {Token} (last active {Age:F0}s ago)",
-                    token, (DateTime.UtcNow - session.LastActive).TotalSeconds);
-                Stop(token);
-                continue;
-            }
-
-            // Crash detection: ffmpeg exited with non-zero. Player will get
-            // 503s on every segment, so kill the session decisively rather
-            // than letting it linger another 5 minutes.
-            if (session.Process.HasExited && session.Process.ExitCode != 0)
-            {
-                _logger.LogInformation("Reaping crashed HLS session {Token} (ffmpeg exit {Code})", token, session.Process.ExitCode);
-                Stop(token);
-                continue;
-            }
-
-            // Incomplete-exit detection: ffmpeg exited successfully but only
-            // produced part of the segments we expected. This shouldn't
-            // happen with VOD encoding to completion, but can happen if our
-            // probe under-counted duration vs ffmpeg's interpretation. Don't
-            // tear it down (player can still seek into what exists) — just
-            // note it for log-diving.
-            if (session.Process.HasExited && session.Process.ExitCode == 0
-                && session.SegmentCount > 0)
-            {
-                var produced = HighestProducedSegment(session.OutputDir) + 1;
-                if (produced < session.SegmentCount)
-                {
-                    _logger.LogDebug("HLS {Token}: ffmpeg done at seg-{Produced}/{Total} — partial encoding",
-                        token, produced, session.SegmentCount);
-                }
-            }
-        }
-
-        // Sweep orphan tmp dirs (a previous process or crash may have left
-        // some behind). Anything under _rootDir not matching an active token
-        // is fair game.
-        try
-        {
-            var activeTokens = _sessions.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var dir in Directory.EnumerateDirectories(_rootDir))
-            {
-                var name = Path.GetFileName(dir);
-                if (activeTokens.Contains(name)) continue;
-                // Only delete dirs older than 2 min so we don't race a
-                // freshly-created session whose token hasn't reached the
-                // dictionary yet.
-                try
-                {
-                    var info = new DirectoryInfo(dir);
-                    if ((DateTime.UtcNow - info.CreationTimeUtc).TotalMinutes < 2) continue;
-                    Directory.Delete(dir, recursive: true);
-                    _logger.LogInformation("HLS: swept orphan session dir {Dir}", name);
-                }
-                catch { /* best-effort */ }
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>Diagnostic snapshot of every live session for /api/hls/sessions.</summary>
-    public IReadOnlyList<HlsSessionStatus> Snapshot()
-    {
-        return _sessions.Select(kv =>
-        {
-            var s = kv.Value;
-            var produced = HighestProducedSegment(s.OutputDir) + 1;
-            var exited   = s.Process.HasExited;
-            return new HlsSessionStatus(
-                Token:           kv.Key,
-                SourcePath:      s.SourcePath,
-                StartSeekSec:    s.SeekSec,
-                SegmentsTotal:   s.SegmentCount,
-                SegmentsReady:   Math.Max(produced, 0),
-                IdleSec:         (DateTime.UtcNow - s.LastActive).TotalSeconds,
-                FfmpegExited:    exited,
-                FfmpegExitCode:  exited ? s.Process.ExitCode : (int?)null
-            );
-        }).ToArray();
-    }
-
-    public sealed record HlsSessionStatus(
-        string Token, string SourcePath, double StartSeekSec,
-        int SegmentsTotal, int SegmentsReady, double IdleSec,
-        bool FfmpegExited, int? FfmpegExitCode);
-
-    private static void TryRemoveDir(string dir)
-    {
-        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
-        catch { /* best-effort */ }
-    }
-
-    public void Dispose()
-    {
-        _gcTimer.Dispose();
-        foreach (var token in _sessions.Keys.ToList())
-            Stop(token);
-    }
-
-    // ─── Per-session record ──────────────────────────────────────────────────
-
-    private sealed class HlsSession
-    {
-        public string Token       { get; }
-        public string SourcePath  { get; }
-        public string OutputDir   { get; }
-        public Process Process    { get; private set; }
-        public double  SeekSec    { get; }
-        public int     SegmentCount { get; }
-        public string? VideoCodec { get; }
-        public HlsPlan Plan       { get; }
-        public double  AudioOffsetSec { get; }
-        public double  TotalDurationSec { get; }
-        // Which audio stream of the source we selected via `-map 0:a:{N}?`.
-        // Set once at session creation; the session restart logic (used for
-        // backward scrub jumps) needs to keep mapping the same audio track.
-        public int     AudioTrackIndex { get; }
-        // Output height cap (0 = native). Carried so the seek-restart re-runs
-        // ffmpeg with the same downscale instead of reverting to source res.
-        public int     MaxHeight  { get; }
-        // External sideload audio file (null = use the source's own audio).
-        // Carried so a backward-scrub restart keeps muxing the same dub track
-        // instead of silently reverting to the source audio.
-        public string? ExternalAudioPath { get; }
-        public DateTime CreatedAt  { get; }
-        public DateTime LastActive { get; private set; }
-
-        // Segments at which a NEW ffmpeg process took over. Used by
-        // RegenerateMediaPlaylist to insert EXT-X-DISCONTINUITY markers
-        // so hls.js does a clean decoder reset instead of trying to
-        // continue the previous run's pipeline through what's actually
-        // a fresh encode (with potentially different SPS/PPS bytes).
-        private readonly HashSet<int> _restartBoundaries = new();
-        private readonly object _boundaryLock = new();
-
-        public void AddRestartBoundary(int segmentIndex)
-        {
-            lock (_boundaryLock) { _restartBoundaries.Add(segmentIndex); }
-        }
-        public IReadOnlyCollection<int> GetRestartBoundaries()
-        {
-            lock (_boundaryLock) { return _restartBoundaries.ToArray(); }
-        }
-
-        public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
-            string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
-            int audioTrackIndex, int maxHeight, string? externalAudioPath = null)
-        {
-            Token       = token;
-            SourcePath  = source;
-            OutputDir   = dir;
-            Process     = proc;
-            SeekSec     = seekSec;
-            SegmentCount = segCount;
-            VideoCodec  = videoCodec;
-            Plan        = plan;
-            AudioOffsetSec = audioOffsetSec;
-            TotalDurationSec = totalDurationSec;
-            AudioTrackIndex  = audioTrackIndex;
-            MaxHeight   = maxHeight;
-            ExternalAudioPath = externalAudioPath;
-            CreatedAt   = DateTime.UtcNow;
-            LastActive  = DateTime.UtcNow;
-        }
-
-        public void Touch() => LastActive = DateTime.UtcNow;
-
-        /// <summary>Replace the ffmpeg process after a seek-restart. The old
-        /// process must already be terminated; we dispose it here.</summary>
-        public void SwapProcess(Process newProc)
-        {
-            var old = Process;
-            Process = newProc;
-            try { old.Dispose(); } catch { }
-        }
-    }
 }

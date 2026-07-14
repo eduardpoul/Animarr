@@ -1,0 +1,140 @@
+@*
+    Next Up rail — the "continue / new episodes" row under the Home hero.
+
+    One card per engaged series: the next episode to watch — either next-in-line
+    (you're mid-binge) or a freshly-landed one badged NEW (you finished the run
+    and a new episode dropped). Click → MediaDetail, where the Continue CTA
+    resumes on that exact episode. Fed by GET /api/me/next-up.
+*@
+
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@if (Items.Length > 0)
+{
+    <section class="nur">
+        <h2 class="nur__title">@L["home.next_up"]</h2>
+        <div class="nur__viewport">
+        @if (_canLeft)
+        {
+            <button type="button" class="nur__nav nur__nav--l tv-focus" aria-label="‹"
+                    @onclick="@(() => ScrollRailAsync(-1))">‹</button>
+        }
+        @if (_canRight)
+        {
+            <button type="button" class="nur__nav nur__nav--r tv-focus" aria-label="›"
+                    @onclick="@(() => ScrollRailAsync(1))">›</button>
+        }
+        <div class="nur__row" @ref="_rowRef">
+            @foreach (var it in Items)
+            {
+                var item  = it;
+                var thumb = (item.Season is int s && item.Episode is int e)
+                    ? Animarr.UI.Services.MediaUrl.EpisodeThumb(item.MediaItemId, s, e)
+                    : (!string.IsNullOrEmpty(item.FanartPath)
+                        ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!)
+                        : (!string.IsNullOrEmpty(item.PosterPath)
+                            ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!)
+                            : null));
+                <button type="button" class="nur__card tv-focus"
+                        @onclick="@(() => Nav.NavigateTo(PlayHref(item)))"
+                        title="@item.Title">
+                    <div class="nur__thumb">
+                        @if (!string.IsNullOrEmpty(thumb))
+                        {
+                            <img src="@thumb" alt="" loading="lazy" class="nur__img" />
+                        }
+                        else
+                        {
+                            <div class="nur__ph"><DIcon Name="video" Size="22" /></div>
+                        }
+                        @if (item.IsNew)
+                        {
+                            <span class="nur__badge">@L["home.new_badge"]</span>
+                        }
+                        <span class="nur__play"><DIcon Name="play" Size="20" /></span>
+                    </div>
+                    <div class="nur__name">@item.Title</div>
+                    <div class="nur__sub">@EpLabel(item)</div>
+                </button>
+            }
+        </div>
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>Next-up rows (next episode per engaged series). Ordered by the
+    /// caller (most recent activity first).</summary>
+    [Parameter, EditorRequired] public ContinueWatchItemDto[] Items { get; set; } = Array.Empty<ContinueWatchItemDto>();
+
+    // Drag-to-scroll + ‹ › paging, shared module with the other rails.
+    // Init keys off the first render that actually has cards, not
+    // firstRender — the host may mount the rail before its data arrives.
+    private ElementReference _rowRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<NextUpRail>? _selfRef;
+    private bool _canLeft, _canRight, _railInit;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_railInit || Items.Length == 0) return;
+        _railInit = true;
+        try
+        {
+            _js = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Animarr.UI/Components/Design/Media/RecRail.razor.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("init", _rowRef, _selfRef);
+        }
+        catch { /* drag/arrows are enhancement — wheel scroll still works */ }
+    }
+
+    [JSInvokable]
+    public void OnRailScrollState(bool canLeft, bool canRight)
+    {
+        if (_canLeft == canLeft && _canRight == canRight) return;
+        _canLeft = canLeft;
+        _canRight = canRight;
+        StateHasChanged();
+    }
+
+    private async Task ScrollRailAsync(int dir)
+    {
+        if (_js is null) return;
+        try { await _js.InvokeVoidAsync("scrollRail", _rowRef, dir); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_js is not null)
+            {
+                await _js.InvokeVoidAsync("destroy", _rowRef);
+                await _js.DisposeAsync();
+            }
+        }
+        catch { /* circuit teardown */ }
+        _selfRef?.Dispose();
+    }
+
+    private static string EpLabel(ContinueWatchItemDto it)
+    {
+        var bits = new List<string>();
+        if (it.Season is > 0) bits.Add($"S{it.Season}");
+        if (it.Episode is not null) bits.Add($"E{it.Episode}");
+        return string.Join(" · ", bits);
+    }
+
+    /// <summary>Detail URL that auto-plays on arrival: an episode carries
+    /// <c>?s=&amp;e=</c> (MediaDetail opens the player straight on that episode);
+    /// a movie / episodeless row carries <c>?play=1</c> (resume / play the
+    /// movie). So a rail click lands the user IN playback, not on the detail
+    /// page with another click to make.</summary>
+    private static string PlayHref(ContinueWatchItemDto it)
+        => it.Episode is int e
+            ? $"/catalog/{it.MediaItemId}?s={it.Season ?? 1}&e={e}"
+            : $"/catalog/{it.MediaItemId}?play=1";
+}

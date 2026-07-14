@@ -51,6 +51,38 @@ public class UserPreferences
     /// Applies only on the Catalog hero. Spec: hero-nav-variants.html.</summary>
     public string HeroPagerStyle { get; set; } = "g";
 
+    /// <summary>Default layout of the episode list on a title's detail page —
+    /// "grid" (poster-card grid, default) or "list" (detailed horizontal rows
+    /// with title/overview/meta). The grid⇄list toggle on the detail page
+    /// writes back here, so it doubles as the per-account default.
+    /// Spec: "Animarr — Episode View Modes".</summary>
+    public string EpisodeListView { get; set; } = "grid";
+
+    /// <summary>Order + visibility of the Home page sections as a JSON array
+    /// ([{"key":"continue","enabled":true}, …]) — see
+    /// <c>Animarr.Shared.HomeSections</c> for the schema and defaults.
+    /// Null = default order, everything visible.</summary>
+    public string? HomeSectionsJson { get; set; }
+
+    /// <summary>Where the recommendation features ("For you" / "Discover")
+    /// may look for candidates: "everywhere" (library + external sources like
+    /// TMDB, default) or "library" (local titles only — hides Discover).
+    /// Persisted ahead of the recommendations feature so the setting is
+    /// already per-user when it ships; no UI reads it yet.</summary>
+    public string RecsScope { get; set; } = "everywhere";
+
+    /// <summary>Global default: hide filler/recap-flagged episodes from the
+    /// episode grid/list and skip them on next-episode advance. Set in
+    /// Profile → Appearance; per-title overrides live in
+    /// <see cref="FillerOverridesJson"/>.</summary>
+    public bool HideFillers { get; set; }
+
+    /// <summary>Per-title overrides of <see cref="HideFillers"/> as JSON
+    /// {"&lt;mediaItemId&gt;": true|false}. A present key wins over the global
+    /// default for that title (title-page toggle writes it); an absent key
+    /// inherits the global. Null/empty = no overrides.</summary>
+    public string? FillerOverridesJson { get; set; }
+
     // ─── Audio (NEW in v4) ───────────────────────────────────────────────────
 
     /// <summary>Preferred audio language for new playbacks. ISO 639-1 lowercase or

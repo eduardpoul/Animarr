@@ -19,7 +19,7 @@
       • EditMetadataDrawer slides in from the right.
 *@
 
-<PageTitle>@(_item?.Title ?? "…") — Animarr</PageTitle>
+<PageTitle>Animarr</PageTitle>
 
 @if (_loading)
 {
@@ -53,14 +53,14 @@ else
     @* ── 3-column body — Synopsis · Details · Identification ────────────── *@
     <div class="md-body">
         <section class="md-body__col md-synopsis">
-            <div class="md-overline">SYNOPSIS</div>
+            <div class="md-overline">@L["media_detail.overline_synopsis"]</div>
             @if (!string.IsNullOrEmpty(item.Description))
             {
                 <p class="md-prose">@item.Description</p>
             }
             else
             {
-                <p class="md-prose md-prose--empty">No synopsis available.</p>
+                <p class="md-prose md-prose--empty">@L["media_detail.no_synopsis"]</p>
             }
             <div class="md-actions">
                 <Btn Variant="ghost" Size="md" OnClick="ReidentifyAsync">
@@ -70,19 +70,20 @@ else
         </section>
 
         <section class="md-body__col md-details">
-            <div class="md-overline">DETAILS</div>
+            <div class="md-overline">@L["media_detail.overline_details"]</div>
             <dl class="md-kv">
-                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>Studio</dt><dd>@item.Studio</dd> }
-                @if (!string.IsNullOrEmpty(item.Language)) { <dt>Language</dt><dd>@item.Language</dd> }
-                @if (item.Runtime is > 0) { <dt>Runtime</dt><dd>@item.Runtime m</dd> }
-                @if (item.EpisodeCount is > 0) { <dt>Episodes</dt><dd>@item.EpisodeCount</dd> }
-                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>Season</dt><dd>@item.SeasonLabel</dd> }
-                @if (!string.IsNullOrEmpty(item.Status)) { <dt>Status</dt><dd>@item.Status</dd> }
-                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>Rating</dt><dd>@item.ContentRating</dd> }
+                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>@L["media_detail.detail_studio"]</dt><dd>@item.Studio</dd> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <dt>@L["media_detail.detail_language"]</dt><dd>@item.Language</dd> }
+                @if (item.Runtime is > 0) { <dt>@L["media_detail.detail_runtime"]</dt><dd>@item.Runtime @L["media_detail.detail_runtime_unit"]</dd> }
+                @if (item.EpisodeCount is > 0) { <dt>@L["media_detail.detail_episodes"]</dt><dd>@item.EpisodeCount</dd> }
+                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>@L["media_detail.detail_season"]</dt><dd>@item.SeasonLabel</dd> }
+                @if (!string.IsNullOrEmpty(item.Status)) { <dt>@L["media_detail.detail_status"]</dt><dd>@item.Status</dd> }
+                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>@L["media_detail.detail_rating"]</dt><dd>@item.ContentRating</dd> }
                 @if (item.Genres.Length > 0)
                 {
-                    <dt>Tags</dt>
-                    <dd class="md-kv__tags">@string.Join(" · ", item.Genres)</dd>
+                    var displayGenres = item.GenresLocalized.Length > 0 ? item.GenresLocalized : item.Genres;
+                    <dt>@L["media_detail.detail_tags"]</dt>
+                    <dd class="md-kv__tags">@string.Join(" · ", displayGenres)</dd>
                 }
             </dl>
         </section>
@@ -176,6 +177,7 @@ else
     if (showEpisodeGrid)
     {
         <section class="md-seasons">
+            <div class="md-season-row">
             <nav class="md-season-tabs" aria-label="Seasons">
                 @if (hasSeasonMeta)
                 {
@@ -216,6 +218,42 @@ else
                 }
             </nav>
 
+                @* Hide-fillers toggle — only on titles that actually carry
+                   Jikan flags; writes the HideFillers preference (page toggle
+                   IS the per-account default, same as the view toggle). *@
+                @if (item.FillerEpisodes.Length + item.RecapEpisodes.Length > 0)
+                {
+                    <button type="button"
+                            class="@($"md-filler-toggle tv-focus {(_hideFillers ? "md-filler-toggle--on" : "")}")"
+                            aria-pressed="@(_hideFillers ? "true" : "false")"
+                            title="@L["episode.hide_fillers_hint"]"
+                            @onclick="ToggleHideFillersAsync">
+                        <DIcon Name="@(_hideFillers ? "eye-off" : "eye")" Size="14" />
+                        <span>@L["episode.hide_fillers"]</span>
+                    </button>
+                }
+
+                @* NEW (Episode View Modes): grid ⇄ detailed-list toggle. Writes
+                   the EpisodeListView preference, so flipping it here also sets
+                   the per-account default surfaced in Profile → Appearance. *@
+                <div class="md-view-toggle" role="group" aria-label="Episode view">
+                    <button type="button"
+                            class="@($"md-view-btn tv-focus {(_episodeView == "grid" ? "md-view-btn--active" : "")}")"
+                            aria-pressed="@(_episodeView == "grid" ? "true" : "false")"
+                            title="Grid view"
+                            @onclick="@(() => SetEpisodeViewAsync("grid"))">
+                        <DIcon Name="grid" Size="15" />
+                    </button>
+                    <button type="button"
+                            class="@($"md-view-btn tv-focus {(_episodeView == "list" ? "md-view-btn--active" : "")}")"
+                            aria-pressed="@(_episodeView == "list" ? "true" : "false")"
+                            title="Detailed list"
+                            @onclick="@(() => SetEpisodeViewAsync("list"))">
+                        <DIcon Name="list" Size="15" />
+                    </button>
+                </div>
+            </div>
+
             @{
                 var active = hasSeasonMeta ? item.Seasons.FirstOrDefault(s => s.Number == _activeSeason) : null;
                 // Episode count for the loop. Prefer the metadata's count, but
@@ -236,28 +274,59 @@ else
                 var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
                     ? Animarr.UI.Services.MediaUrl.Image(seasonPoster, item.LastMetadataRefreshedAt?.Ticks ?? 0)
                     : null;
+                // Section meta ("X of Y watched · all on disk") — Episode View
+                // Modes design. Counts over the active season's 1..loopEpCount.
+                var epsWatched = 0;
+                var epsOnDisk  = 0;
+                for (int si = 1; si <= loopEpCount; si++)
+                {
+                    if (_files.Any(f => (f.Season ?? 1) == _activeSeason && f.Episode == si)) epsOnDisk++;
+                    if (_watchStates.Any(w => w.Season == _activeSeason && w.Episode == si && w.IsWatched)) epsWatched++;
+                }
             }
             @if (active is not null && !string.IsNullOrEmpty(active.Overview))
             {
                 <p class="md-season-overview">@active.Overview</p>
             }
 
+            <div class="md-secmeta">
+                <b>@epsWatched</b> of @loopEpCount watched
+                @if (epsOnDisk >= loopEpCount)
+                {
+                    <span>· all episodes on disk</span>
+                }
+                else
+                {
+                    <span>· @epsOnDisk of @loopEpCount on disk</span>
+                }
+            </div>
+
             @{ var didMarkAutofocusEp = false; }
-            <div class="md-episode-grid">
+            <div class="@(_episodeView == "list" ? "md-episode-rows" : "md-episode-grid")">
                 @for (int i = 1; i <= loopEpCount; i++)
                 {
                     var ep        = i;
                     var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
                     var hasFile   = epFile is not null;
                     var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
-                    // Season 0 = Specials; a donghua season-offset surfaces the
-                    // TMDB absolute number so the user sees which TMDB episode
-                    // their disk file maps to ("Episode 1 · TMDB #107").
-                    var epTitle   = _activeSeason == 0
-                        ? $"Special {ep}"
-                        : epFile?.AbsoluteEpisode is int absEp
-                            ? $"Episode {ep} · TMDB #{absEp}"
-                            : $"Episode {ep}";
+                    // Stage B: per-episode TMDB metadata. Disk → TMDB key mirrors
+                    // the thumb endpoint — an absolute-numbered donghua file maps
+                    // to TMDB season 1 / its absolute episode; everything else maps
+                    // straight through.
+                    var absEpNum  = epFile?.AbsoluteEpisode;
+                    var metaKey   = absEpNum is int absKey ? (Season: 1, Episode: absKey) : (Season: _activeSeason, Episode: ep);
+                    var epDto     = _episodeMeta.GetValueOrDefault(metaKey);
+                    var epRuntime = epDto?.RuntimeMin ?? item.Runtime;
+                    // Prefer the real TMDB episode title; fall back to the
+                    // numbered label. Season 0 = Specials; a donghua season-offset
+                    // surfaces the TMDB absolute number ("Episode 1 · TMDB #107").
+                    var epTitle   = !string.IsNullOrWhiteSpace(epDto?.Title)
+                        ? epDto!.Title!
+                        : _activeSeason == 0
+                            ? $"Special {ep}"
+                            : absEpNum is int absEp
+                                ? $"Episode {ep} · TMDB #{absEp}"
+                                : $"Episode {ep}";
                     // First on-disk episode becomes the default-focus target
                     // when the hero has no Continue CTA (i.e. nothing in
                     // progress yet). Series like Death's Game where every
@@ -272,8 +341,23 @@ else
                     // like the file IS there with broken styling. Bug surfaced on
                     // Death's Game where every episode is missing.
                     var epMeta    = hasFile
-                        ? (item.Runtime is > 0 ? $"{item.Runtime}m" : "")
+                        ? (epRuntime is > 0 ? $"{epRuntime}m" : "")
                         : L["episode_card.meta_missing"];
+                    // Filler/recap marker (Jikan, MAL-entry numbering): match by
+                    // the file's absolute number first — long-runners and
+                    // offset donghua — else by the plain episode number, but
+                    // only on season 1 (a per-season MAL entry's "ep 5" must
+                    // not tag S2E5).
+                    var isFiller = item.FillerEpisodes.Length > 0
+                        && (absEpNum is int fAbs ? item.FillerEpisodes.Contains(fAbs)
+                                                 : _activeSeason <= 1 && item.FillerEpisodes.Contains(ep));
+                    var isRecap  = !isFiller && item.RecapEpisodes.Length > 0
+                        && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
+                                                 : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
+                    var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
+                    // Canon-only marathon mode: flagged episodes drop out of the
+                    // grid entirely while the toggle is on.
+                    if (_hideFillers && epFlag is not null) { continue; }
 
                     @* On TV the card itself MUST be focusable — without it, the
                        D-pad has nothing to land on inside the episode grid and
@@ -294,10 +378,18 @@ else
                          @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
                          @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
                         <EpisodeCard Number="ep"
+                                     Layout="@(_episodeView == "list" ? "list" : "card")"
                                      Title="@epTitle"
+                                     Overview="@epDto?.Overview"
+                                     AirDate="@epDto?.AirDate"
+                                     Rating="@epDto?.Rating"
+                                     Resolution="@(hasFile ? ResolutionFromName(epFile?.FileName) : null)"
+                                     Lang="@(UserCtx.Preferences?.Language)"
                                      ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
                                      Meta="@epMeta"
                                      Have="hasFile"
+                                     Flag="@epFlag"
+                                     FlagLabel="@(epFlag == "filler" ? L["episode.filler"] : epFlag == "recap" ? L["episode.recap"] : null)"
                                      WatchStateDto="@watchDto"
                                      OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
                     </div>
@@ -380,6 +472,21 @@ else
             }
         </section>
     }
+
+    @* Franchise watch-order rail — release order, "вы здесь", missing members
+       dashed with a Want button. Above "More like this": franchise context is
+       the stronger signal on a title page. *@
+    @if (_franchise is not null)
+    {
+        <FranchiseRail Franchise="@_franchise" />
+    }
+
+    @* "More like this" — library matches first, TMDB backfill (per the user's
+       RecsScope preference) rendered as dashed not-in-library cards. *@
+    @if (_similar.Length > 0)
+    {
+        <RecRail Title="@L["recs.similar_title"]" Items="@_similar" />
+    }
 }
 
 @* Player overlay — Artplayer mounts into the .vp-art container. *@
@@ -398,8 +505,24 @@ else
     <EditMetadataDrawer Item="_item" OnClose="@(() => _editOpen = false)" OnSaved="OnEditSaved" />
 }
 
+@* "Mark earlier episodes watched too?" confirm — fired from the episode grid. *@
+@if (_showMarkPrev)
+{
+    <MarkPreviousDialog Count="_markPrevTargets.Count"
+                        OnConfirm="ConfirmMarkPrevious"
+                        OnCancel="CancelMarkPrevious" />
+}
+
 @code {
     [Parameter] public Guid Id { get; set; }
+
+    // Auto-play target from the Home "Up next" rail. ?s=&e= opens the player
+    // straight on that episode; ?play=1 resumes/plays a movie. One-shot
+    // (guarded by _autoPlayHandled) so closing the player doesn't replay it.
+    [Parameter, SupplyParameterFromQuery(Name = "s")]    public int? AutoPlaySeason  { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "e")]    public int? AutoPlayEpisode { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "play")] public int? AutoPlayMovie  { get; set; }
+    private bool _autoPlayHandled;
 
     private MediaItemDto? _item;
     private MediaFileDto[] _files = Array.Empty<MediaFileDto>();
@@ -407,9 +530,28 @@ else
     private ContinueWatchDto? _continue;
     private ContinueAction?   _continueAction;
     private List<WatchStateDto> _watchStates = new();
+    /// <summary>Per-episode TMDB metadata (Stage B), keyed by TMDB
+    /// (season, episode). Loaded in the background after the page paints; the
+    /// render maps disk episodes to these keys via the file's AbsoluteEpisode.</summary>
+    private Dictionary<(int Season, int Episode), EpisodeMetaDto> _episodeMeta = new();
     private int _activeSeason = 1;
+    /// <summary>Episode-list layout — "grid" (poster cards) or "list" (detailed
+    /// rows). Seeded from the user's EpisodeListView preference on init; the
+    /// grid⇄list toggle writes the same preference back (so it doubles as the
+    /// per-account default). Spec: "Animarr — Episode View Modes".</summary>
+    private string _episodeView = "grid";
+    /// <summary>Effective "hide fillers" for THIS title: the per-title override
+    /// if one is set, else the global <c>HideFillers</c> default. Drives grid
+    /// filtering AND the next-episode skip. The page toggle writes a per-title
+    /// override (never the global default — that's Profile → Appearance).</summary>
+    private bool _hideFillers;
     private bool _movieWatched;
     private bool _editOpen;
+
+    // "Mark previous episodes watched" popup — set when the user marks an
+    // episode watched and earlier on-disk episodes are still unwatched.
+    private bool _showMarkPrev;
+    private List<(int Season, int Episode)> _markPrevTargets = new();
 
     // ─── Unmatched-file resolution (episode-resolution Tiers 1–2) ─────────
     // Pending per-file edits keyed by absolute path; falls back to the file's
@@ -493,7 +635,77 @@ else
         // flips (cookie-restored MAUI boot resolves the registry after the
         // page first renders).
         Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+        // Seed the episode-list layout from the user's saved default. On a cold
+        // reload (F5) the page can mount BEFORE UserContextState has finished
+        // fetching /api/me/preferences, so this seed may read null → "grid".
+        // The OnChange subscription below re-seeds once prefs arrive, so the
+        // saved "list" default isn't lost to that race.
+        _episodeView = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        _hideFillers = ResolveHideFillers();
+        UserCtx.OnChange += OnUserCtxChanged;
+        // The initial load happens in OnParametersSetAsync (which also runs on
+        // first mount) — it owns Id-change detection.
+    }
+
+    /// <summary>Id of the title the page currently shows. Blazor reuses this
+    /// component when navigating /catalog/A → /catalog/B (rail links on the
+    /// franchise / "more like this" rows), so the reload must key off the
+    /// route parameter — OnInitializedAsync only runs once per instance.</summary>
+    private Guid _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id) return;
+        var isSwitch = _loadedId != Guid.Empty;
+        _loadedId = Id;
+        // Re-resolve the per-title filler state for the title now in view.
+        _hideFillers = ResolveHideFillers();
+        if (isSwitch)
+        {
+            // Per-title state that LoadAsync doesn't unconditionally overwrite.
+            _similar      = Array.Empty<RecCardDto>();
+            _franchise    = null;
+            _episodeMeta  = new();
+            _activeSeason = 1;
+            _didAutoFocus = false;   // re-focus the new title's hero CTA
+            _themeStarted = false;   // switch theme music to the new title
+        }
         await LoadAsync();
+    }
+
+    /// <summary>Re-seed the episode-list layout whenever UserContextState changes
+    /// — chiefly when preferences finish loading after a cold reload (so the saved
+    /// default applies) and after the page toggle's PATCH echoes back via
+    /// SetPreferences. Guarded so unrelated changes (accent, backdrop) are no-ops.</summary>
+    private void OnUserCtxChanged()
+    {
+        var v  = UserCtx.Preferences?.EpisodeListView == "list" ? "list" : "grid";
+        var hf = ResolveHideFillers();
+        if (v != _episodeView || hf != _hideFillers)
+        {
+            _episodeView = v;
+            _hideFillers = hf;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Honour the Home rail's auto-play query params once the item +
+    /// files have loaded. Episode → open the player on it; play=1 → resume/play
+    /// the movie via the same path the hero Continue CTA uses. Runs once, from
+    /// OnAfterRenderAsync so JS interop (player attach) is guaranteed live.</summary>
+    private async Task MaybeAutoPlayAsync()
+    {
+        if (_autoPlayHandled || _item is null) return;
+        if (AutoPlaySeason is int s && AutoPlayEpisode is int e)
+        {
+            _autoPlayHandled = true;
+            await PlayEpisodeAsync(s, e);
+        }
+        else if (AutoPlayMovie is 1)
+        {
+            _autoPlayHandled = true;
+            await HandleContinueClick();
+        }
     }
 
     private void OnBaseChanged() => InvokeAsync(StateHasChanged);
@@ -533,6 +745,91 @@ else
         catch { _item = null; }
         _loading = false;
         StateHasChanged();
+
+        // Stage B: pull per-episode TMDB metadata in the background so the page
+        // paints immediately (grid/list with "Episode N" + thumbs) and the real
+        // titles / synopses / ratings fill in when the fetch returns. Series-only
+        // — movies have no episode list to localize.
+        if (_item is { MediaType: MediaItemType.Series or MediaItemType.Anime or MediaItemType.Multserials })
+            _ = LoadEpisodeMetaAsync();
+
+        // Stage C: the "More like this" rail, also fire-and-forget — genre
+        // scoring is instant server-side; the TMDB backfill may add a beat.
+        _ = LoadSimilarAsync();
+
+        // Stage D: the franchise rail. A 204 (never-walked title) kicks a
+        // background AniList walk server-side — retry once shortly after so a
+        // small graph appears without leaving the page.
+        _ = LoadFranchiseAsync();
+    }
+
+    private RecCardDto[] _similar = Array.Empty<RecCardDto>();
+    private FranchiseDto? _franchise;
+
+    private async Task LoadSimilarAsync()
+    {
+        var id = Id;   // discard the result if the user navigated to another title
+        try
+        {
+            var similar = await Api.GetSimilarAsync(id);
+            if (id != Id) return;
+            _similar = similar;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* rail is optional decoration */ }
+    }
+
+    private async Task LoadFranchiseAsync()
+    {
+        var id = Id;   // discard the result if the user navigated to another title
+        try
+        {
+            var franchise = await Api.GetFranchiseAsync(id);
+            if (franchise is null)
+            {
+                // The lazy walk needs a few AniList round-trips; one delayed
+                // retry covers the common "first ever open" case.
+                await Task.Delay(TimeSpan.FromSeconds(12));
+                if (id != Id) return;
+                franchise = await Api.GetFranchiseAsync(id);
+            }
+            if (id != Id) return;
+            _franchise = franchise;
+            if (_franchise is not null) await InvokeAsync(StateHasChanged);
+        }
+        catch { /* rail is optional decoration */ }
+    }
+
+    /// <summary>Background-load per-episode TMDB metadata (Stage B) keyed by TMDB
+    /// (season, episode). The render maps disk episodes to these via the file's
+    /// AbsoluteEpisode, mirroring the episode-thumb endpoint. Fire-and-forget
+    /// from <see cref="LoadAsync"/> — failures just leave the "Episode N"
+    /// fallbacks in place.</summary>
+    private async Task LoadEpisodeMetaAsync()
+    {
+        var id = Id;   // discard the result if the user navigated to another title
+        try
+        {
+            var meta = await Api.GetEpisodeMetadataAsync(id);
+            if (id != Id) return;
+            _episodeMeta = meta.ToDictionary(m => (m.Season, m.Episode));
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* keep the "Episode N" fallbacks */ }
+    }
+
+    /// <summary>Best-effort video resolution parsed from a file name
+    /// ("…1080p…" / "…720p…" / "…2160p…" / "4K" / "UHD") for the detailed-list
+    /// `.res` chip. Null when no token is present.</summary>
+    private static string? ResolutionFromName(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            fileName, @"\b(2160p|1080p|720p|480p|4k|uhd)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var tok = m.Value.ToLowerInvariant();
+        return tok is "4k" or "uhd" ? "4K" : tok;
     }
 
     private Task OnHeroContinue(ContinueAction action) => HandleContinueClick();
@@ -540,10 +837,12 @@ else
     private async Task HandleContinueClick()
     {
         if (_item is null || _continue is null) return;
-        string? path = null;
-        if (_continue.Season is int s && _continue.Episode is int ep)
+        // Prefer the file path the server resolved (the next-unwatched episode),
+        // then fall back to a (season, episode) lookup, then the first file.
+        string? path = _continue.FilePath;
+        if (path is null && _continue.Season is int s && _continue.Episode is int ep)
         {
-            var f = _files.FirstOrDefault(x => x.Season == s && x.Episode == ep);
+            var f = _files.FirstOrDefault(x => (x.Season ?? 1) == s && x.Episode == ep);
             path = f?.FilePath;
         }
         path ??= _files.FirstOrDefault()?.FilePath;
@@ -614,6 +913,13 @@ else
             catch { /* host without tv-nav.js — no-op */ }
         }
 
+        // Honour the Home "Up next" rail's auto-play query params (?s=&e= /
+        // ?play=1) once loaded. Post-render so the player JS attach is live.
+        if (!_autoPlayHandled && !_loading && _item is not null && _playerPath is null)
+        {
+            await MaybeAutoPlayAsync();
+        }
+
         // Soft-autoplay the title's theme music once per mount — only when the
         // user opted in and no real playback is active. Anime only (the endpoint
         // 404s otherwise). Stopped when a video starts (PlayPathAsync) and resumed
@@ -632,8 +938,26 @@ else
             _playerSelfRef = DotNetObjectReference.Create(this);
             try
             {
+                // Push the account's audio/subtitle preferences to the player.
+                // Names ("Japanese"/"Russian") are resolved to ISO-639-1 codes so
+                // the player can match them against stream language tags. The
+                // player uses subLang/subSize on every attach and applies the
+                // audio-language preference only on transcoding HLS sessions —
+                // Direct Play is never forced into a transcode for it.
+                var prefs = UserCtx.Preferences;
+                if (prefs is not null)
+                {
+                    await JS.InvokeVoidAsync("animarrPlayer.setPrefs", new
+                    {
+                        audioLang = Animarr.Shared.LanguageNameMap.ToIso639(prefs.AudioPreferredLanguage),
+                        subLang   = Animarr.Shared.LanguageNameMap.ToIso639(prefs.SubtitlePreferredLanguage),
+                        subSize   = prefs.SubtitleSize,
+                    });
+                }
+
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
-                    _playerElementId, _playerSelfRef, _playerPath);
+                    _playerElementId, _playerSelfRef, _playerPath,
+                    new { autoAudio = true });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title
@@ -654,8 +978,24 @@ else
                     // browser resolves it against the page origin which is
                     // exactly what MediaSession's artwork field needs.
                     var artwork = _item.PosterPath ?? _item.FanartPath ?? string.Empty;
-                    var hasNext = _playerEpisode is not null;  // best-effort flag
-                    var hasPrev = _playerEpisode is > 1;
+                    // Accurate adjacency: only offer prev/next when a real file
+                    // for that episode exists on disk (rolls across season
+                    // boundaries). Drives the lock-screen buttons AND the
+                    // end-of-episode auto-advance overlay's `nextAvailable` gate.
+                    var nextEp  = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
+                    var prevEp  = PrevEpisodeOnDisk(_playerSeason, _playerEpisode);
+                    var hasNext = nextEp is not null;
+                    var hasPrev = prevEp is not null;
+                    // Up-next card label, e.g. "S1 · EP 6" (season hidden for
+                    // flat/seasonless items where it's 0).
+                    var upNextName = "";
+                    if (nextEp is { } ne)
+                    {
+                        var neBits = new List<string>();
+                        if (ne.Season > 0) neBits.Add($"S{ne.Season}");
+                        neBits.Add($"EP {ne.Episode}");
+                        upNextName = string.Join(" · ", neBits);
+                    }
                     // HUD-specific kicker. Design (§T-03 in 04-tv.html) shows
                     // "Now playing · S1 · EP 5" — no zero-pad, space before
                     // the episode number. Plain "Now playing" for movies.
@@ -663,6 +1003,48 @@ else
                     if (_playerSeason is > 0)  hudKickerBits.Add($"S{_playerSeason}");
                     if (_playerEpisode is > 0) hudKickerBits.Add($"EP {_playerEpisode}");
                     var hudKicker = string.Join(" · ", hudKickerBits);
+
+                    // Skip-intro/credits times for the player. Best-effort: null →
+                    // the player hides Skip Intro and uses its 95% next-up fallback.
+                    // The server lazily detects (AniSkip) on a first-watch miss.
+                    object? segments = null;
+                    if (_playerEpisode is > 0)
+                    {
+                        try
+                        {
+                            var seg = await Api.GetEpisodeSegmentsAsync(_item.Id, _playerSeason ?? 1, _playerEpisode.Value);
+                            if (seg is not null)
+                                segments = new {
+                                    introStart   = seg.IntroStart,
+                                    introEnd     = seg.IntroEnd,
+                                    creditsStart = seg.CreditsStart,
+                                    creditsEnd   = seg.CreditsEnd,
+                                };
+                        }
+                        catch { /* segments are optional decoration */ }
+                    }
+
+                    // Trickplay seek-preview manifest. Null (204 before the
+                    // background pass reaches this title) → no preview bubble.
+                    object? trickplay = null;
+                    try
+                    {
+                        var tp = _playerEpisode is > 0
+                            ? await Api.GetTrickplayAsync(_item.Id, _playerSeason ?? 1, _playerEpisode.Value)
+                            : await Api.GetTrickplayAsync(_item.Id, null, null);
+                        if (tp is not null)
+                            trickplay = new {
+                                spriteUrl   = tp.SpriteUrl,
+                                intervalSec = tp.IntervalSec,
+                                tileWidth   = tp.TileWidth,
+                                tileHeight  = tp.TileHeight,
+                                cols        = tp.Cols,
+                                rows        = tp.Rows,
+                                count       = tp.Count,
+                            };
+                    }
+                    catch { /* preview is optional decoration */ }
+
                     var meta = new {
                         title,
                         artist,
@@ -674,6 +1056,15 @@ else
                         // top-bar title block. Falls back to `title` if absent.
                         hudKicker,
                         hudName       = _item.Title,
+                        // End-of-episode "Up next" autoplay card labels.
+                        upNextEyebrow = L["player.up_next"],
+                        upNextName,
+                        upNextPlay    = L["player.up_next_play"],
+                        upNextDismiss = L["player.up_next_dismiss"],
+                        // Skip-intro/credits segment times (seconds) for the player.
+                        segments,
+                        // Seek-preview sprite manifest (trickplay).
+                        trickplay,
                     };
                     try
                     {
@@ -713,48 +1104,76 @@ else
         }
     }
 
-    /// <summary>Lock-screen / Bluetooth "Previous track" — try the previous
-    /// episode in the same season. No-op if we're already at E01 or this is
-    /// a movie.</summary>
+    /// <summary>"Previous episode" — lock-screen / Bluetooth prev-track, the HUD
+    /// Prev button, and the MediaTrackPrevious remote key. Jumps to the nearest
+    /// EARLIER on-disk episode (rolls back across a season boundary). No-op for
+    /// movies or when nothing precedes the current episode.</summary>
     [JSInvokable]
     public Task InvokePrev()
     {
-        if (_item is null || _playerEpisode is not > 1) return Task.CompletedTask;
-        var prev = _playerEpisode.Value - 1;
-        return PlayEpisodeAsync(_playerSeason, prev);
+        if (_item is null) return Task.CompletedTask;
+        var prev = PrevEpisodeOnDisk(_playerSeason, _playerEpisode);
+        return prev is { } p ? PlayEpisodeAsync(p.Season, p.Episode) : Task.CompletedTask;
     }
 
-    /// <summary>Lock-screen / Bluetooth "Next track" — try the next episode
-    /// in the same season. No-op if no episode after this one exists in the
-    /// loaded watch-state.</summary>
+    /// <summary>"Next episode" — lock-screen / Bluetooth next-track, the HUD Next
+    /// button, the MediaTrackNext remote key, AND the end-of-episode auto-advance
+    /// overlay. Jumps to the nearest LATER on-disk episode (rolls forward into
+    /// the next season). No-op for movies or at the last available episode.
+    ///
+    /// Advancing to a next episode is itself a "done with this one" signal, even
+    /// when playback never crossed the 90% auto-watched threshold (credits that
+    /// run long, or the user just skipping ahead) — so the outgoing episode is
+    /// marked watched here rather than left to the progress-based heuristic.
+    /// Fire-and-forget so the network round-trip doesn't delay the switch.</summary>
     [JSInvokable]
     public Task InvokeNext()
     {
-        if (_item is null || _playerEpisode is null) return Task.CompletedTask;
-        var next = _playerEpisode.Value + 1;
-        return PlayEpisodeAsync(_playerSeason, next);
+        if (_item is null) return Task.CompletedTask;
+        var next = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
+        if (next is not { } n) return Task.CompletedTask;
+        if (_playerEpisode is not null)
+            _ = ToggleEpisodeWatched(_playerSeason ?? 1, _playerEpisode.Value, true);
+        return PlayEpisodeAsync(n.Season, n.Episode);
     }
 
-    private async Task PlayEpisodeAsync(int? season, int? episode)
+    /// <summary>Nearest on-disk episode AFTER (season, episode), ordered by
+    /// (season, episode) so it rolls into the next season's first file. Null when
+    /// the current item is a movie (episode == null) or this is the last file.
+    /// A file's null season counts as season 1 to match the episode grid.</summary>
+    private (int Season, int Episode)? NextEpisodeOnDisk(int? season, int? episode)
     {
-        if (_item is null) return;
-        // Best-effort lookup of the matching file via /api/media/{id}/files.
-        // If the file doesn't exist (we passed the season finale) we silently
-        // stop — Artplayer keeps the current playback paused.
-        try
-        {
-            var files = await Api.GetMediaFilesAsync(_item.Id);
-            var match = files.FirstOrDefault(f =>
-                (season is null || f.Season == season) &&
-                (episode is null || f.Episode == episode));
-            if (match is null) return;
-            await ClosePlayer();
-            _playerSeason  = season;
-            _playerEpisode = episode;
-            _playerPath    = match.FilePath;
-            StateHasChanged();
-        }
-        catch { /* swallow — UI keeps current playback */ }
+        if (episode is null) return null;
+        var curS = season ?? 1;
+        var curE = episode.Value;
+        // When fillers are hidden for this title, the auto-advance / Next action
+        // jumps over filler+recap episodes to the next canon one — otherwise the
+        // "hide" is cosmetic and playback still lands you on a filler. If only
+        // fillers remain ahead, there's no next (overlay stays hidden).
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => x.Season > curS || (x.Season == curS && x.Episode > curE))
+            .Where(x => !_hideFillers || !IsFlaggedEpisode(x.Season, x.Episode))
+            .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+            .Select(x => ((int Season, int Episode)?)x)
+            .FirstOrDefault();
+    }
+
+    /// <summary>Nearest on-disk episode BEFORE (season, episode). Mirror of
+    /// <see cref="NextEpisodeOnDisk"/> for the Prev action.</summary>
+    private (int Season, int Episode)? PrevEpisodeOnDisk(int? season, int? episode)
+    {
+        if (episode is null) return null;
+        var curS = season ?? 1;
+        var curE = episode.Value;
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => x.Season < curS || (x.Season == curS && x.Episode < curE))
+            .OrderByDescending(x => x.Season).ThenByDescending(x => x.Episode)
+            .Select(x => ((int Season, int Episode)?)x)
+            .FirstOrDefault();
     }
 
     private async Task ClosePlayer()
@@ -767,6 +1186,18 @@ else
         _playerSeason = null;
         _playerEpisode = null;
         _themeStarted = false;   // resume theme music on return to the detail view
+
+        // Playback may have auto-marked an episode watched (≥90%) or moved the
+        // resume point — refresh so the episode grid eyes + hero Continue CTA
+        // reflect it without a full page reload.
+        try { _watchStates = (await Api.GetWatchStatesAsync(Id)).ToList(); } catch { }
+        try
+        {
+            _continue       = await Api.GetContinueAsync(Id);
+            _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
+        }
+        catch { }
+
         StateHasChanged();
     }
 
@@ -816,6 +1247,78 @@ else
     private void OpenEditPanel() => _editOpen = true;
     private async Task OnEditSaved() { _editOpen = false; await LoadAsync(); }
 
+    /// <summary>Flip the episode list between grid + detailed-list. Per the
+    /// design decision, the page toggle IS the per-account default — so it
+    /// PATCHes EpisodeListView (the same preference the Profile → Appearance
+    /// picker writes) and mirrors it into UserContextState. Optimistic: the
+    /// layout swaps locally first; a failed PATCH just leaves the next page
+    /// load to reconcile.</summary>
+    private async Task SetEpisodeViewAsync(string view)
+    {
+        if (view is not ("grid" or "list") || _episodeView == view) return;
+        _episodeView = view;
+        StateHasChanged();
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                EpisodeListView: view));
+            UserCtx.SetPreferences(updated);
+        }
+        catch { /* keep the local view; next load reconciles from the server */ }
+    }
+
+    /// <summary>Hide-fillers toggle — optimistic flip, then persist a PER-TITLE
+    /// override (not the global default): merge this title's new value into the
+    /// override map and PATCH the whole map back. So the global default stays
+    /// put and only this title flips.</summary>
+    private async Task ToggleHideFillersAsync()
+    {
+        _hideFillers = !_hideFillers;
+        StateHasChanged();
+        var map = FillerOverrides(UserCtx.Preferences?.FillerOverridesJson);
+        map[Id.ToString()] = _hideFillers;
+        var json = System.Text.Json.JsonSerializer.Serialize(map);
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                FillerOverridesJson: json));
+            UserCtx.SetPreferences(updated);
+        }
+        catch { /* keep the local state; next load reconciles from the server */ }
+    }
+
+    /// <summary>Effective hide-fillers for the current title: the per-title
+    /// override if present, else the global <c>HideFillers</c> default.</summary>
+    private bool ResolveHideFillers()
+    {
+        var prefs = UserCtx.Preferences;
+        if (prefs is null) return false;
+        return FillerOverrides(prefs.FillerOverridesJson).TryGetValue(Id.ToString(), out var v)
+            ? v : prefs.HideFillers;
+    }
+
+    private static Dictionary<string, bool> FillerOverrides(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(json) ?? new(); }
+        catch { return new(); }
+    }
+
+    /// <summary>Is (season, episode) a MAL filler/recap? Matches the file's
+    /// AbsoluteEpisode first (long-runners / offset donghua), else the plain
+    /// number on season 1 only — mirrors the grid's badge logic so the
+    /// next-episode skip and the visible chips agree.</summary>
+    private bool IsFlaggedEpisode(int season, int episode)
+    {
+        if (_item is null) return false;
+        if (_item.FillerEpisodes.Length == 0 && _item.RecapEpisodes.Length == 0) return false;
+        var abs = _files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == episode)?.AbsoluteEpisode;
+        bool Hit(int[] arr) => abs is int a ? arr.Contains(a) : season <= 1 && arr.Contains(episode);
+        return Hit(_item.FillerEpisodes) || Hit(_item.RecapEpisodes);
+    }
+
     /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.
     /// Re-fetches the item afterwards so any per-user fields derived from
     /// favorites (e.g. category cards) stay in sync.</summary>
@@ -853,9 +1356,68 @@ else
                 IsWatched:   watched));
             _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
             _watchStates.Add(updated);
+
+            // Marking an episode watched while earlier on-disk episodes are still
+            // unwatched is almost always "I watched up to here" — offer to mark
+            // the gap. Only on mark-watched (not un-mark), and only when there's
+            // actually a gap to fill.
+            if (watched)
+            {
+                _markPrevTargets = PreviousUnwatchedOnDisk(season, episode);
+                _showMarkPrev    = _markPrevTargets.Count > 0;
+            }
         }
         catch { }
         StateHasChanged();
+    }
+
+    /// <summary>Earlier on-disk episodes (across ALL seasons) that have no
+    /// watched row yet, relative to the just-watched (season, episode). Ordered
+    /// by (season, episode). Drives the "mark previous too?" popup. A file's
+    /// null season counts as season 1 to match the episode grid's grouping.</summary>
+    private List<(int Season, int Episode)> PreviousUnwatchedOnDisk(int season, int episode)
+    {
+        bool IsBefore(int s, int e) => s < season || (s == season && e < episode);
+
+        var watched = _watchStates
+            .Where(w => w.IsWatched && w.Episode is not null)
+            .Select(w => (Season: w.Season ?? 1, Episode: w.Episode!.Value))
+            .ToHashSet();
+
+        return _files
+            .Where(f => f.Episode is not null)
+            .Select(f => (Season: f.Season ?? 1, Episode: f.Episode!.Value))
+            .Where(x => IsBefore(x.Season, x.Episode) && !watched.Contains(x))
+            .Distinct()
+            .OrderBy(x => x.Season).ThenBy(x => x.Episode)
+            .ToList();
+    }
+
+    private async Task ConfirmMarkPrevious()
+    {
+        if (_item is null || _markPrevTargets.Count == 0) { CancelMarkPrevious(); return; }
+        try
+        {
+            var updated = await Api.MarkBulkWatchedAsync(new MarkBulkWatchedRequest(
+                MediaItemId: _item.Id,
+                Episodes:    _markPrevTargets.Select(t => new EpisodeRef(t.Season, t.Episode)).ToArray(),
+                IsWatched:   true));
+            foreach (var u in updated)
+            {
+                _watchStates.RemoveAll(w => w.Season == u.Season && w.Episode == u.Episode);
+                _watchStates.Add(u);
+            }
+        }
+        catch { }
+        _showMarkPrev    = false;
+        _markPrevTargets = new();
+        StateHasChanged();
+    }
+
+    private void CancelMarkPrevious()
+    {
+        _showMarkPrev    = false;
+        _markPrevTargets = new();
     }
 
     /// <summary>Primary-CTA label for the MovieFileCard.</summary>
@@ -875,12 +1437,18 @@ else
         if (_item is null) return;
         try
         {
-            await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
+            var updated = await Api.ToggleWatchedAsync(new ToggleWatchedRequest(
                 MediaItemId: _item.Id,
                 Season:      null,
                 Episode:     null,
                 FilePath:    null,
                 IsWatched:   watched));
+            // Patch the movie's WatchState row so the card's eye + CTA label
+            // reflect the new state immediately. The card binds to the row from
+            // _watchStates (movieWatchDto), NOT _movieWatched — updating only the
+            // latter left the button visually inert ("doesn't click").
+            _watchStates.RemoveAll(w => w.Season is null && w.Episode is null);
+            _watchStates.Add(updated);
             _movieWatched = watched;
         }
         catch { }
@@ -896,7 +1464,12 @@ else
         if (_item is null) return;
         var prefs = UserCtx.Preferences;
         if (prefs is null || !prefs.ThemeMusicEnabled) return;
+        // Theme availability must not hinge on the metadata language: a resolved
+        // ThemeTitle (or MAL/anime classification) means there's a theme to play,
+        // regardless of whether the localized genres still read "Animation".
         bool animeLike = _item.MediaType == MediaItemType.Anime
+            || _item.MalId is not null
+            || !string.IsNullOrEmpty(_item.ThemeTitle)
             || _item.Genres.Any(g => string.Equals(g, "Animation", StringComparison.OrdinalIgnoreCase));
         if (!animeLike) return;
         var url = Animarr.UI.Services.MediaUrl.Theme(_item.Id);
@@ -913,6 +1486,7 @@ else
     public async ValueTask DisposeAsync()
     {
         Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
+        UserCtx.OnChange -= OnUserCtxChanged;
         await StopThemeAsync();
         if (_playerSelfRef is not null)
         {

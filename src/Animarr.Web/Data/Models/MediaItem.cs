@@ -49,6 +49,11 @@ public class MediaItem
     public int?    MalId  { get; set; }
     public string? ImdbId { get; set; }
     public int?    TvdbId { get; set; }
+    /// <summary>AniList id, captured whenever the AniList bridge resolves this
+    /// title (theme music / AniSkip MAL-id lookups). Unlike MalId it exists for
+    /// most donghua too, and is the key for future airing-schedule / relations
+    /// queries against the AniList GraphQL API.</summary>
+    public int?    AniListId { get; set; }
 
     // ─── Local image paths (absolute paths to MediaCachePaths.ForFolder dir) ─
     /// <summary>poster.jpg — primary poster art (portrait)</summary>
@@ -71,8 +76,13 @@ public class MediaItem
     // ─── Metadata ──────────────────────────────────────────────────────────
     public string? Description { get; set; }
     public string? Tagline { get; set; }
-    /// <summary>JSON array of genre names: ["Action","Drama"]</summary>
+    /// <summary>JSON array of genre names in canonical English: ["Action","Drama"].
+    /// Catalog logic (anime detection, category classification, theme matching) keys
+    /// off these, so they stay language-independent regardless of the metadata language.</summary>
     public string? GenresJson { get; set; }
+    /// <summary>JSON array of the same genres localized to the metadata language, for
+    /// display only. Null when the language is English (UI falls back to <see cref="GenresJson"/>).</summary>
+    public string? GenresLocalizedJson { get; set; }
     /// <summary>JSON array of descriptive tag strings: ["Donghua","Cultivation","Mecha"].
     /// Distinct from MediaTag/MediaItemTag (which models user collections); these are
     /// source-derived labels used by hero/poster overlays.</summary>
@@ -138,6 +148,54 @@ public class MediaItem
     public IdentificationStatus IdentificationStatus { get; set; } = IdentificationStatus.Pending;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastMetadataRefreshedAt { get; set; }
+    /// <summary>When the skip-intro/credits background pass last analysed this
+    /// item with the heavy providers (chromaprint). Null = never scanned. Gates
+    /// the background queue so a title is fully scanned once, then only
+    /// re-scanned after a long TTL.</summary>
+    public DateTime? LastSegmentScanAt { get; set; }
+    /// <summary>When the trickplay background pass last generated seek-preview
+    /// sprites for this item. Same gating contract as LastSegmentScanAt: null =
+    /// never, cleared by the torrent-completion hook so new episodes of an
+    /// ongoing title get sprites without waiting out the TTL.</summary>
+    public DateTime? LastTrickplayScanAt { get; set; }
+
+    // ─── Airing schedule (ongoing calendar) ────────────────────────────────
+    // Refreshed by AiringRefreshBackgroundService: AniList nextAiringEpisode
+    // for anime/donghua (batched), TMDB next_episode_to_air as the fallback
+    // for live-action "Returning Series".
+
+    /// <summary>Normalized release state: RELEASING / NOT_YET_RELEASED /
+    /// FINISHED / CANCELLED / HIATUS (AniList vocabulary; TMDB statuses are
+    /// mapped onto it). Null = never checked.</summary>
+    public string? AiringStatus { get; set; }
+    /// <summary>Absolute number of the NEXT episode to air (source numbering —
+    /// AniList counts per-entry, TMDB per-season; display maps via
+    /// SeasonOffsetsJson where applicable).</summary>
+    public int? NextEpisodeNumber { get; set; }
+    public DateTime? NextAirAtUtc { get; set; }
+    /// <summary>The previously-announced episode once its air time passes —
+    /// keeps "aired recently, is the file here yet?" answerable after the
+    /// refresh pass rolls NextEpisode forward.</summary>
+    public int? LastAiredEpisode { get; set; }
+    public DateTime? LastAiredAtUtc { get; set; }
+    /// <summary>Refresh gate: re-checked when stale (12h) or when the stored
+    /// NextAirAtUtc has passed. Null = never checked.</summary>
+    public DateTime? LastAiringCheckAt { get; set; }
+
+    /// <summary>When the franchise-relations BFS last ran for this title.
+    /// Null = never; re-walked after a long TTL (franchises change rarely).</summary>
+    public DateTime? LastRelationsCheckAt { get; set; }
+
+    /// <summary>JSON {"filler":[..],"recap":[..]} — episode numbers MAL flags
+    /// as filler/recap (Jikan), in the MAL entry's own numbering: absolute for
+    /// long-runners (One Piece), per-season for seasonal entries. Display maps
+    /// via the file's AbsoluteEpisode first, then the season-1 episode number.
+    /// Null = none known / never checked.</summary>
+    public string? EpisodeFlagsJson { get; set; }
+    /// <summary>When Jikan episode flags were last fetched. Null = never;
+    /// re-checked on a long TTL, shorter while RELEASING (a fresh episode of a
+    /// long-runner can be filler).</summary>
+    public DateTime? LastFillerCheckAt { get; set; }
 
     // ─── Navigation ────────────────────────────────────────────────────────
     public ICollection<MediaItemTag> Tags { get; set; } = [];

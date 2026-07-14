@@ -3,6 +3,10 @@ using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
+// Shared helpers moved to Animarr.Shared. Aliased (not `using Animarr.Shared`)
+// so the shared enum copies there don't clash with the Data.Models entities.
+using HueHash = Animarr.Shared.HueHash;
+using LanguageNameMap = Animarr.Shared.LanguageNameMap;
 
 namespace Animarr.Web.Services;
 
@@ -12,7 +16,7 @@ namespace Animarr.Web.Services;
 /// for final selection, then downloads images.
 /// Called by IdentificationQueueProcessorService after the optional LLM title-normalisation step.
 /// </summary>
-public class MetadataService(
+public partial class MetadataService(
     IDbContextFactory<AppDbContext> dbFactory,
     TmdbClient tmdb,
     MalClient mal,
@@ -139,7 +143,7 @@ public class MetadataService(
             log?.Invoke($"[Search] Preferring English/romanised title for search: \"{searchTitle}\"");
         logger.LogInformation("Identifying folder '{Path}' with title '{Title}' type={Type}", folder.Path, searchTitle, typeHint);
 
-        var tmdbKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
+        var tmdbKey = await appConfig.GetTmdbApiKeyAsync(ct);
         var malKey  = await appConfig.GetAsync(AppConfigKeys.MalClientId, ct);
 
         // ── Shortcut: if a stored ImdbId exists on the item, use it directly ─
@@ -373,6 +377,36 @@ public class MetadataService(
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
 
+        // Warm per-episode metadata so the detail page's detailed-list view is
+        // instant on first open instead of lazy-fetching there. Best-effort: a
+        // TMDB hiccup must never fail identification. TMDB-backed series only
+        // (movies have no episode list; MAL-only anime have no TMDB season
+        // detail). The /episodes endpoint stays the lazy fallback for everything
+        // this skips — manual re-picks, transient misses, language changes.
+        if (identified
+            && item.TmdbId is int
+            && item.MediaType is MediaItemType.Series or MediaItemType.Anime or MediaItemType.Multserials)
+        {
+            try
+            {
+                var epLang = (await appConfig.GetAsync(AppConfigKeys.MetadataLanguage, ct) ?? "en")
+                    .Trim().ToLowerInvariant();
+                var epRows = await EpisodeMetadataFetcher.FetchAsync(tmdb, item, epLang, ct, logger);
+                if (epRows.Count > 0)
+                {
+                    var old = await db.EpisodeMetadata.Where(e => e.MediaItemId == item.Id).ToListAsync(ct);
+                    if (old.Count > 0) { db.EpisodeMetadata.RemoveRange(old); await db.SaveChangesAsync(ct); }
+                    db.EpisodeMetadata.AddRange(epRows);
+                    await db.SaveChangesAsync(ct);
+                    log?.Invoke($"[Episodes] Warmed {epRows.Count} episode(s) of metadata.");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Episode-metadata warm failed for {Id}", item.Id);
+            }
+        }
+
         // Container-folder auto-rename was removed entirely after two catastrophic
         // data-corruption incidents (Movies → 6 wrong-named folders, Bleach → "The
         // Portal"). Identification now only updates the DB association
@@ -533,16 +567,13 @@ public class MetadataService(
                 $"ID \u00ab{externalId}\u00bb: metadata fetch failed. " +
                 $"imdbapi.dev returned no data for this ID (check the ID is correct and starts with 'tt').");
     }
-
-    // ── Public: image picker ──────────────────────────────────────────────────
-
     /// <summary>
     /// Builds a human-readable error message for a failed TMDB manual lookup.
     /// Distinguishes between: missing/invalid API key, ID exists but wrong media type, ID doesn't exist.
     /// </summary>
     private async Task<string> BuildTmdbErrorHintAsync(string idStr, string source, CancellationToken ct)
     {
-        var apiKey = await appConfig.GetAsync(AppConfigKeys.TmdbApiKey, ct);
+        var apiKey = await appConfig.GetTmdbApiKeyAsync(ct);
         if (string.IsNullOrWhiteSpace(apiKey))
             return $"ID «{idStr}»: TMDB API key is not configured (go to Settings → API Keys).";
 
@@ -552,378 +583,6 @@ public class MetadataService(
         return $"ID «{idStr}» was not found as {(source == "tmdb_tv" ? "a TV Series" : "a Movie")} on TMDB. " +
                $"If this is {otherLabel}, switch the source dropdown to \"{otherSource}\" and try again.";
     }
-
-    /// <summary>Returns all available poster/backdrop/logo candidates for the
-    /// item. Each row carries the URL plus pixel width/height when the source
-    /// reports them (TMDB does; MAL doesn't — those rows ship with 0/0 and
-    /// the UI hides the dimension badge). Requires TmdbId or
-    /// cross-referenceable ImdbId/TvdbId for the TMDB rows.</summary>
-    public async Task<(List<ImageCandidateDto> Posters, List<ImageCandidateDto> Backdrops, List<ImageCandidateDto> Logos)>
-        GetAvailableImagesAsync(Guid folderId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems.FirstOrDefaultAsync(m => m.FolderId == folderId, ct);
-        if (item is null) return ([], [], []);
-
-        // If TmdbId is missing but we have an external ID, try to resolve it on-the-fly
-        if (!item.TmdbId.HasValue)
-        {
-            var lookups = new List<(string id, string source)>();
-            if (!string.IsNullOrWhiteSpace(item.ImdbId))
-                lookups.Add((item.ImdbId, "imdb_id"));
-            if (item.TvdbId.HasValue)
-                lookups.Add((item.TvdbId.Value.ToString(), "tvdb_id"));
-
-            foreach (var (extId, extSrc) in lookups)
-            {
-                var found = await tmdb.FindByExternalIdAsync(extId, extSrc, ct);
-                if (found is null) continue;
-                if (found.TvResults.Count > 0)
-                {
-                    item.TmdbId = found.TvResults[0].Id;
-                    item.MediaType = MediaItemType.Series;
-                }
-                else if (found.MovieResults.Count > 0)
-                {
-                    item.TmdbId = found.MovieResults[0].Id;
-                    item.MediaType = MediaItemType.Movie;
-                }
-                if (item.TmdbId.HasValue)
-                {
-                    await db.SaveChangesAsync(ct); // cache TmdbId for next time
-                    break;
-                }
-            }
-        }
-
-        var posters   = new List<ImageCandidateDto>();
-        var backdrops = new List<ImageCandidateDto>();
-        var logos     = new List<ImageCandidateDto>();
-
-        // TMDB (multiple variants per image, vote-sorted)
-        if (item.TmdbId.HasValue)
-        {
-            var isTv   = item.MediaType != MediaItemType.Movie;
-            var images = isTv
-                ? await tmdb.GetTvImagesAsync(item.TmdbId.Value, ct)
-                : await tmdb.GetMovieImagesAsync(item.TmdbId.Value, ct);
-
-            if (images is not null)
-            {
-                static IEnumerable<ImageCandidateDto> ToCandidates(List<TmdbImage> list, Func<string, string> urlFn)
-                    => list
-                        .OrderByDescending(i => i.VoteAverage)
-                        .Select(i => new ImageCandidateDto(urlFn(i.FilePath), i.Width, i.Height));
-
-                posters  .AddRange(ToCandidates(images.Posters,   p => TmdbClient.PosterUrl(p,   "w342")));
-                backdrops.AddRange(ToCandidates(images.Backdrops, p => TmdbClient.BackdropUrl(p, "w780")));
-                logos    .AddRange(ToCandidates(images.Logos,     p => TmdbClient.LogoUrl(p,     "w300")));
-            }
-        }
-
-        // MAL (anime) — append any extra poster candidates from the pictures
-        // array. MAL doesn't report image dimensions in its API, so the
-        // candidates ship with 0/0 and the UI hides the badge for them.
-        if (item.MalId.HasValue)
-        {
-            var malDetail = await mal.GetDetailAsync(item.MalId.Value, ct);
-            if (malDetail is not null)
-            {
-                IEnumerable<string?> malPosters = malDetail.Pictures
-                    .Select(p => p.Large ?? p.Medium)
-                    .Prepend(malDetail.MainPicture?.Large ?? malDetail.MainPicture?.Medium);
-                foreach (var url in malPosters)
-                {
-                    if (string.IsNullOrWhiteSpace(url)) continue;
-                    if (posters.Any(p => p.Url == url)) continue;
-                    posters.Add(new ImageCandidateDto(url, 0, 0));
-                }
-            }
-        }
-
-        return (posters, backdrops, logos);
-    }
-
-    /// <summary>Downloads the chosen image and saves it as poster/fanart/logo for the folder.</summary>
-    public async Task ApplySelectedImageAsync(
-        Guid folderId, string imageType, string imageUrl, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var folder = await db.FolderWatchers.FindAsync([folderId], ct);
-        var item   = await db.MediaItems.FirstOrDefaultAsync(m => m.FolderId == folderId, ct);
-        if (folder is null || item is null) return;
-
-        var ext  = Path.GetExtension(imageUrl.Split('?')[0]);
-        string fileName = imageType switch
-        {
-            "poster"  => "poster"  + (string.IsNullOrEmpty(ext) ? ".jpg" : ext),
-            "fanart"  => "fanart"  + (string.IsNullOrEmpty(ext) ? ".jpg" : ext),
-            "logo"    => "logo"    + (string.IsNullOrEmpty(ext) ? ".png" : ext),
-            _ => throw new ArgumentException($"Unknown imageType: {imageType}")
-        };
-
-        // Use full-res URL: swap preview size for full
-        var fullUrl = imageUrl
-            .Replace("/w342/", "/original/")
-            .Replace("/w780/", "/original/")
-            .Replace("/w300/", "/original/");
-
-        var metaDir  = MetaDir(folder);
-        var destPath = Path.Combine(metaDir, fileName);
-        if (!await tmdb.DownloadImageAsync(fullUrl, destPath, ct))
-            throw new InvalidOperationException($"Failed to download image from {fullUrl}");
-
-        // Store the absolute cache path — readers use Path.Combine(folder.Path, …)
-        // which keeps the absolute path verbatim (Path.Combine drops the left side
-        // when the right side is rooted). Backward-compatible with the old
-        // ".animarr/poster.jpg"-style relative paths still sitting in the db.
-        switch (imageType)
-        {
-            case "poster": item.PosterPath = destPath; break;
-            case "fanart": item.FanartPath = destPath; break;
-            case "logo":   item.LogoPath   = destPath; break;
-        }
-        item.LastMetadataRefreshedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
-    }
-
-    // ── Candidate gathering ───────────────────────────────────────────────────
-
-    private async Task<List<MetadataCandidate>> GatherCandidatesAsync(
-        string searchTitle,
-        FolderType typeHint,
-        string? tmdbKey,
-        string? malKey,
-        int? folderYear,
-        Action<string>? log,
-        CancellationToken ct)
-    {
-        // Load source order config: [{id:"tmdb_tv",enabled:true},{id:"tmdb_movie",enabled:true}]
-        var sourceOrderJson = await appConfig.GetAsync(AppConfigKeys.SearchSourceOrder, ct);
-        var sourceOrder = ParseSourceOrder(sourceOrderJson);
-
-        var tasks = new List<Task<List<MetadataCandidate>>>();
-        var sourceWeights = new Dictionary<string, double>();
-
-        for (int i = 0; i < sourceOrder.Count; i++)
-        {
-            var src = sourceOrder[i];
-            if (!src.Enabled) continue;
-            // weight: first source = 1.0, each subsequent = -0.05
-            double weight = 1.0 - i * 0.05;
-            sourceWeights[src.Id] = weight;
-
-            if (src.Id == "tmdb_tv" && typeHint != FolderType.Movie)
-            {
-                if (!string.IsNullOrWhiteSpace(tmdbKey))
-                {
-                    log?.Invoke($"[TMDB] Searching TV for \"{searchTitle}\"");
-                    tasks.Add(SearchTmdbTvCandidatesAsync(searchTitle, folderYear, ct));
-                }
-                else log?.Invoke("[TMDB TV] Skipped — API key not configured.");
-            }
-            else if (src.Id == "tmdb_movie" && typeHint != FolderType.Series)
-            {
-                if (!string.IsNullOrWhiteSpace(tmdbKey))
-                {
-                    log?.Invoke($"[TMDB] Searching Movies for \"{searchTitle}\"");
-                    tasks.Add(SearchTmdbMovieCandidatesAsync(searchTitle, folderYear, ct));
-                }
-                else log?.Invoke("[TMDB Movie] Skipped — API key not configured.");
-            }
-            else if (src.Id == "mal")
-            {
-                if (!string.IsNullOrWhiteSpace(malKey))
-                {
-                    log?.Invoke($"[MAL] Searching for \"{searchTitle}\"");
-                    tasks.Add(SearchMalCandidatesAsync(searchTitle, folderYear, ct));
-                }
-                else log?.Invoke("[MAL] Skipped — client ID not configured.");
-            }
-            else if (src.Id == "imdb_search")
-            {
-                log?.Invoke($"[IMDb] Searching for \"{searchTitle}\"");
-                tasks.Add(SearchImdbCandidatesAsync(searchTitle, folderYear, ct, log));
-            }
-        }
-
-        if (tasks.Count == 0) return [];
-
-        var results = await Task.WhenAll(tasks);
-        var all = results.SelectMany(r => r).ToList();
-
-        // Apply source weight to score
-        if (sourceWeights.Count > 0)
-        {
-            all = all.Select(c =>
-            {
-                double w = sourceWeights.TryGetValue(c.Source, out var wv) ? wv : 1.0;
-                return c with { Score = c.Score * w };
-            }).ToList();
-        }
-
-        // Cross-validation: when two different sources independently return the same
-        // work (matched on normalised title + year), boost every candidate in that
-        // group by +0.25 — agreement between independent indexes is a strong signal.
-        if (all.Count > 1)
-        {
-            var groups = all
-                .GroupBy(c => (Key: NormaliseTitleForMatch(c.Title), c.Year))
-                .Where(g => g.Select(c => c.Source).Distinct().Count() >= 2)
-                .ToList();
-
-            if (groups.Count > 0)
-            {
-                var boosted = new HashSet<MetadataCandidate>(ReferenceEqualityComparer.Instance);
-                foreach (var g in groups)
-                    foreach (var c in g)
-                        boosted.Add(c);
-                all = all.Select(c => boosted.Contains(c)
-                    ? c with { Score = c.Score + 0.25 }
-                    : c).ToList();
-                log?.Invoke($"[Cross-validation] {groups.Count} cross-source match group(s) boosted (+0.25)");
-            }
-        }
-
-        log?.Invoke($"[Search] {all.Count} total candidates");
-        return all;
-    }
-
-    /// <summary>Strips non-alphanumeric characters and lower-cases — for cross-source matching.</summary>
-    private static string NormaliseTitleForMatch(string title)
-    {
-        if (string.IsNullOrEmpty(title)) return "";
-        var sb = new System.Text.StringBuilder(title.Length);
-        foreach (var c in title)
-            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
-        return sb.ToString();
-    }
-
-    /// <summary>True when ≥70% of the letter characters are basic ASCII — used to decide
-    /// whether to switch to the LLM's english_title for searching.</summary>
-    private static bool IsMostlyAscii(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return true;
-        int letters = 0, ascii = 0;
-        foreach (var c in s)
-        {
-            if (!char.IsLetter(c)) continue;
-            letters++;
-            if (c < 128) ascii++;
-        }
-        return letters == 0 || ascii * 10 >= letters * 7;
-    }
-
-    private static List<(string Id, bool Enabled)> ParseSourceOrder(string? json)
-    {
-        var defaults = new List<(string, bool)> { ("tmdb_tv", true), ("tmdb_movie", true), ("mal", false), ("imdb_search", true) };
-        if (string.IsNullOrWhiteSpace(json)) return defaults;
-        try
-        {
-            var parsed = JsonSerializer.Deserialize<List<SearchSourceEntry>>(json);
-            if (parsed is { Count: > 0 })
-                return parsed.Select(e => (e.Id, e.Enabled)).ToList();
-        }
-        catch { /* ignore malformed config */ }
-        return defaults;
-    }
-
-    private sealed record SearchSourceEntry(string Id, bool Enabled);
-
-    // TMDB poster thumb size for the NeedsReview UI (≈ 60×90 rendered).
-    private const string TmdbThumbBase = "https://image.tmdb.org/t/p/w154";
-
-    private async Task<List<MetadataCandidate>> SearchTmdbTvCandidatesAsync(
-        string searchTitle, int? folderYear, CancellationToken ct)
-    {
-        var results = await tmdb.SearchTvAsync(searchTitle, ct);
-        return results.Take(5).Select(r => new MetadataCandidate(
-            Source:        "tmdb_tv",
-            Id:            r.Id,
-            Title:         r.DisplayTitle,
-            OriginalTitle: r.OriginalName,
-            Year:          r.Year,
-            Overview:      r.Overview,
-            IsTv:          true,
-            Score:         ScoreResult(r.DisplayTitle, r.OriginalName, r.Year, searchTitle, folderYear),
-            PosterUrl:     !string.IsNullOrEmpty(r.PosterPath) ? TmdbThumbBase + r.PosterPath : null
-        )).ToList();
-    }
-
-    private async Task<List<MetadataCandidate>> SearchTmdbMovieCandidatesAsync(
-        string searchTitle, int? folderYear, CancellationToken ct)
-    {
-        var results = await tmdb.SearchMovieAsync(searchTitle, ct);
-        return results.Take(5).Select(r => new MetadataCandidate(
-            Source:        "tmdb_movie",
-            Id:            r.Id,
-            Title:         r.DisplayTitle,
-            OriginalTitle: r.OriginalTitle,
-            Year:          r.Year,
-            Overview:      r.Overview,
-            IsTv:          false,
-            Score:         ScoreResult(r.DisplayTitle, r.OriginalTitle, r.Year, searchTitle, folderYear),
-            PosterUrl:     !string.IsNullOrEmpty(r.PosterPath) ? TmdbThumbBase + r.PosterPath : null
-        )).ToList();
-    }
-
-    private async Task<List<MetadataCandidate>> SearchMalCandidatesAsync(
-        string searchTitle, int? folderYear, CancellationToken ct)
-    {
-        var results = await mal.SearchAsync(searchTitle, 5, ct);
-        return results.Select(r => new MetadataCandidate(
-            Source:        "mal",
-            Id:            r.Id,
-            Title:         r.EnglishTitle,
-            OriginalTitle: r.AlternativeTitles?.Ja ?? r.Title,
-            Year:          r.Year,
-            Overview:      r.Synopsis,
-            IsTv:          true,
-            Score:         ScoreResult(r.EnglishTitle, r.AlternativeTitles?.Ja ?? r.Title, r.Year, searchTitle, folderYear),
-            PosterUrl:     r.PosterUrl
-        )).ToList();
-    }
-
-    private async Task<List<MetadataCandidate>> SearchImdbCandidatesAsync(
-        string searchTitle, int? folderYear, CancellationToken ct, Action<string>? log = null)
-    {
-        var results = await imdbSearch.SearchTitlesAsync(searchTitle, 5, ct);
-        if (results.Count == 0)
-            log?.Invoke($"[IMDb] No results for \"{searchTitle}\" — ensure the title is in English.");
-        // Note: IMDb's PrimaryImage is only on the detail endpoint, not the
-        // search response — we leave PosterUrl null and rely on the external
-        // link button in the NeedsReview UI to let the user preview manually.
-        return results.Select(r =>
-        {
-            bool isTv = r.Type is "tvSeries" or "tvMiniSeries" or "tvSpecial" or "tvMovie";
-            return new MetadataCandidate(
-                Source:        "imdb_search",
-                Id:            0,
-                Title:         r.PrimaryTitle,
-                OriginalTitle: r.OriginalTitle,
-                Year:          r.StartYear,
-                Overview:      null,
-                IsTv:          isTv,
-                Score:         ScoreResult(r.PrimaryTitle, r.OriginalTitle, r.StartYear, searchTitle, folderYear),
-                StringId:      r.Id);
-        }).ToList();
-    }
-
-    private static double ScoreResult(string title, string? altTitle, int? year, string searchTitle, int? folderYear)
-    {
-        double sim = StringSimilarity(title, searchTitle);
-        if (!string.IsNullOrEmpty(altTitle))
-            sim = Math.Max(sim, StringSimilarity(altTitle, searchTitle) * 0.95);
-        double score = sim * 2.0;
-
-        if (year.HasValue && folderYear.HasValue)
-        {
-            if (year == folderYear) score += 0.4;
-            else if (Math.Abs(year.Value - folderYear.Value) <= 1) score += 0.15;
-        }
-        return score;
-    }
-
     // ── LLM winner selection ──────────────────────────────────────────────────
 
     private async Task<MetadataCandidate> SelectWinnerAsync(
@@ -1060,863 +719,76 @@ public class MetadataService(
         return sorted[0];
     }
 
-    // ── TMDB populate ─────────────────────────────────────────────────────────
-
-    private async Task<bool> PopulateTvFromTmdbAsync(
-        MediaItem item, FolderWatcher folder, int tmdbId, bool forceRefresh,
-        Action<string>? log, CancellationToken ct)
-    {
-        var detail = await tmdb.GetTvDetailAsync(tmdbId, ct);
-        if (detail is null) { log?.Invoke($"[TMDB] GetTvDetail({tmdbId}) returned null."); return false; }
-
-        log?.Invoke($"[TMDB] TV detail: \"{detail.Name}\" ({detail.Year})  seasons={detail.Seasons.Count}");
-
-        item.TmdbId        = detail.Id;
-        item.ImdbId        = detail.ExternalIds?.ImdbId;
-        item.TvdbId        = detail.ExternalIds?.TvdbId;
-        item.Title         = detail.Name;
-        item.OriginalTitle = detail.OriginalName;
-        item.Year          = detail.Year;
-        item.Description   = detail.Overview;
-        item.Tagline       = detail.Tagline;
-        item.Status        = detail.Status;
-        item.ContentRating = detail.ContentRating;
-        item.Rating        = detail.VoteAverage > 0 ? detail.VoteAverage : null;
-        item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
-        item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
-        item.Runtime       = detail.EpisodeRunTime.FirstOrDefault();
-        item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
-        item.Studio        = detail.StudioName;
-        item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
-        item.EpisodeCount  = detail.NumberOfEpisodes > 0
-            ? detail.NumberOfEpisodes
-            : detail.Seasons.Where(s => s.SeasonNumber > 0).Sum(s => s.EpisodeCount);
-        item.SeasonLabel   = detail.NumberOfSeasons > 1
-            ? $"S{detail.NumberOfSeasons}"
-            : null;
-        item.MediaType     = MediaItemType.Series;
-        item.Hue          ??= HueHash.For(detail.Name);
-
-        // Per-source confidence — TMDB has solid vote_count signal; map to 0..1.
-        // (VoteCount of 500+ pegs at 1.0; 0 votes → 0.0 — keeps the curve readable in UI.)
-        item.TmdbConfidence = Math.Min(1.0, detail.VoteCount / 500.0);
-
-        // Descriptive tags from keywords (Donghua/Cultivation/Mecha-style labels).
-        // Stored separately from genres because the design hero uses "tags pills" rather than genre tags.
-        var keywords = detail.Keywords?.All.Select(k => k.Name).Take(8).ToList() ?? [];
-        if (keywords.Count > 0)
-            item.TagsJson = JsonSerializer.Serialize(keywords, _json);
-
-        // CJK title — if the original language is a CJK locale, mirror OriginalName into CjkTitle
-        // so the hero CJK watermark has a value separate from English-aliased OriginalTitle.
-        if (detail.OriginalLanguage is "zh" or "ja" or "ko" && !string.IsNullOrWhiteSpace(detail.OriginalName))
-            item.CjkTitle = detail.OriginalName;
-
-        // English alternative — fetch translations and pick the en-US "name" if it differs from Title.
-        await TryEnrichEnglishTitleAsync(item, isTv: true, detail.Id, ct);
-
-        // Seasons — include PosterPath so Explorer can show thumbnails
-        var seasons = detail.Seasons
-            .Where(s => s.SeasonNumber > 0)
-            .Select(s => new SeasonMeta
-            {
-                Number       = s.SeasonNumber,
-                EpisodeCount = s.EpisodeCount,
-                Name         = s.Name,
-                PosterPath   = s.PosterPath != null
-                    ? Path.Combine(MetaDir(folder), $"season{s.SeasonNumber}-poster.jpg")
-                    : null,
-            }).ToList();
-        item.SeasonsJson = JsonSerializer.Serialize(seasons, _json);
-
-        item.IdentificationStatus = IdentificationStatus.Identified;
-
-        // Main images
-        await DownloadImagesAsync(item, folder,
-            poster:       detail.PosterPath     != null ? TmdbClient.PosterUrl(detail.PosterPath)         : null,
-            fanart:       detail.BestFanartPath != null ? TmdbClient.BackdropUrl(detail.BestFanartPath)   : null,
-            logo:         detail.BestLogoPath   != null ? TmdbClient.LogoUrl(detail.BestLogoPath)         : null,
-            forceRefresh: forceRefresh, log: log, ct: ct);
-
-        // Season posters → <cache>/<folder-id>/seasonN-poster.jpg
-        foreach (var s in detail.Seasons.Where(s => s.SeasonNumber > 0 && s.PosterPath != null))
-        {
-            var dest = Path.Combine(MetaDir(folder), $"season{s.SeasonNumber}-poster.jpg");
-            if (!forceRefresh && File.Exists(dest)) continue;
-            log?.Invoke($"[Images] Season {s.SeasonNumber} poster");
-            await tmdb.DownloadImageAsync(TmdbClient.PosterUrl(s.PosterPath!), dest, ct);
-        }
-
-        return true;
-    }
-
-    private async Task<bool> PopulateMovieFromTmdbAsync(
-        MediaItem item, FolderWatcher folder, int tmdbId, bool forceRefresh,
-        Action<string>? log, CancellationToken ct)
-    {
-        var detail = await tmdb.GetMovieDetailAsync(tmdbId, ct);
-        if (detail is null) { log?.Invoke($"[TMDB] GetMovieDetail({tmdbId}) returned null."); return false; }
-
-        log?.Invoke($"[TMDB] Movie detail: \"{detail.Title}\" ({detail.Year})");
-
-        item.TmdbId        = detail.Id;
-        item.ImdbId        = detail.ExternalIds?.ImdbId;
-        item.TvdbId        = detail.ExternalIds?.TvdbId;
-        item.Title         = detail.Title;
-        item.OriginalTitle = detail.OriginalTitle;
-        item.Year          = detail.Year;
-        item.Description   = detail.Overview;
-        item.Tagline       = detail.Tagline;
-        item.Status        = detail.Status;
-        item.ContentRating = detail.ContentRating;
-        item.Rating        = detail.VoteAverage > 0 ? detail.VoteAverage : null;
-        item.RatingCount   = detail.VoteCount > 0 ? detail.VoteCount : null;
-        item.Popularity    = detail.Popularity > 0 ? detail.Popularity : null;
-        item.Runtime       = detail.Runtime;
-        item.GenresJson    = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
-        item.Studio        = detail.StudioName;
-        item.Language      = LanguageNameMap.FromIso639(detail.OriginalLanguage);
-        item.EpisodeCount  = null;          // movies have no episodes — explicit null beats stale value on re-identify
-        item.SeasonLabel   = null;
-        item.MediaType     = MediaItemType.Movie;
-        item.Hue          ??= HueHash.For(detail.Title);
-        item.TmdbConfidence = Math.Min(1.0, detail.VoteCount / 500.0);
-
-        var keywords = detail.Keywords?.All.Select(k => k.Name).Take(8).ToList() ?? [];
-        if (keywords.Count > 0)
-            item.TagsJson = JsonSerializer.Serialize(keywords, _json);
-
-        if (detail.OriginalLanguage is "zh" or "ja" or "ko" && !string.IsNullOrWhiteSpace(detail.OriginalTitle))
-            item.CjkTitle = detail.OriginalTitle;
-
-        await TryEnrichEnglishTitleAsync(item, isTv: false, detail.Id, ct);
-
-        item.IdentificationStatus = IdentificationStatus.Identified;
-
-        await DownloadImagesAsync(item, folder,
-            poster:       detail.PosterPath   != null ? TmdbClient.PosterUrl(detail.PosterPath)     : null,
-            fanart:       detail.BackdropPath != null ? TmdbClient.BackdropUrl(detail.BackdropPath) : null,
-            logo:         detail.BestLogoPath != null ? TmdbClient.LogoUrl(detail.BestLogoPath)    : null,
-            forceRefresh: forceRefresh, log: log, ct: ct);
-
-        return true;
-    }
-
-    // ── MAL full populate (winner = MAL) ──────────────────────────────────────
-
-    private async Task<bool> PopulateFromMalAsync(
-        MediaItem item, FolderWatcher folder, int malId, Action<string>? log, CancellationToken ct)
-    {
-        var detail = await mal.GetDetailAsync(malId, ct);
-        if (detail is null) { log?.Invoke($"[MAL] GetDetail({malId}) returned null."); return false; }
-
-        log?.Invoke($"[MAL] Detail: \"{detail.EnglishTitle ?? detail.Title}\" id={detail.Id}");
-
-        item.MalId         = detail.Id;
-        item.Title         = detail.EnglishTitle ?? detail.Title;
-        item.OriginalTitle = detail.AlternativeTitles?.Ja ?? detail.Title;
-        // MAL anime are virtually always Japanese — populate CjkTitle when we have a JA alt-title
-        // distinct from the romanized display title.
-        if (!string.IsNullOrWhiteSpace(detail.AlternativeTitles?.Ja)
-            && detail.AlternativeTitles.Ja != item.Title)
-            item.CjkTitle = detail.AlternativeTitles.Ja;
-        if (!string.IsNullOrWhiteSpace(detail.AlternativeTitles?.En)
-            && detail.AlternativeTitles.En != item.Title)
-            item.EnglishTitle = detail.AlternativeTitles.En;
-        item.Year          ??= detail.Year;
-        item.Description   ??= detail.Synopsis;
-        if (item.Rating is null && detail.Mean.HasValue)               item.Rating      = detail.Mean;
-        if (item.RatingCount is null && detail.NumScoringUsers.HasValue) item.RatingCount = detail.NumScoringUsers;
-        if (item.Popularity is null && detail.Popularity.HasValue)     item.Popularity  = detail.Popularity;
-        if (item.Studio is null && detail.StudioName is not null)      item.Studio      = detail.StudioName;
-        if (item.Runtime is null && detail.RuntimeMinutes.HasValue)    item.Runtime     = detail.RuntimeMinutes;
-        // MAL anime are Japanese by default — only set if not already set by a higher-priority TMDB pass.
-        item.Language     ??= "Japanese";
-        if (detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
-            item.EpisodeCount = detail.NumEpisodes;
-        item.SeasonLabel  ??= detail.StartSeason is not null
-            ? $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}"
-            : null;
-        item.Hue          ??= HueHash.For(item.Title);
-        // MAL confidence proxy: num_scoring_users — 50k+ voters pegs at 1.0.
-        item.MalConfidence = detail.NumScoringUsers.HasValue
-            ? Math.Min(1.0, detail.NumScoringUsers.Value / 50000.0)
-            : null;
-
-        if (detail.Genres.Count > 0)
-            item.GenresJson = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
-
-        item.MediaType            = MediaItemType.Anime;
-        item.IdentificationStatus = IdentificationStatus.Identified;
-
-        // MAL has no concept of seasons — the show is a single contiguous run.
-        // Synthesise a Season 1 entry with NumEpisodes so MediaDetail renders
-        // an episode list (each card marked ✓ or download based on file presence)
-        // instead of an empty page.
-        if (string.IsNullOrEmpty(item.SeasonsJson) && (detail.NumEpisodes ?? 0) > 0)
-        {
-            item.SeasonsJson = JsonSerializer.Serialize(new[]
-            {
-                new
-                {
-                    Number       = 1,
-                    EpisodeCount = detail.NumEpisodes!.Value,
-                    Name         = "Season 1",
-                    PosterPath   = (string?)null,
-                    Overview     = (string?)null,
-                    AirDate      = (string?)null,
-                }
-            }, _json);
-        }
-
-        if (item.PosterPath is null && detail.PosterUrl is not null)
-        {
-            var metaDir  = MetaDir(folder);
-            var destPath = Path.Combine(metaDir, "poster.jpg");
-            if (!File.Exists(destPath))
-            {
-                log?.Invoke($"[Images] Downloading MAL poster → {destPath}");
-                if (await tmdb.DownloadImageAsync(detail.PosterUrl, destPath, ct))
-                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
-                else
-                { log?.Invoke($"[Images] {destPath} ✗ (download failed)"); }
-            }
-            else
-            {
-                item.PosterPath = destPath;
-            }
-        }
-
-        return true;
-    }
-
-    // ── IMDb search → resolve via TMDB FindByExternalId, fallback to imdbapi.dev ──
-
-    private async Task<bool> PopulateFromImdbSearchAsync(
-        MediaItem item, FolderWatcher folder, string imdbId, bool preferTv,
-        bool forceRefresh, Action<string>? log, CancellationToken ct)
-    {
-        log?.Invoke($"[IMDb] Resolving {imdbId} via TMDB FindByExternalId");
-        var findResult = await tmdb.FindByExternalIdAsync(imdbId, "imdb_id", ct);
-        if (findResult is not null)
-        {
-            item.ImdbId = imdbId;
-            if (preferTv && findResult.TvResults.Count > 0)
-                return await PopulateTvFromTmdbAsync(item, folder, findResult.TvResults[0].Id, forceRefresh, log, ct);
-            if (findResult.MovieResults.Count > 0)
-                return await PopulateMovieFromTmdbAsync(item, folder, findResult.MovieResults[0].Id, forceRefresh, log, ct);
-            if (findResult.TvResults.Count > 0)
-                return await PopulateTvFromTmdbAsync(item, folder, findResult.TvResults[0].Id, forceRefresh, log, ct);
-            log?.Invoke($"[IMDb] TMDB returned no TV or movie results for {imdbId}.");
-        }
-        else
-        {
-            log?.Invoke($"[IMDb] TMDB lookup for {imdbId} returned null — falling back to imdbapi.dev direct.");
-        }
-
-        // Fallback: populate directly from imdbapi.dev (no TMDB key required)
-        return await PopulateFromImdbDirectAsync(item, folder, imdbId, forceRefresh, log, ct);
-    }
-
-    /// <summary>Populate MediaItem from imdbapi.dev /titles/{id} without requiring TMDB key.</summary>
-    private async Task<bool> PopulateFromImdbDirectAsync(
-        MediaItem item, FolderWatcher folder, string imdbId,
-        bool forceRefresh, Action<string>? log, CancellationToken ct)
-    {
-        log?.Invoke($"[IMDb] Fetching direct detail for {imdbId} from imdbapi.dev");
-        var detail = await imdbSearch.GetTitleAsync(imdbId, ct);
-        if (detail is null)
-        {
-            log?.Invoke($"[IMDb] Direct detail for {imdbId} returned null.");
-            return false;
-        }
-
-        log?.Invoke($"[IMDb] Direct detail: \"{detail.PrimaryTitle}\" ({detail.StartYear}) type={detail.Type}");
-
-        item.ImdbId        = imdbId;
-        item.Title         = detail.PrimaryTitle;
-        item.OriginalTitle = detail.OriginalTitle;
-        item.Year          = detail.StartYear;
-        item.Description   = detail.Plot;
-        item.Runtime       = detail.RuntimeSeconds.HasValue ? detail.RuntimeSeconds.Value / 60 : null;
-        if (detail.Rating is not null)
-        {
-            item.Rating      = detail.Rating.AggregateRating;
-            item.RatingCount = detail.Rating.VoteCount;
-            // IMDb confidence proxy: vote_count. IMDb's bar is higher than TMDB's because
-            // it's the long-tail source — 10k voters → ~1.0; matches what "established title" feels like.
-            item.ImdbConfidence = Math.Min(1.0, detail.Rating.VoteCount / 10000.0);
-        }
-        if (detail.Genres.Count > 0)
-            item.GenresJson = JsonSerializer.Serialize(detail.Genres, _json);
-
-        bool isTv = detail.Type is "tvSeries" or "tvMiniSeries" or "tvSpecial";
-        item.MediaType = isTv ? MediaItemType.Series : MediaItemType.Movie;
-        item.Hue      ??= HueHash.For(detail.PrimaryTitle);
-        item.IdentificationStatus = IdentificationStatus.Identified;
-
-        // Download poster from imdbapi.dev primaryImage if available
-        if (detail.PrimaryImage?.Url is { Length: > 0 } posterUrl)
-        {
-            var metaDir  = MetaDir(folder);
-            var destPath = Path.Combine(metaDir, "poster.jpg");
-            if (forceRefresh || item.PosterPath is null || !File.Exists(destPath))
-            {
-                log?.Invoke($"[Images] Downloading IMDb poster → {destPath}");
-                if (await tmdb.DownloadImageAsync(posterUrl, destPath, ct))
-                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
-                else
-                { log?.Invoke($"[Images] {destPath} ✗ (download failed)"); }
-            }
-            else if (File.Exists(destPath))
-            {
-                item.PosterPath = destPath;
-            }
-        }
-
-        return true;
-    }
-
-    // ── MAL enrichment (supplements existing TMDB data) ──────────────────────
-
-    private async Task EnrichWithMalAsync(
-        MediaItem item, FolderWatcher folder, int malId, bool forceRefresh,
-        Action<string>? log, CancellationToken ct)
-    {
-        var detail = await mal.GetDetailAsync(malId, ct);
-        if (detail is null) { log?.Invoke($"[MAL] GetDetail({malId}) returned null."); return; }
-
-        log?.Invoke($"[MAL] Enriching: \"{detail.EnglishTitle ?? detail.Title}\" id={detail.Id}");
-
-        item.MalId = detail.Id;
-        if (string.IsNullOrWhiteSpace(item.Title))    item.Title         = detail.EnglishTitle;
-        if (item.OriginalTitle is null)                item.OriginalTitle = detail.AlternativeTitles?.Ja ?? detail.Title;
-        // Enrich CJK / English alts only when missing — TMDB pass already populated them when it ran first.
-        if (item.CjkTitle is null && !string.IsNullOrWhiteSpace(detail.AlternativeTitles?.Ja))
-            item.CjkTitle = detail.AlternativeTitles.Ja;
-        if (item.EnglishTitle is null && !string.IsNullOrWhiteSpace(detail.AlternativeTitles?.En)
-            && detail.AlternativeTitles.En != item.Title)
-            item.EnglishTitle = detail.AlternativeTitles.En;
-        if (item.Year is null)                         item.Year          = detail.Year;
-        if (item.Description is null)                  item.Description   = detail.Synopsis;
-        if (item.Rating is null && detail.Mean.HasValue)               item.Rating     = detail.Mean;
-        if (item.RatingCount is null && detail.NumScoringUsers.HasValue) item.RatingCount = detail.NumScoringUsers;
-        if (item.Popularity is null && detail.Popularity.HasValue)      item.Popularity = detail.Popularity;
-        if (item.Studio is null && detail.StudioName is not null)       item.Studio     = detail.StudioName;
-        if (item.Runtime is null && detail.RuntimeMinutes.HasValue)     item.Runtime    = detail.RuntimeMinutes;
-        item.Language ??= "Japanese";
-        if (item.EpisodeCount is null && detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
-            item.EpisodeCount = detail.NumEpisodes;
-        if (item.SeasonLabel is null && detail.StartSeason is not null)
-            item.SeasonLabel = $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}";
-        item.Hue ??= HueHash.For(item.Title);
-        item.MalConfidence ??= detail.NumScoringUsers.HasValue
-            ? Math.Min(1.0, detail.NumScoringUsers.Value / 50000.0)
-            : null;
-        if (item.GenresJson is null && detail.Genres.Count > 0)
-            item.GenresJson = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
-
-        item.MediaType = MediaItemType.Anime;
-
-        if (item.PosterPath is null && detail.PosterUrl is not null)
-        {
-            var metaDir  = MetaDir(folder);
-            var destPath = Path.Combine(metaDir, "poster.jpg");
-            if (forceRefresh || !File.Exists(destPath))
-            {
-                log?.Invoke($"[Images] Downloading MAL poster → {destPath}");
-                if (await tmdb.DownloadImageAsync(detail.PosterUrl, destPath, ct))
-                { item.PosterPath = destPath; log?.Invoke($"[Images] {destPath} ✓"); }
-            }
-            else
-            {
-                item.PosterPath = destPath;
-            }
-        }
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static string Capitalize(string s)
-        => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
-
-    /// <summary>Fetch translations and pick the en-US "name"/"title" when it differs from item.Title.
-    /// Cheap (one extra GET) but only fires when the primary detail came back in a non-English locale.</summary>
-    private async Task TryEnrichEnglishTitleAsync(MediaItem item, bool isTv, int tmdbId, CancellationToken ct)
-    {
-        // Skip when we already have a distinct English title or the primary title is already English.
-        if (!string.IsNullOrWhiteSpace(item.EnglishTitle)) return;
-
-        var translations = isTv
-            ? await tmdb.GetTvTranslationsAsync(tmdbId, ct)
-            : await tmdb.GetMovieTranslationsAsync(tmdbId, ct);
-        if (translations is null) return;
-
-        var en = translations.Translations
-            .FirstOrDefault(t => t.Language == "en" && t.Country == "US")
-            ?? translations.Translations.FirstOrDefault(t => t.Language == "en");
-
-        var enTitle = en?.Data?.DisplayTitle;
-        if (!string.IsNullOrWhiteSpace(enTitle) && enTitle != item.Title)
-            item.EnglishTitle = enTitle;
-    }
-
-    // ── Image download ────────────────────────────────────────────────────────
+    // ── Re-localisation (text + poster only) ──────────────────────────────────
 
     /// <summary>
-    /// Returns the cache directory for this folder's posters, fanart, logos.
-    /// Always lives inside <see cref="MediaCachePaths.CacheRoot"/> — never
-    /// inside the user's media tree. SingleFilePath vs directory entries no
-    /// longer need different layouts because each FolderWatcher has its own
-    /// unique cache subdir keyed by Id.
+    /// Lightweight re-localisation of one already-identified TMDB item: re-fetches the
+    /// main TV/Movie detail in <paramref name="lang"/> and overwrites ONLY the
+    /// language-dependent fields — Title, Description, Genres — plus the poster when a
+    /// poster localized to that language exists (otherwise the current poster is kept,
+    /// never downgraded). Matched ids, ratings, episode mappings, original/CJK/English
+    /// titles and the audio Language are left untouched. Empty overview/title fall back
+    /// to English per field. Mutates <paramref name="item"/> in place; the caller owns
+    /// persistence. Returns false for non-TMDB items (e.g. MAL-only anime) or when the
+    /// detail fetch fails. Used by <see cref="MetadataLanguageService"/>'s library pass.
     /// </summary>
-    private string MetaDir(FolderWatcher folder) => cachePaths.ForFolder(folder.Id);
-
-    private async Task DownloadImagesAsync(
-        MediaItem item,
-        FolderWatcher folder,
-        string? poster,
-        string? fanart,
-        string? logo,
-        bool forceRefresh,
-        Action<string>? log,
-        CancellationToken ct)
+    public async Task<bool> RelocalizeItemAsync(MediaItem item, string lang, CancellationToken ct = default)
     {
-        var metaDir = MetaDir(folder);
+        if (item.TmdbId is not { } tmdbId) return false;   // only TMDB-sourced items can be localized
+        lang = string.IsNullOrWhiteSpace(lang) ? "en" : lang;
 
-        if (poster != null)
+        string? title, overview, localizedPosterPath;
+        List<string> genres, localizedGenres;
+
+        if (item.MediaType == MediaItemType.Movie)
         {
-            var ext  = Path.GetExtension(poster.Split('?')[0]);
-            var name = "poster" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
-            var dest = Path.Combine(metaDir, name);
-            if (forceRefresh || !File.Exists(dest))
+            var d = await tmdb.GetMovieDetailAsync(tmdbId, lang, ct);
+            if (d is null) return false;
+            title = d.Title; overview = d.Overview;
+            genres = TmdbGenreCatalog.English(d.Genres);   // canonical (English) — catalog logic depends on it
+            localizedGenres = d.Genres.Select(g => g.Name).ToList();
+            localizedPosterPath = d.Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath;
+            if (lang != "en" && string.IsNullOrWhiteSpace(overview))
             {
-                log?.Invoke($"[Images] Downloading poster → {dest}");
-                if (await tmdb.DownloadImageAsync(poster, dest, ct))
-                { item.PosterPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
-                else
-                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
-            }
-            else
-            {
-                item.PosterPath = dest;
-                log?.Invoke($"[Images] {dest} already exists, skipping");
+                var en = await tmdb.GetMovieDetailAsync(tmdbId, "en", ct);
+                if (string.IsNullOrWhiteSpace(overview)) overview = en?.Overview;
+                if (string.IsNullOrWhiteSpace(title))    title    = en?.Title;
             }
         }
         else
         {
-            log?.Invoke("[Images] No poster URL.");
-        }
-
-        if (fanart != null)
-        {
-            var ext  = Path.GetExtension(fanart.Split('?')[0]);
-            var name = "fanart" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext);
-            var dest = Path.Combine(metaDir, name);
-            if (forceRefresh || !File.Exists(dest))
+            var d = await tmdb.GetTvDetailAsync(tmdbId, lang, ct);
+            if (d is null) return false;
+            title = d.Name; overview = d.Overview;
+            genres = TmdbGenreCatalog.English(d.Genres);   // canonical (English) — catalog logic depends on it
+            localizedGenres = d.Genres.Select(g => g.Name).ToList();
+            localizedPosterPath = d.Images?.Posters?.FirstOrDefault(p => p.Iso6391 == lang)?.FilePath;
+            if (lang != "en" && string.IsNullOrWhiteSpace(overview))
             {
-                log?.Invoke($"[Images] Downloading fanart → {dest}");
-                if (await tmdb.DownloadImageAsync(fanart, dest, ct))
-                { item.FanartPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
-                else
-                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
-            }
-            else
-            {
-                item.FanartPath = dest;
-                log?.Invoke($"[Images] {dest} already exists, skipping");
+                var en = await tmdb.GetTvDetailAsync(tmdbId, "en", ct);
+                if (string.IsNullOrWhiteSpace(overview)) overview = en?.Overview;
+                if (string.IsNullOrWhiteSpace(title))    title    = en?.Name;
             }
         }
 
-        if (logo != null)
-        {
-            var ext  = Path.GetExtension(logo.Split('?')[0]);
-            var name = "logo" + (string.IsNullOrEmpty(ext) ? ".png" : ext);
-            var dest = Path.Combine(metaDir, name);
-            if (forceRefresh || !File.Exists(dest))
-            {
-                log?.Invoke($"[Images] Downloading logo → {dest}");
-                if (await tmdb.DownloadImageAsync(logo, dest, ct))
-                { item.LogoPath = dest; log?.Invoke($"[Images] {dest} ✓"); }
-                else
-                { log?.Invoke($"[Images] {dest} ✗ (download failed)"); }
-            }
-            else
-            {
-                item.LogoPath = dest;
-                log?.Invoke($"[Images] {dest} already exists, skipping");
-            }
-        }
+        if (!string.IsNullOrWhiteSpace(title)) item.Title = title;
+        item.Description = overview;
+        if (genres.Count > 0)
+            item.GenresJson = JsonSerializer.Serialize(genres, _json);
+        // Localized genres for display (max localization); null → UI falls back to English canonical.
+        item.GenresLocalizedJson = lang != "en" && localizedGenres.Count > 0
+            ? JsonSerializer.Serialize(localizedGenres, _json)
+            : null;
+
+        // Swap the poster only when one localized to `lang` exists — overwrite the same
+        // cached file (mirrors ApplySelectedImageAsync) and bump the cache-bust stamp.
+        if (localizedPosterPath is { } lp && !string.IsNullOrEmpty(item.PosterPath))
+            await tmdb.DownloadImageAsync(TmdbClient.PosterUrl(lp), item.PosterPath, ct);
+
+        item.LastMetadataRefreshedAt = DateTime.UtcNow;
+        return true;
     }
 
-    // ── Image fallback: fill missing images from other sources ───────────────
-
-    /// <summary>
-    /// After a primary populate, tries to fill any still-missing images (poster / fanart / logo)
-    /// by querying additional sources in priority order:
-    ///   1. TMDB via stored ImdbId  (FindByExternalId)
-    ///   2. TMDB via stored TvdbId  (FindByExternalId)
-    ///   3. MAL poster              (when item.MalId is set and poster still missing)
-    ///
-    /// If the primary source was already TMDB (item.TmdbId is set), TMDB steps are skipped.
-    /// </summary>
-    private async Task FillMissingImagesAsync(
-        MediaItem item, FolderWatcher folder,
-        bool forceRefresh, Action<string>? log, CancellationToken ct)
-    {
-        bool needPoster = item.PosterPath is null;
-        bool needFanart = item.FanartPath is null;
-        bool needLogo   = item.LogoPath   is null;
-        if (!needPoster && !needFanart && !needLogo) return;
-
-        var missing = string.Join(", ",
-            new[] { needPoster ? "poster" : null, needFanart ? "fanart" : null, needLogo ? "logo" : null }
-            .Where(x => x is not null));
-        log?.Invoke($"[Images/Fallback] Missing after primary: {missing} — trying supplementary sources.");
-
-        // ── 1 & 2: TMDB via external ID cross-ref (skipped if TMDB was primary) ─
-        if (!item.TmdbId.HasValue)
-        {
-            // Build a list of (externalId, source) pairs to try
-            var externalLookups = new List<(string id, string source)>();
-            if (!string.IsNullOrWhiteSpace(item.ImdbId))
-                externalLookups.Add((item.ImdbId, "imdb_id"));
-            if (item.TvdbId.HasValue)
-                externalLookups.Add((item.TvdbId.Value.ToString(), "tvdb_id"));
-
-            foreach (var (extId, extSource) in externalLookups)
-            {
-                if (!needPoster && !needFanart && !needLogo) break;
-
-                log?.Invoke($"[Images/Fallback] TMDB FindByExternalId({extId}, {extSource})");
-                var find = await tmdb.FindByExternalIdAsync(extId, extSource, ct);
-                if (find is null) continue;
-
-                int? tmdbId = null;
-                bool isTv   = false;
-                if (find.TvResults.Count > 0)        { tmdbId = find.TvResults[0].Id;    isTv = true; }
-                else if (find.MovieResults.Count > 0) { tmdbId = find.MovieResults[0].Id; }
-                if (tmdbId is null) continue;
-
-                item.TmdbId = tmdbId; // cache for future refreshes
-
-                string? posterUrl = null, fanartUrl = null, logoUrl = null;
-                if (isTv)
-                {
-                    var d = await tmdb.GetTvDetailAsync(tmdbId.Value, ct);
-                    if (d is not null)
-                    {
-                        if (needPoster && d.PosterPath     != null) posterUrl = TmdbClient.PosterUrl(d.PosterPath);
-                        if (needFanart && d.BestFanartPath != null) fanartUrl = TmdbClient.BackdropUrl(d.BestFanartPath);
-                        if (needLogo   && d.BestLogoPath   != null) logoUrl   = TmdbClient.LogoUrl(d.BestLogoPath);
-                    }
-                }
-                else
-                {
-                    var d = await tmdb.GetMovieDetailAsync(tmdbId.Value, ct);
-                    if (d is not null)
-                    {
-                        if (needPoster && d.PosterPath   != null) posterUrl = TmdbClient.PosterUrl(d.PosterPath);
-                        if (needFanart && d.BackdropPath != null) fanartUrl = TmdbClient.BackdropUrl(d.BackdropPath);
-                        if (needLogo   && d.BestLogoPath != null) logoUrl   = TmdbClient.LogoUrl(d.BestLogoPath);
-                    }
-                }
-
-                if (posterUrl is not null || fanartUrl is not null || logoUrl is not null)
-                    await DownloadImagesAsync(item, folder, posterUrl, fanartUrl, logoUrl, forceRefresh, log, ct);
-
-                needPoster = item.PosterPath is null;
-                needFanart = item.FanartPath is null;
-                needLogo   = item.LogoPath   is null;
-                if (!needPoster && !needFanart && !needLogo) break;
-            }
-        }
-
-        // ── 3. MAL poster (when poster still missing and MalId is known) ─────
-        if (needPoster && item.MalId.HasValue)
-        {
-            log?.Invoke($"[Images/Fallback] MAL id={item.MalId} for poster");
-            var detail = await mal.GetDetailAsync(item.MalId.Value, ct);
-            if (detail?.PosterUrl is { Length: > 0 } posterUrl)
-            {
-                var metaDir  = MetaDir(folder);
-                var destPath = Path.Combine(metaDir, "poster.jpg");
-                if (forceRefresh || !File.Exists(destPath))
-                {
-                    if (await tmdb.DownloadImageAsync(posterUrl, destPath, ct))
-                    { item.PosterPath = destPath; log?.Invoke($"[Images/Fallback] {destPath} from MAL ✓"); }
-                    else
-                    { log?.Invoke($"[Images/Fallback] {destPath} from MAL ✗"); }
-                }
-                else
-                {
-                    item.PosterPath = destPath;
-                }
-            }
-        }
-    }
-
-    // ── Theme music (anime OP/ED) ─────────────────────────────────────────────
-
-    /// <summary>
-    /// Best-effort fetch of the title's opening/ending theme from AnimeThemes.moe,
-    /// cached as theme.ogg in the media folder's <c>.animarr/&lt;folderId&gt;/</c> dir
-    /// (NOT the central image cache — kept next to the media to keep the Docker data
-    /// volume small). Only runs for anime-like items. Never throws — theme music is
-    /// non-critical, so any failure (no match, read-only mount, network) just leaves
-    /// ThemePath null and identification continues.
-    /// </summary>
-    private async Task FillThemeMusicAsync(
-        MediaItem item, FolderWatcher folder, bool forceRefresh, Action<string>? log, CancellationToken ct,
-        bool bypassEnabledGate = false)
-    {
-        try
-        {
-            // Skip the network-heavy prefetch when no user has theme music enabled —
-            // keeps identification fast and avoids downloading audio nobody will play.
-            // Bypassed for explicit user-triggered refreshes (the drawer's Rescan button).
-            if (!bypassEnabledGate)
-            {
-                await using var prefDb = await dbFactory.CreateDbContextAsync(ct);
-                if (!await prefDb.UserPreferences.AnyAsync(p => p.ThemeMusicEnabled, ct))
-                    return;
-            }
-
-            var genres = DeserialiseGenreNames(item.GenresJson);
-            if (!LooksLikeAnime(item, genres)) return;
-
-            var dir = ThemeDir(folder);
-            if (dir is null) { log?.Invoke("[Theme] No media dir resolved — skipping."); return; }
-            var dest = Path.Combine(dir, "theme.ogg");
-
-            // Idempotent: keep the existing file unless a forced refresh.
-            if (!forceRefresh && File.Exists(dest))
-            {
-                item.ThemePath = dest;
-                return;
-            }
-
-            // Resolve a MAL/AniList id. MAL is off by default, so most anime reach
-            // here without item.MalId — bridge via AniList (title → idMal).
-            int? malId = item.MalId;
-            int? aniListId = null;
-            if (malId is null)
-            {
-                var match = await aniList.ResolveAsync(item.EnglishTitle ?? item.Title, ct);
-                if (match is not null)
-                {
-                    malId     = match.IdMal;
-                    aniListId = match.AniListId;
-                    log?.Invoke($"[Theme] AniList resolved \"{item.Title}\" → mal={malId} anilist={aniListId} ({match.Title})");
-                }
-            }
-
-            AnimeThemesClient.ThemePick? pick = null;
-            if (malId is int m)
-                pick = await animeThemes.GetBestThemeAsync("MyAnimeList", m.ToString(), ct);
-            if (pick is null && aniListId is int a)
-                pick = await animeThemes.GetBestThemeAsync("AniList", a.ToString(), ct);
-
-            if (pick is null) { log?.Invoke($"[Theme] No theme found for \"{item.Title}\"."); return; }
-
-            try { Directory.CreateDirectory(dir); }
-            catch (Exception ex) { log?.Invoke($"[Theme] Can't create {dir} (read-only media mount?): {ex.Message}"); return; }
-
-            if (await animeThemes.DownloadAsync(pick.AudioUrl, dest, ct))
-            {
-                item.ThemePath  = dest;
-                item.ThemeTitle = pick.Title;
-                log?.Invoke($"[Theme] {dest} ✓ ({pick.Title})");
-            }
-            else
-            {
-                log?.Invoke($"[Theme] download failed: {pick.AudioUrl}");
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Theme music fetch failed for folder {Id}", folder.Id);
-        }
-    }
-
-    /// <summary>Public on-demand theme fetch for an existing item — the detail page
-    /// triggers this (via GET /api/media/{id}/theme) so the current library backfills
-    /// lazily without a full re-identify. Returns the cached path, or null when the
-    /// title has no theme / isn't anime. Persists ThemePath/ThemeTitle when found.</summary>
-    public async Task<string?> EnsureThemeMusicAsync(Guid mediaItemId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
-        if (item is null) return null;
-        if (!string.IsNullOrEmpty(item.ThemePath) && File.Exists(item.ThemePath)) return item.ThemePath;
-
-        var folder = await db.FolderWatchers.FindAsync([item.FolderId], ct);
-        if (folder is null) return null;
-
-        await FillThemeMusicAsync(item, folder, forceRefresh: false, log: null, ct);
-        if (item.ThemePath is not null) await db.SaveChangesAsync(ct);
-        return item.ThemePath;
-    }
-
-    /// <summary>Explicit user-triggered re-fetch (the Edit Metadata drawer's THEME MUSIC
-    /// "Rescan" button). Forces a fresh AnimeThemes lookup and bypasses the global
-    /// "any user enabled" gate (the user is asking for it directly). Returns the new
-    /// ThemePath, or null when nothing was found.</summary>
-    public async Task<string?> RefreshThemeMusicAsync(Guid mediaItemId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
-        if (item is null) return null;
-        var folder = await db.FolderWatchers.FindAsync([item.FolderId], ct);
-        if (folder is null) return null;
-
-        await FillThemeMusicAsync(item, folder, forceRefresh: true, log: null, ct, bypassEnabledGate: true);
-        await db.SaveChangesAsync(ct);
-        NotifyMediaItemChanged(item.FolderId);
-        return item.ThemePath;
-    }
-
-    /// <summary>Manual override (the drawer's THEME MUSIC "Add" button): download a
-    /// user-supplied direct audio URL and use it as the title's theme. Works for any
-    /// title (no anime gate) — the user picked the file. Returns the new path or null.</summary>
-    public async Task<string?> SetThemeFromUrlAsync(Guid mediaItemId, string url, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return null;
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
-        if (item is null) return null;
-        var folder = await db.FolderWatchers.FindAsync([item.FolderId], ct);
-        if (folder is null) return null;
-
-        var dir = ThemeDir(folder);
-        if (dir is null) return null;
-        var ext = Path.GetExtension(url.Split('?')[0]);
-        if (string.IsNullOrEmpty(ext) || ext.Length > 5) ext = ".ogg";
-        var dest = Path.Combine(dir, "theme" + ext);
-
-        try { Directory.CreateDirectory(dir); }
-        catch (Exception ex) { logger.LogWarning(ex, "SetThemeFromUrl: can't create {Dir}", dir); return null; }
-
-        if (!await animeThemes.DownloadAsync(url, dest, ct)) return null;
-        item.ThemePath  = dest;
-        item.ThemeTitle = "Custom";
-        await db.SaveChangesAsync(ct);
-        NotifyMediaItemChanged(item.FolderId);
-        return item.ThemePath;
-    }
-
-    /// <summary>True for items worth a theme lookup. TMDB-identified anime come back
-    /// as MediaType.Series, so we also accept Animation-genre + Japanese-language
-    /// items. Donghua (Mandarin) aren't bridged via AniList — they're virtually
-    /// absent from AnimeThemes — but are still attempted when they carry a MalId.</summary>
-    private static bool LooksLikeAnime(MediaItem item, List<string> genres)
-        => item.MediaType == MediaItemType.Anime
-           || item.MalId is not null
-           || (genres.Any(g => g.Equals("Animation", StringComparison.OrdinalIgnoreCase))
-               && string.Equals(item.Language, "Japanese", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Media-adjacent cache dir for heavy assets (theme music; later trailers).
-    /// Lives in the media folder's <c>.animarr/&lt;folderId&gt;/</c> — NOT MediaCachePaths
-    /// (the central image cache). Keeps large audio/video off the Docker data volume.
-    /// The &lt;folderId&gt; subdir prevents collisions when several flat-section files
-    /// share one parent .animarr dir. Returns null when no base dir can be derived.</summary>
-    private static string? ThemeDir(FolderWatcher folder)
-    {
-        var baseDir = folder.SingleFilePath is { Length: > 0 } file
-            ? Path.GetDirectoryName(file)
-            : folder.Path;
-        if (string.IsNullOrWhiteSpace(baseDir)) return null;
-        return Path.Combine(baseDir, ".animarr", folder.Id.ToString("N"));
-    }
-
-    private static List<string> DeserialiseGenreNames(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return [];
-        try { return JsonSerializer.Deserialize<List<string>>(json, _json) ?? []; }
-        catch { return []; }
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static string ParseTitleFromPath(string folderPath)
-    {
-        var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
-
-        // 1. Bracketed year — strip the bracket cluster only (year still extracted by ExtractYearFromPath)
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(]\d{4}[\]\)]?\s*$", "").Trim();
-
-        // 2. Season/episode markers (TV files that slipped into a Movies section)
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s*-?\s*S\d{1,2}(E\d{1,2})?(\s*-\s*S?\d{1,2}E\d{1,2})?\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+(Season|Series|Part)\s*\d+.*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+\d+(st|nd|rd|th)\s+Season.*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-
-        // 3. Bracketed release-tag cluster (e.g. "(1080p BluRay x265)") — strip from the marker on
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(](1080p|720p|480p|2160p|4K|UHD|BluRay|BDRip|WEB-DL|WEBRip|HEVC|x265|x264|AVC|AAC|DTS|FLAC|HDR|SDR).*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-
-        // 4. Normalise separators — dots/underscores → spaces, then collapse runs.
-        name = name.Replace('.', ' ').Replace('_', ' ');
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s{2,}", " ").Trim();
-
-        // 5. Release-noise word/year stripping. Many torrent-style filenames have the title +
-        //    a dot-separated release-tag run: "Соник 2 в кино 2022 UHD Blu-Ray Remux 2160p"
-        //    becomes "Соник 2 в кино" after this pass. Walk from the right, drop each token
-        //    that looks like noise; stop at the first token that doesn't match.
-        //    The earlier `\s(19|20)\d{2}\s*$` rule only caught the year if it was already
-        //    the trailing token after the regexes above — for files with year + release tags
-        //    after it, it missed.
-        var noise = new System.Text.RegularExpressions.Regex(
-            @"^(1080p|720p|480p|2160p|4K|UHD|BluRay|Blu-Ray|BDRip|BRRip|DVDRip|WEB-?DL|WEBRip|HEVC|x265|x264|H\.?265|H\.?264|AVC|AAC|AC3|DTS(?:-HD)?|TrueHD|FLAC|HDR|HDR10\+?|SDR|10bit|8bit|REMUX|Atmos|2CH|6CH|MA|Dolby|Hybrid|Extended|Director'?s?Cut|UNRATED|Theatrical|REPACK|PROPER|MULTi|DUAL|RUS|ENG|JAP|CHS|CHT|EN|RU|JA|ZH|KO|FR|DE|ES|IT|SUB|SUBS|DUB|DUBBED|FANSUB|YIFY|YTS|RARBG|FGT|EVO|CMRG|GalaxyRG|TGx|d3g|Telesync|TS|CAM|HDCAM|TC|TBS|VC-?1|10-?bit|HQ|HDTV|SDTV|BDR|BDRemux|REMASTERED|MAR-CAS|MeGusta|EPSiLON|SPARKS|NTb|FraMeSToR|DEFLATE|tigole|UTR|d3g)$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
-        var year = new System.Text.RegularExpressions.Regex(@"^(19|20)\d{2}$");
-
-        var tokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        while (tokens.Count > 0)
-        {
-            var last = tokens[^1];
-            if (noise.IsMatch(last) || year.IsMatch(last))
-            {
-                tokens.RemoveAt(tokens.Count - 1);
-                continue;
-            }
-            break;
-        }
-        name = string.Join(' ', tokens).Trim();
-
-        // Trailing punctuation that survived the strip.
-        name = name.Trim('-', '.', ' ', '_');
-        return name;
-    }
-
-    private static int? ExtractYearFromPath(string folderPath)
-    {
-        var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, '/'));
-        // Bracketed year: (2024) or [2024]
-        var m = System.Text.RegularExpressions.Regex.Match(name, @"[\[\(](\d{4})[\]\)]");
-        if (m.Success && int.TryParse(m.Groups[1].Value, out var y) && y is >= 1900 and <= 2099)
-            return y;
-        // Dot/space/dash-separated trailing year: Movie.Name.2024 or Movie Name - 2024
-        var m2 = System.Text.RegularExpressions.Regex.Match(name, @"[.\s\-]((?:19|20)\d{2})(?:[.\s]|$)");
-        if (m2.Success && int.TryParse(m2.Groups[1].Value, out var y2) && y2 is >= 1900 and <= 2099)
-            return y2;
-        return null;
-    }
-
-    private static double StringSimilarity(string a, string b)
-    {
-        a = a.ToLowerInvariant();
-        b = b.ToLowerInvariant();
-        if (a == b) return 1.0;
-        if (a.Contains(b) || b.Contains(a)) return 0.8;
-
-        static HashSet<string> Bigrams(string s) =>
-            [.. Enumerable.Range(0, Math.Max(0, s.Length - 1)).Select(i => s.Substring(i, 2))];
-
-        var ba = Bigrams(a);
-        var bb = Bigrams(b);
-        if (ba.Count == 0 || bb.Count == 0) return 0;
-        double intersection = ba.Intersect(bb).Count();
-        return 2.0 * intersection / (ba.Count + bb.Count);
-    }
 }
 
 /// <summary>Season metadata stored as JSON in MediaItem.SeasonsJson</summary>

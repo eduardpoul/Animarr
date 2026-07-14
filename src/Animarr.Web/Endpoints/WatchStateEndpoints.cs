@@ -1,4 +1,5 @@
 using Animarr.Shared;
+using Animarr.Shared.Models;
 using Animarr.Shared.Requests;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
@@ -48,11 +49,13 @@ internal static class WatchStateEndpoints
             if (uid is null) return Results.Unauthorized();
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var now = DateTime.UtcNow;
             var row = await db.WatchStates.FirstOrDefaultAsync(w =>
                 w.UserId      == uid &&
                 w.MediaItemId == request.MediaItemId &&
                 w.Season      == request.Season &&
                 w.Episode     == request.Episode, ct);
+            long deltaSec = 0;
             if (row is null)
             {
                 row = new WatchState
@@ -63,21 +66,42 @@ internal static class WatchStateEndpoints
                     Season      = request.Season,
                     Episode     = request.Episode,
                     FilePath    = request.FilePath,
-                    CreatedAt   = DateTime.UtcNow,
+                    CreatedAt   = now,
                     PlayCount   = 1,
                 };
                 db.WatchStates.Add(row);
             }
+            else
+            {
+                // A ping after a quiet gap starts a new playback session — the
+                // convention PlayCount documents but only the external-player
+                // path used to honour.
+                if (row.LastSeenAt is { } seen && (now - seen).TotalMinutes >= 30)
+                    row.PlayCount++;
+                // Position delta since the previous ping ≈ seconds actually
+                // played (pings arrive every ~2-5s during playback). Larger
+                // jumps are seeks / stalled tabs and credit nothing.
+                if (row.ProgressMs is { } prev)
+                {
+                    var d = (request.ProgressMs - prev) / 1000;
+                    if (d > 0 && d <= WatchEventRecorder.MaxTickSeconds) deltaSec = d;
+                }
+            }
             row.ProgressMs = request.ProgressMs;
             if (request.RuntimeMs is > 0) row.RuntimeMs = request.RuntimeMs;
             if (!string.IsNullOrEmpty(request.FilePath)) row.FilePath = request.FilePath;
-            row.LastSeenAt = DateTime.UtcNow;
+            row.LastSeenAt = now;
+            row.TotalWatchTimeSec += deltaSec;
+            await WatchEventRecorder.RecordAsync(
+                db, uid, request.MediaItemId, request.Season, request.Episode, deltaSec, now, ct);
 
-            // Auto-flip IsWatched at ≥90% of runtime per CHANGELOG §1.
-            if (row.ProgressMs is > 0 && row.RuntimeMs is > 0 &&
-                (double)row.ProgressMs.Value / row.RuntimeMs.Value >= 0.9)
+            // IsWatched tracks "near the end of THIS playthrough": flip ON at
+            // ≥90% of runtime (per CHANGELOG §1), and back OFF below 90% so a
+            // rewatch — whose progress restarts low — shows as in-progress again
+            // instead of staying pinned to watched and masking the resume bar.
+            if (row.ProgressMs is > 0 && row.RuntimeMs is > 0)
             {
-                row.IsWatched = true;
+                row.IsWatched = (double)row.ProgressMs.Value / row.RuntimeMs.Value >= 0.9;
             }
 
             await db.SaveChangesAsync(ct);
@@ -146,6 +170,60 @@ internal static class WatchStateEndpoints
             row.LastSeenAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
+        }).RequireAuthorization();
+
+        // Retroactive "mark previous episodes (un)watched" in one shot — drives
+        // the MediaDetail "you skipped earlier episodes, mark them too?" popup.
+        // Upserts a row per (season, episode) under the current user. Returns
+        // the affected rows so the client patches its WatchStates list in place.
+        app.MapPost(ApiRoutes.WatchStateMarkBulk, async (
+            MarkBulkWatchedRequest request,
+            IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
+            CancellationToken ct) =>
+        {
+            var uid = userCtx.CurrentUserId;
+            if (uid is null) return Results.Unauthorized();
+            if (request.Episodes is null || request.Episodes.Length == 0)
+                return Results.Ok(Array.Empty<WatchStateDto>());
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // One read of every row for this (user, item); upsert in memory so
+            // the per-episode loop never round-trips the DB.
+            var existing = await db.WatchStates
+                .Where(w => w.UserId == uid && w.MediaItemId == request.MediaItemId)
+                .ToListAsync(ct);
+
+            var now     = DateTime.UtcNow;
+            var touched = new List<WatchState>(request.Episodes.Length);
+            foreach (var epRef in request.Episodes)
+            {
+                var row = existing.FirstOrDefault(w => w.Season == epRef.Season && w.Episode == epRef.Episode);
+                if (row is null)
+                {
+                    row = new WatchState
+                    {
+                        Id          = Guid.NewGuid(),
+                        UserId      = uid,
+                        MediaItemId = request.MediaItemId,
+                        Season      = epRef.Season,
+                        Episode     = epRef.Episode,
+                        CreatedAt   = now,
+                    };
+                    db.WatchStates.Add(row);
+                    existing.Add(row); // dedup: a repeated (s,e) in the payload reuses this row
+                }
+                row.IsWatched  = request.IsWatched;
+                row.LastSeenAt = now;
+                // Match the single-toggle convention: watched pins progress to
+                // the end (bar matches the chip); unwatched clears it.
+                if (request.IsWatched && row.RuntimeMs is > 0) row.ProgressMs = row.RuntimeMs;
+                else if (!request.IsWatched) row.ProgressMs = null;
+                touched.Add(row);
+            }
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(touched.Select(r => r.ToDto()).ToArray());
         }).RequireAuthorization();
 
         return app;

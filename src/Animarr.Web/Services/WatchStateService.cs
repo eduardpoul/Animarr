@@ -203,11 +203,16 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
             };
             db.WatchStates.Add(row);
         }
+        var now = DateTime.UtcNow;
         row.ProgressMs        = positionMs;
         if (runtimeMs is { } rt) row.RuntimeMs = rt;
         row.TotalWatchTimeSec += Math.Max(0, playedDeltaSec);
-        row.LastSeenAt        = DateTime.UtcNow;
+        row.LastSeenAt        = now;
         if (filePath is not null && row.FilePath is null) row.FilePath = filePath;
+        // Journal the played delta for the stats surface. UserId=null mirrors
+        // this service's anonymous WatchState rows (external mpv tracker).
+        await WatchEventRecorder.RecordAsync(
+            db, userId: null, mediaItemId, season, episode, Math.Max(0, playedDeltaSec), now, ct);
 
         // Auto-flip watched when the player crosses the threshold.
         if (!row.IsWatched && runtimeMs is > 0 && positionMs >= runtimeMs * AutoWatchedThreshold)

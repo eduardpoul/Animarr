@@ -28,19 +28,19 @@
        both create actions without the wide full-width CTA at the bottom. *@
     <div class="d-srv-users__segment-bar">
         <div class="d-srv-users__segment" role="tablist">
-            @foreach (var (key, label) in new[] { ("users", "Users"), ("roles", "Roles") })
+            @foreach (var (key, labelKey) in new[] { ("users", "users_roles.seg_users"), ("roles", "users_roles.seg_roles") })
             {
                 var k = key;
-                var l = label;
+                var lk = labelKey;
                 var active = _view == k;
                 <button type="button"
                         class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
-                        @onclick="@(() => _view = k)">@l</button>
+                        @onclick="@(() => _view = k)">@L[lk]</button>
             }
         </div>
         <button type="button" class="d-srv-users__new-btn tv-focus"
                 @onclick="OpenCurrentCreateDrawer">
-            <DIcon Name="plus" Size="13" /> New @(_view == "users" ? "user" : "role")
+            <DIcon Name="plus" Size="13" /> @(_view == "users" ? L["users_roles.btn_new_user"] : L["users_roles.btn_new_role"])
         </button>
     </div>
 
@@ -60,24 +60,24 @@
 
 @* ── Edit/Create drawer — only one open at a time (User vs Role). ── *@
 <SettingsEditDrawer IsOpen="@_userDrawerOpen"
-                    Title="@(_editingUserId is null ? "Create user" : "Edit user")"
-                    Overline="USERS"
+                    Title="@(_editingUserId is null ? L["users_roles.user_drawer_title_create"] : L["users_roles.user_drawer_title_edit"])"
+                    Overline="@L["users_roles.user_drawer_overline"]"
                     Hint="@(_editingUserId is null
-                            ? "Add a new account that can sign in."
-                            : "Update name, email, role. Leave password blank to keep current.")"
+                            ? L["users_roles.user_drawer_hint_create"]
+                            : L["users_roles.user_drawer_hint_edit"])"
                     Icon="user"
                     OnClose="CloseUserDrawer">
     <Body>
         <div class="d-srv-users__form-grid">
             <Input Value="@_newUserName" ValueChanged="@(v => _newUserName = v ?? "")"
-                   Label="FULL NAME" Placeholder="Anna Petrova" />
+                   Label="@L["users_roles.user_field_name"]" Placeholder="@L["users_roles.user_field_name_placeholder"]" />
             <Input Value="@_newUserUsername" ValueChanged="@(v => _newUserUsername = v ?? "")"
-                   Label="USERNAME" Placeholder="anna"
+                   Label="@L["users_roles.user_field_username"]" Placeholder="@L["users_roles.user_field_username_placeholder"]"
                    Disabled="@(_editingUserId is not null)" />
             <Input Value="@_newUserEmail" ValueChanged="@(v => _newUserEmail = v ?? "")"
-                   Label="EMAIL (OPTIONAL)" Placeholder="anna@example.com" />
+                   Label="@L["users_roles.user_field_email"]" Placeholder="@L["users_roles.user_field_email_placeholder"]" />
             <label class="d-input-group">
-                <span class="d-input-group__label">ROLE</span>
+                <span class="d-input-group__label">@L["users_roles.user_field_role"]</span>
                 <select class="d-profile__select" @bind="_newUserRoleId">
                     @foreach (var r in _roles)
                     {
@@ -87,74 +87,74 @@
             </label>
             <Input Value="@_newUserPass" ValueChanged="@(v => _newUserPass = v ?? "")"
                    Type="password"
-                   Label="@(_editingUserId is null ? "INITIAL PASSWORD" : "NEW PASSWORD (OPTIONAL)")"
+                   Label="@(_editingUserId is null ? L["users_roles.user_field_password_initial"] : L["users_roles.user_field_password_new"])"
                    Placeholder="••••••••" />
             <Input Value="@_newUserPass2" ValueChanged="@(v => _newUserPass2 = v ?? "")"
-                   Type="password" Label="REPEAT PASSWORD" Placeholder="••••••••" />
+                   Type="password" Label="@L["users_roles.user_field_password_repeat"]" Placeholder="••••••••" />
         </div>
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SubmitUserAsync">
-            <DIcon Name="check" Size="13" /> @(_editingUserId is null ? "Create user" : "Save changes")
+            <DIcon Name="check" Size="13" /> @(_editingUserId is null ? L["users_roles.btn_create_user"] : L["users_roles.btn_save_changes"])
         </Btn>
-        <Btn Variant="ghost" Size="md" OnClick="CloseUserDrawer">Cancel</Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseUserDrawer">@L["common.btn_cancel"]</Btn>
     </Footer>
 </SettingsEditDrawer>
 
 <SettingsEditDrawer IsOpen="@_roleDrawerOpen"
-                    Title="@(_editingRoleId is null ? "Create role" : "Edit role")"
-                    Overline="ROLES"
-                    Hint="Bundle permissions + folder access. Folder access is enforced server-side at the API layer."
+                    Title="@(_editingRoleId is null ? L["users_roles.role_drawer_title_create"] : L["users_roles.role_drawer_title_edit"])"
+                    Overline="@L["users_roles.role_drawer_overline"]"
+                    Hint="@L["users_roles.role_drawer_hint"]"
                     Icon="shield"
                     OnClose="CloseRoleDrawer">
     <Body>
         <div class="d-srv-form__col">
             <Input Value="@_newRoleName" ValueChanged="@(v => _newRoleName = v ?? "")"
-                   Label="ROLE NAME" Placeholder="e.g. Donghua uploader" />
+                   Label="@L["users_roles.role_field_name"]" Placeholder="@L["users_roles.role_field_name_placeholder"]" />
 
             <div class="d-srv-form__block">
-                <div class="d-srv-form__block-label">PERMISSIONS</div>
+                <div class="d-srv-form__block-label">@L["users_roles.role_block_permissions"]</div>
                 <div class="d-srv-form__perms">
                     <label class="d-srv-form__perm">
                         <Toggle Checked="@_newRoleView" CheckedChanged="@(v => _newRoleView = v)" />
                         <div>
-                            <div class="d-srv-form__perm-title">View content</div>
-                            <div class="d-srv-form__perm-hint">Playback library, mark watched, manage favorites.</div>
+                            <div class="d-srv-form__perm-title">@L["users_roles.perm_view_title"]</div>
+                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_view_hint"]</div>
                         </div>
                     </label>
                     <label class="d-srv-form__perm">
                         <Toggle Checked="@_newRoleUpload" CheckedChanged="@(v => _newRoleUpload = v)" />
                         <div>
-                            <div class="d-srv-form__perm-title">Upload content</div>
-                            <div class="d-srv-form__perm-hint">Add downloads (torrents, magnets, file uploads).</div>
+                            <div class="d-srv-form__perm-title">@L["users_roles.perm_upload_title"]</div>
+                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_upload_hint"]</div>
                         </div>
                     </label>
                     <label class="d-srv-form__perm">
                         <Toggle Checked="@_newRoleSys" CheckedChanged="@(v => _newRoleSys = v)" />
                         <div>
-                            <div class="d-srv-form__perm-title">System settings</div>
-                            <div class="d-srv-form__perm-hint">Access Server Settings: LLM, patterns, ignore rules, downloads config.</div>
+                            <div class="d-srv-form__perm-title">@L["users_roles.perm_system_title"]</div>
+                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_system_hint"]</div>
                         </div>
                     </label>
                     <label class="d-srv-form__perm">
                         <Toggle Checked="@_newRoleUsers" CheckedChanged="@(v => _newRoleUsers = v)" />
                         <div>
-                            <div class="d-srv-form__perm-title">Manage users</div>
-                            <div class="d-srv-form__perm-hint">Create / edit / delete users and roles.</div>
+                            <div class="d-srv-form__perm-title">@L["users_roles.perm_manage_title"]</div>
+                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_manage_hint"]</div>
                         </div>
                     </label>
                 </div>
             </div>
 
             <div class="d-srv-form__block">
-                <div class="d-srv-form__block-label">SOURCE FOLDERS</div>
+                <div class="d-srv-form__block-label">@L["users_roles.role_block_folders"]</div>
                 <div class="d-srv-form__segment">
-                    @foreach (var (key, label) in new[] { ("all", "All folders"), ("selected", "Selected only") })
+                    @foreach (var (key, labelKey) in new[] { ("all", "users_roles.folder_mode_all"), ("selected", "users_roles.folder_mode_selected") })
                     {
-                        var k = key; var l = label;
+                        var k = key; var lk = labelKey;
                         <button type="button"
                                 class="@($"d-srv-form__seg-item tv-focus {(_newRoleFolderMode == k ? "is-active" : "")}")"
-                                @onclick="@(() => _newRoleFolderMode = k)">@l</button>
+                                @onclick="@(() => _newRoleFolderMode = k)">@L[lk]</button>
                     }
                 </div>
                 @if (_newRoleFolderMode == "selected")
@@ -163,7 +163,7 @@
                         @if (_allFolders.Length == 0)
                         {
                             <div class="d-srv-form__folder-empty">
-                                No section folders defined yet — add them in Server Settings → Folders.
+                                @L["users_roles.folders_empty"]
                             </div>
                         }
                         @foreach (var f in _allFolders)
@@ -184,9 +184,9 @@
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SubmitRoleAsync">
-            <DIcon Name="check" Size="13" /> @(_editingRoleId is null ? "Create role" : "Save changes")
+            <DIcon Name="check" Size="13" /> @(_editingRoleId is null ? L["users_roles.btn_create_role"] : L["users_roles.btn_save_changes"])
         </Btn>
-        <Btn Variant="ghost" Size="md" OnClick="CloseRoleDrawer">Cancel</Btn>
+        <Btn Variant="ghost" Size="md" OnClick="CloseRoleDrawer">@L["common.btn_cancel"]</Btn>
     </Footer>
 </SettingsEditDrawer>
 
@@ -289,7 +289,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Failed to load users / roles: {ex.Message}");
+            Toasts.ShowError(L.Get("users_roles.toast_load_failed", ex.Message));
         }
         _loading = false;
         StateHasChanged();
@@ -302,23 +302,23 @@
     {
         if (string.IsNullOrWhiteSpace(_newUserName) || string.IsNullOrWhiteSpace(_newUserUsername))
         {
-            Toasts.ShowWarning("Name and username are required");
+            Toasts.ShowWarning(L["users_roles.toast_name_username_required"]);
             return;
         }
         var passwordProvided = !string.IsNullOrEmpty(_newUserPass);
         if (_editingUserId is null && !passwordProvided)
         {
-            Toasts.ShowWarning("Password is required for new users");
+            Toasts.ShowWarning(L["users_roles.toast_password_required"]);
             return;
         }
         if (passwordProvided && _newUserPass.Length < 6)
         {
-            Toasts.ShowWarning("Password must be at least 6 characters");
+            Toasts.ShowWarning(L["users_roles.toast_password_too_short"]);
             return;
         }
         if (passwordProvided && _newUserPass != _newUserPass2)
         {
-            Toasts.ShowWarning("Passwords don't match");
+            Toasts.ShowWarning(L["users_roles.toast_passwords_mismatch"]);
             return;
         }
         try
@@ -330,7 +330,7 @@
                     Email:       string.IsNullOrWhiteSpace(_newUserEmail) ? null : _newUserEmail.Trim(),
                     RoleId:      _newUserRoleId == Guid.Empty ? null : _newUserRoleId,
                     NewPassword: passwordProvided ? _newUserPass : null));
-                Toasts.ShowSuccess("User updated");
+                Toasts.ShowSuccess(L["users_roles.toast_user_updated"]);
             }
             else
             {
@@ -338,7 +338,7 @@
                     _newUserName.Trim(), _newUserUsername.Trim(),
                     string.IsNullOrWhiteSpace(_newUserEmail) ? null : _newUserEmail.Trim(),
                     _newUserRoleId, _newUserPass));
-                Toasts.ShowSuccess("User created");
+                Toasts.ShowSuccess(L["users_roles.toast_user_created"]);
             }
             ResetUserForm();
             await LoadAsync();
@@ -347,7 +347,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Save failed: {ex.Message}");
+            Toasts.ShowError(L.Get("users_roles.toast_save_failed", ex.Message));
         }
     }
 
@@ -355,7 +355,7 @@
     {
         if (string.IsNullOrWhiteSpace(_newRoleName))
         {
-            Toasts.ShowWarning("Role name is required");
+            Toasts.ShowWarning(L["users_roles.toast_role_name_required"]);
             return;
         }
         try
@@ -371,7 +371,7 @@
                     SystemSettings: _newRoleSys,
                     ManageUsers:    _newRoleUsers,
                     FolderIds:      folderIds));
-                Toasts.ShowSuccess("Role updated");
+                Toasts.ShowSuccess(L["users_roles.toast_role_updated"]);
             }
             else
             {
@@ -379,7 +379,7 @@
                     _newRoleName.Trim(), "",
                     _newRoleView, _newRoleUpload, _newRoleSys, _newRoleUsers,
                     folderIds));
-                Toasts.ShowSuccess("Role created");
+                Toasts.ShowSuccess(L["users_roles.toast_role_created"]);
             }
             ResetRoleForm();
             await LoadAsync();
@@ -388,7 +388,7 @@
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Save failed: {ex.Message}");
+            Toasts.ShowError(L.Get("users_roles.toast_save_failed", ex.Message));
         }
     }
 
@@ -398,11 +398,11 @@
         {
             await Api.DeleteUserAsync(id);
             await LoadAsync();
-            Toasts.ShowSuccess("User deleted");
+            Toasts.ShowSuccess(L["users_roles.toast_user_deleted"]);
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Delete failed: {ex.Message}");
+            Toasts.ShowError(L.Get("users_roles.toast_delete_failed", ex.Message));
         }
     }
 
@@ -412,11 +412,11 @@
         {
             await Api.DeleteRoleAsync(id);
             await LoadAsync();
-            Toasts.ShowSuccess("Role deleted");
+            Toasts.ShowSuccess(L["users_roles.toast_role_deleted"]);
         }
         catch (Exception ex)
         {
-            Toasts.ShowError($"Delete failed: {ex.Message}");
+            Toasts.ShowError(L.Get("users_roles.toast_delete_failed", ex.Message));
         }
     }
 
@@ -491,8 +491,8 @@
     {
         <div class="d-srv-card">
             <header class="d-srv-card__head">
-                <h2 class="d-srv-card__title">Users</h2>
-                <div class="d-srv-card__sub">Accounts that can sign in. Roles define what each can do.</div>
+                <h2 class="d-srv-card__title">@L["users_roles.users_card_title"]</h2>
+                <div class="d-srv-card__sub">@L["users_roles.users_card_sub"]</div>
             </header>
             <div class="d-srv-users__rows">
                 @foreach (var u in _users)
@@ -509,13 +509,13 @@
                         <Pill Tone="@(isMaster ? "accent" : "")">@u.RoleName.ToUpperInvariant()</Pill>
                         <span class="d-srv-users__row-seen">@(u.LastSeenAt is null ? "—" : RelativeTime(u.LastSeenAt.Value))</span>
                         <div class="d-srv-users__row-actions">
-                            <button type="button" class="d-srv-users__icon-btn tv-focus" title="Edit"
+                            <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_edit"]"
                                     @onclick="@(() => StartEditUser(u))">
                                 <DIcon Name="pencil" Size="14" />
                             </button>
                             @if (!isMaster)
                             {
-                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="Delete"
+                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_delete"]"
                                         @onclick="@(() => DeleteUserAsync(u.Id))">
                                     <DIcon Name="trash" Size="14" />
                                 </button>
@@ -532,8 +532,8 @@
     {
         <div class="d-srv-card">
             <header class="d-srv-card__head">
-                <h2 class="d-srv-card__title">Roles</h2>
-                <div class="d-srv-card__sub">Roles bundle permissions + folder access. Master is built-in and cannot be edited.</div>
+                <h2 class="d-srv-card__title">@L["users_roles.roles_card_title"]</h2>
+                <div class="d-srv-card__sub">@L["users_roles.roles_card_sub"]</div>
             </header>
             <div class="d-srv-roles__rows">
                 @foreach (var r in _roles)
@@ -548,29 +548,31 @@
                                     @r.Name
                                     @if (r.BuiltIn)
                                     {
-                                        <span class="d-srv-roles__row-builtin">· BUILT-IN</span>
+                                        <span class="d-srv-roles__row-builtin">@L["users_roles.role_builtin_suffix"]</span>
                                     }
                                 </div>
                                 <div class="d-srv-roles__row-desc">@r.Description</div>
                             </div>
-                            <span class="d-srv-roles__row-count">@r.UserCount users</span>
+                            <span class="d-srv-roles__row-count">@L.Get("users_roles.role_user_count_fmt", r.UserCount)</span>
                             @if (!r.BuiltIn)
                             {
-                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="Edit"
+                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_edit"]"
                                         @onclick="@(() => StartEditRole(r))">
                                     <DIcon Name="pencil" Size="14" />
                                 </button>
                             }
                         </header>
                         <div class="d-srv-roles__perms">
-                            @if (r.Permissions.ViewContent)    { <Pill Tone="success">View content</Pill> }
-                            @if (r.Permissions.UploadContent)  { <Pill Tone="accent">Upload content</Pill> }
-                            @if (r.Permissions.SystemSettings) { <Pill Tone="warn">System settings</Pill> }
-                            @if (r.Permissions.ManageUsers)    { <Pill Tone="warn">Manage users</Pill> }
+                            @if (r.Permissions.ViewContent)    { <Pill Tone="success">@L["users_roles.perm_view_title"]</Pill> }
+                            @if (r.Permissions.UploadContent)  { <Pill Tone="accent">@L["users_roles.perm_upload_title"]</Pill> }
+                            @if (r.Permissions.SystemSettings) { <Pill Tone="warn">@L["users_roles.perm_system_title"]</Pill> }
+                            @if (r.Permissions.ManageUsers)    { <Pill Tone="warn">@L["users_roles.perm_manage_title"]</Pill> }
                             <span class="d-srv-roles__folders">
                                 @(r.FolderIds is null
-                                    ? "ALL FOLDERS"
-                                    : $"{r.FolderIds.Length} FOLDER{(r.FolderIds.Length == 1 ? "" : "S")}")
+                                    ? L["users_roles.role_all_folders"]
+                                    : L.Get(r.FolderIds.Length == 1
+                                            ? "users_roles.role_folder_count_one_fmt"
+                                            : "users_roles.role_folder_count_many_fmt", r.FolderIds.Length))
                             </span>
                         </div>
                     </div>

@@ -226,6 +226,41 @@ body[data-animarr-native="1"] .vp-backdrop * {
         0 0 0 9px rgba(255,255,255,0.06);
 }
 
+/* Trickplay seek-preview bubble — sprite-sheet frame + timestamp floating
+   above the scrubber at the hovered/scrubbed position. Sized by JS from the
+   sprite manifest; hidden whenever no manifest exists for the episode. */
+.vp-hud__preview {
+    position: absolute;
+    bottom: calc(100% + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 6px 28px rgba(0,0,0,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 100ms ease-out;
+    z-index: 4;
+}
+.vp-hud__preview--on { opacity: 1; }
+.vp-hud__preview-img { background-repeat: no-repeat; }
+.vp-hud__preview-time {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 0 3px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+    background: linear-gradient(to top, rgba(0,0,0,0.72), transparent);
+}
+
 /* Controls row.
    Landscape (default): one row — primary playback group on the left (margin-
    right:auto pushes the rest right), then the secondary settings group and the
@@ -519,4 +554,245 @@ body[data-animarr-native="1"] .vp-backdrop * {
     .vp-hud__top {
         padding-top: max(20px, env(safe-area-inset-top, 0px));
     }
+}
+
+/* ── Up-next overlay (end-of-episode autoplay card) ───────────────────
+   Appended to the player root (sibling of .vp-hud), NOT inside it, so it
+   stays fully opaque while the HUD fades out near the end. Accent borrows
+   the active --accent-hue with the player's own bright L/C (mirrors
+   --hud-accent, which is scoped to .vp-hud and therefore out of reach here). */
+.vp-upnext {
+    position: absolute;
+    right: 40px;
+    bottom: 120px;
+    z-index: 45;
+    width: min(360px, 70vw);
+    padding: 18px 20px;
+    background: rgba(20, 22, 26, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #e8eaed;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    transition: opacity 200ms ease, transform 200ms ease;
+    pointer-events: auto;
+}
+.vp-upnext--hidden {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+}
+.vp-upnext__eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: oklch(0.80 0.15 var(--accent-hue, 245));
+    margin-bottom: 4px;
+}
+.vp-upnext__name {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: #fff;
+}
+.vp-upnext__actions {
+    display: flex;
+    gap: 10px;
+}
+.vp-upnext__btn {
+    flex: 1;
+    padding: 11px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+.vp-upnext__btn--play {
+    background: oklch(0.72 0.18 var(--accent-hue, 245));
+    color: #0f1115;
+    font-weight: 700;
+}
+.vp-upnext__btn--play:hover { background: oklch(0.80 0.15 var(--accent-hue, 245)); }
+.vp-upnext__btn--skip {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #e8eaed;
+}
+.vp-upnext__btn--skip:hover { background: rgba(255, 255, 255, 0.16); }
+.vp-upnext__close {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    padding: 4px 6px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+.vp-upnext__close:hover { color: #fff; }
+
+@media (max-width: 560px) {
+    .vp-upnext { right: 40px; left: 40px; bottom: 120px; width: auto; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Touch / phone layout — activated by [data-touch="1"] on the HUD (set in
+   attachHud for a coarse pointer OR a narrow viewport, never on the Android-TV
+   host, which needs the full d-pad button bar). Strips the bottom bar to:
+   scrubber, then prev/next on the LEFT and a settings gear + fullscreen on the
+   RIGHT. Play moves to a big centre overlay; ±10 becomes a double-tap on the
+   left/right thirds (handled in JS, ripple below). The secondary controls
+   (quality, aspect, cast, sync, audio, subtitles, info, volume) all move into
+   the gear menu.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* Gear + centre play are hidden on the default (desktop / TV) layout. */
+.vp-hud__gear,
+.vp-hud__center { display: none; }
+
+.vp-hud[data-touch="1"] .vp-btn[data-act="back10"],
+.vp-hud[data-touch="1"] .vp-btn[data-act="fwd10"],
+.vp-hud[data-touch="1"] .vp-hud__cluster--secondary,
+.vp-hud[data-touch="1"] .vp-hud__cluster--primary .vp-btn[data-act="play"] {
+    display: none;
+}
+
+/* Centre play overlay — the middle flex row between the top + bottom bars.
+   position:relative + z-index lift it above the full-area tap-catcher (z 1);
+   pointer-events:none lets non-button taps fall through to that catcher (the
+   ±10 double-tap / toggle), while only the button itself is interactive. */
+.vp-hud[data-touch="1"] .vp-hud__center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 2;
+    pointer-events: none;
+}
+.vp-hud[data-touch="1"] .vp-hud__cplay {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 76px;
+    height: 76px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    color: #fff;
+    background: rgba(8, 10, 13, 0.42);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    transition: transform 120ms ease, background 140ms ease;
+}
+.vp-hud[data-touch="1"] .vp-hud__cplay:active { transform: scale(0.94); }
+/* When the controls are hidden the whole HUD is opacity:0 but the centre play
+   button keeps pointer-events — without this it would swallow the "tap to
+   reveal controls" tap (and a play/pause) over the centre of the video. */
+.vp-hud--hidden .vp-hud__cplay { pointer-events: none; }
+.vp-hud[data-touch="1"] .vp-hud__cplay .vp-glyph { line-height: 0; }
+.vp-hud[data-touch="1"] .vp-hud__cplay .vp-glyph svg {
+    width: 38px;
+    height: 38px;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+}
+
+/* Bottom row: prev/next left (primary keeps margin-right:auto), gear +
+   fullscreen pinned right, on one line. Gear shows; its label stays hidden
+   even in the "full" style so it reads as a bare icon. */
+.vp-hud[data-touch="1"] .vp-hud__controls {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+}
+.vp-hud[data-touch="1"] .vp-hud__cluster--primary {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    margin-right: auto;
+}
+.vp-hud[data-touch="1"] .vp-hud__gear { display: inline-flex; }
+.vp-hud[data-touch="1"] .vp-hud__gear .vp-label { display: none; }
+
+/* ±10 double-tap ripple. */
+.vp-seek-ripple {
+    position: absolute;
+    top: 50%;
+    z-index: 4;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38%;
+    color: #fff;
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    animation: vp-seek-ripple 600ms ease-out forwards;
+}
+.vp-seek-ripple--left  { left: 0; }
+.vp-seek-ripple--right { right: 0; }
+.vp-seek-ripple span {
+    background: rgba(8, 10, 13, 0.55);
+    padding: 10px 16px;
+    border-radius: 999px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+@keyframes vp-seek-ripple {
+    0%   { opacity: 0; transform: translateY(-50%) scale(0.85); }
+    25%  { opacity: 1; transform: translateY(-50%) scale(1); }
+    100% { opacity: 0; transform: translateY(-50%) scale(1); }
+}
+
+/* Settings menu — same shell as the pickers, list of worded rows. */
+.vp-hud-popup--menu { min-width: 240px; }
+
+/* Kill the mobile double-tap-zoom heuristic on the controls: it adds a ~300ms
+   click delay AND fires a synthesized "ghost" click ~300ms after the real one,
+   which used to re-toggle the just-opened settings menu shut ("appears then
+   immediately disappears"). `manipulation` keeps pan/pinch and does NOT affect
+   the pointer-event-based ±10 double-tap-seek. */
+.vp-hud[data-touch="1"] .vp-hud__tap,
+.vp-hud[data-touch="1"] .vp-btn,
+.vp-hud[data-touch="1"] .vp-hud__cplay,
+.vp-hud-popup {
+    touch-action: manipulation;
+}
+
+/* Skip-intro button — floating accent pill, bottom-right above the controls.
+   Shown only while playback is inside the detected intro; seeks past it. */
+.vp-skip {
+    position: absolute;
+    right: 40px;
+    bottom: 120px;
+    z-index: 46;
+    padding: 11px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    color: #0f1115;
+    background: oklch(0.72 0.18 var(--accent-hue, 245));
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
+}
+.vp-skip:hover { background: oklch(0.80 0.15 var(--accent-hue, 245)); }
+.vp-skip--hidden {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+}
+@media (max-width: 560px) {
+    .vp-skip { right: 40px; bottom: 120px; }
 }

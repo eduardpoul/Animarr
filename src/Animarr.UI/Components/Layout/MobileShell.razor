@@ -10,7 +10,7 @@
 @inject LocalizationService Loc
 @implements IDisposable
 
-<nav class="d-mobile-nav" aria-label="Top navigation">
+<nav class="d-mobile-nav" aria-label="@L["mobile.top_nav_aria"]">
     <a href="/" class="d-mobile-nav__brand tv-focus">
         <BrandMark Size="28" ExtraClass="animarr-brand-mark" />
         <span class="animarr-brand-name">ANIMARR</span>
@@ -18,19 +18,19 @@
     <span class="d-mobile-nav__spacer"></span>
     @if (ActiveDownloads > 0)
     {
-        <span class="sb-live" title="@($"{ActiveDownloads} active")">
-            <span class="sb-live__dot"></span>@ActiveDownloads LIVE
+        <span class="sb-live" title="@L.Get("mobile.active_fmt", ActiveDownloads)">
+            <span class="sb-live__dot"></span>@ActiveDownloads @L["layout.live_label"]
         </span>
     }
     @if (UserCtx.Me is { } me)
     {
-        <button type="button" class="d-mobile-nav__avatar tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
+        <button type="button" class="d-mobile-nav__avatar tv-focus" @onclick="OnProfileClick" aria-label="@L["mobile.open_profile_aria"]">
             <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
         </button>
     }
 </nav>
 
-<nav class="d-tabbar" aria-label="Primary mobile navigation">
+<nav class="d-tabbar" aria-label="@L["mobile.tabbar_aria"]">
     <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.All" href="" ActiveClass="d-tabbar__item--active">
         <DIcon Name="catalog" Size="22" />
         <span class="d-tabbar__label">@L["nav.catalog"]</span>

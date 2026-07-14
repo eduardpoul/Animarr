@@ -30,12 +30,12 @@
 @implements IDisposable
 
 <header class="d-topbar @ExtraClass">
-    <button type="button" class="d-topbar__brand tv-focus" @onclick="GoHome" aria-label="Animarr — go to catalog">
+    <button type="button" class="d-topbar__brand tv-focus" @onclick="GoHome" aria-label="@L["topbar.brand_aria"]">
         <BrandMark Size="30" ExtraClass="d-topbar__brand-mark" />
         <span class="d-topbar__brand-name">Animarr</span>
     </button>
 
-    <nav class="d-topbar__nav d-scroll-x" aria-label="Folder navigation">
+    <nav class="d-topbar__nav d-scroll-x" aria-label="@L["topbar.folder_nav_aria"]">
         @* v5 update: TopBar pills are ROOT FOLDER pills (Movies / Anime /
            Donghua / …), not category chips. Folders are the admin-managed
            sections from Server Settings → Folders; clicking one filters the
@@ -61,7 +61,7 @@
     <NeedsReviewChip Compact="true" />
 
     @* LLM status pill — sits LEFT of the search button (swapped per request). *@
-    <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="LLM status">
+    <button type="button" class="d-topbar__llm tv-focus" @onclick="ToggleLlm" aria-label="@L["sidebar_llm.popup_aria"]">
         <span class="d-topbar__llm-dot"></span>
         <DIcon Name="magic" Size="13" />
         <span class="d-topbar__llm-count">@_llmCount</span>
@@ -73,9 +73,37 @@
     <button type="button"
             class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/search") ? "d-topbar__icon-btn--active" : "")}")"
             @onclick="@(() => Nav.NavigateTo("/search"))"
-            title="Search"
-            aria-label="Search">
+            title="@L["search.title"]"
+            aria-label="@L["search.title"]">
         <DIcon Name="search" Size="15" />
+    </button>
+
+    @* Airing calendar — when the next episodes of the library's ongoings drop. *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/calendar") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/calendar"))"
+            title="@L["calendar.title"]"
+            aria-label="@L["calendar.title"]">
+        <DIcon Name="calendar" Size="15" />
+    </button>
+
+    @* Watchlist — "Хочу посмотреть". Fed by the Want buttons on the
+       recommendation rails (and, later, franchises). *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/watchlist") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/watchlist"))"
+            title="@L["watchlist.title"]"
+            aria-label="@L["watchlist.title"]">
+        <DIcon Name="bookmark" Size="15" />
+    </button>
+
+    @* Personal watch statistics. *@
+    <button type="button"
+            class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/stats") ? "d-topbar__icon-btn--active" : "")}")"
+            @onclick="@(() => Nav.NavigateTo("/stats"))"
+            title="@L["stats.title"]"
+            aria-label="@L["stats.title"]">
+        <DIcon Name="stats" Size="15" />
     </button>
 
     @if (UserCtx.Can(p => p.UploadContent))
@@ -83,7 +111,7 @@
         <button type="button"
                 class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/downloads") ? "d-topbar__icon-btn--active" : "")}")"
                 @onclick="@(() => Nav.NavigateTo("/downloads"))"
-                title="Downloads">
+                title="@L["topbar.downloads"]">
             <DIcon Name="torrent" Size="15" />
             @if (_activeDownloads > 0)
             {
@@ -97,7 +125,7 @@
         <button type="button"
                 class="@($"d-topbar__icon-btn tv-focus {(IsRoute("/server") ? "d-topbar__icon-btn--active" : "")}")"
                 @onclick="@(() => Nav.NavigateTo("/server"))"
-                title="Server settings">
+                title="@L["profile.server_settings_title"]">
             <DIcon Name="settings" Size="15" />
         </button>
     }
@@ -106,7 +134,7 @@
     {
         @* Avatar only — the name + role text beside it was visual noise; the
            avatar alone opens the profile drawer where identity lives. *@
-        <button type="button" class="d-topbar__profile d-topbar__profile--icon-only tv-focus" @onclick="OnProfileClick" aria-label="Open profile">
+        <button type="button" class="d-topbar__profile d-topbar__profile--icon-only tv-focus" @onclick="OnProfileClick" aria-label="@L["topbar.open_profile"]">
             <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
         </button>
     }
@@ -199,8 +227,10 @@
 
     private bool IsCatalogRoute()
     {
+        // Home ("/") and the full Library page share the folder/category
+        // filter state, so pills highlight — and filter in place — on both.
         var path = new Uri(Nav.Uri).AbsolutePath;
-        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog";
+        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog" || path == "/library";
     }
 
     private bool IsRoute(string path)
