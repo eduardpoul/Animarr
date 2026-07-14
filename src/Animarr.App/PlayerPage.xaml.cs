@@ -1,27 +1,32 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Windows.Input;
 using Animarr.App.Services;
 using Animarr.Shared;
-using Animarr.Shared.Models;
-using Animarr.Shared.Requests;
 using Animarr.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Animarr.App;
 
 /// <summary>
-/// Full-screen native player. Hosts ExoPlayer (via NativePlayerService) in a
-/// SurfaceView added to <c>VideoHost</c>, with a XAML HUD overlaid on top — the
-/// hole-punch surface sits behind the MAUI content so the transport controls
-/// stay visible. Playback URL comes from POST /api/hls/start (server picks
-/// Direct Play / Direct Stream / HLS); we tell it the client can decode HEVC so
-/// it stream-copies rather than transcodes on the weak TV box. Resume position
-/// is seeked on start and progress is reported to /api/watch-states every 5s.
+/// Full-screen native player. ExoPlayer (via NativePlayerService) renders into a
+/// TextureView added to the root grid; the XAML HUD sits on top. Controlled the
+/// way a TV player should be — straight off the D-pad, not by focusing on-screen
+/// buttons: OK = play/pause, ◀/▶ = seek ±10s, ▲ = skip intro/credits. The HUD
+/// auto-hides during playback and stays up while paused. Keys are delivered from
+/// MainActivity.OnKeyDown via <see cref="HandleKey"/>.
+///
+/// Playback URL comes from POST /api/hls/start (server picks Direct Play /
+/// Direct Stream / HLS; we advertise HEVC so it stream-copies on the weak TV
+/// box). Resume is seeked on start; progress is reported to /api/watch-states.
 /// </summary>
 public partial class PlayerPage : ContentPage
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>The player currently on screen — MainActivity routes D-pad keys
+    /// here so OK/seek work without focusing a button.</summary>
+    public static PlayerPage? Current { get; private set; }
+    public static bool HandleGlobalKey(int keyCode) => Current?.HandleKey(keyCode) ?? false;
 
     private readonly HttpClient _http;
     private readonly ServerAddressProvider _addr;
@@ -35,20 +40,15 @@ public partial class PlayerPage : ContentPage
     private readonly long   _resumeMs;
 
     private IDispatcherTimer? _timer;
+    private IDispatcherTimer? _hudTimer;
     private int  _ticks;
     private long _durationMs;
     private bool _started;
     private bool _attached;
 
-    // Skip segments (seconds), loaded lazily.
     private double? _introStart, _introEnd, _creditsStart, _creditsEnd;
     private double  _skipTarget;
-
-    public Command BackCommand      { get; }
-    public Command PlayPauseCommand { get; }
-    public Command SeekBackCommand  { get; }
-    public Command SeekFwdCommand   { get; }
-    public Command SkipCommand      { get; }
+    private bool    _skipVisible;
 
     public PlayerPage(Guid mediaItemId, int? season, int? episode,
                       string filePath, string? title, long resumeMs = 0)
@@ -70,13 +70,68 @@ public partial class PlayerPage : ContentPage
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
 
-        BackCommand      = new Command(async () => await Navigation.PopAsync());
-        PlayPauseCommand = new Command(TogglePlay);
-        SeekBackCommand  = new Command(() => SeekBy(-10_000));
-        SeekFwdCommand   = new Command(() => SeekBy(+10_000));
-        SkipCommand      = new Command(DoSkip);
-
         RootGrid.Loaded += (_, _) => AttachAndStart();
+    }
+
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        Current = this;
+        ShowHud();
+    }
+
+    // ── D-pad control (delivered from MainActivity.OnKeyDown) ────────────────
+    public bool HandleKey(int keyCode)
+    {
+#if ANDROID
+        switch ((Android.Views.Keycode)keyCode)
+        {
+            case Android.Views.Keycode.DpadCenter:
+            case Android.Views.Keycode.Enter:
+            case Android.Views.Keycode.NumpadEnter:
+            case Android.Views.Keycode.ButtonA:
+            case Android.Views.Keycode.MediaPlayPause:
+                TogglePlay(); ShowHud(); return true;
+
+            case Android.Views.Keycode.DpadLeft:
+            case Android.Views.Keycode.MediaRewind:
+                SeekBy(-10_000); ShowHud(); return true;
+
+            case Android.Views.Keycode.DpadRight:
+            case Android.Views.Keycode.MediaFastForward:
+                SeekBy(+10_000); ShowHud(); return true;
+
+            case Android.Views.Keycode.DpadUp:
+                if (_skipVisible) DoSkip(); else ShowHud();
+                return true;
+
+            case Android.Views.Keycode.DpadDown:
+                ShowHud(); return true;
+
+            case Android.Views.Keycode.MediaPlay:
+                NativePlayerService.Instance?.ResumeAsync(); ShowHud(); return true;
+            case Android.Views.Keycode.MediaPause:
+                NativePlayerService.Instance?.PauseAsync(); ShowHud(); return true;
+        }
+#endif
+        return false;
+    }
+
+    // ── HUD show / auto-hide ────────────────────────────────────────────────
+    private void ShowHud()
+    {
+        Hud.IsVisible = true;
+        _hudTimer?.Stop();
+        _hudTimer = Dispatcher.CreateTimer();
+        _hudTimer.Interval = TimeSpan.FromSeconds(3.5);
+        _hudTimer.IsRepeating = false;
+        _hudTimer.Tick += (_, _) =>
+        {
+            // Hide only while actually playing — keep it up when paused.
+            if (NativePlayerService.Instance?.GetState()?.Playing == true)
+                Hud.IsVisible = false;
+        };
+        _hudTimer.Start();
     }
 
     private void AttachAndStart()
@@ -106,7 +161,7 @@ public partial class PlayerPage : ContentPage
             // MAUI's layout only arranges its own cross-platform children, so a
             // raw native child never gets measured/laid-out and stays 0×0 — the
             // video decodes but renders to nothing (black screen, audio only).
-            // Force an explicit measure+layout to the display size, and re-do it
+            // Force an explicit measure+layout to the display size, re-doing it
             // whenever MAUI re-arranges (which would otherwise reset it).
             _textureView = tv;
             LayoutNative(tv, w, h);
@@ -143,10 +198,7 @@ public partial class PlayerPage : ContentPage
 
             var mediaUrl = Abs(body?.DirectPlayUrl ?? body?.DirectStreamUrl ?? body?.ManifestUrl);
             if (string.IsNullOrEmpty(mediaUrl))
-            {
-                // Fall back to a raw file stream so playback still starts.
                 mediaUrl = $"{ImageBase}/api/file?path={Uri.EscapeDataString(_filePath)}";
-            }
 
             NativePlayerService.Instance?.PlayAsync(mediaUrl, _resumeMs);
             _ = LoadSegmentsAsync();
@@ -154,7 +206,6 @@ public partial class PlayerPage : ContentPage
         catch { /* leave HUD; user can back out */ }
     }
 
-    // Resolve a possibly-relative server URL (e.g. "/api/file?…") to absolute.
     private string? Abs(string? url)
     {
         if (string.IsNullOrEmpty(url)) return null;
@@ -191,7 +242,8 @@ public partial class PlayerPage : ContentPage
         if (st is null) return;
 
         _durationMs = st.DurationMs;
-        PlayPauseLabel.Text = st.Playing ? "⏸" : "▶";
+        CenterIcon.Text     = st.Playing ? "❚❚" : "▶";
+        BufferSpinner.IsVisible = st.Buffering;
 
         if (st.DurationMs > 0)
         {
@@ -202,7 +254,6 @@ public partial class PlayerPage : ContentPage
 
         UpdateSkip(st.PositionMs / 1000.0);
 
-        // End of file → leave the player.
         if (st.Ended)
         {
             RecordProgress(st.PositionMs, st.DurationMs);
@@ -210,29 +261,28 @@ public partial class PlayerPage : ContentPage
             return;
         }
 
-        // Report progress every ~5s.
         if (++_ticks % 5 == 0 && st.PositionMs > 0)
             RecordProgress(st.PositionMs, st.DurationMs);
     }
 
     private void UpdateSkip(double posSec)
     {
-        // Inside intro?
         if (_introStart is double is0 && _introEnd is double ie && posSec >= is0 && posSec < ie)
         {
-            _skipTarget = ie;
+            _skipTarget = ie; _skipVisible = true;
             SkipLabel.Text = "Пропустить заставку";
             SkipButton.IsVisible = true;
             return;
         }
-        // Inside credits?
         if (_creditsStart is double cs && posSec >= cs)
         {
             _skipTarget = _creditsEnd ?? (_durationMs / 1000.0);
+            _skipVisible = true;
             SkipLabel.Text = "Пропустить титры";
             SkipButton.IsVisible = true;
             return;
         }
+        _skipVisible = false;
         SkipButton.IsVisible = false;
     }
 
@@ -240,6 +290,7 @@ public partial class PlayerPage : ContentPage
     {
         if (_skipTarget > 0)
             NativePlayerService.Instance?.SeekAsync((long)(_skipTarget * 1000));
+        _skipVisible = false;
         SkipButton.IsVisible = false;
     }
 
@@ -264,7 +315,7 @@ public partial class PlayerPage : ContentPage
         if (_mediaItemId == Guid.Empty || positionMs <= 0) return;
         try
         {
-            _ = _api.RecordProgressAsync(new RecordProgressRequest(
+            _ = _api.RecordProgressAsync(new Animarr.Shared.Requests.RecordProgressRequest(
                 _mediaItemId, _season, _episode, _filePath, positionMs,
                 durationMs > 0 ? durationMs : null));
         }
@@ -274,7 +325,9 @@ public partial class PlayerPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        if (Current == this) Current = null;
         _timer?.Stop();
+        _hudTimer?.Stop();
         var st = NativePlayerService.Instance?.GetState();
         if (st is not null) RecordProgress(st.PositionMs, st.DurationMs);
         _ = NativePlayerService.Instance?.DetachAsync();

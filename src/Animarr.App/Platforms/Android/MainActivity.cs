@@ -218,6 +218,16 @@ public class MainActivity : MauiAppCompatActivity
     /// UI thread (BackResultCallback below). We don't fall through to
     /// base.OnBackPressed() here because the system handler would
     /// instantly finish() the activity and race the async result.</summary>
+    // Route D-pad keys to the native player while it's on screen so OK toggles
+    // play/pause and ◀/▶ seek — a TV player drives off the remote, not focused
+    // on-screen buttons. Handled keys are swallowed so they don't also move
+    // focus in the (hidden) HUD underneath.
+    public override bool OnKeyDown(Android.Views.Keycode keyCode, Android.Views.KeyEvent? e)
+    {
+        if (PlayerPage.HandleGlobalKey((int)keyCode)) return true;
+        return base.OnKeyDown(keyCode, e);
+    }
+
 #pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
     public override void OnBackPressed()
     {
