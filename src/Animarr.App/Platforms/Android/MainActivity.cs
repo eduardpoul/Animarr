@@ -271,6 +271,23 @@ public class MainActivity : MauiAppCompatActivity
 #pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
     public override void OnBackPressed()
     {
+        // Native TV flow (no WebView on these pages): pop the MAUI navigation
+        // stack — player → detail → catalog — before anything else, so BACK
+        // doesn't finish() the whole app from a nested native screen. On phone
+        // the root is a plain MainPage (stack depth 1) so this no-ops and the
+        // WebView history logic below runs as before.
+        try
+        {
+            var win = Microsoft.Maui.Controls.Application.Current?.Windows;
+            var nav = win is { Count: > 0 } ? win[0].Page?.Navigation : null;
+            if (nav?.NavigationStack is { Count: > 1 })
+            {
+                _ = nav.PopAsync();
+                return;
+            }
+        }
+        catch { /* fall through to the WebView / default handler */ }
+
         try
         {
             var webView = FindWebView(Window?.DecorView);
