@@ -1453,6 +1453,7 @@
             hud.classList.remove('vp-hud--hidden');
             hud.setAttribute('data-visible', 'true');
             root.style.cursor = '';
+            applyFloatingVisibility();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
             // Arm the hide timer unless the user is actively interacting. We do
             // NOT gate arming on adapter.playing: play() is async, so right
@@ -1466,16 +1467,28 @@
                 if (hovering || dragging) return;
                 if (root.querySelector('.vp-hud-popup')) return;  // popup open
                 if (!adapter.playing) return;                     // keep visible while paused
-                hud.classList.add('vp-hud--hidden');
-                hud.setAttribute('data-visible', 'false');
-                root.style.cursor = 'none';
+                hideNow();
             }, HIDE_MS);
         }
         function hideNow() {
             hud.classList.add('vp-hud--hidden');
             hud.setAttribute('data-visible', 'false');
             root.style.cursor = 'none';
+            applyFloatingVisibility();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        }
+        // Skip-intro pill and the Up-Next card float above the HUD's control
+        // bars but must still follow its visibility — otherwise a bright "Skip
+        // intro" pill (or the Up-Next card) is left floating alone once the rest
+        // of the controls have faded out. Each element's OWN logic (intro/credits
+        // time window) still decides whether it WANTS to be shown; this only
+        // gates the two against the HUD's current shown/hidden state. Called
+        // whenever either changes: show()/hideNow()/pause (HUD) and
+        // setSkip/hideSkip/showUpNext/hideUpNext (their own want-shown state).
+        function applyFloatingVisibility() {
+            const hudVisible = hud.getAttribute('data-visible') === 'true';
+            skipEl.classList.toggle('vp-skip--hidden', !skipShown || !hudVisible);
+            upNextEl.classList.toggle('vp-upnext--hidden', !upNextShown || !hudVisible);
         }
         // Tap-to-toggle: a tap/click on the bare video area reveals the HUD when
         // hidden and hides it when shown (YouTube-style). Controls live in
@@ -1793,12 +1806,13 @@
         refs.track.addEventListener('pointercancel', endDrag);
 
         // ── up-next overlay (end-of-episode autoplay card) ────────────
-        // Appended to the player root (a sibling of .vp-hud) so it stays
-        // visible while the HUD controls fade out near the end — Netflix
-        // style. Shows once playback crosses 90% (the same threshold the
-        // server uses to auto-mark "watched") AND a next episode exists on
-        // disk. In the last few seconds it shows a countdown and auto-advances;
-        // "Dismiss" cancels that for the rest of this episode.
+        // Appended to the player root (a sibling of .vp-hud), gated to the
+        // HUD's own shown/hidden state via applyFloatingVisibility() — same
+        // reasoning as the skip-intro pill. Shows once playback crosses 90%
+        // (the same threshold the server uses to auto-mark "watched") AND a
+        // next episode exists on disk. In the last few seconds it shows a
+        // countdown and auto-advances regardless of whether the card itself is
+        // currently visible; "Dismiss" cancels that for the rest of this episode.
         const upNextEl = document.createElement('div');
         upNextEl.className = 'vp-upnext vp-upnext--hidden';
         upNextEl.innerHTML = `
@@ -1812,6 +1826,10 @@
               </button>
             </div>`;
         root.appendChild(upNextEl);
+        // Resting the mouse on the card while reading it must not let it vanish
+        // out from under the cursor — same "hovering" latch as the HUD's bars.
+        upNextEl.addEventListener('mouseenter', () => { hovering = true;  show(); });
+        upNextEl.addEventListener('mouseleave', () => { hovering = false; show(); });
         const unRefs = {
             eyebrow: upNextEl.querySelector('[data-bind="un-eyebrow"]'),
             name:    upNextEl.querySelector('[data-bind="un-name"]'),
@@ -1833,12 +1851,12 @@
             unRefs.name.textContent    = m.name || '';
             unRefs.play.textContent    = m.play || 'Play next';
             unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
-            upNextEl.classList.remove('vp-upnext--hidden');
+            applyFloatingVisibility();
         }
         function hideUpNext() {
             if (!upNextShown) return;
             upNextShown = false;
-            upNextEl.classList.add('vp-upnext--hidden');
+            applyFloatingVisibility();
         }
         function dismissUpNext() { upNextDismissed = true; hideUpNext(); }
         function triggerUpNext() {
@@ -1894,22 +1912,28 @@
         // ── skip-intro button ─────────────────────────────────────────
         // Floating button shown only while currentTime is inside the detected
         // intro [introStart, introEnd]; clicking seeks past it. Sibling of the
-        // HUD so it stays put while the controls fade. Stays hidden entirely
-        // when no intro was detected for this episode.
+        // HUD, but gated to the HUD's own shown/hidden state via
+        // applyFloatingVisibility() — it must not linger alone once the rest of
+        // the controls have faded out. Stays hidden entirely when no intro was
+        // detected for this episode.
         const skipEl = document.createElement('button');
         skipEl.type = 'button';
         skipEl.className = 'vp-skip vp-skip--hidden tv-focus';
         root.appendChild(skipEl);
+        // Resting the mouse on the pill itself must not let it vanish out from
+        // under the cursor — same "hovering" latch as the HUD's own control bars.
+        skipEl.addEventListener('mouseenter', () => { hovering = true;  show(); });
+        skipEl.addEventListener('mouseleave', () => { hovering = false; show(); });
         let skipShown = false, skipTarget = 0, skipIntroUsed = false;
         function setSkip(label, target) {
             skipTarget = target;
             if (skipEl.textContent !== label) skipEl.textContent = label;
-            if (!skipShown) { skipShown = true; skipEl.classList.remove('vp-skip--hidden'); }
+            if (!skipShown) { skipShown = true; applyFloatingVisibility(); }
         }
         function hideSkip() {
             if (!skipShown) return;
             skipShown = false;
-            skipEl.classList.add('vp-skip--hidden');
+            applyFloatingVisibility();
         }
         // Floating pill for Skip intro only (the opening). Skip credits now lives
         // inside the Up-Next card (the credits zone).
@@ -1969,6 +1993,7 @@
             hud.classList.remove('vp-hud--hidden');
             hud.setAttribute('data-visible', 'true');
             root.style.cursor = '';
+            applyFloatingVisibility();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         });
 
