@@ -8,55 +8,49 @@
     <Grid x:Name="RootGrid">
         <!-- native ExoPlayer TextureView is inserted at index 0 in code-behind -->
 
-        <!-- HUD overlay (hidden by default; shown via code-behind) -->
         <Grid x:Name="Hud" IsVisible="False">
 
-            <!-- top scrim + back hint + title -->
-            <Grid VerticalOptions="Start" HeightRequest="150">
+            <!-- top: back (left) + now-playing (centre) -->
+            <Grid VerticalOptions="Start" HeightRequest="120" Padding="40,24,40,0">
                 <BoxView>
                     <BoxView.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                            <GradientStop Color="#CC000000" Offset="0" />
+                            <GradientStop Color="#B3000000" Offset="0" />
                             <GradientStop Color="Transparent" Offset="1" />
                         </LinearGradientBrush>
                     </BoxView.Background>
                 </BoxView>
-                <VerticalStackLayout Padding="56,26,56,0" Spacing="4" VerticalOptions="Start">
-                    <Label Text="‹  НАЗАД" TextColor="#8b93a1" FontFamily="GeistMono"
-                           FontSize="11" CharacterSpacing="2" />
+                <Border x:Name="BackButton" HorizontalOptions="Start" VerticalOptions="Start"
+                        WidthRequest="42" HeightRequest="42" StrokeThickness="0"
+                        StrokeShape="RoundRectangle 21" BackgroundColor="#40FFFFFF">
+                    <Border.Behaviors>
+                        <local:TvFocusBehavior x:Name="BackFocus" Radius="21" />
+                    </Border.Behaviors>
+                    <Label Text="‹" TextColor="White" FontSize="24" HorizontalOptions="Center" VerticalOptions="Center" />
+                </Border>
+                <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Start" Spacing="2">
+                    <Label x:Name="EyebrowLabel" Text="NOW PLAYING" TextColor="#e8a33d"
+                           FontFamily="GeistMono" FontSize="10" CharacterSpacing="2"
+                           HorizontalOptions="Center" />
                     <Label x:Name="TitleLabel" TextColor="White" FontFamily="ArchivoBlack"
-                           FontSize="26" MaxLines="1" LineBreakMode="TailTruncation" />
+                           FontSize="18" MaxLines="1" LineBreakMode="TailTruncation"
+                           HorizontalOptions="Center" />
                 </VerticalStackLayout>
             </Grid>
 
-            <!-- centre flash icon + buffering -->
-            <Grid VerticalOptions="Center" HorizontalOptions="Center" WidthRequest="104" HeightRequest="104">
-                <Border StrokeThickness="0" BackgroundColor="#59000000"
-                        StrokeShape="RoundRectangle 52" WidthRequest="104" HeightRequest="104">
-                    <Label x:Name="CenterIcon" Text="❚❚" TextColor="White" FontSize="40"
-                           HorizontalOptions="Center" VerticalOptions="Center" />
-                </Border>
-                <ActivityIndicator x:Name="BufferSpinner" IsRunning="True" IsVisible="False"
-                                   Color="#e8772e" WidthRequest="72" HeightRequest="72"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
-            </Grid>
+            <!-- buffering -->
+            <ActivityIndicator x:Name="BufferSpinner" IsRunning="True" IsVisible="False"
+                               Color="#e8772e" WidthRequest="64" HeightRequest="64"
+                               HorizontalOptions="Center" VerticalOptions="Center" />
 
-            <!-- skip intro / credits (focusable) -->
-            <Border x:Name="SkipButton" IsVisible="False" HorizontalOptions="End" VerticalOptions="End"
-                    Margin="0,0,56,210" StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                    BackgroundColor="#E6e8772e" Padding="20,12">
-                <Border.Behaviors>
-                    <local:TvFocusBehavior x:Name="SkipFocus" Radius="10" />
-                </Border.Behaviors>
-                <HorizontalStackLayout Spacing="10">
-                    <Label Text="▲" TextColor="White" FontSize="14" VerticalOptions="Center" />
-                    <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White"
-                           FontFamily="Geist" FontSize="15" VerticalOptions="Center" />
-                </HorizontalStackLayout>
-            </Border>
+            <!-- transient info line (kodек / audio / subs / quality feedback) -->
+            <Label x:Name="InfoLine" IsVisible="False" Text="" TextColor="White"
+                   FontFamily="GeistMono" FontSize="13" HorizontalOptions="Center"
+                   VerticalOptions="End" Margin="0,0,0,200" BackgroundColor="#B3000000"
+                   Padding="16,8" />
 
-            <!-- bottom scrim + scrubber + time + transport buttons -->
-            <Grid VerticalOptions="End" HeightRequest="230">
+            <!-- bottom: progress + time + controls -->
+            <Grid VerticalOptions="End" HeightRequest="180">
                 <BoxView>
                     <BoxView.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -65,44 +59,90 @@
                         </LinearGradientBrush>
                     </BoxView.Background>
                 </BoxView>
-                <VerticalStackLayout VerticalOptions="End" Padding="56,0,56,34" Spacing="16">
-                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                <VerticalStackLayout VerticalOptions="End" Padding="40,0,40,28" Spacing="14">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
                         <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="White"
-                               FontFamily="GeistMono" FontSize="14" VerticalOptions="Center" />
+                               FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
                         <ProgressBar Grid.Column="1" x:Name="Scrubber" Progress="0"
                                      ProgressColor="#e8772e" VerticalOptions="Center" />
                         <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#cfd3da"
-                               FontFamily="GeistMono" FontSize="14" VerticalOptions="Center" />
+                               FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
                     </Grid>
 
-                    <HorizontalStackLayout HorizontalOptions="Start" Spacing="10">
-                        <Border x:Name="SeekBackButton" WidthRequest="50" HeightRequest="38"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="SeekBackFocus" Radius="8" />
-                            </Border.Behaviors>
-                            <Label Text="⏪" FontSize="15" TextColor="White"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
-                        </Border>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <!-- left: transport cluster -->
+                        <HorizontalStackLayout Grid.Column="0" Spacing="8">
+                            <Border x:Name="SeekBackButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="SeekBackFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="-10" TextColor="White" FontFamily="GeistMono" FontSize="12"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="PrevButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="PrevFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="⏮" TextColor="White" FontSize="14"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="PlayPauseButton" WidthRequest="52" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#e8772e">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="PlayPauseFocus" Radius="8" /></Border.Behaviors>
+                                <Label x:Name="PlayPauseIcon" Text="❚❚" TextColor="White" FontSize="15"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="NextButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="NextFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="⏭" TextColor="White" FontSize="14"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="SeekFwdButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="+10" TextColor="White" FontFamily="GeistMono" FontSize="12"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="SkipButton" IsVisible="False" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#E6e8772e" Padding="14,0" Margin="8,0,0,0">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="SkipFocus" Radius="8" /></Border.Behaviors>
+                                <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White" FontFamily="Geist"
+                                       FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                        </HorizontalStackLayout>
 
-                        <Border x:Name="PlayPauseButton" WidthRequest="54" HeightRequest="38"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#e8772e">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="PlayPauseFocus" Radius="8" />
-                            </Border.Behaviors>
-                            <Label x:Name="PlayPauseIcon" Text="❚❚" FontSize="16" TextColor="White"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
-                        </Border>
-
-                        <Border x:Name="SeekFwdButton" WidthRequest="50" HeightRequest="38"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="8" />
-                            </Border.Behaviors>
-                            <Label Text="⏩" FontSize="15" TextColor="White"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
-                        </Border>
-                    </HorizontalStackLayout>
+                        <!-- right: settings cluster -->
+                        <HorizontalStackLayout Grid.Column="1" Spacing="8">
+                            <Border x:Name="VolumeButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="VolumeFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="🔊" FontSize="14" HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="AudioButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="AudioFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="AT" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="SubsButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="SubsFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="CC" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="QualityButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="QualityFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="HD" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                            <Border x:Name="InfoButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="InfoFocus" Radius="8" /></Border.Behaviors>
+                                <Label Text="ⓘ" TextColor="White" FontSize="15"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
+                        </HorizontalStackLayout>
+                    </Grid>
                 </VerticalStackLayout>
             </Grid>
         </Grid>
