@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Animarr.App.TvBootstrapPage"
+             BackgroundColor="#0a0c10">
+    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="26">
+        <Label Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack"
+               FontSize="46" CharacterSpacing="5" HorizontalOptions="Center" />
+        <ActivityIndicator IsRunning="True" Color="#e8772e" HorizontalOptions="Center" />
+        <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
+               FontFamily="GeistMono" FontSize="13" HorizontalOptions="Center" />
+    </VerticalStackLayout>
+</ContentPage>
