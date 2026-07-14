@@ -52,6 +52,13 @@ public partial class CatalogNativePage : ContentPage
         ProfileCommand  = new Command(() => Navigation.PushAsync(new ProfilePanelPage()));
         HeroPlayCommand = new Command(OpenHero);
 
+        // Wire the hero + top-bar buttons' D-pad OK straight to their commands.
+        // behavior.Command is the reliable path — a gesture binding through
+        // x:Reference silently resolves to null on TV.
+        HeroFocus.Command    = HeroPlayCommand;
+        SearchFocus.Command  = SearchCommand;
+        ProfileFocus.Command = ProfileCommand;
+
         _ = LoadAsync();
     }
 
@@ -127,15 +134,11 @@ public partial class CatalogNativePage : ContentPage
     {
         var rails = new List<RailVm>();
 
-        // 1) Continue watching (with resume bars).
+        // 1) Continue watching (with resume bars). Show every row the server
+        // returns — don't drop rows missing a poster (they still have a title +
+        // fanart fallback), which is what left the rail short vs the web.
         if (cont.Length > 0)
-        {
-            var contItems = cont
-                .Where(c => !string.IsNullOrEmpty(c.PosterPath ?? c.FanartPath))
-                .Select(ToPosterFromContinue).ToList();
-            if (contItems.Count > 0)
-                rails.Add(new RailVm("Продолжить просмотр", contItems));
-        }
+            rails.Add(new RailVm("Продолжить просмотр", cont.Select(ToPosterFromContinue).ToList()));
 
         // 2) Favorites.
         var favs = items.Where(i => i.IsFavorite && !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
@@ -184,7 +187,7 @@ public partial class CatalogNativePage : ContentPage
         if (i.EpisodeCount is > 0) parts.Add($"{i.EpisodeCount} EP");
         if (i.Rating is > 0)       parts.Add($"★ {i.Rating:F1}");
 
-        return new PosterItem
+        var p = new PosterItem
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
@@ -194,22 +197,26 @@ public partial class CatalogNativePage : ContentPage
             Meta        = string.Join("   ·   ", parts),
             Cjk         = i.CjkTitle ?? "",
         };
+        p.Open = new Command(() => OpenDetail(p));
+        return p;
     }
 
     private PosterItem ToPosterFromContinue(ContinueApi c)
     {
-        var path = c.PosterPath ?? c.FanartPath!;
-        return new PosterItem
+        var path = c.PosterPath ?? c.FanartPath;
+        var p = new PosterItem
         {
             Id          = c.MediaItemId,
             Title       = (c.Title ?? "").ToUpperInvariant(),
-            ImageUrl    = Img(path, 330),
+            ImageUrl    = string.IsNullOrEmpty(path) ? "" : Img(path, 330),
             BackdropUrl = string.IsNullOrEmpty(c.FanartPath) ? null : Img(c.FanartPath, 1280),
             TypeLabel   = "",
             Meta        = EpisodeLabel(c.Season, c.Episode),
             Cjk         = "",
             Progress    = Math.Clamp(c.Progress, 0, 1),
         };
+        p.Open = new Command(() => OpenDetail(p));
+        return p;
     }
 
     private static string TypeLabel(string? t) => t switch
@@ -244,6 +251,9 @@ public partial class CatalogNativePage : ContentPage
         public double  Progress    { get; init; }          // 0..1; >0 shows the resume bar
         public bool    HasProgress => Progress > 0.01;
         public bool    HasType     => !string.IsNullOrEmpty(TypeLabel);
+        /// <summary>D-pad OK action for this card, bound to TvFocusBehavior.Command
+        /// from the item's own BindingContext (reliable inside a template).</summary>
+        public System.Windows.Input.ICommand? Open { get; set; }
     }
 
     public sealed class RailVm

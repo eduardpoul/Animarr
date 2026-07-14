@@ -78,18 +78,14 @@ public partial class NativeDetailPage : ContentPage
         FavoriteCommand = new Command(async () => await ToggleFavoriteAsync());
         PlayHeroCommand = new Command(PlayCta);
 
+        // D-pad OK on the hero buttons — set on the behavior directly (reliable).
+        BackFocus.Command = BackCommand;
+        FavFocus.Command  = FavoriteCommand;
+        PlayFocus.Command = PlayHeroCommand;
+
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         if (!string.IsNullOrEmpty(backdropUrl)) BackdropImage.Source = backdropUrl;
-        EpisodesView.SelectionChanged += OnEpisodeSelected;
-        TvFocus.Attach(EpisodesView);
         _ = LoadAsync();
-    }
-
-    private void OnEpisodeSelected(object? sender, SelectionChangedEventArgs e)
-    {
-        if (e.CurrentSelection.FirstOrDefault() is EpisodeVm ep && ep.Have)
-            PlayFile(ep.Season, ep.EpisodeNum, ep.FilePath, ep.ResumeMs);
-        EpisodesView.SelectedItem = null;
     }
 
     // Hero CTA: resume / next / first / rewatch, computed server-side.
@@ -126,6 +122,7 @@ public partial class NativeDetailPage : ContentPage
             ApplyHero();
             ApplyBody();
             BuildSeasonTabs();
+            Loader.IsVisible = false;
 
             // Personalised bits — best-effort, don't block the page on them.
             if (_guid != Guid.Empty)
@@ -268,7 +265,12 @@ public partial class NativeDetailPage : ContentPage
     }
 
     private void RenderTabs()
-        => SeasonTabs = _tabs.Select(t => new SeasonTabVm(t.Number, t.Label, t.RawCount, t.Number == _activeSeason)).ToList();
+        => SeasonTabs = _tabs.Select(t =>
+        {
+            var vm = new SeasonTabVm(t.Number, t.Label, t.RawCount, t.Number == _activeSeason);
+            vm.Select = new Command(() => SwitchSeason(vm.Number));
+            return vm;
+        }).ToList();
 
     private void SwitchSeason(int n)
     {
@@ -285,24 +287,23 @@ public partial class NativeDetailPage : ContentPage
         {
             var mf = _files.FirstOrDefault();
             var ws = _watch.FirstOrDefault();
-            Episodes = new List<EpisodeVm>
+            var movieEp = new EpisodeVm
             {
-                new()
-                {
-                    Number   = "▶",
-                    Title    = "Смотреть фильм",
-                    Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Фильм",
-                    ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
-                        ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
-                    Have     = mf is not null,
-                    FilePath = mf?.FilePath,
-                    Season   = mf?.Season,
-                    EpisodeNum = mf?.Episode,
-                    ResumeMs = ws?.ProgressMs ?? 0,
-                    IsWatched   = ws?.IsWatched ?? false,
-                    WatchFraction = Frac(ws),
-                },
+                Number   = "▶",
+                Title    = "Смотреть фильм",
+                Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Фильм",
+                ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
+                    ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
+                Have     = mf is not null,
+                FilePath = mf?.FilePath,
+                Season   = mf?.Season,
+                EpisodeNum = mf?.Episode,
+                ResumeMs = ws?.ProgressMs ?? 0,
+                IsWatched   = ws?.IsWatched ?? false,
+                WatchFraction = Frac(ws),
             };
+            movieEp.Play = new Command(() => PlayFile(movieEp.Season, movieEp.EpisodeNum, movieEp.FilePath, movieEp.ResumeMs));
+            Episodes = new List<EpisodeVm> { movieEp };
             return;
         }
 
@@ -311,6 +312,10 @@ public partial class NativeDetailPage : ContentPage
                               .Select(f => f.Episode ?? 0).DefaultIfEmpty(0).Max();
         var count = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
         if (count == 0) count = 1;
+        // No per-episode thumbnails now, so cards are cheap; keep a generous cap
+        // as a jank backstop for pathological seasons. Continue CTA plays the
+        // exact episode regardless. TODO: virtualize for full seasons.
+        if (count > 500) count = 500;
 
         var eps = new List<EpisodeVm>();
         for (int i = 1; i <= count; i++)
@@ -321,12 +326,15 @@ public partial class NativeDetailPage : ContentPage
             var title = _activeSeason == 0
                 ? $"Спецвыпуск {i}"
                 : (f?.AbsoluteEpisode is int ab ? $"Эпизод {i}  ·  TMDB #{ab}" : $"Эпизод {i}");
-            eps.Add(new EpisodeVm
+            var ep = new EpisodeVm
             {
                 Number   = i.ToString("00"),
                 Title    = title,
                 Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "На диске") : "Нет файла",
-                ThumbUrl = have ? $"{ImageBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
+                // No per-episode thumbnail here: fetching one triggers a server
+                // ffmpeg frame-grab per episode, and 150 of them made the page
+                // take ~30s to load. Card shows number + title + status instead.
+                ThumbUrl = "",
                 Have     = have,
                 FilePath = f?.FilePath,
                 Season   = _activeSeason,
@@ -334,7 +342,9 @@ public partial class NativeDetailPage : ContentPage
                 ResumeMs = ws?.ProgressMs ?? 0,
                 IsWatched   = ws?.IsWatched ?? false,
                 WatchFraction = Frac(ws),
-            });
+            };
+            ep.Play = new Command(() => PlayFile(ep.Season, ep.EpisodeNum, ep.FilePath, ep.ResumeMs));
+            eps.Add(ep);
         }
         Episodes = eps;
     }
@@ -376,6 +386,8 @@ public partial class NativeDetailPage : ContentPage
         public Color  Bg       { get; }
         public Color  Fg       { get; }
         public Color  CountFg  { get; }
+        /// <summary>D-pad OK action for this tab (bound to TvFocusBehavior.Command).</summary>
+        public System.Windows.Input.ICommand? Select { get; set; }
 
         public SeasonTabVm(int number, string label, int count, bool active = false)
         {
@@ -400,6 +412,7 @@ public partial class NativeDetailPage : ContentPage
         public int?    Season     { get; init; }
         public int?    EpisodeNum { get; init; }
         public long    ResumeMs   { get; init; }
+        public System.Windows.Input.ICommand? Play { get; set; }
         public bool    IsWatched     { get; init; }
         public double  WatchFraction { get; init; }   // 0..1 resume position
 
