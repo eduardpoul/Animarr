@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Animarr.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Animarr.App;
 
@@ -12,7 +14,6 @@ namespace Animarr.App;
 /// </summary>
 public partial class CatalogNativePage : ContentPage
 {
-    private const string ServerBase = "http://192.168.11.200:8080";
     private const int    Span       = 8;
     private const double Spacing    = 16;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -39,10 +40,25 @@ public partial class CatalogNativePage : ContentPage
     private (string Name, int Count)[] _chipGroups = Array.Empty<(string, int)>();
     private int _total;
 
+    // Shared, cookie-carrying HttpClient + the live server address, both from
+    // the MAUI DI container (see MauiProgram). Replaces the POC's throwaway
+    // `new HttpClient` + hard-coded LAN URL so catalog calls are authenticated
+    // and follow whatever server the user picked.
+    private readonly HttpClient _http;
+    private readonly ServerAddressProvider _addr;
+    // Absolute base for <img>-style URLs (Image.Source can't go through the
+    // client's handler pipeline, so it needs a fully-qualified origin).
+    private string ImageBase => _addr.Current.ToString().TrimEnd('/');
+
     public CatalogNativePage()
     {
         InitializeComponent();
         NavigationPage.SetHasNavigationBar(this, false);
+
+        var services = IPlatformApplication.Current?.Services
+            ?? throw new InvalidOperationException("MAUI DI container not ready.");
+        _http = services.GetRequiredService<HttpClient>();
+        _addr = services.GetRequiredService<ServerAddressProvider>();
         OpenCommand     = new Command<PosterItem>(OpenDetail);
         ChipCommand     = new Command<string>(FilterByCategory);
         // Long-tail screens reuse the existing Blazor UI in a pushed WebView host.
@@ -109,8 +125,7 @@ public partial class CatalogNativePage : ContentPage
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-            var items = await http.GetFromJsonAsync<ApiItem[]>($"{ServerBase}/api/media?take=500", Json)
+            var items = await _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500", Json)
                         ?? Array.Empty<ApiItem>();
 
             _all = items.Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
@@ -137,7 +152,7 @@ public partial class CatalogNativePage : ContentPage
         Hero = new HeroVm
         {
             Id       = h.Id ?? "",
-            Backdrop = $"{ServerBase}/api/image?path={Uri.EscapeDataString(h.FanartPath!)}&w=1280",
+            Backdrop = $"{ImageBase}/api/image?path={Uri.EscapeDataString(h.FanartPath!)}&w=1280",
             Eyebrow  = "FEATURED",
             Title    = (h.Title ?? "").ToUpperInvariant(),
             Meta     = string.Join("   ·   ", meta),
@@ -175,7 +190,7 @@ public partial class CatalogNativePage : ContentPage
     }
 #endif
 
-    private static PosterItem ToPoster(ApiItem i)
+    private PosterItem ToPoster(ApiItem i)
     {
         var path  = i.PosterPath ?? i.FanartPath!;
         var parts = new List<string>();
@@ -187,9 +202,9 @@ public partial class CatalogNativePage : ContentPage
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
-            ImageUrl    = $"{ServerBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
+            ImageUrl    = $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
             BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
-                        : $"{ServerBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
+                        : $"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
             TypeLabel   = TypeLabel(i.MediaType),
             Meta        = string.Join("   ·   ", parts),
             Cjk         = i.CjkTitle ?? "",
