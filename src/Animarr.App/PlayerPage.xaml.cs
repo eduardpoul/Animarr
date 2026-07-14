@@ -70,12 +70,22 @@ public partial class PlayerPage : ContentPage
         _resumeMs = resumeMs;
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
+        EyebrowLabel.Text = episode is not null
+            ? $"NOW PLAYING · S{season ?? 1} · EP {episode}"
+            : "NOW PLAYING";
 
-        // Button commands (used when the HUD is up and a button is activated).
-        PlayPauseFocus.Command = new Command(TogglePlay);
+        BackFocus.Command      = new Command(async () => await Navigation.PopAsync());
         SeekBackFocus.Command  = new Command(() => SeekBy(-10_000));
+        PrevFocus.Command      = new Command(() => FlashInfo("Предыдущая серия — скоро"));
+        PlayPauseFocus.Command = new Command(TogglePlay);
+        NextFocus.Command      = new Command(() => FlashInfo("Следующая серия — скоро"));
         SeekFwdFocus.Command   = new Command(() => SeekBy(+10_000));
         SkipFocus.Command      = new Command(DoSkip);
+        VolumeFocus.Command    = new Command(CycleVolume);
+        AudioFocus.Command     = new Command(() => FlashInfo("Выбор аудиодорожки — скоро"));
+        SubsFocus.Command      = new Command(() => FlashInfo("Субтитры — скоро"));
+        QualityFocus.Command   = new Command(() => FlashInfo("Качество — скоро"));
+        InfoFocus.Command      = new Command(ShowInfo);
 
         RootGrid.Loaded += (_, _) => AttachAndStart();
     }
@@ -245,7 +255,6 @@ public partial class PlayerPage : ContentPage
         if (st is null) return;
 
         _durationMs = st.DurationMs;
-        CenterIcon.Text     = st.Playing ? "❚❚" : "▶";
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
@@ -304,6 +313,35 @@ public partial class PlayerPage : ContentPage
         if (st is null) return;
         if (st.Playing) NativePlayerService.Instance?.PauseAsync();
         else            NativePlayerService.Instance?.ResumeAsync();
+    }
+
+    private float _volume = 1f;
+    private void CycleVolume()
+    {
+        _volume = _volume <= 0.01f ? 1f : Math.Max(0f, _volume - 0.25f);
+        NativePlayerService.Instance?.SetVolumeAsync(_volume);
+        FlashInfo(_volume <= 0.01f ? "Звук выключен" : $"Громкость {(int)(_volume * 100)}%");
+    }
+
+    private void ShowInfo()
+    {
+        var st = NativePlayerService.Instance?.GetState();
+        if (st is null) { FlashInfo("Нет данных"); return; }
+        var codec = string.IsNullOrEmpty(st.ActualCodec) ? "—" : st.ActualCodec.ToUpperInvariant();
+        FlashInfo($"{codec} · {st.ActualWidth}×{st.ActualHeight} · {st.ActualBitDepth}-bit");
+    }
+
+    private IDispatcherTimer? _infoTimer;
+    private void FlashInfo(string text)
+    {
+        InfoLine.Text = text;
+        InfoLine.IsVisible = true;
+        _infoTimer?.Stop();
+        _infoTimer = Dispatcher.CreateTimer();
+        _infoTimer.Interval = TimeSpan.FromSeconds(2.5);
+        _infoTimer.IsRepeating = false;
+        _infoTimer.Tick += (_, _) => InfoLine.IsVisible = false;
+        _infoTimer.Start();
     }
 
     private void SeekBy(long deltaMs)

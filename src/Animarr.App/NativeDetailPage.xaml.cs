@@ -331,10 +331,11 @@ public partial class NativeDetailPage : ContentPage
                               .Select(f => f.Episode ?? 0).DefaultIfEmpty(0).Max();
         var count = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
         if (count == 0) count = 1;
-        // FlexLayout has no recycling — 150 cards took ~18s to render on the TV.
-        // Cap tight for now so the page is usable; the Continue CTA plays the
-        // exact episode regardless. TODO: virtualize for the full season list.
-        if (count > 40) count = 40;
+        // FlexLayout has no recycling — each card costs measure/layout on the
+        // weak TV GPU, and that blocks the UI thread (focus feels frozen). Cap
+        // tight so the page is responsive; Continue CTA plays the exact episode
+        // regardless. TODO: virtualize for the full season list.
+        if (count > 24) count = 24;
 
         var eps = new List<EpisodeVm>();
         for (int i = 1; i <= count; i++)
