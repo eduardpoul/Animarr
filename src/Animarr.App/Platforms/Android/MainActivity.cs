@@ -231,6 +231,9 @@ public class MainActivity : MauiAppCompatActivity
 #pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
     public override void OnBackPressed()
     {
+        // Player HUD open → Back closes the HUD, not the page.
+        if (PlayerPage.HandleGlobalBack()) return;
+
         // Native TV flow (no WebView on these pages): pop the MAUI navigation
         // stack — player → detail → catalog — before anything else, so BACK
         // doesn't finish() the whole app from a nested native screen. On phone

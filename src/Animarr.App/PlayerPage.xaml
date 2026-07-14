@@ -75,31 +75,31 @@
                                FontFamily="GeistMono" FontSize="14" VerticalOptions="Center" />
                     </Grid>
 
-                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="18">
-                        <Border x:Name="SeekBackButton" WidthRequest="64" HeightRequest="52"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 10" BackgroundColor="#26FFFFFF">
+                    <HorizontalStackLayout HorizontalOptions="Start" Spacing="10">
+                        <Border x:Name="SeekBackButton" WidthRequest="50" HeightRequest="38"
+                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
                             <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="SeekBackFocus" Radius="10" />
+                                <local:TvFocusBehavior x:Name="SeekBackFocus" Radius="8" />
                             </Border.Behaviors>
-                            <Label Text="◀◀" FontSize="16" TextColor="White"
+                            <Label Text="⏪" FontSize="15" TextColor="White"
                                    HorizontalOptions="Center" VerticalOptions="Center" />
                         </Border>
 
-                        <Border x:Name="PlayPauseButton" WidthRequest="76" HeightRequest="52"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 10" BackgroundColor="#e8772e">
+                        <Border x:Name="PlayPauseButton" WidthRequest="54" HeightRequest="38"
+                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#e8772e">
                             <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="PlayPauseFocus" Radius="10" />
+                                <local:TvFocusBehavior x:Name="PlayPauseFocus" Radius="8" />
                             </Border.Behaviors>
-                            <Label x:Name="PlayPauseIcon" Text="❚❚" FontSize="20" TextColor="White"
+                            <Label x:Name="PlayPauseIcon" Text="❚❚" FontSize="16" TextColor="White"
                                    HorizontalOptions="Center" VerticalOptions="Center" />
                         </Border>
 
-                        <Border x:Name="SeekFwdButton" WidthRequest="64" HeightRequest="52"
-                                StrokeThickness="0" StrokeShape="RoundRectangle 10" BackgroundColor="#26FFFFFF">
+                        <Border x:Name="SeekFwdButton" WidthRequest="50" HeightRequest="38"
+                                StrokeThickness="0" StrokeShape="RoundRectangle 8" BackgroundColor="#26FFFFFF">
                             <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="10" />
+                                <local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="8" />
                             </Border.Behaviors>
-                            <Label Text="▶▶" FontSize="16" TextColor="White"
+                            <Label Text="⏩" FontSize="15" TextColor="White"
                                    HorizontalOptions="Center" VerticalOptions="Center" />
                         </Border>
                     </HorizontalStackLayout>
