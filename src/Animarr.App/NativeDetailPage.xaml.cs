@@ -87,31 +87,30 @@ public partial class NativeDetailPage : ContentPage
 
     private void OnEpisodeSelected(object? sender, SelectionChangedEventArgs e)
     {
-        if (e.CurrentSelection.FirstOrDefault() is EpisodeVm ep && ep.Have) Play(ep.FilePath);
+        if (e.CurrentSelection.FirstOrDefault() is EpisodeVm ep && ep.Have)
+            PlayFile(ep.Season, ep.EpisodeNum, ep.FilePath, ep.ResumeMs);
         EpisodesView.SelectedItem = null;
     }
 
     // Hero CTA: resume / next / first / rewatch, computed server-side.
     private void PlayCta()
-        => Play(_continue?.FilePath ?? _files.FirstOrDefault(f => !string.IsNullOrEmpty(f.FilePath))?.FilePath);
+    {
+        if (_continue?.FilePath is { Length: > 0 } cf)
+            PlayFile(_continue.Season, _continue.Episode, cf, _continue.ProgressMs ?? 0);
+        else
+        {
+            var f = _files.FirstOrDefault(x => !string.IsNullOrEmpty(x.FilePath));
+            PlayFile(f?.Season, f?.Episode, f?.FilePath, 0);
+        }
+    }
 
-    // Raw passthrough (/api/file) launched via ACTION_VIEW — the device's video
-    // player streams it with range support. (Phase 6 swaps this for an
-    // in-app ExoPlayer.)
-    private void Play(string? filePath)
+    // Open the in-app ExoPlayer for one file, carrying resume + episode coords
+    // so the player reports progress back to /api/watch-states.
+    private async void PlayFile(int? season, int? episode, string? filePath, long resumeMs)
     {
         if (string.IsNullOrEmpty(filePath)) return;
-#if ANDROID
-        try
-        {
-            var url = $"{ImageBase}/api/file?path={Uri.EscapeDataString(filePath)}";
-            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView);
-            intent.SetDataAndType(Android.Net.Uri.Parse(url), "video/*");
-            intent.AddFlags(Android.Content.ActivityFlags.NewTask);
-            Android.App.Application.Context!.StartActivity(intent);
-        }
-        catch { }
-#endif
+        var title = _item?.Title ?? TitleLabel.Text;
+        await Navigation.PushAsync(new PlayerPage(_guid, season, episode, filePath, title, resumeMs));
     }
 
     private async Task LoadAsync()
@@ -297,6 +296,9 @@ public partial class NativeDetailPage : ContentPage
                         ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
                     Have     = mf is not null,
                     FilePath = mf?.FilePath,
+                    Season   = mf?.Season,
+                    EpisodeNum = mf?.Episode,
+                    ResumeMs = ws?.ProgressMs ?? 0,
                     IsWatched   = ws?.IsWatched ?? false,
                     WatchFraction = Frac(ws),
                 },
@@ -327,6 +329,9 @@ public partial class NativeDetailPage : ContentPage
                 ThumbUrl = have ? $"{ImageBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
                 Have     = have,
                 FilePath = f?.FilePath,
+                Season   = _activeSeason,
+                EpisodeNum = i,
+                ResumeMs = ws?.ProgressMs ?? 0,
                 IsWatched   = ws?.IsWatched ?? false,
                 WatchFraction = Frac(ws),
             });
@@ -392,6 +397,9 @@ public partial class NativeDetailPage : ContentPage
         public string  ThumbUrl   { get; init; } = "";
         public bool    Have       { get; init; }
         public string? FilePath   { get; init; }
+        public int?    Season     { get; init; }
+        public int?    EpisodeNum { get; init; }
+        public long    ResumeMs   { get; init; }
         public bool    IsWatched     { get; init; }
         public double  WatchFraction { get; init; }   // 0..1 resume position
 
