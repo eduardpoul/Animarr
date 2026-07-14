@@ -111,33 +111,51 @@ public partial class NativeDetailPage : ContentPage
 
     private async Task LoadAsync()
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+            // Two core calls together.
             var itemTask  = _http.GetFromJsonAsync<DetailDto>($"/api/media/{_id}", Json);
             var filesTask = _http.GetFromJsonAsync<FileDto[]>($"/api/media/{_id}/files", Json);
-            _item  = await itemTask;
-            _files = await filesTask ?? Array.Empty<FileDto>();
+            _item  = await itemTask;  LogT(sw, "item");
+            _files = await filesTask ?? Array.Empty<FileDto>();  LogT(sw, "files");
             if (_item is null) return;
 
             ApplyHero();
             ApplyBody();
             BuildSeasonTabs();
             Loader.IsVisible = false;
+            LogT(sw, "core-ui");
 
-            // Personalised bits — best-effort, don't block the page on them.
+            // Personalised bits — run in parallel, don't serialize them.
             if (_guid != Guid.Empty)
             {
-                _continue = await SafeAsync(_api.GetContinueAsync(_guid));
-                _watch    = await SafeAsync(_api.GetWatchStatesAsync(_guid)) ?? Array.Empty<WatchStateDto>();
-                var favs  = await SafeAsync(_api.GetFavoriteIdsAsync());
-                _isFav    = favs?.Contains(_guid) ?? false;
+                var contT  = SafeAsync(_api.GetContinueAsync(_guid));
+                var watchT = SafeAsync(_api.GetWatchStatesAsync(_guid));
+                var favT   = SafeAsync(_api.GetFavoriteIdsAsync());
+                _continue = await contT;  LogT(sw, "continue");
+                _watch    = await watchT ?? Array.Empty<WatchStateDto>();  LogT(sw, "watch");
+                var favs  = await favT;   _isFav = favs?.Contains(_guid) ?? false;  LogT(sw, "favs");
 
                 ApplyCta();
                 ApplyFavorite();
-                BuildEpisodes();   // re-render with watched ticks / resume bars
             }
+
+            // Build the episode grid LAST, after a yield so the hero/body paint
+            // first — rendering the cards is the slow part on the weak TV GPU.
+            await Task.Yield();
+            BuildEpisodes();
+            LogT(sw, "episodes");
         }
         catch { /* leave partial UI on failure */ }
+        finally { Loader.IsVisible = false; }
+    }
+
+    private static void LogT(System.Diagnostics.Stopwatch sw, string stage)
+    {
+#if ANDROID
+        Android.Util.Log.Info("AnimarrDetail", $"{stage} @ {sw.ElapsedMilliseconds}ms");
+#endif
     }
 
     private static async Task<T?> SafeAsync<T>(Task<T> task)
@@ -261,7 +279,8 @@ public partial class NativeDetailPage : ContentPage
         SeasonsSection.IsVisible = tabs.Count > 0;
         _activeSeason = tabs.Count > 0 ? tabs[0].Number : 1;
         RenderTabs();
-        BuildEpisodes();
+        // Episodes are built separately (after a yield) so the tabs/hero paint
+        // first — see LoadAsync.
     }
 
     private void RenderTabs()
@@ -312,10 +331,10 @@ public partial class NativeDetailPage : ContentPage
                               .Select(f => f.Episode ?? 0).DefaultIfEmpty(0).Max();
         var count = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
         if (count == 0) count = 1;
-        // No per-episode thumbnails now, so cards are cheap; keep a generous cap
-        // as a jank backstop for pathological seasons. Continue CTA plays the
-        // exact episode regardless. TODO: virtualize for full seasons.
-        if (count > 500) count = 500;
+        // FlexLayout has no recycling — 150 cards took ~18s to render on the TV.
+        // Cap tight for now so the page is usable; the Continue CTA plays the
+        // exact episode regardless. TODO: virtualize for the full season list.
+        if (count > 40) count = 40;
 
         var eps = new List<EpisodeVm>();
         for (int i = 1; i <= count; i++)

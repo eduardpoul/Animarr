@@ -46,7 +46,6 @@ public partial class PlayerPage : ContentPage
     private long _durationMs;
     private bool _started;
     private bool _attached;
-    private bool _hudUp;      // true = HUD shown with focusable buttons
 
     private double? _introStart, _introEnd, _creditsStart, _creditsEnd;
     private double  _skipTarget;
@@ -85,82 +84,49 @@ public partial class PlayerPage : ContentPage
     {
         base.OnAppearing();
         Current = this;
-        FlashHud();   // brief HUD on entry, then it fades to clean video
+        RevealHud();  // show the HUD + focus the play button on entry
     }
 
-    // ── D-pad control ───────────────────────────────────────────────────────
+    // ── Remote control (simple) ─────────────────────────────────────────────
+    // HUD hidden → any key opens it and focus lands on the buttons.
+    // HUD shown → keys fall through to normal MAUI focus navigation (arrows move
+    // between buttons, OK activates). Back hides the HUD (handled via OnBack).
     public bool HandleKey(int keyCode)
     {
 #if ANDROID
         var kc = (Android.Views.Keycode)keyCode;
+        if (kc is Android.Views.Keycode.Back or Android.Views.Keycode.Escape)
+            return false;   // let the activity handle Back
 
-        // HUD shown → let MAUI focus navigation drive the buttons; just keep the
-        // auto-hide alive. (Don't intercept, so arrows move focus + OK clicks.)
-        if (_hudUp)
+        if (!Hud.IsVisible)
         {
-            if (kc is Android.Views.Keycode.DpadUp or Android.Views.Keycode.DpadDown
-                   or Android.Views.Keycode.DpadLeft or Android.Views.Keycode.DpadRight
-                   or Android.Views.Keycode.DpadCenter or Android.Views.Keycode.Enter
-                   or Android.Views.Keycode.ButtonA)
-                ArmAutoHide(4.5);
-            return false;
+            RevealHud();
+            return true;    // swallow the key that opened the menu
         }
-
-        // HUD hidden → direct playback control.
-        switch (kc)
-        {
-            case Android.Views.Keycode.DpadCenter:
-            case Android.Views.Keycode.Enter:
-            case Android.Views.Keycode.NumpadEnter:
-            case Android.Views.Keycode.ButtonA:
-            case Android.Views.Keycode.MediaPlayPause:
-                TogglePlay(); FlashHud(); return true;
-
-            case Android.Views.Keycode.DpadLeft:
-            case Android.Views.Keycode.MediaRewind:
-                SeekBy(-10_000); FlashHud(); return true;
-
-            case Android.Views.Keycode.DpadRight:
-            case Android.Views.Keycode.MediaFastForward:
-                SeekBy(+10_000); FlashHud(); return true;
-
-            case Android.Views.Keycode.DpadUp:
-            case Android.Views.Keycode.DpadDown:
-                RevealHud(); return true;
-
-            case Android.Views.Keycode.MediaPlay:
-                NativePlayerService.Instance?.ResumeAsync(); FlashHud(); return true;
-            case Android.Views.Keycode.MediaPause:
-                NativePlayerService.Instance?.PauseAsync(); FlashHud(); return true;
-        }
+        ArmAutoHide();      // keep it up while the user navigates
 #endif
-        return false;
+        return false;       // focus navigation drives the buttons
     }
 
-    // Brief, non-focusable HUD (after OK/seek) that fades on its own.
-    private void FlashHud()
+    public static bool HandleGlobalBack() => Current?.OnBack() ?? false;
+    private bool OnBack()
     {
-        _hudUp = false;
-        Hud.InputTransparent = true;
-        Hud.IsVisible = true;
-        ArmAutoHide(2.2);
+        if (Hud.IsVisible) { HideHud(); return true; }
+        return false;       // let navigation pop the page
     }
 
-    // Full HUD with focusable buttons (after ▲/▼); focus the play/pause button.
     private void RevealHud()
     {
-        _hudUp = true;
-        Hud.InputTransparent = false;
         Hud.IsVisible = true;
         try { PlayPauseButton.Focus(); } catch { }
-        ArmAutoHide(4.5);
+        ArmAutoHide();
     }
 
-    private void ArmAutoHide(double seconds)
+    private void ArmAutoHide()
     {
         _hudTimer?.Stop();
         _hudTimer = Dispatcher.CreateTimer();
-        _hudTimer.Interval = TimeSpan.FromSeconds(seconds);
+        _hudTimer.Interval = TimeSpan.FromSeconds(5);
         _hudTimer.IsRepeating = false;
         _hudTimer.Tick += (_, _) =>
         {
@@ -171,11 +137,7 @@ public partial class PlayerPage : ContentPage
         _hudTimer.Start();
     }
 
-    private void HideHud()
-    {
-        _hudUp = false;
-        Hud.IsVisible = false;
-    }
+    private void HideHud() => Hud.IsVisible = false;
 
     private void AttachAndStart()
     {
