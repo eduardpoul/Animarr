@@ -179,62 +179,12 @@ public class MainActivity : MauiAppCompatActivity
         // work, and the back gesture cleanly closes the app instead of
         // crashing into a blank page.
 
-        // Phase 2b (2026-05-27): native ExoPlayer video surface.
-        // We insert a TextureView at the very bottom of the activity's view
-        // tree (index 0 of DecorView). When the player opens, ExoPlayer hands
-        // its frames to this TextureView; the BlazorWebView above has a
-        // transparent background (set in MauiProgram's WebView mapper) so the
-        // video shows through wherever the HTML body is also transparent.
-        // Outside playback the TextureView is GONE — zero compositing cost.
-        // TextureView (not SurfaceView) so the regular GL pipeline can
-        // composite it BEHIND the translucent WebView; SurfaceView's
-        // hole-punch model wouldn't let the HUD overlay layer cleanly.
-        try
-        {
-            if (Window?.DecorView is ViewGroup decor)
-            {
-                // Native video plane. On this device the only z-order that
-                // composites VISIBLY over the BlazorWebView is "on top"
-                // (SetZOrderOnTop) — a TextureView or a below-window SurfaceView
-                // both got occluded by the WebView layer (frames confirmed
-                // rendering, never visible). So we render the video ABOVE the
-                // window, but constrained to a CENTRED LETTERBOX BAND (sized by
-                // NativePlayerService to the video aspect) so the HUD's top/
-                // bottom bars — drawn by the WebView underneath — stay visible
-                // around it. Touch still reaches the HUD: SetZOrderOnTop only
-                // moves the SURFACE compositing up; the SurfaceView's VIEW stays
-                // at the back of the hierarchy, so the WebView gets touch events.
-                //
-                // The SurfaceView lives inside a FrameLayout container we own,
-                // because DecorView does not honour FrameLayout child gravity —
-                // our own FrameLayout does, making the centred band reliable.
-                var container = new Android.Widget.FrameLayout(this)
-                {
-                    LayoutParameters = new ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MatchParent,
-                        ViewGroup.LayoutParams.MatchParent),
-                };
-                var sv = new SurfaceView(this)
-                {
-                    Visibility = ViewStates.Gone,
-                    LayoutParameters = new Android.Widget.FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MatchParent,
-                        ViewGroup.LayoutParams.MatchParent)
-                    {
-                        Gravity = Android.Views.GravityFlags.Center,
-                    },
-                };
-                sv.SetZOrderOnTop(true);
-                container.AddView(sv);
-                decor.AddView(container, 0);
-                Services.NativePlayerService.RegisterSurfaceView(sv);
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Android.Util.Log.Error("Animarr.NativePlayer",
-                $"Failed to insert SurfaceView: {ex.Message}");
-        }
+        // Native ExoPlayer video surface is now a TextureView created by the
+        // native PlayerPage (added to its VideoHost + registered via
+        // NativePlayerService.RegisterTextureView), so the activity no longer
+        // inserts a DecorView SurfaceView. A TextureView composites inside the
+        // normal view tree, so the XAML HUD overlays it cleanly — no hole-punch,
+        // no z-order fight (the SurfaceView path was for the old WebView shell).
     }
 
     protected override void OnNewIntent(Intent? intent)

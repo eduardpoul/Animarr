@@ -5,9 +5,8 @@
              x:Class="Animarr.App.PlayerPage"
              x:Name="Root"
              BackgroundColor="Black">
-    <Grid>
-        <!-- native ExoPlayer SurfaceView goes here (added in code-behind) -->
-        <ContentView x:Name="VideoHost" />
+    <Grid x:Name="RootGrid">
+        <!-- native ExoPlayer TextureView is inserted at index 0 in code-behind -->
 
         <!-- HUD overlay -->
         <Grid x:Name="Hud" InputTransparent="False">

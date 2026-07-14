@@ -76,7 +76,7 @@ public partial class PlayerPage : ContentPage
         SeekFwdCommand   = new Command(() => SeekBy(+10_000));
         SkipCommand      = new Command(DoSkip);
 
-        VideoHost.Loaded += (_, _) => AttachAndStart();
+        RootGrid.Loaded += (_, _) => AttachAndStart();
     }
 
     private void AttachAndStart()
@@ -92,20 +92,42 @@ public partial class PlayerPage : ContentPage
     {
 #if ANDROID
         if (_attached) return;
-        if (VideoHost.Handler?.PlatformView is Android.Views.ViewGroup vg)
+        if (RootGrid.Handler?.PlatformView is Android.Views.ViewGroup vg)
         {
-            var sv = new Android.Views.SurfaceView(vg.Context!)
+            var m = vg.Resources?.DisplayMetrics;
+            int w = m?.WidthPixels  ?? 1920;
+            int h = m?.HeightPixels ?? 1080;
+            var tv = new Android.Views.TextureView(vg.Context!)
             {
-                LayoutParameters = new Android.Views.ViewGroup.LayoutParams(
-                    Android.Views.ViewGroup.LayoutParams.MatchParent,
-                    Android.Views.ViewGroup.LayoutParams.MatchParent),
+                LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h),
             };
-            vg.AddView(sv);
-            NativePlayerService.RegisterSurfaceView(sv);
+            vg.AddView(tv, 0);   // behind the XAML HUD
+
+            // MAUI's layout only arranges its own cross-platform children, so a
+            // raw native child never gets measured/laid-out and stays 0×0 — the
+            // video decodes but renders to nothing (black screen, audio only).
+            // Force an explicit measure+layout to the display size, and re-do it
+            // whenever MAUI re-arranges (which would otherwise reset it).
+            _textureView = tv;
+            LayoutNative(tv, w, h);
+            RootGrid.SizeChanged += (_, _) => { if (_textureView is { } t) LayoutNative(t, w, h); };
+
+            NativePlayerService.RegisterTextureView(tv);
             _attached = true;
         }
 #endif
     }
+
+#if ANDROID
+    private Android.Views.TextureView? _textureView;
+    private static void LayoutNative(Android.Views.View v, int w, int h)
+    {
+        v.Measure(
+            Android.Views.View.MeasureSpec.MakeMeasureSpec(w, Android.Views.MeasureSpecMode.Exactly),
+            Android.Views.View.MeasureSpec.MakeMeasureSpec(h, Android.Views.MeasureSpecMode.Exactly));
+        v.Layout(0, 0, w, h);
+    }
+#endif
 
     private async Task StartAsync()
     {

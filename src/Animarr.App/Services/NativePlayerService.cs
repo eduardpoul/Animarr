@@ -59,7 +59,7 @@ public sealed class NativePlayerService : IDisposable
     // confirmed reaching the surface via OnSurfaceTextureUpdated, but never
     // visible). Registered once at activity startup; visibility toggled so the
     // surface only composites during actual playback.
-    private static SurfaceView? s_surfaceView;
+    private static TextureView? s_textureView;
 
     // Pending play request stashed when PlayAsync runs BEFORE the SurfaceView's
     // Surface is created (race between MainActivity.OnCreate inserting the view
@@ -92,10 +92,10 @@ public sealed class NativePlayerService : IDisposable
     /// calls that land before that point go onto a pending queue, drained once
     /// the surface is ready (SurfaceCreated).
     /// </summary>
-    public static void RegisterSurfaceView(SurfaceView surfaceView)
+    public static void RegisterTextureView(TextureView textureView)
     {
-        s_surfaceView = surfaceView;
-        surfaceView.Holder?.AddCallback(new SurfaceWatcher());
+        s_textureView = textureView;
+        textureView.SurfaceTextureListener = new TextureListener();
     }
 
     /// <summary>Hosted-activity OnPause hook. Stashes <c>PlayWhenReady</c> so
@@ -127,27 +127,22 @@ public sealed class NativePlayerService : IDisposable
     /// decoder memory across activity recreations.</summary>
     public void OnHostActivityDestroyed() => _ = DetachAsync();
 
-    private sealed class SurfaceWatcher : Java.Lang.Object, global::Android.Views.ISurfaceHolderCallback
+    private sealed class TextureListener : Java.Lang.Object, TextureView.ISurfaceTextureListener
     {
-        public void SurfaceCreated(global::Android.Views.ISurfaceHolder holder)
+        public void OnSurfaceTextureAvailable(global::Android.Graphics.SurfaceTexture surface, int width, int height)
         {
-            global::Android.Util.Log.Info("Animarr.NativePlayer", "SurfaceCreated");
+            global::Android.Util.Log.Info("Animarr.NativePlayer", "SurfaceTextureAvailable");
             Instance?.OnSurfaceReady();
         }
-        public void SurfaceChanged(global::Android.Views.ISurfaceHolder holder,
-            global::Android.Graphics.Format format, int width, int height)
-        {
-            // Re-apply aspect sizing whenever the surface dimensions change
-            // (first layout, rotation).
-            Instance?.ApplyAspectMatrix();
-        }
-        public void SurfaceDestroyed(global::Android.Views.ISurfaceHolder holder)
+        public void OnSurfaceTextureSizeChanged(global::Android.Graphics.SurfaceTexture surface, int width, int height)
+            => Instance?.ApplyAspectMatrix();
+        public bool OnSurfaceTextureDestroyed(global::Android.Graphics.SurfaceTexture surface)
         {
             var svc = Instance;
             if (svc is not null) svc._surfaceReady = false;
-            // ExoPlayer (via SetVideoSurfaceView) drops its surface ref on this
-            // callback automatically and re-acquires on the next SurfaceCreated.
+            return true;   // let the system release the texture
         }
+        public void OnSurfaceTextureUpdated(global::Android.Graphics.SurfaceTexture surface) { }
     }
 
     /// <summary>
@@ -165,7 +160,7 @@ public sealed class NativePlayerService : IDisposable
             // Direct attach — don't recurse into PlayAsync (would re-queue).
             DoPlay(pending.Value.Url, pending.Value.ResumeMs);
         }
-        else if (_player is not null && s_surfaceView is not null)
+        else if (_player is not null && s_textureView is not null)
         {
             // Re-attach surface to existing player (e.g. after lifecycle
             // bounce destroyed + recreated the surface).
@@ -182,12 +177,12 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void AttachSurface()
     {
-        if (_player is null || s_surfaceView is null) return;
+        if (_player is null || s_textureView is null) return;
         try
         {
-            _player.SetVideoSurfaceView(s_surfaceView);
+            _player.SetVideoTextureView(s_textureView);
             global::Android.Util.Log.Info("Animarr.NativePlayer",
-                "AttachSurface: SetVideoSurfaceView done");
+                "AttachSurface: SetVideoTextureView done");
         }
         catch (System.Exception ex)
         {
@@ -258,13 +253,13 @@ public sealed class NativePlayerService : IDisposable
             // only creates the Surface for a VISIBLE SurfaceView — so we flip
             // to Visible BEFORE the surface can become ready. If the surface is
             // ALREADY valid (a previous play left it hot), drain immediately.
-            if (s_surfaceView is not null)
+            if (s_textureView is not null)
             {
-                s_surfaceView.Post(new Java.Lang.Runnable(() =>
+                s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
-                    s_surfaceView.Visibility = ViewStates.Visible;
-                    s_surfaceView.KeepScreenOn = true;
-                    if (s_surfaceView.Holder?.Surface?.IsValid == true)
+                    s_textureView.Visibility = ViewStates.Visible;
+                    s_textureView.KeepScreenOn = true;
+                    if (s_textureView.IsAvailable)
                     {
                         // Surface already live (warm re-play) → attach now.
                         OnSurfaceReady();
@@ -309,9 +304,9 @@ public sealed class NativePlayerService : IDisposable
             {
                 _player ??= BuildPlayer(ctx);
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"DoPlay url={url} svNull={s_surfaceView is null} " +
-                    $"svValid={(s_surfaceView?.Holder?.Surface?.IsValid.ToString() ?? "?")} " +
-                    $"svSize={s_surfaceView?.Width ?? -1}x{s_surfaceView?.Height ?? -1}");
+                    $"DoPlay url={url} svNull={s_textureView is null} " +
+                    $"svValid={(s_textureView?.IsAvailable.ToString() ?? "?")} " +
+                    $"svSize={s_textureView?.Width ?? -1}x{s_textureView?.Height ?? -1}");
                 AttachSurface();
                 var item = MediaItem.FromUri(url);
                 _player.SetMediaItem(item);
@@ -480,51 +475,11 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void ApplyAspectMatrix()
     {
-        if (s_surfaceView is null) return;
-        var size = _lastVideoSize;
-        if (size is null && _player is not null)
-        {
-            try { size = _player.VideoSize; } catch { }
-        }
-        if (size is null || size.Width <= 0 || size.Height <= 0) return;
-
-        var sv = s_surfaceView;
-        var vw = size.Width; var vh = size.Height;
-        sv.Post(new Java.Lang.Runnable(() =>
-        {
-            try
-            {
-                var parent = sv.Parent as global::Android.Views.View;
-                float pw = parent?.Width ?? 0f;
-                float ph = parent?.Height ?? 0f;
-                if (pw <= 0 || ph <= 0) return;
-
-                float vRatio = (float)vw / vh;
-                float screenRatio = pw / ph;
-                int w, h;
-                if (vRatio > screenRatio)   // video wider → full width, bars top/bottom
-                {
-                    w = (int)pw;
-                    h = (int)System.Math.Round(pw / vRatio);
-                }
-                else                        // video taller → full height, bars left/right
-                {
-                    h = (int)ph;
-                    w = (int)System.Math.Round(ph * vRatio);
-                }
-
-                sv.LayoutParameters = new global::Android.Widget.FrameLayout.LayoutParams(w, h)
-                {
-                    Gravity = global::Android.Views.GravityFlags.Center,
-                };
-                global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"Aspect-sized SurfaceView {w}x{h} (video {vw}x{vh}, screen {(int)pw}x{(int)ph})");
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogWarning(ex, "NativePlayer.ApplyAspectMatrix");
-            }
-        }));
+        // TextureView scales the video within its own bounds and fills the host,
+        // which is full-screen 16:9 — as is virtually all content — so explicit
+        // letterbox sizing isn't needed here. (SurfaceView needed manual
+        // FrameLayout sizing; TextureView doesn't.) Kept as a no-op so the
+        // size-changed listener has a valid target.
     }
 
     private static float ParseAspect(string value)
@@ -640,9 +595,9 @@ public sealed class NativePlayerService : IDisposable
         {
             lock (_lock)
             {
-                if (_player is not null && s_surfaceView is not null)
+                if (_player is not null && s_textureView is not null)
                 {
-                    try { _player.ClearVideoSurfaceView(s_surfaceView); } catch { }
+                    try { _player.ClearVideoTextureView(s_textureView); } catch { }
                 }
                 _aspectApplied = false;
                 // Release() drops the decoder buffers (~50-200MB on a 4K HDR
@@ -662,12 +617,12 @@ public sealed class NativePlayerService : IDisposable
             // UI underneath visible without the SurfaceView painting black.
             // Drop KeepScreenOn too so non-playback pages get the OS's normal
             // dim/lock-out timing back.
-            if (s_surfaceView is not null)
+            if (s_textureView is not null)
             {
-                s_surfaceView.Post(new Java.Lang.Runnable(() =>
+                s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
-                    s_surfaceView.Visibility = ViewStates.Gone;
-                    s_surfaceView.KeepScreenOn = false;
+                    s_textureView.Visibility = ViewStates.Gone;
+                    s_textureView.KeepScreenOn = false;
                 }));
             }
             _pendingPlay = null;

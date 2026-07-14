@@ -1,5 +1,6 @@
 #if ANDROID
 using System.Linq;
+using System.Windows.Input;
 using AndroidX.RecyclerView.Widget;
 using Microsoft.Maui.Controls;
 using AView = Android.Views.View;
@@ -89,6 +90,19 @@ public sealed class TvFocusBehavior : Behavior<View>
     /// <summary>Corner radius (dp) of the focus ring, to match the control.</summary>
     public float Radius { get; set; } = 12f;
 
+    /// <summary>What D-pad OK runs. Bindable so it can be set from an item
+    /// binding (<c>Command="{Binding Open}"</c>) or programmatically in
+    /// code-behind — both reliable, unlike a TapGestureRecognizer Command bound
+    /// through <c>x:Reference</c> (the gesture isn't in the visual tree, so that
+    /// binding silently resolves to null on TV).</summary>
+    public static readonly BindableProperty CommandProperty =
+        BindableProperty.Create(nameof(Command), typeof(ICommand), typeof(TvFocusBehavior));
+    public ICommand? Command { get => (ICommand?)GetValue(CommandProperty); set => SetValue(CommandProperty, value); }
+
+    public static readonly BindableProperty CommandParameterProperty =
+        BindableProperty.Create(nameof(CommandParameter), typeof(object), typeof(TvFocusBehavior));
+    public object? CommandParameter { get => GetValue(CommandParameterProperty); set => SetValue(CommandParameterProperty, value); }
+
     private View? _view;
     private AView? _native;
 
@@ -120,15 +134,19 @@ public sealed class TvFocusBehavior : Behavior<View>
         _native = v;
         v.Focusable = true;
         v.FocusableInTouchMode = false;
+        // Clickable so Android natively converts a D-pad OK / Enter on the
+        // focused view into a Click — far more reliable than a KeyPress hook,
+        // which doesn't fire on a non-control Border with a real TV remote.
+        v.Clickable = true;
         v.FocusChange += OnFocus;
-        v.KeyPress += OnKey;
+        v.Click += OnClick;
     }
 
     private void Unwire()
     {
         if (_native is null) return;
         _native.FocusChange -= OnFocus;
-        _native.KeyPress -= OnKey;
+        _native.Click -= OnClick;
         _native = null;
     }
 
@@ -137,36 +155,26 @@ public sealed class TvFocusBehavior : Behavior<View>
         if (sender is AView v) TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius);
     }
 
-    // Fire once, on key-up, for the OK / center / enter family. Touch is left to
-    // MAUI's own TapGestureRecognizer handler, so the command never double-runs.
-    private void OnKey(object? sender, AView.KeyEventArgs e)
-    {
-        var ev = e.Event;
-        if (ev is null || ev.Action != Android.Views.KeyEventActions.Up)
-        {
-            e.Handled = false;
-            return;
-        }
-
-        if (e.KeyCode is Android.Views.Keycode.DpadCenter
-                      or Android.Views.Keycode.Enter
-                      or Android.Views.Keycode.NumpadEnter
-                      or Android.Views.Keycode.ButtonA)
-        {
-            Activate();
-            e.Handled = true;
-        }
-        else
-        {
-            e.Handled = false;
-        }
-    }
+    // D-pad OK / Enter on a focused clickable view lands here as a Click.
+    private void OnClick(object? sender, EventArgs e) => Activate();
 
     private void Activate()
     {
+        // Prefer the behavior's own Command (item binding / code-behind) — that's
+        // the reliable path. Fall back to a TapGestureRecognizer Command for any
+        // template still using one.
+        if (Command is { } c && c.CanExecute(CommandParameter))
+        {
+            c.Execute(CommandParameter);
+            return;
+        }
         var tap = _view?.GestureRecognizers?.OfType<TapGestureRecognizer>().FirstOrDefault();
-        if (tap?.Command is { } cmd && cmd.CanExecute(tap.CommandParameter))
-            cmd.Execute(tap.CommandParameter);
+        if (tap?.Command is { } tc && tc.CanExecute(tap.CommandParameter))
+        {
+            tc.Execute(tap.CommandParameter);
+            return;
+        }
+        global::Android.Util.Log.Warn("AnimarrFocus", $"Activate no-op: cmd={Command is not null} tap={tap is not null}");
     }
 }
 #else
@@ -183,5 +191,13 @@ public static class TvFocus
 public sealed class TvFocusBehavior : Behavior<View>
 {
     public float Radius { get; set; } = 12f;
+
+    public static readonly BindableProperty CommandProperty =
+        BindableProperty.Create(nameof(Command), typeof(System.Windows.Input.ICommand), typeof(TvFocusBehavior));
+    public System.Windows.Input.ICommand? Command { get => (System.Windows.Input.ICommand?)GetValue(CommandProperty); set => SetValue(CommandProperty, value); }
+
+    public static readonly BindableProperty CommandParameterProperty =
+        BindableProperty.Create(nameof(CommandParameter), typeof(object), typeof(TvFocusBehavior));
+    public object? CommandParameter { get => GetValue(CommandParameterProperty); set => SetValue(CommandParameterProperty, value); }
 }
 #endif
