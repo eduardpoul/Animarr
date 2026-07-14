@@ -763,14 +763,21 @@ internal static class MediaEndpoints
                     .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
                     .ToListAsync(ct);
 
+                bool missingIntro   = !have.Any(x => x.Kind == SegmentKind.Intro);
+                bool missingCredits = !have.Any(x => x.Kind == SegmentKind.Credits);
+
                 // Lazy detect on a miss using cheap providers only (AniSkip via
-                // the AniList MAL-id bridge + chapters). Best-effort — the player
-                // falls back to 95%.
-                if (have.Count == 0)
+                // the AniList MAL-id bridge + chapters). Gated on EITHER kind
+                // being missing — not just "nothing at all" — so an episode that
+                // already has an intro but no credits (or vice versa) still gets
+                // a retry instead of being stuck on the fallback below forever.
+                // Best-effort — the player falls back to 95% if nothing pans out.
+                MediaFileDto[]? files = null;
+                if (missingIntro || missingCredits)
                 {
                     try
                     {
-                        var files = await resolver.ResolveAsync(id, ct);
+                        files = await resolver.ResolveAsync(id, ct);
                         var fp = files.FirstOrDefault(f => (f.Season ?? 1) == s && f.Episode == e)?.FilePath;
                         if (!string.IsNullOrEmpty(fp))
                         {
@@ -779,19 +786,22 @@ internal static class MediaEndpoints
                                 have = await db.EpisodeSegments.AsNoTracking()
                                     .Where(x => x.MediaItemId == id && x.Season == s && x.Episode == e)
                                     .ToListAsync(ct);
+                                missingIntro   = !have.Any(x => x.Kind == SegmentKind.Intro);
+                                missingCredits = !have.Any(x => x.Kind == SegmentKind.Credits);
                             }
 
-                            // Cheap providers found nothing. The heavy chromaprint
-                            // provider can still detect it (e.g. donghua, which aren't
-                            // on AniList), but it decodes minutes of audio — too slow
-                            // to run inline. The batch pass would do it, except it
-                            // skips already-scanned titles (LastSegmentScanAt), so a
-                            // newly-added episode of an ongoing show never gets
-                            // fingerprinted. Run chromaprint for THIS episode in the
-                            // background, debounced once per process so repeat opens
-                            // of a genuinely segment-less episode don't re-decode it;
-                            // it'll be ready on a later open.
-                            if (have.Count == 0 && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
+                            // Cheap providers still leave something missing. The heavy
+                            // chromaprint provider can still detect it (e.g. donghua,
+                            // which aren't on AniList, or an episode chromaprint simply
+                            // missed on its last pass), but it decodes minutes of audio
+                            // — too slow to run inline. The batch pass would do it,
+                            // except it skips already-scanned titles (LastSegmentScanAt),
+                            // so a newly-added episode — or a stubborn miss — never gets
+                            // another shot. Run chromaprint for THIS episode in the
+                            // background, debounced once per process so repeat opens of
+                            // a genuinely segment-less episode don't re-decode it; it'll
+                            // be ready on a later open.
+                            if ((missingIntro || missingCredits) && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
                             {
                                 var peers = files
                                     .Where(f => (f.Season ?? 1) == s && f.Episode != null && !string.IsNullOrEmpty(f.FilePath))
@@ -812,23 +822,20 @@ internal static class MediaEndpoints
                     }
                     catch { /* best-effort lazy detection */ }
                 }
+
                 // Smart credits fallback: this episode has no detected credits →
-                // use the median credits start of the season's other episodes, so
-                // the next-episode card appears at the ending instead of at the
-                // player's blunt 95%-of-runtime guess.
+                // guess a trigger time instead of the player's blunt 95%-of-runtime
+                // fallback. See ComputeCreditsFallbackAsync for why this is a
+                // distance-from-the-end estimate, not an absolute-time median.
                 double? creditsFallback = null;
-                if (!have.Any(x => x.Kind == SegmentKind.Credits))
+                if (missingCredits)
                 {
-                    var others = await db.EpisodeSegments.AsNoTracking()
-                        .Where(x => x.MediaItemId == id && x.Season == s
-                                 && x.Kind == SegmentKind.Credits && x.Episode != e)
-                        .Select(x => x.StartSec)
-                        .ToListAsync(ct);
-                    if (others.Count > 0)
+                    try
                     {
-                        others.Sort();
-                        creditsFallback = others[others.Count / 2];
+                        files ??= await resolver.ResolveAsync(id, ct);
+                        creditsFallback = await ComputeCreditsFallbackAsync(db, files, id, s, e, ct);
                     }
+                    catch { /* best-effort — player falls back to 95% */ }
                 }
                 return Results.Ok(ToSegmentsDto(s, e, have, creditsFallback));
             }
@@ -962,13 +969,68 @@ internal static class MediaEndpoints
         var intro   = Pick(SegmentKind.Intro);
         var credits = Pick(SegmentKind.Credits);
         var recap   = Pick(SegmentKind.Recap);
-        // No detected credits → use the season-median fallback the caller passed,
-        // so the next-episode card still lands at the ending (not at 95%).
+        // No detected credits → use the fallback the caller passed (see
+        // ComputeCreditsFallbackAsync), so the next-episode card still lands
+        // near the ending instead of at the player's blunt 95%-of-runtime guess.
         return new EpisodeSegmentsDto(
             season, episode,
             intro?.StartSec,   intro?.EndSec,
             credits?.StartSec ?? creditsStartFallback, credits?.EndSec,
             recap?.StartSec,   recap?.EndSec);
+    }
+
+    /// <summary>Best-effort "next episode" trigger time for an episode whose own
+    /// credits haven't been detected. A season-wide median of OTHER episodes'
+    /// absolute credits-start time goes badly wrong whenever this episode's
+    /// runtime deviates from theirs — e.g. a double-length special: neighbours'
+    /// credits sit ~18 min into their own ~20 min episodes, nowhere near where a
+    /// 35-min episode's ending actually falls, because episode CONTENT length
+    /// varies a lot (that's the whole point of it being a different episode).
+    ///
+    /// What IS stable across episodes is the distance from the ending song to
+    /// the very end of the file — the same ending theme (+ trailing stinger)
+    /// takes roughly the same time regardless of how much story precedes it. So:
+    /// take the nearest-numbered episodes with a detected credits row (closest
+    /// cour-mates are the best analogue, since the ending theme itself can
+    /// change between cours — same reasoning as the chromaprint nearest-peer
+    /// fix), compute how far each one's credits sit from ITS OWN file end, and
+    /// apply the median of that gap to this episode's own probed duration.
+    ///
+    /// ffprobe's duration read is a header parse (unlike chromaprint's audio
+    /// decode), so probing a handful of files live is cheap — no caching needed.
+    /// Clamped to never fire before 60% of this episode's own runtime, as a
+    /// backstop against a thin or unusually-shaped sample.</summary>
+    private static async Task<double?> ComputeCreditsFallbackAsync(
+        AppDbContext db, MediaFileDto[] files, Guid mediaItemId, int season, int episode, CancellationToken ct)
+    {
+        var ownPath = files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == episode)?.FilePath;
+        if (string.IsNullOrEmpty(ownPath)) return null;
+        var ownDuration = await MediaProbe.GetDurationAsync(ownPath, ct);
+        if (ownDuration <= 0) return null;
+
+        var neighbours = await db.EpisodeSegments.AsNoTracking()
+            .Where(x => x.MediaItemId == mediaItemId && x.Season == season
+                     && x.Kind == SegmentKind.Credits && x.Episode != episode)
+            .Select(x => new { x.Episode, x.StartSec })
+            .ToListAsync(ct);
+        if (neighbours.Count == 0) return null;
+
+        var gaps = new List<double>();
+        foreach (var n in neighbours.OrderBy(n => Math.Abs(n.Episode - episode)))
+        {
+            var path = files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == n.Episode)?.FilePath;
+            if (string.IsNullOrEmpty(path)) continue;
+            var dur = await MediaProbe.GetDurationAsync(path, ct);
+            if (dur > n.StartSec) gaps.Add(dur - n.StartSec);
+            if (gaps.Count >= 3) break;   // 3 nearest is enough for a stable median
+        }
+        if (gaps.Count == 0) return null;
+
+        gaps.Sort();
+        var guess = ownDuration - gaps[gaps.Count / 2];
+
+        var floor = ownDuration * 0.6;
+        return guess < floor ? floor : guess;
     }
 
     // Cap concurrent ffmpeg frame-grabs: opening a season fires a burst of lazy
