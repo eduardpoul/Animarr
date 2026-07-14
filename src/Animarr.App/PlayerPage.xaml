@@ -1,96 +1,79 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:local="clr-namespace:Animarr.App"
              x:Class="Animarr.App.PlayerPage"
              x:Name="Root"
              BackgroundColor="Black">
     <Grid x:Name="RootGrid">
         <!-- native ExoPlayer TextureView is inserted at index 0 in code-behind -->
 
-        <!-- HUD overlay -->
-        <Grid x:Name="Hud" InputTransparent="False">
-            <!-- top scrim + back + title -->
-            <Grid VerticalOptions="Start" Padding="40,24" ColumnDefinitions="Auto,*"
-                  ColumnSpacing="16" BackgroundColor="#66000000">
-                <Border Grid.Column="0" WidthRequest="46" HeightRequest="46" StrokeThickness="0"
-                        StrokeShape="RoundRectangle 10" BackgroundColor="#59000000">
-                    <Border.Behaviors>
-                        <local:TvFocusBehavior Radius="10" />
-                    </Border.Behaviors>
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding BackCommand, Source={x:Reference Root}}" />
-                    </Border.GestureRecognizers>
-                    <Label Text="‹" TextColor="White" FontSize="26"
-                           HorizontalOptions="Center" VerticalOptions="Center" />
-                </Border>
-                <Label Grid.Column="1" x:Name="TitleLabel" TextColor="White"
-                       FontFamily="ArchivoBlack" FontSize="20" VerticalOptions="Center"
-                       MaxLines="1" LineBreakMode="TailTruncation" />
+        <!-- HUD overlay (visual only; control is via D-pad in code-behind) -->
+        <Grid x:Name="Hud" InputTransparent="True">
+
+            <!-- top scrim + back hint + title -->
+            <Grid VerticalOptions="Start" HeightRequest="150">
+                <BoxView>
+                    <BoxView.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#CC000000" Offset="0" />
+                            <GradientStop Color="Transparent" Offset="1" />
+                        </LinearGradientBrush>
+                    </BoxView.Background>
+                </BoxView>
+                <VerticalStackLayout Padding="56,26,56,0" Spacing="4" VerticalOptions="Start">
+                    <Label Text="‹  НАЗАД" TextColor="#8b93a1" FontFamily="GeistMono"
+                           FontSize="11" CharacterSpacing="2" />
+                    <Label x:Name="TitleLabel" TextColor="White" FontFamily="ArchivoBlack"
+                           FontSize="26" MaxLines="1" LineBreakMode="TailTruncation" />
+                </VerticalStackLayout>
             </Grid>
 
-            <!-- skip intro/credits (shown only inside a segment) -->
-            <Border x:Name="SkipButton" IsVisible="False" HorizontalOptions="End"
-                    VerticalOptions="End" Margin="0,0,44,150" StrokeThickness="0"
-                    StrokeShape="RoundRectangle 10" BackgroundColor="#E6e8772e" Padding="22,12">
-                <Border.Behaviors>
-                    <local:TvFocusBehavior Radius="10" />
-                </Border.Behaviors>
-                <Border.GestureRecognizers>
-                    <TapGestureRecognizer Command="{Binding SkipCommand, Source={x:Reference Root}}" />
-                </Border.GestureRecognizers>
-                <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White"
-                       FontFamily="Geist" FontSize="15" />
+            <!-- centre play/pause + buffering -->
+            <Grid VerticalOptions="Center" HorizontalOptions="Center" WidthRequest="104" HeightRequest="104">
+                <Border StrokeThickness="0" BackgroundColor="#66000000"
+                        StrokeShape="RoundRectangle 52" WidthRequest="104" HeightRequest="104">
+                    <Label x:Name="CenterIcon" Text="❚❚" TextColor="White" FontSize="40"
+                           HorizontalOptions="Center" VerticalOptions="Center" />
+                </Border>
+                <ActivityIndicator x:Name="BufferSpinner" IsRunning="True" IsVisible="False"
+                                   Color="#e8772e" WidthRequest="72" HeightRequest="72"
+                                   HorizontalOptions="Center" VerticalOptions="Center" />
+            </Grid>
+
+            <!-- skip intro / credits (▲) -->
+            <Border x:Name="SkipButton" IsVisible="False" HorizontalOptions="End" VerticalOptions="End"
+                    Margin="0,0,56,150" StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                    BackgroundColor="#E6e8772e" Padding="20,12">
+                <HorizontalStackLayout Spacing="10">
+                    <Label Text="▲" TextColor="White" FontSize="14" VerticalOptions="Center" />
+                    <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White"
+                           FontFamily="Geist" FontSize="15" VerticalOptions="Center" />
+                </HorizontalStackLayout>
             </Border>
 
-            <!-- bottom transport -->
-            <VerticalStackLayout VerticalOptions="End" Padding="44,20,44,32" Spacing="12"
-                                 BackgroundColor="#88000000">
-                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-                    <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="#cfd3da"
-                           FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
-                    <ProgressBar Grid.Column="1" x:Name="Scrubber" Progress="0"
-                                 ProgressColor="#e8772e" VerticalOptions="Center" />
-                    <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#cfd3da"
-                           FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
-                </Grid>
-
-                <HorizontalStackLayout HorizontalOptions="Center" Spacing="18">
-                    <Border WidthRequest="60" HeightRequest="52" StrokeThickness="0"
-                            StrokeShape="RoundRectangle 10" BackgroundColor="#26FFFFFF">
-                        <Border.Behaviors>
-                            <local:TvFocusBehavior Radius="10" />
-                        </Border.Behaviors>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SeekBackCommand, Source={x:Reference Root}}" />
-                        </Border.GestureRecognizers>
-                        <Label Text="⏪" FontSize="20" HorizontalOptions="Center" VerticalOptions="Center" />
-                    </Border>
-
-                    <Border WidthRequest="72" HeightRequest="52" StrokeThickness="0"
-                            StrokeShape="RoundRectangle 10" BackgroundColor="#e8772e">
-                        <Border.Behaviors>
-                            <local:TvFocusBehavior Radius="10" />
-                        </Border.Behaviors>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding PlayPauseCommand, Source={x:Reference Root}}" />
-                        </Border.GestureRecognizers>
-                        <Label x:Name="PlayPauseLabel" Text="⏸" FontSize="22" TextColor="White"
+            <!-- bottom scrim + scrubber + time + hints -->
+            <Grid VerticalOptions="End" HeightRequest="170">
+                <BoxView>
+                    <BoxView.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="Transparent" Offset="0" />
+                            <GradientStop Color="#E6000000" Offset="1" />
+                        </LinearGradientBrush>
+                    </BoxView.Background>
+                </BoxView>
+                <VerticalStackLayout VerticalOptions="End" Padding="56,0,56,40" Spacing="12">
+                    <ProgressBar x:Name="Scrubber" Progress="0" ProgressColor="#e8772e" />
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="White"
+                               FontFamily="GeistMono" FontSize="14" />
+                        <Label Grid.Column="1" Text="◀ ▶  перемотка ±10с    ·    OK  пауза    ·    ▲  пропустить"
+                               TextColor="#7b8290" FontFamily="GeistMono" FontSize="11"
                                HorizontalOptions="Center" VerticalOptions="Center" />
-                    </Border>
-
-                    <Border WidthRequest="60" HeightRequest="52" StrokeThickness="0"
-                            StrokeShape="RoundRectangle 10" BackgroundColor="#26FFFFFF">
-                        <Border.Behaviors>
-                            <local:TvFocusBehavior Radius="10" />
-                        </Border.Behaviors>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SeekFwdCommand, Source={x:Reference Root}}" />
-                        </Border.GestureRecognizers>
-                        <Label Text="⏩" FontSize="20" HorizontalOptions="Center" VerticalOptions="Center" />
-                    </Border>
-                </HorizontalStackLayout>
-            </VerticalStackLayout>
+                        <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#cfd3da"
+                               FontFamily="GeistMono" FontSize="14" />
+                    </Grid>
+                </VerticalStackLayout>
+            </Grid>
         </Grid>
     </Grid>
 </ContentPage>
