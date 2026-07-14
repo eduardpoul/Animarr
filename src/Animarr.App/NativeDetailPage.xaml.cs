@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Animarr.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Animarr.App;
 
@@ -12,8 +14,15 @@ namespace Animarr.App;
 /// </summary>
 public partial class NativeDetailPage : ContentPage
 {
-    private const string ServerBase = "http://192.168.11.200:8080";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    // Shared cookie-carrying HttpClient + live server address from MAUI DI
+    // (see MauiProgram) — replaces the POC's throwaway client + hard-coded URL.
+    private readonly HttpClient _http;
+    private readonly ServerAddressProvider _addr;
+    // Absolute origin for Image.Source / ACTION_VIEW URLs (they can't ride the
+    // HttpClient handler pipeline, so they need a fully-qualified server base).
+    private string ImageBase => _addr.Current.ToString().TrimEnd('/');
 
     private readonly string _id;
     private DetailDto? _item;
@@ -52,6 +61,12 @@ public partial class NativeDetailPage : ContentPage
     {
         InitializeComponent();
         NavigationPage.SetHasNavigationBar(this, false);
+
+        var services = IPlatformApplication.Current?.Services
+            ?? throw new InvalidOperationException("MAUI DI container not ready.");
+        _http = services.GetRequiredService<HttpClient>();
+        _addr = services.GetRequiredService<ServerAddressProvider>();
+
         _id = id;
         SeasonCommand   = new Command<int>(SwitchSeason);
         BackCommand     = new Command(() => Navigation.PopAsync());
@@ -82,7 +97,7 @@ public partial class NativeDetailPage : ContentPage
 #if ANDROID
         try
         {
-            var url = $"{ServerBase}/api/file?path={Uri.EscapeDataString(filePath)}";
+            var url = $"{ImageBase}/api/file?path={Uri.EscapeDataString(filePath)}";
             var intent = new Android.Content.Intent(Android.Content.Intent.ActionView);
             intent.SetDataAndType(Android.Net.Uri.Parse(url), "video/*");
             intent.AddFlags(Android.Content.ActivityFlags.NewTask);
@@ -96,9 +111,8 @@ public partial class NativeDetailPage : ContentPage
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-            var itemTask  = http.GetFromJsonAsync<DetailDto>($"{ServerBase}/api/media/{_id}", Json);
-            var filesTask = http.GetFromJsonAsync<FileDto[]>($"{ServerBase}/api/media/{_id}/files", Json);
+            var itemTask  = _http.GetFromJsonAsync<DetailDto>($"/api/media/{_id}", Json);
+            var filesTask = _http.GetFromJsonAsync<FileDto[]>($"/api/media/{_id}/files", Json);
             _item  = await itemTask;
             _files = await filesTask ?? Array.Empty<FileDto>();
             if (_item is null) return;
@@ -122,9 +136,9 @@ public partial class NativeDetailPage : ContentPage
         CjkLabel.Text = it.CjkTitle ?? "";
 
         if (!string.IsNullOrEmpty(it.FanartPath))
-            BackdropImage.Source = $"{ServerBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=1280";
+            BackdropImage.Source = $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=1280";
         if (!string.IsNullOrEmpty(it.PosterPath))
-            PosterImage.Source = $"{ServerBase}/api/image?path={Uri.EscapeDataString(it.PosterPath)}&w=330";
+            PosterImage.Source = $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.PosterPath)}&w=330";
 
         var meta = new List<string>();
         if (it.Rating is > 0)              meta.Add($"★ {it.Rating:F1}");
@@ -219,7 +233,7 @@ public partial class NativeDetailPage : ContentPage
                     Title    = "Play movie",
                     Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Movie",
                     ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
-                        ? $"{ServerBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
+                        ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
                     Have     = mf is not null,
                     FilePath = mf?.FilePath,
                 },
@@ -246,7 +260,7 @@ public partial class NativeDetailPage : ContentPage
                 Number   = i.ToString("00"),
                 Title    = title,
                 Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "On disk") : "Not downloaded",
-                ThumbUrl = have ? $"{ServerBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
+                ThumbUrl = have ? $"{ImageBase}/api/media/{_id}/episode-thumb?season={_activeSeason}&episode={i}" : "",
                 Have     = have,
                 FilePath = f?.FilePath,
             });
