@@ -9,22 +9,23 @@ namespace Animarr.App;
 
 /// <summary>
 /// Full-screen native player. ExoPlayer (via NativePlayerService) renders into a
-/// TextureView added to the root grid; the XAML HUD sits on top. Controlled the
-/// way a TV player should be — straight off the D-pad, not by focusing on-screen
-/// buttons: OK = play/pause, ◀/▶ = seek ±10s, ▲ = skip intro/credits. The HUD
-/// auto-hides during playback and stays up while paused. Keys are delivered from
-/// MainActivity.OnKeyDown via <see cref="HandleKey"/>.
+/// TextureView added to the root grid; the XAML HUD sits on top. Two control
+/// modes, like a web/YouTube-TV player:
 ///
-/// Playback URL comes from POST /api/hls/start (server picks Direct Play /
-/// Direct Stream / HLS; we advertise HEVC so it stream-copies on the weak TV
-/// box). Resume is seeked on start; progress is reported to /api/watch-states.
+///   • HUD hidden (video playing): the remote drives playback directly —
+///     OK = play/pause, ◀/▶ = seek ±10s. ▲/▼ reveals the HUD.
+///   • HUD shown: focus lands on the on-screen buttons; arrows move focus
+///     between them and OK activates the focused one (normal D-pad nav). The
+///     HUD auto-hides after a few seconds of no input while playing.
+///
+/// Keys are delivered from MainActivity.OnKeyDown via <see cref="HandleKey"/>,
+/// which only intercepts them while the HUD is hidden; once it's up, keys fall
+/// through to MAUI focus navigation.
 /// </summary>
 public partial class PlayerPage : ContentPage
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>The player currently on screen — MainActivity routes D-pad keys
-    /// here so OK/seek work without focusing a button.</summary>
     public static PlayerPage? Current { get; private set; }
     public static bool HandleGlobalKey(int keyCode) => Current?.HandleKey(keyCode) ?? false;
 
@@ -45,6 +46,7 @@ public partial class PlayerPage : ContentPage
     private long _durationMs;
     private bool _started;
     private bool _attached;
+    private bool _hudUp;      // true = HUD shown with focusable buttons
 
     private double? _introStart, _introEnd, _creditsStart, _creditsEnd;
     private double  _skipTarget;
@@ -70,6 +72,12 @@ public partial class PlayerPage : ContentPage
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
 
+        // Button commands (used when the HUD is up and a button is activated).
+        PlayPauseFocus.Command = new Command(TogglePlay);
+        SeekBackFocus.Command  = new Command(() => SeekBy(-10_000));
+        SeekFwdFocus.Command   = new Command(() => SeekBy(+10_000));
+        SkipFocus.Command      = new Command(DoSkip);
+
         RootGrid.Loaded += (_, _) => AttachAndStart();
     }
 
@@ -77,61 +85,96 @@ public partial class PlayerPage : ContentPage
     {
         base.OnAppearing();
         Current = this;
-        ShowHud();
+        FlashHud();   // brief HUD on entry, then it fades to clean video
     }
 
-    // ── D-pad control (delivered from MainActivity.OnKeyDown) ────────────────
+    // ── D-pad control ───────────────────────────────────────────────────────
     public bool HandleKey(int keyCode)
     {
 #if ANDROID
-        switch ((Android.Views.Keycode)keyCode)
+        var kc = (Android.Views.Keycode)keyCode;
+
+        // HUD shown → let MAUI focus navigation drive the buttons; just keep the
+        // auto-hide alive. (Don't intercept, so arrows move focus + OK clicks.)
+        if (_hudUp)
+        {
+            if (kc is Android.Views.Keycode.DpadUp or Android.Views.Keycode.DpadDown
+                   or Android.Views.Keycode.DpadLeft or Android.Views.Keycode.DpadRight
+                   or Android.Views.Keycode.DpadCenter or Android.Views.Keycode.Enter
+                   or Android.Views.Keycode.ButtonA)
+                ArmAutoHide(4.5);
+            return false;
+        }
+
+        // HUD hidden → direct playback control.
+        switch (kc)
         {
             case Android.Views.Keycode.DpadCenter:
             case Android.Views.Keycode.Enter:
             case Android.Views.Keycode.NumpadEnter:
             case Android.Views.Keycode.ButtonA:
             case Android.Views.Keycode.MediaPlayPause:
-                TogglePlay(); ShowHud(); return true;
+                TogglePlay(); FlashHud(); return true;
 
             case Android.Views.Keycode.DpadLeft:
             case Android.Views.Keycode.MediaRewind:
-                SeekBy(-10_000); ShowHud(); return true;
+                SeekBy(-10_000); FlashHud(); return true;
 
             case Android.Views.Keycode.DpadRight:
             case Android.Views.Keycode.MediaFastForward:
-                SeekBy(+10_000); ShowHud(); return true;
+                SeekBy(+10_000); FlashHud(); return true;
 
             case Android.Views.Keycode.DpadUp:
-                if (_skipVisible) DoSkip(); else ShowHud();
-                return true;
-
             case Android.Views.Keycode.DpadDown:
-                ShowHud(); return true;
+                RevealHud(); return true;
 
             case Android.Views.Keycode.MediaPlay:
-                NativePlayerService.Instance?.ResumeAsync(); ShowHud(); return true;
+                NativePlayerService.Instance?.ResumeAsync(); FlashHud(); return true;
             case Android.Views.Keycode.MediaPause:
-                NativePlayerService.Instance?.PauseAsync(); ShowHud(); return true;
+                NativePlayerService.Instance?.PauseAsync(); FlashHud(); return true;
         }
 #endif
         return false;
     }
 
-    // ── HUD show / auto-hide ────────────────────────────────────────────────
-    private void ShowHud()
+    // Brief, non-focusable HUD (after OK/seek) that fades on its own.
+    private void FlashHud()
     {
+        _hudUp = false;
+        Hud.InputTransparent = true;
         Hud.IsVisible = true;
+        ArmAutoHide(2.2);
+    }
+
+    // Full HUD with focusable buttons (after ▲/▼); focus the play/pause button.
+    private void RevealHud()
+    {
+        _hudUp = true;
+        Hud.InputTransparent = false;
+        Hud.IsVisible = true;
+        try { PlayPauseButton.Focus(); } catch { }
+        ArmAutoHide(4.5);
+    }
+
+    private void ArmAutoHide(double seconds)
+    {
         _hudTimer?.Stop();
         _hudTimer = Dispatcher.CreateTimer();
-        _hudTimer.Interval = TimeSpan.FromSeconds(3.5);
+        _hudTimer.Interval = TimeSpan.FromSeconds(seconds);
         _hudTimer.IsRepeating = false;
         _hudTimer.Tick += (_, _) =>
         {
-            // Hide only while actually playing — keep it up when paused.
+            // Auto-hide only while actually playing; keep it up when paused.
             if (NativePlayerService.Instance?.GetState()?.Playing == true)
-                Hud.IsVisible = false;
+                HideHud();
         };
         _hudTimer.Start();
+    }
+
+    private void HideHud()
+    {
+        _hudUp = false;
+        Hud.IsVisible = false;
     }
 
     private void AttachAndStart()
@@ -159,10 +202,8 @@ public partial class PlayerPage : ContentPage
             vg.AddView(tv, 0);   // behind the XAML HUD
 
             // MAUI's layout only arranges its own cross-platform children, so a
-            // raw native child never gets measured/laid-out and stays 0×0 — the
-            // video decodes but renders to nothing (black screen, audio only).
-            // Force an explicit measure+layout to the display size, re-doing it
-            // whenever MAUI re-arranges (which would otherwise reset it).
+            // raw native child stays 0×0 (video decodes but renders to nothing —
+            // black screen, audio only). Force measure+layout to display size.
             _textureView = tv;
             LayoutNative(tv, w, h);
             RootGrid.SizeChanged += (_, _) => { if (_textureView is { } t) LayoutNative(t, w, h); };
@@ -203,7 +244,7 @@ public partial class PlayerPage : ContentPage
             NativePlayerService.Instance?.PlayAsync(mediaUrl, _resumeMs);
             _ = LoadSegmentsAsync();
         }
-        catch { /* leave HUD; user can back out */ }
+        catch { }
     }
 
     private string? Abs(string? url)
@@ -243,6 +284,7 @@ public partial class PlayerPage : ContentPage
 
         _durationMs = st.DurationMs;
         CenterIcon.Text     = st.Playing ? "❚❚" : "▶";
+        PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
         if (st.DurationMs > 0)
