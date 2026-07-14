@@ -1,54 +1,41 @@
+using System.Collections.ObjectModel;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Windows.Input;
 using Animarr.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Animarr.App;
 
 /// <summary>
-/// POC native catalog. Self-contained (own HttpClient, hard-coded LAN server)
-/// so it doesn't depend on Blazor DI / cookie plumbing — judges native
-/// CollectionView look + scroll + D-pad on the Mi TV. Web-matching hero +
-/// category chips (functional) + 8-column true-2:3 poster grid. Card tap pushes
-/// a native detail page.
+/// Native TV catalog: a top bar (search + profile) over a vertical stack of
+/// horizontal rails — Continue watching (with a resume bar), Favorites, then a
+/// rail per top category. Each poster is a native D-pad focus target
+/// (TvFocusBehavior) whose OK opens the detail page. Talks to the server through
+/// the shared, cookie-carrying HttpClient (see MauiProgram) so every call is
+/// authenticated and follows the picked server.
 /// </summary>
 public partial class CatalogNativePage : ContentPage
 {
-    private const int    Span       = 8;
-    private const double Spacing    = 16;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static readonly BindableProperty ArtHeightProperty =
-        BindableProperty.Create(nameof(ArtHeight), typeof(double), typeof(CatalogNativePage), 300.0);
-    public double ArtHeight { get => (double)GetValue(ArtHeightProperty); set => SetValue(ArtHeightProperty, value); }
+    private readonly HttpClient _http;
+    private readonly ServerAddressProvider _addr;
+    private string ImageBase => _addr.Current!.ToString().TrimEnd('/');
+
+    // Bound to the vertical rail list.
+    public static readonly BindableProperty RailsProperty =
+        BindableProperty.Create(nameof(Rails), typeof(System.Collections.IList), typeof(CatalogNativePage));
+    public System.Collections.IList? Rails { get => (System.Collections.IList?)GetValue(RailsProperty); set => SetValue(RailsProperty, value); }
 
     public static readonly BindableProperty HeroProperty =
         BindableProperty.Create(nameof(Hero), typeof(HeroVm), typeof(CatalogNativePage));
     public HeroVm? Hero { get => (HeroVm?)GetValue(HeroProperty); set => SetValue(HeroProperty, value); }
 
-    public static readonly BindableProperty ChipsProperty =
-        BindableProperty.Create(nameof(Chips), typeof(System.Collections.IList), typeof(CatalogNativePage));
-    public System.Collections.IList? Chips { get => (System.Collections.IList?)GetValue(ChipsProperty); set => SetValue(ChipsProperty, value); }
-
-    public Command<PosterItem> OpenCommand     { get; }
-    public Command<string>     ChipCommand     { get; }
-    public Command             SearchCommand   { get; }
-    public Command             SettingsCommand { get; }
-    public Command             HeroPlayCommand { get; }
-
-    private List<PosterItem> _all = new();
-    private (string Name, int Count)[] _chipGroups = Array.Empty<(string, int)>();
-    private int _total;
-
-    // Shared, cookie-carrying HttpClient + the live server address, both from
-    // the MAUI DI container (see MauiProgram). Replaces the POC's throwaway
-    // `new HttpClient` + hard-coded LAN URL so catalog calls are authenticated
-    // and follow whatever server the user picked.
-    private readonly HttpClient _http;
-    private readonly ServerAddressProvider _addr;
-    // Absolute base for <img>-style URLs (Image.Source can't go through the
-    // client's handler pipeline, so it needs a fully-qualified origin).
-    private string ImageBase => _addr.Current.ToString().TrimEnd('/');
+    public ICommand OpenCommand    { get; }
+    public ICommand SearchCommand  { get; }
+    public ICommand ProfileCommand { get; }
+    public ICommand HeroPlayCommand { get; }
 
     public CatalogNativePage()
     {
@@ -59,51 +46,19 @@ public partial class CatalogNativePage : ContentPage
             ?? throw new InvalidOperationException("MAUI DI container not ready.");
         _http = services.GetRequiredService<HttpClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
+
         OpenCommand     = new Command<PosterItem>(OpenDetail);
-        ChipCommand     = new Command<string>(FilterByCategory);
-        // Long-tail screens reuse the existing Blazor UI in a pushed WebView host.
-        SearchCommand   = new Command(() => Navigation.PushAsync(new BlazorHostPage("/search")));
-        SettingsCommand = new Command(() => Navigation.PushAsync(new BlazorHostPage("/settings")));
+        SearchCommand   = new Command(() => Navigation.PushAsync(new SearchPage()));
+        ProfileCommand  = new Command(() => Navigation.PushAsync(new ProfilePanelPage()));
         HeroPlayCommand = new Command(OpenHero);
-        ComputeArtHeight(0);
-        PostersView.Loaded += OnCollectionLoaded;
-        PostersView.SelectionChanged += OnPosterSelected;
-        TvFocus.Attach(PostersView);
+
         _ = LoadAsync();
     }
 
-    // D-pad OK on a focused card fires CollectionView selection → open detail.
-    private void OnPosterSelected(object? sender, SelectionChangedEventArgs e)
-    {
-        if (e.CurrentSelection.FirstOrDefault() is PosterItem p) OpenDetail(p);
-        PostersView.SelectedItem = null;   // allow re-selecting the same card
-    }
-
-    // Hero "Play" opens the featured title's detail page (where Play streams it).
     private async void OpenHero()
     {
         if (Hero?.Id is { Length: > 0 } id)
             await Navigation.PushAsync(new NativeDetailPage(id, Hero.Title, Hero.Backdrop));
-    }
-
-    private void OnCollectionLoaded(object? sender, EventArgs e)
-        => ComputeArtHeight(PostersView.Width);
-
-    // True 2:3 art: card width = (avail - gaps) / span, height = width * 1.5.
-    private void ComputeArtHeight(double viewWidth)
-    {
-        try
-        {
-            double avail = viewWidth;
-            if (avail <= 0)
-            {
-                var info = DeviceDisplay.Current.MainDisplayInfo;
-                avail = info.Density > 0 ? info.Width / info.Density : 960;
-            }
-            var cardW = (avail - (Span - 1) * Spacing - 16) / Span;
-            if (cardW > 20) ArtHeight = Math.Round(cardW * 1.5);
-        }
-        catch { }
     }
 
     private async void OpenDetail(PosterItem? p)
@@ -112,37 +67,46 @@ public partial class CatalogNativePage : ContentPage
         await Navigation.PushAsync(new NativeDetailPage(p.Id, p.Title, p.BackdropUrl));
     }
 
-    private void FilterByCategory(string? cat)
-    {
-        cat ??= "All";
-        PostersView.ItemsSource = (cat == "All")
-            ? _all
-            : _all.Where(p => p.Categories.Contains(cat)).ToList();
-        RebuildChips(cat);
-    }
-
     private async Task LoadAsync()
     {
         try
         {
-            var items = await _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500", Json)
-                        ?? Array.Empty<ApiItem>();
+            var libraryTask  = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500", Json);
+            var continueTask = SafeGetAsync<ContinueApi[]>("/api/me/continue?take=20");
 
-            _all = items.Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
-                        .Select(ToPoster).ToList();
+            var items = await libraryTask ?? Array.Empty<ApiItem>();
+            var cont  = await continueTask ?? Array.Empty<ContinueApi>();
 
-            PostersView.ItemsSource = _all;
-            BuildHero(items);
-            BuildChips(items);
-#if ANDROID
-            PreloadImages(_all);
-#endif
+            BuildHero(items, cont);
+            BuildRails(items, cont);
         }
-        catch { /* POC: leave empty on failure */ }
+        catch { /* leave the page empty on a hard failure */ }
     }
 
-    private void BuildHero(ApiItem[] items)
+    private async Task<T?> SafeGetAsync<T>(string url)
     {
+        try { return await _http.GetFromJsonAsync<T>(url, Json); }
+        catch { return default; }
+    }
+
+    private void BuildHero(ApiItem[] items, ContinueApi[] cont)
+    {
+        // Prefer the most-recent continue item as the hero; else the top-rated
+        // title that has a backdrop.
+        var c = cont.FirstOrDefault(x => !string.IsNullOrEmpty(x.FanartPath ?? x.PosterPath));
+        if (c is not null)
+        {
+            Hero = new HeroVm
+            {
+                Id       = c.MediaItemId,
+                Backdrop = Img(c.FanartPath ?? c.PosterPath!, 1280),
+                Eyebrow  = c.IsNew ? "НОВЫЙ ЭПИЗОД" : "ПРОДОЛЖИТЬ",
+                Title    = (c.Title ?? "").ToUpperInvariant(),
+                Meta     = EpisodeLabel(c.Season, c.Episode),
+            };
+            return;
+        }
+
         var h = items.Where(i => !string.IsNullOrEmpty(i.FanartPath))
                      .OrderByDescending(i => i.Rating ?? 0)
                      .FirstOrDefault();
@@ -152,43 +116,65 @@ public partial class CatalogNativePage : ContentPage
         Hero = new HeroVm
         {
             Id       = h.Id ?? "",
-            Backdrop = $"{ImageBase}/api/image?path={Uri.EscapeDataString(h.FanartPath!)}&w=1280",
-            Eyebrow  = "FEATURED",
+            Backdrop = Img(h.FanartPath!, 1280),
+            Eyebrow  = "РЕКОМЕНДУЕМ",
             Title    = (h.Title ?? "").ToUpperInvariant(),
             Meta     = string.Join("   ·   ", meta),
         };
     }
 
-    private void BuildChips(ApiItem[] items)
+    private void BuildRails(ApiItem[] items, ContinueApi[] cont)
     {
-        _chipGroups = items
+        var rails = new List<RailVm>();
+
+        // 1) Continue watching (with resume bars).
+        if (cont.Length > 0)
+        {
+            var contItems = cont
+                .Where(c => !string.IsNullOrEmpty(c.PosterPath ?? c.FanartPath))
+                .Select(ToPosterFromContinue).ToList();
+            if (contItems.Count > 0)
+                rails.Add(new RailVm("Продолжить просмотр", contItems));
+        }
+
+        // 2) Favorites.
+        var favs = items.Where(i => i.IsFavorite && !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
+                        .Select(ToPoster).ToList();
+        if (favs.Count > 0)
+            rails.Add(new RailVm("Избранное", favs));
+
+        // 3) One rail per top category (by title count), then an "all" catch-all.
+        var withArt = items.Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath)).ToList();
+        var categories = withArt
             .SelectMany(i => i.CategoryNames ?? Array.Empty<string>())
             .GroupBy(n => n)
-            .Select(g => (g.Key, g.Count()))
-            .OrderByDescending(g => g.Item2)
-            .ToArray();
-        _total = items.Length;
-        RebuildChips("All");
-    }
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .Take(6);
 
-    private void RebuildChips(string active)
-    {
-        var chips = new List<ChipVm> { new("All", _total.ToString(), active == "All") };
-        chips.AddRange(_chipGroups.Select(g => new ChipVm(g.Name, g.Count.ToString(), active == g.Name)));
-        Chips = chips;
-    }
-
-#if ANDROID
-    private static void PreloadImages(IEnumerable<PosterItem> posters)
-    {
-        try
+        foreach (var cat in categories)
         {
-            var rm = Bumptech.Glide.Glide.With(Android.App.Application.Context);
-            foreach (var p in posters) { try { rm.Load(p.ImageUrl).Preload(); } catch { } }
+            var catItems = withArt.Where(i => (i.CategoryNames ?? Array.Empty<string>()).Contains(cat))
+                                  .Select(ToPoster).ToList();
+            if (catItems.Count >= 3)
+                rails.Add(new RailVm(cat, catItems));
         }
-        catch { }
+
+        // Fallback: if nothing categorised, show the whole library in one rail.
+        if (rails.Count == 0 && withArt.Count > 0)
+            rails.Add(new RailVm("Библиотека", withArt.Select(ToPoster).ToList()));
+
+        Rails = rails;
     }
-#endif
+
+    private string Img(string path, int w) => $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w={w}";
+
+    private static string EpisodeLabel(int? season, int? episode)
+    {
+        if (season is null && episode is null) return "";
+        if (episode is null) return $"Сезон {season}";
+        return season is > 0 ? $"S{season} · E{episode}" : $"Эпизод {episode}";
+    }
 
     private PosterItem ToPoster(ApiItem i)
     {
@@ -202,14 +188,27 @@ public partial class CatalogNativePage : ContentPage
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
-            ImageUrl    = $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
-            BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
-                        : $"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
+            ImageUrl    = Img(path, 330),
+            BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null : Img(i.FanartPath, 1280),
             TypeLabel   = TypeLabel(i.MediaType),
             Meta        = string.Join("   ·   ", parts),
             Cjk         = i.CjkTitle ?? "",
-            HueGlow     = HueGlow(i.Hue),
-            Categories  = i.CategoryNames ?? Array.Empty<string>(),
+        };
+    }
+
+    private PosterItem ToPosterFromContinue(ContinueApi c)
+    {
+        var path = c.PosterPath ?? c.FanartPath!;
+        return new PosterItem
+        {
+            Id          = c.MediaItemId,
+            Title       = (c.Title ?? "").ToUpperInvariant(),
+            ImageUrl    = Img(path, 330),
+            BackdropUrl = string.IsNullOrEmpty(c.FanartPath) ? null : Img(c.FanartPath, 1280),
+            TypeLabel   = "",
+            Meta        = EpisodeLabel(c.Season, c.Episode),
+            Cjk         = "",
+            Progress    = Math.Clamp(c.Progress, 0, 1),
         };
     }
 
@@ -219,40 +218,43 @@ public partial class CatalogNativePage : ContentPage
         "Movie"       => "MOVIE",
         "Series"      => "SERIES",
         "Multserials" => "MULTI",
-        _             => "MEDIA",
+        _             => "",
     };
 
-    private static Brush HueGlow(int? hue)
-    {
-        var c = Color.FromHsla((hue ?? 0) / 360.0, 0.5, 0.62);
-        return new RadialGradientBrush
-        {
-            Center = new Point(0.5, 0.0),
-            Radius = 0.9,
-            GradientStops =
-            {
-                new GradientStop(c.WithAlpha(0.18f), 0f),
-                new GradientStop(Colors.Transparent, 0.65f),
-            },
-        };
-    }
-
+    // ── API shapes (only the fields the catalog uses) ────────────────────────
     private sealed record ApiItem(
         string? Id, string? Title, string? PosterPath, string? FanartPath, string? CjkTitle,
-        int? Year, string? MediaType, double? Rating, int? EpisodeCount, int? Hue,
-        string[]? CategoryNames);
+        int? Year, string? MediaType, double? Rating, int? EpisodeCount,
+        bool IsFavorite, string[]? CategoryNames);
 
+    private sealed record ContinueApi(
+        string MediaItemId, string? Title, string? PosterPath, string? FanartPath,
+        int? Season, int? Episode, double Progress, bool IsNew);
+
+    // ── View models bound from XAML ──────────────────────────────────────────
     public sealed class PosterItem
     {
-        public string   Id          { get; init; } = "";
-        public string   Title       { get; init; } = "";
-        public string   ImageUrl    { get; init; } = "";
-        public string?  BackdropUrl { get; init; }
-        public string   TypeLabel   { get; init; } = "";
-        public string   Meta        { get; init; } = "";
-        public string   Cjk         { get; init; } = "";
-        public Brush?   HueGlow     { get; init; }
-        public string[] Categories  { get; init; } = Array.Empty<string>();
+        public string  Id          { get; init; } = "";
+        public string  Title       { get; init; } = "";
+        public string  ImageUrl    { get; init; } = "";
+        public string? BackdropUrl { get; init; }
+        public string  TypeLabel   { get; init; } = "";
+        public string  Meta        { get; init; } = "";
+        public string  Cjk         { get; init; } = "";
+        public double  Progress    { get; init; }          // 0..1; >0 shows the resume bar
+        public bool    HasProgress => Progress > 0.01;
+        public bool    HasType     => !string.IsNullOrEmpty(TypeLabel);
+    }
+
+    public sealed class RailVm
+    {
+        public string Title { get; }
+        public ObservableCollection<PosterItem> Items { get; }
+        public RailVm(string title, IEnumerable<PosterItem> items)
+        {
+            Title = title;
+            Items = new ObservableCollection<PosterItem>(items);
+        }
     }
 
     public sealed class HeroVm
@@ -262,25 +264,5 @@ public partial class CatalogNativePage : ContentPage
         public string Eyebrow  { get; init; } = "";
         public string Title    { get; init; } = "";
         public string Meta     { get; init; } = "";
-    }
-
-    public sealed class ChipVm
-    {
-        public string Label    { get; }
-        public string Count    { get; }
-        public string Category { get; }
-        public Color  Bg       { get; }
-        public Color  Fg       { get; }
-        public Color  CountFg  { get; }
-
-        public ChipVm(string label, string count, bool active)
-        {
-            Label    = label;
-            Count    = count;
-            Category = label;
-            Bg       = active ? Color.FromArgb("#e8772e")  : Color.FromArgb("#1a1d24");
-            Fg       = active ? Colors.White               : Color.FromArgb("#c7ccd4");
-            CountFg  = active ? Color.FromArgb("#ffe0c8")  : Color.FromArgb("#6b7280");
-        }
     }
 }
