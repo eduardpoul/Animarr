@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:Animarr.App"
              x:Class="Animarr.App.ServerPickerPage"
+             x:Name="Root"
              BackgroundColor="#0a0c10">
     <Grid RowDefinitions="*,Auto,*" Padding="80,0">
         <VerticalStackLayout Grid.Row="1" Spacing="18" MaximumWidthRequest="720"
@@ -12,7 +13,7 @@
             <Label Text="Подключитесь к серверу Animarr"
                    TextColor="White" FontFamily="ArchivoBlack" FontSize="34" />
 
-            <!-- Discovered servers appear here as focusable buttons. -->
+            <!-- Discovered servers appear here as focusable cards. -->
             <VerticalStackLayout x:Name="FoundList" Spacing="10" Margin="0,10,0,0" />
 
             <Label Text="Или введите адрес вручную" TextColor="#7b8290"
@@ -32,7 +33,7 @@
                     <local:TvFocusBehavior Radius="10" />
                 </Border.Behaviors>
                 <Border.GestureRecognizers>
-                    <TapGestureRecognizer Tapped="OnConnect" />
+                    <TapGestureRecognizer Command="{Binding ConnectCommand, Source={x:Reference Root}}" />
                 </Border.GestureRecognizers>
                 <Label Text="Подключиться" TextColor="White" FontFamily="Geist"
                        FontSize="17" HorizontalOptions="Center" />
