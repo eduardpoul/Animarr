@@ -297,6 +297,10 @@ public static class MauiProgram
         // whenever a response carries Set-Cookie.
         var cookieJar = new CookieContainer();
         CookiePersistence.Load(cookieJar);
+        // Mirror the restored cookies into the WebView store too — its <img>
+        // fetches (episode thumbs on cookie-gated servers) authenticate via
+        // the WEBVIEW's cookies, not the HttpClient container.
+        CookiePersistence.SyncToWebView(cookieJar);
         builder.Services.AddSingleton(cookieJar);
         builder.Services.AddSingleton(sp =>
         {
