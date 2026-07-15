@@ -59,6 +59,15 @@
     private DotNetObjectReference<ThisWeekRail>? _selfRef;
     private bool _canLeft, _canRight, _railInit;
 
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips — the MAUI hybrid boot
+        // hydrates it after the first render, and the art URLs bake the base.
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    }
+
+    private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (_railInit || Items.Length == 0) return;
@@ -90,6 +99,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
         try
         {
             if (_js is not null)
@@ -120,7 +130,11 @@
     };
 
     private static string ArtStyle(CalendarEventDto e)
-        => string.IsNullOrEmpty(e.BackdropUrl ?? e.PosterUrl)
-            ? ""
-            : $"background-image:url('{(e.BackdropUrl ?? e.PosterUrl)!.Replace("'", "%27")}')";
+    {
+        // Rebase the server-relative art URL for the MAUI hybrid (see MediaUrl).
+        var raw = e.BackdropUrl ?? e.PosterUrl;
+        if (string.IsNullOrEmpty(raw)) return "";
+        var abs = Animarr.UI.Services.MediaUrl.Absolute(raw);
+        return $"background-image:url('{abs.Replace("'", "%27")}')";
+    }
 }

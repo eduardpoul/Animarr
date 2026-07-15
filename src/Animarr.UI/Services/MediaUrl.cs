@@ -60,6 +60,19 @@ public static class MediaUrl
             : $"{_base}/api/image{query}";
     }
 
+    /// <summary>Rebase a server-relative URL (<c>/api/…</c>) onto the active
+    /// server. DTOs like <c>CalendarEventDto</c> / rec cards carry relative
+    /// URLs — a browser resolves them against its origin, but the MAUI
+    /// WebView's virtual host 404s them. Absolute (http/https) URLs pass
+    /// through untouched.</summary>
+    public static string Absolute(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "";
+        if (url!.StartsWith("http", System.StringComparison.OrdinalIgnoreCase)) return url;
+        if (string.IsNullOrEmpty(_base)) return url;
+        return url[0] == '/' ? _base + url : $"{_base}/{url}";
+    }
+
     /// <summary>Build the <c>/api/media/{id}/theme</c> URL for a title's theme
     /// audio (anime OP/ED). Used as the <c>&lt;audio&gt;</c> src on the detail page.</summary>
     public static string Theme(System.Guid id)
