@@ -31,9 +31,17 @@
             {
                 var e = ev;
                 var local = e.AiringAtUtc.ToLocalTime();
+                var artUrl = Animarr.UI.Services.MediaUrl.Absolute(e.BackdropUrl ?? e.PosterUrl);
                 <button type="button" class="twr__card tv-focus" title="@e.Title"
                         @onclick="@(() => Nav.NavigateTo($"/catalog/{e.MediaItemId}"))">
-                    <span class="twr__art" style="@ArtStyle(e)">
+                    <span class="twr__art">
+                        @* An <img> (not background-image) — the proven loader
+                           path in the MAUI hybrid WebView, matching the hero
+                           and poster cards. *@
+                        @if (!string.IsNullOrEmpty(artUrl))
+                        {
+                            <img class="twr__img" src="@artUrl" alt="" loading="lazy" />
+                        }
                         <span class="twr__when">@DayLabel(local) · @local.ToString("HH:mm")</span>
                         <span class="twr__name">@e.Title</span>
                     </span>
@@ -129,12 +137,4 @@
         _               => L["calendar.upcoming"],
     };
 
-    private static string ArtStyle(CalendarEventDto e)
-    {
-        // Rebase the server-relative art URL for the MAUI hybrid (see MediaUrl).
-        var raw = e.BackdropUrl ?? e.PosterUrl;
-        if (string.IsNullOrEmpty(raw)) return "";
-        var abs = Animarr.UI.Services.MediaUrl.Absolute(raw);
-        return $"background-image:url('{abs.Replace("'", "%27")}')";
-    }
 }
