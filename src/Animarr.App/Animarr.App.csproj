@@ -76,6 +76,31 @@
         <AndroidLinkMode>None</AndroidLinkMode>
     </PropertyGroup>
 
+    <!-- Opt-in arm64 AOT (perf). OFF by default: AOT REQUIRES trimming (build
+         error XA1030), and trimming is exactly what this project keeps disabled
+         for crash-safety — the linker can drop Java binding / MainActivity stubs
+         → ClassNotFoundException, the same failure class that made us turn AOT
+         off in the first place. So it stays gated behind an explicit flag: build
+         with `-p:AnimarrEnableArm64Aot=true` and VERIFY on the real device (adb
+         logcat: no ClassNotFound, app launches) before trusting it. When on:
+         AOT + partial / SDK-only trim, so the app + binding assemblies are
+         preserved and only the framework is trimmed. arm64 only — android-arm
+         (v7a) never AOTs (that's the ABI the cross-compiler actually broke). -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' == 'android-arm64' and '$(AnimarrEnableArm64Aot)' == 'true'">
+        <RunAOTCompilation>true</RunAOTCompilation>
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>partial</TrimMode>
+        <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    </PropertyGroup>
+
+    <!-- Build stamp baked into assembly metadata. MauiProgram reads it to
+         purge the WebView cache exactly ONCE after a new build is installed
+         (instead of on every launch) — fresh assets after an update, cached
+         cold-start cost otherwise. UtcNow.Ticks changes every build. -->
+    <ItemGroup>
+        <AssemblyMetadata Include="AnimarrBuildStamp" Value="$([System.DateTime]::UtcNow.Ticks)" />
+    </ItemGroup>
+
     <!-- Debug also ships both ABIs so installs on cheap armeabi-v7a TV boxes
          (Mi TV, generic Android TV sticks) work straight from `dotnet build
          -t:Install`. Without 32-bit support the installer fails with
@@ -83,7 +108,12 @@
          compared to the friction of having to flip to Release just to push
          a Debug build to a TV. -->
     <PropertyGroup Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-        <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+        <!-- Real TV boxes ship arm64 or 32-bit armeabi-v7a, so Debug builds both.
+             For the x86_64 Android TV *emulator*, build with `-p:AnimarrEmu=true`
+             to get a fast x64-only APK instead (the emulator can't run arm libs
+             at usable speed). -->
+        <RuntimeIdentifiers Condition="'$(AnimarrEmu)' == 'true'">android-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers Condition="'$(AnimarrEmu)' != 'true'">android-arm64;android-arm</RuntimeIdentifiers>
     </PropertyGroup>
 
     <ItemGroup>

@@ -30,8 +30,14 @@ public sealed record AddTorrentFileRequest(
     /// <summary>File paths (as listed in the parsed manifest — MonoTorrent's
     /// <c>Torrent.Files[].Path</c>) the user UNCHECKED in the Add-drawer tree.
     /// The engine stamps these DoNotDownload BEFORE starting, so skipped files
-    /// never hit disk. Null/empty = download everything (back-compat default).</summary>
-    string[]? ExcludedFiles = null);
+    /// never hit disk. Null/empty = download everything (back-compat default).
+    /// Superseded by <see cref="FilePriorities"/> when that is supplied.</summary>
+    string[]? ExcludedFiles = null,
+    /// <summary>Full per-file priority map chosen in the flat add list:
+    /// path → 0=skip / 1=normal / 2=high. When present it drives the engine's
+    /// initial priorities (so the user can pick High at creation, not just
+    /// skip). Keys are manifest paths like <see cref="ExcludedFiles"/>.</summary>
+    System.Collections.Generic.Dictionary<string, int>? FilePriorities = null);
 
 /// <summary>Body for <c>POST /api/torrents/parse</c>. Echo of the metadata
 /// inside a .torrent file (file list + total size) without touching the

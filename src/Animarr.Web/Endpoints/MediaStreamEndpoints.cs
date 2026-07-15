@@ -22,19 +22,35 @@ internal static class MediaStreamEndpoints
         app.MapGet("/api/image", async (
                 string path,
                 long? t,
+                int? w,
                 MediaPathValidator pathValidator,
+                MediaCachePaths cachePaths,
                 HttpContext ctx) =>
         {
             var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryOrCacheFileAsync(path);
             if (!ok) return earlyResult!;
 
             var mime = MediaMime.ForImageExtension(Path.GetExtension(fullPath!));
+
+            // Optional width cap (?w=): serve a downscaled, disk-cached variant so
+            // the client doesn't decode a full-size poster for a small card — the
+            // texture thrash that janks weak Android-TV GPUs. Best-effort: falls
+            // back to the original on any failure or unsupported format.
+            var servePath = fullPath!;
+            if (w is > 0)
+            {
+                servePath = await ImageResizer.GetResizedAsync(
+                    fullPath!, w.Value, cachePaths.CacheRoot, ctx.RequestAborted);
+                if (!string.Equals(servePath, fullPath, StringComparison.OrdinalIgnoreCase))
+                    mime = "image/jpeg";
+            }
+
             // Cache-busting: a version stamp (t>0) makes the URL unique per file
             // version → cache immutably for a year; otherwise always revalidate.
             ctx.Response.Headers.CacheControl = t is > 0
                 ? "public, max-age=31536000, immutable"
                 : "no-cache";
-            return Results.File(fullPath!, mime);
+            return Results.File(servePath, mime);
         })
         .WithName("GetMediaImage")
         .AllowAnonymous();

@@ -59,7 +59,7 @@ public sealed class NativePlayerService : IDisposable
     // confirmed reaching the surface via OnSurfaceTextureUpdated, but never
     // visible). Registered once at activity startup; visibility toggled so the
     // surface only composites during actual playback.
-    private static SurfaceView? s_surfaceView;
+    private static TextureView? s_textureView;
 
     // Pending play request stashed when PlayAsync runs BEFORE the SurfaceView's
     // Surface is created (race between MainActivity.OnCreate inserting the view
@@ -92,10 +92,10 @@ public sealed class NativePlayerService : IDisposable
     /// calls that land before that point go onto a pending queue, drained once
     /// the surface is ready (SurfaceCreated).
     /// </summary>
-    public static void RegisterSurfaceView(SurfaceView surfaceView)
+    public static void RegisterTextureView(TextureView textureView)
     {
-        s_surfaceView = surfaceView;
-        surfaceView.Holder?.AddCallback(new SurfaceWatcher());
+        s_textureView = textureView;
+        textureView.SurfaceTextureListener = new TextureListener();
     }
 
     /// <summary>Hosted-activity OnPause hook. Stashes <c>PlayWhenReady</c> so
@@ -127,27 +127,22 @@ public sealed class NativePlayerService : IDisposable
     /// decoder memory across activity recreations.</summary>
     public void OnHostActivityDestroyed() => _ = DetachAsync();
 
-    private sealed class SurfaceWatcher : Java.Lang.Object, global::Android.Views.ISurfaceHolderCallback
+    private sealed class TextureListener : Java.Lang.Object, TextureView.ISurfaceTextureListener
     {
-        public void SurfaceCreated(global::Android.Views.ISurfaceHolder holder)
+        public void OnSurfaceTextureAvailable(global::Android.Graphics.SurfaceTexture surface, int width, int height)
         {
-            global::Android.Util.Log.Info("Animarr.NativePlayer", "SurfaceCreated");
+            global::Android.Util.Log.Info("Animarr.NativePlayer", "SurfaceTextureAvailable");
             Instance?.OnSurfaceReady();
         }
-        public void SurfaceChanged(global::Android.Views.ISurfaceHolder holder,
-            global::Android.Graphics.Format format, int width, int height)
-        {
-            // Re-apply aspect sizing whenever the surface dimensions change
-            // (first layout, rotation).
-            Instance?.ApplyAspectMatrix();
-        }
-        public void SurfaceDestroyed(global::Android.Views.ISurfaceHolder holder)
+        public void OnSurfaceTextureSizeChanged(global::Android.Graphics.SurfaceTexture surface, int width, int height)
+            => Instance?.ApplyAspectMatrix();
+        public bool OnSurfaceTextureDestroyed(global::Android.Graphics.SurfaceTexture surface)
         {
             var svc = Instance;
             if (svc is not null) svc._surfaceReady = false;
-            // ExoPlayer (via SetVideoSurfaceView) drops its surface ref on this
-            // callback automatically and re-acquires on the next SurfaceCreated.
+            return true;   // let the system release the texture
         }
+        public void OnSurfaceTextureUpdated(global::Android.Graphics.SurfaceTexture surface) { }
     }
 
     /// <summary>
@@ -165,7 +160,7 @@ public sealed class NativePlayerService : IDisposable
             // Direct attach — don't recurse into PlayAsync (would re-queue).
             DoPlay(pending.Value.Url, pending.Value.ResumeMs);
         }
-        else if (_player is not null && s_surfaceView is not null)
+        else if (_player is not null && s_textureView is not null)
         {
             // Re-attach surface to existing player (e.g. after lifecycle
             // bounce destroyed + recreated the surface).
@@ -182,12 +177,12 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void AttachSurface()
     {
-        if (_player is null || s_surfaceView is null) return;
+        if (_player is null || s_textureView is null) return;
         try
         {
-            _player.SetVideoSurfaceView(s_surfaceView);
+            _player.SetVideoTextureView(s_textureView);
             global::Android.Util.Log.Info("Animarr.NativePlayer",
-                "AttachSurface: SetVideoSurfaceView done");
+                "AttachSurface: SetVideoTextureView done");
         }
         catch (System.Exception ex)
         {
@@ -258,13 +253,13 @@ public sealed class NativePlayerService : IDisposable
             // only creates the Surface for a VISIBLE SurfaceView — so we flip
             // to Visible BEFORE the surface can become ready. If the surface is
             // ALREADY valid (a previous play left it hot), drain immediately.
-            if (s_surfaceView is not null)
+            if (s_textureView is not null)
             {
-                s_surfaceView.Post(new Java.Lang.Runnable(() =>
+                s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
-                    s_surfaceView.Visibility = ViewStates.Visible;
-                    s_surfaceView.KeepScreenOn = true;
-                    if (s_surfaceView.Holder?.Surface?.IsValid == true)
+                    s_textureView.Visibility = ViewStates.Visible;
+                    s_textureView.KeepScreenOn = true;
+                    if (s_textureView.IsAvailable)
                     {
                         // Surface already live (warm re-play) → attach now.
                         OnSurfaceReady();
@@ -309,9 +304,9 @@ public sealed class NativePlayerService : IDisposable
             {
                 _player ??= BuildPlayer(ctx);
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"DoPlay url={url} svNull={s_surfaceView is null} " +
-                    $"svValid={(s_surfaceView?.Holder?.Surface?.IsValid.ToString() ?? "?")} " +
-                    $"svSize={s_surfaceView?.Width ?? -1}x{s_surfaceView?.Height ?? -1}");
+                    $"DoPlay url={url} svNull={s_textureView is null} " +
+                    $"svValid={(s_textureView?.IsAvailable.ToString() ?? "?")} " +
+                    $"svSize={s_textureView?.Width ?? -1}x{s_textureView?.Height ?? -1}");
                 AttachSurface();
                 var item = MediaItem.FromUri(url);
                 _player.SetMediaItem(item);
@@ -480,51 +475,11 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void ApplyAspectMatrix()
     {
-        if (s_surfaceView is null) return;
-        var size = _lastVideoSize;
-        if (size is null && _player is not null)
-        {
-            try { size = _player.VideoSize; } catch { }
-        }
-        if (size is null || size.Width <= 0 || size.Height <= 0) return;
-
-        var sv = s_surfaceView;
-        var vw = size.Width; var vh = size.Height;
-        sv.Post(new Java.Lang.Runnable(() =>
-        {
-            try
-            {
-                var parent = sv.Parent as global::Android.Views.View;
-                float pw = parent?.Width ?? 0f;
-                float ph = parent?.Height ?? 0f;
-                if (pw <= 0 || ph <= 0) return;
-
-                float vRatio = (float)vw / vh;
-                float screenRatio = pw / ph;
-                int w, h;
-                if (vRatio > screenRatio)   // video wider → full width, bars top/bottom
-                {
-                    w = (int)pw;
-                    h = (int)System.Math.Round(pw / vRatio);
-                }
-                else                        // video taller → full height, bars left/right
-                {
-                    h = (int)ph;
-                    w = (int)System.Math.Round(ph * vRatio);
-                }
-
-                sv.LayoutParameters = new global::Android.Widget.FrameLayout.LayoutParams(w, h)
-                {
-                    Gravity = global::Android.Views.GravityFlags.Center,
-                };
-                global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"Aspect-sized SurfaceView {w}x{h} (video {vw}x{vh}, screen {(int)pw}x{(int)ph})");
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogWarning(ex, "NativePlayer.ApplyAspectMatrix");
-            }
-        }));
+        // TextureView scales the video within its own bounds and fills the host,
+        // which is full-screen 16:9 — as is virtually all content — so explicit
+        // letterbox sizing isn't needed here. (SurfaceView needed manual
+        // FrameLayout sizing; TextureView doesn't.) Kept as a no-op so the
+        // size-changed listener has a valid target.
     }
 
     private static float ParseAspect(string value)
@@ -640,9 +595,9 @@ public sealed class NativePlayerService : IDisposable
         {
             lock (_lock)
             {
-                if (_player is not null && s_surfaceView is not null)
+                if (_player is not null && s_textureView is not null)
                 {
-                    try { _player.ClearVideoSurfaceView(s_surfaceView); } catch { }
+                    try { _player.ClearVideoTextureView(s_textureView); } catch { }
                 }
                 _aspectApplied = false;
                 // Release() drops the decoder buffers (~50-200MB on a 4K HDR
@@ -662,12 +617,12 @@ public sealed class NativePlayerService : IDisposable
             // UI underneath visible without the SurfaceView painting black.
             // Drop KeepScreenOn too so non-playback pages get the OS's normal
             // dim/lock-out timing back.
-            if (s_surfaceView is not null)
+            if (s_textureView is not null)
             {
-                s_surfaceView.Post(new Java.Lang.Runnable(() =>
+                s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
-                    s_surfaceView.Visibility = ViewStates.Gone;
-                    s_surfaceView.KeepScreenOn = false;
+                    s_textureView.Visibility = ViewStates.Gone;
+                    s_textureView.KeepScreenOn = false;
                 }));
             }
             _pendingPlay = null;
@@ -834,6 +789,262 @@ public sealed class NativePlayerService : IDisposable
     }
 #endif
 
+    // ── Track selection (audio / subtitles / quality) ───────────────────────
+    // Reads the tracks ExoPlayer parsed from the current stream so the native
+    // HUD can build selection menus, and applies a choice live through
+    // TrackSelectionParameters overrides (no MediaItem rebuild for embedded
+    // tracks; sideloaded subtitles still go via SetSubtitleAsync).
+
+    /// <summary>Audio tracks embedded in the current stream.</summary>
+    public IReadOnlyList<TrackOption> GetAudioTracks()
+    {
+#if ANDROID
+        return GetTracks(global::AndroidX.Media3.Common.C.TrackTypeAudio);
+#else
+        return System.Array.Empty<TrackOption>();
+#endif
+    }
+
+    /// <summary>Subtitle / caption tracks embedded in the current stream.</summary>
+    public IReadOnlyList<TrackOption> GetTextTracks()
+    {
+#if ANDROID
+        return GetTracks(global::AndroidX.Media3.Common.C.TrackTypeText);
+#else
+        return System.Array.Empty<TrackOption>();
+#endif
+    }
+
+    /// <summary>Video / quality renditions in the current stream.</summary>
+    public IReadOnlyList<TrackOption> GetVideoTracks()
+    {
+#if ANDROID
+        return GetTracks(global::AndroidX.Media3.Common.C.TrackTypeVideo);
+#else
+        return System.Array.Empty<TrackOption>();
+#endif
+    }
+
+#if ANDROID
+    private IReadOnlyList<TrackOption> GetTracks(int trackType)
+    {
+        var list = new List<TrackOption>();
+        try
+        {
+            lock (_lock)
+            {
+                if (_player is null) return list;
+                var tracks = _player.CurrentTracks;
+                if (tracks is null) return list;
+                var groups = GetGroups(tracks);
+                for (int gi = 0; gi < groups.Count; gi++)
+                {
+                    var g = groups[gi];
+                    if (g.Type != trackType) continue;
+                    for (int ti = 0; ti < g.Length; ti++)
+                    {
+                        global::AndroidX.Media3.Common.Format fmt;
+                        try { fmt = g.GetTrackFormat(ti); } catch { continue; }
+                        bool selected;
+                        try { selected = g.IsTrackSelected(ti); } catch { selected = false; }
+                        list.Add(new TrackOption(gi, ti, LabelFor(trackType, fmt, ti), selected));
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.GetTracks"); }
+        return list;
+    }
+
+    /// <summary>
+    /// Read <c>Tracks.getGroups()</c> via JNI. The managed accessor is absent
+    /// from this binding: the Java method returns a Guava
+    /// <c>ImmutableList&lt;Group&gt;</c>, an unbound type, so the generator drops
+    /// it. We call it directly (the result IS a <c>java.util.List</c>) and wrap
+    /// each element back into the fully-bound <c>Tracks.Group</c> peer, which DOES
+    /// expose Type/Length/GetTrackFormat/IsTrackSelected/MediaTrackGroup.
+    /// </summary>
+    private static List<global::AndroidX.Media3.Common.Tracks.Group> GetGroups(
+        global::AndroidX.Media3.Common.Tracks tracks)
+    {
+        var result = new List<global::AndroidX.Media3.Common.Tracks.Group>();
+        IntPtr listRef = IntPtr.Zero;
+        try
+        {
+            var handle = tracks.Handle;
+            if (handle == IntPtr.Zero) return result;
+
+            IntPtr cls = global::Android.Runtime.JNIEnv.GetObjectClass(handle);
+            IntPtr mGetGroups = global::Android.Runtime.JNIEnv.GetMethodID(
+                cls, "getGroups", "()Lcom/google/common/collect/ImmutableList;");
+            global::Android.Runtime.JNIEnv.DeleteLocalRef(cls);
+            if (mGetGroups == IntPtr.Zero) return result;
+
+            listRef = global::Android.Runtime.JNIEnv.CallObjectMethod(handle, mGetGroups);
+            if (listRef == IntPtr.Zero) return result;
+
+            IntPtr listCls = global::Android.Runtime.JNIEnv.GetObjectClass(listRef);
+            IntPtr mSize = global::Android.Runtime.JNIEnv.GetMethodID(listCls, "size", "()I");
+            IntPtr mGet  = global::Android.Runtime.JNIEnv.GetMethodID(listCls, "get", "(I)Ljava/lang/Object;");
+            global::Android.Runtime.JNIEnv.DeleteLocalRef(listCls);
+            if (mSize == IntPtr.Zero || mGet == IntPtr.Zero) return result;
+
+            int n = global::Android.Runtime.JNIEnv.CallIntMethod(listRef, mSize);
+            for (int i = 0; i < n; i++)
+            {
+                IntPtr elem = global::Android.Runtime.JNIEnv.CallObjectMethod(
+                    listRef, mGet, new global::Android.Runtime.JValue(i));
+                if (elem == IntPtr.Zero) continue;
+                var g = Java.Lang.Object.GetObject<global::AndroidX.Media3.Common.Tracks.Group>(
+                    elem, global::Android.Runtime.JniHandleOwnership.TransferLocalRef);
+                if (g is not null) result.Add(g);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            global::Android.Util.Log.Warn("Animarr.NativePlayer", $"GetGroups JNI failed: {ex.Message}");
+        }
+        finally
+        {
+            if (listRef != IntPtr.Zero) global::Android.Runtime.JNIEnv.DeleteLocalRef(listRef);
+        }
+        return result;
+    }
+#endif
+
+    /// <summary>Select a specific track (indices come from Get*Tracks).</summary>
+    public void SelectTrack(int groupIndex, int trackIndex)
+    {
+#if ANDROID
+        try
+        {
+            lock (_lock)
+            {
+                if (_player is null) return;
+                var tracks = _player.CurrentTracks;
+                if (tracks is null) return;
+                var groups = GetGroups(tracks);
+                if (groupIndex < 0 || groupIndex >= groups.Count) return;
+                var g = groups[groupIndex];
+                var over = new global::AndroidX.Media3.Common.TrackSelectionOverride(
+                    g.MediaTrackGroup, trackIndex);
+                var p = _player.TrackSelectionParameters.BuildUpon();
+                p.SetTrackTypeDisabled(g.Type, false);
+                p.SetOverrideForType(over);
+                _player.TrackSelectionParameters = p.Build();
+                _logger.LogInformation("NativePlayer: selected track g={G} t={T}", groupIndex, trackIndex);
+            }
+        }
+        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.SelectTrack"); }
+#endif
+    }
+
+    /// <summary>Turn subtitles off (disable the text track type).</summary>
+    public void DisableSubtitles()
+    {
+#if ANDROID
+        try
+        {
+            lock (_lock)
+            {
+                if (_player is null) return;
+                var p = _player.TrackSelectionParameters.BuildUpon();
+                p.ClearOverridesOfType(global::AndroidX.Media3.Common.C.TrackTypeText);
+                p.SetTrackTypeDisabled(global::AndroidX.Media3.Common.C.TrackTypeText, true);
+                _player.TrackSelectionParameters = p.Build();
+            }
+        }
+        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.DisableSubtitles"); }
+#endif
+    }
+
+#if ANDROID
+    /// <summary>Build a human label for a track: "Русский · 5.1 · EAC3",
+    /// "English" (subtitle), "1080p · HEVC" (video). Falls back to an index.</summary>
+    private static string LabelFor(int trackType, global::AndroidX.Media3.Common.Format fmt, int ti)
+    {
+        string lang = LangName(fmt.Language);
+        if (trackType == global::AndroidX.Media3.Common.C.TrackTypeAudio)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(fmt.Label)) parts.Add(fmt.Label!);
+            else if (!string.IsNullOrEmpty(lang)) parts.Add(lang);
+            else parts.Add($"Дорожка {ti + 1}");
+            var ch = ChannelText(fmt.ChannelCount);
+            if (ch is not null) parts.Add(ch);
+            var codec = AudioCodecShort(fmt.SampleMimeType);
+            if (codec is not null) parts.Add(codec);
+            return string.Join(" · ", parts);
+        }
+        if (trackType == global::AndroidX.Media3.Common.C.TrackTypeText)
+        {
+            if (!string.IsNullOrWhiteSpace(fmt.Label)) return fmt.Label!;
+            if (!string.IsNullOrEmpty(lang)) return lang;
+            return $"Субтитры {ti + 1}";
+        }
+        var vp = new List<string>();
+        if (fmt.Height > 0) vp.Add($"{fmt.Height}p");
+        var vc = VideoCodecShort(fmt.SampleMimeType);
+        if (vc is not null) vp.Add(vc);
+        return vp.Count > 0 ? string.Join(" · ", vp) : $"Видео {ti + 1}";
+    }
+
+    private static string LangName(string? code)
+    {
+        if (string.IsNullOrEmpty(code)) return string.Empty;
+        return code.ToLowerInvariant() switch
+        {
+            "ja" or "jpn" => "Японский",
+            "en" or "eng" => "Английский",
+            "ru" or "rus" => "Русский",
+            "uk" or "ukr" => "Украинский",
+            "zh" or "chi" or "zho" => "Китайский",
+            "ko" or "kor" => "Корейский",
+            "de" or "ger" or "deu" => "Немецкий",
+            "es" or "spa" => "Испанский",
+            "fr" or "fre" or "fra" => "Французский",
+            "und" or "" => string.Empty,
+            _ => code.ToUpperInvariant(),
+        };
+    }
+
+    private static string? ChannelText(int channels) => channels switch
+    {
+        1 => "Моно",
+        2 => "Стерео",
+        6 => "5.1",
+        8 => "7.1",
+        _ => channels > 0 ? $"{channels}.0" : null,
+    };
+
+    private static string? AudioCodecShort(string? mime)
+    {
+        if (string.IsNullOrEmpty(mime)) return null;
+        var s = mime.ToLowerInvariant();
+        if (s.Contains("eac3") || s.Contains("ec-3")) return "EAC3";
+        if (s.Contains("ac3") || s.Contains("ac-3")) return "AC3";
+        if (s.Contains("aac"))    return "AAC";
+        if (s.Contains("dts"))    return "DTS";
+        if (s.Contains("truehd")) return "TrueHD";
+        if (s.Contains("opus"))   return "Opus";
+        if (s.Contains("flac"))   return "FLAC";
+        if (s.Contains("vorbis")) return "Vorbis";
+        if (s.Contains("mp3") || s.Contains("mpeg")) return "MP3";
+        return null;
+    }
+
+    private static string? VideoCodecShort(string? mime)
+    {
+        if (string.IsNullOrEmpty(mime)) return null;
+        var s = mime.ToLowerInvariant();
+        if (s.Contains("avc"))  return "H.264";
+        if (s.Contains("hevc") || s.Contains("h265")) return "HEVC";
+        if (s.Contains("av1"))  return "AV1";
+        if (s.Contains("vp9"))  return "VP9";
+        return null;
+    }
+#endif
+
     public void Dispose()
     {
 #if ANDROID
@@ -862,3 +1073,9 @@ public sealed record NativePlayerState(
     public static NativePlayerState Empty { get; } =
         new(0, 0, false, false, false, null, string.Empty, 0, 0, 0);
 }
+
+/// <summary>One selectable track for the HUD's audio / subtitle / quality menus.
+/// <paramref name="GroupIndex"/> + <paramref name="TrackIndex"/> address it inside
+/// ExoPlayer's current <c>Tracks.Groups</c>; <paramref name="Label"/> is display
+/// text; <paramref name="Selected"/> marks the currently active one.</summary>
+public sealed record TrackOption(int GroupIndex, int TrackIndex, string Label, bool Selected);

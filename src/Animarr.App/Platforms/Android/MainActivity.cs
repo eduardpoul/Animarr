@@ -80,12 +80,110 @@ public class MainActivity : MauiAppCompatActivity
         return id;
     }
 
+    /// <summary>
+    /// TV interface-scale setting (Маленький / Обычный / Большой in the profile
+    /// panel). Applied by overriding the activity context's DENSITY — dp sizes
+    /// resolve against it, so cards, posters, paddings AND text all zoom
+    /// together like a display-scale setting (a fontScale-only override was
+    /// tried first and read as "nothing changed": text is a small fraction of
+    /// the screen). Gated to Leanback so the phone/tablet Blazor path is
+    /// untouched. Stored in plain Android SharedPreferences (not MAUI
+    /// Preferences) because this runs before MAUI Essentials initializes.
+    /// </summary>
+    internal const string TvPrefsName   = "animarr_tv";
+    internal const string UiScalePref   = "ui_scale";
+
+    /// <summary>Wrap <paramref name="ctx"/> with the scaled-density config, or
+    /// return it untouched. Called from BOTH MainApplication and MainActivity
+    /// AttachBaseContext: MAUI converts dp→px through the APPLICATION context's
+    /// density while native text resolves against the activity's — overriding
+    /// only one of them scales half the UI.</summary>
+    internal static Context? ApplyTvUiScale(Context? ctx)
+    {
+        try
+        {
+            if (ctx?.PackageManager?.HasSystemFeature(PackageManager.FeatureLeanback) != true)
+                return ctx;
+            var sp = ctx.GetSharedPreferences(TvPrefsName, FileCreationMode.Private);
+            var scale = sp?.GetFloat(UiScalePref, 1f) ?? 1f;
+            if (Math.Abs(scale - 1f) <= 0.01f || ctx.Resources?.Configuration is not { } baseCfg)
+                return ctx;
+            var cfg = new Android.Content.Res.Configuration(baseCfg);
+            // Density drives BOTH dp and sp, so fontScale stays as-is —
+            // multiplying both would double-zoom the text.
+            var baseDpi = baseCfg.DensityDpi > 0
+                ? baseCfg.DensityDpi
+                : (int)Android.Util.DisplayMetricsDensity.Xhigh;
+            cfg.DensityDpi = (int)Math.Round(baseDpi * scale);
+            return ctx.CreateConfigurationContext(cfg) ?? ctx;
+        }
+        catch { return ctx; /* bad prefs / OEM quirks — unscaled context */ }
+    }
+
+    protected override void AttachBaseContext(Context? @base)
+        => base.AttachBaseContext(ApplyTvUiScale(@base));
+
+    /// <summary>Mutate the APPLICATION-context Resources to the scaled density
+    /// (deprecated UpdateConfiguration — the only way to rescale an existing
+    /// Resources in place). MAUI's dp→px conversions read this context, while
+    /// native text resolves against the activity's — both must agree. Re-applied
+    /// from several hooks because the system re-pushes the pristine config.</summary>
+    private static int s_baseAppDpi;
+
+    internal static void ApplyTvUiScaleToAppResources()
+    {
+        try
+        {
+            var ctx = Android.App.Application.Context;
+            if (ctx.PackageManager?.HasSystemFeature(PackageManager.FeatureLeanback) != true)
+                return;
+            var sp = ctx.GetSharedPreferences(TvPrefsName, FileCreationMode.Private);
+            var scale = sp?.GetFloat(UiScalePref, 1f) ?? 1f;
+            // NB: no early return for scale==1 — switching back to "Обычный"
+            // must RESET an already-scaled config to the captured base dpi.
+
+            var res = ctx.Resources;
+            if (res?.Configuration is not { } baseCfg || res.DisplayMetrics is null) return;
+            // Capture the device's real dpi on the first (pristine) call —
+            // re-applies must scale from THAT, not from an already-scaled value.
+            if (s_baseAppDpi == 0)
+                s_baseAppDpi = baseCfg.DensityDpi > 0
+                    ? baseCfg.DensityDpi
+                    : (int)Android.Util.DisplayMetricsDensity.Xhigh;
+            var targetDpi = (int)Math.Round(s_baseAppDpi * scale);
+            if (baseCfg.DensityDpi == targetDpi) return;   // already scaled
+
+            var cfg = new Android.Content.Res.Configuration(baseCfg) { DensityDpi = targetDpi };
+#pragma warning disable CA1422
+            res.UpdateConfiguration(cfg, res.DisplayMetrics);
+#pragma warning restore CA1422
+        }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.UiScale", $"app-resources scale failed: {ex.Message}");
+        }
+    }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        // The system re-pushed the pristine app configuration while binding this
+        // activity — re-apply the TV scale BEFORE MAUI initializes and reads
+        // density for its dp→px conversions.
+        ApplyTvUiScaleToAppResources();
+
         // MulticastLock is acquired earlier in MainApplication.OnCreate so it's
         // already held by the time MauiProgram.CreateMauiApp resolves
         // MdnsBrowserService. Activity.OnCreate is too late for that.
         base.OnCreate(savedInstanceState);
+
+        // UI-scale diagnostics: which density each context actually reports.
+        try
+        {
+            Android.Util.Log.Info("Animarr.UiScale",
+                $"activity density={Resources?.DisplayMetrics?.Density} " +
+                $"app density={Android.App.Application.Context.Resources?.DisplayMetrics?.Density}");
+        }
+        catch { }
 
         // Edge-to-edge: paint behind the system bars so the cinematic backdrop
         // fills the whole screen rather than getting boxed in by a black
@@ -179,62 +277,12 @@ public class MainActivity : MauiAppCompatActivity
         // work, and the back gesture cleanly closes the app instead of
         // crashing into a blank page.
 
-        // Phase 2b (2026-05-27): native ExoPlayer video surface.
-        // We insert a TextureView at the very bottom of the activity's view
-        // tree (index 0 of DecorView). When the player opens, ExoPlayer hands
-        // its frames to this TextureView; the BlazorWebView above has a
-        // transparent background (set in MauiProgram's WebView mapper) so the
-        // video shows through wherever the HTML body is also transparent.
-        // Outside playback the TextureView is GONE — zero compositing cost.
-        // TextureView (not SurfaceView) so the regular GL pipeline can
-        // composite it BEHIND the translucent WebView; SurfaceView's
-        // hole-punch model wouldn't let the HUD overlay layer cleanly.
-        try
-        {
-            if (Window?.DecorView is ViewGroup decor)
-            {
-                // Native video plane. On this device the only z-order that
-                // composites VISIBLY over the BlazorWebView is "on top"
-                // (SetZOrderOnTop) — a TextureView or a below-window SurfaceView
-                // both got occluded by the WebView layer (frames confirmed
-                // rendering, never visible). So we render the video ABOVE the
-                // window, but constrained to a CENTRED LETTERBOX BAND (sized by
-                // NativePlayerService to the video aspect) so the HUD's top/
-                // bottom bars — drawn by the WebView underneath — stay visible
-                // around it. Touch still reaches the HUD: SetZOrderOnTop only
-                // moves the SURFACE compositing up; the SurfaceView's VIEW stays
-                // at the back of the hierarchy, so the WebView gets touch events.
-                //
-                // The SurfaceView lives inside a FrameLayout container we own,
-                // because DecorView does not honour FrameLayout child gravity —
-                // our own FrameLayout does, making the centred band reliable.
-                var container = new Android.Widget.FrameLayout(this)
-                {
-                    LayoutParameters = new ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MatchParent,
-                        ViewGroup.LayoutParams.MatchParent),
-                };
-                var sv = new SurfaceView(this)
-                {
-                    Visibility = ViewStates.Gone,
-                    LayoutParameters = new Android.Widget.FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MatchParent,
-                        ViewGroup.LayoutParams.MatchParent)
-                    {
-                        Gravity = Android.Views.GravityFlags.Center,
-                    },
-                };
-                sv.SetZOrderOnTop(true);
-                container.AddView(sv);
-                decor.AddView(container, 0);
-                Services.NativePlayerService.RegisterSurfaceView(sv);
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Android.Util.Log.Error("Animarr.NativePlayer",
-                $"Failed to insert SurfaceView: {ex.Message}");
-        }
+        // Native ExoPlayer video surface is now a TextureView created by the
+        // native PlayerPage (added to its VideoHost + registered via
+        // NativePlayerService.RegisterTextureView), so the activity no longer
+        // inserts a DecorView SurfaceView. A TextureView composites inside the
+        // normal view tree, so the XAML HUD overlays it cleanly — no hole-punch,
+        // no z-order fight (the SurfaceView path was for the old WebView shell).
     }
 
     protected override void OnNewIntent(Intent? intent)
@@ -268,9 +316,39 @@ public class MainActivity : MauiAppCompatActivity
     /// UI thread (BackResultCallback below). We don't fall through to
     /// base.OnBackPressed() here because the system handler would
     /// instantly finish() the activity and race the async result.</summary>
+    // Route D-pad keys to the native player while it's on screen so OK toggles
+    // play/pause and ◀/▶ seek — a TV player drives off the remote, not focused
+    // on-screen buttons. Handled keys are swallowed so they don't also move
+    // focus in the (hidden) HUD underneath.
+    public override bool OnKeyDown(Android.Views.Keycode keyCode, Android.Views.KeyEvent? e)
+    {
+        if (PlayerPage.HandleGlobalKey((int)keyCode)) return true;
+        return base.OnKeyDown(keyCode, e);
+    }
+
 #pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
     public override void OnBackPressed()
     {
+        // Player HUD open → Back closes the HUD, not the page.
+        if (PlayerPage.HandleGlobalBack()) return;
+
+        // Native TV flow (no WebView on these pages): pop the MAUI navigation
+        // stack — player → detail → catalog — before anything else, so BACK
+        // doesn't finish() the whole app from a nested native screen. On phone
+        // the root is a plain MainPage (stack depth 1) so this no-ops and the
+        // WebView history logic below runs as before.
+        try
+        {
+            var win = Microsoft.Maui.Controls.Application.Current?.Windows;
+            var nav = win is { Count: > 0 } ? win[0].Page?.Navigation : null;
+            if (nav?.NavigationStack is { Count: > 1 })
+            {
+                _ = nav.PopAsync();
+                return;
+            }
+        }
+        catch { /* fall through to the WebView / default handler */ }
+
         try
         {
             var webView = FindWebView(Window?.DecorView);
