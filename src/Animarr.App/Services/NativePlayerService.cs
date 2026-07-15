@@ -456,30 +456,68 @@ public sealed class NativePlayerService : IDisposable
 
 #if ANDROID
     private string _aspectValue = "default";
-    private global::AndroidX.Media3.Common.VideoSize? _lastVideoSize;
+    // Decoded video geometry, captured by GetState's poll (there is no
+    // ExoPlayer listener in this service — the HUD already polls state every
+    // few hundred ms, so a size change is picked up within a tick).
+    private int   _vidW;
+    private int   _vidH;
+    private float _vidPar = 1f;
 
     /// <summary>
-    /// Size the SurfaceView to match the video's aspect, centered (letterbox /
-    /// pillarbox). ExoPlayer stretches the decoded frame to fill the
-    /// SurfaceView's bounds, so — unlike the old TextureView transform-matrix
-    /// approach — we get correct aspect by sizing the *view* to the video's
-    /// ratio rather than transforming the texture. Called from DoPlay and from
-    /// SurfaceChanged (first layout / rotation) and re-polled from GetState
-    /// once the decoded video size is known.
-    ///
-    /// NOTE: explicit aspect-ratio crop modes (21:9 etc.) currently fall back
-    /// to fit on the native/SurfaceView path — SurfaceView can't be transformed
-    /// like a TextureView, and a proper cover-crop needs a clip container.
-    /// Getting the picture visible + undistorted is the priority; crop modes
-    /// can be layered on later.
+    /// A raw TextureView bound via <c>SetVideoTextureView</c> STRETCHES the
+    /// decoded frame to its bounds (we bypass ExoPlayer's
+    /// AspectRatioFrameLayout entirely), so anything that isn't exactly the
+    /// screen's aspect renders distorted. This applies the aspect correction
+    /// as a texture transform:
+    /// <list type="bullet">
+    ///   <item>"default" — fit: undistorted, letterbox/pillarbox bars.</item>
+    ///   <item>"stretch" — identity: fill the screen, ignore the aspect.</item>
+    ///   <item>"zoom" — cover: undistorted, crops the overflowing axis.</item>
+    ///   <item>"16:9" / "4:3" / "2.35:1"… — force the displayed aspect to the
+    ///         given ratio, fitted inside the view.</item>
+    /// </list>
+    /// Must run on the UI thread. Re-run on: aspect change, decoded-size
+    /// change (GetState), surface size change (TextureListener).
     /// </summary>
-    private void ApplyAspectMatrix()
+    internal void ApplyAspectMatrix()
     {
-        // TextureView scales the video within its own bounds and fills the host,
-        // which is full-screen 16:9 — as is virtually all content — so explicit
-        // letterbox sizing isn't needed here. (SurfaceView needed manual
-        // FrameLayout sizing; TextureView doesn't.) Kept as a no-op so the
-        // size-changed listener has a valid target.
+        try
+        {
+            var tv = s_textureView;
+            if (tv is null) return;
+            int vw = tv.Width, vh = tv.Height;
+            if (vw <= 0 || vh <= 0) return;
+
+            var m = new global::Android.Graphics.Matrix();   // identity = stretch
+            float videoAspect = _vidH > 0 && _vidW > 0 ? _vidW * _vidPar / _vidH : 0f;
+            float viewAspect  = (float)vw / vh;
+
+            float target = _aspectValue switch
+            {
+                "stretch"          => 0f,           // identity
+                "zoom"             => videoAspect,
+                null or "" or "default" => videoAspect,
+                _                  => ParseAspect(_aspectValue),
+            };
+
+            if (_aspectValue != "stretch" && target > 0f && viewAspect > 0f)
+            {
+                // k = how much wider the content should display than the view.
+                // Fit keeps both scales ≤ 1 (bars); cover keeps both ≥ 1 (crop).
+                float k = target / viewAspect;
+                float sx, sy;
+                if (_aspectValue == "zoom") { if (k >= 1f) { sx = k; sy = 1f; } else { sx = 1f; sy = 1f / k; } }
+                else                        { if (k <= 1f) { sx = k; sy = 1f; } else { sx = 1f; sy = 1f / k; } }
+                m.SetScale(sx, sy, vw / 2f, vh / 2f);
+            }
+
+            tv.SetTransform(m);
+            tv.Invalidate();
+        }
+        catch (System.Exception ex)
+        {
+            global::Android.Util.Log.Warn("Animarr.NativePlayer", $"ApplyAspectMatrix: {ex.Message}");
+        }
     }
 
     private static float ParseAspect(string value)
@@ -705,6 +743,20 @@ public sealed class NativePlayerService : IDisposable
                         actualCodec     = NormalizeCodec(fmt.SampleMimeType);
                         actualWidth     = fmt.Width;
                         actualHeight    = fmt.Height;
+                        // Decoded geometry changed (first frames / new episode /
+                        // quality switch) → re-apply the aspect transform. The
+                        // HUD polls this every few hundred ms, which stands in
+                        // for an OnVideoSizeChanged listener.
+                        float par = 1f;
+                        try { par = fmt.PixelWidthHeightRatio; } catch { }
+                        if (par <= 0f) par = 1f;
+                        if (actualWidth > 0 && actualHeight > 0 &&
+                            (actualWidth != _vidW || actualHeight != _vidH ||
+                             System.Math.Abs(par - _vidPar) > 0.001f))
+                        {
+                            _vidW = actualWidth; _vidH = actualHeight; _vidPar = par;
+                            s_textureView?.Post(() => ApplyAspectMatrix());
+                        }
                         // ColorInfo's bit-depth fields aren't directly exposed
                         // as ints; pix_fmt detection happens server-side. Best
                         // we can do here is mark 10-bit when colorTransfer
