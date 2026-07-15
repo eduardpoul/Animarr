@@ -80,12 +80,22 @@ public static class MediaUrl
             ? $"/api/media/{id}/theme"
             : $"{_base}/api/media/{id}/theme";
 
+    /// <summary>Loopback media-proxy base (MAUI hybrid only). When set,
+    /// cookie-gated thumbnail URLs route through it: the WebView can't attach
+    /// the auth cookie to a cross-site &lt;img&gt; (SameSite), so the local
+    /// proxy signs those requests instead. Empty in browsers (same-origin
+    /// cookies just work there).</summary>
+    private static string _mediaProxyBase = "";
+    public static void SetMediaProxyBase(string? url)
+        => _mediaProxyBase = string.IsNullOrWhiteSpace(url) ? "" : url!.TrimEnd('/');
+
     /// <summary>Per-episode thumbnail URL (TMDB still or an ffmpeg frame). Used
     /// as the &lt;EpisodeCard&gt; ThumbUrl so each episode shows a distinct image
     /// instead of the same season poster repeated.</summary>
     public static string EpisodeThumb(System.Guid id, int season, int episode)
     {
         var path = $"/api/media/{id}/episode-thumb?season={season}&episode={episode}";
+        if (!string.IsNullOrEmpty(_mediaProxyBase)) return $"{_mediaProxyBase}{path}";
         return string.IsNullOrEmpty(_base) ? path : $"{_base}{path}";
     }
 }
