@@ -30,20 +30,30 @@
             @foreach (var it in Items)
             {
                 var item  = it;
+                var art   = !string.IsNullOrEmpty(item.FanartPath)
+                    ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!)
+                    : (!string.IsNullOrEmpty(item.PosterPath)
+                        ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!)
+                        : null);
                 var thumb = (item.Season is int s && item.Episode is int e)
                     ? Animarr.UI.Services.MediaUrl.EpisodeThumb(item.MediaItemId, s, e)
-                    : (!string.IsNullOrEmpty(item.FanartPath)
-                        ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!)
-                        : (!string.IsNullOrEmpty(item.PosterPath)
-                            ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!)
-                            : null));
+                    : art;
+                @* The episode-thumb endpoint is cookie-gated on older servers,
+                   and the hybrid WebView can't attach the auth cookie to a
+                   cross-site <img> (SameSite) — fall back to the anonymous
+                   fanart via a plain onerror swap (error doesn't bubble, so a
+                   Blazor handler can't catch it). *@
+                var onErr = thumb != art && !string.IsNullOrEmpty(art)
+                    ? $"this.onerror=null;this.src='{art!.Replace("'", "%27")}'"
+                    : "this.onerror=null;this.style.display='none'";
                 <button type="button" class="nur__card tv-focus"
                         @onclick="@(() => Nav.NavigateTo(PlayHref(item)))"
                         title="@item.Title">
                     <div class="nur__thumb">
                         @if (!string.IsNullOrEmpty(thumb))
                         {
-                            <img src="@thumb" alt="" loading="lazy" class="nur__img" />
+                            <img src="@thumb" alt="" loading="lazy" class="nur__img"
+                                 onerror="@onErr" />
                         }
                         else
                         {
