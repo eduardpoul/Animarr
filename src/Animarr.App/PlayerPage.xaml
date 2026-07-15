@@ -139,6 +139,13 @@
                                 <Label Text="HD" TextColor="White" FontFamily="GeistMono" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
+                            <!-- aspect ratio (fit / stretch / zoom / forced) -->
+                            <Border x:Name="AspectButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="AspectFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                                <Label Text="AR" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
                             <Border x:Name="InfoButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="InfoFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
