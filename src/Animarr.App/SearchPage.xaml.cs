@@ -20,12 +20,6 @@ public partial class SearchPage : ContentPage
     private string ImageBase => _addr.Current!.ToString().TrimEnd('/');
     private CancellationTokenSource? _debounce;
 
-    public static readonly BindableProperty ResultsProperty =
-        BindableProperty.Create(nameof(Results), typeof(System.Collections.IList), typeof(SearchPage));
-    public System.Collections.IList? Results { get => (System.Collections.IList?)GetValue(ResultsProperty); set => SetValue(ResultsProperty, value); }
-
-    public ICommand OpenCommand { get; }
-
     public SearchPage()
     {
         InitializeComponent();
@@ -36,13 +30,49 @@ public partial class SearchPage : ContentPage
         _http = services.GetRequiredService<HttpClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
 
-        OpenCommand = new Command<Poster>(OpenDetail);
+        // D-pad OK via the behavior (programmatic — the reliable path).
+        BackFocus.Command = new Command(async () => await Navigation.PopAsync());
+        SearchTitle.Text = TvL.T("search.title", "Поиск", "Search").ToUpperInvariant();
+        QueryEntry.Placeholder = TvL.T("search.placeholder", "Название сериала или фильма", "Series or movie title");
+        // A focused Entry does NOT summon the IME on leanback devices (non-touch
+        // → the system waits for a tap that never comes). Force it.
+        QueryEntry.Focused += (_, _) => ShowKeyboard();
+        // The dark Border is the input's visual — drop the EditText's own
+        // colored underline strip.
+        QueryEntry.HandlerChanged += (_, _) =>
+        {
+#if ANDROID
+            if (QueryEntry.Handler?.PlatformView is global::Android.Widget.EditText et)
+                et.BackgroundTintList =
+                    global::Android.Content.Res.ColorStateList.ValueOf(global::Android.Graphics.Color.Transparent);
+#endif
+        };
     }
 
     protected override void OnAppearing()
     {
         base.OnAppearing();
-        QueryEntry.Focus();
+        // Give the handler a beat to attach, then autofocus + raise the keyboard.
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () =>
+        {
+            QueryEntry.Focus();
+            ShowKeyboard();
+        });
+    }
+
+    private void ShowKeyboard()
+    {
+#if ANDROID
+        try
+        {
+            if (QueryEntry.Handler?.PlatformView is not global::Android.Views.View v) return;
+            v.RequestFocus();
+            var imm = (global::Android.Views.InputMethods.InputMethodManager?)
+                v.Context?.GetSystemService(global::Android.Content.Context.InputMethodService);
+            imm?.ShowSoftInput(v, global::Android.Views.InputMethods.ShowFlags.Forced);
+        }
+        catch { }
+#endif
     }
 
     private void OnQueryChanged(object? sender, TextChangedEventArgs e)
@@ -59,8 +89,11 @@ public partial class SearchPage : ContentPage
 
         if (q.Length < 2)
         {
-            Results = null;
-            StatusLabel.Text = "";
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                ResultsHost.Children.Clear();
+                StatusLabel.Text = "";
+            });
             return;
         }
 
@@ -73,47 +106,45 @@ public partial class SearchPage : ContentPage
 
             var posters = items.Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
                                .Select(ToPoster).ToList();
-            Results = posters;
-            StatusLabel.Text = posters.Count == 0 ? "Ничего не найдено" : $"{posters.Count} результатов";
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                ResultsHost.Children.Clear();
+                foreach (var p in posters) ResultsHost.Children.Add(TvCards.BuildPosterCard(p));
+                StatusLabel.Text = posters.Count == 0 ? TvL.T("search.empty", "Ничего не найдено", "Nothing found") : TvL.F("search.results_fmt", "{0} результатов", "{0} results", posters.Count);
+            });
         }
         catch (OperationCanceledException) { }
-        catch { StatusLabel.Text = "Ошибка поиска"; }
+        catch { MainThread.BeginInvokeOnMainThread(() => StatusLabel.Text = TvL.T("search.error", "Ошибка поиска", "Search error")); }
     }
 
-    private async void OpenDetail(Poster? p)
-    {
-        if (p is null || string.IsNullOrEmpty(p.Id)) return;
-        await Navigation.PushAsync(new NativeDetailPage(p.Id, p.Title, p.BackdropUrl));
-    }
-
-    private Poster ToPoster(ApiItem i)
+    private CatalogNativePage.PosterItem ToPoster(ApiItem i)
     {
         var path  = i.PosterPath ?? i.FanartPath!;
         var parts = new List<string>();
-        if (i.Year is > 0)   parts.Add(i.Year!.Value.ToString());
-        if (i.Rating is > 0) parts.Add($"★ {i.Rating:F1}");
+        if (i.Year is > 0)         parts.Add(i.Year!.Value.ToString());
+        if (i.EpisodeCount is > 0) parts.Add($"{i.EpisodeCount} EP");
+        if (i.Rating is > 0)       parts.Add($"★ {i.Rating:F1}");
 
-        return new Poster
+        var p = new CatalogNativePage.PosterItem
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
             ImageUrl    = $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
             BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
                         : $"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
-            Meta        = string.Join("   ·   ", parts),
+            TypeLabel   = i.MediaType switch
+            {
+                "Anime" => "ANIME", "Movie" => "MOVIE", "Series" => "SERIES",
+                "Multserials" => "MULTI", _ => "",
+            },
+            Meta        = string.Join(" · ", parts),
         };
+        p.Open = new Command(async () =>
+            await Navigation.PushAsync(new NativeDetailPage(p.Id, p.Title, p.BackdropUrl)));
+        return p;
     }
 
     private sealed record ApiItem(
         string? Id, string? Title, string? PosterPath, string? FanartPath,
-        int? Year, double? Rating);
-
-    public sealed class Poster
-    {
-        public string  Id          { get; init; } = "";
-        public string  Title       { get; init; } = "";
-        public string  ImageUrl    { get; init; } = "";
-        public string? BackdropUrl { get; init; }
-        public string  Meta        { get; init; } = "";
-    }
+        int? Year, double? Rating, string? MediaType, int? EpisodeCount);
 }

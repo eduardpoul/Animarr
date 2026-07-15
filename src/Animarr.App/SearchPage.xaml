@@ -5,61 +5,37 @@
              x:Class="Animarr.App.SearchPage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <Grid RowDefinitions="Auto,*" Padding="56,28,56,0">
-        <VerticalStackLayout Grid.Row="0" Spacing="12">
-            <Label Text="ПОИСК" TextColor="#e8a33d" FontFamily="GeistMono"
-                   FontSize="12" CharacterSpacing="3" />
-            <Border StrokeThickness="0" StrokeShape="RoundRectangle 12"
-                    BackgroundColor="#151a21" Padding="18,4">
-                <Entry x:Name="QueryEntry" Placeholder="Название сериала или фильма"
-                       TextChanged="OnQueryChanged" TextColor="White" PlaceholderColor="#5b6472"
-                       FontFamily="Geist" FontSize="20" BackgroundColor="Transparent" />
+    <Grid RowDefinitions="Auto,*" Padding="24,22,24,0">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*" ColumnSpacing="18">
+            <!-- back (same chip as the detail page) -->
+            <Border Grid.Column="0" VerticalOptions="Start" WidthRequest="48" HeightRequest="48"
+                    StrokeThickness="0" StrokeShape="RoundRectangle 12" BackgroundColor="#99000000">
+                <Border.Behaviors>
+                    <local:TvFocusBehavior x:Name="BackFocus" Radius="12" />
+                </Border.Behaviors>
+                <Label Text="‹" TextColor="White" FontSize="26" TranslationY="-2" HorizontalOptions="Center"
+                       VerticalOptions="Center" />
             </Border>
-            <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
-                   FontFamily="GeistMono" FontSize="12" />
-        </VerticalStackLayout>
+            <VerticalStackLayout Grid.Column="1" Spacing="12">
+                <Label x:Name="SearchTitle" Text="ПОИСК" TextColor="#e8a33d" FontFamily="GeistMono"
+                       FontSize="12" CharacterSpacing="3" />
+                <Border StrokeThickness="0" StrokeShape="RoundRectangle 12"
+                        BackgroundColor="#151a21" Padding="18,4">
+                    <Entry x:Name="QueryEntry" Placeholder="Название сериала или фильма"
+                           TextChanged="OnQueryChanged" TextColor="White" PlaceholderColor="#5b6472"
+                           FontFamily="Geist" FontSize="20" BackgroundColor="Transparent" />
+                </Border>
+                <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
+                       FontFamily="GeistMono" FontSize="12" />
+            </VerticalStackLayout>
+        </Grid>
 
-        <CollectionView Grid.Row="1" Margin="0,16,0,0"
-                        ItemsSource="{Binding Results, Source={x:Reference Root}}">
-            <CollectionView.ItemsLayout>
-                <GridItemsLayout Orientation="Vertical" Span="7"
-                                 HorizontalItemSpacing="14" VerticalItemSpacing="18" />
-            </CollectionView.ItemsLayout>
-            <CollectionView.ItemTemplate>
-                <DataTemplate>
-                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            BackgroundColor="#15171d" Margin="2">
-                        <Border.Behaviors>
-                            <local:TvFocusBehavior Radius="10" />
-                        </Border.Behaviors>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer
-                                Command="{Binding OpenCommand, Source={x:Reference Root}}"
-                                CommandParameter="{Binding .}" />
-                        </Border.GestureRecognizers>
-                        <Grid RowDefinitions="246,Auto">
-                            <Grid Grid.Row="0">
-                                <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
-                                <BoxView InputTransparent="True">
-                                    <BoxView.Background>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                            <GradientStop Color="Transparent" Offset="0.55" />
-                                            <GradientStop Color="#D90A0807" Offset="1.0" />
-                                        </LinearGradientBrush>
-                                    </BoxView.Background>
-                                </BoxView>
-                            </Grid>
-                            <VerticalStackLayout Grid.Row="1" Spacing="1" Padding="9,7,9,9">
-                                <Label Text="{Binding Title}" FontFamily="ArchivoBlack"
-                                       FontSize="12" TextColor="White" MaxLines="2"
-                                       LineBreakMode="TailTruncation" />
-                                <Label Text="{Binding Meta}" FontFamily="GeistMono"
-                                       FontSize="8" TextColor="#a8a097" CharacterSpacing="0.4" />
-                            </VerticalStackLayout>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
-        </CollectionView>
+        <!-- code-built poster cards (TvCards): a CollectionView's recycled items
+             never became reliable D-pad focus targets on TV -->
+        <ScrollView Grid.Row="1" Margin="0,16,0,0">
+            <FlexLayout x:Name="ResultsHost" Wrap="Wrap" Direction="Row"
+                        JustifyContent="Start" AlignItems="Start" AlignContent="Start"
+                        Padding="0,0,0,40" />
+        </ScrollView>
     </Grid>
 </ContentPage>

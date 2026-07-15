@@ -12,14 +12,14 @@
             <Label Text="ВХОД" TextColor="#e8a33d" FontFamily="GeistMono"
                    FontSize="13" CharacterSpacing="3" />
             <Label Text="Подтвердите вход с телефона" TextColor="White"
-                   FontFamily="ArchivoBlack" FontSize="34" />
+                   FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="34" />
             <Label x:Name="HintLabel" Text="" TextColor="#aeb4c0"
                    FontFamily="Geist" FontSize="16" LineHeight="1.35" />
 
             <Label Text="КОД УСТРОЙСТВА" TextColor="#7b8290" FontFamily="GeistMono"
                    FontSize="12" CharacterSpacing="2" Margin="0,16,0,0" />
             <Label x:Name="CodeLabel" Text="··-··-··" TextColor="White"
-                   FontFamily="ArchivoBlack" FontSize="58" CharacterSpacing="6" />
+                   FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="58" CharacterSpacing="6" />
             <Label x:Name="StatusLabel" Text="Ожидание подтверждения…"
                    TextColor="#7b8290" FontFamily="GeistMono" FontSize="13" Margin="0,8,0,0" />
         </VerticalStackLayout>

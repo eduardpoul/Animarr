@@ -80,12 +80,110 @@ public class MainActivity : MauiAppCompatActivity
         return id;
     }
 
+    /// <summary>
+    /// TV interface-scale setting (Маленький / Обычный / Большой in the profile
+    /// panel). Applied by overriding the activity context's DENSITY — dp sizes
+    /// resolve against it, so cards, posters, paddings AND text all zoom
+    /// together like a display-scale setting (a fontScale-only override was
+    /// tried first and read as "nothing changed": text is a small fraction of
+    /// the screen). Gated to Leanback so the phone/tablet Blazor path is
+    /// untouched. Stored in plain Android SharedPreferences (not MAUI
+    /// Preferences) because this runs before MAUI Essentials initializes.
+    /// </summary>
+    internal const string TvPrefsName   = "animarr_tv";
+    internal const string UiScalePref   = "ui_scale";
+
+    /// <summary>Wrap <paramref name="ctx"/> with the scaled-density config, or
+    /// return it untouched. Called from BOTH MainApplication and MainActivity
+    /// AttachBaseContext: MAUI converts dp→px through the APPLICATION context's
+    /// density while native text resolves against the activity's — overriding
+    /// only one of them scales half the UI.</summary>
+    internal static Context? ApplyTvUiScale(Context? ctx)
+    {
+        try
+        {
+            if (ctx?.PackageManager?.HasSystemFeature(PackageManager.FeatureLeanback) != true)
+                return ctx;
+            var sp = ctx.GetSharedPreferences(TvPrefsName, FileCreationMode.Private);
+            var scale = sp?.GetFloat(UiScalePref, 1f) ?? 1f;
+            if (Math.Abs(scale - 1f) <= 0.01f || ctx.Resources?.Configuration is not { } baseCfg)
+                return ctx;
+            var cfg = new Android.Content.Res.Configuration(baseCfg);
+            // Density drives BOTH dp and sp, so fontScale stays as-is —
+            // multiplying both would double-zoom the text.
+            var baseDpi = baseCfg.DensityDpi > 0
+                ? baseCfg.DensityDpi
+                : (int)Android.Util.DisplayMetricsDensity.Xhigh;
+            cfg.DensityDpi = (int)Math.Round(baseDpi * scale);
+            return ctx.CreateConfigurationContext(cfg) ?? ctx;
+        }
+        catch { return ctx; /* bad prefs / OEM quirks — unscaled context */ }
+    }
+
+    protected override void AttachBaseContext(Context? @base)
+        => base.AttachBaseContext(ApplyTvUiScale(@base));
+
+    /// <summary>Mutate the APPLICATION-context Resources to the scaled density
+    /// (deprecated UpdateConfiguration — the only way to rescale an existing
+    /// Resources in place). MAUI's dp→px conversions read this context, while
+    /// native text resolves against the activity's — both must agree. Re-applied
+    /// from several hooks because the system re-pushes the pristine config.</summary>
+    private static int s_baseAppDpi;
+
+    internal static void ApplyTvUiScaleToAppResources()
+    {
+        try
+        {
+            var ctx = Android.App.Application.Context;
+            if (ctx.PackageManager?.HasSystemFeature(PackageManager.FeatureLeanback) != true)
+                return;
+            var sp = ctx.GetSharedPreferences(TvPrefsName, FileCreationMode.Private);
+            var scale = sp?.GetFloat(UiScalePref, 1f) ?? 1f;
+            // NB: no early return for scale==1 — switching back to "Обычный"
+            // must RESET an already-scaled config to the captured base dpi.
+
+            var res = ctx.Resources;
+            if (res?.Configuration is not { } baseCfg || res.DisplayMetrics is null) return;
+            // Capture the device's real dpi on the first (pristine) call —
+            // re-applies must scale from THAT, not from an already-scaled value.
+            if (s_baseAppDpi == 0)
+                s_baseAppDpi = baseCfg.DensityDpi > 0
+                    ? baseCfg.DensityDpi
+                    : (int)Android.Util.DisplayMetricsDensity.Xhigh;
+            var targetDpi = (int)Math.Round(s_baseAppDpi * scale);
+            if (baseCfg.DensityDpi == targetDpi) return;   // already scaled
+
+            var cfg = new Android.Content.Res.Configuration(baseCfg) { DensityDpi = targetDpi };
+#pragma warning disable CA1422
+            res.UpdateConfiguration(cfg, res.DisplayMetrics);
+#pragma warning restore CA1422
+        }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.UiScale", $"app-resources scale failed: {ex.Message}");
+        }
+    }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        // The system re-pushed the pristine app configuration while binding this
+        // activity — re-apply the TV scale BEFORE MAUI initializes and reads
+        // density for its dp→px conversions.
+        ApplyTvUiScaleToAppResources();
+
         // MulticastLock is acquired earlier in MainApplication.OnCreate so it's
         // already held by the time MauiProgram.CreateMauiApp resolves
         // MdnsBrowserService. Activity.OnCreate is too late for that.
         base.OnCreate(savedInstanceState);
+
+        // UI-scale diagnostics: which density each context actually reports.
+        try
+        {
+            Android.Util.Log.Info("Animarr.UiScale",
+                $"activity density={Resources?.DisplayMetrics?.Density} " +
+                $"app density={Android.App.Application.Context.Resources?.DisplayMetrics?.Density}");
+        }
+        catch { }
 
         // Edge-to-edge: paint behind the system bars so the cinematic backdrop
         // fills the whole screen rather than getting boxed in by a black

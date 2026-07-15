@@ -26,11 +26,15 @@ public static class MauiProgram
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
-                // Native-catalog POC: match the web design system's display +
-                // mono faces so the XAML card reads like the Blazor one.
-                fonts.AddFont("archivo-black-400.ttf", "ArchivoBlack");
-                fonts.AddFont("geist-mono-400.ttf",   "GeistMono");
-                fonts.AddFont("geist-600.ttf",         "Geist");
+                // The web design system (tokens.css) uses ONE face for ui /
+                // display / mono alike: Hanken Grotesk. Register the same
+                // variable TTF the web ships under all three legacy aliases so
+                // every existing FontFamily reference renders exactly like the
+                // browser (bold weights via FontAttributes → synthetic bold).
+                fonts.AddFont("hanken-grotesk-variable.ttf", "Hanken");
+                fonts.AddFont("hanken-grotesk-variable.ttf", "ArchivoBlack");
+                fonts.AddFont("hanken-grotesk-variable.ttf", "GeistMono");
+                fonts.AddFont("hanken-grotesk-variable.ttf", "Geist");
             });
 
         // BlazorWebView host plumbing.

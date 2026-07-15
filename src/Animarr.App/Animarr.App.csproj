@@ -108,7 +108,12 @@
          compared to the friction of having to flip to Release just to push
          a Debug build to a TV. -->
     <PropertyGroup Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-        <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+        <!-- Real TV boxes ship arm64 or 32-bit armeabi-v7a, so Debug builds both.
+             For the x86_64 Android TV *emulator*, build with `-p:AnimarrEmu=true`
+             to get a fast x64-only APK instead (the emulator can't run arm libs
+             at usable speed). -->
+        <RuntimeIdentifiers Condition="'$(AnimarrEmu)' == 'true'">android-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers Condition="'$(AnimarrEmu)' != 'true'">android-arm64;android-arm</RuntimeIdentifiers>
     </PropertyGroup>
 
     <ItemGroup>

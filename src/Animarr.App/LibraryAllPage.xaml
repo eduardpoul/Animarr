@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Animarr.App"
+             x:Class="Animarr.App.LibraryAllPage"
+             BackgroundColor="#0a0c10">
+    <Grid RowDefinitions="Auto,*">
+        <HorizontalStackLayout Grid.Row="0" Padding="24,22,24,4" Spacing="18">
+            <!-- back (same chip as the detail page) -->
+            <Border WidthRequest="48" HeightRequest="48" VerticalOptions="Center"
+                    StrokeThickness="0" StrokeShape="RoundRectangle 12" BackgroundColor="#99000000">
+                <Border.Behaviors>
+                    <local:TvFocusBehavior x:Name="BackFocus" Radius="12" />
+                </Border.Behaviors>
+                <Label Text="‹" TextColor="White" FontSize="26" TranslationY="-2" HorizontalOptions="Center"
+                       VerticalOptions="Center" />
+            </Border>
+            <VerticalStackLayout Spacing="4" VerticalOptions="Center">
+                <Label x:Name="CountLabel" Text="БИБЛИОТЕКА" TextColor="#e8a33d"
+                       FontFamily="GeistMono" FontSize="11" CharacterSpacing="2.5" />
+                <Label x:Name="PageTitle" Text="Вся библиотека" TextColor="White"
+                       FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+            </VerticalStackLayout>
+        </HorizontalStackLayout>
+
+        <ScrollView Grid.Row="1">
+            <VerticalStackLayout>
+                <!-- source/section filter (web topbar pills) -->
+                <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout x:Name="SectionsHost" Spacing="8" Padding="24,8,24,2" />
+                </ScrollView>
+                <ActivityIndicator x:Name="Loader" IsRunning="True" Color="#e8772e"
+                                   WidthRequest="44" HeightRequest="44" Margin="0,60,0,0"
+                                   HorizontalOptions="Center" />
+                <!-- right padding 14 (not 24): the last card in a row carries its
+                     own 10dp gap margin, so 14+10 balances the 24 left -->
+                <FlexLayout x:Name="GridHost" Wrap="Wrap" Direction="Row"
+                            JustifyContent="Start" AlignItems="Start" AlignContent="Start"
+                            Padding="24,12,14,60" />
+            </VerticalStackLayout>
+        </ScrollView>
+    </Grid>
+</ContentPage>

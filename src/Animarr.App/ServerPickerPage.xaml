@@ -11,7 +11,7 @@
             <Label Text="ВЫБОР СЕРВЕРА" TextColor="#e8a33d" FontFamily="GeistMono"
                    FontSize="13" CharacterSpacing="3" />
             <Label Text="Подключитесь к серверу Animarr"
-                   TextColor="White" FontFamily="ArchivoBlack" FontSize="34" />
+                   TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="34" />
 
             <!-- Discovered servers appear here as focusable cards. -->
             <VerticalStackLayout x:Name="FoundList" Spacing="10" Margin="0,10,0,0" />
@@ -30,11 +30,8 @@
             <Border x:Name="ConnectButton" StrokeThickness="0" StrokeShape="RoundRectangle 10"
                     BackgroundColor="#e8772e" Padding="0,15" HorizontalOptions="Fill">
                 <Border.Behaviors>
-                    <local:TvFocusBehavior Radius="10" />
+                    <local:TvFocusBehavior x:Name="ConnectFocus" Radius="10" />
                 </Border.Behaviors>
-                <Border.GestureRecognizers>
-                    <TapGestureRecognizer Command="{Binding ConnectCommand, Source={x:Reference Root}}" />
-                </Border.GestureRecognizers>
                 <Label Text="Подключиться" TextColor="White" FontFamily="Geist"
                        FontSize="17" HorizontalOptions="Center" />
             </Border>

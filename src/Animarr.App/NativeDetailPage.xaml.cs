@@ -2,8 +2,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Animarr.Shared;
 using Animarr.Shared.Models;
+using Animarr.Shared.Requests;
 using Animarr.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Maui.Controls.Shapes;
 
 namespace Animarr.App;
 
@@ -50,9 +52,21 @@ public partial class NativeDetailPage : ContentPage
         BindableProperty.Create(nameof(SeasonTabs), typeof(System.Collections.IList), typeof(NativeDetailPage));
     public System.Collections.IList? SeasonTabs { get => (System.Collections.IList?)GetValue(SeasonTabsProperty); set => SetValue(SeasonTabsProperty, value); }
 
-    public static readonly BindableProperty EpisodesProperty =
-        BindableProperty.Create(nameof(Episodes), typeof(System.Collections.IList), typeof(NativeDetailPage));
-    public System.Collections.IList? Episodes { get => (System.Collections.IList?)GetValue(EpisodesProperty); set => SetValue(EpisodesProperty, value); }
+    // ── Episode grid: chunked code-built cards + a lazy thumb queue ─────────
+    // The full season renders (175+ episodes), but only EpChunk cards at a time:
+    // OnPageScrolled appends the next chunk as the view nears the end, so the
+    // initial layout stays fast on the weak TV GPU. Episode frames download
+    // through the authenticated HttpClient with ThumbGate limiting concurrency
+    // (each uncached frame costs the server an ffmpeg grab).
+    private const int EpChunk = 24;
+    private static readonly SemaphoreSlim ThumbGate = new(3);
+    private List<EpisodeVm> _seasonEps = new();
+    private int  _builtCount;
+    private bool _appending;
+    private CancellationTokenSource? _thumbCts;
+    /// <summary>"grid" | "list" — seeded from the EpisodeListView preference
+    /// (same one the web grid⇄list toggle writes).</summary>
+    private string _episodeView = "grid";
 
     public Command<int> SeasonCommand   { get; }
     public Command      BackCommand     { get; }
@@ -82,6 +96,8 @@ public partial class NativeDetailPage : ContentPage
         BackFocus.Command = BackCommand;
         FavFocus.Command  = FavoriteCommand;
         PlayFocus.Command = PlayHeroCommand;
+        GridViewFocus.Command = new Command(() => SwitchEpisodeView("grid"));
+        ListViewFocus.Command = new Command(() => SwitchEpisodeView("list"));
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         if (!string.IsNullOrEmpty(backdropUrl)) BackdropImage.Source = backdropUrl;
@@ -133,13 +149,16 @@ public partial class NativeDetailPage : ContentPage
                 var contT  = SafeAsync(_api.GetContinueAsync(_guid));
                 var watchT = SafeAsync(_api.GetWatchStatesAsync(_guid));
                 var favT   = SafeAsync(_api.GetFavoriteIdsAsync());
+                var prefT  = SafeAsync(_api.GetMyPreferencesAsync());
                 _continue = await contT;  LogT(sw, "continue");
                 _watch    = await watchT ?? Array.Empty<WatchStateDto>();  LogT(sw, "watch");
                 var favs  = await favT;   _isFav = favs?.Contains(_guid) ?? false;  LogT(sw, "favs");
+                _episodeView = (await prefT)?.EpisodeListView == "list" ? "list" : "grid";
 
                 ApplyCta();
                 ApplyFavorite();
             }
+            ApplyViewToggleVisual();
 
             // Build the episode grid LAST, after a yield so the hero/body paint
             // first — rendering the cards is the slow part on the weak TV GPU.
@@ -167,10 +186,10 @@ public partial class NativeDetailPage : ContentPage
     {
         PlayLabel.Text = _continue?.Kind switch
         {
-            "continue" => $"▶   Продолжить {EpLabel(_continue)}",
-            "next"     => $"▶   Следующая {EpLabel(_continue)}",
-            "rewatch"  => "↺   Пересмотреть",
-            _          => "▶   Смотреть",
+            "continue" => $"▶   {TvL.T("continue.resume", "Продолжить", "Resume")} {EpLabel(_continue)}",
+            "next"     => $"▶   {TvL.T("detail.next", "Следующая", "Next")} {EpLabel(_continue)}",
+            "rewatch"  => "↺   " + TvL.T("detail.rewatch", "Пересмотреть", "Rewatch"),
+            _          => "▶   " + TvL.T("home.watch", "Смотреть", "Watch"),
         };
     }
 
@@ -236,14 +255,17 @@ public partial class NativeDetailPage : ContentPage
 
         var kv = new List<KvVm>();
         void Add(string k, string? v) { if (!string.IsNullOrEmpty(v)) kv.Add(new KvVm(k, v!)); }
-        Add("Студия", it.Studio);
-        Add("Язык", it.Language);
-        if (it.Runtime is > 0)      Add("Хроно", $"{it.Runtime} м");
-        if (it.EpisodeCount is > 0) Add("Эпизодов", it.EpisodeCount.ToString());
-        Add("Сезон", it.SeasonLabel);
-        Add("Статус", it.Status);
-        Add("Рейтинг", it.ContentRating);
-        if (it.Genres is { Length: > 0 }) Add("Жанры", string.Join(" · ", it.Genres));
+        Add(TvL.T("media_detail.detail_studio", "Студия", "Studio"), it.Studio);
+        Add(TvL.T("media_detail.detail_language", "Язык", "Language"), it.Language);
+        if (it.Runtime is > 0)
+            Add(TvL.T("media_detail.detail_runtime", "Хроно", "Runtime"), $"{it.Runtime} m");
+        if (it.EpisodeCount is > 0)
+            Add(TvL.T("media_detail.detail_episodes", "Эпизодов", "Episodes"), it.EpisodeCount.ToString());
+        Add(TvL.T("media_detail.detail_season", "Сезон", "Season"), it.SeasonLabel);
+        Add(TvL.T("media_detail.detail_status", "Статус", "Status"), it.Status);
+        Add(TvL.T("media_detail.detail_rating", "Рейтинг", "Rating"), it.ContentRating);
+        if (it.Genres is { Length: > 0 })
+            Add(TvL.T("media_detail.detail_genres", "Жанры", "Genres"), string.Join(" · ", it.Genres));
         DetailRows = kv;
 
         var ids = new List<IdVm>();
@@ -265,14 +287,14 @@ public partial class NativeDetailPage : ContentPage
         if (hasMeta)
         {
             foreach (var s in it.Seasons!.OrderBy(s => s.Number))
-                tabs.Add(new SeasonTabVm(s.Number, $"Сезон {s.Number}", s.EpisodeCount));
+                tabs.Add(new SeasonTabVm(s.Number, TvL.F("media_detail.season_default", "Сезон {0}", "Season {0}", s.Number), s.EpisodeCount));
             foreach (var n in fileSeasons.Where(fs => it.Seasons!.All(s => s.Number != fs)))
-                tabs.Add(new SeasonTabVm(n, n == 0 ? "Спецвыпуски" : $"Сезон {n}", _files.Count(f => (f.Season ?? 1) == n)));
+                tabs.Add(new SeasonTabVm(n, n == 0 ? TvL.T("media_detail.specials", "Спецвыпуски", "Specials") : TvL.F("media_detail.season_default", "Сезон {0}", "Season {0}", n), _files.Count(f => (f.Season ?? 1) == n)));
         }
         else
         {
             foreach (var n in fileSeasons)
-                tabs.Add(new SeasonTabVm(n, n == 0 ? "Спецвыпуски" : $"Сезон {n}", _files.Count(f => (f.Season ?? 1) == n)));
+                tabs.Add(new SeasonTabVm(n, n == 0 ? TvL.T("media_detail.specials", "Спецвыпуски", "Specials") : TvL.F("media_detail.season_default", "Сезон {0}", "Season {0}", n), _files.Count(f => (f.Season ?? 1) == n)));
         }
 
         _tabs = tabs;
@@ -300,6 +322,19 @@ public partial class NativeDetailPage : ContentPage
 
     private void BuildEpisodes()
     {
+        _thumbCts?.Cancel();
+        _thumbCts = new CancellationTokenSource();
+        EpisodesHost.Children.Clear();
+        _builtCount = 0;
+        _seasonEps  = ComputeSeasonEpisodes();
+        AppendEpisodeChunk();
+        UpdateCounters();
+    }
+
+    /// <summary>The FULL episode list for the active season (no cap — cards are
+    /// appended in chunks as the page scrolls, see AppendEpisodeChunk).</summary>
+    private List<EpisodeVm> ComputeSeasonEpisodes()
+    {
         var it = _item!;
 
         if (it.MediaType == "Movie" || (_files.Length == 1 && _files[0].Episode is null))
@@ -309,8 +344,7 @@ public partial class NativeDetailPage : ContentPage
             var movieEp = new EpisodeVm
             {
                 Number   = "▶",
-                Title    = "Смотреть фильм",
-                Meta     = it.Runtime is > 0 ? $"{it.Runtime}m" : "Фильм",
+                Title    = TvL.T("media_detail.movie_play_default", "Смотреть фильм", "Watch movie"),
                 ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
                     ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
                 Have     = mf is not null,
@@ -322,8 +356,8 @@ public partial class NativeDetailPage : ContentPage
                 WatchFraction = Frac(ws),
             };
             movieEp.Play = new Command(() => PlayFile(movieEp.Season, movieEp.EpisodeNum, movieEp.FilePath, movieEp.ResumeMs));
-            Episodes = new List<EpisodeVm> { movieEp };
-            return;
+            movieEp.Menu = new Command(() => ShowEpisodeMenu(movieEp));
+            return new List<EpisodeVm> { movieEp };
         }
 
         var active    = it.Seasons?.FirstOrDefault(s => s.Number == _activeSeason);
@@ -331,30 +365,17 @@ public partial class NativeDetailPage : ContentPage
                               .Select(f => f.Episode ?? 0).DefaultIfEmpty(0).Max();
         var count = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
         if (count == 0) count = 1;
-        // FlexLayout has no recycling — each card costs measure/layout on the
-        // weak TV GPU, and that blocks the UI thread (focus feels frozen). Cap
-        // tight so the page is responsive; Continue CTA plays the exact episode
-        // regardless. TODO: virtualize for the full season list.
-        if (count > 24) count = 24;
 
-        var eps = new List<EpisodeVm>();
+        var eps = new List<EpisodeVm>(count);
         for (int i = 1; i <= count; i++)
         {
             var f    = _files.FirstOrDefault(x => (x.Season ?? 1) == _activeSeason && x.Episode == i);
             var have = f is not null;
             var ws   = _watch.FirstOrDefault(w => (w.Season ?? 1) == _activeSeason && w.Episode == i);
-            var title = _activeSeason == 0
-                ? $"Спецвыпуск {i}"
-                : (f?.AbsoluteEpisode is int ab ? $"Эпизод {i}  ·  TMDB #{ab}" : $"Эпизод {i}");
             var ep = new EpisodeVm
             {
                 Number   = i.ToString("00"),
-                Title    = title,
-                Meta     = have ? (it.Runtime is > 0 ? $"{it.Runtime}m" : "На диске") : "Нет файла",
-                // No per-episode thumbnail here: fetching one triggers a server
-                // ffmpeg frame-grab per episode, and 150 of them made the page
-                // take ~30s to load. Card shows number + title + status instead.
-                ThumbUrl = "",
+                Title    = _activeSeason == 0 ? TvL.F("detail.special_fmt", "Спецвыпуск {0}", "Special {0}", i) : TvL.F("detail.episode_fmt", "Эпизод {0}", "Episode {0}", i),
                 Have     = have,
                 FilePath = f?.FilePath,
                 Season   = _activeSeason,
@@ -364,9 +385,380 @@ public partial class NativeDetailPage : ContentPage
                 WatchFraction = Frac(ws),
             };
             ep.Play = new Command(() => PlayFile(ep.Season, ep.EpisodeNum, ep.FilePath, ep.ResumeMs));
+            ep.Menu = new Command(() => ShowEpisodeMenu(ep));
             eps.Add(ep);
         }
-        Episodes = eps;
+        return eps;
+    }
+
+    private void AppendEpisodeChunk()
+    {
+        if (_appending || _thumbCts is null) return;
+        _appending = true;
+        try
+        {
+            var end = Math.Min(_builtCount + EpChunk, _seasonEps.Count);
+            for (var i = _builtCount; i < end; i++)
+                EpisodesHost.Children.Add(_episodeView == "list"
+                    ? BuildEpisodeRow(_seasonEps[i], _thumbCts.Token)
+                    : BuildEpisodeCard(_seasonEps[i], _thumbCts.Token));
+            _builtCount = end;
+        }
+        finally { _appending = false; }
+    }
+
+    /// <summary>Grid⇄list flip: rebuild the episode area and persist the choice
+    /// to the shared EpisodeListView preference (the web toggle reads it too).</summary>
+    private void SwitchEpisodeView(string view)
+    {
+        if (_episodeView == view) return;
+        _episodeView = view;
+        ApplyViewToggleVisual();
+        BuildEpisodes();
+        _ = SafeAsync(_api.UpdateMyPreferencesAsync(new UpdatePreferencesRequest(
+            AccentHue: null, BackdropEnabled: null, BackdropBlurPx: null,
+            BackdropBrightness: null, BackdropIntervalSec: null, TvMode: null,
+            AudioPreferredLanguage: null, SubtitlePreferredLanguage: null,
+            SubtitleSize: null, DefaultVolume: null, AudioPassthrough: null,
+            NormalizeVolume: null, Language: null, EpisodeListView: view)));
+    }
+
+    private void ApplyViewToggleVisual()
+    {
+        var grid = _episodeView != "list";
+        GridViewBtn.BackgroundColor = grid ? Color.FromArgb("#e8772e") : Color.FromArgb("#1a1d24");
+        GridViewIcon.TextColor      = grid ? Colors.White : Color.FromArgb("#c7ccd4");
+        ListViewBtn.BackgroundColor = grid ? Color.FromArgb("#1a1d24") : Color.FromArgb("#e8772e");
+        ListViewIcon.TextColor      = grid ? Color.FromArgb("#c7ccd4") : Colors.White;
+    }
+
+    // D-pad focus auto-scrolls the page, so this fires for both touch and
+    // remote: top up the grid when the view nears the built end (~3 rows out).
+    private void OnPageScrolled(object? sender, ScrolledEventArgs e)
+    {
+        if (_builtCount >= _seasonEps.Count) return;
+        var remaining = PageScroll.ContentSize.Height - PageScroll.Height - e.ScrollY;
+        if (remaining < 900) AppendEpisodeChunk();
+    }
+
+    // ── Episode card (web MediaDetail grid look) ────────────────────────────
+    // 143dp card, 6 per row in the 922dp strip: big number top-left on the
+    // frame, green ✓ chip top-right when watched (amber ! when the file is
+    // missing), green on-disk dot bottom-right, resume bar, "Эпизод N" below.
+    private const int EpCardW = 143;
+
+    private View BuildEpisodeCard(EpisodeVm ep, CancellationToken ct)
+    {
+        var art = new Grid { HeightRequest = 80 };
+        var image = new Image { Aspect = Aspect.AspectFill };
+        art.Add(image);
+        if (!string.IsNullOrEmpty(ep.ThumbUrl)) image.Source = ep.ThumbUrl;   // movie fanart
+        else if (ep.Have && ep.Season is int s && ep.EpisodeNum is int e)
+            EnqueueThumb(image, s, e, ct);
+
+        art.Add(new BoxView
+        {
+            InputTransparent = true,
+            Background = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Colors.Transparent, 0.25f),
+                    new GradientStop(Color.FromArgb("#C7000000"), 1f),
+                },
+                new Point(0, 0), new Point(0, 1)),
+        });
+        art.Add(new Label
+        {
+            Text = ep.Number, InputTransparent = true,
+            FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold, FontSize = 15, TextColor = Colors.White,
+            HorizontalOptions = LayoutOptions.Start, VerticalOptions = LayoutOptions.Start,
+            Margin = new Thickness(8, 5, 0, 0),
+        });
+
+        // Top-right: watched ✓ (green) / missing file ! (amber).
+        var watchChip = MakeEpChip("✓", "#56c596");
+        watchChip.IsVisible = ep.IsWatched;
+        art.Add(watchChip);
+        if (!ep.Have)
+        {
+            var missing = MakeEpChip("!", "#e8a33d");
+            missing.IsVisible = !ep.IsWatched;
+            art.Add(missing);
+        }
+
+        // Bottom-right: on-disk dot (web's disk badge).
+        if (ep.Have)
+        {
+            art.Add(new Border
+            {
+                InputTransparent = true,
+                HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.End,
+                Margin = new Thickness(0, 0, 6, 6),
+                WidthRequest = 16, HeightRequest = 16, StrokeThickness = 0,
+                StrokeShape = new RoundRectangle { CornerRadius = 4 },
+                BackgroundColor = Color.FromArgb("#A6101720"),
+                Content = new Label
+                {
+                    Text = "●", TextColor = Color.FromArgb("#56c596"), FontSize = 7,
+                    HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center,
+                },
+            });
+        }
+
+        // Resume bar (hand-rolled — the native ProgressBar track renders fat).
+        var barFill = new BoxView
+        {
+            Color = ep.IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e"),
+            HorizontalOptions = LayoutOptions.Start,
+            WidthRequest = ep.IsWatched ? EpCardW : Math.Round(EpCardW * ep.WatchFraction),
+        };
+        var bar = new Grid
+        {
+            HeightRequest = 3, VerticalOptions = LayoutOptions.End, InputTransparent = true,
+            IsVisible = ep.IsWatched || ep.WatchFraction > 0.01,
+        };
+        bar.Add(new BoxView { Color = Color.FromArgb("#66000000") });
+        bar.Add(barFill);
+        art.Add(bar);
+
+        var rows = new Grid
+        {
+            RowDefinitions = { new RowDefinition(80), new RowDefinition(GridLength.Auto) },
+        };
+        rows.Add(art, 0, 0);
+        var title = new Label
+        {
+            Text = ep.Title, FontFamily = "Geist", FontSize = 10,
+            TextColor = Color.FromArgb(ep.Have ? "#c7ccd4" : "#7d7972"),
+            MaxLines = 1, LineBreakMode = LineBreakMode.TailTruncation,
+            Padding = new Thickness(8, 6, 8, 8),
+        };
+        rows.Add(title, 0, 1);
+
+        var card = new Border
+        {
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            BackgroundColor = Color.FromArgb("#15171d"),
+            WidthRequest = EpCardW,
+            Margin = new Thickness(0, 0, TvCards.CardGap, TvCards.CardGap),
+            Opacity = ep.Have ? 1.0 : 0.72,
+        };
+        card.Content = rows;
+        card.Behaviors.Add(new TvFocusBehavior { Radius = 8, Command = ep.Play, LongCommand = ep.Menu });
+
+        // Toggle-watched updates this card in place (no grid rebuild).
+        ep.Refresh = () =>
+        {
+            watchChip.IsVisible = ep.IsWatched;
+            bar.IsVisible = ep.IsWatched || ep.WatchFraction > 0.01;
+            barFill.WidthRequest = ep.IsWatched ? EpCardW : Math.Round(EpCardW * ep.WatchFraction);
+            barFill.Color = ep.IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e");
+        };
+        return card;
+    }
+
+    /// <summary>List-mode episode row (web d-ep--list): small 16:9 thumb with the
+    /// number + resume bar, then "EP NN · title" and a meta line, watched chip at
+    /// the right. Same focus/click/long-press semantics as the grid card.</summary>
+    private View BuildEpisodeRow(EpisodeVm ep, CancellationToken ct)
+    {
+        const int rowW = 912, thumbW = 100, thumbH = 56;
+
+        var art = new Grid();
+        var image = new Image { Aspect = Aspect.AspectFill };
+        art.Add(image);
+        if (!string.IsNullOrEmpty(ep.ThumbUrl)) image.Source = ep.ThumbUrl;
+        else if (ep.Have && ep.Season is int s && ep.EpisodeNum is int e)
+            EnqueueThumb(image, s, e, ct);
+        var barFill = new BoxView
+        {
+            Color = ep.IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e"),
+            HorizontalOptions = LayoutOptions.Start,
+            WidthRequest = ep.IsWatched ? thumbW : Math.Round(thumbW * ep.WatchFraction),
+        };
+        var bar = new Grid
+        {
+            HeightRequest = 2.5, VerticalOptions = LayoutOptions.End, InputTransparent = true,
+            IsVisible = ep.IsWatched || ep.WatchFraction > 0.01,
+        };
+        bar.Add(new BoxView { Color = Color.FromArgb("#66000000") });
+        bar.Add(barFill);
+        art.Add(bar);
+        var thumb = new Border
+        {
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 6 },
+            BackgroundColor = Color.FromArgb("#10141a"),
+            WidthRequest = thumbW, HeightRequest = thumbH,
+            VerticalOptions = LayoutOptions.Center,
+            Content = art,
+        };
+
+        var titleLine = new HorizontalStackLayout
+        {
+            Spacing = 8,
+            Children =
+            {
+                new Label
+                {
+                    Text = $"EP {ep.Number}", FontFamily = "GeistMono", FontSize = 9.5,
+                    FontAttributes = FontAttributes.Bold, TextColor = Color.FromArgb("#f5934f"),
+                    VerticalOptions = LayoutOptions.Center,
+                },
+                new Label
+                {
+                    Text = ep.Title, FontFamily = "Geist", FontSize = 11.5,
+                    FontAttributes = FontAttributes.Bold,
+                    TextColor = Color.FromArgb(ep.Have ? "#e8eaed" : "#7d7972"),
+                    MaxLines = 1, LineBreakMode = LineBreakMode.TailTruncation,
+                    VerticalOptions = LayoutOptions.Center,
+                },
+            },
+        };
+        var metaLabel = new Label
+        {
+            Text = ep.Have
+                ? (_item?.Runtime is > 0 ? $"{_item.Runtime}m" : TvL.T("episode_card.tooltip_on_disk", "На диске", "On disk"))
+                : TvL.T("episode_card.meta_missing", "Не скачано", "Not downloaded"),
+            FontFamily = "Geist", FontSize = 9,
+            TextColor = Color.FromArgb(ep.Have ? "#8a91a0" : "#e8a33d"),
+        };
+        var main = new VerticalStackLayout
+        {
+            Spacing = 2, VerticalOptions = LayoutOptions.Center,
+            Children = { titleLine, metaLabel },
+        };
+
+        var watchChip = MakeEpChip("✓", "#56c596");
+        watchChip.IsVisible = ep.IsWatched;
+        watchChip.VerticalOptions = LayoutOptions.Center;
+        watchChip.Margin = new Thickness(0);
+
+        var cols = new Grid
+        {
+            Padding = new Thickness(8, 6),
+            ColumnSpacing = 14,
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        cols.Add(thumb, 0, 0);
+        cols.Add(main, 1, 0);
+        cols.Add(watchChip, 2, 0);
+        if (!ep.Have)
+        {
+            var missing = MakeEpChip("!", "#e8a33d");
+            missing.VerticalOptions = LayoutOptions.Center;
+            missing.Margin = new Thickness(0);
+            cols.Add(missing, 2, 0);
+        }
+
+        var row = new Border
+        {
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            BackgroundColor = Color.FromArgb("#15171d"),
+            WidthRequest = rowW,
+            Margin = new Thickness(0, 0, TvCards.CardGap, TvCards.CardGap),
+            Opacity = ep.Have ? 1.0 : 0.72,
+            Content = cols,
+        };
+        row.Behaviors.Add(new TvFocusBehavior { Radius = 8, Command = ep.Play, LongCommand = ep.Menu });
+
+        ep.Refresh = () =>
+        {
+            watchChip.IsVisible = ep.IsWatched;
+            bar.IsVisible = ep.IsWatched || ep.WatchFraction > 0.01;
+            barFill.WidthRequest = ep.IsWatched ? thumbW : Math.Round(thumbW * ep.WatchFraction);
+            barFill.Color = ep.IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e");
+        };
+        return row;
+    }
+
+    private static Border MakeEpChip(string glyph, string color) => new()
+    {
+        InputTransparent = true,
+        HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.Start,
+        Margin = new Thickness(0, 5, 6, 0),
+        WidthRequest = 18, HeightRequest = 18,
+        StrokeThickness = 1, Stroke = Color.FromArgb(color),
+        StrokeShape = new RoundRectangle { CornerRadius = 5 },
+        BackgroundColor = Color.FromArgb("#8C10141a"),
+        Content = new Label
+        {
+            Text = glyph, TextColor = Color.FromArgb(color), FontSize = 10,
+            HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center,
+        },
+    };
+
+    /// <summary>Episode frame via the cookie-carrying HttpClient, throttled by
+    /// ThumbGate — an uncached frame costs the server an ffmpeg grab, so the
+    /// queue keeps a page-load from firing 175 of them at once.</summary>
+    private void EnqueueThumb(Image img, int season, int episode, CancellationToken ct)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ThumbGate.WaitAsync(ct);
+                try
+                {
+                    var bytes = await _http.GetByteArrayAsync(
+                        $"/api/media/{_id}/episode-thumb?season={season}&episode={episode}", ct);
+                    if (bytes.Length == 0 || ct.IsCancellationRequested) return;
+                    MainThread.BeginInvokeOnMainThread(() =>
+                        img.Source = ImageSource.FromStream(() => new MemoryStream(bytes)));
+                }
+                finally { ThumbGate.Release(); }
+            }
+            catch { /* number-only card is fine */ }
+        }, ct);
+    }
+
+    // ── Long-press: watched toggle (the TV counterpart of the web checkbox) ──
+    private async void ShowEpisodeMenu(EpisodeVm ep)
+    {
+        if (_guid == Guid.Empty) return;
+        var mark  = ep.IsWatched ? TvL.T("movie_file_card.btn_mark_unwatched", "Отметить непросмотренным", "Mark as unwatched") : TvL.T("movie_file_card.btn_mark_watched", "Отметить просмотренным", "Mark as watched");
+        var title = ep.EpisodeNum is int n
+            ? (_activeSeason > 0
+                ? $"{TvL.F("media_detail.season_default", "Сезон {0}", "Season {0}", _activeSeason)} · {TvL.F("detail.episode_fmt", "Эпизод {0}", "Episode {0}", n)}"
+                : TvL.F("detail.episode_fmt", "Эпизод {0}", "Episode {0}", n))
+            : (_item?.Title ?? "");
+        var choice = await DisplayActionSheet(title, TvL.T("common.btn_cancel", "Отмена", "Cancel"), null, mark);
+        if (choice != mark) return;
+
+        try
+        {
+            var dto = await _api.ToggleWatchedAsync(new Animarr.Shared.Requests.ToggleWatchedRequest(
+                _guid, ep.Season, ep.EpisodeNum, ep.FilePath, !ep.IsWatched));
+            ep.IsWatched     = dto?.IsWatched ?? !ep.IsWatched;
+            ep.WatchFraction = ep.IsWatched ? 1 : 0;
+            ep.Refresh?.Invoke();
+            UpdateCounters();
+            // Keep the cache fresh so a season switch shows the new state.
+            _watch = await SafeAsync(_api.GetWatchStatesAsync(_guid)) ?? _watch;
+        }
+        catch { }
+    }
+
+    /// <summary>Web's "164 of 175 watched · 171 of 175 on disk" line.</summary>
+    private void UpdateCounters()
+    {
+        if (_item?.MediaType == "Movie" || _seasonEps.Count <= 1)
+        {
+            WatchedCounter.IsVisible = false;
+            return;
+        }
+        var total   = _seasonEps.Count;
+        var watched = _seasonEps.Count(e => e.IsWatched);
+        var disk    = _seasonEps.Count(e => e.Have);
+        WatchedCounter.Text = TvL.F("detail.watched_counter_fmt", "{0} из {1} просмотрено · {2} из {1} на диске", "{0} of {1} watched · {2} of {1} on disk", watched, total, disk);
+        WatchedCounter.IsVisible = true;
     }
 
     private static double Frac(WatchStateDto? ws)
@@ -425,28 +817,21 @@ public partial class NativeDetailPage : ContentPage
     {
         public string  Number     { get; init; } = "";
         public string  Title      { get; init; } = "";
-        public string  Meta       { get; init; } = "";
+        /// <summary>Direct image URL (movie fanart); episode frames are queued
+        /// through EnqueueThumb instead.</summary>
         public string  ThumbUrl   { get; init; } = "";
         public bool    Have       { get; init; }
         public string? FilePath   { get; init; }
         public int?    Season     { get; init; }
         public int?    EpisodeNum { get; init; }
         public long    ResumeMs   { get; init; }
+        // Mutable: the long-press watched toggle updates these in place.
+        public bool    IsWatched     { get; set; }
+        public double  WatchFraction { get; set; }   // 0..1 resume position
         public System.Windows.Input.ICommand? Play { get; set; }
-        public bool    IsWatched     { get; init; }
-        public double  WatchFraction { get; init; }   // 0..1 resume position
-
-        public Color  Strip    => Have ? Color.FromArgb("#56c596") : Color.FromArgb("#e8a33d");
-        public string ChipText => IsWatched ? "✓" : Have ? "•" : "!";
-        public Color  ChipFg   => IsWatched ? Color.FromArgb("#56c596")
-                                : Have ? Color.FromArgb("#c7ccd4") : Color.FromArgb("#e8a33d");
-        public Color  TitleFg  => Have ? Color.FromArgb("#e8eaed") : Color.FromArgb("#a8a097");
-        public Color  MetaFg   => Have ? Color.FromArgb("#5d564f") : Color.FromArgb("#e8a33d");
-        public double ArtOpacity => Have ? (IsWatched ? 0.82 : 1.0) : 0.72;
-
-        // Resume bar: full green when watched, partial orange mid-episode.
-        public bool   HasBar     => IsWatched || WatchFraction > 0.01;
-        public double BarValue   => IsWatched ? 1.0 : WatchFraction;
-        public Color  BarColor   => IsWatched ? Color.FromArgb("#56c596") : Color.FromArgb("#e8772e");
+        public System.Windows.Input.ICommand? Menu { get; set; }
+        /// <summary>Repaints this card's watched chip / resume bar after a toggle
+        /// (set by BuildEpisodeCard — the cards are code-built, not data-bound).</summary>
+        public Action? Refresh { get; set; }
     }
 }

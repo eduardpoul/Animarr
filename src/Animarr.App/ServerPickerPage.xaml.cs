@@ -14,9 +14,9 @@ namespace Animarr.App;
 /// manual address box for setups where discovery can't cross the AP boundary.
 /// Any candidate is validated with an anonymous <c>GET /api/server/info</c>
 /// probe before it's saved; then we branch to pairing or catalog by session.
-/// D-pad activation runs through TapGestureRecognizer.Command (what
-/// TvFocusBehavior invokes on OK) — not the Tapped event, which fires on touch
-/// only.
+/// The manual button's D-pad OK runs through <c>TvFocusBehavior.Command</c> set
+/// in code-behind; discovered-server cards set their tap Command programmatically
+/// too. Both avoid a gesture Command bound via {x:Reference}, which is null on TV.
 /// </summary>
 public partial class ServerPickerPage : ContentPage
 {
@@ -44,6 +44,10 @@ public partial class ServerPickerPage : ContentPage
         _mdns   = services.GetRequiredService<MdnsBrowserService>();
 
         ConnectCommand = new Command(async () => await TryConnectAsync(UrlEntry.Text));
+        // D-pad OK must run the command via the behavior, set programmatically —
+        // a TapGestureRecognizer Command bound through {x:Reference Root} silently
+        // resolves to null on TV (the gesture isn't in the visual tree).
+        ConnectFocus.Command = ConnectCommand;
 
         // Pre-fill the last saved server (if any) for a one-click re-connect.
         var saved = Preferences.Get(TvRoot.ServerKey, "");
