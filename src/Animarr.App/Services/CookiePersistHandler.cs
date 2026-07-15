@@ -34,6 +34,9 @@ public sealed class CookiePersistHandler : DelegatingHandler
         if (response.Headers.Contains("Set-Cookie"))
         {
             CookiePersistence.Save(_container);
+            // Keep the WebView's own cookie store in step so its <img> /
+            // media fetches stay authenticated (login, refresh, logout).
+            CookiePersistence.SyncToWebView(_container);
         }
         return response;
     }
