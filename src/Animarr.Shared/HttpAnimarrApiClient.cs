@@ -301,6 +301,12 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task RecheckTorrentAsync(Guid id, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.TorrentRecheckFor(id), null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public async Task<TorrentFileNodeDto> GetTorrentFileTreeAsync(Guid id, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<TorrentFileNodeDto>(ApiRoutes.TorrentFileTreeFor(id), JsonOpts, ct)
             ?? new TorrentFileNodeDto();

@@ -7,6 +7,15 @@
     overflow: hidden;
     transition: transform var(--motion-base), box-shadow var(--motion-base);
     box-shadow: var(--shadow-card);
+    /* Render-virtualization without dropping DOM: Chromium skips layout / paint
+       / image-decode for cards scrolled out of view, so the 240-card grid never
+       renders all at once. The cards stay in the DOM, so the D-pad spatial
+       navigator still finds every one — unlike Blazor <Virtualize>, which would
+       remove off-screen focus targets and break TV navigation. intrinsic-size
+       reserves ~card height (2:3 poster ≈ 330px at the 220px track) to keep the
+       scrollbar stable; `auto` remembers the real size after first paint. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 330px;
 }
 
 @media (hover: hover) {

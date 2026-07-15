@@ -668,7 +668,12 @@ internal static class MediaEndpoints
                 return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
 
             return Results.NotFound();
-        });
+        })
+        // Anonymous like the other visual endpoints (/api/image, theme, trickplay):
+        // the path is derived server-side from (id, season, episode), never taken
+        // raw from the client, so there's nothing to gate with a cookie — and the
+        // native TV Image.Source loader can't attach one anyway.
+        .AllowAnonymous();
 
         // ── Per-episode metadata (detailed-list view) ────────────────────────
         // Lazy-fetch + cache TMDB episode texts (title / synopsis / air date /

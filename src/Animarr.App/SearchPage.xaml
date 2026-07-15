@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Animarr.App"
+             x:Class="Animarr.App.SearchPage"
+             x:Name="Root"
+             BackgroundColor="#0a0c10">
+    <Grid RowDefinitions="Auto,*" Padding="24,22,24,0">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*" ColumnSpacing="18">
+            <!-- back (same chip as the detail page) -->
+            <Border Grid.Column="0" VerticalOptions="Start" WidthRequest="48" HeightRequest="48"
+                    StrokeThickness="0" StrokeShape="RoundRectangle 12" BackgroundColor="#99000000">
+                <Border.Behaviors>
+                    <local:TvFocusBehavior x:Name="BackFocus" Radius="12" />
+                </Border.Behaviors>
+                <Label Text="‹" TextColor="White" FontSize="26" TranslationY="-2" HorizontalOptions="Center"
+                       VerticalOptions="Center" />
+            </Border>
+            <VerticalStackLayout Grid.Column="1" Spacing="12">
+                <Label x:Name="SearchTitle" Text="ПОИСК" TextColor="#e8a33d" FontFamily="GeistMono"
+                       FontSize="12" CharacterSpacing="3" />
+                <Border StrokeThickness="0" StrokeShape="RoundRectangle 12"
+                        BackgroundColor="#151a21" Padding="18,4">
+                    <Entry x:Name="QueryEntry" Placeholder="Название сериала или фильма"
+                           TextChanged="OnQueryChanged" TextColor="White" PlaceholderColor="#5b6472"
+                           FontFamily="Geist" FontSize="20" BackgroundColor="Transparent" />
+                </Border>
+                <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
+                       FontFamily="GeistMono" FontSize="12" />
+            </VerticalStackLayout>
+        </Grid>
+
+        <!-- code-built poster cards (TvCards): a CollectionView's recycled items
+             never became reliable D-pad focus targets on TV -->
+        <ScrollView Grid.Row="1" Margin="0,16,0,0">
+            <FlexLayout x:Name="ResultsHost" Wrap="Wrap" Direction="Row"
+                        JustifyContent="Start" AlignItems="Start" AlignContent="Start"
+                        Padding="0,0,0,40" />
+        </ScrollView>
+    </Grid>
+</ContentPage>

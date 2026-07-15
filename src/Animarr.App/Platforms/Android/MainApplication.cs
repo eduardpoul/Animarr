@@ -27,8 +27,24 @@ public class MainApplication : MauiApplication
 
     public override void OnCreate()
     {
+        // TV interface scale: MAUI's dp→px conversions read density from the
+        // APPLICATION context, so it must be scaled here too (the activity-level
+        // override alone only scales text). NB: Application.AttachBaseContext
+        // cannot be overridden in C# — it runs before the .NET runtime loads
+        // (UnsatisfiedLinkError) — so the app Resources are mutated in OnCreate
+        // instead. The system re-pushes the pristine configuration when the
+        // activity spins up, so MainActivity.OnCreate and OnConfigurationChanged
+        // re-apply the same mutation.
+        MainActivity.ApplyTvUiScaleToAppResources();
         AcquireMulticastLock();
         base.OnCreate();
+    }
+
+    public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
+    {
+        base.OnConfigurationChanged(newConfig);
+        // The system just replaced the app configuration — re-apply the scale.
+        MainActivity.ApplyTvUiScaleToAppResources();
     }
 
     private void AcquireMulticastLock()

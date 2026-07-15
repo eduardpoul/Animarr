@@ -1,0 +1,147 @@
+/* Shared torrent file tree — folders + tri-state checkbox + priority dropdown.
+   Lives inside whatever scroll container the host provides (the host sets the
+   border/height); this only styles the rows. */
+.tft {
+    display: flex;
+    flex-direction: column;
+}
+
+.tft__row {
+    position: relative;
+    overflow: hidden;                  /* clip the progress fill to the row radius */
+    display: grid;
+    /* caret · check · icon · name(flex) · size · priority */
+    grid-template-columns: 18px 18px 18px 1fr auto auto;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px calc(6px + var(--depth, 0) * 16px);
+    border-radius: 8px;
+    min-width: 0;
+}
+.tft__row:hover { background: rgba(255, 255, 255, 0.04); }
+.tft__row--skip .tft__name { opacity: 0.45; text-decoration: line-through; }
+
+/* Per-file download progress — a subtle left-anchored fill spanning the full
+   row height, behind the content. Greenish once the file is complete. */
+.tft__fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    background: var(--accent-soft);
+    pointer-events: none;
+    transition: width 0.4s ease;
+}
+.tft__fill--done { background: oklch(0.55 0.13 150 / 0.22); }
+/* Keep every real cell painted above the fill. */
+.tft__row > :not(.tft__fill) { position: relative; z-index: 1; }
+.tft__row--skip .tft__fill { opacity: 0.4; }
+
+.tft__caret {
+    appearance: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-faint);
+    padding: 0;
+    transition: transform var(--motion-fast), color var(--motion-fast);
+}
+.tft__caret:hover { color: var(--text); }
+.tft__caret.is-open { transform: rotate(90deg); }
+.tft__caret--leaf { cursor: default; }
+
+.tft__check {
+    appearance: none;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border-strong, rgba(255, 255, 255, 0.25));
+    background: transparent;
+    display: inline-grid;
+    place-items: center;
+    color: #fff;
+    padding: 0;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.tft__check:hover { border-color: var(--accent-hi); }
+.tft__check.is-on,
+.tft__check.is-partial {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.tft__dash {
+    width: 8px;
+    height: 2px;
+    background: #fff;
+    border-radius: 1px;
+}
+
+.tft__ficon {
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-faint);
+}
+.tft__row:not(.tft__row--file) .tft__ficon { color: var(--accent-hi); }
+
+.tft__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    color: var(--text);
+}
+.tft__row:not(.tft__row--file) .tft__name { font-weight: 600; }
+
+.tft__size {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.tft__prio {
+    font-size: 11px;
+    padding: 2px 22px 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-badge);
+    background: var(--surface);
+    color: var(--text);
+    min-width: 86px;
+    appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235d564f' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+}
+.tft__prio--skip { opacity: 0.45; }
+
+/* Phone: drop the row to two lines so name + size + priority stop colliding.
+   caret/check/icon/name keep the top line; size + priority wrap below, right-
+   aligned. */
+@media (max-width: 639px) {
+    .tft__row {
+        grid-template-columns: 18px 18px 18px 1fr;
+        grid-template-areas:
+            "caret check icon name"
+            "caret .     .    meta";
+        row-gap: 4px;
+    }
+    .tft__caret { grid-area: caret; }
+    .tft__check { grid-area: check; }
+    .tft__ficon { grid-area: icon; }
+    .tft__name  { grid-area: name; }
+    .tft__size,
+    .tft__prio  { grid-area: meta; }
+    .tft__size  { justify-self: start; align-self: center; }
+    .tft__prio  { justify-self: end; }
+    /* Both share the "meta" cell — lay them out inline within it. */
+    .tft__row { }
+}

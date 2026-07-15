@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Animarr.App.PairingPage"
+             BackgroundColor="#0a0c10">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="70" Padding="90,0"
+          HorizontalOptions="Center" VerticalOptions="Center">
+
+        <!-- left: instructions + big code -->
+        <VerticalStackLayout Grid.Column="0" Spacing="14" VerticalOptions="Center"
+                             MaximumWidthRequest="640">
+            <Label Text="ВХОД" TextColor="#e8a33d" FontFamily="GeistMono"
+                   FontSize="13" CharacterSpacing="3" />
+            <Label Text="Подтвердите вход с телефона" TextColor="White"
+                   FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="34" />
+            <Label x:Name="HintLabel" Text="" TextColor="#aeb4c0"
+                   FontFamily="Geist" FontSize="16" LineHeight="1.35" />
+
+            <Label Text="КОД УСТРОЙСТВА" TextColor="#7b8290" FontFamily="GeistMono"
+                   FontSize="12" CharacterSpacing="2" Margin="0,16,0,0" />
+            <Label x:Name="CodeLabel" Text="··-··-··" TextColor="White"
+                   FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="58" CharacterSpacing="6" />
+            <Label x:Name="StatusLabel" Text="Ожидание подтверждения…"
+                   TextColor="#7b8290" FontFamily="GeistMono" FontSize="13" Margin="0,8,0,0" />
+        </VerticalStackLayout>
+
+        <!-- right: server-rendered QR on a white plate -->
+        <Border Grid.Column="1" StrokeThickness="0" StrokeShape="RoundRectangle 16"
+                BackgroundColor="White" Padding="18" VerticalOptions="Center">
+            <Image x:Name="QrImage" WidthRequest="300" HeightRequest="300" Aspect="AspectFit" />
+        </Border>
+    </Grid>
+</ContentPage>

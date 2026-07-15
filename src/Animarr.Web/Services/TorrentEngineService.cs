@@ -214,7 +214,9 @@ public class TorrentEngineService : BackgroundService
         await using var ctx = await db.CreateDbContextAsync();
 
         var records = await ctx.TorrentRecords
-            .Where(r => r.State != TorrentRecordState.Stopped && r.State != TorrentRecordState.Error)
+            // Load everything except user-stopped torrents — Error ones are
+            // loaded too (left idle below) so the user can Recheck/retry them.
+            .Where(r => r.State != TorrentRecordState.Stopped)
             .Include(r => r.FileSelections)
             .Include(r => r.FolderWatcher)
             .ToListAsync();
@@ -262,7 +264,10 @@ public class TorrentEngineService : BackgroundService
                 if (record.SkipSubfolderStructure)
                     await ApplyFlattenAsync(mgr, record.InfoHash);
 
-                if (record.State != TorrentRecordState.Paused)
+                // Don't auto-start Paused (user choice) or Error torrents — an
+                // errored one is loaded but left idle so it doesn't re-error in
+                // a boot loop; the user retries it via Recheck.
+                if (record.State != TorrentRecordState.Paused && record.State != TorrentRecordState.Error)
                     await mgr.StartAsync();
             }
             catch (Exception ex)
@@ -379,11 +384,23 @@ public class TorrentEngineService : BackgroundService
         }
         else if (mgr.State == TorrentState.Error)
         {
+            // Capture WHY it errored — MonoTorrent exposes the reason + the
+            // underlying exception on mgr.Error. Without this the UI could only
+            // say "Error" with no explanation.
+            var reason = mgr.Error is { } err
+                ? $"{err.Reason}{(err.Exception is { } iex ? $": {iex.Message}" : "")}"
+                : "Unknown error";
+            _logger.LogWarning("Torrent {Hash} entered Error state: {Reason}", infoHash, reason);
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var ctx = await db.CreateDbContextAsync();
             var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == infoHash);
-            if (record is not null) { record.State = TorrentRecordState.Error; await ctx.SaveChangesAsync(); }
+            if (record is not null)
+            {
+                record.State = TorrentRecordState.Error;
+                record.ErrorMessage = reason;
+                await ctx.SaveChangesAsync();
+            }
         }
         }
         catch (DbUpdateConcurrencyException ex)
@@ -450,6 +467,15 @@ public class TorrentEngineService : BackgroundService
                 }
             }
 
+            // Bytes verified on disk = progress × size. NOT mgr.Monitor
+            // .DataBytesReceived — that counts only THIS session's received
+            // bytes, so it resets to 0 on every restart and makes an already
+            // (partly) downloaded torrent read "0 B" / 0% until it fetches more.
+            // progress×size survives restarts because mgr.Progress is rebuilt
+            // from the on-disk bitfield by the startup hash-check.
+            var totalSize   = mgr.Torrent?.Size ?? 0;
+            var onDiskBytes = (long)Math.Round(totalSize * (mgr.Progress / 100.0));
+
             _liveStats[hash] = new TorrentLiveStats(
                 InfoHash:         hash,
                 Name:             mgr.Torrent?.Name ?? _names.GetValueOrDefault(hash, hash[..Math.Min(8, hash.Length)]),
@@ -458,9 +484,9 @@ public class TorrentEngineService : BackgroundService
                 Progress:         mgr.Progress / 100.0,   // MonoTorrent reports 0–100; the UI wants a 0–1 fraction
                 DownloadRate:     mgr.Monitor.DownloadRate,
                 UploadRate:       mgr.Monitor.UploadRate,
-                Downloaded:       mgr.Monitor.DataBytesReceived,
+                Downloaded:       onDiskBytes,
                 Uploaded:         mgr.Monitor.DataBytesSent,
-                TotalSize:        mgr.Torrent?.Size ?? 0,
+                TotalSize:        totalSize,
                 Seeds:            mgr.Peers.Seeds,
                 Peers:            mgr.Peers.Leechs,
                 DownloadLimit:    mgr.Settings.MaximumDownloadRate,
@@ -892,6 +918,35 @@ public class TorrentEngineService : BackgroundService
         if (!_managers.TryGetValue(infoHash, out var mgr)) return;
         await mgr.StartAsync();
         await SetRecordStateAsync(infoHash, TorrentRecordState.Downloading);
+        UpdateLiveStats(); StateChanged?.Invoke();
+    }
+
+    /// <summary>Re-verify the torrent's data against what's actually on disk
+    /// (full hash check), then resume. Recovers an errored torrent and corrects
+    /// stale per-file progress — MonoTorrent re-reads every piece so the file
+    /// bitfields reflect reality. Clears the stored error message.</summary>
+    public async Task RecheckAsync(string infoHash)
+    {
+        if (!_managers.TryGetValue(infoHash, out var mgr)) return;
+        try { if (mgr.State != TorrentState.Stopped) await mgr.StopAsync(); } catch { }
+
+        // Clear the stale error + optimistically mark downloading; the state
+        // handler settles it afterwards (or re-captures a fresh error).
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            var rec = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == infoHash);
+            if (rec is not null)
+            {
+                rec.ErrorMessage = null;
+                rec.State = TorrentRecordState.Downloading;
+                await ctx.SaveChangesAsync();
+            }
+        }
+
+        try { await mgr.HashCheckAsync(true); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Recheck failed for {Hash}", infoHash); }
         UpdateLiveStats(); StateChanged?.Invoke();
     }
 

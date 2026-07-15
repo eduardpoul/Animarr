@@ -49,12 +49,12 @@ public static class MediaUrl
 
     /// <summary>Build an <c>/api/image</c> URL for the given absolute server
     /// path, with an optional <c>?t=</c> cache-buster.</summary>
-    public static string Image(string path, long? cacheBuster = null)
+    public static string Image(string path, long? cacheBuster = null, int? width = null)
     {
         var encoded = System.Uri.EscapeDataString(path);
-        var query   = cacheBuster.HasValue
-            ? $"?path={encoded}&t={cacheBuster.Value}"
-            : $"?path={encoded}";
+        var query   = $"?path={encoded}";
+        if (cacheBuster.HasValue) query += $"&t={cacheBuster.Value}";
+        if (width.HasValue)       query += $"&w={width.Value}";
         return string.IsNullOrEmpty(_base)
             ? $"/api/image{query}"
             : $"{_base}/api/image{query}";

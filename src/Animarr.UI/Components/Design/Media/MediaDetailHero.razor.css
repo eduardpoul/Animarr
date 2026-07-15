@@ -149,6 +149,14 @@
    drawer/player. Mobile keeps them absolute — there the hero chrome scrolls with
    the fanart (and the mobile shell owns the top bar). */
 @media (min-width: 960px) {
+    /* Lift the WHOLE hero stacking context above the page content. The hero has
+       `isolation: isolate`, which traps the fixed controls in its own context —
+       their z-index:40 only applies INSIDE the hero, so episode cards (later in
+       the DOM) painted over the fixed Back button and swallowed its clicks
+       ("кнопка назад не нажимается поверх серии"). Raising the hero itself to
+       z-index:40 lifts the entire context (and the trapped controls with it)
+       above that content, still below the TopBar (50) + drawers/player. */
+    .d-mdhero { z-index: 40; }
     .d-mdhero__backwrap,
     .d-mdhero__top-actions {
         position: fixed;

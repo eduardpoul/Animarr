@@ -1,0 +1,255 @@
+@*
+    TorrentFileTreeEditor — shared folder tree for torrent file selection.
+
+    Used by both the Add-torrent drawer (Torrents.razor) and the per-torrent
+    edit drawer (TorrentEdit.razor) so the two surfaces stay identical.
+
+    Each row is: caret (folders) · tri-state checkbox · icon · name · size ·
+    priority dropdown (Skip / Normal / High). The checkbox and the dropdown are
+    two views of ONE value (the file's priority): unchecked ⇔ Skip(0), checked ⇔
+    Normal(1)/High(2). Folder rows cascade BOTH controls to every file beneath
+    them, so a whole season can be skipped or bumped in one click.
+
+    Data flow: the parent owns the <c>Priorities</c> dictionary (path → 0/1/2);
+    this component mutates it in place and raises <c>OnChanged</c> so the parent
+    can re-render its own summary (counts/size) and persist on save.
+*@
+
+@if (_root is not null)
+{
+    <div class="tft">
+        @foreach (var row in Flatten())
+        {
+            var node  = row.Node;
+            var state = CheckState(node);
+            var prio  = NodePriority(node);
+            var pct   = (int)Math.Round(NodeProgress(node) * 100);
+            <div @key="node"
+                 class="@($"tft__row {(node.IsFile ? "tft__row--file" : "")} {(state == 0 ? "tft__row--skip" : "")}")"
+                 style="--depth:@row.Depth">
+                @if (pct > 0)
+                {
+                    <div class="tft__fill @(pct >= 100 ? "tft__fill--done" : "")" style="width:@(pct)%"></div>
+                }
+                @if (!node.IsFile)
+                {
+                    <button type="button"
+                            class="@($"tft__caret {(node.Expanded ? "is-open" : "")}")"
+                            @onclick="@(() => node.Expanded = !node.Expanded)"
+                            aria-label="Expand folder">
+                        <DIcon Name="chev-r" Size="12" />
+                    </button>
+                }
+                else
+                {
+                    <span class="tft__caret tft__caret--leaf"></span>
+                }
+
+                <button type="button"
+                        class="@($"tft__check {(state == 1 ? "is-on" : state == 2 ? "is-partial" : "")}")"
+                        @onclick="@(() => ToggleCheck(node))"
+                        aria-label="Download this">
+                    @if (state == 1)
+                    {
+                        <DIcon Name="check" Size="11" />
+                    }
+                    else if (state == 2)
+                    {
+                        <span class="tft__dash"></span>
+                    }
+                </button>
+
+                <span class="tft__ficon">
+                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="13" />
+                </span>
+                <span class="tft__name" title="@node.Name">@node.Name</span>
+                <span class="tft__size">@FormatBytes(node.Size)</span>
+                <select class="tft__prio @(prio == 0 ? "tft__prio--skip" : "")"
+                        value="@prio"
+                        @onchange="@(e => SetPriority(node, int.TryParse(e.Value?.ToString(), out var p) ? p : 1))">
+                    <option value="0">@L["file_priority.skip"]</option>
+                    <option value="1">@L["file_priority.normal"]</option>
+                    <option value="2">@L["file_priority.high"]</option>
+                </select>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Every file in the torrent (path + size). The tree is rebuilt
+    /// when this set changes.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<FileItem> Files { get; set; } = Array.Empty<FileItem>();
+
+    /// <summary>Path → priority (0=skip / 1=normal / 2=high). MUTATED in place;
+    /// the parent reads it back to persist / submit. Missing entries are
+    /// treated as Normal.</summary>
+    [Parameter, EditorRequired] public Dictionary<string, int> Priorities { get; set; } = new();
+
+    /// <summary>Raised after any checkbox / priority change so the parent can
+    /// refresh its summary line (selected count / size).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Optional path → download progress (0..1), drives the per-row
+    /// background fill. Null = no fill (e.g. the add screen, where nothing has
+    /// downloaded yet). Display-only — never mutated here.</summary>
+    [Parameter] public Dictionary<string, double>? Progress { get; set; }
+
+    public sealed record FileItem(string Path, long Size);
+
+    private TorNode? _root;
+    private string? _builtKey;
+    private Dictionary<string, long> _sizeByPath = new();
+
+    protected override void OnParametersSet()
+    {
+        // Rebuild only when the file set actually changes — preserves expand
+        // state + node identity (for @key) across priority toggles.
+        var key = string.Join("|", Files.Select(f => f.Path));
+        if (key != _builtKey)
+        {
+            BuildTree();
+            _sizeByPath = Files.GroupBy(f => f.Path).ToDictionary(g => g.Key, g => g.First().Size);
+            _builtKey = key;
+        }
+    }
+
+    /// <summary>Download progress 0..1 for a node. Files read the map directly;
+    /// folders aggregate their files weighted by size.</summary>
+    private double NodeProgress(TorNode n)
+    {
+        if (Progress is null) return 0;
+        if (n.IsFile) return Progress.GetValueOrDefault(n.FullPath, 0);
+        long total = 0;
+        double done = 0;
+        foreach (var p in n.FilePaths)
+        {
+            var sz = _sizeByPath.GetValueOrDefault(p, 0);
+            total += sz;
+            done  += sz * Progress.GetValueOrDefault(p, 0);
+        }
+        return total > 0 ? done / total : 0;
+    }
+
+    // ── Priority / check state (derived from the shared Priorities map) ──
+
+    private int NodePriority(TorNode n)
+    {
+        if (n.IsFile) return Priorities.GetValueOrDefault(n.FullPath, 1);
+        // Folder shows the common priority of its files, or Normal when mixed.
+        var distinct = n.FilePaths.Select(p => Priorities.GetValueOrDefault(p, 1)).Distinct().Take(2).ToList();
+        return distinct.Count == 1 ? distinct[0] : 1;
+    }
+
+    /// <summary>0 = all skipped (unchecked), 1 = all included, 2 = partial.</summary>
+    private int CheckState(TorNode n)
+    {
+        if (n.IsFile) return Priorities.GetValueOrDefault(n.FullPath, 1) == 0 ? 0 : 1;
+        var total = n.FilePaths.Count;
+        if (total == 0) return 1;
+        var included = n.FilePaths.Count(p => Priorities.GetValueOrDefault(p, 1) != 0);
+        return included == 0 ? 0 : included == total ? 1 : 2;
+    }
+
+    private void ToggleCheck(TorNode n)
+    {
+        // Full → skip everything; partial/empty → include (restore to Normal).
+        var include = CheckState(n) != 1;
+        foreach (var p in n.FilePaths)
+        {
+            if (include) { if (Priorities.GetValueOrDefault(p, 1) == 0) Priorities[p] = 1; }
+            else         { Priorities[p] = 0; }
+        }
+        Changed();
+    }
+
+    private void SetPriority(TorNode n, int prio)
+    {
+        foreach (var p in n.FilePaths) Priorities[p] = prio;
+        Changed();
+    }
+
+    private void Changed()
+    {
+        OnChanged.InvokeAsync();
+        StateHasChanged();
+    }
+
+    // ── Tree build (flat manifest → folders) ──
+
+    private void BuildTree()
+    {
+        var root = new TorNode();
+        foreach (var f in Files)
+        {
+            var parts = f.Path.Split('/', '\\').Where(p => p.Length > 0).ToArray();
+            if (parts.Length == 0) continue;
+            var cur = root;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (i == parts.Length - 1)
+                {
+                    cur.Children.Add(new TorNode
+                    {
+                        Name = parts[i], FullPath = f.Path, IsFile = true, Size = f.Size,
+                    });
+                }
+                else
+                {
+                    var next = cur.Children.FirstOrDefault(c => !c.IsFile && c.Name == parts[i]);
+                    if (next is null) { next = new TorNode { Name = parts[i] }; cur.Children.Add(next); }
+                    cur = next;
+                }
+            }
+        }
+        ComputeAndSort(root);
+        _root = root;
+    }
+
+    private static void ComputeAndSort(TorNode node)
+    {
+        if (node.IsFile) { node.FilePaths = new List<string> { node.FullPath }; return; }
+        foreach (var c in node.Children) ComputeAndSort(c);
+        node.Size      = node.Children.Sum(c => c.Size);
+        node.FilePaths = node.Children.SelectMany(c => c.FilePaths).ToList();
+        node.Children  = node.Children
+            .OrderByDescending(c => !c.IsFile)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private IEnumerable<(TorNode Node, int Depth)> Flatten()
+    {
+        var list = new List<(TorNode, int)>();
+        if (_root is null) return list;
+        void Walk(TorNode n, int depth)
+        {
+            foreach (var c in n.Children)
+            {
+                list.Add((c, depth));
+                if (!c.IsFile && c.Expanded) Walk(c, depth + 1);
+            }
+        }
+        Walk(_root, 0);
+        return list;
+    }
+
+    private sealed class TorNode
+    {
+        public string Name = "";
+        public string FullPath = "";
+        public bool   IsFile;
+        public long   Size;
+        public bool   Expanded = true;
+        public List<TorNode> Children = new();
+        public List<string>  FilePaths = new();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576)     return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024)          return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+}

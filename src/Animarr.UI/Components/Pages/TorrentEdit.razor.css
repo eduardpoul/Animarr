@@ -67,6 +67,10 @@
     border-bottom: 1px solid var(--border);
 }
 .te-tree__file:last-child { border-bottom: 0; }
+.te-tree__file--skip .te-tree__file-name {
+    opacity: 0.45;
+    text-decoration: line-through;
+}
 
 .te-tree__file-name {
     flex: 1;
@@ -92,6 +96,30 @@
     background-position: right 6px center;
 }
 .te-tree__priority--skip { opacity: 0.4; }
+
+.te-tree__file-size {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    flex-shrink: 0;
+    min-width: 52px;
+    text-align: right;
+}
+
+.te-files-empty {
+    color: var(--text-faint);
+    font-size: 12.5px;
+    line-height: 1.5;
+    padding: 12px 8px;
+}
+
+/* Phone: let each file row wrap so the name, size and priority dropdown
+   stop squeezing into / overlapping each other in the narrow drawer. */
+@media (max-width: 639px) {
+    .te-tree__file { flex-wrap: wrap; row-gap: 6px; }
+    .te-tree__file-name { flex: 1 1 auto; min-width: 120px; }
+    .te-tree__priority { margin-left: auto; }
+}
 
 /* ── Speed / options fields ──────────────────────────────────── */
 .te-field {
@@ -167,6 +195,22 @@
     word-break: break-all;
 }
 .te-stats__hash { margin-top: 4px; }
+
+/* Error reason shown when the torrent entered the Error state. */
+.te-stats__error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-radius: var(--radius-ctrl);
+    background: oklch(0.66 0.20 25 / 0.12);
+    border: 1px solid oklch(0.66 0.20 25 / 0.35);
+    color: oklch(0.80 0.13 25);
+    font-size: 11.5px;
+    line-height: 1.4;
+    word-break: break-word;
+}
 
 /* ── Footer spacer — pushes the danger Remove button to the right
    so it can't be accidentally clicked next to the Save button. ──── */

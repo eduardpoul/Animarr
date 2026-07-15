@@ -79,6 +79,9 @@ public sealed record TorrentFileNodeDto
     public int    Depth { get; init; }
     /// <summary>0=DoNotDownload, 1=Normal, 2=High.</summary>
     public int    Priority { get; init; } = 1;
+    /// <summary>Download completion 0..1 for this file (0 when metadata not yet
+    /// known / not downloading). Drives the per-row background fill.</summary>
+    public double Progress { get; init; }
     public List<TorrentFileNodeDto> Children { get; init; } = new();
 }
 
