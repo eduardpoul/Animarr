@@ -109,6 +109,34 @@ public static class CookiePersistence
         }
     }
 
+    /// <summary>Mirror the container's cookies into the Android WebView's
+    /// CookieManager. The auth cookie lives in the app's HttpClient pipeline,
+    /// but <c>&lt;img&gt;</c> / media requests issued by the BlazorWebView go
+    /// through the WEBVIEW's network stack, which has its own cookie store —
+    /// without this sync, cookie-gated binary endpoints (e.g. the older
+    /// servers' <c>/api/media/{id}/episode-thumb</c>) return 401 and the
+    /// thumbnails render broken on phones. Call after <see cref="Load"/> at
+    /// boot and after every Set-Cookie (login / refresh / logout).</summary>
+    public static void SyncToWebView(CookieContainer container)
+    {
+#if ANDROID
+        try
+        {
+            var mgr = global::Android.Webkit.CookieManager.Instance;
+            if (mgr is null) return;
+            mgr.SetAcceptCookie(true);
+            foreach (var c in container.GetAllCookies().Where(c => !c.Expired))
+            {
+                var path = string.IsNullOrEmpty(c.Path) ? "/" : c.Path;
+                var url  = $"http{(c.Secure ? "s" : "")}://{c.Domain}{path}";
+                mgr.SetCookie(url, $"{c.Name}={c.Value}; Path={path}");
+            }
+            mgr.Flush();
+        }
+        catch { /* WebView not ready yet — the next sync will land */ }
+#endif
+    }
+
     /// <summary>Stable serialisation shape. Doesn't include attributes the
     /// .NET <see cref="Cookie"/> doesn't round-trip cleanly (SameSite,
     /// Discard) — they're inferred by the server side anyway.</summary>
