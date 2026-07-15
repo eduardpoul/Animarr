@@ -32,7 +32,7 @@
         <div class="d-ep__art">
             @if (!string.IsNullOrEmpty(ThumbUrl))
             {
-                <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" />
+                <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" onerror="this.onerror=null;this.style.display='none'" />
             }
             else
             {
@@ -128,7 +128,7 @@ else
     <div class="d-ep__art">
         @if (!string.IsNullOrEmpty(ThumbUrl))
         {
-            <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" />
+            <img src="@ThumbUrl" alt="" loading="lazy" class="d-ep__img" onerror="this.onerror=null;this.style.display='none'" />
         }
         else
         {
