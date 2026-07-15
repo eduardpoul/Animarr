@@ -269,14 +269,18 @@
     margin-top: var(--space-3);
 }
 
-/* ── Mobile / tablet — shrink hero, tighten poster, stack content. */
+/* ── Mobile / tablet — shrink hero, tighten poster, stack content.
+   NB: no margin/padding-top here — this block comes LATER in the file than
+   the bleed rules at the top (margin -(56px + safe-top), content padding-top
+   56px + safe-top) and used to override them, which left a blank 56px+inset
+   band above the hero on phones (the fanart no longer slid under the
+   transparent mobile nav / status bar). Only size/side paddings belong here. */
 @media (max-width: 959px) {
     .d-mdhero {
         height: clamp(400px, 54vh, 520px);
-        margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-7);
     }
     .d-mdhero__content {
-        padding: var(--space-6) var(--space-7) var(--space-7);
+        padding: calc(56px + var(--animarr-safe-top)) var(--space-7) var(--space-7);
         gap: var(--space-5);
     }
     .d-mdhero__poster { width: 160px; }

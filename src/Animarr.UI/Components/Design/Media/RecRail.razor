@@ -42,7 +42,7 @@
                             <a class="recrail__poster tv-focus" href="/catalog/@mid" title="@card.Title">
                                 @if (!string.IsNullOrEmpty(card.PosterUrl))
                                 {
-                                    <img loading="lazy" src="@card.PosterUrl" alt="@card.Title" class="recrail__img" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(card.PosterUrl)" alt="@card.Title" class="recrail__img" />
                                 }
                                 else
                                 {
@@ -55,7 +55,7 @@
                             <div class="recrail__ext" title="@card.Title">
                                 @if (!string.IsNullOrEmpty(card.PosterUrl))
                                 {
-                                    <img loading="lazy" src="@card.PosterUrl" alt="@card.Title" class="recrail__img" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(card.PosterUrl)" alt="@card.Title" class="recrail__img" />
                                 }
                                 else
                                 {
@@ -105,6 +105,15 @@
 
     protected override void OnParametersSet() => _cards = Items.ToList();
 
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips — the MAUI hybrid boot
+        // hydrates it after the first render, and the art URLs bake the base.
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChangedHandler;
+    }
+
+    private void OnBaseChangedHandler() => InvokeAsync(StateHasChanged);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _cards.Count == 0) return;
@@ -135,6 +144,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChangedHandler;
         try
         {
             if (_js is not null)

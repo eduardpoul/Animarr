@@ -77,6 +77,15 @@
     private DotNetObjectReference<NextUpRail>? _selfRef;
     private bool _canLeft, _canRight, _railInit;
 
+    protected override void OnInitialized()
+    {
+        // Re-render when the active server URL flips — the MAUI hybrid boot
+        // hydrates it after the first render, and the art URLs bake the base.
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChangedHandler;
+    }
+
+    private void OnBaseChangedHandler() => InvokeAsync(StateHasChanged);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (_railInit || Items.Length == 0) return;
@@ -108,6 +117,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChangedHandler;
         try
         {
             if (_js is not null)
