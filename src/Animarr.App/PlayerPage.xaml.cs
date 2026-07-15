@@ -98,8 +98,14 @@ public partial class PlayerPage : ContentPage
         AudioFocus.Command     = new Command(OpenAudioSheet);
         SubsFocus.Command      = new Command(OpenSubsSheet);
         QualityFocus.Command   = new Command(OpenQualitySheet);
+        AspectFocus.Command    = new Command(OpenAspectSheet);
         InfoFocus.Command      = new Command(ShowInfo);
         VolumeSliderFocus.Command = new Command(CloseSheet);
+
+        // Re-apply the remembered aspect mode ("default" = fit/letterbox) —
+        // the raw TextureView stretches non-16:9 sources without it.
+        _aspect = Preferences.Default.Get("player_aspect", "default");
+        _ = NativePlayerService.Instance?.SetAspectRatioAsync(_aspect);
 
         RootGrid.Loaded += (_, _) => AttachAndStart();
     }
@@ -560,6 +566,30 @@ public partial class PlayerPage : ContentPage
                 FlashInfo($"Субтитры: {t.Label}");
             }));
         OpenListSheet("СУБТИТРЫ", rows, SubsButton);
+    }
+
+    // Aspect ratio ------------------------------------------------------------
+    private string _aspect = "default";
+
+    private void OpenAspectSheet()
+    {
+        var rows = new List<SheetRow>
+        {
+            new("Авто (вписать)",        _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
+            new("Растянуть на экран",    _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
+            new("Заполнить (обрезать)",  _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
+            new("16:9",                  _aspect == "16:9",          () => ApplyAspect("16:9", "16:9")),
+            new("4:3",                   _aspect == "4:3",           () => ApplyAspect("4:3", "4:3")),
+        };
+        OpenListSheet("СООТНОШЕНИЕ СТОРОН", rows, AspectButton);
+    }
+
+    private void ApplyAspect(string value, string label)
+    {
+        _aspect = value;
+        Preferences.Default.Set("player_aspect", value);
+        _ = NativePlayerService.Instance?.SetAspectRatioAsync(value);
+        FlashInfo($"Формат: {label}");
     }
 
     private void OpenQualitySheet()
