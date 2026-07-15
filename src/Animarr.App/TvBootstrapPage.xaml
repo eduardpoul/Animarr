@@ -4,7 +4,7 @@
              x:Class="Animarr.App.TvBootstrapPage"
              BackgroundColor="#0a0c10">
     <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="26">
-        <Label Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack"
+        <Label Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold"
                FontSize="46" CharacterSpacing="5" HorizontalOptions="Center" />
         <ActivityIndicator IsRunning="True" Color="#e8772e" HorizontalOptions="Center" />
         <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"

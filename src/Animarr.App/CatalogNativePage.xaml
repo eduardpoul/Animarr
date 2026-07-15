@@ -5,132 +5,162 @@
              x:Class="Animarr.App.CatalogNativePage"
              x:Name="Root"
              BackgroundColor="#0a0c10">
-    <Grid>
-        <ScrollView>
-            <VerticalStackLayout Spacing="6">
+    <ScrollView>
+        <VerticalStackLayout Spacing="0">
 
-                <!-- ── HERO ─────────────────────────────────────────────── -->
-                <Grid HeightRequest="380">
-                    <Image Source="{Binding Hero.Backdrop, Source={x:Reference Root}}"
-                           Aspect="AspectFill" />
-                    <BoxView InputTransparent="True">
-                        <BoxView.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                <GradientStop Color="#F00a0c10" Offset="0" />
-                                <GradientStop Color="#000a0c10" Offset="0.7" />
-                            </LinearGradientBrush>
-                        </BoxView.Background>
-                    </BoxView>
-                    <BoxView InputTransparent="True">
-                        <BoxView.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                <GradientStop Color="Transparent" Offset="0.4" />
-                                <GradientStop Color="#FF0a0c10" Offset="1" />
-                            </LinearGradientBrush>
-                        </BoxView.Background>
-                    </BoxView>
-                    <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
-                                         Padding="60,0,0,30" Spacing="8" MaximumWidthRequest="820">
-                        <Label Text="{Binding Hero.Eyebrow, Source={x:Reference Root}}"
-                               TextColor="#e8a33d" FontFamily="GeistMono" FontSize="11"
-                               CharacterSpacing="2.5" />
-                        <Label Text="{Binding Hero.Title, Source={x:Reference Root}}"
-                               TextColor="White" FontFamily="ArchivoBlack" FontSize="42"
-                               MaxLines="2" LineBreakMode="TailTruncation" />
-                        <Label Text="{Binding Hero.Meta, Source={x:Reference Root}}"
-                               TextColor="#cfd3da" FontFamily="GeistMono" FontSize="13"
-                               CharacterSpacing="0.5" Margin="0,2,0,0" />
-                        <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
-                                BackgroundColor="#e8772e" Padding="26,12"
-                                HorizontalOptions="Start" Margin="0,12,0,0">
-                            <Border.Behaviors>
-                                <local:TvFocusBehavior x:Name="HeroFocus" Radius="8" />
-                            </Border.Behaviors>
-                            <Label Text="▶   Смотреть" TextColor="White" FontFamily="Geist" FontSize="15" />
-                        </Border>
-                    </VerticalStackLayout>
-                </Grid>
+            <!-- ── HERO (top bar lives INSIDE so it scrolls away with the page) ── -->
+            <Grid HeightRequest="470">
+                <Image Source="{Binding Hero.Backdrop, Source={x:Reference Root}}"
+                       Aspect="AspectFill" />
+                <BoxView InputTransparent="True">
+                    <BoxView.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#F00a0c10" Offset="0" />
+                            <GradientStop Color="#000a0c10" Offset="0.72" />
+                        </LinearGradientBrush>
+                    </BoxView.Background>
+                </BoxView>
+                <BoxView InputTransparent="True">
+                    <BoxView.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="Transparent" Offset="0.42" />
+                            <GradientStop Color="#FF0a0c10" Offset="1" />
+                        </LinearGradientBrush>
+                    </BoxView.Background>
+                </BoxView>
 
-                <!-- ── RAILS (BindableLayout so each poster is a real focus target) ── -->
-                <VerticalStackLayout Spacing="28" Padding="0,12,0,60"
-                        BindableLayout.ItemsSource="{Binding Rails, Source={x:Reference Root}}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate>
-                            <VerticalStackLayout Spacing="12">
-                                <Label Text="{Binding Title}" TextColor="#e8eaed"
-                                       FontFamily="Geist" FontSize="20" Margin="60,0,0,0" />
-                                <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
-                                    <HorizontalStackLayout Spacing="16" Padding="60,6,40,10"
-                                            BindableLayout.ItemsSource="{Binding Items}">
-                                        <BindableLayout.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                                                        BackgroundColor="#15171d" WidthRequest="170">
-                                                    <Border.Behaviors>
-                                                        <local:TvFocusBehavior Radius="10" Command="{Binding Open}" />
-                                                    </Border.Behaviors>
-                                                    <Grid RowDefinitions="255,Auto">
-                                                        <Grid Grid.Row="0">
-                                                            <Image Source="{Binding ImageUrl}" Aspect="AspectFill" />
-                                                            <BoxView InputTransparent="True">
-                                                                <BoxView.Background>
-                                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                                        <GradientStop Color="Transparent" Offset="0.55" />
-                                                                        <GradientStop Color="#D90A0807" Offset="1.0" />
-                                                                    </LinearGradientBrush>
-                                                                </BoxView.Background>
-                                                            </BoxView>
-                                                            <Border InputTransparent="True" HorizontalOptions="Start"
-                                                                    VerticalOptions="Start" Margin="8" Padding="6,2"
-                                                                    IsVisible="{Binding HasType}"
-                                                                    StrokeThickness="1" Stroke="#1FFFFFFF"
-                                                                    StrokeShape="RoundRectangle 3" BackgroundColor="#8C000000">
-                                                                <Label Text="{Binding TypeLabel}" FontFamily="GeistMono"
-                                                                       FontSize="8" TextColor="White" CharacterSpacing="1.4" />
-                                                            </Border>
-                                                            <ProgressBar Progress="{Binding Progress}"
-                                                                         IsVisible="{Binding HasProgress}"
-                                                                         ProgressColor="#e8772e" VerticalOptions="End"
-                                                                         InputTransparent="True" />
-                                                        </Grid>
-                                                        <Label Grid.Row="1" Text="{Binding Title}" FontFamily="Geist"
-                                                               FontSize="12" TextColor="White" MaxLines="2"
-                                                               LineBreakMode="TailTruncation" Padding="10,7,10,10"
-                                                               HeightRequest="54" />
-                                                    </Grid>
-                                                </Border>
-                                            </DataTemplate>
-                                        </BindableLayout.ItemTemplate>
-                                    </HorizontalStackLayout>
-                                </ScrollView>
-                            </VerticalStackLayout>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
+                <VerticalStackLayout VerticalOptions="End" HorizontalOptions="Start"
+                                     Padding="24,0,0,30" Spacing="0" MaximumWidthRequest="900">
+                    <Label Text="{Binding Hero.Eyebrow, Source={x:Reference Root}}"
+                           TextColor="#e8a33d" FontFamily="GeistMono" FontSize="10"
+                           CharacterSpacing="2.5" />
+                    <Label Text="{Binding Hero.Title, Source={x:Reference Root}}"
+                           TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="31"
+                           MaxLines="2" LineBreakMode="TailTruncation" Margin="0,8,0,0" />
+                    <!-- compact web-style meta: "2022  S03  E12" + orange percent -->
+                    <HorizontalStackLayout Spacing="18" Margin="0,9,0,0">
+                        <Label Text="{Binding Hero.MetaLine, Source={x:Reference Root}}"
+                               TextColor="#c7ccd4" FontFamily="GeistMono" FontSize="12"
+                               CharacterSpacing="1" />
+                        <Label Text="{Binding Hero.Percent, Source={x:Reference Root}}"
+                               IsVisible="{Binding Hero.HasPercent, Source={x:Reference Root}}"
+                               TextColor="#e8a33d" FontFamily="GeistMono" FontSize="12"
+                               FontAttributes="Bold" CharacterSpacing="1" />
+                    </HorizontalStackLayout>
+                    <!-- thin resume bar: hand-rolled track+fill (a native
+                         ProgressBar renders its track as a fat light stripe) -->
+                    <Grid HeightRequest="4" WidthRequest="330" HorizontalOptions="Start"
+                          Margin="0,9,0,0"
+                          IsVisible="{Binding Hero.HasProgress, Source={x:Reference Root}}">
+                        <BoxView Color="#2EFFFFFF" CornerRadius="2" />
+                        <BoxView Color="#e8772e" CornerRadius="2" HorizontalOptions="Start"
+                                 WidthRequest="{Binding Hero.ProgressWidth, Source={x:Reference Root}}" />
+                    </Grid>
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 8"
+                            BackgroundColor="#e8772e" Padding="24,11"
+                            HorizontalOptions="Start" Margin="0,16,0,0">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="HeroFocus" Radius="8" />
+                        </Border.Behaviors>
+                        <Label Text="{Binding Hero.ButtonText, Source={x:Reference Root}}"
+                               TextColor="White" FontFamily="Geist" FontSize="14" />
+                    </Border>
                 </VerticalStackLayout>
+
+                <!-- web-style pager (variant G): ‹ dashes › — flips the hero feed -->
+                <HorizontalStackLayout x:Name="HeroPager" IsVisible="False"
+                                       VerticalOptions="End" HorizontalOptions="Center"
+                                       Spacing="12" Margin="0,0,0,16">
+                    <Border WidthRequest="36" HeightRequest="36" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 18" BackgroundColor="#B3151a21"
+                            VerticalOptions="Center">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="HeroPrevFocus" Radius="18" />
+                        </Border.Behaviors>
+                        <Label Text="‹" TextColor="#cfd3da" FontSize="20"
+                               HorizontalOptions="Center" VerticalOptions="Center"
+                               Margin="0,-3,0,0" />
+                    </Border>
+                    <HorizontalStackLayout x:Name="HeroDashes" Spacing="6"
+                                           VerticalOptions="Center" />
+                    <Border WidthRequest="36" HeightRequest="36" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 18" BackgroundColor="#B3151a21"
+                            VerticalOptions="Center">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="HeroNextFocus" Radius="18" />
+                        </Border.Behaviors>
+                        <Label Text="›" TextColor="#cfd3da" FontSize="20"
+                               HorizontalOptions="Center" VerticalOptions="Center"
+                               Margin="0,-3,0,0" />
+                    </Border>
+                </HorizontalStackLayout>
+
+                <!-- top bar: overlays the hero backdrop, scrolls away with it -->
+                <Grid VerticalOptions="Start" Padding="24,18,24,0"
+                      ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                    <Label Grid.Column="0" Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold"
+                           FontSize="19" CharacterSpacing="3" VerticalOptions="Center" />
+
+                    <!-- circular 36dp chips (48 read huge); the -1.5 lift centers the
+                         emoji glyph, whose baseline sits visibly low -->
+                    <Border Grid.Column="2" WidthRequest="36" HeightRequest="36" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 18" BackgroundColor="#B3151a21">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="SearchFocus" Radius="18" />
+                        </Border.Behaviors>
+                        <Label Text="🔍" FontSize="13" HorizontalOptions="Center" VerticalOptions="Center"
+                               TranslationY="-1.5" />
+                    </Border>
+
+                    <Border Grid.Column="3" WidthRequest="36" HeightRequest="36" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 18" BackgroundColor="#e8772e">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="ProfileFocus" Radius="18" />
+                        </Border.Behaviors>
+                        <Label Text="👤" FontSize="13" HorizontalOptions="Center" VerticalOptions="Center"
+                               TranslationY="-1.5" />
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <!-- ── СМОТРЕТЬ ДАЛЬШЕ (small landscape resume cards, web-sized).
+                 Cards are code-built (TvCards.BuildContinueCard): the episode
+                 frame downloads through the authenticated HttpClient with an
+                 instant fanart fallback, and D-pad commands attach directly. ── -->
+            <VerticalStackLayout x:Name="ContinueSection" Spacing="12" Margin="0,18,0,0"
+                                 IsVisible="False">
+                <Label x:Name="ContinueTitle" Text="Смотреть дальше" TextColor="#e8eaed"
+                       FontFamily="Geist" FontSize="18" FontAttributes="Bold" Margin="24,0,0,0" />
+                <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout x:Name="ContinueHost" Spacing="14" Padding="24,6,24,10" />
+                </ScrollView>
             </VerticalStackLayout>
-        </ScrollView>
 
-        <!-- ── TOP BAR (overlay) ────────────────────────────────────────── -->
-        <Grid VerticalOptions="Start" Padding="60,22,32,0" ColumnDefinitions="Auto,*,Auto,Auto"
-              ColumnSpacing="12">
-            <Label Grid.Column="0" Text="ANIMARR" TextColor="White" FontFamily="ArchivoBlack"
-                   FontSize="22" CharacterSpacing="3" VerticalOptions="Center" />
+            <!-- ── НА ЭТОЙ НЕДЕЛЕ: airing calendar rail (web ThisWeekRail) ────── -->
+            <VerticalStackLayout x:Name="WeekSection" Spacing="12" Margin="0,20,0,0"
+                                 IsVisible="False">
+                <Label x:Name="WeekTitle" Text="На этой неделе" TextColor="#e8eaed"
+                       FontFamily="Geist" FontSize="18" FontAttributes="Bold" Margin="24,0,0,0" />
+                <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout x:Name="WeekHost" Spacing="14" Padding="24,6,24,10" />
+                </ScrollView>
+            </VerticalStackLayout>
 
-            <Border Grid.Column="2" WidthRequest="48" HeightRequest="48" StrokeThickness="0"
-                    StrokeShape="RoundRectangle 12" BackgroundColor="#B3151a21">
-                <Border.Behaviors>
-                    <local:TvFocusBehavior x:Name="SearchFocus" Radius="12" />
-                </Border.Behaviors>
-                <Label Text="🔍" FontSize="18" HorizontalOptions="Center" VerticalOptions="Center" />
-            </Border>
-
-            <Border Grid.Column="3" WidthRequest="48" HeightRequest="48" StrokeThickness="0"
-                    StrokeShape="RoundRectangle 12" BackgroundColor="#e8772e">
-                <Border.Behaviors>
-                    <local:TvFocusBehavior x:Name="ProfileFocus" Radius="12" />
-                </Border.Behaviors>
-                <Label Text="👤" FontSize="18" HorizontalOptions="Center" VerticalOptions="Center" />
-            </Border>
-        </Grid>
-    </Grid>
+            <!-- ── БИБЛИОТЕКА: two-row poster grid + "Просмотреть все" tile ───── -->
+            <VerticalStackLayout x:Name="LibrarySection" Spacing="12" Padding="0,20,0,60"
+                                 IsVisible="False">
+                <Label x:Name="LibraryTitle" Text="Библиотека" TextColor="#e8eaed"
+                       FontFamily="Geist" FontSize="18" FontAttributes="Bold" Margin="24,0,0,0" />
+                <!-- source/section filter (web topbar pills): All + server sections -->
+                <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout x:Name="SectionsHost" Spacing="8" Padding="24,2,24,2" />
+                </ScrollView>
+                <!-- right margin is 14 (not 24): the last card in a row carries
+                     its own 10dp gap margin, so 14+10 balances the 24 left -->
+                <FlexLayout x:Name="LibraryHost" Wrap="Wrap" Direction="Row"
+                            JustifyContent="Start" AlignItems="Start" AlignContent="Start"
+                            Margin="24,6,14,0" />
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
 </ContentPage>
