@@ -175,13 +175,48 @@ public sealed partial class HlsSessionService : IDisposable
     /// our HLS pipeline where the appropriate <see cref="HlsPlan"/> is picked.
     /// </summary>
     public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath,
-        bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default)
+        bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default,
+        IReadOnlySet<string>? nativeCaps = null)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
         if (probe is null) return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
+
+        // ── Native client (Android TV ExoPlayer) — capability negotiation ──
+        // The browser eligibility rules below are wrong for ExoPlayer: it
+        // demuxes MKV/AVI/TS itself and the device usually decodes MPEG4-ASP,
+        // AC3/E-AC3 etc. The client probes MediaCodecList and sends the token
+        // list (containers + codecs); we serve the widest tier the DEVICE can
+        // take instead of burning CPU on a transcode a browser would need.
+        // Old AVI/XviD rips are the poster child: full re-encode for the web,
+        // plain /api/file for the TV.
+        if (nativeCaps is { Count: > 0 })
+        {
+            bool videoOk = NativeVideoOk(probe, nativeCaps);
+            bool audioOk = NativeTokenOk(probe.AudioCodec, nativeCaps);
+            bool containerOk = nativeCaps.Contains(container);
+
+            if (videoOk && audioOk && containerOk)
+            {
+                var nativeUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
+                var nativeOut = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
+                return new PlaybackDecision(true, nativeUrl, duration, nativeOut);
+            }
+            if (videoOk && !probe.HasDolbyVision)
+            {
+                // Device decodes the video but not the audio (or can't demux the
+                // container) → /api/video: video stream-copy + audio→AAC. Still
+                // ~0% CPU compared to a full re-encode.
+                var remuxUrl = "/api/video?path=" + Uri.EscapeDataString(fullPath);
+                var remuxOut = BuildOutputInfo(probe, plan: null, isDirectPlay: false, isDirectStream: true);
+                return new PlaybackDecision(false, remuxUrl, duration, remuxOut, DirectStream: true);
+            }
+            // Video codec beyond the device → HLS transcode as usual.
+            return new PlaybackDecision(false, null, duration, null);
+        }
+
         if (IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/file serves the raw bytes with Range support — exactly what
@@ -283,6 +318,49 @@ public sealed partial class HlsSessionService : IDisposable
             AudioLanguage:   probe.AudioLanguage ?? "",
             Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason);
+    }
+
+    /// <summary>Video eligibility against the native client's capability tokens.
+    /// 10-bit HEVC needs the explicit <c>hevc10</c> token; Dolby Vision is never
+    /// offered natively (device DV handling is a minefield — HLS path knows how
+    /// to strip/serve it). 10-bit H.264 (High10) has no hardware decoders on
+    /// TV SoCs → transcode.</summary>
+    private static bool NativeVideoOk(ProbeInfo probe, IReadOnlySet<string> caps)
+    {
+        if (probe.HasDolbyVision) return false;
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        return vc switch
+        {
+            "h264"  => !probe.Is10Bit && caps.Contains("h264"),
+            "hevc"  => caps.Contains(probe.Is10Bit ? "hevc10" : "hevc"),
+            "mpeg4" => caps.Contains("mpeg4"),
+            "mpeg2" or "mpeg2video" => caps.Contains("mpeg2"),
+            "vp9"   => caps.Contains("vp9"),
+            "vp8"   => caps.Contains("vp8"),
+            "av1"   => caps.Contains("av1"),
+            _       => false,
+        };
+    }
+
+    /// <summary>Audio token check with the ffprobe→token aliases the client
+    /// derives from Android mime types.</summary>
+    private static bool NativeTokenOk(string? codec, IReadOnlySet<string> caps)
+    {
+        var c = (codec ?? "").ToLowerInvariant();
+        return c switch
+        {
+            "aac" or "mp4a"        => caps.Contains("aac"),
+            "mp3" or "mp2"         => caps.Contains("mp3"),
+            "ac3"                  => caps.Contains("ac3"),
+            "eac3" or "eac3_joc"   => caps.Contains("eac3"),
+            "dts"                  => caps.Contains("dts"),
+            "truehd"               => caps.Contains("truehd"),
+            "opus"                 => caps.Contains("opus"),
+            "vorbis"               => caps.Contains("vorbis"),
+            "flac"                 => caps.Contains("flac"),
+            _ when c.StartsWith("pcm") => caps.Contains("pcm"),
+            _                      => false,
+        };
     }
 
     private static bool IsDirectPlayEligible(string container, ProbeInfo probe, bool clientHevc, bool clientHevc10)
