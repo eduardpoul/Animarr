@@ -56,6 +56,13 @@ internal static class HlsEndpoints
             // Same flag for 10-bit / Main10 HEVC — gates Direct Play of HDR10 MP4s
             // (so they play on a native <video> where RTX VSR / HDR can engage).
             string? clientHevc10,
+            // Native (Android TV ExoPlayer) capability tokens, comma-separated:
+            // containers + codecs the DEVICE can demux/decode, probed from
+            // MediaCodecList (e.g. "mkv,avi,h264,mpeg4,ac3,aac"). When present,
+            // playback eligibility uses these instead of the browser rules —
+            // an AVI/XviD that would cost a full transcode for the web goes out
+            // as a raw /api/file to the TV.
+            string? nativeCaps,
             // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
@@ -98,8 +105,13 @@ internal static class HlsEndpoints
             // where maxHeight/maxBitrate actually apply. Same for an external dub,
             // which needs the HLS mux to combine foreign audio with the video.
             bool wantCap = (maxHeight ?? 0) > 0 || (maxBitrate ?? 0) > 0;
+            IReadOnlySet<string>? caps = string.IsNullOrWhiteSpace(nativeCaps)
+                ? null
+                : nativeCaps.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                            .Select(t => t.ToLowerInvariant())
+                            .ToHashSet();
             var decision = externalAudioFull is null && !wantCap
-                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10)
+                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, nativeCaps: caps)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
