@@ -106,6 +106,28 @@ RUN apt-get update && \
     cp /tmp/ffmpeg-*/bin/ffmpeg /tmp/ffmpeg-*/bin/ffprobe /opt/ffmpeg/bin/ && \
     /opt/ffmpeg/bin/ffmpeg -version
 
+# libva ≥ 2.21 — the static BtbN ffmpeg calls vaMapBuffer2 (added in libva
+# 2.21) on the sw-decode → hwupload → h264_vaapi path (legacy-codec transcode
+# offload). Ubuntu Noble ships libva 2.20, and the lazily-bound symbol aborts
+# ffmpeg (implib assert) the first time hwupload runs. Build 2.22 from source
+# (a tiny meson project, libdrm the only dep) and overlay it over the distro
+# libs in the final stage. Same soname (libva.so.2) — mesa's radeonsi VA
+# driver keeps working, ABI is backward compatible.
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS libva
+ARG LIBVA_URL=https://github.com/intel/libva/archive/refs/tags/2.22.0.tar.gz
+ARG LIBVA_SHA256=467c418c2640a178c6baad5be2e00d569842123763b80507721ab87eb7af8735
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates build-essential meson ninja-build pkg-config libdrm-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL -o /tmp/libva.tar.gz "$LIBVA_URL" && \
+    echo "${LIBVA_SHA256}  /tmp/libva.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/libva.tar.gz -C /tmp && \
+    cd /tmp/libva-2.22.0 && \
+    meson setup build --prefix=/opt/libva --libdir=lib -Ddefault_library=shared \
+        -Ddriverdir=/usr/lib/x86_64-linux-gnu/dri && \
+    ninja -C build install
+
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
@@ -158,6 +180,13 @@ RUN apt-get update && \
 # `ffprobe` child processes resolve to the patched 8.1.2 build. COPY preserves
 # the +x bits set during extraction.
 COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+
+# Overlay libva 2.22 over Noble's 2.20 (see the libva stage above) — required
+# by the static ffmpeg's hwupload path (vaMapBuffer2). Same soname, drop-in.
+COPY --from=libva /opt/libva/lib/libva.so.2.2200.0 /lib/x86_64-linux-gnu/libva.so.2.2200.0
+COPY --from=libva /opt/libva/lib/libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/libva-drm.so.2.2200.0
+RUN ln -sf libva.so.2.2200.0 /lib/x86_64-linux-gnu/libva.so.2 && \
+    ln -sf libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/libva-drm.so.2
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data && chmod 777 /app/data
