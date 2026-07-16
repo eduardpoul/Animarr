@@ -289,13 +289,21 @@ public partial class PlayerPage : ContentPage
 
     private Task StartAsync() => StartStreamAsync(_resumeMs, 0);
 
+    /// <summary>True while the current stream is the /api/video progressive
+    /// remux — a non-seekable ffmpeg pipe. SeekTo on it snaps to 0, so SeekBy
+    /// restarts the stream at the target instead (ffmpeg's -output_ts_offset
+    /// keeps the PTS absolute, so the timeline stays honest).</summary>
+    private bool _isDirectStream;
+    /// <summary>Set after a decoder failure — retry without nativeCaps so the
+    /// server falls back to its transcode pipeline.</summary>
+    private bool _forceTranscode;
+
     /// <summary>
     /// (Re)start the current file at <paramref name="resumeMs"/> (absolute time on
-    /// the real runtime) with an optional height cap. maxHeight 0 = original: the
-    /// server Direct Plays the raw file and ExoPlayer owns an absolute timeline
-    /// (base 0). maxHeight &gt; 0: the server transcodes/downscales and returns an
-    /// HLS manifest already seeked to resumeMs, so ExoPlayer starts at 0 and we
-    /// carry the offset in <see cref="_streamBaseMs"/>.
+    /// the real runtime) with an optional height cap. Sends the device's decoder
+    /// capabilities (nativeCaps) so the server Direct Plays anything ExoPlayer
+    /// handles itself (MKV/AVI/MPEG4/AC3 …) instead of transcoding "for a
+    /// browser". maxHeight &gt; 0 forces the HLS transcode path with a cap.
     /// </summary>
     private async Task StartStreamAsync(long resumeMs, int maxHeight)
     {
@@ -305,6 +313,12 @@ public partial class PlayerPage : ContentPage
             var seekSec = resumeMs / 1000;
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
                       $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1";
+            if (!_forceTranscode)
+            {
+                var caps = Services.TvCodecCaps.Get();
+                if (!string.IsNullOrEmpty(caps))
+                    url += $"&nativeCaps={Uri.EscapeDataString(caps)}";
+            }
             var resp = await _http.PostAsync(url, null);
             StartResponse? body = null;
             if (resp.IsSuccessStatusCode)
@@ -312,19 +326,31 @@ public partial class PlayerPage : ContentPage
 
             _knownDurationMs = (long)((body?.TotalDuration ?? 0) * 1000);
 
+            bool directPlay   = !string.IsNullOrEmpty(body?.DirectPlayUrl);
+            bool directStream = !string.IsNullOrEmpty(body?.DirectStreamUrl) && !directPlay;
             var mediaUrl = Abs(body?.DirectPlayUrl ?? body?.DirectStreamUrl ?? body?.ManifestUrl);
-            bool direct = !string.IsNullOrEmpty(body?.DirectPlayUrl)
-                       || !string.IsNullOrEmpty(body?.DirectStreamUrl);
             if (string.IsNullOrEmpty(mediaUrl))
             {
                 mediaUrl = $"{ImageBase}/api/file?path={Uri.EscapeDataString(_filePath)}";
-                direct = true;   // raw-file fallback → absolute timeline
+                directPlay = true;   // raw-file fallback → absolute timeline
             }
+            _isDirectStream = directStream;
 
-            if (direct)
+            if (directPlay)
             {
+                // Range-seekable raw file — ExoPlayer owns an absolute timeline.
                 _streamBaseMs = 0;
                 NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs);
+            }
+            else if (directStream)
+            {
+                // Progressive remux pipe: NOT seekable — bake the offset into the
+                // request instead of SeekTo (which would snap to 0). The pipe's
+                // PTS carry the absolute offset, so no base correction needed.
+                if (seekSec > 0)
+                    mediaUrl += (mediaUrl.Contains('?') ? "&" : "?") + $"seek={seekSec}";
+                _streamBaseMs = 0;
+                NativePlayerService.Instance?.PlayAsync(mediaUrl, 0);
             }
             else
             {
@@ -376,6 +402,7 @@ public partial class PlayerPage : ContentPage
         // Fresh episode → back to original quality + absolute timeline, drop stale
         // skip segments (they're re-fetched for the new episode).
         _maxHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
+        _isDirectStream = false; _forceTranscode = false;   // per-file decisions
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
         EyebrowLabel.Text = _episode is not null
@@ -423,6 +450,17 @@ public partial class PlayerPage : ContentPage
         long dur    = _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs;
         long absPos = _streamBaseMs + st.PositionMs;
         _durationMs = dur;
+
+        // Capability negotiation safety net: the device ADVERTISED a decoder
+        // but it failed at runtime (rare vendor quirks) → retry once with
+        // nativeCaps off, which sends the server down its transcode pipeline.
+        if (!string.IsNullOrEmpty(st.ErrorMessage) && !_forceTranscode)
+        {
+            _forceTranscode = true;
+            FlashInfo("Формат не пошёл — переключаюсь на транскод");
+            _ = StartStreamAsync(absPos, _maxHeight);
+            return;
+        }
 
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
@@ -754,6 +792,14 @@ public partial class PlayerPage : ContentPage
         long dur = _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs;
         long absPos = _streamBaseMs + st.PositionMs;
         long target = Math.Clamp(absPos + deltaMs, 0, dur > 0 ? dur : long.MaxValue);
+        // The /api/video remux pipe is NOT seekable — ExoPlayer.SeekTo snaps it
+        // to 0 (the tester's "+10 resets to start"). Re-request the stream at
+        // the target instead; PTS stay absolute via -output_ts_offset.
+        if (_isDirectStream)
+        {
+            _ = StartStreamAsync(target, _maxHeight);
+            return;
+        }
         // Back to the stream's own timeline: 0 for Direct Play; a seeked HLS
         // transcode can't rewind before its base, so clamp there.
         long rel = target - _streamBaseMs;
