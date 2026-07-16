@@ -141,9 +141,15 @@ public sealed partial class HlsSessionService
 
         // Anything else — mpeg4/XviD (AVI), MPEG-2, VC-1, MPEG-1, … — the browser
         // can't play it and it can't be stream-copied into fMP4 (AVI carries no
-        // valid pts → "pts has no value"). Re-encode to H.264. Software decode is
-        // the safe choice: VAAPI/NVENC may not decode these legacy codecs, and
-        // such files are usually low-res so libx264 is cheap.
+        // valid pts → "pts has no value"). Re-encode to H.264. DECODE stays in
+        // software (GPU decoders rarely accept these legacy codecs — the arg
+        // builders skip -hwaccel for them), but the ENCODE — the expensive
+        // half — goes to the GPU when one is present: sw-decode → hwupload →
+        // h264_vaapi (or h264_nvenc straight from system frames). "libx264 is
+        // cheap for low-res" proved false in practice: a 704×396 XviD pinned a
+        // Ryzen 2400GE at ~80% total.
+        if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
+        if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;
         return HlsPlan.Fmp4SoftwareReencode;
     }
 

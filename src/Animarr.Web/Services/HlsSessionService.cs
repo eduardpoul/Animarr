@@ -289,8 +289,8 @@ public sealed partial class HlsSessionService : IDisposable
         string? reason = isDirectPlay || isDirectStream ? null : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
-            HlsPlan.Fmp4VaapiReencode => "HEVC 8-bit re-encoded to H.264 via VAAPI for browser compatibility (HDR lost)",
-            HlsPlan.Fmp4NvencReencode => "HEVC re-encoded to H.264 via NVENC for browser compatibility (HDR lost)",
+            HlsPlan.Fmp4VaapiReencode => "Re-encoded to H.264 via VAAPI (GPU) for browser compatibility (HDR lost)",
+            HlsPlan.Fmp4NvencReencode => "Re-encoded to H.264 via NVENC (GPU) for browser compatibility (HDR lost)",
             HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality (HDR lost)",
             HlsPlan.Fmp4StreamCopy    => "HEVC stream-copied to fMP4 — original bitstream, no re-encode (browser decodes HEVC; HDR/10-bit preserved)",
             _                          => null,
