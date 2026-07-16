@@ -55,11 +55,11 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate);
+                    externalAudioPath, maxBitrate, videoCodec);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate);
+                    externalAudioPath, maxBitrate, videoCodec);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
@@ -197,7 +197,7 @@ public sealed partial class HlsSessionService
     /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0)
+        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -211,10 +211,19 @@ public sealed partial class HlsSessionService
         // always err on the late side. Implementation: a second ffmpeg input
         // with -itsoffset — the only PTS-shift mechanism the HLS fMP4 muxer
         // respects (filter-graph adelay/aresample get re-aligned away).
+        //
+        // Decode side: only H.264/HEVC go through the VAAPI DECODER. Legacy
+        // codecs (mpeg4/XviD, MPEG-2, VC-1 …) are decoded in software — cheap —
+        // and the frames are hwupload'ed so the ENCODE still runs on the GPU.
+        var vc = (videoCodec ?? "").ToLowerInvariant();
+        bool hwDecode = vc is "h264" or "hevc";
         args.Add("-vaapi_device");
         args.Add("/dev/dri/renderD128");
-        args.Add("-hwaccel"); args.Add("vaapi");
-        args.Add("-hwaccel_output_format"); args.Add("vaapi");
+        if (hwDecode)
+        {
+            args.Add("-hwaccel"); args.Add("vaapi");
+            args.Add("-hwaccel_output_format"); args.Add("vaapi");
+        }
 
         // Input #0 — video (GPU-decoded).
         if (seekSec > 0)
@@ -242,9 +251,20 @@ public sealed partial class HlsSessionService
         {
             args.Add("-copyts");
         }
-        var vf = "format=nv12|vaapi,hwupload";
-        if (targetHeight > 0)
-            vf = $"scale_vaapi=w=-2:h={targetHeight}:format=nv12,{vf}";
+        string vf;
+        if (hwDecode)
+        {
+            vf = "format=nv12|vaapi,hwupload";
+            if (targetHeight > 0)
+                vf = $"scale_vaapi=w=-2:h={targetHeight}:format=nv12,{vf}";
+        }
+        else
+        {
+            // Software-decoded frames: upload first, then scale ON the GPU.
+            vf = "format=nv12,hwupload";
+            if (targetHeight > 0)
+                vf += $",scale_vaapi=w=-2:h={targetHeight}";
+        }
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
@@ -270,14 +290,20 @@ public sealed partial class HlsSessionService
     /// reintroduce the fMP4 TFDT sync wobble.</summary>
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0)
+        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
-        // CPU↔GPU bounce. `auto` lets ffmpeg pick the right NVDEC for the
-        // source codec (h264_nvdec, hevc_nvdec, etc.).
-        args.Add("-hwaccel"); args.Add("cuda");
-        args.Add("-hwaccel_output_format"); args.Add("cuda");
+        // CPU↔GPU bounce. Legacy codecs NVDEC can't decode (mpeg4/XviD, VC-1 …)
+        // are decoded in software; h264_nvenc happily encodes system-memory
+        // frames, so the expensive half still runs on the GPU.
+        var vc = (videoCodec ?? "").ToLowerInvariant();
+        bool hwDecode = vc is "h264" or "hevc";
+        if (hwDecode)
+        {
+            args.Add("-hwaccel"); args.Add("cuda");
+            args.Add("-hwaccel_output_format"); args.Add("cuda");
+        }
 
         // Input #0 — video, GPU-decoded.
         if (seekSec > 0)
@@ -303,11 +329,16 @@ public sealed partial class HlsSessionService
         {
             args.Add("-copyts");
         }
-        // Optional scale on GPU via scale_cuda. nv12 output format for
-        // NVENC compatibility.
-        var vf = targetHeight > 0
-            ? $"scale_cuda=w=-2:h={targetHeight}:format=nv12"
-            : "scale_cuda=format=nv12";
+        // Optional scale: on-GPU via scale_cuda for GPU-decoded frames;
+        // plain CPU scale for software-decoded legacy codecs (NVENC takes
+        // system-memory nv12/yuv420p frames directly).
+        var vf = hwDecode
+            ? (targetHeight > 0
+                ? $"scale_cuda=w=-2:h={targetHeight}:format=nv12"
+                : "scale_cuda=format=nv12")
+            : (targetHeight > 0
+                ? $"scale=-2:{targetHeight},format=nv12"
+                : "format=nv12");
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
