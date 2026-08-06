@@ -249,6 +249,10 @@ public static class ApiRoutes
     /// registry to refresh stale entries (title count / version drift).</summary>
     public const string ServerInfo   = "/api/server/info";
 
+    /// <summary>Anonymous summary for external dashboards (e.g. Homepage's
+    /// customapi widget). Aggregates only — returns <c>ServerDashboardDto</c>.</summary>
+    public const string ServerDashboard = "/api/server/dashboard";
+
     // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
     /// <summary>POST anonymous — TV asks for a fresh 6-char pair code +
     /// QR payload. Returns <c>PairInitDto</c>.</summary>

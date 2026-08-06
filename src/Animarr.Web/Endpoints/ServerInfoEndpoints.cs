@@ -80,6 +80,35 @@ internal static class ServerInfoEndpoints
                 ServerId:      serverId!));
         }).AllowAnonymous();
 
+        // GET /api/server/dashboard — anonymous aggregates for external
+        // dashboards (Homepage's customapi widget, polled every minute).
+        // Same reasoning as /api/server/info above: no titles, no users, no
+        // paths — just COUNT/SUM over indexed columns, cheap enough for a
+        // SQLite database to answer once a minute forever. Deliberately
+        // excludes on-disk library size (would mean walking the filesystem)
+        // and download SPEED (TorrentRecord only has cumulative Downloaded/
+        // Uploaded, not bytes/sec — that lives in the live torrent engine,
+        // not the DB, and would need a different source if ever added).
+        app.MapGet(ApiRoutes.ServerDashboard, async (
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var weekAgo = DateTime.UtcNow.AddDays(-7);
+
+            var downloading = db.TorrentRecords
+                .Where(t => t.State == Animarr.Web.Data.Models.TorrentRecordState.Downloading);
+
+            return Results.Ok(new ServerDashboardDto(
+                Titles:                await db.MediaItems.CountAsync(ct),
+                TitlesAddedWeek:       await db.MediaItems.CountAsync(m => m.CreatedAt >= weekAgo, ct),
+                EpisodesOnDisk:        await db.EpisodeFileMappings.CountAsync(ct),
+                TorrentsDownloading:   await downloading.CountAsync(ct),
+                TorrentsSeeding:       await db.TorrentRecords
+                                           .CountAsync(t => t.State == Animarr.Web.Data.Models.TorrentRecordState.Seeding, ct),
+                DownloadingBytesTotal: await downloading.SumAsync(t => t.TotalSize, ct),
+                DownloadingBytesDone:  await downloading.SumAsync(t => t.Downloaded, ct)));
+        }).AllowAnonymous();
+
         return app;
     }
 }
