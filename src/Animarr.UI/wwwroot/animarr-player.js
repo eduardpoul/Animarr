@@ -1449,6 +1449,10 @@
         let hideTimer = null;
         let hovering = false;
         let dragging = false;
+        // How long the Skip-intro pill / Up-Next card force themselves visible
+        // when they first pop up, regardless of the HUD's own state — see
+        // applyFloatingVisibility().
+        const ANNOUNCE_MS = 5000;
         function show() {
             hud.classList.remove('vp-hud--hidden');
             hud.setAttribute('data-visible', 'true');
@@ -1478,17 +1482,24 @@
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         }
         // Skip-intro pill and the Up-Next card float above the HUD's control
-        // bars but must still follow its visibility — otherwise a bright "Skip
-        // intro" pill (or the Up-Next card) is left floating alone once the rest
-        // of the controls have faded out. Each element's OWN logic (intro/credits
-        // time window) still decides whether it WANTS to be shown; this only
-        // gates the two against the HUD's current shown/hidden state. Called
-        // whenever either changes: show()/hideNow()/pause (HUD) and
-        // setSkip/hideSkip/showUpNext/hideUpNext (their own want-shown state).
+        // bars. Each has two phases once its own logic (intro/credits time
+        // window) says it wants to be shown:
+        //   1. ANNOUNCE (first ANNOUNCE_MS): forced visible regardless of the
+        //      HUD's own state — a self-contained "heads up, you can skip this"
+        //      toast, so it's not missed just because the HUD happened to be
+        //      auto-hidden when the window started.
+        //   2. FOLLOW (after ANNOUNCE_MS, for the rest of the window): visible
+        //      only while the HUD itself is — otherwise a bright pill (or the
+        //      Up-Next card) is left floating alone once the controls fade.
+        // skipForced/upNextForced flip the gate; setSkip/showUpNext arm the
+        // ANNOUNCE_MS timer that clears them. Called whenever anything relevant
+        // changes: show()/hideNow()/pause (HUD) and setSkip/hideSkip/
+        // showUpNext/hideUpNext (their own want-shown state) and the two
+        // announce timers (phase transition).
         function applyFloatingVisibility() {
             const hudVisible = hud.getAttribute('data-visible') === 'true';
-            skipEl.classList.toggle('vp-skip--hidden', !skipShown || !hudVisible);
-            upNextEl.classList.toggle('vp-upnext--hidden', !upNextShown || !hudVisible);
+            skipEl.classList.toggle('vp-skip--hidden', !skipShown || !(skipForced || hudVisible));
+            upNextEl.classList.toggle('vp-upnext--hidden', !upNextShown || !(upNextForced || hudVisible));
         }
         // Tap-to-toggle: a tap/click on the bare video area reveals the HUD when
         // hidden and hides it when shown (YouTube-style). Controls live in
@@ -1841,6 +1852,7 @@
         const UP_NEXT_FALLBACK_PCT = 0.95;
         const UP_NEXT_COUNTDOWN = 10;   // seconds before end to start auto-advance
         let upNextShown = false, upNextDismissed = false, upNextDone = false, skipCreditsUsed = false;
+        let upNextForced = false, upNextForceTimer = null;
 
         function upNextLabels() { return entry.upNext || {}; }
         function showUpNext() {
@@ -1851,11 +1863,22 @@
             unRefs.name.textContent    = m.name || '';
             unRefs.play.textContent    = m.play || 'Play next';
             unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
+            // Announce phase: force it visible for ANNOUNCE_MS regardless of the
+            // HUD, then hand off to "follow the HUD" for the rest of the credits
+            // (applyFloatingVisibility — see its comment).
+            upNextForced = true;
+            clearTimeout(upNextForceTimer);
+            upNextForceTimer = setTimeout(() => {
+                upNextForced = false;
+                applyFloatingVisibility();
+            }, ANNOUNCE_MS);
             applyFloatingVisibility();
         }
         function hideUpNext() {
             if (!upNextShown) return;
             upNextShown = false;
+            upNextForced = false;
+            clearTimeout(upNextForceTimer);
             applyFloatingVisibility();
         }
         function dismissUpNext() { upNextDismissed = true; hideUpNext(); }
@@ -1924,15 +1947,29 @@
         // under the cursor — same "hovering" latch as the HUD's own control bars.
         skipEl.addEventListener('mouseenter', () => { hovering = true;  show(); });
         skipEl.addEventListener('mouseleave', () => { hovering = false; show(); });
-        let skipShown = false, skipTarget = 0, skipIntroUsed = false;
+        let skipShown = false, skipTarget = 0, skipIntroUsed = false, skipForced = false, skipForceTimer = null;
         function setSkip(label, target) {
             skipTarget = target;
             if (skipEl.textContent !== label) skipEl.textContent = label;
-            if (!skipShown) { skipShown = true; applyFloatingVisibility(); }
+            if (!skipShown) {
+                skipShown = true;
+                // Announce phase: force it visible for ANNOUNCE_MS regardless of
+                // the HUD, then hand off to "follow the HUD" for the rest of the
+                // intro (applyFloatingVisibility — see its comment).
+                skipForced = true;
+                clearTimeout(skipForceTimer);
+                skipForceTimer = setTimeout(() => {
+                    skipForced = false;
+                    applyFloatingVisibility();
+                }, ANNOUNCE_MS);
+                applyFloatingVisibility();
+            }
         }
         function hideSkip() {
             if (!skipShown) return;
             skipShown = false;
+            skipForced = false;
+            clearTimeout(skipForceTimer);
             applyFloatingVisibility();
         }
         // Floating pill for Skip intro only (the opening). Skip credits now lives
@@ -2014,6 +2051,8 @@
             try { touchMql && touchMql.removeEventListener('change', applyTouchMode); }
             catch { try { touchMql && touchMql.removeListener(applyTouchMode); } catch {} }
             if (hideTimer) clearTimeout(hideTimer);
+            clearTimeout(skipForceTimer);
+            clearTimeout(upNextForceTimer);
             try { upNextEl.remove(); } catch {}
             // Restore the system bars + drop the orientation listener so other
             // (non-player) pages get the status bar back.
