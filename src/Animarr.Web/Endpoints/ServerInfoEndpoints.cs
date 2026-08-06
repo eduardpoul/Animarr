@@ -89,6 +89,15 @@ internal static class ServerInfoEndpoints
         // and download SPEED (TorrentRecord only has cumulative Downloaded/
         // Uploaded, not bytes/sec — that lives in the live torrent engine,
         // not the DB, and would need a different source if ever added).
+        //
+        // EpisodesTotal is EpisodeFileMappings' near-namesake NOT what it
+        // sounds like: that table only holds manual/LLM per-file (season,
+        // episode) OVERRIDES (see EpisodeFileMapping's own doc comment) — the
+        // deterministic majority case is resolved on the fly by
+        // MediaFileResolver and never persisted, so there is no cheap DB-only
+        // "episodes on disk" count. Sum(MediaItem.EpisodeCount) — a
+        // denormalised, metadata-sourced total already cached for the catalog
+        // grid — is the closest cheap proxy for library size instead.
         app.MapGet(ApiRoutes.ServerDashboard, async (
             IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
         {
@@ -101,7 +110,7 @@ internal static class ServerInfoEndpoints
             return Results.Ok(new ServerDashboardDto(
                 Titles:                await db.MediaItems.CountAsync(ct),
                 TitlesAddedWeek:       await db.MediaItems.CountAsync(m => m.CreatedAt >= weekAgo, ct),
-                EpisodesOnDisk:        await db.EpisodeFileMappings.CountAsync(ct),
+                EpisodesTotal:         await db.MediaItems.SumAsync(m => m.EpisodeCount ?? 0, ct),
                 TorrentsDownloading:   await downloading.CountAsync(ct),
                 TorrentsSeeding:       await db.TorrentRecords
                                            .CountAsync(t => t.State == Animarr.Web.Data.Models.TorrentRecordState.Seeding, ct),
