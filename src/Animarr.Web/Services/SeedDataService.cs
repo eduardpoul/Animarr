@@ -57,6 +57,21 @@ public class SeedDataService(IDbContextFactory<AppDbContext> dbFactory, ILogger<
             Priority: 50
         ),
         new(
+            "Season-Tagged Episode",
+            // Release tags that carry the season right next to a PER-SEASON
+            // episode number:
+            //   [Anistar.org] Jade Dynasty [TV-4] - 01 [1080p].mp4  → S4E01
+            //   Show [S2] - 05.mkv  /  Show S3 - 12 [1080p].mkv     → S2E05 / S3E12
+            // Without this the bare-number fallback below reads the "01" as an
+            // ABSOLUTE episode, and a weekly season-4 release lands on top of
+            // episode 1 of season 1. Deliberately narrow: the marker must be
+            // TV-N or S-N sitting immediately before the " - NN" separator, so
+            // "[SubsKindly] Show - 05" and "Show.s2e12.mkv" stay with the
+            // patterns that already own them.
+            @"(?i)(?:\[|\b)(?:tv-|s)(?<season>\d{1,2})\]?\s*-\s*(?<episode>\d{1,3})(?:[.\s\[(]|$)",
+            Priority: 55
+        ),
+        new(
             "Universal S##E##",
             // any_name.S01E05.mkv  /  Show.s2e12.mkv  /  S02E01.mkv
             // The leading (?:^|…) is load-bearing: a bare "S02E01.mkv" with no

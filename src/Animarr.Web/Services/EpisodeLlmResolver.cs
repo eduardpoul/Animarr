@@ -52,12 +52,44 @@ public sealed class EpisodeLlmResolver(
         foreach (var grp in unresolved.GroupBy(f => f.Season))
         {
             int? season = grp.Key;
-            // Can't safely assign a season to season-less files on a multi-season
-            // show — leave those for a manual fix rather than guess.
-            if (season is null && declaredSeasons > 1) continue;
             int seasonNum = season ?? 1;
 
-            var episodes = await BuildEpisodeListAsync(item, seasonNum, ct);
+            // Season-less files on a multi-season show used to be skipped outright
+            // ("can't safely guess") — which is precisely the case a release tag
+            // like "[TV-4] - 01" lands in when no pattern caught it, so the model
+            // never even saw the one filename that says which season it is.
+            // Instead of guessing, hand it the whole run numbered ABSOLUTELY
+            // (S1E01..S4E01 → 1..79, each labelled "S04E01 · Title") and split the
+            // answer back into (season, episode). Still a closed set, so the
+            // guardrail inside MapFilesToEpisodesAsync holds unchanged.
+            bool absoluteMode = season is null && declaredSeasons > 1;
+
+            List<(int Number, string Name)> episodes;
+            var absMap = new Dictionary<int, (int Season, int Episode)>();
+            if (absoluteMode)
+            {
+                episodes = [];
+                int cum = 0;
+                // Offsets come from SeasonsJson episode counts — the same basis
+                // MediaFileResolver uses, so an absolute number means the same
+                // thing on both sides.
+                foreach (var s in ParseSeasons(item.SeasonsJson).Where(s => s.Number > 0).OrderBy(s => s.Number))
+                {
+                    foreach (var (num, title) in await BuildEpisodeListAsync(item, s.Number, ct))
+                    {
+                        int abs = cum + num;
+                        absMap[abs] = (s.Number, num);
+                        episodes.Add((abs, string.IsNullOrEmpty(title)
+                            ? $"S{s.Number:D2}E{num:D2}"
+                            : $"S{s.Number:D2}E{num:D2} · {title}"));
+                    }
+                    cum += s.EpisodeCount;
+                }
+            }
+            else
+            {
+                episodes = await BuildEpisodeListAsync(item, seasonNum, ct);
+            }
             if (episodes.Count == 0) continue;
 
             var groupFiles = grp.ToList();
@@ -70,6 +102,17 @@ public sealed class EpisodeLlmResolver(
                 if (idx < 0 || idx >= groupFiles.Count) continue;
                 var file = groupFiles[idx];
 
+                // In absolute mode the model answers with an absolute number;
+                // translate it back BEFORE touching the DB. A number outside the
+                // map can't be placed — skipping after Add() would leave an empty
+                // mapping row behind for the next SaveChanges to persist.
+                int rowSeason = seasonNum, rowEpisode = ep;
+                if (absoluteMode)
+                {
+                    if (!absMap.TryGetValue(ep, out var se)) continue;
+                    (rowSeason, rowEpisode) = se;
+                }
+
                 var row = await db.EpisodeFileMappings
                     .FirstOrDefaultAsync(m => m.MediaItemId == mediaItemId && m.FilePath == file.FilePath, ct);
                 if (row is { Source: MappingSource.Manual }) continue; // never trump a manual fix
@@ -78,8 +121,9 @@ public sealed class EpisodeLlmResolver(
                     row = new EpisodeFileMapping { MediaItemId = mediaItemId, FilePath = file.FilePath };
                     db.EpisodeFileMappings.Add(row);
                 }
-                row.Season     = seasonNum;
-                row.Episode    = ep;
+
+                row.Season     = rowSeason;
+                row.Episode    = rowEpisode;
                 row.Source     = MappingSource.Llm;
                 row.Confidence = 0.8;
                 row.UpdatedAt  = DateTime.UtcNow;

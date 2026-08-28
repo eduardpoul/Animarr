@@ -113,7 +113,7 @@ public sealed class MediaFileResolver
         var seasonStructure = ParseSeasonList(item.SeasonsJson);
 
         // ── Pass 1: deterministic (season, episode) per file ──────────────────
-        var raw = new List<(string FilePath, string FileName, int? Season, int? Episode, long Size)>();
+        var raw = new List<(string FilePath, string FileName, int? Season, int? Episode, long Size, bool SeasonFromPath)>();
         foreach (var filePath in Directory.EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories))
         {
             if (!VideoExts.Contains(Path.GetExtension(filePath))) continue;
@@ -121,8 +121,17 @@ public sealed class MediaFileResolver
             var parse    = _patterns.ParseFileName(fileName, effectivePatterns);
             var fileDir  = Path.GetDirectoryName(filePath) ?? folder.Path;
 
-            int? season = parse.Season
-                ?? _patterns.DetectSeasonFromPath(fileDir, folder.Path);
+            // Two different claims, deliberately kept apart. A season baked into
+            // the FILE NAME by a release tag ("[TV-4] - 01") labels that one file.
+            // A season read from the PATH ("Season 4/…") says the DISK is laid out
+            // per-season. Only the latter may veto absolute-numbering distribution
+            // below: conflating them let a single tagged weekly release switch off
+            // the distribution for an entire flat library, collapsing it into S1.
+            int? seasonFromName = parse.Season;
+            int? seasonFromPath = seasonFromName is null
+                ? _patterns.DetectSeasonFromPath(fileDir, folder.Path)
+                : null;
+            int? season  = seasonFromName ?? seasonFromPath;
             int? episode = parse.IsMatched ? parse.Episode : null;
 
             // Bare-numeric filename fallback: `7.mkv`, `08.mkv`, `ep12.mkv`.
@@ -138,7 +147,9 @@ public sealed class MediaFileResolver
 
             long size;
             try { size = new FileInfo(filePath).Length; } catch { continue; }
-            raw.Add((filePath, fileName, season, episode, size));
+            // Season 0 (Specials) never counted as a numbered season folder, and
+            // still doesn't — matching the old `Season is null or 0` test.
+            raw.Add((filePath, fileName, season, episode, size, seasonFromPath is > 0));
         }
 
         // Absolute-numbering distribution applies ONLY to a genuinely FLAT disk —
@@ -150,14 +161,17 @@ public sealed class MediaFileResolver
         int s1Count = seasonStructure.Count > 0 ? seasonStructure[0].Count : 0;
         int maxFlatEp = raw.Where(r => r.Season is null && r.Episode is > 0)
                            .Select(r => r.Episode!.Value).DefaultIfEmpty(0).Max();
-        bool applyAbsolute = !isMovie
+        // A multi-season show whose files all sit loose in one folder — the disk
+        // is numbered absolutely, whatever any individual filename claims.
+        bool flatDisk = !isMovie
             && seasonStructure.Count > 1
-            && raw.All(r => r.Season is null or 0)   // no numbered season folders
+            && raw.All(r => !r.SeasonFromPath);      // no numbered season folders
+        bool applyAbsolute = flatDisk
             && maxFlatEp > s1Count;                  // genuinely spans past S1
 
         // ── Pass 2: distribution → overrides → absolute number → DTO ──────────
         var results = new List<MediaFileDto>(raw.Count);
-        foreach (var (filePath, fileName, season0, episode0, size) in raw)
+        foreach (var (filePath, fileName, season0, episode0, size, _) in raw)
         {
             int? season = season0, episode = episode0;
             string? source = null;
@@ -195,6 +209,14 @@ public sealed class MediaFileResolver
             if (absoluteEp is null && season is not null && episode is not null &&
                 seasonOffsets.TryGetValue(season.Value, out var off))
                 absoluteEp = off + episode.Value;
+
+            // No stored offsets, but we know (season, episode) and the disk is
+            // flat-absolute: the TMDB season structure gives the same answer.
+            // S4E01 with seasons [26,26,26,…] → absolute 79, which is what lines
+            // a freshly-tagged weekly release up with the 78 bare-numbered files
+            // already sitting next to it.
+            if (absoluteEp is null && flatDisk && season is > 0 && episode is > 0)
+                absoluteEp = SeasonEpisodeToAbsolute(season.Value, episode.Value, seasonStructure);
 
             results.Add(new MediaFileDto(filePath, fileName, season, episode, size, source, absoluteEp));
         }
@@ -274,6 +296,24 @@ public sealed class MediaFileResolver
         }
         var last = seasons[^1];
         return (last.Number, abs - (cum - last.Count));
+    }
+
+    /// <summary>Inverse of <see cref="AbsoluteToSeasonEpisode"/>: (season 4,
+    /// episode 1) with seasons [26,26,26,1] → absolute 79. Specials (season 0)
+    /// are skipped rather than counted — they carry no absolute number and would
+    /// otherwise shift every real season. Returns null when the season isn't in
+    /// the known structure, so a bogus release tag can't invent a number.</summary>
+    private static int? SeasonEpisodeToAbsolute(
+        int season, int episode, List<(int Number, int Count)> seasons)
+    {
+        int cum = 0;
+        foreach (var (number, count) in seasons)
+        {
+            if (number <= 0) continue;
+            if (number == season) return cum + episode;
+            cum += count;
+        }
+        return null;
     }
 
     /// <summary>Last-resort episode extraction for filenames that no rename
