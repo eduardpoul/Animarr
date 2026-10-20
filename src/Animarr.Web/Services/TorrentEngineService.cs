@@ -36,6 +36,13 @@ public class TorrentEngineService : BackgroundService
     private long _lastStatsHash;
     private DateTime _lastStatsPersistAt = DateTime.MinValue;
 
+    /// <summary>Lifetime uploaded bytes per torrent: the persisted total at load
+    /// plus everything sent since. MonoTorrent's Monitor.DataBytesSent is a
+    /// per-session counter — persisting it as-is threw the lifetime total away on
+    /// every restart. Fed by <see cref="AccumulateUploads"/> on the timer loop.</summary>
+    private readonly ConcurrentDictionary<string, long> _uploadedTotal = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _lastBytesSent = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Fires every 500 ms (only if values changed) and on any torrent state change.</summary>
     public event Action? StateChanged;
 
@@ -63,6 +70,7 @@ public class TorrentEngineService : BackgroundService
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
+                AccumulateUploads();
                 UpdateLiveStats();
                 FlushPendingDownloadedWrites();
 
@@ -247,6 +255,7 @@ public class TorrentEngineService : BackgroundService
                 }
 
                 _names[record.InfoHash] = record.Name;
+                _uploadedTotal[record.InfoHash] = record.Uploaded;
                 _folderWatchers[record.InfoHash] = record.FolderWatcherId;
 
                 await ApplyFileSelectionsAsync(mgr, record.FileSelections);
@@ -379,10 +388,7 @@ public class TorrentEngineService : BackgroundService
             }
 
             // Stop seeding check
-            var ratio = record.StopSeedingRatio ?? cfg.StopSeedingRatio;
-            var totalSize = mgr.Torrent?.Size ?? 0;
-            bool ratioReached = ratio > 0 && totalSize > 0 &&
-                (record.Uploaded + mgr.Monitor.DataBytesSent) >= (long)(totalSize * ratio);
+            bool ratioReached = SeedRatioReached(infoHash, mgr, record.StopSeedingRatio);
 
             if (record.StopAfterDownload || ratioReached || cfg.StopSeedingAfterDone)
                 await mgr.StopAsync();
@@ -519,7 +525,7 @@ public class TorrentEngineService : BackgroundService
                 DownloadRate:     mgr.Monitor.DownloadRate,
                 UploadRate:       mgr.Monitor.UploadRate,
                 Downloaded:       onDiskBytes,
-                Uploaded:         mgr.Monitor.DataBytesSent,
+                Uploaded:         _uploadedTotal.GetValueOrDefault(hash),
                 TotalSize:        totalSize,
                 Seeds:            mgr.Peers.Seeds,
                 Peers:            mgr.Peers.Leechs,
@@ -534,16 +540,47 @@ public class TorrentEngineService : BackgroundService
             _liveStats.TryRemove(hash, out _);
     }
 
+    /// <summary>Fold each manager's session send counter into
+    /// <see cref="_uploadedTotal"/>. Timer-loop only, so deltas aren't double
+    /// counted. A counter that went backwards was reset (manager restarted) and
+    /// counts from zero.</summary>
+    private void AccumulateUploads()
+    {
+        foreach (var (hash, mgr) in _managers)
+        {
+            var sent  = mgr.Monitor.DataBytesSent;
+            var last  = _lastBytesSent.GetValueOrDefault(hash);
+            var delta = sent >= last ? sent - last : sent;
+            _lastBytesSent[hash] = sent;
+            if (delta > 0) _uploadedTotal.AddOrUpdate(hash, delta, (_, v) => v + delta);
+        }
+    }
+
+    /// <summary>True once a seeding torrent has uploaded its ratio limit
+    /// (per-torrent override, else the global setting; 0 = no limit).</summary>
+    private bool SeedRatioReached(string infoHash, TorrentManager mgr, double? torrentRatio)
+    {
+        var ratio = torrentRatio ?? _cachedConfig.StopSeedingRatio;
+        var size  = mgr.Torrent?.Size ?? 0;
+        return ratio > 0 && size > 0 && _uploadedTotal.GetValueOrDefault(infoHash) >= (long)(size * ratio);
+    }
+
     private async Task PersistStatsAsync()
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
 
+        var ratioReached = new List<TorrentManager>();
         foreach (var (hash, stats) in _liveStats)
         {
             var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == hash);
             if (record is null) continue;
+            // The ratio is reached while SEEDING, long after the one check at
+            // completion in OnStateChangedAsync — so evaluate it here too.
+            if (_managers.TryGetValue(hash, out var seeding) && seeding.State == TorrentState.Seeding
+                && SeedRatioReached(hash, seeding, record.StopSeedingRatio))
+                ratioReached.Add(seeding);
             record.Downloaded = stats.Downloaded;
             record.Uploaded   = stats.Uploaded;
             // A Paused/Error torrent restored idle (or added paused) sits in
@@ -557,6 +594,13 @@ public class TorrentEngineService : BackgroundService
                 record.State = live;
         }
         await ctx.SaveChangesAsync();
+
+        foreach (var mgr in ratioReached)
+        {
+            _logger.LogInformation("Seed ratio reached for {Name} — stopping.", mgr.Torrent?.Name);
+            try { await mgr.StopAsync(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Stopping {Name} at seed ratio failed", mgr.Torrent?.Name); }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1031,6 +1075,8 @@ public class TorrentEngineService : BackgroundService
         _liveStats.TryRemove(infoHash, out _);
         _names.TryRemove(infoHash, out _);
         _folderWatchers.TryRemove(infoHash, out _);
+        _uploadedTotal.TryRemove(infoHash, out _);
+        _lastBytesSent.TryRemove(infoHash, out _);
 
         // C-1: dispose per-torrent semaphore so it doesn't leak across add/remove cycles.
         if (_torrentLocks.TryRemove(infoHash, out var sem))
