@@ -550,7 +550,11 @@ public class FolderWatcherService(
     ///
     /// Returns the IDs of the newly-registered child watchers.
     /// </summary>
-    public async Task<List<Guid>> DiscoverChildrenAsync(Guid sectionId, bool pruneOrphans = true)
+    /// <param name="automatic">Background pass rather than the user's Rescan:
+    /// honours FlatSection ("never auto-register subfolders" — the same switch
+    /// that turns the section's directory watcher off) by registering loose
+    /// files only.</param>
+    public async Task<List<Guid>> DiscoverChildrenAsync(Guid sectionId, bool pruneOrphans = true, bool automatic = false)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var section = await db.FolderWatchers.FindAsync(sectionId);
@@ -573,14 +577,14 @@ public class FolderWatcherService(
         await _registerLock.WaitAsync();
         try
         {
-            return await RegisterNewChildrenAsync(db, section);
+            return await RegisterNewChildrenAsync(db, section, includeDirs: !(automatic && section.FlatSection));
         }
         finally { _registerLock.Release(); }
     }
 
     /// <summary>Body of <see cref="DiscoverChildrenAsync"/>, run under
     /// <see cref="_registerLock"/>.</summary>
-    private async Task<List<Guid>> RegisterNewChildrenAsync(AppDbContext db, FolderWatcher section)
+    private async Task<List<Guid>> RegisterNewChildrenAsync(AppDbContext db, FolderWatcher section, bool includeDirs)
     {
         var sectionId = section.Id;
 
@@ -621,7 +625,7 @@ public class FolderWatcherService(
         var newIds = new List<Guid>();
         var toAdd  = new List<FolderWatcher>();
 
-        foreach (var dirPath in dirs)
+        foreach (var dirPath in includeDirs ? dirs : [])
         {
             if (existingPaths.Contains(dirPath)) continue;
             if (dismissed.Contains(NormalisePath(dirPath))) continue;
@@ -785,7 +789,7 @@ public class FolderWatcherService(
         foreach (var id in sectionIds)
         {
             ct.ThrowIfCancellationRequested();
-            newIds.AddRange(await DiscoverChildrenAsync(id, pruneOrphans: false));
+            newIds.AddRange(await DiscoverChildrenAsync(id, pruneOrphans: false, automatic: true));
         }
         if (newIds.Count == 0) return;
 
