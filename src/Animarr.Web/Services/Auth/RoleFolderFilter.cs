@@ -26,7 +26,12 @@ public static class RoleFolderFilter
         if (allowed is null || allowed.Count == 0)
             return source; // "all folders" — no filter
         // EF Core translates IReadOnlyList<Guid>.Contains to SQL IN (...).
-        return source.Where(m => allowed.Contains(m.FolderId));
+        // The role editor grants SECTIONS (it lists section roots only), while a
+        // MediaItem hangs off its per-title child folder — matching FolderId
+        // alone emptied the library for every restricted role. Accept either.
+        return source.Where(m => allowed.Contains(m.FolderId)
+            || (m.Folder != null && m.Folder.ParentSectionId != null
+                && allowed.Contains(m.Folder.ParentSectionId.Value)));
     }
 
     /// <summary>Generic helper for tables that carry a FolderId column —
