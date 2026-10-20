@@ -41,8 +41,15 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
     /// <summary>Resolve an anime by title (romaji/english). Returns the AniList id
     /// plus the MAL id when AniList has the cross-reference. Null when no match.</summary>
     public async Task<AniListMatch?> ResolveAsync(string title, CancellationToken ct = default)
+        => (await TryResolveAsync(title, ct)).Match;
+
+    /// <summary><see cref="ResolveAsync"/> that also says whether a null is an
+    /// ANSWER (AniList has no such anime — 404 / empty result) or a transient
+    /// failure (429 rate limit, 5xx, network, cancellation) that is worth
+    /// retrying rather than caching.</summary>
+    public async Task<(AniListMatch? Match, bool Definitive)> TryResolveAsync(string title, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(title)) return null;
+        if (string.IsNullOrWhiteSpace(title)) return (null, true);
         try
         {
             var http = httpFactory.CreateClient(ClientName);
@@ -50,17 +57,18 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             var payload = new { query, variables = new { search = title } };
 
             using var resp = await http.PostAsJsonAsync("/", payload, _json, ct);
-            if (!resp.IsSuccessStatusCode) return null;
+            // AniList answers a search miss with 404 "Not Found."
+            if (!resp.IsSuccessStatusCode) return (null, resp.StatusCode == System.Net.HttpStatusCode.NotFound);
 
             var data = await resp.Content.ReadFromJsonAsync<AniListEnvelope>(_json, ct);
             var m = data?.Data?.Media;
-            if (m is null) return null;
-            return new AniListMatch(m.Id, m.IdMal, m.Title?.English ?? m.Title?.Romaji);
+            if (m is null) return (null, true);
+            return (new AniListMatch(m.Id, m.IdMal, m.Title?.English ?? m.Title?.Romaji), true);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "[AniList] resolve failed for '{Title}'", title);
-            return null;
+            return (null, false);
         }
     }
 
