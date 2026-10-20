@@ -1,6 +1,5 @@
 /* ============================================================
-   PinKeypad — 4-digit numeric keypad. Spec: multi-server-flow.html
-   lines 108-115 (.pin styles) + 430-462 (C2 frame layout).
+   PinKeypad — 4-digit numeric keypad, Fluent 2.
 
    The component is unstyled relative to the surrounding container —
    the parent decides whether to embed it in a centered card, a
@@ -9,60 +8,59 @@
    ============================================================ */
 
 .d-pin {
-    /* Width is the canonical 280px from the design spec. The keys grid
-       inside computes its column width relative to this. */
+    /* 280px keypad; the keys grid computes its column width from it. */
     width: 280px;
     max-width: 100%;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    /* Take focus rings without a visible outline on the wrapper itself
-       — the keypad buttons own their own .tv-focus treatment. */
+    font-family: var(--font-ui);
+    /* The wrapper takes focus (keyboard input) without a visible ring —
+       the keypad buttons own their own .tv-focus treatment. */
     outline: none;
 }
 
 .d-pin__title {
     font-family: var(--font-display);
-    font-size: 22px;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
     letter-spacing: 0;
     color: var(--text);
     text-align: center;
-    line-height: 1.15;
 }
 
 .d-pin__sub {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0;
-    color: var(--text-faint);
+    margin-top: 4px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
     text-align: center;
-    margin-top: 6px;
-    margin-bottom: 22px;
-    text-transform: none;
 }
 
 /* ── Dots row ──────────────────────────────────────────────────
-   Four filled/unfilled discs that indicate how many digits the
-   user has typed. The accent halo on filled dots matches the
-   keypad's accent. */
+   Four discs that fill as digits land. */
 .d-pin__dots {
     display: flex;
-    gap: 14px;
+    gap: 16px;
     justify-content: center;
-    margin-bottom: 22px;
+    margin-bottom: 24px;
 }
 
 .d-pin__dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.08);
-    transition: background var(--motion-fast), box-shadow var(--motion-fast);
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--stroke-ctrl-acc);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .d-pin__dot.is-on {
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-soft);
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
 }
 
 /* Wrong-PIN feedback: tiny lateral shake. Plays once per error
@@ -79,54 +77,56 @@
     40%, 60% { transform: translateX(5px); }
 }
 
+/* Fluent MessageBar (error intent). */
 .d-pin__error {
-    color: var(--warn);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    letter-spacing: 0;
-    text-align: center;
-    margin-bottom: 14px;
-    padding: 6px 10px;
-    background: oklch(0.78 0.16 75 / 0.08);
-    border: 1px solid oklch(0.78 0.16 75 / 0.25);
-    border-radius: 8px;
     width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    background: color-mix(in oklch, var(--danger) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--danger) 35%, transparent);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
 }
 
 /* ── Keys grid ──────────────────────────────────────────────── */
 .d-pin__keys {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: 8px;
     width: 100%;
 }
 
+/* Digit key — Fluent default button, enlarged for touch / 10-foot use. */
 .d-pin__key {
     appearance: none;
     cursor: pointer;
-    height: 60px;
-    border-radius: 12px;
+    height: 56px;
+    box-sizing: border-box;
+    border-radius: var(--radius-ctrl);
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--stroke-ctrl);
     color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 22px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    line-height: 28px;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     display: grid;
     place-items: center;
     transition:
         background var(--motion-fast),
-        border-color var(--motion-fast),
-        transform var(--motion-fast);
+        border-color var(--motion-fast);
 }
-.d-pin__key:hover,
-.d-pin__key:focus {
+.d-pin__key:hover {
     background: var(--surface-2);
-    border-color: var(--border-strong);
-    outline: none;
+    border-color: var(--stroke-ctrl-hi);
 }
 .d-pin__key:active {
-    transform: scale(0.97);
+    background: var(--surface-3);
 }
 
 /* The empty cell in the 4th row keeps the layout 3-wide without
@@ -137,34 +137,34 @@
     pointer-events: none;
 }
 
-/* Backspace cell — same shape as a digit key but visually subdued
-   so the eye doesn't read it as "10". */
+/* Backspace — subtle button so the eye doesn't read it as "10". */
 .d-pin__key--back {
     background: transparent;
     border-color: transparent;
     color: var(--text-dim);
 }
-.d-pin__key--back:hover,
-.d-pin__key--back:focus {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: var(--border);
+.d-pin__key--back:hover {
+    background: var(--ink-2);
+    border-color: transparent;
     color: var(--text);
 }
+.d-pin__key--back:active { background: var(--ink-3); }
 
-/* ── Cancel link under the keypad ──────────────────────────── */
+/* ── Cancel under the keypad — Fluent subtle button ─────────── */
 .d-pin__cancel {
     appearance: none;
     cursor: pointer;
+    margin-top: 16px;
+    min-height: 32px;
+    padding: 5px 12px;
     background: transparent;
     border: 0;
-    margin-top: 18px;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0;
-    padding: 8px 14px;
-    border-radius: 6px;
-}
-.d-pin__cancel:hover {
+    border-radius: var(--radius-ctrl);
     color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    transition: background var(--motion-fast);
 }
+.d-pin__cancel:hover  { background: var(--ink-2); }
+.d-pin__cancel:active { background: var(--ink-3); }

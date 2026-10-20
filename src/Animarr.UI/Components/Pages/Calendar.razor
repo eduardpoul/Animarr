@@ -19,10 +19,10 @@
         </div>
         <div class="cal-nav">
             <span class="cal-range">@RangeLabel</span>
-            <button type="button" class="cal-nav__btn tv-focus" @onclick="@(() => ShiftWeek(-1))" aria-label="‹">‹</button>
+            <button type="button" class="cal-nav__btn cal-nav__btn--icon tv-focus" @onclick="@(() => ShiftWeek(-1))" aria-label="‹"><DIcon Name="chev-l" Size="16" /></button>
             <button type="button" class="@($"cal-nav__btn cal-nav__btn--today tv-focus {(_weekOffset == 0 ? "is-active" : "")}")"
                     @onclick="@(() => { _weekOffset = 0; })">@L["calendar.today"]</button>
-            <button type="button" class="cal-nav__btn tv-focus" @onclick="@(() => ShiftWeek(1))" aria-label="›">›</button>
+            <button type="button" class="cal-nav__btn cal-nav__btn--icon tv-focus" @onclick="@(() => ShiftWeek(1))" aria-label="›"><DIcon Name="chev-r" Size="16" /></button>
         </div>
     </div>
 
@@ -64,7 +64,7 @@
                                     <span class="cal-card__title">@e.Title</span>
                                 </span>
                                 <span class="cal-card__meta">
-                                    <span class="cal-card__ep">EP @e.Episode</span>
+                                    <span class="cal-card__ep">@L.Get("common.episode_short_fmt", e.Episode)</span>
                                     <span class="@($"cal-chip cal-chip--{e.Status}")">@StatusLabel(e.Status)</span>
                                 </span>
                             </button>

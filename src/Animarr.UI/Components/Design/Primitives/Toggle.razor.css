@@ -1,6 +1,6 @@
-/* Spec-match: design_handoff_animarr/CANVAS.html §01.6.3.
-   34×18 track, 14×14 thumb, no border, white thumb always.
-   Glow on active state (box-shadow accent-soft). */
+/* Fluent 2 Switch: 40×20 outlined track, 14px thumb. Unchecked = accessible
+   stroke outline + stroke-coloured thumb; checked = brand fill + on-accent
+   thumb. */
 
 .d-toggle {
     display: inline-flex;
@@ -20,14 +20,13 @@
 
 .d-toggle__track {
     position: relative;
-    /* Fluent Switch: 40x20 outlined track, 14px thumb. */
     width: 40px;
     height: 20px;
     box-sizing: border-box;
     background: transparent;
     border: 1px solid var(--stroke-ctrl-acc);
-    border-radius: 10px;
-    transition: background var(--motion-base), box-shadow var(--motion-base);
+    border-radius: var(--radius-pill);
+    transition: background var(--motion-base), border-color var(--motion-base);
     flex-shrink: 0;
 }
 
@@ -38,7 +37,7 @@
     width: 14px;
     height: 14px;
     background: var(--stroke-ctrl-acc);
-    border-radius: 14px;
+    border-radius: 50%;
     transition: left var(--motion-fast), background var(--motion-fast);
 }
 
@@ -61,5 +60,6 @@
 
 .d-toggle__label {
     font-size: 14px;
+    line-height: 20px;
     color: var(--text);
 }

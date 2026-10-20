@@ -283,6 +283,7 @@ internal static class FolderEndpoints
         // written so the caller can render an accurate toast.
         app.MapPost(ApiRoutes.FolderUpload, async (
             Guid watcherId,
+            string? subPath,
             HttpRequest httpReq,
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
@@ -296,6 +297,13 @@ internal static class FolderEndpoints
             if (string.IsNullOrWhiteSpace(folder.Path) || !Directory.Exists(folder.Path))
                 return Results.Problem("Folder path missing on disk.");
 
+            // Optional subfolder from the drawer's picker ("Show/Season 2") —
+            // created on demand. SubfolderPath.Split drops ".." segments, so it
+            // stays inside the watcher root.
+            var targetDir = SubfolderPath.Split(subPath).Aggregate(folder.Path, System.IO.Path.Combine);
+            try { Directory.CreateDirectory(targetDir); }
+            catch (Exception) { return Results.Problem("Couldn't create the subfolder."); }
+
             var form = await httpReq.ReadFormAsync(ct);
             var written = 0;
             foreach (var file in form.Files)
@@ -305,7 +313,7 @@ internal static class FolderEndpoints
                 // malicious "../../../etc/passwd" can't escape the watcher root.
                 var safeName = System.IO.Path.GetFileName(file.FileName);
                 if (string.IsNullOrWhiteSpace(safeName)) continue;
-                var target = System.IO.Path.Combine(folder.Path, safeName);
+                var target = System.IO.Path.Combine(targetDir, safeName);
                 try
                 {
                     await using var fs = System.IO.File.Create(target);

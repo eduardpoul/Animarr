@@ -1,5 +1,6 @@
-/* Spec match: design_handoff_animarr/screens-v3.jsx::NRBadgeV3.
-   CTRL_H = 36px to align with filter row tabs + search. */
+/* Needs-review chip — Fluent warning-tinted button that opens the
+   NeedsReview drawer. Full variant: "Needs review · N" (32px, 4px corners).
+   Compact (NavPane) variant: round pill with the warn icon + count. */
 
 .nr-chip {
     appearance: none;
@@ -7,65 +8,66 @@
     position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    height: 36px;
-    padding: 0 14px 0 12px;
-    background: oklch(0.80 0.17 75 / 0.16);
-    border: 1px solid oklch(0.60 0.16 75 / 0.40);
-    border-radius: var(--radius-card);
-    color: var(--warn);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0;
+    gap: 6px;
+    min-height: 32px;
+    padding: 5px 12px 5px 10px;
     box-sizing: border-box;
-    transition: background var(--motion-base), border-color var(--motion-base);
+    background: color-mix(in oklch, var(--warn) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--warn) 35%, transparent);
+    border-radius: var(--radius-ctrl);
+    color: var(--warn);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 400;
+    letter-spacing: 0;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 
 .nr-chip:hover {
-    background: oklch(0.80 0.17 75 / 0.24);
-    border-color: oklch(0.60 0.16 75 / 0.60);
+    background: color-mix(in oklch, var(--warn) 20%, transparent);
+    border-color: color-mix(in oklch, var(--warn) 55%, transparent);
+}
+.nr-chip:active {
+    background: color-mix(in oklch, var(--warn) 26%, transparent);
 }
 
-/* Compact topbar variant — small amber pill (warn icon + count), no verbose
-   label or corner dot, so it sits cleanly next to the LLM pill. */
+/* Compact NavPane variant — no verbose label or corner dot. */
 .nr-chip--compact {
-    height: 32px;
-    padding: 0 11px;
-    border-radius: 999px;
-    gap: 6px;
+    min-height: 32px;
+    padding: 5px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    line-height: 16px;
     flex-shrink: 0;
 }
 .nr-chip--compact .nr-chip__label,
 .nr-chip--compact .nr-chip__dot { display: none; }
 
-.nr-chip__label {
-    text-transform: none;
-}
-
 .nr-chip__count {
-    /* The design embeds the count inline as " · N", not as a separate badge. */
-    margin-left: 0;
-    padding: 0;
-    background: transparent;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--warn);
-    font-weight: 700;
-    text-align: left;
 }
 
+/* Unread-style dot on the corner of the full chip. */
 .nr-chip__dot {
     position: absolute;
-    top: -4px;
-    right: -4px;
+    top: -3px;
+    right: -3px;
     width: 8px;
     height: 8px;
     border-radius: var(--radius-pill);
     background: var(--warn);
-    box-shadow: 0 0 8px var(--warn);
+    box-shadow: 0 0 0 2px var(--bg-0);
     animation: nr-chip-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes nr-chip-pulse {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nr-chip__dot { animation: none; }
 }

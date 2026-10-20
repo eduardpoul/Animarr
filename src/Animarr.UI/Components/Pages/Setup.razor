@@ -17,12 +17,12 @@
 
 <div class="d-setup">
     <button type="button" class="d-setup__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> @L["setup.back"]
+        <DIcon Name="arrow-l" Size="16" /> @L["setup.back"]
     </button>
 
     <div class="d-setup__card" role="dialog" aria-label="@L["setup.aria_first_run"]">
         <header class="d-setup__brand">
-            <BrandMark Size="38" ExtraClass="d-setup__brand-mark" />
+            <BrandMark Size="40" ExtraClass="d-setup__brand-mark" />
             <div>
                 <div class="d-setup__brand-name">Animarr</div>
                 <div class="d-setup__brand-sub">@L["setup.brand_sub"]</div>
@@ -42,21 +42,26 @@
 
             @if (!string.IsNullOrEmpty(_error))
             {
-                <div class="d-setup__error">@_error</div>
+                <div class="fs-msgbar fs-msgbar--error" role="alert">
+                    <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+                    <span>@_error</span>
+                </div>
             }
 
-            <div class="d-setup__hint">
-                @L["setup.hint"]
+            <div class="fs-msgbar fs-msgbar--info">
+                <span class="fs-msgbar__ic"><DIcon Name="info" Size="16" /></span>
+                <span>@L["setup.hint"]</span>
             </div>
 
-            <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || !CanSubmit)">
-                @if (_loading) { <Spinner Size="14" /><text>@L["setup.btn_creating"]</text> }
-                else
-                {
-                    <text>@L["setup.btn_create_master"]</text>
-                    <DIcon Name="arrow-r" Size="13" />
-                }
-            </Btn>
+            <div class="d-setup__actions">
+                <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || !CanSubmit)">
+                    @if (_loading) { <Spinner Size="sm" Tone="light" /><text>@L["setup.btn_creating"]</text> }
+                    else
+                    {
+                        <text>@L["setup.btn_create_master"]</text>
+                    }
+                </Btn>
+            </div>
         </form>
     </div>
 </div>

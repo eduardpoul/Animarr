@@ -1,21 +1,21 @@
 /* "На этой неделе" rail — compact airing cards, 210px cells to match the
-   other Home surfaces. Status chips reuse the calendar palette (the shared
+   other Home surfaces. Status badges reuse the calendar palette (the
    .cal-chip classes are duplicated here because scoped CSS doesn't cross
-   components). */
+   components — keep in sync with Calendar.razor.css). */
 
 .twr { margin: var(--space-10) 0; }
 .twr__head {
     display: flex;
     align-items: baseline;
     gap: var(--space-4);
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-5);
 }
+/* Fluent subtitle 20/28 — same as every Home section header. */
 .twr__title {
     margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
 }
 .twr__row {
     display: flex;
@@ -32,23 +32,26 @@
     cursor: pointer;
     padding: 0;
     text-align: left;
+    font-family: inherit;
+    color: var(--text);
     width: 210px;
     flex-shrink: 0;
     scroll-snap-align: start;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     overflow: hidden;
-    transition: border-color var(--motion-base);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
-.twr__card:hover { border-color: var(--border-strong); }
+.twr__card:hover { background: var(--surface-2); border-color: var(--border-strong); }
 
+/* Backdrop strip — always-dark, white copy over a legibility scrim. */
 .twr__art {
     position: relative;
     display: block;
     height: 108px;
     overflow: hidden;
-    background-color: var(--surface-2);
+    background-color: var(--surface-3);
 }
 .twr__img {
     position: absolute;
@@ -66,25 +69,25 @@
 }
 .twr__when {
     position: absolute;
-    top: 7px;
+    top: 6px;
     right: 8px;
     z-index: 1;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: #fff;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
 }
 .twr__name {
     position: absolute;
-    left: 9px;
-    right: 9px;
+    left: 8px;
+    right: 8px;
     bottom: 6px;
     z-index: 1;
-    font-size: 12.5px;
-    font-weight: 700;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
     color: #fff;
-    text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -97,75 +100,73 @@
     padding: 8px 10px 10px;
 }
 .twr__ep {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 700;
-    color: var(--accent-hi);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
-/* Status chips — same palette as Calendar.razor.css. */
+/* Status badges — same palette as Calendar.razor.css. */
 .cal-chip {
-    display: inline-flex;
-    align-items: center;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-transform: none;
+    display: inline-block;
+    min-width: 0;
+    padding: 1px 6px;
+    border-radius: var(--radius-badge);
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
     white-space: nowrap;
-    padding: 2px 6px;
-    border-radius: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .cal-chip--upcoming {
     color: var(--text-dim);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border-strong);
+    background: var(--ink-2);
 }
 .cal-chip--aired-waiting {
-    color: var(--warn, oklch(0.8 0.17 75));
-    background: oklch(0.8 0.17 75 / 0.16);
-    border: 1px solid oklch(0.6 0.16 75 / 0.5);
+    color: var(--warn);
+    background: color-mix(in oklch, var(--warn) 16%, transparent);
 }
 .cal-chip--in-library {
-    color: var(--success, oklch(0.74 0.15 150));
-    background: oklch(0.74 0.15 150 / 0.16);
-    border: 1px solid var(--success, oklch(0.74 0.15 150));
+    color: var(--success);
+    background: color-mix(in oklch, var(--success) 16%, transparent);
 }
 
 @media (max-width: 639px) {
     .twr__card { width: 182px; }
-    .twr__title { font-size: 19px; }
 }
 
-/* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
+/* ── ‹ › paging (floating Fluent flip buttons) + drag-to-scroll ──────── */
 .twr__viewport { position: relative; }
 .twr__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
 .twr__nav {
     position: absolute;
-    top: 0;
-    /* Cover the backdrop-art zone of the cards (108px + card border). */
-    height: 112px;
-    width: 44px;
+    /* Centred on the 108px backdrop strip (+1px card border). */
+    top: calc(109px / 2 - 16px);
     z-index: 5;
+    width: 32px;
+    height: 32px;
+    padding: 0;
     display: grid;
     place-items: center;
     appearance: none;
     cursor: pointer;
-    border: none;
-    color: #fff;
-    font-size: 30px;
+    border-radius: var(--radius-ctrl);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    box-shadow: var(--shadow-8);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 20px;
     line-height: 1;
-    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    opacity: 0.75;
-    transition: opacity var(--motion-base);
+    transition: background var(--motion-fast);
 }
-.twr__nav:hover { opacity: 1; }
-.twr__nav--l { left: 0; border-radius: 12px 0 0 12px; }
-.twr__nav--r {
-    right: 0;
-    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    border-radius: 0 12px 12px 0;
-}
+.twr__nav:hover { background: var(--surface-2); }
+.twr__nav:active { background: var(--surface-3); }
+.twr__nav--l { left: 8px; }
+.twr__nav--r { right: 8px; }
 @media (hover: none) {
     .twr__nav { display: none; }
 }

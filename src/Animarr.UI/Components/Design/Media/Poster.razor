@@ -45,7 +45,7 @@
             <div class="d-poster__title">@Item.Title</div>
             <div class="d-poster__meta">
                 @if (Item.Year is not null) { <span>@Item.Year</span> }
-                @if (Item.EpisodeCount is > 0) { <span class="d-poster__dot">·</span><span>@Item.EpisodeCount EP</span> }
+                @if (Item.EpisodeCount is > 0) { <span class="d-poster__dot">·</span><span>@L.Get("common.episode_count_fmt", Item.EpisodeCount)</span> }
                 @if (Item.Rating is > 0) { <span class="d-poster__dot">·</span><span>★ @($"{Item.Rating:F1}")</span> }
             </div>
         </div>
@@ -83,12 +83,12 @@
         => Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
     private void OnBaseChanged() => InvokeAsync(StateHasChanged);
 
-    private static string TypeLabel(MediaItemType t) => t switch
+    private string TypeLabel(MediaItemType t) => t switch
     {
-        MediaItemType.Anime       => "ANIME",
-        MediaItemType.Movie       => "MOVIE",
-        MediaItemType.Series      => "SERIES",
-        MediaItemType.Multserials => "MULTI",
-        _                         => "MEDIA",
+        MediaItemType.Anime       => L["poster.type_anime"],
+        MediaItemType.Movie       => L["poster.type_movie"],
+        MediaItemType.Series      => L["poster.type_series"],
+        MediaItemType.Multserials => L["poster.type_multi"],
+        _                         => L["poster.type_media"],
     };
 }

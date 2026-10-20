@@ -1,242 +1,73 @@
-/* Catalog page — spec source: design_handoff_animarr/screens-v3.jsx::CatalogV3.
-   Filter bar, category chip strip (v4 replaces v3 type tabs), poster grid.
-   The hero is owned by <CatalogHero /> with its own scoped CSS. */
+/* Home — a stack of per-user sections (hero, rails, library block). The
+   heroes and rails own their scoped CSS; the empty state is the global
+   .catalog-empty. Only Home's own bits live here. */
 
-/* Small count badge on category chip — sits inside the chip pill,
-   muted mono to not compete with the chip label. */
-.catalog-chip__count {
-    margin-left: 7px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-faint);
-    letter-spacing: 0;
-    font-weight: 400;
-}
-.catalog-chip--active .catalog-chip__count { color: rgba(255, 255, 255, 0.6); }
-
+/* A1: keep the page positioned + stacked so the rails that follow the
+   (isolated) hero paint over its fade zone. Don't drop this. */
 .catalog-page {
     position: relative;
     z-index: 1;
 }
 
-/* Filter bar — tabs · search · Rescan · NR chip · count.
-   Counter uses margin-left:auto to push to the right edge per CatalogV3 lines 269-272. */
-.catalog-filter {
-    display: flex;
-    align-items: center;
-    gap: var(--space-6);
-    margin-bottom: var(--space-6);
-    flex-wrap: wrap;
-}
-
-.catalog-count {
-    margin-left: auto;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-faint);
-    letter-spacing: 0;
-    white-space: nowrap;
-}
-
-.catalog-count__sep {
-    color: var(--text-faint);
-    margin: 0 2px;
-}
-
-.catalog-count__label {
-    color: var(--text-faint);
-    margin-left: var(--space-2);
-}
-
-/* Folder chip strip — 11.5px UI-font buttons with regular case,
-   accent solid fill when active. Distinct from the all-caps mono Pill primitive. */
-.catalog-folders {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-11);
-    flex-wrap: wrap;
-}
-
-.catalog-folders__label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-faint);
-    letter-spacing: 0;
-    margin-right: var(--space-1);
-    text-transform: none;
-}
-
-.catalog-chip {
-    appearance: none;
-    cursor: pointer;
-    padding: 5px 11px;
-    border-radius: var(--radius-pill);
-    font-family: var(--font-ui);
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0;
-    color: var(--text-dim);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    transition: color var(--motion-base), background var(--motion-base), border-color var(--motion-base);
-}
-
-.catalog-chip:hover {
-    color: var(--text);
-    border-color: var(--border-strong);
-}
-
-.catalog-chip--active {
-    color: #fff;
-    background: var(--accent);
-    border-color: var(--accent);
-}
-
-.catalog-chip--active:hover {
-    background: var(--accent-hi);
-    border-color: var(--accent-hi);
-}
-
-/* Poster grid — CatalogV3 line 196: minmax(220px, 1fr), gap 22px. */
-.catalog-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--space-9);
-}
-
-.catalog-empty {
-    text-align: center;
-    padding: var(--space-12) 0;
-    color: var(--text-dim);
-}
-
-.catalog-empty__text {
-    margin-top: var(--space-5);
-    font-size: 15px;
-}
-
-.catalog-more {
-    text-align: center;
-    padding: var(--space-9) 0;
-    color: var(--text-faint);
-    font-size: 13px;
-    font-family: var(--font-mono);
-    letter-spacing: 0;
-}
-
-/* ── Mobile / tablet (≤ 959px) — shrink poster columns, stack the filter bar. */
-@media (max-width: 959px) {
-    .catalog-grid {
-        /* 3-4 cols on tablet — minmax shrinks below the desktop 220px. */
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: var(--space-6);
-    }
-    .catalog-filter {
-        gap: var(--space-4);
-    }
-    .catalog-folders {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        padding-bottom: 4px;
-        scrollbar-width: none;
-        margin-bottom: var(--space-8);
-    }
-    .catalog-folders::-webkit-scrollbar { display: none; }
-    .catalog-folders__label { flex-shrink: 0; }
-    .catalog-chip { flex-shrink: 0; }
-    .catalog-count { font-size: 10px; }
-}
-
-/* ── Phone (≤ 639px) — 2 cols, smaller posters, vertically stacked filter. */
-@media (max-width: 639px) {
-    .catalog-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-5);
-    }
-    .catalog-filter {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    .catalog-count {
-        margin-left: 0;
-        text-align: right;
-    }
-}
-
-
-/* Catalog full-screen loading state — replaces the old thin progress bar
-   that looked like an empty library while data was in flight. A centered
-   ring + label tells the user "we're still fetching" unambiguously. */
+/* Full-screen loading state — a foreground ring + caption reads as "still
+   fetching" (the old thin bar looked like an empty library). */
 .catalog-loading {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
+    gap: 12px;
     padding: 80px 24px;
     min-height: 280px;
 }
 .catalog-loading__ring {
-    width: 38px;
-    height: 38px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    border: 2.5px solid var(--ink-2);
+    border: 3px solid var(--ink-3);
     border-top-color: var(--accent-hi);
     animation: catalog-loading-spin 0.9s linear infinite;
 }
 .catalog-loading__label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
 }
 @keyframes catalog-loading-spin { to { transform: rotate(360deg); } }
 
 /* ── Home library block ─────────────────────────────────────────────
-   Compact slice of the catalog: fixed column counts per breakpoint keep it
-   to exactly two poster rows on desktop (four on phones); posters past the
-   row budget are display:none'd so the "view all" tile — always the last
-   DOM child — lands right after the last visible poster. The full catalog
-   moved to /library. */
+   Compact slice of the catalog: two poster rows on desktop (four on
+   phones); the collocated Home.razor.js shows exactly (columns × rows − 1)
+   posters so the "view all" tile — always the last DOM child — lands right
+   after the last visible poster. The full catalog lives on /library. */
 .home-lib {
     margin-bottom: var(--space-11);
 }
 .home-lib__head {
     display: flex;
     align-items: baseline;
-    gap: var(--space-4);
-    margin-bottom: var(--space-6);
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
 }
 .home-lib__title {
-    /* Same size as the rail titles (.recrail__title / .nur__title) — every
-       Home section header reads uniform. */
+    /* Same as the rail titles (.nur / .twr / .recrail) — every Home
+       section header reads uniform: Fluent subtitle 20/28 semibold. */
     margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
 }
 .home-lib__count {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
 }
-.home-lib__all {
-    margin-left: auto;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--accent-hi);
-    text-decoration: none;
-    white-space: nowrap;
-}
-.home-lib__all:hover { color: var(--accent); }
 
 /* Fixed-size cards (the For-you rail's 210px), as many columns as fit —
-   never stretched. Two-row clamp without knowing the column count: rows
-   past the second collapse to 0 height and are clipped by overflow:hidden;
-   row spacing comes from item margins (row-gap would leak into the
+   never stretched. Two-row clamp without knowing the column count (no-JS /
+   first-paint fallback): rows past the second collapse to 0 height and are
+   clipped; row spacing comes from item margins (row-gap would leak into the
    collapsed rows as phantom bottom padding). */
 .home-lib__grid {
     display: grid;
@@ -258,36 +89,31 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     aspect-ratio: 2 / 3;
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-card);
     border: 1px dashed var(--border-strong);
     background: var(--surface);
-    color: var(--text-dim);
+    color: var(--text);
     text-decoration: none;
-    transition: border-color var(--motion-base), color var(--motion-base), background var(--motion-base);
+    transition: border-color var(--motion-fast), background var(--motion-fast);
 }
 .home-lib__more:hover {
-    border-color: var(--accent-line, var(--accent));
-    color: var(--text);
+    border-color: var(--stroke-ctrl-hi);
     background: var(--surface-2);
 }
 .home-lib__more-icon { color: var(--accent-hi); }
 .home-lib__more-label {
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
 }
 .home-lib__more-count {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
 }
-
-/* The "view all" tile is NOT pinned: the collocated Home.razor.js shows
-   exactly (columns × rows − 1) posters, so the tile flows into the very
-   next cell — the rows fill completely, and when the library runs out it
-   sits right after the last poster instead of hugging the far edge. The
-   collapsed-rows clamp above stays as the no-JS/first-paint fallback. */
 
 /* Phone: fixed 210px would leave a single column — switch to the classic
    2 stretched columns × 4 rows. */
@@ -297,5 +123,4 @@
         grid-template-rows: repeat(4, auto);
         column-gap: var(--space-5);
     }
-    .home-lib__title { font-size: 19px; }
 }

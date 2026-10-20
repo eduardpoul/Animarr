@@ -155,7 +155,7 @@ internal static class TorrentEndpoints
             entity.StopSeedingRatio       = request.StopSeedingRatio;
             entity.SkipSubfolderStructure = request.SkipSubfolderStructure;
             entity.SuppressRootFolder     = request.SuppressRootFolder;
-            entity.CustomRootFolderName   = request.CustomRootFolderName;
+            entity.CustomRootFolderName   = SubfolderPath.Normalize(request.CustomRootFolderName);
             await db.SaveChangesAsync(ct);
 
             await engine.SetStopAfterDownloadAsync(entity.InfoHash, request.StopAfterDownload);
@@ -389,6 +389,40 @@ internal static class TorrentEndpoints
             {
                 return Results.BadRequest($"Could not parse .torrent: {ex.Message}");
             }
+        });
+
+        // Subfolder picker in the Add drawer: one level of directories inside
+        // the chosen destination (or the default download dir). Sandboxed to
+        // that root — SubfolderPath.Split drops ".." / "." segments, so `path`
+        // can't climb out. Unlike /api/folders/browse (whole-filesystem, admin
+        // only) this sits behind uploadContent like the rest of the torrent
+        // surface: a downloader can see folders under destinations they can
+        // already save into, nothing else.
+        torrents.MapGet(ApiRoutes.TorrentDestinationBrowse, async (
+            Guid? folderId,
+            string? path,
+            IDbContextFactory<AppDbContext> dbFactory,
+            CancellationToken ct) =>
+        {
+            var root = await ResolveSavePathAsync(dbFactory, folderId, ct);
+            var dir  = SubfolderPath.Split(path).Aggregate(root, Path.Combine);
+            if (!Directory.Exists(dir))
+                return Results.Ok(new DestinationFolderListDto(dir, Array.Empty<string>(), false));
+
+            try
+            {
+                // Hide dot/@ folders (.animarr asset stores, Synology @eaDir…) and
+                // OS-hidden/system ones ($RECYCLE.BIN) — never download targets.
+                var folders = new DirectoryInfo(dir).EnumerateDirectories()
+                    .Where(d => d.Name[0] is not ('.' or '@')
+                             && (d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0)
+                    .Select(d => d.Name)
+                    .OrderBy(n => n, NaturalStringComparer.Ordinal)
+                    .ToArray();
+                return Results.Ok(new DestinationFolderListDto(dir, folders, true));
+            }
+            catch (UnauthorizedAccessException) { return Results.Problem("Access denied.", statusCode: 403); }
+            catch (IOException) { return Results.Problem("Couldn't read directory."); }
         });
 
         return app;

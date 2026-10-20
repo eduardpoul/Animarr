@@ -1,20 +1,20 @@
 /*
-    SectionFolderDeleteDialog — v5 panel refactor. Modal scaffold removed;
-    the warning copy and effect list now live inside a <SettingsEditDrawer>
-    body with Tone="warn". Only the inner body markup needs scoped styles.
+    SectionFolderDeleteDialog — warning copy and effect list inside a
+    <SettingsEditDrawer Tone="warn"> body (the drawer owns the chrome and
+    the right-aligned Remove / Cancel actions).
 */
 
 .sfdd__body {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
 }
 
 .sfdd__copy {
     margin: 0;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text-dim);
-    font-size: 13px;
-    line-height: 1.55;
 }
 
 .sfdd__effects {
@@ -23,26 +23,29 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
 }
 
 .sfdd__effects li {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     color: var(--text);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 20px;
 }
+.sfdd__effects li:last-child { border-bottom: 0; }
 
-.sfdd__effects li > svg {
+/* DIcon is a child component — ::deep reaches its <svg>. */
+.sfdd__effects li ::deep svg {
     flex-shrink: 0;
     margin-top: 2px;
-    color: var(--text-faint);
+    color: var(--text-dim);
 }
 
 .sfdd__effects li strong {

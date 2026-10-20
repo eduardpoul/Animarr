@@ -1,10 +1,7 @@
-/* Welcome — minimal centered landing, no scroll. Tokens only.
-
-   Uses 100dvh (dynamic viewport height) instead of 100vh so the layout
-   doesn't overflow on mobile WebView where the status-bar-safe-area
-   <div> above #app added ~30px to the total body height — 100vh meant
-   "viewport" so .d-welcome + safe-area > viewport → page scrolls. dvh
-   accounts for that automatically. */
+/* Welcome — Fluent 2 onboarding card: mark → large title → tagline → one
+   primary CTA, centred on the page background. 100dvh (not 100vh) so the
+   mobile WebView's status-bar safe-area doesn't push the page into a
+   scroll. */
 
 .d-welcome {
     position: relative;
@@ -13,93 +10,77 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    /* Three-row column: top gutter (flex-grow) | centered stack |
-       bottom gutter with github link. justify-content: space-between
-       puts the stack in the middle of the remaining space. */
+    /* Card centred in the free space, GitHub link pinned to the bottom. */
     justify-content: space-between;
-    padding: 24px 20px;
+    padding: 24px 16px;
+    box-sizing: border-box;
     text-align: center;
 }
 
-.d-welcome__cjk {
-    position: fixed;
-    top: 50%;
-    right: 5%;
-    transform: translateY(-50%);
-    font-family: var(--font-cjk);
-    font-size: clamp(280px, 40vw, 460px);
-    color: var(--text);
-    opacity: 0.05;
-    writing-mode: vertical-rl;
-    pointer-events: none;
-    user-select: none;
-    line-height: 1;
-}
-
-/* Centered hero stack: icon → name → tagline → CTA. Wrapped in its own
-   flex column so margin: auto on the wrapper vertically centres against
-   the parent's space-between. */
 .d-welcome__stack {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 22px;
-    max-width: 420px;
-    width: 100%;
+    width: 440px;
+    max-width: 100%;
+    box-sizing: border-box;
     margin: auto 0;
-}
-
-/* v6: SVG BrandMark replaces the old text-rendered "a" tile. The SVG
-   paints its own dark surface + accent A; this rule just adds the soft
-   glow shadow that lifted the chip off the page. */
-.d-welcome__mark {
-    border-radius: 22px;
-    box-shadow: 0 16px 40px -12px var(--accent-soft);
+    padding: 40px 32px 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-16);
 }
 
 .d-welcome__name {
+    margin: 20px 0 0;
     font-family: var(--font-display);
-    font-size: 44px;
+    font-size: 40px;
+    line-height: 52px;
+    font-weight: 600;
     letter-spacing: 0;
-    line-height: 1;
-    margin: 0;
     color: var(--text);
 }
 
 .d-welcome__tagline {
-    font-size: 15px;
-    line-height: 1.5;
-    color: var(--text-dim);
-    margin: 0 0 8px;
+    margin: 8px 0 32px;
     max-width: 360px;
+    font-size: 16px;
+    line-height: 22px;
+    color: var(--text-dim);
 }
 
-/* GitHub link — quiet single word ("github") that doesn't compete with
-   the centered CTA. Sits at the bottom of the column via the parent's
-   space-between (no absolute positioning needed). */
+.d-welcome__stack ::deep .d-btn { width: 100%; }
+
+/* GitHub — quiet text link at the bottom of the column. */
 .d-welcome__gh {
-    font-family: var(--font-mono);
+    margin-top: 16px;
+    padding: 6px 8px;
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
     font-size: 12px;
-    color: var(--text-faint);
+    line-height: 16px;
+    color: var(--text-dim);
     letter-spacing: 0;
     text-decoration: none;
-    padding: 6px 14px;
-    border-radius: 999px;
-    transition: color var(--motion-fast), background var(--motion-fast);
+    transition: color var(--motion-fast);
 }
 .d-welcome__gh:hover {
-    color: var(--text-dim);
-    background: var(--ink-1);
+    color: var(--text);
+    text-decoration: underline;
 }
 
 @media (max-width: 639px) {
-    .d-welcome { padding: 20px 18px; }
-    .d-welcome__stack { gap: 18px; }
-    /* SVG width/height are set via the BrandMark Size parameter, not
-       here. This rule kept for mobile-specific border-radius / shadow
-       adjustments only. */
-    .d-welcome__mark { border-radius: 18px; }
-    .d-welcome__name { font-size: 36px; letter-spacing: 0; }
-    .d-welcome__tagline { font-size: 14px; }
-    .d-welcome__cjk { font-size: clamp(240px, 50vw, 320px); right: -8%; }
+    .d-welcome { padding: 16px; }
+    .d-welcome__stack { padding: 32px 20px 24px; }
+    .d-welcome__name {
+        font-size: 28px;
+        line-height: 36px;
+        margin-top: 16px;
+    }
+    .d-welcome__tagline {
+        font-size: 14px;
+        line-height: 20px;
+        margin-bottom: 24px;
+    }
 }

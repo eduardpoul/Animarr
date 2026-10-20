@@ -6,15 +6,16 @@
 @inject UserContextState UserCtx
 
 @*
-    Media detail (v3 design — reused unchanged in v4 per CHANGELOG_3 §3).
+    Media detail — Fluent 2 (A1) title page.
 
     Composition:
-      • <MediaDetailHero> — full-bleed fanart, BACK + EDIT METADATA glass
-        chips, 260px poster + flex title block, CJK watermark, Continue CTA.
-      • 3-column body: Synopsis 2.2fr · Details 1fr · Identification 320px.
-      • Series / Anime: season tabs + episode grid (repeat(auto-fill,
-        minmax(260px, 1fr))) using <EpisodeCard>.
-      • Movies: <MovieFileCard> with 360px thumb panel + info panel.
+      • <MediaDetailHero> — full-bleed fanart (A1 fade), Back / Favorite /
+        Edit glass buttons, poster + title block, CJK watermark, Continue CTA.
+      • Two-column body (.md-layout): main column = Synopsis, season pivot +
+        episode grid/list (<EpisodeCard>) or <MovieFileCard>, unmatched files,
+        <FranchiseRail>; side column = Details + Identification cards.
+        Below 1200px it collapses to one column (synopsis → cards → episodes).
+      • "More like this" <RecRail> runs full width under the body.
       • Player overlay mounts Artplayer.
       • EditMetadataDrawer slides in from the right.
 *@
@@ -41,93 +42,6 @@ else if (_item is null)
 else
 {
     var item = _item;
-
-    @* Hero with full-bleed fanart, BACK / EDIT chips, poster + title row. *@
-    <MediaDetailHero Item="@item"
-                     BackHref="/"
-                     Continue="@_continueAction"
-                     OnContinueClick="OnHeroContinue"
-                     OnEditClick="OpenEditPanel"
-                     OnFavoriteClick="ToggleFavoriteAsync" />
-
-    @* ── 3-column body — Synopsis · Details · Identification ────────────── *@
-    <div class="md-body">
-        <section class="md-body__col md-synopsis">
-            <div class="md-overline">@L["media_detail.overline_synopsis"]</div>
-            @if (!string.IsNullOrEmpty(item.Description))
-            {
-                <p class="md-prose">@item.Description</p>
-            }
-            else
-            {
-                <p class="md-prose md-prose--empty">@L["media_detail.no_synopsis"]</p>
-            }
-            <div class="md-actions">
-                <Btn Variant="ghost" Size="md" OnClick="ReidentifyAsync">
-                    <DIcon Name="refresh" Size="14" /> @L["catalog.btn_reidentify"]
-                </Btn>
-            </div>
-        </section>
-
-        <section class="md-body__col md-details">
-            <div class="md-overline">@L["media_detail.overline_details"]</div>
-            <dl class="md-kv">
-                @if (!string.IsNullOrEmpty(item.Studio)) { <dt>@L["media_detail.detail_studio"]</dt><dd>@item.Studio</dd> }
-                @if (!string.IsNullOrEmpty(item.Language)) { <dt>@L["media_detail.detail_language"]</dt><dd>@item.Language</dd> }
-                @if (item.Runtime is > 0) { <dt>@L["media_detail.detail_runtime"]</dt><dd>@item.Runtime @L["media_detail.detail_runtime_unit"]</dd> }
-                @if (item.EpisodeCount is > 0) { <dt>@L["media_detail.detail_episodes"]</dt><dd>@item.EpisodeCount</dd> }
-                @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>@L["media_detail.detail_season"]</dt><dd>@item.SeasonLabel</dd> }
-                @if (!string.IsNullOrEmpty(item.Status)) { <dt>@L["media_detail.detail_status"]</dt><dd>@item.Status</dd> }
-                @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>@L["media_detail.detail_rating"]</dt><dd>@item.ContentRating</dd> }
-                @if (item.Genres.Length > 0)
-                {
-                    var displayGenres = item.GenresLocalized.Length > 0 ? item.GenresLocalized : item.Genres;
-                    <dt>@L["media_detail.detail_tags"]</dt>
-                    <dd class="md-kv__tags">@string.Join(" · ", displayGenres)</dd>
-                }
-            </dl>
-        </section>
-
-        <section class="md-body__col md-ident">
-            <div class="md-overline md-overline--dim">IDENTIFICATION</div>
-            @if (item.TmdbId is not null)
-            {
-                <div class="md-id-row">
-                    <span class="md-id-row__src">TMDB</span>
-                    <a class="md-id-row__link"
-                       target="_blank" rel="noopener"
-                       href="@($"https://www.themoviedb.org/{(item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{item.TmdbId}")">
-                        @item.TmdbId
-                        <DIcon Name="external" Size="10" />
-                    </a>
-                </div>
-            }
-            @if (item.MalId is not null)
-            {
-                <div class="md-id-row">
-                    <span class="md-id-row__src">MAL</span>
-                    <a class="md-id-row__link"
-                       target="_blank" rel="noopener"
-                       href="@($"https://myanimelist.net/anime/{item.MalId}")">
-                        @item.MalId
-                        <DIcon Name="external" Size="10" />
-                    </a>
-                </div>
-            }
-            @if (!string.IsNullOrEmpty(item.ImdbId))
-            {
-                <div class="md-id-row">
-                    <span class="md-id-row__src">IMDb</span>
-                    <a class="md-id-row__link"
-                       target="_blank" rel="noopener"
-                       href="@($"https://www.imdb.com/title/{item.ImdbId}")">
-                        @item.ImdbId
-                        <DIcon Name="external" Size="10" />
-                    </a>
-                </div>
-            }
-        </section>
-    </div>
 
     @* ── Episodes (series/anime) ──────────────────────────
          v5 fix: previously this branch only fired when Item.Seasons came back
@@ -174,312 +88,412 @@ else
         .ToArray();
     var showEpisodeGrid = hasSeasonMeta
                       || (isMultiEpisode && fileSeasons.Length > 0);
-    if (showEpisodeGrid)
-    {
-        <section class="md-seasons">
-            <div class="md-season-row">
-            <nav class="md-season-tabs" aria-label="Seasons">
-                @if (hasSeasonMeta)
+
+    @* Hero with full-bleed fanart, Back / Favorite / Edit, poster + title row. *@
+    <MediaDetailHero Item="@item"
+                     BackHref="/"
+                     Continue="@_continueAction"
+                     OnContinueClick="OnHeroContinue"
+                     OnEditClick="OpenEditPanel"
+                     OnFavoriteClick="ToggleFavoriteAsync" />
+
+    @* ── Two-column body — main (synopsis · episodes · franchise) + side
+         cards (Details · Identification). Single column below 1200px. ── *@
+    <div class="md-layout">
+        <div class="md-main">
+            <section class="md-synopsis">
+                <h2 class="md-h2">@L["media_detail.overline_synopsis"]</h2>
+                @if (!string.IsNullOrEmpty(item.Description))
                 {
-                    @foreach (var s in item.Seasons.OrderBy(s => s.Number))
-                    {
-                        var n = s.Number;
-                        <button type="button"
-                                class="@($"md-season-tab tv-focus {(_activeSeason == n ? "md-season-tab--active" : "")}")"
-                                @onclick="@(() => _activeSeason = n)">
-                            @($"Season {n}") <span class="md-season-tab__count">@s.EpisodeCount</span>
-                        </button>
-                    }
-                    @* Disk-only seasons TMDB metadata doesn't list — chiefly
-                       Specials (season 0). Without a tab they'd stay hidden. *@
-                    @foreach (var n in fileSeasons.Where(fs => !item.Seasons.Any(s => s.Number == fs)))
-                    {
-                        var nn = n;
-                        var epCount = _files.Count(f => (f.Season ?? 1) == nn);
-                        <button type="button"
-                                class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
-                                @onclick="@(() => _activeSeason = nn)">
-                            @(nn == 0 ? "Specials" : $"Season {nn}") <span class="md-season-tab__count">@epCount</span>
-                        </button>
-                    }
+                    <p class="md-prose">@item.Description</p>
                 }
                 else
                 {
-                    @foreach (var n in fileSeasons)
-                    {
-                        var nn = n;
-                        var epCount = _files.Count(f => (f.Season ?? 1) == nn);
-                        <button type="button"
-                                class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
-                                @onclick="@(() => _activeSeason = nn)">
-                            @(nn == 0 ? "Specials" : $"Season {nn}") <span class="md-season-tab__count">@epCount</span>
-                        </button>
-                    }
+                    <p class="md-prose md-prose--empty">@L["media_detail.no_synopsis"]</p>
                 }
-            </nav>
+            </section>
 
-                @* Hide-fillers toggle — only on titles that actually carry
-                   Jikan flags; writes the HideFillers preference (page toggle
-                   IS the per-account default, same as the view toggle). *@
-                @if (item.FillerEpisodes.Length + item.RecapEpisodes.Length > 0)
-                {
-                    <button type="button"
-                            class="@($"md-filler-toggle tv-focus {(_hideFillers ? "md-filler-toggle--on" : "")}")"
-                            aria-pressed="@(_hideFillers ? "true" : "false")"
-                            title="@L["episode.hide_fillers_hint"]"
-                            @onclick="ToggleHideFillersAsync">
-                        <DIcon Name="@(_hideFillers ? "eye-off" : "eye")" Size="14" />
-                        <span>@L["episode.hide_fillers"]</span>
-                    </button>
-                }
-
-                @* NEW (Episode View Modes): grid ⇄ detailed-list toggle. Writes
-                   the EpisodeListView preference, so flipping it here also sets
-                   the per-account default surfaced in Profile → Appearance. *@
-                <div class="md-view-toggle" role="group" aria-label="Episode view">
-                    <button type="button"
-                            class="@($"md-view-btn tv-focus {(_episodeView == "grid" ? "md-view-btn--active" : "")}")"
-                            aria-pressed="@(_episodeView == "grid" ? "true" : "false")"
-                            title="Grid view"
-                            @onclick="@(() => SetEpisodeViewAsync("grid"))">
-                        <DIcon Name="grid" Size="15" />
-                    </button>
-                    <button type="button"
-                            class="@($"md-view-btn tv-focus {(_episodeView == "list" ? "md-view-btn--active" : "")}")"
-                            aria-pressed="@(_episodeView == "list" ? "true" : "false")"
-                            title="Detailed list"
-                            @onclick="@(() => SetEpisodeViewAsync("list"))">
-                        <DIcon Name="list" Size="15" />
-                    </button>
-                </div>
-            </div>
-
-            @{
-                var active = hasSeasonMeta ? item.Seasons.FirstOrDefault(s => s.Number == _activeSeason) : null;
-                // Episode count for the loop. Prefer the metadata's count, but
-                // fall back to whichever is larger of (metadata count, max
-                // on-disk file episode for this season) so cards aren't lost
-                // when TMDB underreports the season length (common for ongoing
-                // donghua / continuing series).
-                var maxFileEp = _files.Where(f => (f.Season ?? 1) == _activeSeason)
-                                       .Max(f => (int?)f.Episode) ?? 0;
-                var loopEpCount = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
-                if (loopEpCount == 0) loopEpCount = 1;
-                // Per-season poster URL (used as the per-episode thumb fallback
-                // so the grid isn't a wall of placeholder DIcons). Cache-buster
-                // ticks come from Item.LastMetadataRefreshedAt — rescans
-                // overwrite the same path. Falls back to the main FanartPath
-                // when no season-poster was downloaded.
-                var seasonPoster = active?.PosterPath ?? item.FanartPath ?? item.PosterPath;
-                var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
-                    ? Animarr.UI.Services.MediaUrl.Image(seasonPoster, item.LastMetadataRefreshedAt?.Ticks ?? 0)
-                    : null;
-                // Section meta ("X of Y watched · all on disk") — Episode View
-                // Modes design. Counts over the active season's 1..loopEpCount.
-                var epsWatched = 0;
-                var epsOnDisk  = 0;
-                for (int si = 1; si <= loopEpCount; si++)
-                {
-                    if (_files.Any(f => (f.Season ?? 1) == _activeSeason && f.Episode == si)) epsOnDisk++;
-                    if (_watchStates.Any(w => w.Season == _activeSeason && w.Episode == si && w.IsWatched)) epsWatched++;
-                }
-            }
-            @if (active is not null && !string.IsNullOrEmpty(active.Overview))
+            @* Episodes (series/anime) — season pivot, progress + view tools,
+               then the grid / detailed list. Gating vars are computed above. *@
+            @if (showEpisodeGrid)
             {
-                <p class="md-season-overview">@active.Overview</p>
-            }
+                <section class="md-seasons">
+                    <nav class="md-season-tabs" aria-label="Seasons">
+                        @if (hasSeasonMeta)
+                        {
+                            @foreach (var s in item.Seasons.OrderBy(s => s.Number))
+                            {
+                                var n = s.Number;
+                                <button type="button"
+                                        class="@($"md-season-tab tv-focus {(_activeSeason == n ? "md-season-tab--active" : "")}")"
+                                        @onclick="@(() => _activeSeason = n)">
+                                    @L.Get("media_detail.season_default", n) <span class="md-season-tab__count">@s.EpisodeCount</span>
+                                </button>
+                            }
+                            @* Disk-only seasons TMDB metadata doesn't list — chiefly
+                               Specials (season 0). Without a tab they'd stay hidden. *@
+                            @foreach (var n in fileSeasons.Where(fs => !item.Seasons.Any(s => s.Number == fs)))
+                            {
+                                var nn = n;
+                                var epCount = _files.Count(f => (f.Season ?? 1) == nn);
+                                <button type="button"
+                                        class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
+                                        @onclick="@(() => _activeSeason = nn)">
+                                    @(nn == 0 ? L["media_detail.specials"] : L.Get("media_detail.season_default", nn)) <span class="md-season-tab__count">@epCount</span>
+                                </button>
+                            }
+                        }
+                        else
+                        {
+                            @foreach (var n in fileSeasons)
+                            {
+                                var nn = n;
+                                var epCount = _files.Count(f => (f.Season ?? 1) == nn);
+                                <button type="button"
+                                        class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
+                                        @onclick="@(() => _activeSeason = nn)">
+                                    @(nn == 0 ? L["media_detail.specials"] : L.Get("media_detail.season_default", nn)) <span class="md-season-tab__count">@epCount</span>
+                                </button>
+                            }
+                        }
+                    </nav>
 
-            <div class="md-secmeta">
-                <b>@epsWatched</b> of @loopEpCount watched
-                @if (epsOnDisk >= loopEpCount)
-                {
-                    <span>· all episodes on disk</span>
-                }
-                else
-                {
-                    <span>· @epsOnDisk of @loopEpCount on disk</span>
-                }
-            </div>
+                    @{
+                        var active = hasSeasonMeta ? item.Seasons.FirstOrDefault(s => s.Number == _activeSeason) : null;
+                        // Episode count for the loop. Prefer the metadata's count, but
+                        // fall back to whichever is larger of (metadata count, max
+                        // on-disk file episode for this season) so cards aren't lost
+                        // when TMDB underreports the season length (common for ongoing
+                        // donghua / continuing series).
+                        var maxFileEp = _files.Where(f => (f.Season ?? 1) == _activeSeason)
+                                               .Max(f => (int?)f.Episode) ?? 0;
+                        var loopEpCount = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
+                        if (loopEpCount == 0) loopEpCount = 1;
+                        // Per-season poster URL (used as the per-episode thumb fallback
+                        // so the grid isn't a wall of placeholder DIcons). Cache-buster
+                        // ticks come from Item.LastMetadataRefreshedAt — rescans
+                        // overwrite the same path. Falls back to the main FanartPath
+                        // when no season-poster was downloaded.
+                        var seasonPoster = active?.PosterPath ?? item.FanartPath ?? item.PosterPath;
+                        var seasonThumb = !string.IsNullOrEmpty(seasonPoster)
+                            ? Animarr.UI.Services.MediaUrl.Image(seasonPoster, item.LastMetadataRefreshedAt?.Ticks ?? 0)
+                            : null;
+                        // Section meta ("X of Y watched · all on disk") — Episode View
+                        // Modes design. Counts over the active season's 1..loopEpCount.
+                        var epsWatched = 0;
+                        var epsOnDisk  = 0;
+                        for (int si = 1; si <= loopEpCount; si++)
+                        {
+                            if (_files.Any(f => (f.Season ?? 1) == _activeSeason && f.Episode == si)) epsOnDisk++;
+                            if (_watchStates.Any(w => w.Season == _activeSeason && w.Episode == si && w.IsWatched)) epsWatched++;
+                        }
+                    }
+                    @if (active is not null && !string.IsNullOrEmpty(active.Overview))
+                    {
+                        <p class="md-season-overview">@active.Overview</p>
+                    }
 
-            @{ var didMarkAutofocusEp = false; }
-            <div class="@(_episodeView == "list" ? "md-episode-rows" : "md-episode-grid")">
-                @for (int i = 1; i <= loopEpCount; i++)
-                {
-                    var ep        = i;
-                    var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
-                    var hasFile   = epFile is not null;
-                    var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
-                    // Stage B: per-episode TMDB metadata. Disk → TMDB key mirrors
-                    // the thumb endpoint — an absolute-numbered donghua file maps
-                    // to TMDB season 1 / its absolute episode; everything else maps
-                    // straight through.
-                    var absEpNum  = epFile?.AbsoluteEpisode;
-                    var metaKey   = absEpNum is int absKey ? (Season: 1, Episode: absKey) : (Season: _activeSeason, Episode: ep);
-                    var epDto     = _episodeMeta.GetValueOrDefault(metaKey);
-                    var epRuntime = epDto?.RuntimeMin ?? item.Runtime;
-                    // Prefer the real TMDB episode title; fall back to the
-                    // numbered label. Season 0 = Specials; a donghua season-offset
-                    // surfaces the TMDB absolute number ("Episode 1 · TMDB #107").
-                    var epTitle   = !string.IsNullOrWhiteSpace(epDto?.Title)
-                        ? epDto!.Title!
-                        : _activeSeason == 0
-                            ? $"Special {ep}"
-                            : absEpNum is int absEp
-                                ? $"Episode {ep} · TMDB #{absEp}"
-                                : $"Episode {ep}";
-                    // First on-disk episode becomes the default-focus target
-                    // when the hero has no Continue CTA (i.e. nothing in
-                    // progress yet). Series like Death's Game where every
-                    // episode is missing → no card gets the marker, focus
-                    // falls back to first-focusable-in-main (Back chip).
-                    var markEpAutofocus = hasFile && !didMarkAutofocusEp;
-                    if (markEpAutofocus) didMarkAutofocusEp = true;
-                    // Design spec: on-disk shows runtime/codec/size; missing shows
-                    // "Not downloaded" in warn color (the .d-ep--miss .d-ep__meta
-                    // rule already tints it). Was hard-coded to runtime regardless,
-                    // so missing episodes showed e.g. "53m" in warn color — looks
-                    // like the file IS there with broken styling. Bug surfaced on
-                    // Death's Game where every episode is missing.
-                    var epMeta    = hasFile
-                        ? (epRuntime is > 0 ? $"{epRuntime}m" : "")
-                        : L["episode_card.meta_missing"];
-                    // Filler/recap marker (Jikan, MAL-entry numbering): match by
-                    // the file's absolute number first — long-runners and
-                    // offset donghua — else by the plain episode number, but
-                    // only on season 1 (a per-season MAL entry's "ep 5" must
-                    // not tag S2E5).
-                    var isFiller = item.FillerEpisodes.Length > 0
-                        && (absEpNum is int fAbs ? item.FillerEpisodes.Contains(fAbs)
-                                                 : _activeSeason <= 1 && item.FillerEpisodes.Contains(ep));
-                    var isRecap  = !isFiller && item.RecapEpisodes.Length > 0
-                        && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
-                                                 : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
-                    var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
-                    // Canon-only marathon mode: flagged episodes drop out of the
-                    // grid entirely while the toggle is on.
-                    if (_hideFillers && epFlag is not null) { continue; }
+                    <div class="md-season-bar">
+                        <div class="md-secmeta">
+                            <span class="md-secmeta__track" aria-hidden="true"><span class="md-secmeta__fill" style="width: @(epsWatched * 100 / loopEpCount)%"></span></span>
+                            <span class="md-secmeta__text">
+                                @((MarkupString)L.Get("media_detail.watched_of_html_fmt", epsWatched, loopEpCount))
+                                @if (epsOnDisk >= loopEpCount)
+                                {
+                                    <span>· @L["media_detail.all_on_disk"]</span>
+                                }
+                                else
+                                {
+                                    <span>· @L.Get("media_detail.season_on_disk_fmt", epsOnDisk, loopEpCount)</span>
+                                }
+                            </span>
+                        </div>
 
-                    @* On TV the card itself MUST be focusable — without it, the
-                       D-pad has nothing to land on inside the episode grid and
-                       OK can't trigger Play. The wrapper was a plain <div> with
-                       click handler, which mouse + touch handle fine but the
-                       remote treats as un-targetable. tabindex+role+keydown
-                       turns it into a proper interactive widget that
-                       tv-nav.js's spatial scan picks up and that the OK key
-                       (Enter) activates. Disabled episodes (file missing)
-                       still render but tabindex=-1 so the remote skips over
-                       them — matches the visual --miss dim. *@
-                    <div class="md-episode-card tv-focus"
-                         tabindex="@(hasFile ? "0" : "-1")"
-                         role="button"
-                         aria-label="@($"Play episode {ep}")"
-                         aria-disabled="@(hasFile ? "false" : "true")"
-                         data-tv-autofocus="@(markEpAutofocus ? "true" : null)"
-                         @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
-                         @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
-                        <EpisodeCard Number="ep"
-                                     Layout="@(_episodeView == "list" ? "list" : "card")"
-                                     Title="@epTitle"
-                                     Overview="@epDto?.Overview"
-                                     AirDate="@epDto?.AirDate"
-                                     Rating="@epDto?.Rating"
-                                     Resolution="@(hasFile ? ResolutionFromName(epFile?.FileName) : null)"
-                                     Lang="@(UserCtx.Preferences?.Language)"
-                                     ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
-                                     Meta="@epMeta"
-                                     Have="hasFile"
-                                     Flag="@epFlag"
-                                     FlagLabel="@(epFlag == "filler" ? L["episode.filler"] : epFlag == "recap" ? L["episode.recap"] : null)"
-                                     WatchStateDto="@watchDto"
-                                     OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
+                        <div class="md-season-tools">
+                            @* Hide-fillers switch — only on titles that actually carry
+                               Jikan flags; writes the HideFillers preference (page toggle
+                               IS the per-account default, same as the view toggle). *@
+                            @if (item.FillerEpisodes.Length + item.RecapEpisodes.Length > 0)
+                            {
+                                <button type="button"
+                                        class="@($"md-filler-toggle tv-focus {(_hideFillers ? "md-filler-toggle--on" : "")}")"
+                                        aria-pressed="@(_hideFillers ? "true" : "false")"
+                                        title="@L["episode.hide_fillers_hint"]"
+                                        @onclick="ToggleHideFillersAsync">
+                                    <span class="md-switch" aria-hidden="true"><span class="md-switch__thumb"></span></span>
+                                    <span>@L["episode.hide_fillers"]</span>
+                                </button>
+                            }
+
+                            @* Episode View Modes: grid ⇄ detailed-list toggle. Writes
+                               the EpisodeListView preference, so flipping it here also sets
+                               the per-account default surfaced in Profile → Appearance. *@
+                            <div class="md-view-toggle" role="group" aria-label="Episode view">
+                                <button type="button"
+                                        class="@($"md-view-btn tv-focus {(_episodeView == "grid" ? "md-view-btn--active" : "")}")"
+                                        aria-pressed="@(_episodeView == "grid" ? "true" : "false")"
+                                        title="@L["media_detail.view_grid"]"
+                                        @onclick="@(() => SetEpisodeViewAsync("grid"))">
+                                    <DIcon Name="grid" Size="16" />
+                                </button>
+                                <button type="button"
+                                        class="@($"md-view-btn tv-focus {(_episodeView == "list" ? "md-view-btn--active" : "")}")"
+                                        aria-pressed="@(_episodeView == "list" ? "true" : "false")"
+                                        title="@L["media_detail.view_list"]"
+                                        @onclick="@(() => SetEpisodeViewAsync("list"))">
+                                    <DIcon Name="list" Size="16" />
+                                </button>
+                            </div>
+                        </div>
                     </div>
+
+                    @{ var didMarkAutofocusEp = false; }
+                    <div class="@(_episodeView == "list" ? "md-episode-rows" : "md-episode-grid")">
+                        @for (int i = 1; i <= loopEpCount; i++)
+                        {
+                            var ep        = i;
+                            var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
+                            var hasFile   = epFile is not null;
+                            var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
+                            // Stage B: per-episode TMDB metadata. Disk → TMDB key mirrors
+                            // the thumb endpoint — an absolute-numbered donghua file maps
+                            // to TMDB season 1 / its absolute episode; everything else maps
+                            // straight through.
+                            var absEpNum  = epFile?.AbsoluteEpisode;
+                            var metaKey   = absEpNum is int absKey ? (Season: 1, Episode: absKey) : (Season: _activeSeason, Episode: ep);
+                            var epDto     = _episodeMeta.GetValueOrDefault(metaKey);
+                            var epRuntime = epDto?.RuntimeMin ?? item.Runtime;
+                            // Prefer the real TMDB episode title; fall back to the
+                            // numbered label. Season 0 = Specials; a donghua season-offset
+                            // surfaces the TMDB absolute number ("Episode 1 · TMDB #107").
+                            var epTitle   = !string.IsNullOrWhiteSpace(epDto?.Title)
+                                ? epDto!.Title!
+                                : _activeSeason == 0
+                                    ? $"Special {ep}"
+                                    : absEpNum is int absEp
+                                        ? $"Episode {ep} · TMDB #{absEp}"
+                                        : $"Episode {ep}";
+                            // First on-disk episode becomes the default-focus target
+                            // when the hero has no Continue CTA (i.e. nothing in
+                            // progress yet). Series like Death's Game where every
+                            // episode is missing → no card gets the marker, focus
+                            // falls back to first-focusable-in-main (Back chip).
+                            var markEpAutofocus = hasFile && !didMarkAutofocusEp;
+                            if (markEpAutofocus) didMarkAutofocusEp = true;
+                            // Design spec: on-disk shows runtime/codec/size; missing shows
+                            // "Not downloaded" in warn color (the .d-ep--miss .d-ep__meta
+                            // rule already tints it). Was hard-coded to runtime regardless,
+                            // so missing episodes showed e.g. "53m" in warn color — looks
+                            // like the file IS there with broken styling. Bug surfaced on
+                            // Death's Game where every episode is missing.
+                            var epMeta    = hasFile
+                                ? (epRuntime is > 0 ? $"{epRuntime}m" : "")
+                                : L["episode_card.meta_missing"];
+                            // Filler/recap marker (Jikan, MAL-entry numbering): match by
+                            // the file's absolute number first — long-runners and
+                            // offset donghua — else by the plain episode number, but
+                            // only on season 1 (a per-season MAL entry's "ep 5" must
+                            // not tag S2E5).
+                            var isFiller = item.FillerEpisodes.Length > 0
+                                && (absEpNum is int fAbs ? item.FillerEpisodes.Contains(fAbs)
+                                                         : _activeSeason <= 1 && item.FillerEpisodes.Contains(ep));
+                            var isRecap  = !isFiller && item.RecapEpisodes.Length > 0
+                                && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
+                                                         : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
+                            var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
+                            // Canon-only marathon mode: flagged episodes drop out of the
+                            // grid entirely while the toggle is on.
+                            if (_hideFillers && epFlag is not null) { continue; }
+
+                            @* On TV the card itself MUST be focusable — without it, the
+                               D-pad has nothing to land on inside the episode grid and
+                               OK can't trigger Play. The wrapper was a plain <div> with
+                               click handler, which mouse + touch handle fine but the
+                               remote treats as un-targetable. tabindex+role+keydown
+                               turns it into a proper interactive widget that
+                               tv-nav.js's spatial scan picks up and that the OK key
+                               (Enter) activates. Disabled episodes (file missing)
+                               still render but tabindex=-1 so the remote skips over
+                               them — matches the visual --miss dim. *@
+                            <div class="md-episode-card tv-focus"
+                                 tabindex="@(hasFile ? "0" : "-1")"
+                                 role="button"
+                                 aria-label="@($"Play episode {ep}")"
+                                 aria-disabled="@(hasFile ? "false" : "true")"
+                                 data-tv-autofocus="@(markEpAutofocus ? "true" : null)"
+                                 @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
+                                 @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
+                                <EpisodeCard Number="ep"
+                                             Layout="@(_episodeView == "list" ? "list" : "card")"
+                                             Title="@epTitle"
+                                             Overview="@epDto?.Overview"
+                                             AirDate="@epDto?.AirDate"
+                                             Rating="@epDto?.Rating"
+                                             Resolution="@(hasFile ? ResolutionFromName(epFile?.FileName) : null)"
+                                             Lang="@(UserCtx.Preferences?.Language)"
+                                             ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
+                                             Meta="@epMeta"
+                                             Have="hasFile"
+                                             Flag="@epFlag"
+                                             FlagLabel="@(epFlag == "filler" ? L["episode.filler"] : epFlag == "recap" ? L["episode.recap"] : null)"
+                                             WatchStateDto="@watchDto"
+                                             OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+            else if (item.MediaType == MediaItemType.Movie
+                  || (item.Seasons.Length == 0 && _files.Length > 0))
+            {
+                @* Movie OR flat-folder anime (e.g. one-shot OVA) with no Seasons.
+                   Renders the same MovieFileCard recipe. *@
+                var movieFile     = _files.FirstOrDefault();
+                var movieWatchDto = _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null);
+                var thumbUrl      = !string.IsNullOrEmpty(item.FanartPath)
+                    ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
+                    : (!string.IsNullOrEmpty(item.PosterPath)
+                        ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
+                        : null);
+                var runtimeLabel  = item.Runtime is > 0 ? $"{item.Runtime} min" : null;
+
+                <section class="md-movie-section">
+                    <MovieFileCard Title="@item.Title"
+                                   FileName="@(movieFile?.FileName)"
+                                   ThumbUrl="@thumbUrl"
+                                   Runtime="@runtimeLabel"
+                                   Have="@(movieFile is not null)"
+                                   WatchStateDto="@movieWatchDto"
+                                   PlayLabel="@(MovieCtaLabel(movieWatchDto))"
+                                   PlayIcon="@(MovieCtaIcon(movieWatchDto))"
+                                   OnPlayClick="OnMoviePlayClick"
+                                   OnToggleWatched="OnMovieToggleWatched" />
+                </section>
+            }
+
+            @* ── Unmatched files ───────────────────────────────────────────
+                 Series files on disk that the deterministic parser couldn't place
+                 (Episode == null). They're invisible in the episode grid above, so
+                 surface them here: set (season, episode) by hand — Tier 2 manual
+                 override — or hit "Resolve with AI" to run the LLM (Tier 1). *@
+            @if (item.MediaType == MediaItemType.Series && _files.Any(f => f.Episode is null))
+            {
+                var unmatched = _files.Where(f => f.Episode is null)
+                                      .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
+                                      .ToList();
+                <section class="md-card md-unmatched">
+                    <div class="md-unmatched__head">
+                        <h3 class="md-h2 md-unmatched__title">
+                            @L["media_detail.unmatched_title"] <span class="md-unmatched__count">@unmatched.Count</span>
+                        </h3>
+                        <Btn Variant="primary" Size="md" Loading="@_aiBusy" OnClick="ResolveWithAiAsync">
+                            @if (!_aiBusy) { <DIcon Name="sparkle" Size="16" /> }
+                            @(_aiBusy ? L["media_detail.resolving"] : L["media_detail.btn_resolve_ai"])
+                        </Btn>
+                    </div>
+                    <p class="md-unmatched__hint">
+                        On disk, but no season/episode could be read from the name. Set them
+                        by hand, or let the AI match against the episode list.
+                    </p>
+                    @if (_aiStatus is not null)
+                    {
+                        <p class="fs-msgbar fs-msgbar--info md-unmatched__status">@_aiStatus</p>
+                    }
+                    <div class="md-unmatched__list">
+                        @foreach (var f in unmatched)
+                        {
+                            var path = f.FilePath;
+                            <div class="md-unmatched__row">
+                                <span class="md-unmatched__name" title="@path">@f.FileName</span>
+                                <label class="md-unmatched__field">S
+                                    <input type="number" min="1" class="fs-input md-unmatched__num"
+                                           value="@EditSeason(path, f)"
+                                           @onchange="@(e => SetEditSeason(path, e.Value?.ToString()))" />
+                                </label>
+                                <label class="md-unmatched__field">E
+                                    <input type="number" min="1" class="fs-input md-unmatched__num"
+                                           value="@EditEpisode(path, f)"
+                                           @onchange="@(e => SetEditEpisode(path, e.Value?.ToString()))" />
+                                </label>
+                                <Btn Variant="solid" Size="md" OnClick="@(() => SaveMappingAsync(path, f))">@L["common.btn_save"]</Btn>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+
+            @* Franchise watch-order rail — release order, "вы здесь", missing members
+               dashed with a Want button. Above "More like this": franchise context is
+               the stronger signal on a title page. *@
+            @if (_franchise is not null)
+            {
+                <FranchiseRail Franchise="@_franchise" />
+            }
+        </div>
+
+        @* Side column — Fluent cards with key/value rows. *@
+        <aside class="md-aside">
+            <section class="md-card md-details">
+                <h2 class="md-h2">@L["media_detail.overline_details"]</h2>
+                <dl class="md-kv">
+                    @if (!string.IsNullOrEmpty(item.Studio)) { <dt>@L["media_detail.detail_studio"]</dt><dd>@item.Studio</dd> }
+                    @if (!string.IsNullOrEmpty(item.Language)) { <dt>@L["media_detail.detail_language"]</dt><dd>@item.Language</dd> }
+                    @if (item.Runtime is > 0) { <dt>@L["media_detail.detail_runtime"]</dt><dd>@item.Runtime @L["media_detail.detail_runtime_unit"]</dd> }
+                    @if (item.EpisodeCount is > 0) { <dt>@L["media_detail.detail_episodes"]</dt><dd>@item.EpisodeCount</dd> }
+                    @if (!string.IsNullOrEmpty(item.SeasonLabel)) { <dt>@L["media_detail.detail_season"]</dt><dd>@item.SeasonLabel</dd> }
+                    @if (!string.IsNullOrEmpty(item.Status)) { <dt>@L["media_detail.detail_status"]</dt><dd>@item.Status</dd> }
+                    @if (!string.IsNullOrEmpty(item.ContentRating)) { <dt>@L["media_detail.detail_rating"]</dt><dd>@item.ContentRating</dd> }
+                    @if (item.Genres.Length > 0)
+                    {
+                        var displayGenres = item.GenresLocalized.Length > 0 ? item.GenresLocalized : item.Genres;
+                        <dt>@L["media_detail.detail_tags"]</dt>
+                        <dd class="md-kv__tags">
+                            @foreach (var g in displayGenres)
+                            {
+                                <span class="md-tag">@g</span>
+                            }
+                        </dd>
+                    }
+                </dl>
+            </section>
+
+            <section class="md-card md-ident">
+                <h2 class="md-h2">@L["media_detail.overline_identification"]</h2>
+                @if (item.TmdbId is not null)
+                {
+                    <a class="md-id-row"
+                       target="_blank" rel="noopener"
+                       href="@($"https://www.themoviedb.org/{(item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{item.TmdbId}")">
+                        <span class="md-id-row__src">TMDB</span>
+                        <span class="md-id-row__val">@item.TmdbId <DIcon Name="external" Size="14" /></span>
+                    </a>
                 }
-            </div>
-        </section>
-    }
-    else if (item.MediaType == MediaItemType.Movie
-          || (item.Seasons.Length == 0 && _files.Length > 0))
-    {
-        @* Movie OR flat-folder anime (e.g. one-shot OVA) with no Seasons.
-           Renders the same MovieFileCard recipe. *@
-        var movieFile     = _files.FirstOrDefault();
-        var movieWatchDto = _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null);
-        var thumbUrl      = !string.IsNullOrEmpty(item.FanartPath)
-            ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
-            : (!string.IsNullOrEmpty(item.PosterPath)
-                ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
-                : null);
-        var runtimeLabel  = item.Runtime is > 0 ? $"{item.Runtime} min" : null;
-
-        <section class="md-movie-section">
-            <MovieFileCard Title="@item.Title"
-                           FileName="@(movieFile?.FileName)"
-                           ThumbUrl="@thumbUrl"
-                           Runtime="@runtimeLabel"
-                           Have="@(movieFile is not null)"
-                           WatchStateDto="@movieWatchDto"
-                           PlayLabel="@(MovieCtaLabel(movieWatchDto))"
-                           PlayIcon="@(MovieCtaIcon(movieWatchDto))"
-                           OnPlayClick="OnMoviePlayClick"
-                           OnToggleWatched="OnMovieToggleWatched" />
-        </section>
-    }
-
-    @* ── Unmatched files ───────────────────────────────────────────────
-         Series files on disk that the deterministic parser couldn't place
-         (Episode == null). They're invisible in the episode grid above, so
-         surface them here: set (season, episode) by hand — Tier 2 manual
-         override — or hit "Resolve with AI" to run the LLM (Tier 1). *@
-    @if (item.MediaType == MediaItemType.Series && _files.Any(f => f.Episode is null))
-    {
-        var unmatched = _files.Where(f => f.Episode is null)
-                              .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
-                              .ToList();
-        <section class="md-unmatched">
-            <div class="md-unmatched__head">
-                <h3 class="md-unmatched__title">
-                    Unmatched files <span class="md-unmatched__count">@unmatched.Count</span>
-                </h3>
-                <button class="md-unmatched__ai tv-focus" disabled="@_aiBusy" @onclick="ResolveWithAiAsync">
-                    @(_aiBusy ? "Resolving…" : "✨ Resolve with AI")
-                </button>
-            </div>
-            <p class="md-unmatched__hint">
-                On disk, but no season/episode could be read from the name. Set them
-                by hand, or let the AI match against the episode list.
-            </p>
-            @if (_aiStatus is not null)
-            {
-                <p class="md-unmatched__status">@_aiStatus</p>
-            }
-            @foreach (var f in unmatched)
-            {
-                var path = f.FilePath;
-                <div class="md-unmatched__row">
-                    <span class="md-unmatched__name" title="@path">@f.FileName</span>
-                    <label class="md-unmatched__field">S
-                        <input type="number" min="1" class="md-unmatched__num"
-                               value="@EditSeason(path, f)"
-                               @onchange="@(e => SetEditSeason(path, e.Value?.ToString()))" />
-                    </label>
-                    <label class="md-unmatched__field">E
-                        <input type="number" min="1" class="md-unmatched__num"
-                               value="@EditEpisode(path, f)"
-                               @onchange="@(e => SetEditEpisode(path, e.Value?.ToString()))" />
-                    </label>
-                    <button class="md-unmatched__save tv-focus" @onclick="@(() => SaveMappingAsync(path, f))">Save</button>
+                @if (item.MalId is not null)
+                {
+                    <a class="md-id-row"
+                       target="_blank" rel="noopener"
+                       href="@($"https://myanimelist.net/anime/{item.MalId}")">
+                        <span class="md-id-row__src">MAL</span>
+                        <span class="md-id-row__val">@item.MalId <DIcon Name="external" Size="14" /></span>
+                    </a>
+                }
+                @if (!string.IsNullOrEmpty(item.ImdbId))
+                {
+                    <a class="md-id-row"
+                       target="_blank" rel="noopener"
+                       href="@($"https://www.imdb.com/title/{item.ImdbId}")">
+                        <span class="md-id-row__src">IMDb</span>
+                        <span class="md-id-row__val">@item.ImdbId <DIcon Name="external" Size="14" /></span>
+                    </a>
+                }
+                <div class="md-ident__actions">
+                    <Btn Variant="solid" Size="md" OnClick="ReidentifyAsync">
+                        <DIcon Name="refresh" Size="16" /> @L["catalog.btn_reidentify"]
+                    </Btn>
                 </div>
-            }
-        </section>
-    }
-
-    @* Franchise watch-order rail — release order, "вы здесь", missing members
-       dashed with a Want button. Above "More like this": franchise context is
-       the stronger signal on a title page. *@
-    @if (_franchise is not null)
-    {
-        <FranchiseRail Franchise="@_franchise" />
-    }
+            </section>
+        </aside>
+    </div>
 
     @* "More like this" — library matches first, TMDB backfill (per the user's
        RecsScope preference) rendered as dashed not-in-library cards. *@
@@ -993,15 +1007,15 @@ else
                     {
                         var neBits = new List<string>();
                         if (ne.Season > 0) neBits.Add($"S{ne.Season}");
-                        neBits.Add($"EP {ne.Episode}");
+                        neBits.Add(L.Get("common.episode_short_fmt", ne.Episode));
                         upNextName = string.Join(" · ", neBits);
                     }
                     // HUD-specific kicker. Design (§T-03 in 04-tv.html) shows
                     // "Now playing · S1 · EP 5" — no zero-pad, space before
                     // the episode number. Plain "Now playing" for movies.
-                    var hudKickerBits = new List<string> { "Now playing" };
+                    var hudKickerBits = new List<string> { L["media_detail.now_playing"] };
                     if (_playerSeason is > 0)  hudKickerBits.Add($"S{_playerSeason}");
-                    if (_playerEpisode is > 0) hudKickerBits.Add($"EP {_playerEpisode}");
+                    if (_playerEpisode is > 0) hudKickerBits.Add(L.Get("common.episode_short_fmt", _playerEpisode));
                     var hudKicker = string.Join(" · ", hudKickerBits);
 
                     // Skip-intro/credits times for the player. Best-effort: null →

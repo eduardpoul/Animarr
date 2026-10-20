@@ -114,8 +114,13 @@ public interface IAnimarrApiClient
     Task<ParsedTorrentDto?>  ParseTorrentAsync(ParseTorrentRequest request, CancellationToken ct = default);
     /// <summary>Drop arbitrary files into <paramref name="watcherId"/>'s folder
     /// (third tab of the Add download drawer — local files, no torrent).
-    /// Returns the count of files actually written.</summary>
-    Task<int>                UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, CancellationToken ct = default);
+    /// <paramref name="subPath"/> ("Show/Season 2") lands them in a subfolder,
+    /// created on demand. Returns the count of files actually written.</summary>
+    Task<int>                UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, string? subPath = null, CancellationToken ct = default);
+    /// <summary>Immediate subfolders of <paramref name="relativePath"/> inside a
+    /// download destination (<paramref name="folderId"/> null = the default
+    /// download directory). Feeds the Add drawer's subfolder picker.</summary>
+    Task<DestinationFolderListDto> BrowseDestinationAsync(Guid? folderId, string? relativePath, CancellationToken ct = default);
 
     // ─── Watch state ──────────────────────────────────────────────────────
     Task<WatchStateDto[]> GetWatchStatesAsync(Guid mediaItemId, CancellationToken ct = default);

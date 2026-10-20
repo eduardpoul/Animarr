@@ -5,6 +5,7 @@ using Animarr.Web.Data.Models;
 using Microsoft.EntityFrameworkCore;
 using MonoTorrent;
 using MonoTorrent.Client;
+using SubfolderPath = Animarr.Shared.SubfolderPath;
 
 namespace Animarr.Web.Services;
 
@@ -262,7 +263,7 @@ public class TorrentEngineService : BackgroundService
                 if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
                     await ApplyRootFolderRemapAsync(mgr, record.InfoHash, record.CustomRootFolderName);
                 if (record.SkipSubfolderStructure)
-                    await ApplyFlattenAsync(mgr, record.InfoHash);
+                    await ApplyFlattenAsync(mgr, record.InfoHash, record.CustomRootFolderName);
 
                 // Don't auto-start Paused (user choice) or Error torrents — an
                 // errored one is loaded but left idle so it doesn't re-error in
@@ -432,9 +433,9 @@ public class TorrentEngineService : BackgroundService
             if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
                 await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
 
-            // Flatten subfolders for magnets: remap all file paths to savePath root before download starts
+            // Flatten subfolders for magnets: remap all file paths to the destination root before download starts
             if (record.SkipSubfolderStructure)
-                await ApplyFlattenAsync(mgr, infoHash);
+                await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -798,7 +799,7 @@ public class TorrentEngineService : BackgroundService
         record.StopAfterDownload  = stopAfterDownload;
         record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
-        record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
+        record.CustomRootFolderName = SubfolderPath.Normalize(customRootFolderName);
         record.CompletedAt        = null;
         record.ErrorMessage       = null;
         await ctx.SaveChangesAsync();
@@ -869,7 +870,7 @@ public class TorrentEngineService : BackgroundService
         record.StopAfterDownload  = stopAfterDownload;
         record.SkipSubfolderStructure  = flattenSubfolders;
         record.SuppressRootFolder   = suppressRootFolder;
-        record.CustomRootFolderName = string.IsNullOrWhiteSpace(customRootFolderName) ? null : customRootFolderName.Trim();
+        record.CustomRootFolderName = SubfolderPath.Normalize(customRootFolderName);
         record.CompletedAt        = null;
         record.ErrorMessage       = null;
         // Persist initial file priorities — use ExecuteDeleteAsync so EF change tracking
@@ -891,12 +892,12 @@ public class TorrentEngineService : BackgroundService
         _managers[infoHash] = mgr;
 
         // Apply root folder rename for .torrent files (suppress is handled by CreateContainingDirectory=false)
-        if (!string.IsNullOrWhiteSpace(customRootFolderName))
-            await ApplyRootFolderRemapAsync(mgr, infoHash, customRootFolderName);
+        if (record.CustomRootFolderName is not null)
+            await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
 
-        // Flatten subfolders: remap all file paths to savePath root before download starts
+        // Flatten subfolders: remap all file paths to the destination root before download starts
         if (flattenSubfolders)
-            await ApplyFlattenAsync(mgr, infoHash);
+            await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
 
         if (!startPaused) await mgr.StartAsync();
 
@@ -1094,7 +1095,12 @@ public class TorrentEngineService : BackgroundService
     {
         if (mgr.Files.Count == 0) return;
 
-        var targetDir = Path.Combine(mgr.SavePath, customName);
+        // customName may be nested ("Cowboy Bebop/Season 2" from the Add
+        // drawer's subfolder picker). Split → platform separators; ".." and
+        // friends are dropped so it can't climb out of SavePath.
+        var segments = SubfolderPath.Split(customName);
+        if (segments.Length == 0) return;
+        var targetDir = segments.Aggregate(mgr.SavePath, Path.Combine);
 
         // Idempotent: already living under the custom folder (the remap re-runs on
         // every restore — this stops it doing pointless moves).
@@ -1184,17 +1190,21 @@ public class TorrentEngineService : BackgroundService
         _                     => TorrentRecordState.Downloading,
     };
 
-    private async Task ApplyFlattenAsync(TorrentManager mgr, string infoHash)
+    // Flattens into the custom root folder when one is set — it used to dump
+    // everything into SavePath, silently undoing the subfolder the user chose
+    // (remap runs first, then this moved the files back out of it).
+    private async Task ApplyFlattenAsync(TorrentManager mgr, string infoHash, string? customRootFolderName)
     {
         if (mgr.Files.Count == 0) return;
+        var destDir = SubfolderPath.Split(customRootFolderName).Aggregate(mgr.SavePath, Path.Combine);
         foreach (var file in mgr.Files)
         {
             if (file.Priority == Priority.DoNotDownload) continue;
-            var dest = Path.Combine(mgr.SavePath, Path.GetFileName(file.Path));
+            var dest = Path.Combine(destDir, Path.GetFileName(file.Path));
             if (string.Equals(file.FullPath, dest, StringComparison.OrdinalIgnoreCase)) continue;
             try { await mgr.MoveFileAsync(file, dest); }
             catch (Exception ex) { _logger.LogWarning(ex, "ApplyFlatten: failed to remap {File}", file.Path); }
         }
-        _logger.LogInformation("ApplyFlatten [{Hash}]: remapped {Count} files to root", infoHash, mgr.Files.Count);
+        _logger.LogInformation("ApplyFlatten [{Hash}]: remapped {Count} files to {Dir}", infoHash, mgr.Files.Count, destDir);
     }
 }

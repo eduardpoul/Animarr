@@ -92,6 +92,10 @@ public static class ApiRoutes
     /// <summary>POST a Base64-encoded .torrent and get back its parsed file
     /// list — used by the Add drawer to preview contents before committing.</summary>
     public const string TorrentParse           = "/api/torrents/parse";
+    /// <summary>GET ?folderId=&amp;path= — immediate subfolders of a download
+    /// destination (the chosen folder, or the default download dir when
+    /// folderId is omitted). Backs the Add drawer's subfolder picker.</summary>
+    public const string TorrentDestinationBrowse = "/api/torrents/destination/browse";
     /// <summary>POST multipart files + a destination folder id. Drops the
     /// files into the folder as a plain copy (no torrent / magnet involved).
     /// Used by the "Upload files" tab of the Add download drawer.</summary>

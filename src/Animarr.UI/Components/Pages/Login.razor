@@ -21,14 +21,14 @@
 
 <div class="d-login">
     <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> @L["login.back"]
+        <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
     </button>
 
     <div class="d-login__card" role="dialog" aria-label="@L["login.aria_sign_in"]">
         <header class="d-login__brand">
-            <BrandMark Size="38" ExtraClass="d-login__brand-mark" />
+            <BrandMark Size="40" ExtraClass="d-login__brand-mark" />
             <div>
-                <div class="d-login__brand-name">ANIMARR</div>
+                <div class="d-login__brand-name">Animarr</div>
                 <div class="d-login__brand-sub">@L["login.brand_sub"]</div>
             </div>
         </header>
@@ -40,43 +40,49 @@
                    Autocomplete="current-password" Disabled="@_loading" />
             @if (!string.IsNullOrEmpty(_error))
             {
-                <div class="d-login__error">@_error</div>
+                <div class="fs-msgbar fs-msgbar--error" role="alert">
+                    <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+                    <span>@_error</span>
+                </div>
             }
 
-            @* Two QR shortcuts — only one is visible at a time depending on
-               whether this device already has a session.
-                 • Anon user: "Pair on TV" → /pair shows a QR THIS device
-                   exposes for another (signed-in) phone to scan.
-                 • Signed-in user: "Scan TV QR" opens the camera so this
-                   phone can confirm a code shown on another (anonymous) TV.
-               The visual styling is identical; only the labels and onclick
-               differ. *@
-            @if (UserCtx.IsAuthenticated)
-            {
-                <button type="button" class="d-login__qr-link tv-focus" @onclick="OpenQrScan">
-                    <DIcon Name="qr-code" Size="14" /> @L["login.scan_qr"]
-                </button>
-            }
-            else
-            {
-                <button type="button" class="d-login__qr-link tv-focus"
-                        @onclick="@(() => Nav.NavigateTo("/pair"))">
-                    <DIcon Name="qr-code" Size="14" /> @L["login.pair_via_phone_qr"]
-                </button>
-            }
+            <div class="d-login__actions">
+                <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || string.IsNullOrEmpty(_username) || string.IsNullOrEmpty(_password))">
+                    @if (_loading)
+                    {
+                        <Spinner Size="sm" Tone="light" />
+                        <text>@L["login.btn_signing_in"]</text>
+                    }
+                    else
+                    {
+                        <text>@L["login.btn_sign_in"]</text>
+                    }
+                </Btn>
 
-            <Btn Variant="primary" Size="lg" Type="submit" Disabled="@(_loading || string.IsNullOrEmpty(_username) || string.IsNullOrEmpty(_password))">
-                @if (_loading)
+                @* Two QR shortcuts — only one is visible at a time depending on
+                   whether this device already has a session.
+                     • Anon user: "Pair on TV" → /pair shows a QR THIS device
+                       exposes for another (signed-in) phone to scan.
+                     • Signed-in user: "Scan TV QR" opens the camera so this
+                       phone can confirm a code shown on another (anonymous) TV.
+                   The visual styling is identical; only the labels and onclick
+                   differ. Rendered as the secondary action under the primary
+                   "Sign in" button (Fluent sign-in: one primary, alternatives
+                   below it). *@
+                @if (UserCtx.IsAuthenticated)
                 {
-                    <Spinner Size="14" />
-                    <text>@L["login.btn_signing_in"]</text>
+                    <button type="button" class="d-login__qr-link tv-focus" @onclick="OpenQrScan">
+                        <DIcon Name="qr-code" Size="16" /> @L["login.scan_qr"]
+                    </button>
                 }
                 else
                 {
-                    <text>@L["login.btn_sign_in"]</text>
-                    <DIcon Name="arrow-r" Size="13" />
+                    <button type="button" class="d-login__qr-link tv-focus"
+                            @onclick="@(() => Nav.NavigateTo("/pair"))">
+                        <DIcon Name="qr-code" Size="16" /> @L["login.pair_via_phone_qr"]
+                    </button>
                 }
-            </Btn>
+            </div>
         </form>
     </div>
 
@@ -85,9 +91,9 @@
         <div class="d-login__qr-modal" role="dialog" aria-label="@L["login.aria_scan_tv_qr"]">
             <div class="d-login__qr-modal-card">
                 <header class="d-login__qr-modal-head">
-                    <span>@L["login.qr_scan_tv"]</span>
-                    <button type="button" class="d-login__qr-modal-close tv-focus" @onclick="CloseQrScan" aria-label="@L["login.qr_aria_close"]">
-                        <DIcon Name="x" Size="14" />
+                    <span class="d-login__qr-modal-title">@L["login.qr_scan_tv"]</span>
+                    <button type="button" class="d-login__qr-modal-close fs-icon-btn tv-focus" @onclick="CloseQrScan" aria-label="@L["login.qr_aria_close"]">
+                        <DIcon Name="x" Size="16" />
                     </button>
                 </header>
                 <div id="animarr-qr-viewer" class="d-login__qr-viewer"></div>
@@ -105,13 +111,13 @@
     @if (!string.IsNullOrEmpty(_toast))
     {
         <div class="d-login__toast" role="status">
-            <DIcon Name="check" Size="13" /> @_toast
+            <span class="d-login__toast-ic"><DIcon Name="check" Size="16" /></span> @_toast
         </div>
     }
 
     <footer class="d-login__footer">
         <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-login__footer-link tv-focus" aria-label="Animarr on GitHub">
-            github
+            GitHub
         </a>
     </footer>
 </div>

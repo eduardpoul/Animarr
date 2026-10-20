@@ -1,4 +1,7 @@
 @page "/404"
 
-<h1>@L["not_found.title"]</h1>
-<p>@((MarkupString)L["not_found.body_html"])</p>
+<div class="d-status-page">
+    <div class="d-status-page__ic" aria-hidden="true"><DIcon Name="search" Size="24" /></div>
+    <h1 class="d-status-page__title">@L["not_found.title"]</h1>
+    <p class="d-status-page__body">@((MarkupString)L["not_found.body_html"])</p>
+</div>

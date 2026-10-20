@@ -11,7 +11,7 @@
 
 <SettingsEditDrawer IsOpen="true"
                     Title="@L.Get("settings.root_folders.delete_title", Section.Label)"
-                    Overline="DANGER"
+                    Overline="@L["edit_metadata.danger_title"]"
                     Hint="@L["settings.root_folders.delete_body"]"
                     Icon="warn"
                     Tone="warn"
@@ -20,8 +20,8 @@
         <div class="sfdd__body">
             <p class="sfdd__copy">@L["settings.root_folders.delete_body"]</p>
             <ul class="sfdd__effects">
-                <li><DIcon Name="check" Size="13" /> <span>Files on disk are <strong>not</strong> touched.</span></li>
-                <li><DIcon Name="trash" Size="13" /> <span>Removes the section entry, child watchers, identification queue rows and any media items mapped under it.</span></li>
+                <li><DIcon Name="check" Size="16" /> <span>@((MarkupString)L["settings.root_folders.delete_effect_files_html"])</span></li>
+                <li><DIcon Name="trash" Size="16" /> <span>@L["settings.root_folders.delete_effect_cascade"]</span></li>
             </ul>
         </div>
     </Body>

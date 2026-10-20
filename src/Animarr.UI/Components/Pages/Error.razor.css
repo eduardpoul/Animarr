@@ -1,0 +1,72 @@
+/* Error fallback — Fluent 2 empty state in the danger tone. Mirrors
+   NotFound.razor.css (scoped CSS can't share rules across components). */
+
+.d-status-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 64px 16px;
+    text-align: center;
+}
+
+.d-status-page__ic {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--ink-2);
+    color: var(--text-dim);
+}
+.d-status-page__ic--danger {
+    background: color-mix(in oklch, var(--danger) 14%, transparent);
+    color: var(--danger);
+}
+
+.d-status-page__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.d-status-page__subtitle {
+    margin: 4px 0 0;
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 400;
+    color: var(--danger);
+}
+
+.d-status-page__trace {
+    margin: 16px 0 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    word-break: break-all;
+}
+.d-status-page__trace strong {
+    font-weight: 600;
+    color: var(--text);
+}
+.d-status-page__trace code {
+    font-family: var(--font-code);
+    font-size: 12px;
+    padding: 1px 5px;
+    border-radius: var(--radius-badge);
+    background: var(--ink-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.d-status-page__body {
+    margin: 16px 0 0;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+}

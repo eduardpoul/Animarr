@@ -4,7 +4,7 @@
     Pops on MediaDetail when the user flips an episode's watched-eye and there
     are still-unwatched on-disk episodes BEFORE it (any earlier season/episode).
     Yes → MediaDetail bulk-marks them via /api/watch-states/mark-bulk; No leaves
-    them as they were. Centered glass modal — the only centered modal in the app
+    them as they were. Fluent 2 Dialog — the only centered modal in the app
     (everything else is the right-edge SettingsEditDrawer), justified because
     this is a quick yes/no that interrupts the episode-grid flow in place.
 *@
@@ -12,14 +12,14 @@
 <div class="mpd-backdrop" @onclick="OnCancelClick">
     <div class="mpd-card" @onclick:stopPropagation="true"
          role="dialog" aria-modal="true" aria-labelledby="mpd-title">
-        <div class="mpd-icon"><DIcon Name="eye-off" Size="22" /></div>
+        <div class="mpd-icon"><DIcon Name="eye-off" Size="20" /></div>
         <h2 class="mpd-title" id="mpd-title">@L["mark_prev.title"]</h2>
         <p class="mpd-body">@L.Get("mark_prev.body", Count)</p>
         <div class="mpd-actions">
-            <Btn Variant="primary" Size="lg" OnClick="OnConfirmClick" Loading="@_busy">
+            <Btn Variant="primary" Size="md" OnClick="OnConfirmClick" Loading="@_busy">
                 @L["mark_prev.yes"]
             </Btn>
-            <Btn Variant="ghost" Size="lg" OnClick="OnCancelClick" Disabled="@_busy">
+            <Btn Variant="solid" Size="md" OnClick="OnCancelClick" Disabled="@_busy">
                 @L["mark_prev.no"]
             </Btn>
         </div>

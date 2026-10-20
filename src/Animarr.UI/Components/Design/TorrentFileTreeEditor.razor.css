@@ -1,6 +1,6 @@
-/* Shared torrent file tree — folders + tri-state checkbox + priority dropdown.
-   Lives inside whatever scroll container the host provides (the host sets the
-   border/height); this only styles the rows. */
+/* Shared torrent file tree (Fluent 2) — folders + tri-state checkbox +
+   priority dropdown. Lives inside whatever scroll container the host provides
+   (the host sets the border/height); this only styles the rows. */
 .tft {
     display: flex;
     flex-direction: column;
@@ -11,18 +11,19 @@
     overflow: hidden;                  /* clip the progress fill to the row radius */
     display: grid;
     /* caret · check · icon · name(flex) · size · priority */
-    grid-template-columns: 18px 18px 18px 1fr auto auto;
+    grid-template-columns: 20px 20px 20px minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 6px;
-    padding: 4px 8px 4px calc(6px + var(--depth, 0) * 16px);
-    border-radius: 8px;
+    min-height: 32px;
     min-width: 0;
+    padding: 2px 4px 2px calc(4px + var(--depth, 0) * 16px);
+    border-radius: var(--radius-ctrl);
 }
 .tft__row:hover { background: var(--ink-1); }
-.tft__row--skip .tft__name { opacity: 0.45; text-decoration: line-through; }
+.tft__row--skip .tft__name { color: var(--text-faint); text-decoration: line-through; }
 
 /* Per-file download progress — a subtle left-anchored fill spanning the full
-   row height, behind the content. Greenish once the file is complete. */
+   row height, behind the content. Success-tinted once the file is complete. */
 .tft__fill {
     position: absolute;
     left: 0;
@@ -31,61 +32,70 @@
     z-index: 0;
     background: var(--accent-soft);
     pointer-events: none;
-    transition: width 0.4s ease;
+    transition: width var(--motion-slow) ease;
 }
-.tft__fill--done { background: oklch(0.55 0.13 150 / 0.22); }
+.tft__fill--done { background: color-mix(in oklch, var(--success) 16%, transparent); }
 /* Keep every real cell painted above the fill. */
 .tft__row > :not(.tft__fill) { position: relative; z-index: 1; }
 .tft__row--skip .tft__fill { opacity: 0.4; }
 
 .tft__caret {
     appearance: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
     background: none;
     border: none;
+    border-radius: var(--radius-ctrl);
+    color: var(--text-dim);
     cursor: pointer;
-    width: 18px;
-    height: 18px;
-    display: inline-grid;
-    place-items: center;
-    color: var(--text-faint);
-    padding: 0;
-    transition: transform var(--motion-fast), color var(--motion-fast);
+    transition: transform var(--motion-fast), background var(--motion-fast);
 }
-.tft__caret:hover { color: var(--text); }
+.tft__caret:hover { background: var(--ink-2); color: var(--text); }
 .tft__caret.is-open { transform: rotate(90deg); }
 .tft__caret--leaf { cursor: default; }
+.tft__caret--leaf:hover { background: none; }
 
+/* Fluent checkbox: 16px, control radius, accent fill when checked. */
 .tft__check {
     appearance: none;
-    cursor: pointer;
-    width: 18px;
-    height: 18px;
-    border-radius: 5px;
-    border: 1.5px solid var(--border-strong, rgba(255, 255, 255, 0.25));
-    background: transparent;
+    justify-self: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
     display: inline-grid;
     place-items: center;
-    color: #fff;
-    padding: 0;
+    border: 1px solid var(--text-dim);
+    border-radius: var(--radius-ctrl);
+    background: transparent;
+    color: var(--on-accent);
+    cursor: pointer;
     transition: background var(--motion-fast), border-color var(--motion-fast);
 }
-.tft__check:hover { border-color: var(--accent-hi); }
+.tft__check:hover { border-color: var(--text); background: var(--ink-1); }
 .tft__check.is-on,
 .tft__check.is-partial {
     background: var(--accent);
     border-color: var(--accent);
 }
+.tft__check.is-on:hover,
+.tft__check.is-partial:hover {
+    background: color-mix(in oklch, var(--accent), var(--text) 12%);
+    border-color: transparent;
+}
 .tft__dash {
     width: 8px;
     height: 2px;
-    background: #fff;
     border-radius: 1px;
+    background: var(--on-accent);
 }
 
 .tft__ficon {
     display: inline-grid;
     place-items: center;
-    color: var(--text-faint);
+    color: var(--text-dim);
 }
 .tft__row:not(.tft__row--file) .tft__ficon { color: var(--accent-hi); }
 
@@ -94,45 +104,66 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12.5px;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text);
 }
 .tft__row:not(.tft__row--file) .tft__name { font-weight: 600; }
 
 .tft__size {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-faint);
-    white-space: nowrap;
     flex-shrink: 0;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
 }
 
+/* Compact Fluent dropdown (24px) — same chevron as the global .fs-select. */
 .tft__prio {
-    font-size: 11px;
-    padding: 2px 22px 2px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-badge);
-    background: var(--surface);
-    color: var(--text);
-    min-width: 86px;
     appearance: none;
-    cursor: pointer;
-    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235d564f' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+    box-sizing: border-box;
+    height: 24px;
+    min-width: 96px;
+    padding: 0 26px 0 8px;
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
+    border-radius: var(--radius-ctrl);
+    background-color: var(--surface);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20'%3E%3Cpath fill='%238f8f8f' d='M15.85 7.65c.2.2.2.5 0 .7l-5.46 5.49a.55.55 0 0 1-.78 0L4.15 8.35a.5.5 0 1 1 .7-.7L10 12.8l5.15-5.16c.2-.2.5-.2.7 0'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 6px center;
+    background-position: right 8px center;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 16px;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast);
 }
-.tft__prio--skip { opacity: 0.45; }
+.tft__prio:hover {
+    background-color: var(--surface-2);
+    border-color: var(--stroke-ctrl-hi);
+    border-bottom-color: var(--stroke-ctrl-acc);
+}
+.tft__prio:focus-visible {
+    outline: none;
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
+}
+.tft__prio--skip { color: var(--text-dim); }
 
-/* Phone: drop the row to two lines so name + size + priority stop colliding.
-   caret/check/icon/name keep the top line; size + priority wrap below, right-
-   aligned. */
+/* Phone: two lines per row so name + size + priority stop colliding.
+   caret/check/icon/name keep the top line; size (left) + priority (right)
+   share the "meta" cell below. */
 @media (max-width: 639px) {
     .tft__row {
-        grid-template-columns: 18px 18px 18px 1fr;
+        grid-template-columns: 20px 20px 20px minmax(0, 1fr);
         grid-template-areas:
             "caret check icon name"
             "caret .     .    meta";
         row-gap: 4px;
+        padding-top: 4px;
+        padding-bottom: 4px;
     }
     .tft__caret { grid-area: caret; }
     .tft__check { grid-area: check; }
@@ -142,6 +173,4 @@
     .tft__prio  { grid-area: meta; }
     .tft__size  { justify-self: start; align-self: center; }
     .tft__prio  { justify-self: end; }
-    /* Both share the "meta" cell — lay them out inline within it. */
-    .tft__row { }
 }

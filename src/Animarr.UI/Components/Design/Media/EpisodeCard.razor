@@ -1,22 +1,20 @@
 @*
-    Episode card with the design's ON DISK / MISSING visual language plus
-    two-corner chips (CHANGELOG §4). The chips on the thumbnail are peers:
+    Episode card — Fluent 2 card (--surface, 8px corners) in two layouts:
+    "card" (grid tile) and "list" (flat detailed row inside one list card).
+    Chips on the thumbnail are peers:
 
       • TOP-RIGHT — disk-status (immutable):
-          ✓  green tint  = file on disk
-          ⚠  amber tint  = missing
+          ✓  success = file on disk
+          ⚠  warning = missing
 
       • BOTTOM-RIGHT — watched-eye (user toggles):
           eye-open  = unwatched
-          eye-off   = watched (closed eye + green tint)
+          eye-off   = watched (success tint)
 
-    Watched-state modifier (.d-ep--watched) drops opacity + saturates the
-    thumb + flips the left strip to text-faint.
-
-    Bottom progress bar overlays the thumb's bottom edge: gradient when
-    in-progress, flat text-faint when fully watched.
-
-    Spec: design_v2/animarr/project/design_handoff_animarr/CHANGELOG_FOR_CLAUDE_CODE.md §4.
+    Filler / recap / watched / resume states are Fluent badges in the caption.
+    Watched (.d-ep--watched) dims the thumbnail; missing (.d-ep--miss) dims the
+    card and dashes its stroke. The 3px bar on the thumb's bottom edge shows
+    progress.
 *@
 
 @if (Layout == "list")
@@ -27,8 +25,6 @@
        Richer per-episode metadata (synopsis, air date, rating) lands in
        Stage B; for now the row shows exactly what the grid already has. *@
     <div class="@CssClass" title="@Title">
-        <div class="d-ep__strip"></div>
-
         <div class="d-ep__art">
             @if (!string.IsNullOrEmpty(ThumbUrl))
             {
@@ -41,7 +37,7 @@
             <div class="d-ep__num">@Number.ToString("00")</div>
             @if (Have)
             {
-                <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="22" /></div>
+                <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="24" /></div>
             }
             @if (Have && (IsWatched || ProgressPct > 0))
             {
@@ -53,19 +49,19 @@
 
         <div class="d-eplist__main">
             <div class="d-eplist__top">
-                <span class="d-eplist__epnum">EP @Number.ToString("00")</span>
+                <span class="d-eplist__epnum">@L["media_detail.ep_prefix"] @Number.ToString("00")</span>
                 <span class="d-eplist__title">@Title</span>
                 @if (FlagLabel is not null)
                 {
-                    <span class="@($"d-eplist__badge d-eplist__badge--{Flag}")">@FlagLabel</span>
+                    <span class="@($"d-ep__badge d-ep__badge--{Flag}")">@FlagLabel</span>
                 }
                 @if (Have && IsWatched)
                 {
-                    <span class="d-eplist__badge d-eplist__badge--watched">Watched</span>
+                    <span class="d-ep__badge d-ep__badge--watched">@L["episode_card.badge_watched"]</span>
                 }
                 else if (Have && ProgressPct > 0)
                 {
-                    <span class="d-eplist__badge d-eplist__badge--progress">@ProgressPct% · Resume</span>
+                    <span class="d-ep__badge d-ep__badge--progress">@L.Get("episode_card.badge_resume_fmt", ProgressPct)</span>
                 }
             </div>
             <div class="d-eplist__meta">
@@ -104,17 +100,17 @@
                 }
                 <div class="d-eplist__acts">
                     <button type="button"
-                            class="@($"d-eplist__act {(IsWatched ? "is-on" : "")}")"
+                            class="@($"fs-icon-btn d-eplist__act {(IsWatched ? "is-on" : "")}")"
                             title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
                             @onclick="OnEyeClick"
                             @onclick:stopPropagation="true">
-                        <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="15" />
+                        <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
                     </button>
                     @* No @onclick — the click bubbles to the parent .md-episode-card
                        wrapper, whose handler plays the episode (same target as the
                        whole-card click used in the grid). *@
-                    <button type="button" class="d-eplist__act d-eplist__act--pri" title="Play">
-                        <DIcon Name="play" Size="15" />
+                    <button type="button" class="fs-icon-btn d-eplist__act d-eplist__act--pri" title="@L["episode_card.tooltip_play"]">
+                        <DIcon Name="play" Size="16" />
                     </button>
                 </div>
             </div>
@@ -124,7 +120,6 @@
 else
 {
 <div class="@CssClass" title="@Title">
-    <div class="d-ep__strip"></div>
     <div class="d-ep__art">
         @if (!string.IsNullOrEmpty(ThumbUrl))
         {
@@ -138,19 +133,19 @@ else
         @* Big episode number sits over the thumb, top-left. *@
         <div class="d-ep__num">@Number.ToString("00")</div>
 
-        @* TOP-RIGHT — disk-status chip. 26×26, peers with the eye below. *@
+        @* TOP-RIGHT — disk-status chip. 28×28, peers with the eye below. *@
         @if (Have)
         {
             <div class="d-ep__chip d-ep__chip--ok"
-                 title="On disk"><DIcon Name="check" Size="13" /></div>
+                 title="@L["episode_card.tooltip_on_disk"]"><DIcon Name="check" Size="16" /></div>
         }
         else
         {
             <div class="d-ep__chip d-ep__chip--miss"
-                 title="Missing — not downloaded"><DIcon Name="warn" Size="13" /></div>
+                 title="@L["episode_card.tooltip_missing"]"><DIcon Name="warn" Size="16" /></div>
         }
 
-        @* BOTTOM-RIGHT — watched-eye chip. Same 26×26 box size as disk-status
+        @* BOTTOM-RIGHT — watched-eye chip. Same 28×28 box size as disk-status
            per CHANGELOG §4 ("must be the same size on the same card").
            Only renders when the file is on disk — there's nothing to mark as
            watched when it's missing. *@
@@ -161,28 +156,21 @@ else
                     title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
                     @onclick="OnEyeClick"
                     @onclick:stopPropagation="true">
-                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="13" />
+                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
             </button>
         }
 
         @* Hover overlays — play button for on-disk, EMPTY box for missing. *@
         @if (Have)
         {
-            <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="22" /></div>
+            <div class="d-ep__overlay d-ep__overlay--play"><DIcon Name="play" Size="24" /></div>
         }
         else
         {
             <div class="d-ep__overlay d-ep__overlay--miss">
                 <DIcon Name="download" Size="18" />
-                <span class="d-ep__overlay-label">EMPTY</span>
+                <span class="d-ep__overlay-label">@L["episode_card.overlay_empty"]</span>
             </div>
-        }
-
-        @* Filler/recap marker — bottom-left over the thumb, opposite the
-           watched-eye. MAL data via Jikan; helps decide "can I skip this?". *@
-        @if (FlagLabel is not null)
-        {
-            <div class="@($"d-ep__flag d-ep__flag--{Flag}")">@FlagLabel</div>
         }
 
         @* Progress bar — 3px on episode card. Pinned to thumb bottom edge.
@@ -197,7 +185,15 @@ else
 
     <div class="d-ep__body">
         <div class="d-ep__title">@Title</div>
-        <div class="d-ep__meta">@Meta</div>
+        <div class="d-ep__sub">
+            <span class="d-ep__meta">@Meta</span>
+            @* Filler/recap marker — MAL data via Jikan; helps decide "can I
+               skip this?". A Fluent badge on the card surface (theme-aware). *@
+            @if (FlagLabel is not null)
+            {
+                <span class="@($"d-ep__badge d-ep__badge--{Flag}")">@FlagLabel</span>
+            }
+        </div>
     </div>
 </div>
 }

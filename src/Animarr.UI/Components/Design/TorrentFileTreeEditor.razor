@@ -36,7 +36,7 @@
                     <button type="button"
                             class="@($"tft__caret {(node.Expanded ? "is-open" : "")}")"
                             @onclick="@(() => node.Expanded = !node.Expanded)"
-                            aria-label="Expand folder">
+                            aria-label="@L["torrents.tree_expand_folder_aria"]">
                         <DIcon Name="chev-r" Size="12" />
                     </button>
                 }
@@ -48,10 +48,10 @@
                 <button type="button"
                         class="@($"tft__check {(state == 1 ? "is-on" : state == 2 ? "is-partial" : "")}")"
                         @onclick="@(() => ToggleCheck(node))"
-                        aria-label="Download this">
+                        aria-label="@L["torrents.tree_select_aria"]">
                     @if (state == 1)
                     {
-                        <DIcon Name="check" Size="11" />
+                        <DIcon Name="check" Size="12" />
                     }
                     else if (state == 2)
                     {
@@ -60,7 +60,7 @@
                 </button>
 
                 <span class="tft__ficon">
-                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="13" />
+                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="16" />
                 </span>
                 <span class="tft__name" title="@node.Name">@node.Name</span>
                 <span class="tft__size">@FormatBytes(node.Size)</span>

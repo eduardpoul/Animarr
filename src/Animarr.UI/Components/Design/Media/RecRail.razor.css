@@ -1,5 +1,6 @@
-/* Recommendation rail — horizontal scroll row of poster cards. Local cards
-   are plain posters; external ones get a dashed frame + Want button. */
+/* Recommendation rail — horizontal scroll row of poster cards (Home "For
+   you", MediaDetail "More like this"). Local cards are plain posters;
+   external ones get a dashed frame + Want button. */
 
 .recrail {
     margin: var(--space-10) 0;
@@ -7,21 +8,21 @@
 .recrail__head {
     display: flex;
     align-items: baseline;
-    gap: var(--space-4);
-    margin-bottom: var(--space-6);
+    flex-wrap: wrap;
+    gap: 4px var(--space-4);
+    margin-bottom: var(--space-5);
 }
+/* Fluent subtitle 20/28 — same as every Home section header. */
 .recrail__title {
     margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
 }
 .recrail__hint {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-faint);
-    letter-spacing: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
 }
 .recrail__row {
     display: flex;
@@ -35,7 +36,7 @@
 
 .recrail__cell {
     /* Match the library grid's poster width (~210-240px) so the rails and
-       the grid read as one system, Emby-style. */
+       the grid read as one system. */
     width: 210px;
     flex-shrink: 0;
     scroll-snap-align: start;
@@ -47,11 +48,14 @@
     position: relative;
     display: block;
     aspect-ratio: 2 / 3;
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-card);
     overflow: hidden;
-    background: var(--surface);
+    background: var(--surface-3);
 }
-.recrail__poster { border: 1px solid var(--border); }
+.recrail__poster {
+    border: 1px solid var(--border);
+    transition: border-color var(--motion-fast);
+}
 .recrail__poster:hover { border-color: var(--border-strong); }
 
 .recrail__ext { border: 1px dashed var(--border-strong); }
@@ -72,22 +76,22 @@
     color: var(--text-faint);
 }
 
+/* Badge / Want / dismiss sit on the artwork — always-dark glass, white copy. */
 .recrail__ext-badge {
     position: absolute;
     top: 8px;
     left: 8px;
-    font-family: var(--font-mono);
-    font-size: 8.5px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: rgba(255, 255, 255, 0.85);
-    background: rgba(0, 0, 0, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-badge);
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
     pointer-events: none;
 }
 
+/* Want — Fluent primary button pinned to the poster's bottom edge. */
 .recrail__want {
     position: absolute;
     left: 8px;
@@ -95,49 +99,61 @@
     bottom: 8px;
     appearance: none;
     cursor: pointer;
-    padding: 8px 0;
-    border-radius: 9px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #15100b;
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 5px 12px;
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--on-accent);
     background: var(--accent);
     border: 1px solid transparent;
-    transition: background var(--motion-base), color var(--motion-base);
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
-.recrail__want:hover { background: var(--accent-hi); }
+.recrail__want:hover { background: color-mix(in oklch, var(--accent), #fff 12%); }
+/* Already in the list — a quiet dark-glass state instead of the brand fill. */
 .recrail__want.is-on {
-    background: var(--accent-soft);
-    color: var(--accent-hi);
-    border-color: var(--accent-line, var(--accent));
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    border-color: rgba(255, 255, 255, 0.14);
     cursor: default;
 }
 
 .recrail__dismiss {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 6px;
+    right: 6px;
     z-index: 3;
     appearance: none;
     cursor: pointer;
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: var(--radius-ctrl);
     display: grid;
     place-items: center;
     font-size: 12px;
+    line-height: 1;
     color: #fff;
-    background: rgba(10, 8, 7, 0.66);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     opacity: 0;
-    transition: opacity var(--motion-base);
+    transition: opacity var(--motion-fast), background var(--motion-fast);
 }
+.recrail__dismiss:hover { background: rgba(0, 0, 0, 0.8); }
 .recrail__art-wrap:hover .recrail__dismiss,
 .recrail__dismiss:focus-visible { opacity: 1; }
+/* Touch has no hover — keep the dismiss reachable. */
+@media (hover: none) {
+    .recrail__dismiss { opacity: 1; }
+}
 
 .recrail__name {
     margin-top: 8px;
-    font-size: 12.5px;
+    font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -145,60 +161,57 @@
     text-overflow: ellipsis;
 }
 .recrail__reason {
-    margin-top: 4px;
-    font-size: 11px;
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 16px;
     color: var(--text-dim);
-    line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
-.recrail__reason-dot { color: var(--accent-hi); font-size: 8px; }
+.recrail__reason-dot { color: var(--accent-hi); font-size: 8px; vertical-align: 1px; }
 
 @media (max-width: 639px) {
     .recrail__cell { width: 156px; }
-    .recrail__title { font-size: 19px; }
-    /* Touch has no hover — keep the dismiss reachable. */
     .recrail__dismiss { opacity: 1; }
 }
 
-/* ── viewport + paging arrows ──────────────────────────────────────────
-   Arrows overlay the rail edges while more content exists in that
-   direction (state pushed from the collocated JS on scroll/resize).
-   Mouse-only affordance — touch pans natively. */
+/* ── ‹ › paging (floating Fluent flip buttons) + drag-to-scroll ────────
+   Shown while more content exists that way (state pushed from the
+   collocated JS on scroll/resize). Mouse-only — touch pans natively. */
 .recrail__viewport { position: relative; }
 .recrail__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
 .recrail__nav {
     position: absolute;
-    top: 0;
-    /* Centre on the poster area (aspect 2/3 of the 210px cell ≈ 315px). */
-    height: 315px;
-    width: 44px;
+    /* Centred on the poster (2:3 of the 210px cell ≈ 315px). */
+    top: calc(315px / 2 - 16px);
     z-index: 5;
+    width: 32px;
+    height: 32px;
+    padding: 0;
     display: grid;
     place-items: center;
     appearance: none;
     cursor: pointer;
-    border: none;
-    color: #fff;
-    font-size: 30px;
+    border-radius: var(--radius-ctrl);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    box-shadow: var(--shadow-8);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 20px;
     line-height: 1;
-    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    opacity: 0.75;
-    transition: opacity var(--motion-base);
+    transition: background var(--motion-fast);
 }
-.recrail__nav:hover { opacity: 1; }
-.recrail__nav--l { left: 0; border-radius: 12px 0 0 12px; }
-.recrail__nav--r {
-    right: 0;
-    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    border-radius: 0 12px 12px 0;
-}
+.recrail__nav:hover { background: var(--surface-2); }
+.recrail__nav:active { background: var(--surface-3); }
+.recrail__nav--l { left: 8px; }
+.recrail__nav--r { right: 8px; }
 @media (hover: none) {
     .recrail__nav { display: none; }
 }
 @media (max-width: 639px) {
-    /* 156px cells → shorter posters. */
-    .recrail__nav { height: 234px; }
+    /* 156px cells → ~234px posters. */
+    .recrail__nav { top: calc(234px / 2 - 16px); }
 }

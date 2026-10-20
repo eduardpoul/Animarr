@@ -6,56 +6,47 @@
 @using Microsoft.AspNetCore.SignalR.Client
 
 @*
-    Torrents list with add-magnet form + pause/resume/delete + per-row link
-    to TorrentEdit. SignalR live snapshots merge over the persistent record
-    by InfoHash for download/upload rates.
+    Downloads page (Fluent 2). Page header (title + History / Add), live stat
+    tiles summed from the SignalR snapshots, an Active | History pivot, and the
+    torrent list (name + folder/size meta, state badge, 4px progress bar,
+    rates, row actions). SignalR live snapshots merge over the persistent
+    record by InfoHash for progress, state and rates.
 
-    The full .torrent file upload UX still lives in Animarr.Web (uses
-    InputFile + JS interop for drag-and-drop). Magnet-add covers most of
-    the day-to-day need and lands here first.
+    Add flow lives in the right-side SettingsEditDrawer below: .torrent file /
+    magnet / plain upload → destination + subfolder (DestinationFolderPicker)
+    → rate caps → post-processing toggles.
 *@
 
 <div class="tor-page">
-<header class="d-page-header">
+<header class="tor-head">
     <PageBack />
-    <div class="d-page-header__main">
-        <div class="d-page-header__overline">@L["torrents.page_overline"]</div>
-        <h1 class="d-page-header__title">@L["torrents.page_title"]</h1>
-        <div class="d-page-header__sub">@L["torrents.page_sub"]</div>
+    <div class="tor-head__main">
+        <h1 class="tor-head__title">@L["torrents.page_title"]</h1>
+        <div class="tor-head__sub">@L["torrents.page_sub"]</div>
     </div>
-    @* v5 fix: was .d-page-header__actions which doesn't exist (the page-header
-       partial in components.css defines .d-page-header__right + flex helpers).
-       The old class collapsed to display:block, stacking the buttons under the
-       header instead of pinning them top-right.
-       On phone .d-page-header__right is hidden via CSS — the Add action
-       lands as a floating FAB instead (design_handoff_animarr/05-mobile.html
-       Downloads spec), and the History link moves into the FAB's long-press
-       menu in a follow-up (for now still reachable via /torrents/history). *@
-    <div class="d-page-header__right">
-        <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
-            @* "clock" — DIcon has no "archive", so it was rendering the missing-
-               icon "?" glyph. clock reads as "history/past". *@
-            <DIcon Name="clock" Size="13" /> @L["torrents.btn_history"]
+    @* Hidden below 960px — the Add action becomes the floating FAB there and
+       History is reachable through the Active | History pivot. *@
+    <div class="tor-head__actions">
+        <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
+            <DIcon Name="history" Size="16" /> @L["torrents.btn_history"]
         </Btn>
         <Btn Variant="primary" Size="md" OnClick="OpenAdd">
-            <DIcon Name="plus" Size="14" /> @L["torrents.btn_add"]
+            <DIcon Name="plus" Size="16" /> @L["torrents.btn_add"]
         </Btn>
     </div>
 </header>
 
 @* Mobile-only floating action button — pinned bottom-right above the
-   safe-area inset. Matches the design's "+ Add" FAB on the Downloads
-   screen (05-mobile.html). Desktop hides this via CSS in favour of the
-   inline header button above. *@
+   safe-area inset. Desktop and TV hide it via CSS in favour of the header
+   button above. *@
 <button type="button" class="tor-fab tv-focus" @onclick="OpenAdd"
         aria-label="@L["torrents.add_download_aria"]">
-    <DIcon Name="plus" Size="22" />
+    <DIcon Name="plus" Size="24" />
 </button>
 
 @* Add Torrent drawer — slides in from the right (SettingsEditDrawer
-   shell). Matches design_handoff_animarr/screens.jsx::AddTorrentDrawer
-   (lines 1046-1167): source segment toggle → source-specific input →
-   destination + subfolder → 4 post-processing toggles. *@
+   shell): source tabs → source-specific input → destination + subfolder →
+   rate caps → post-processing toggles. *@
 <SettingsEditDrawer IsOpen="@_addOpen"
                     Title="@L["torrents.add_drawer_title"]"
                     Overline="@L["torrents.add_drawer_overline"]"
@@ -63,20 +54,15 @@
                     Icon="torrent"
                     OnClose="CloseAdd">
     <Body>
-        @* ── 1. SOURCE SEGMENT — Magnet / .torrent file / Upload files.
-              v5: third tab lets the user drop arbitrary local files (mkv /
-              mp4 / srt /…) straight into a registered folder, bypassing the
-              torrent engine entirely. Useful when you already have the file
-              and just want Animarr to index it. *@
+        @* ── 1. SOURCE — .torrent file / Magnet / Upload files (Fluent TabList).
+              The third tab drops arbitrary local files (mkv / mp4 / srt /…)
+              straight into a registered folder, bypassing the torrent engine. *@
         <div class="tor-add__segment" role="tablist">
             @foreach (var (key, label, icon) in new[]
                 {
-                    // .torrent first, magnet second (per request). Icon was
-                    // "paperclip" — not in the DIcon set, so it rendered the
-                    // missing-icon "?"; use the real "torrent" glyph.
                     ("file",   L["torrents.source_torrent_file"], "torrent"),
                     ("magnet", L["torrents.source_magnet_link"],  "link"),
-                    ("upload", L["torrents.source_upload_files"], "download"),
+                    ("upload", L["torrents.source_upload_files"], "upload"),
                 })
             {
                 var k = key;
@@ -88,7 +74,7 @@
                         role="tab"
                         aria-selected="@active"
                         @onclick="@(() => _addSource = k)">
-                    <DIcon Name="@ic" Size="13" />
+                    <DIcon Name="@ic" Size="16" />
                     @l
                 </button>
             }
@@ -99,7 +85,7 @@
         {
             <label class="d-input-group tor-add__field">
                 <span class="d-input-group__label">@L["torrents.magnet_uri_label"]</span>
-                <input class="tor-add__input tor-add__input--mono"
+                <input class="fs-input fs-input--code"
                        placeholder="magnet:?xt=urn:btih:…"
                        value="@_addMagnet"
                        @oninput="@(e => _addMagnet = e.Value?.ToString() ?? "")" />
@@ -116,7 +102,7 @@
                     <div class="tor-add__dropzone-content">
                         @if (_addFileName is null)
                         {
-                            <DIcon Name="torrent" Size="20" />
+                            <DIcon Name="torrent" Size="24" />
                             <div class="tor-add__dropzone-prompt">
                                 @L["torrents.dropzone_torrent_prompt"] <span class="tor-add__dropzone-browse">@L["torrents.dropzone_browse"]</span>
                             </div>
@@ -124,7 +110,7 @@
                         }
                         else
                         {
-                            <DIcon Name="check" Size="16" />
+                            <DIcon Name="check" Size="20" />
                             <div class="tor-add__dropzone-prompt">
                                 @_addFileName · @FormatBytesShort(_addFileSize)
                             </div>
@@ -134,11 +120,9 @@
                 </div>
             </div>
 
-            @* v5: parsed-manifest preview. Server's POST /api/torrents/parse
-               returns the file list inside the .torrent — surfacing it here
-               lets the user see what they're about to download (and how big)
-               BEFORE committing. Was present in the v4 design but lost in
-               the drawer rewrite. *@
+            @* Parsed-manifest preview: POST /api/torrents/parse returns the file
+               list inside the .torrent so the user sees what they're about to
+               download (and how big) before committing. *@
             @if (_parsed is not null)
             {
                 <div class="tor-add__field">
@@ -149,9 +133,8 @@
                         @if (_treeRoot is not null && _parsed.Files.Length > 1)
                         {
                             <div class="tor-tree__head-actions">
-                                <button type="button" class="tor-tree__linkbtn" @onclick="SelectAllFiles">@L["torrents.tree_all"]</button>
-                                <span class="tor-tree__sep">·</span>
-                                <button type="button" class="tor-tree__linkbtn" @onclick="SelectNoneFiles">@L["torrents.tree_none"]</button>
+                                <Btn Variant="flat" Size="sm" OnClick="SelectAllFiles">@L["torrents.tree_all"]</Btn>
+                                <Btn Variant="flat" Size="sm" OnClick="SelectNoneFiles">@L["torrents.tree_none"]</Btn>
                             </div>
                         }
                     </div>
@@ -169,10 +152,8 @@
                             @* @key by node identity — without it Blazor diffs the
                                rows by position and can bind a row's checkbox /
                                @onclick delegate to the wrong node after a cascade
-                               toggle, so some children's checkboxes wouldn't flip
-                               ("дети не всегда реагируют"). Keying to the node
-                               object (stable across renders) makes each row track
-                               its own state. *@
+                               toggle. Keying to the node object (stable across
+                               renders) makes each row track its own state. *@
                             <div @key="node" class="@($"tor-tree__row {(node.IsFile ? "tor-tree__row--file" : "")}")" style="--depth:@row.Depth">
                                 @if (!node.IsFile)
                                 {
@@ -194,7 +175,7 @@
                                         aria-label="@L["torrents.tree_select_aria"]">
                                     @if (stateN == 1)
                                     {
-                                        <DIcon Name="check" Size="11" />
+                                        <DIcon Name="check" Size="12" />
                                     }
                                     else if (stateN == 2)
                                     {
@@ -203,7 +184,7 @@
                                 </button>
 
                                 <span class="tor-tree__ficon">
-                                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="13" />
+                                    <DIcon Name="@(node.IsFile ? "file" : "folder")" Size="16" />
                                 </span>
                                 <span class="tor-tree__name" title="@node.Name">@node.Name</span>
                                 <span class="tor-tree__size">@FormatBytesShort(node.Size)</span>
@@ -214,7 +195,10 @@
             }
             else if (_parseError is not null)
             {
-                <div class="tor-add__field tor-add__error">@_parseError</div>
+                <div class="fs-msgbar fs-msgbar--error tor-add__field">
+                    <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+                    <span>@_parseError</span>
+                </div>
             }
         }
         else
@@ -229,7 +213,7 @@
                     <div class="tor-add__dropzone-content">
                         @if (_uploadFiles.Count == 0)
                         {
-                            <DIcon Name="download" Size="20" />
+                            <DIcon Name="upload" Size="24" />
                             <div class="tor-add__dropzone-prompt">
                                 @L["torrents.dropzone_files_prompt"] <span class="tor-add__dropzone-browse">@L["torrents.dropzone_browse"]</span>
                             </div>
@@ -237,7 +221,7 @@
                         }
                         else
                         {
-                            <DIcon Name="check" Size="16" />
+                            <DIcon Name="check" Size="20" />
                             <div class="tor-add__dropzone-prompt">
                                 @L.Get("torrents.files_count_fmt", _uploadFiles.Count) · @FormatBytesShort(_uploadFiles.Sum(f => f.Content.LongLength))
                             </div>
@@ -265,17 +249,18 @@
         }
 
         @* ── 3. DESTINATION (root folder) + subfolder. Subfolder maps to
-              CustomRootFolderName on the add request — server creates that
-              directory under the chosen root and drops the torrent in.
+              CustomRootFolderName on the add request (subPath for uploads) —
+              the server creates that directory under the chosen root and the
+              download's contents land straight in it.
               Filter: skip flat-section LEAF entries (SingleFilePath != null).
               Those rows point at individual video files inside a flat section,
               not at folders — selecting them as a download target made no
               sense and the picker rendered them as if they were folders. *@
         <label class="d-input-group tor-add__field">
             <span class="d-input-group__label">@L["torrents.save_to_folder_label"]</span>
-            <select class="tor-add__select"
+            <select class="fs-select fs-select--wide"
                     value="@(_addFolderId?.ToString() ?? "")"
-                    @onchange="@(e => _addFolderId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                    @onchange="OnAddFolderChanged">
                 <option value="">@L["torrents.default_download_folder_option"]</option>
                 @foreach (var f in FolderOptions())
                 {
@@ -284,35 +269,58 @@
             </select>
         </label>
 
-        <label class="d-input-group tor-add__field">
+        @* Subfolder: a button opening DestinationFolderPicker (explorer-style
+           tree of what's already inside the destination + "New folder")
+           instead of a free-text field you had to type a path into blind. *@
+        <div class="d-input-group tor-add__field">
             <span class="d-input-group__label">@L["torrents.create_subfolder_label"]</span>
-            <input class="tor-add__input tor-add__input--mono"
-                   placeholder="@L["torrents.create_subfolder_placeholder"]"
-                   value="@_addSubfolder"
-                   @oninput="@(e => _addSubfolder = e.Value?.ToString() ?? "")" />
-        </label>
+            <div class="tor-add__subfolder">
+                <button type="button"
+                        class="@($"tor-add__subfolder-btn tv-focus {(_addSubfolder is null ? "is-empty" : "")}")"
+                        @onclick="@(() => _subfolderPickerOpen = true)">
+                    <span class="tor-add__subfolder-ic"><DIcon Name="folder" Size="16" /></span>
+                    <span class="tor-add__subfolder-text">
+                        @if (_addSubfolder is null)
+                        {
+                            @L["torrents.subfolder_none"]
+                        }
+                        else
+                        {
+                            @string.Join(" / ", SubfolderPath.Split(_addSubfolder))
+                        }
+                    </span>
+                    <span class="tor-add__subfolder-action">@L["torrents.subfolder_btn_browse"]</span>
+                </button>
+                @if (_addSubfolder is not null)
+                {
+                    <button type="button" class="fs-icon-btn tor-add__subfolder-clear tv-focus"
+                            @onclick="@(() => _addSubfolder = null)"
+                            title="@L["torrents.subfolder_clear"]"
+                            aria-label="@L["torrents.subfolder_clear"]">
+                        <DIcon Name="x" Size="16" />
+                    </button>
+                }
+            </div>
+        </div>
 
         @* ── 4. Bandwidth caps — per-torrent rate limits in KB/s. Zero = no
               limit. Only meaningful for magnet/.torrent — the upload-files
-              tab doesn't go through the engine. v5: previously these lived
-              only on TorrentEdit (after the fact); the Add drawer hardcoded
-              both sides to "unlimited" so the user had to throttle by hand
-              once the torrent was already saturating the line. *@
+              tab doesn't go through the engine. *@
         @if (_addSource != "upload")
         {
-            <div class="tor-add__limits">
-                <label class="d-input-group tor-add__field tor-add__field--half">
+            <div class="fs-grid-2 tor-add__limits">
+                <label class="d-input-group tor-add__field">
                     <span class="d-input-group__label">@L["torrents.dl_limit_kbps_label"]</span>
                     <input type="number" min="0" step="50"
-                           class="tor-add__input tor-add__input--mono"
+                           class="fs-input"
                            placeholder="0"
                            value="@_addDownloadKBps"
                            @oninput="@(e => _addDownloadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
                 </label>
-                <label class="d-input-group tor-add__field tor-add__field--half">
+                <label class="d-input-group tor-add__field">
                     <span class="d-input-group__label">@L["torrents.ul_limit_kbps_label"]</span>
                     <input type="number" min="0" step="50"
-                           class="tor-add__input tor-add__input--mono"
+                           class="fs-input"
                            placeholder="0"
                            value="@_addUploadKBps"
                            @oninput="@(e => _addUploadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
@@ -320,9 +328,8 @@
             </div>
         }
 
-        @* ── 5. POST-PROCESSING TOGGLES — match design spec line 1152-1157.
-              Hidden in the Upload tab: the toggles only make sense for
-              torrents (seeding, root-folder stripping, etc.). *@
+        @* ── 5. POST-PROCESSING TOGGLES. Hidden in the Upload tab: the toggles
+              only make sense for torrents (seeding, root-folder stripping…). *@
         @if (_addSource != "upload")
         {
             <div class="tor-add__toggles">
@@ -351,8 +358,9 @@
         }
         else
         {
-            <div class="tor-add__upload-note">
-                @L["torrents.upload_note"]
+            <div class="fs-msgbar fs-msgbar--info tor-add__upload-note">
+                <span class="fs-msgbar__ic"><DIcon Name="info" Size="16" /></span>
+                <span>@L["torrents.upload_note"]</span>
             </div>
         }
     </Body>
@@ -360,11 +368,77 @@
         <Btn Variant="primary" Size="md" Loading="@_adding"
              Disabled="@(!CanAdd || _adding)"
              OnClick="AddTorrentAsync">
-            <DIcon Name="download" Size="13" /> @L["torrents.btn_start_download"]
+            <DIcon Name="download" Size="16" /> @L["torrents.btn_start_download"]
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="CloseAdd">@L["common.btn_cancel"]</Btn>
     </Footer>
 </SettingsEditDrawer>
+
+@* Outside the drawer on purpose: the drawer's slide-in transform would make
+   it the containing block of the picker's position:fixed. *@
+<DestinationFolderPicker IsOpen="@(_addOpen && _subfolderPickerOpen)"
+                         FolderId="@_addFolderId"
+                         RootLabel="@SubfolderRootLabel"
+                         Value="@_addSubfolder"
+                         OnPick="OnSubfolderPicked"
+                         OnClose="@(() => _subfolderPickerOpen = false)" />
+
+@* ── Stat tiles — summed from the live SignalR snapshots of the listed
+      torrents (same TryGetValue merge the table rows use). *@
+@if (_records is { Length: > 0 } recs)
+{
+    long sumDown = 0;
+    long sumUp = 0;
+    int sumPeers = 0;
+    int downloading = 0;
+    foreach (var r in recs)
+    {
+        if (_live.TryGetValue(r.InfoHash, out var s))
+        {
+            sumDown  += s.DownloadRate;
+            sumUp    += s.UploadRate;
+            sumPeers += s.Peers;
+            if (s.State is "Downloading" or "Metadata") downloading++;
+        }
+    }
+    <div class="tor-stats">
+        <div class="tor-stat">
+            <span class="tor-stat__ic tor-stat__ic--accent"><DIcon Name="download" Size="20" /></span>
+            <div class="tor-stat__text">
+                <div class="tor-stat__label">@L["torrents.stat_download"]</div>
+                <div class="tor-stat__value">@FormatRate(sumDown)</div>
+            </div>
+        </div>
+        <div class="tor-stat">
+            <span class="tor-stat__ic tor-stat__ic--success"><DIcon Name="upload" Size="20" /></span>
+            <div class="tor-stat__text">
+                <div class="tor-stat__label">@L["torrents.stat_upload"]</div>
+                <div class="tor-stat__value">@FormatRate(sumUp)</div>
+            </div>
+        </div>
+        <div class="tor-stat">
+            <span class="tor-stat__ic"><DIcon Name="flash" Size="20" /></span>
+            <div class="tor-stat__text">
+                <div class="tor-stat__label">@L["torrent_history.state_downloading"]</div>
+                <div class="tor-stat__value">@downloading / @recs.Length</div>
+            </div>
+        </div>
+        <div class="tor-stat">
+            <span class="tor-stat__ic"><DIcon Name="users" Size="20" /></span>
+            <div class="tor-stat__text">
+                <div class="tor-stat__label">@L["torrent_edit.stat_peers"]</div>
+                <div class="tor-stat__value">@sumPeers</div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Active | History pivot (Fluent TabList, 3px indicator). History is a
+   sibling page, so the tabs are links. *@
+<nav class="tor-pivot" aria-label="@L["torrents.page_title"]">
+    <a href="torrents" class="tor-pivot__item is-active tv-focus" aria-current="page">@L["torrents.tab_active"]</a>
+    <a href="torrents/history" class="tor-pivot__item tv-focus">@L["torrents.tab_history"]</a>
+</nav>
 
 @if (_records is null)
 {
@@ -372,33 +446,28 @@
 }
 else if (_records.Length == 0)
 {
-    @* v5 fix: was .torrent-empty (no matching rule); .torrents-empty already
-       exists in Torrents.razor.css with the right token-based styling. *@
-    <div class="torrents-empty">@L["torrents.empty_list"]</div>
+    <div class="tor-empty">
+        <span class="tor-empty__ic"><DIcon Name="download" Size="24" /></span>
+        <div class="tor-empty__text">@L["torrents.empty"]</div>
+        <Btn Variant="primary" Size="md" OnClick="OpenAdd">
+            <DIcon Name="plus" Size="16" /> @L["torrents.btn_add"]
+        </Btn>
+    </div>
 }
 else
 {
-    @* v5 fix: was <table class="torrent-table">. The scoped CSS defines
-       .tor-table with full row/cell styles + responsive grid layout for
-       mobile — rename to pick that up. .bar/.bar-fill/.bar-pct were
-       page-local ad-hoc helpers; switched to the global .animarr-progress
-       primitive so the bar tracks the accent token instead of staying
-       Cinematic-era crimson. *@
-    <div class="torrents-grid-wrap">
-        @* v5: column widths come from CSS classes (.tor-col-*) so they
-           live next to the .tor-table rules and stay consistent across
-           pages. Inline widths squeezed Progress to 140px which left the
-           actual bar around 70px — way too short for the percentage and
-           bar to both be readable. The progress column is now 320px and
-           the speed columns trim back to 90px. *@
+    @* Fluent list: card on --surface, 1px border; rows hover --surface-2.
+       Column widths come from the .tor-col-* classes. Below 960px each row
+       turns into its own card (see the media queries). *@
+    <div class="tor-list">
         <table class="tor-table">
             <thead>
                 <tr>
                     <th>@L["torrents.col_name"]</th>
                     <th class="tor-col-status">@L["torrents.col_state"]</th>
                     <th class="tor-col-progress">@L["torrents.col_progress"]</th>
-                    <th class="tor-col-mono tor-col--right">@L["torrents.col_down"]</th>
-                    <th class="tor-col-mono tor-col--right">@L["torrents.col_up"]</th>
+                    <th class="tor-col-rate tor-col--right">@L["torrents.col_down"]</th>
+                    <th class="tor-col-rate tor-col--right">@L["torrents.col_up"]</th>
                     <th class="tor-col-actions"></th>
                 </tr>
             </thead>
@@ -412,49 +481,54 @@ else
                     // as a nonsensical "100.2%". Keep the bar + label in [0,100].
                     var progress = Math.Clamp(progressRaw, 0d, 1d);
                     var state = live?.State ?? t.State.ToString();
+                    var stateKey = state.ToLowerInvariant();
                     var paused = t.State == TorrentRecordState.Paused;
-                    <tr>
+                    var folderName = System.IO.Path.GetFileName(t.SavePath.TrimEnd('/', '\\'));
+                    <tr class="@($"tor-row tor-st--{stateKey}")">
                         <td class="tor-name">
                             <button type="button" class="tor-name__text"
                                     @onclick="@(() => OpenEdit(t.InfoHash))">@t.Name</button>
+                            <span class="tor-name__meta" title="@t.SavePath">
+                                @if (!string.IsNullOrEmpty(folderName))
+                                {
+                                    @($"{folderName} · ")
+                                }
+                                @FormatBytesShort(t.TotalSize)
+                            </span>
                         </td>
-                        <td class="tor-cell tor-cell--dim">@state</td>
+                        <td class="tor-cell-state"><span class="tor-badge">@state</span></td>
                         <td>
-                            <div class="tor-progress tor-progress--info">
-                                <div class="animarr-progress">
-                                    <div class="animarr-progress__track">
-                                        <div class="animarr-progress__fill" style="@(System.FormattableString.Invariant($"width:{progress * 100:F1}%"))"></div>
-                                    </div>
+                            <div class="tor-progress">
+                                <div class="tor-bar">
+                                    <div class="tor-bar__fill" style="@(System.FormattableString.Invariant($"width:{progress * 100:F1}%"))"></div>
                                 </div>
                                 <span class="tor-progress__pct">@($"{progress * 100:F1}%")</span>
                             </div>
                         </td>
-                        <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.DownloadRate ?? 0)</td>
-                        <td class="tor-cell tor-cell--mono tor-col--right">@FormatRate(live?.UploadRate ?? 0)</td>
+                        <td class="tor-num tor-col--right">@FormatRate(live?.DownloadRate ?? 0)</td>
+                        <td class="tor-num tor-col--right">@FormatRate(live?.UploadRate ?? 0)</td>
                         <td class="tor-col-actions">
                             <div class="tor-actions">
                                 @* Edit (settings drawer): folder, file selection,
-                                   rate limits, etc. Every row here is a torrent or
-                                   magnet — plain uploads never create a record — so
-                                   the pencil shows on all of them. Clicking the name
-                                   opens the same drawer. *@
-                                <button class="tor-iconbtn" title="@L["torrents.btn_edit"]" @onclick="@(() => OpenEdit(t.InfoHash))">
-                                    <DIcon Name="pencil" Size="13" />
+                                   rate limits, etc. Clicking the name opens the
+                                   same drawer. *@
+                                <button class="fs-icon-btn" title="@L["torrents.btn_edit"]" aria-label="@L["torrents.btn_edit"]" @onclick="@(() => OpenEdit(t.InfoHash))">
+                                    <DIcon Name="pencil" Size="16" />
                                 </button>
                                 @if (paused)
                                 {
-                                    <button class="tor-iconbtn" title="@L["torrents.btn_resume"]" @onclick="@(() => ResumeAsync(t.Id))">
-                                        <DIcon Name="play" Size="13" />
+                                    <button class="fs-icon-btn" title="@L["torrents.btn_resume"]" aria-label="@L["torrents.btn_resume"]" @onclick="@(() => ResumeAsync(t.Id))">
+                                        <DIcon Name="play" Size="16" />
                                     </button>
                                 }
                                 else
                                 {
-                                    <button class="tor-iconbtn" title="@L["torrents.btn_pause"]" @onclick="@(() => PauseAsync(t.Id))">
-                                        <DIcon Name="pause" Size="13" />
+                                    <button class="fs-icon-btn" title="@L["torrents.btn_pause"]" aria-label="@L["torrents.btn_pause"]" @onclick="@(() => PauseAsync(t.Id))">
+                                        <DIcon Name="pause" Size="16" />
                                     </button>
                                 }
-                                <button class="tor-iconbtn tor-iconbtn--danger" title="@L["common.btn_remove"]" @onclick="@(() => _deleteTarget = t)">
-                                    <DIcon Name="trash" Size="13" />
+                                <button class="fs-icon-btn tor-act--danger" title="@L["common.btn_remove"]" aria-label="@L["common.btn_remove"]" @onclick="@(() => _deleteTarget = t)">
+                                    <DIcon Name="trash" Size="16" />
                                 </button>
                             </div>
                         </td>
@@ -488,16 +562,16 @@ else
             <div class="tor-del">
                 <p class="tor-del__copy">@L["torrents.remove_confirm_copy"]</p>
                 <ul class="tor-del__effects">
-                    <li><DIcon Name="check" Size="13" />
+                    <li><span class="tor-del__ic"><DIcon Name="check" Size="16" /></span>
                         <span>@((MarkupString)L["torrents.remove_effect_torrent_only_html"])</span></li>
-                    <li><DIcon Name="trash" Size="13" />
+                    <li><span class="tor-del__ic tor-del__ic--danger"><DIcon Name="trash" Size="16" /></span>
                         <span>@((MarkupString)L["torrents.remove_effect_torrent_files_html"])</span></li>
                 </ul>
             </div>
         </Body>
         <Footer>
             <Btn Variant="danger" Size="md" Loading="@_deleting" OnClick="@(() => ConfirmDeleteAsync(true))">
-                <DIcon Name="trash" Size="13" /> @L["torrents.btn_torrent_and_files"]
+                <DIcon Name="trash" Size="16" /> @L["torrents.btn_torrent_and_files"]
             </Btn>
             <Btn Variant="primary" Size="md" Disabled="@_deleting" OnClick="@(() => ConfirmDeleteAsync(false))">
                 @L["torrents.btn_torrent_only"]
@@ -528,7 +602,8 @@ else
     private byte[]? _addFileBytes;
     private long   _addFileSize;
     private Guid?  _addFolderId;
-    private string _addSubfolder  = "";   // → CustomRootFolderName
+    private string? _addSubfolder;        // "Show/Season 2" → CustomRootFolderName / upload subPath
+    private bool   _subfolderPickerOpen;
     private bool   _addStopAfter;
     private bool   _addFlatten;           // → SkipSubfolderStructure
     private bool   _addStripRoot;         // → SuppressRootFolder
@@ -569,7 +644,8 @@ else
         _addFileBytes  = null;
         _addFileSize   = 0;
         _addFolderId   = null;
-        _addSubfolder  = "";
+        _addSubfolder  = null;
+        _subfolderPickerOpen = false;
         _addStopAfter  = false;
         _addFlatten    = false;
         _addStripRoot  = false;
@@ -583,7 +659,33 @@ else
         _addOpen       = true;
     }
 
-    private void CloseAdd() => _addOpen = false;
+    private void CloseAdd()
+    {
+        _addOpen = false;
+        _subfolderPickerOpen = false;
+    }
+
+    /// <summary>The subfolder is relative to the destination, so switching
+    /// destination drops it — "Season 2" under one show means nothing under
+    /// another.</summary>
+    private void OnAddFolderChanged(ChangeEventArgs e)
+    {
+        var id = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null;
+        if (id != _addFolderId) _addSubfolder = null;
+        _addFolderId = id;
+    }
+
+    private void OnSubfolderPicked(string? path)
+    {
+        _addSubfolder = SubfolderPath.Normalize(path);
+        _subfolderPickerOpen = false;
+    }
+
+    /// <summary>Root row label in the picker — the destination's name.</summary>
+    private string SubfolderRootLabel
+        => _addFolderId is Guid id && _folders?.FirstOrDefault(f => f.Id == id) is { } f
+            ? f.Label
+            : L["torrents.subfolder_default_root"];
 
     private async Task OnTorrentDeleted()
     {
@@ -732,7 +834,7 @@ else
         StateHasChanged();
         try
         {
-            var subfolder = string.IsNullOrWhiteSpace(_addSubfolder) ? null : _addSubfolder.Trim();
+            var subfolder = SubfolderPath.Normalize(_addSubfolder);
             if (_addSource == "magnet")
             {
                 await Api.AddMagnetAsync(new AddMagnetRequest(
@@ -762,7 +864,7 @@ else
             }
             else if (_addSource == "upload" && _addFolderId is Guid folder && _uploadFiles.Count > 0)
             {
-                await Api.UploadFilesToFolderAsync(folder, _uploadFiles);
+                await Api.UploadFilesToFolderAsync(folder, _uploadFiles, subfolder);
             }
 
             _addMagnet = "";
@@ -782,6 +884,7 @@ else
 
     private static string FormatBytesShort(long bytes)
     {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
         if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F1} MB";
         if (bytes >= 1024)      return $"{bytes / 1024.0:F0} KB";
         return $"{bytes} B";

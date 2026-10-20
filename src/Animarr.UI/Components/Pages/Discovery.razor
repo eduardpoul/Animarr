@@ -32,12 +32,12 @@
 
 <div class="d-discovery">
     <button type="button" class="d-discovery__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="13" /> @L["discovery.btn_back"]
+        <DIcon Name="arrow-l" Size="16" /> @L["discovery.btn_back"]
     </button>
 
     <div class="d-discovery__card" role="dialog" aria-label="@L["discovery.dialog_aria"]">
         <header class="d-discovery__brand">
-            <BrandMark Size="38" ExtraClass="d-discovery__brand-mark" />
+            <BrandMark Size="40" ExtraClass="d-discovery__brand-mark" />
             <div>
                 <div class="d-discovery__brand-name">Animarr</div>
                 <div class="d-discovery__brand-sub">@L["discovery.brand_sub"]</div>
@@ -86,17 +86,17 @@
             </div>
             <div class="d-discovery__actions">
                 <Btn Variant="ghost" Size="md" OnClick="OpenManualAdd">
-                    <DIcon Name="plus" Size="13" /> @L["discovery.add_manually"]
+                    <DIcon Name="plus" Size="16" /> @L["discovery.add_manually"]
                 </Btn>
                 <Btn Variant="ghost" Size="md" OnClick="Rescan">
-                    <DIcon Name="refresh" Size="13" /> @L["discovery.rescan"]
+                    <DIcon Name="refresh" Size="16" /> @L["discovery.rescan"]
                 </Btn>
             </div>
         }
         else if (_state == State.Empty)
         {
             <div class="d-discovery__empty-ic">
-                <DIcon Name="globe" Size="22" />
+                <DIcon Name="globe" Size="24" />
             </div>
             <div class="d-discovery__empty-title">@L["discovery.empty_title"]</div>
             <p class="d-discovery__empty-body">
@@ -108,12 +108,12 @@
                    parks the remote on this CTA so the user isn't stuck
                    somewhere irrelevant when the scan returns nothing. *@
                 <Btn Variant="primary" Size="md" OnClick="OpenManualAdd" data-tv-autofocus="true">
-                    <DIcon Name="plus" Size="13" /> @L["discovery.add_manually"]
+                    <DIcon Name="plus" Size="16" /> @L["discovery.add_manually"]
                 </Btn>
                 @if (_canScan)
                 {
                     <Btn Variant="ghost" Size="md" OnClick="Rescan">
-                        <DIcon Name="refresh" Size="13" /> @L["discovery.scan_again"]
+                        <DIcon Name="refresh" Size="16" /> @L["discovery.scan_again"]
                     </Btn>
                 }
             </div>
@@ -125,22 +125,26 @@
         @if (_manualOpen)
         {
             <div class="d-discovery__manual">
-                <div class="d-discovery__manual-label">@L["discovery.manual_label"]</div>
+                <label class="d-discovery__manual-label" for="d-discovery-manual-url">@L["discovery.manual_label"]</label>
                 <input type="text"
-                       class="d-discovery__manual-input"
+                       id="d-discovery-manual-url"
+                       class="d-discovery__manual-input fs-input fs-input--wide"
                        placeholder="@L["discovery.manual_placeholder"]"
                        value="@_manualUrl"
                        @oninput="@((ChangeEventArgs e) => _manualUrl = e.Value?.ToString() ?? "")"
                        @onkeypress="OnManualKeyPress" />
                 @if (!string.IsNullOrEmpty(_manualError))
                 {
-                    <div class="d-discovery__manual-error">@_manualError</div>
+                    <div class="fs-msgbar fs-msgbar--error" role="alert">
+                        <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+                        <span>@_manualError</span>
+                    </div>
                 }
                 <div class="d-discovery__manual-row">
                     <Btn Variant="primary" Size="md" Loading="@_manualProbing"
                          OnClick="OnManualProbe"
                          Disabled="@(string.IsNullOrWhiteSpace(_manualUrl))">
-                        <DIcon Name="link" Size="13" /> @L["discovery.probe_add"]
+                        <DIcon Name="link" Size="16" /> @L["discovery.probe_add"]
                     </Btn>
                     <Btn Variant="flat" Size="md" OnClick="@(() => _manualOpen = false)">
                         @L["common.btn_cancel"]

@@ -1,0 +1,471 @@
+@*
+    DestinationFolderPicker — centred popup (bottom sheet on phone) that picks
+    WHERE inside the chosen download destination a download lands. Replaces the
+    Add drawer's free-text "Create subfolder" field.
+
+    Explorer-style lazy tree: the root row is the destination itself (= no
+    subfolder); clicking a folder selects it and loads its children from
+    GET /api/torrents/destination/browse, one level at a time. "New folder"
+    adds a child under the selected node.
+
+    New folders are VIRTUAL until the download starts — the server creates the
+    directory when it writes the first file. Creating it here would leave an
+    empty folder behind on Cancel, and an empty folder inside a library section
+    gets picked up by the folder watcher and queued for identification.
+
+    The value is the '/'-joined path relative to the destination root
+    ("Cowboy Bebop/Season 2"), or null for the root. Re-opening rebuilds the
+    tree along that path; segments not on disk come back as pending new folders.
+
+    Rendered by the caller OUTSIDE SettingsEditDrawer: the drawer animates a
+    transform, which would make it the containing block of position:fixed.
+    Esc / Back is handled by tv-nav.js clicking the topmost backdrop, which is
+    this one (z 80 vs the drawer's 70).
+*@
+
+@inject IAnimarrApiClient Api
+
+@if (IsOpen)
+{
+    <div class="dfp__backdrop" @onclick="CancelAsync" aria-hidden="true"></div>
+    <div class="dfp" role="dialog" aria-modal="true" aria-label="@L["torrents.subfolder_picker_title"]">
+        <header class="dfp__head">
+            <div class="dfp__head-ic"><DIcon Name="folder" Size="20" /></div>
+            <div class="dfp__head-text">
+                <div class="dfp__title">@L["torrents.subfolder_picker_title"]</div>
+                <div class="dfp__hint">@L["torrents.subfolder_picker_hint"]</div>
+            </div>
+            <button type="button" class="dfp__close tv-focus" @onclick="CancelAsync"
+                    aria-label="@L["common.btn_close"]">
+                <DIcon Name="x" Size="18" />
+            </button>
+        </header>
+
+        <div class="dfp__toolbar">
+            <label class="dfp__search">
+                <DIcon Name="search" Size="13" />
+                <input class="dfp__search-input"
+                       placeholder="@L["torrents.subfolder_filter_placeholder"]"
+                       value="@_filter"
+                       @oninput="@(e => _filter = e.Value?.ToString() ?? "")" />
+            </label>
+            <Btn Variant="ghost" Size="md" OnClick="BeginCreateAsync" Disabled="@(_createParent is not null)">
+                <DIcon Name="plus" Size="13" /> @L["torrents.subfolder_btn_new"]
+            </Btn>
+        </div>
+
+        <div class="dfp__tree" role="tree">
+            @foreach (var row in Rows())
+            {
+                if (row.Kind == RowKind.Folder)
+                {
+                    var node = row.Node;
+                    var isRoot = node.Parent is null;
+                    var selected = node == _selected;
+                    @* @key on the node so Blazor doesn't rebind a row's handlers to a
+                       neighbour when a level loads or the filter changes. *@
+                    <div @key="node"
+                         class="@($"dfp__row {(selected ? "is-selected" : "")} {(isRoot ? "dfp__row--root" : "")}")"
+                         style="--depth:@row.Depth"
+                         role="treeitem"
+                         aria-selected="@(selected ? "true" : "false")"
+                         aria-expanded="@(node.Expanded ? "true" : "false")">
+                        @if (!isRoot && HasCaret(node))
+                        {
+                            <button type="button"
+                                    class="@($"dfp__caret {(node.Expanded ? "is-open" : "")}")"
+                                    tabindex="-1"
+                                    @onclick="@(() => ToggleAsync(node))"
+                                    aria-label="@L["torrents.tree_expand_folder_aria"]">
+                                <DIcon Name="chev-r" Size="12" />
+                            </button>
+                        }
+                        else if (!isRoot)
+                        {
+                            <span class="dfp__caret dfp__caret--leaf"></span>
+                        }
+
+                        <button type="button" class="dfp__pick tv-focus"
+                                @onclick="@(() => SelectAsync(node))"
+                                @ondblclick="@(() => PickAsync(node))">
+                            <span class="dfp__ficon"><DIcon Name="folder" Size="16" /></span>
+                            <span class="dfp__name" title="@(isRoot ? RootLabel : node.Name)">@(isRoot ? RootLabel : node.Name)</span>
+                            @if (isRoot && _rootPath.Length > 0)
+                            {
+                                <span class="dfp__root-path" title="@_rootPath"><bdi dir="ltr">@_rootPath</bdi></span>
+                            }
+                            @if (node.IsNew)
+                            {
+                                <span class="dfp__badge">@L["torrents.subfolder_new_badge"]</span>
+                            }
+                            @if (node.Loading)
+                            {
+                                <Spinner Size="sm" />
+                            }
+                        </button>
+
+                        @if (node.IsNew)
+                        {
+                            <button type="button" class="dfp__remove tv-focus"
+                                    @onclick="@(() => RemoveNew(node))"
+                                    title="@L["torrents.subfolder_remove_new"]"
+                                    aria-label="@L["torrents.subfolder_remove_new"]">
+                                <DIcon Name="x" Size="12" />
+                            </button>
+                        }
+                    </div>
+                }
+                else if (row.Kind == RowKind.NewInput)
+                {
+                    <div @key="@("new-input")" class="dfp__row dfp__row--input" style="--depth:@row.Depth">
+                        <span class="dfp__caret dfp__caret--leaf"></span>
+                        <span class="dfp__ficon dfp__ficon--new"><DIcon Name="folder" Size="16" /></span>
+                        <input class="@($"dfp__new-input {(_newError is not null ? "is-invalid" : "")}")"
+                               @ref="_newInput"
+                               placeholder="@L["torrents.subfolder_new_placeholder"]"
+                               value="@_newName"
+                               @oninput="OnNewNameInput"
+                               @onkeydown="OnNewNameKey" />
+                        <button type="button" class="dfp__icon-btn dfp__icon-btn--ok tv-focus" @onclick="CommitCreate"
+                                aria-label="@L["torrents.subfolder_create_ok"]" title="@L["torrents.subfolder_create_ok"]">
+                            <DIcon Name="check" Size="13" />
+                        </button>
+                        <button type="button" class="dfp__icon-btn tv-focus" @onclick="CancelCreate"
+                                aria-label="@L["common.btn_cancel"]" title="@L["common.btn_cancel"]">
+                            <DIcon Name="x" Size="13" />
+                        </button>
+                    </div>
+                    @if (_newError is not null)
+                    {
+                        <div @key="@("new-error")" class="dfp__msg dfp__msg--error" style="--depth:@row.Depth">@_newError</div>
+                    }
+                }
+                else
+                {
+                    <div @key="@((row.Kind, row.Node))"
+                         class="@($"dfp__msg {(row.Kind == RowKind.Error ? "dfp__msg--error" : "")}")"
+                         style="--depth:@row.Depth">
+                        @(row.Kind switch
+                        {
+                            RowKind.Error     => L["torrents.subfolder_load_error"],
+                            RowKind.NoMatches => L["torrents.subfolder_no_matches"],
+                            _                 => L["torrents.subfolder_empty"],
+                        })
+                    </div>
+                }
+            }
+        </div>
+
+        <footer class="dfp__foot">
+            <div class="dfp__target">
+                <span class="dfp__target-label">@L["torrents.subfolder_target_label"]</span>
+                <span class="dfp__target-path" title="@TargetPath"><bdi dir="ltr">@TargetPath</bdi></span>
+            </div>
+            <div class="dfp__actions">
+                <Btn Variant="primary" Size="md" OnClick="ConfirmAsync">
+                    <DIcon Name="check" Size="13" /> @L["torrents.subfolder_btn_select"]
+                </Btn>
+                <Btn Variant="ghost" Size="md" OnClick="CancelAsync">@L["common.btn_cancel"]</Btn>
+            </div>
+        </footer>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    /// <summary>FolderWatcher the path is relative to; null = the server's
+    /// default download directory.</summary>
+    [Parameter] public Guid? FolderId { get; set; }
+    /// <summary>Display name for the root row (the destination's label).</summary>
+    [Parameter] public string RootLabel { get; set; } = "";
+    /// <summary>Current relative path ("Show/Season 2"), null = root.</summary>
+    [Parameter] public string? Value { get; set; }
+    /// <summary>Raised with the picked path (null = root) when the user confirms.</summary>
+    [Parameter] public EventCallback<string?> OnPick { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private sealed class Node
+    {
+        public string Name = "";
+        public Node?  Parent;
+        public bool   IsNew;      // virtual — created on disk when the download starts
+        public bool   Expanded;
+        public bool   Loaded;
+        public bool   Loading;
+        public bool   Failed;
+        public List<Node> Children = new();
+
+        public string RelPath => Parent is null ? ""
+            : Parent.Parent is null ? Name
+            : $"{Parent.RelPath}/{Name}";
+    }
+
+    private enum RowKind { Folder, NewInput, Empty, NoMatches, Error }
+    private readonly record struct Row(RowKind Kind, Node Node, int Depth);
+
+    private Node   _root = new();
+    private Node?  _selected;
+    private string _rootPath = "";
+    private string _filter = "";
+    private bool   _wasOpen;
+
+    // Inline "new folder" row — shown as the first child of _createParent.
+    private Node?   _createParent;
+    private string  _newName = "";
+    private string? _newError;
+    private ElementReference _newInput;
+    private bool    _focusNewInput;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && !_wasOpen)
+        {
+            _wasOpen = true;
+            await ResetAsync();
+        }
+        else if (!IsOpen)
+        {
+            _wasOpen = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusNewInput) return;
+        _focusNewInput = false;
+        try { await _newInput.FocusAsync(); }
+        catch { /* row not rendered (filtered out) — the user can click it */ }
+    }
+
+    private async Task ResetAsync()
+    {
+        _root         = new Node { Expanded = true };
+        _selected     = _root;
+        _rootPath     = "";
+        _filter       = "";
+        _createParent = null;
+        _newName      = "";
+        _newError     = null;
+        await LoadAsync(_root);
+
+        // Re-open on the current value: walk its segments level by level.
+        var cur = _root;
+        foreach (var seg in SubfolderPath.Split(Value))
+        {
+            var next = FindChild(cur, seg);
+            if (next is null)
+            {
+                next = new Node { Name = seg, Parent = cur, IsNew = true, Loaded = true };
+                cur.Children.Insert(0, next);
+            }
+            cur.Expanded = true;
+            if (!next.Loaded) await LoadAsync(next);
+            cur = next;
+        }
+        _selected = cur;
+    }
+
+    private async Task LoadAsync(Node node)
+    {
+        if (node.IsNew) { node.Loaded = true; return; }
+        node.Loading = true;
+        node.Failed  = false;
+        StateHasChanged();
+        try
+        {
+            var res = await Api.BrowseDestinationAsync(FolderId, node.RelPath);
+            if (node.Parent is null) _rootPath = res.Path;
+            // Keep pending new folders the user already added at this level.
+            var pending = node.Children.Where(c => c.IsNew).ToList();
+            node.Children = pending
+                .Concat(res.Folders
+                    .Where(f => !pending.Any(p => SameName(p.Name, f)))
+                    .Select(f => new Node { Name = f, Parent = node }))
+                .ToList();
+            node.Loaded = true;
+        }
+        catch
+        {
+            node.Failed = true;
+        }
+        finally
+        {
+            node.Loading = false;
+        }
+    }
+
+    private static bool SameName(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private static Node? FindChild(Node parent, string name)
+        => parent.Children.FirstOrDefault(c => SameName(c.Name, name));
+
+    /// <summary>No caret once a level is known to be empty; unloaded folders
+    /// keep one (we don't probe every child for subfolders up front — that's a
+    /// readdir per row on a slow media mount).</summary>
+    private static bool HasCaret(Node n) => !n.Loaded || n.Children.Count > 0;
+
+    private async Task ToggleAsync(Node n)
+    {
+        if (n.Expanded) { n.Expanded = false; return; }
+        n.Expanded = true;
+        if (!n.Loaded && !n.Loading) await LoadAsync(n);
+    }
+
+    /// <summary>Click = select + open, so drilling down is one click per level.</summary>
+    private async Task SelectAsync(Node n)
+    {
+        _selected = n;
+        if (!n.Expanded) await ToggleAsync(n);
+    }
+
+    private async Task PickAsync(Node n)
+    {
+        _selected = n;
+        await ConfirmAsync();
+    }
+
+    // ── Rows ──────────────────────────────────────────────────────────
+
+    /// <summary>Depth-first visible rows. The filter only constrains a branch
+    /// until a folder whose name matches — below a match everything shows, so
+    /// filtering "bebop" then opening "Cowboy Bebop" still lists its seasons.
+    /// Under a filter, collapsed-but-loaded branches surface their matches too.</summary>
+    private List<Row> Rows()
+    {
+        var rows   = new List<Row>();
+        var filter = _filter.Trim();
+
+        void Walk(Node n, int depth, bool matched)
+        {
+            rows.Add(new Row(RowKind.Folder, n, depth));
+            var open   = n.Expanded;
+            var active = filter.Length > 0 && !matched;
+            if (!open && !active) return;
+
+            if (open && n == _createParent) rows.Add(new Row(RowKind.NewInput, n, depth + 1));
+            if (open && n.Failed)
+            {
+                rows.Add(new Row(RowKind.Error, n, depth + 1));
+                return;
+            }
+
+            var shown = 0;
+            foreach (var c in n.Children)
+            {
+                if (active && !(open ? IsVisibleUnderFilter(c, filter) : SubtreeMatches(c, filter)))
+                    continue;
+                Walk(c, depth + 1, matched || NameMatches(c, filter));
+                shown++;
+            }
+            if (open && shown == 0 && n.Loaded && n != _createParent && (!active || n == _root))
+                rows.Add(new Row(active ? RowKind.NoMatches : RowKind.Empty, n, depth + 1));
+        }
+
+        Walk(_root, 0, false);
+        return rows;
+    }
+
+    private static bool NameMatches(Node n, string filter)
+        => filter.Length > 0 && n.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private static bool SubtreeMatches(Node n, string filter)
+        => NameMatches(n, filter) || n.Children.Any(c => SubtreeMatches(c, filter));
+
+    /// <summary>A match, an ancestor of one, or on the path to the selection /
+    /// the new-folder row — those never vanish while filtering.</summary>
+    private bool IsVisibleUnderFilter(Node n, string filter)
+        => SubtreeMatches(n, filter) || IsOnPathTo(n, _selected) || IsOnPathTo(n, _createParent);
+
+    private static bool IsOnPathTo(Node n, Node? target)
+    {
+        for (var cur = target; cur is not null; cur = cur.Parent)
+            if (cur == n) return true;
+        return false;
+    }
+
+    // ── New folder ────────────────────────────────────────────────────
+
+    private async Task BeginCreateAsync()
+    {
+        var parent = _selected ?? _root;
+        if (!parent.Expanded) await ToggleAsync(parent);
+        _createParent  = parent;
+        _newName       = "";
+        _newError      = null;
+        _focusNewInput = true;
+    }
+
+    private void OnNewNameInput(ChangeEventArgs e)
+    {
+        _newName  = e.Value?.ToString() ?? "";
+        _newError = null;
+    }
+
+    private void OnNewNameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") CommitCreate();
+    }
+
+    private void CommitCreate()
+    {
+        if (_createParent is null) return;
+        var name = _newName.Trim();
+        if (name.Length == 0) { CancelCreate(); return; }
+        if (!SubfolderPath.IsValidName(name))
+        {
+            _newError = L.Get("torrents.subfolder_err_invalid_fmt", string.Join(" ", SubfolderPath.InvalidNameChars.ToCharArray()));
+            return;
+        }
+
+        // Same name already here (on disk or pending) → just select that one.
+        var node = FindChild(_createParent, name);
+        if (node is null)
+        {
+            node = new Node { Name = name, Parent = _createParent, IsNew = true, Loaded = true };
+            _createParent.Children.Insert(0, node);
+        }
+        _createParent.Expanded = true;
+        _selected     = node;
+        _createParent = null;
+        _newName      = "";
+    }
+
+    private void CancelCreate()
+    {
+        _createParent = null;
+        _newName      = "";
+        _newError     = null;
+    }
+
+    private void RemoveNew(Node n)
+    {
+        if (!n.IsNew || n.Parent is null) return;
+        if (IsOnPathTo(n, _selected))     _selected     = n.Parent;
+        if (IsOnPathTo(n, _createParent)) _createParent = null;
+        n.Parent.Children.Remove(n);
+    }
+
+    // ── Result ────────────────────────────────────────────────────────
+
+    /// <summary>Absolute preview of where the download will land.</summary>
+    private string TargetPath
+    {
+        get
+        {
+            var rel = _selected?.RelPath ?? "";
+            if (_rootPath.Length == 0) return rel;
+            if (rel.Length == 0) return _rootPath;
+            // Match the server's separator so a Windows dev box previews "C:\…".
+            var sep = _rootPath.Contains('\\') && !_rootPath.Contains('/') ? '\\' : '/';
+            return _rootPath.TrimEnd('/', '\\') + sep + rel.Replace('/', sep);
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        var rel = _selected?.RelPath ?? "";
+        await OnPick.InvokeAsync(rel.Length == 0 ? null : rel);
+    }
+
+    private Task CancelAsync() => OnClose.InvokeAsync();
+}

@@ -1,183 +1,302 @@
-/* TorrentHistory — plain HTML table replacing the old FluentDataGrid layout.
-   Status dot + mono numerics are duplicated here from Torrents.razor.css
-   because scoped razor.css doesn't cross component boundaries. */
+/* TorrentHistory — Fluent 2, mirrors the Downloads page (Torrents.razor.css):
+   same header, Active | History pivot and list card. Header / pivot / badge
+   rules are duplicated here because scoped razor.css doesn't cross component
+   boundaries. */
 
-/* Page width — match the active Downloads page (.tor-page) and Server settings
-   (.d-server), both capped at 1480px and centred. Without this the history
-   table bled full-width and looked wider than the active list. */
+/* Same measure as the Downloads page, centred. */
 .th-page {
     max-width: 1480px;
     margin: 0 auto;
-}
-
-/* Status dot — solid colored circle keyed off the row state. */
-.tor-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-pill);
-    background: var(--text-faint);
-    flex-shrink: 0;
-}
-.tor-dot--info     { background: var(--accent-hi); box-shadow: 0 0 10px var(--accent-soft); }
-.tor-dot--success  { background: var(--success);   box-shadow: 0 0 10px oklch(0.74 0.15 150 / 0.45); }
-.tor-dot--warning  { background: var(--warn); }
-.tor-dot--error    { background: oklch(0.66 0.22 25); }
-.tor-dot--neutral  { background: var(--text-faint); }
-
-.tor-cell        { font-size: 12.5px; color: var(--text); }
-.tor-cell--mono  { font-family: var(--font-mono); font-size: 11.5px; }
-.tor-cell--dim   { color: var(--text-dim); }
-
-
-.th-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-5);
-    margin-bottom: var(--space-7);
-    padding-bottom: var(--space-5);
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    gap: 20px;
 }
 
-.th-header__title {
+/* ── Page header ─────────────────────────────────────────── */
+.th-head {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+}
+.th-head ::deep .d-page-back {
+    align-self: flex-start;
+    margin-right: 0;
+}
+.th-head__main { flex: 1; min-width: 0; }
+.th-head__title {
+    margin: 0;
     font-family: var(--font-display);
     font-size: 28px;
-    line-height: 1.0;
-    letter-spacing: 0;
-    text-transform: none;
+    line-height: 36px;
+    font-weight: 600;
     color: var(--text);
-    margin: 0;
+}
+.th-head__sub {
+    margin-top: 2px;
+    max-width: 720px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+}
+.th-head__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
+/* ── Active | History pivot (Fluent TabList) ─────────────── */
+.th-pivot {
+    display: flex;
+    gap: 4px;
+    margin-bottom: -8px;
+}
+.th-pivot__item {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: var(--radius-ctrl);
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 20px;
+    text-decoration: none;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+.th-pivot__item:hover { background: var(--ink-2); color: var(--text); }
+.th-pivot__item.is-active { color: var(--text); font-weight: 600; }
+.th-pivot__item.is-active:hover { background: transparent; }
+.th-pivot__item.is-active::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 0;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--accent-hi);
+}
+
+/* ── Loading / empty ─────────────────────────────────────── */
 .th-loading {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: var(--space-12) 0;
+    padding: 48px 0;
 }
 
 .th-empty {
-    color: var(--text-faint);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 48px 24px;
+    text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+}
+.th-empty__ic {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink-2);
+    color: var(--text-dim);
+}
+.th-empty__text {
+    max-width: 420px;
     font-size: 14px;
-    padding: var(--space-7) 0;
+    line-height: 20px;
+    color: var(--text-dim);
 }
 
+/* ── List ────────────────────────────────────────────────── */
 .th-table-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-panel);
+    border-radius: var(--radius-card);
     overflow: hidden;
 }
 
 .th-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 20px;
 }
 
 .th-table thead th {
+    height: 40px;
+    padding: 0 12px;
     text-align: left;
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--text-faint);
-    padding: var(--space-3) var(--space-4);
-    background: var(--bg-1);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    color: var(--text-dim);
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
 }
 
 .th-table tbody td {
-    /* 1:1 with the active Downloads table (.tor-table) — same fixed 44px row
-       height so the two pages share the exact row rhythm. History rows are
-       text-only and would otherwise sit shorter than the active rows (which
-       carry 28px icon buttons + a progress bar). Reset to auto on phone, where
-       rows become stacked cards. */
+    /* Single-line rows, fixed height, content centred. Reset to auto below
+       960px, where rows become cards. */
     height: 44px;
-    padding: 0 var(--space-4);
+    padding: 0 12px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
-
 .th-table tbody tr:last-child td { border-bottom: 0; }
-.th-table tbody tr:hover { background: var(--bg-1); }
+.th-table tbody tr { transition: background var(--motion-fast); }
+.th-table tbody tr:hover { background: var(--surface-2); }
 
-.th-col-dot     { width: 24px; }
-.th-col-folder  { width: 180px; }
-.th-col-mono    { width: 110px; }
-.th-col-date    { width: 140px; }
-.th-col-status  { width: 110px; }
+.th-col-folder { width: 180px; }
+.th-col-num    { width: 96px; }
+.th-col-speed  { width: 150px; }
+.th-col-date   { width: 132px; }
+.th-col-status { width: 124px; }
 
-/* Paginator row under the table */
+/* Name — real table-cell + `max-width: 0` so long titles ellipsize instead
+   of widening the table (full name in the title tooltip). */
+.th-name {
+    max-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+}
+.th-cell {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.th-cell--num { font-variant-numeric: tabular-nums; }
+
+/* State badge (Fluent tint badge with a status dot). */
+.th-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--ink-2);
+    color: var(--text-dim);
+}
+.th-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.th-badge--info {
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+}
+.th-badge--success {
+    background: color-mix(in oklch, var(--success) 16%, transparent);
+    color: var(--success);
+}
+.th-badge--warning {
+    background: color-mix(in oklch, var(--warn) 16%, transparent);
+    color: var(--warn);
+}
+.th-badge--error {
+    background: color-mix(in oklch, var(--danger) 16%, transparent);
+    color: var(--danger);
+}
+
+/* Paginator under the list. */
 .th-paginator {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: var(--space-3);
-    margin-top: var(--space-4);
+    gap: 8px;
+    margin-top: -8px;
 }
-
 .th-paginator__label {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text-dim);
     min-width: 56px;
     text-align: center;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
 }
 
-/* ── Mobile / tablet — drop low-priority columns, allow name to wrap. */
+/* ============================================================
+   Tablet / phone (≤ 959px) — one card per row:
+       [name (2 lines)            ][status]
+       [folder ·····························]
+       [size   ↓/↑   added → completed     ]
+   Flex-wrap + order keeps the 7-cell markup untouched.
+   ============================================================ */
 @media (max-width: 959px) {
-    .th-header { flex-wrap: wrap; gap: var(--space-4); }
-    .th-header__title { font-size: 24px; }
+    .th-head { align-items: flex-start; }
+    /* The pivot + PageBack cover "back to active" on small screens. */
+    .th-head__actions { display: none; }
+
     .th-table-wrap {
         background: transparent;
         border: 0;
         border-radius: 0;
-        overflow-x: auto;
+        overflow: visible;
     }
-    .th-table { min-width: 540px; }
-    .th-col-folder { width: 120px; }
-    .th-col-date   { width: 110px; }
-}
-
-/* ── Phone — collapse to a single-card-per-row layout. */
-@media (max-width: 639px) {
-    .th-table { min-width: 0; display: block; }
+    .th-table,
+    .th-table tbody { display: block; width: 100%; }
     .th-table thead { display: none; }
-    .th-table tbody { display: block; }
+
     .th-table tbody tr {
-        display: grid;
-        grid-template-columns: 16px 1fr auto;
-        grid-template-areas:
-            "dot name status"
-            ".   folder folder"
-            ".   speed size"
-            ".   added completed";
-        gap: 4px var(--space-3);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 12px;
+        padding: 12px 12px 12px 16px;
+        margin-bottom: 8px;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-card);
-        padding: var(--space-4) var(--space-5);
-        margin-bottom: var(--space-3);
     }
     .th-table tbody tr:hover { background: var(--surface); }
+
     .th-table tbody td {
         display: block;
-        height: auto;          /* reset the desktop fixed row height */
+        height: auto;
         padding: 0;
         border-bottom: 0;
         min-width: 0;
     }
-    .th-table tbody tr td:nth-child(1) { grid-area: dot; }
-    .th-table tbody tr td:nth-child(2) { grid-area: name; word-break: break-word; }
-    .th-table tbody tr td:nth-child(3) { grid-area: folder; color: var(--text-faint); font-size: 11px; }
-    .th-table tbody tr td:nth-child(4) { grid-area: size; text-align: right; }
-    .th-table tbody tr td:nth-child(5) { grid-area: speed; }
-    .th-table tbody tr td:nth-child(6) { grid-area: added; font-size: 11px; }
-    .th-table tbody tr td:nth-child(7) { grid-area: completed; font-size: 11px; text-align: right; }
-    .th-table tbody tr td:nth-child(8) { grid-area: status; text-align: right; }
+    /* name / folder / size / speed / added / completed / status */
+    .th-table tbody tr td:nth-child(1) {
+        order: 1;
+        flex: 1 1 0;
+        max-width: none;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal;
+        word-break: break-word;
+        font-weight: 600;
+    }
+    .th-table tbody tr td:nth-child(7) { order: 2; flex: none; width: auto; }
+    .th-table tbody tr td:nth-child(2) { order: 3; flex: 1 1 100%; }
+    .th-table tbody tr td:nth-child(3) { order: 4; }
+    .th-table tbody tr td:nth-child(4) { order: 5; }
+    .th-table tbody tr td:nth-child(5) { order: 6; margin-left: auto; }
+    .th-table tbody tr td:nth-child(6) { order: 7; }
+    .th-table tbody tr td:nth-child(6)::before { content: "→ "; }
 
-    .th-paginator { justify-content: center; }
+    .th-paginator { justify-content: center; margin-top: 0; }
 }
+
+/* TV: DPad lands on the header button. */
+html.tv-mode .th-head__actions { display: flex; }

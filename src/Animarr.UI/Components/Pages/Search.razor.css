@@ -1,46 +1,48 @@
-/* Search page — full-page library text-filter UI. */
+/* Search page — full-page library text filter (Fluent 2 SearchBox). The
+   result grid / empty state are the global .catalog-* rules. */
 
 .search-page {
     display: flex;
     flex-direction: column;
-    gap: var(--space-7);
+    gap: 24px;
+    padding-bottom: 48px;
 }
 
 .search-page__head {
     display: flex;
     align-items: center;
-    gap: var(--space-4);
-    /* Pinned just under the transparent TopBar — the header itself sits
-       in-flow but reads as a "search bar" at the top of the page. */
-    padding-top: var(--space-3);
+    gap: var(--space-5);
 }
 
-/* NB: the back control is the shared <PageBack> component (.d-page-back,
-   a 40x40 glass square) — there is no .search-page__back element, so the
-   old custom-button rule that used to live here was dead and has been
-   removed. The input wrap below matches PageBack's 40px height so the back
-   chip and the search field read as one horizontal row. */
+/* NB: the back control is the shared <PageBack> (.d-page-back, 40×40); the
+   field below matches its height so both read as one row. */
 
 .search-page__input-wrap {
     flex: 1;
     min-width: 0;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    /* Match the <PageBack> button height (.d-page-back = 40px) so the two
-       controls sit flush on one row instead of at different scales. */
     height: 40px;
-    padding: 0 16px;
+    padding: 0 8px 0 12px;
     border-radius: var(--radius-ctrl);
-    background: var(--ink-1);
-    border: 1px solid var(--ink-2);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: var(--surface);
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
     color: var(--text-dim);
-    transition: border-color var(--motion-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
+.search-page__input-wrap:hover {
+    background: var(--surface-2);
+    border-color: var(--stroke-ctrl-hi);
+    border-bottom-color: var(--stroke-ctrl-acc);
+}
+/* Fluent focus: accent underline (2px) along the bottom edge. */
 .search-page__input-wrap:focus-within {
-    border-color: var(--accent-line);
+    background: var(--surface);
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
     color: var(--text);
 }
 
@@ -51,22 +53,14 @@
     background: transparent;
     border: 0;
     outline: 0;
-    color: var(--text);
-    font-family: var(--font-display);
-    /* Large but not screaming — it's the page's primary control. */
-    font-size: 20px;
-    letter-spacing: 0;
-    line-height: 1;
     padding: 0;
-}
-.search-page__input::placeholder {
-    color: var(--text-faint);
+    color: var(--text);
     font-family: var(--font-ui);
     font-size: 16px;
-    letter-spacing: 0;
+    line-height: 22px;
 }
-/* Webkit puts a built-in clear button on type=search — hide it; we render
-   our own to match the rest of the design. */
+.search-page__input::placeholder { color: var(--text-faint); }
+/* Webkit's built-in clear button on type=search — we render our own. */
 .search-page__input::-webkit-search-cancel-button { display: none; }
 .search-page__input::-webkit-search-decoration   { display: none; }
 
@@ -74,39 +68,35 @@
     appearance: none;
     cursor: pointer;
     flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-pill);
-    background: var(--ink-2);
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border: 0;
+    border-radius: var(--radius-ctrl);
+    background: transparent;
     color: var(--text-dim);
     display: grid;
     place-items: center;
     transition: background var(--motion-fast), color var(--motion-fast);
 }
-.search-page__clear:hover {
-    background: var(--ink-3);
-    color: var(--text);
-}
+.search-page__clear:hover { background: var(--ink-2); color: var(--text); }
+.search-page__clear:active { background: var(--ink-3); }
 
 .search-page__count {
     flex-shrink: 0;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0;
-    color: var(--text-dim);
     display: inline-flex;
     align-items: baseline;
-    gap: 4px;
-    text-transform: none;
+    gap: 2px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
 }
 .search-page__count-sep { color: var(--text-faint); padding: 0 2px; }
-.search-page__count-label {
-    color: var(--text-faint);
-    margin-left: 4px;
-}
+.search-page__count-label { margin-left: 4px; color: var(--text-dim); }
 
 @media (max-width: 639px) {
+    .search-page { gap: 16px; }
     .search-page__head {
         flex-wrap: wrap;
         gap: var(--space-3);
@@ -114,11 +104,7 @@
     .search-page__count {
         width: 100%;
         justify-content: flex-end;
-    }
-    .search-page__input {
-        font-size: 16px;
-    }
-    .search-page__input::placeholder {
-        font-size: 14px;
+        font-size: 12px;
+        line-height: 16px;
     }
 }

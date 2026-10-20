@@ -19,7 +19,7 @@
 
 <SettingsEditDrawer IsOpen="true"
                     Title="@(Existing is null ? L["settings.root_folders.add_title"] : L["settings.root_folders.edit_title"])"
-                    Overline="SETTINGS"
+                    Overline="@L["settings.title"]"
                     Hint="@L["settings.root_folders.dialog_sub"]"
                     Icon="folder"
                     OnClose="CancelAsync">
@@ -39,7 +39,7 @@
                                ValueChanged="@(v => _path = v ?? "")"
                                Placeholder="@L["settings.root_folders.field_path_placeholder"]" />
                         <Btn Variant="ghost" Size="md" OnClick="OpenPickerAsync">
-                            <DIcon Name="folder" Size="13" /> @L["settings.root_folders.btn_pick"]
+                            <DIcon Name="folder" Size="16" /> @L["settings.root_folders.btn_pick"]
                         </Btn>
                     </div>
                 </label>
@@ -63,7 +63,7 @@
 
                 @if (_pickerLoading)
                 {
-                    <div class="sfd-picker__empty"><InlineDots Label="Listing" /></div>
+                    <div class="sfd-picker__empty"><InlineDots Label="@L["settings.root_folders.picker_listing"]" /></div>
                 }
                 else if (_pickerCurrent is null)
                 {
@@ -73,7 +73,7 @@
                        as the Cancel in the drill-down branch below. *@
                     <div class="sfd-picker__crumb">
                         <Btn Variant="ghost" Size="sm" OnClick="@(() => _pickerOpen = false)">
-                            <DIcon Name="chev-l" Size="13" /> @L["settings.root_folders.btn_cancel"]
+                            <DIcon Name="chev-l" Size="16" /> @L["settings.root_folders.btn_cancel"]
                         </Btn>
                         <span class="sfd-picker__crumb-path">@L["settings.root_folders.picker_title"]</span>
                     </div>
@@ -82,7 +82,7 @@
                         {
                             var e = entry;
                             <button type="button" class="sfd-picker__root" @onclick="@(() => DrillInAsync(e.Path))">
-                                <DIcon Name="folder" Size="14" />
+                                <DIcon Name="folder" Size="16" />
                                 <span>@e.Path</span>
                             </button>
                         }
@@ -96,7 +96,7 @@
                 {
                     <div class="sfd-picker__crumb">
                         <Btn Variant="ghost" Size="sm" OnClick="PickerUpAsync">
-                            <DIcon Name="chev-l" Size="13" />
+                            <DIcon Name="chev-l" Size="16" />
                         </Btn>
                         <span class="sfd-picker__crumb-path" title="@_pickerCurrent">@_pickerCurrent</span>
                     </div>
@@ -118,7 +118,7 @@
                                    focusable elements and skips bare divs. *@
                                 <button type="button" class="sfd-picker__row tv-focus"
                                         @onclick="@(() => DrillInAsync(e.Path))">
-                                    <DIcon Name="folder" Size="14" />
+                                    <DIcon Name="folder" Size="16" />
                                     <span>@e.Name</span>
                                 </button>
                             }

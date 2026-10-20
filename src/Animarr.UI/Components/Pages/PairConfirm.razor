@@ -26,12 +26,12 @@
 <div class="d-pair-confirm">
     <button type="button" class="d-pair-confirm__back tv-focus"
             @onclick="@(() => Nav.NavigateTo("/"))">
-        <DIcon Name="arrow-l" Size="13" /> @L["pair.confirm.back"]
+        <DIcon Name="arrow-l" Size="16" /> @L["pair.confirm.back"]
     </button>
 
     <div class="d-pair-confirm__card" role="dialog" aria-label="@L["pair.confirm.aria_pair_tv"]">
         <header class="d-pair-confirm__brand">
-            <BrandMark Size="38" ExtraClass="d-pair-confirm__brand-mark" />
+            <BrandMark Size="40" ExtraClass="d-pair-confirm__brand-mark" />
             <div>
                 <div class="d-pair-confirm__brand-name">@L["pair.confirm.brand_name"]</div>
                 <div class="d-pair-confirm__brand-sub">@L["pair.confirm.brand_sub"]</div>
@@ -44,13 +44,13 @@
                     class="@($"d-pair-confirm__tab tv-focus {(_mode == "scan" ? "is-active" : "")}")"
                     @onclick="@(() => SwitchModeAsync("scan"))"
                     role="tab" aria-selected="@(_mode == "scan")">
-                <DIcon Name="qr-code" Size="13" /> @L["pair.confirm.tab_scan_qr"]
+                <DIcon Name="qr-code" Size="16" /> @L["pair.confirm.tab_scan_qr"]
             </button>
             <button type="button"
                     class="@($"d-pair-confirm__tab tv-focus {(_mode == "code" ? "is-active" : "")}")"
                     @onclick="@(() => SwitchModeAsync("code"))"
                     role="tab" aria-selected="@(_mode == "code")">
-                <DIcon Name="pencil" Size="13" /> @L["pair.confirm.tab_enter_code"]
+                <DIcon Name="pencil" Size="16" /> @L["pair.confirm.tab_enter_code"]
             </button>
         </div>
 
@@ -95,7 +95,7 @@
                 <Btn Variant="primary" Size="lg" Loading="@_submitting"
                      OnClick="OnSubmitCode"
                      Disabled="@(_typedCode.Length < 6 || _submitting)">
-                    <DIcon Name="check" Size="14" /> @L["pair.confirm.btn_confirm"]
+                    <DIcon Name="check" Size="16" /> @L["pair.confirm.btn_confirm"]
                 </Btn>
             </div>
         }
@@ -103,7 +103,7 @@
         @if (!string.IsNullOrEmpty(_toast))
         {
             <div class="d-pair-confirm__toast" role="status">
-                <DIcon Name="check" Size="13" /> @_toast
+                <span class="d-pair-confirm__toast-ic"><DIcon Name="check" Size="16" /></span> @_toast
             </div>
         }
     </div>

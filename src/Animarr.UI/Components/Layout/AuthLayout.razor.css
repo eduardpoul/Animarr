@@ -1,12 +1,15 @@
-/* AuthLayout — full-bleed shell for unauthenticated pages.
-   Replaces the TopBar/sidebar with a single backdrop layer. */
+/* AuthLayout — full-bleed shell for unauthenticated pages (Welcome, Login,
+   Setup, Discovery, Pair, PairConfirm, Switch). Fluent 2: a plain page
+   background; each page centres its own sign-in card on top of it. */
 
 .d-auth-shell {
     position: relative;
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: hidden;
     background: var(--bg-0);
     color: var(--text);
+    font-family: var(--font-ui);
 }
 
 .d-auth-shell__backdrop {
@@ -14,14 +17,11 @@
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background:
-        radial-gradient(120% 80% at 50% 30%,
-            transparent 0%,
-            rgba(10, 8, 7, 0.55) 60%,
-            rgba(10, 8, 7, 0.95) 100%),
-        var(--bg-0);
+    background: var(--bg-0);
 }
 
+/* Retired film-grain decoration — `.film-grain` is a global no-op now;
+   the layer only keeps its stacking slot. */
 .d-auth-shell__grain {
     position: fixed;
     inset: 0;

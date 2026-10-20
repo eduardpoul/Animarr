@@ -29,7 +29,7 @@
         <header class="emd__header">
             @if (_mobileShowingDetail)
             {
-                <button type="button" class="emd__back tv-focus"
+                <button type="button" class="fs-icon-btn emd__back tv-focus"
                         @onclick="@(() => _mobileShowingDetail = false)"
                         aria-label="@L["edit_metadata.aria_back_sections"]">
                     <DIcon Name="chev-l" Size="18" />
@@ -47,7 +47,7 @@
                     <div class="emd__hint">@L["edit_metadata.header_hint"]</div>
                 }
             </div>
-            <button type="button" class="emd__close" @onclick="OnCloseAsync" aria-label="@L["edit_metadata.aria_close"]">
+            <button type="button" class="fs-icon-btn emd__close tv-focus" @onclick="OnCloseAsync" aria-label="@L["edit_metadata.aria_close"]">
                 <DIcon Name="x" Size="20" />
             </button>
         </header>
@@ -76,10 +76,10 @@
                 <button type="button" class="emd__mlist-row tv-focus"
                         @onclick="@(async () => { await SwitchTabAsync(key); _mobileShowingDetail = true; })">
                     <span class="emd__mlist-ic">
-                        <DIcon Name="@TabIcon(key)" Size="14" />
+                        <DIcon Name="@TabIcon(key)" Size="16" />
                     </span>
                     <span class="emd__mlist-label">@t.Value</span>
-                    <DIcon Name="chev-r" Size="13" />
+                    <DIcon Name="chev-r" Size="16" />
                 </button>
             }
         </nav>
@@ -95,17 +95,16 @@
         </div>
 
         <footer class="emd__footer">
-            <button type="button" class="@($"emd__btn emd__btn--primary {(_saving ? "emd__btn--loading" : "")}")"
-                    @onclick="SaveAsync" disabled="@_saving">
-                @if (_saving) { <Spinner Size="sm" Tone="light" /> }
-                else          { <DIcon Name="check" Size="14" /> }
+            @* Btn Loading = spinner + disabled while the save runs. *@
+            <Btn Variant="primary" Size="md" Loading="@_saving" OnClick="SaveAsync">
+                @if (!_saving) { <DIcon Name="check" Size="16" /> }
                 @(_saving ? L["edit_metadata.btn_saving"] : L["edit_metadata.btn_save_changes"])
-            </button>
-            <button type="button" class="emd__btn emd__btn--ghost" @onclick="OnCloseAsync">@L["edit_metadata.btn_cancel"]</button>
+            </Btn>
+            <Btn Variant="solid" Size="md" OnClick="OnCloseAsync">@L["edit_metadata.btn_cancel"]</Btn>
             <div class="emd__footer-spacer"></div>
-            <button type="button" class="emd__btn emd__btn--flat emd__btn--xs" @onclick="ReidentifyAsync">
-                <DIcon Name="magic" Size="13" /> @L["edit_metadata.btn_rerun_llm"]
-            </button>
+            <Btn Variant="flat" Size="md" OnClick="ReidentifyAsync">
+                <DIcon Name="magic" Size="16" /> @L["edit_metadata.btn_rerun_llm"]
+            </Btn>
         </footer>
     </div>
 }
@@ -558,7 +557,7 @@
 
     private RenderFragment SourceIdsTab() => @<div class="emd-form">
         <div class="emd-automatch">
-            <div class="emd-automatch__icon"><DIcon Name="sparkle" Size="14" /></div>
+            <div class="emd-automatch__icon"><DIcon Name="sparkle" Size="16" /></div>
             <div>
                 <div class="emd-automatch__title">@L.Get("edit_metadata.automatch_title_fmt", $"{(Item!.LlmConfidence ?? 0):P0}")</div>
                 <div class="emd-automatch__hint">@(Item.LlmIdentifiedTitle ?? Item.Title) → @Item.Title</div>
@@ -571,7 +570,7 @@
                 @if (Item.TmdbId is not null)
                 {
                     var url = $"https://www.themoviedb.org/{(Item.MediaType == MediaItemType.Movie ? "movie" : "tv")}/{Item.TmdbId}";
-                    <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
+                    <a href="@url" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="12" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
@@ -584,7 +583,7 @@
                     <button type="button" class="@($"emd-segmented__btn {(!_tmdbIsTv ? "emd-segmented__btn--active" : "")}")"
                             @onclick="@(() => _tmdbIsTv = false)">@L["edit_metadata.id_tmdb_movie"]</button>
                 </div>
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyTmdbAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
+                <Btn Variant="solid" Size="md" OnClick="ApplyTmdbAsync"><DIcon Name="refresh" Size="16" /> @L["edit_metadata.id_btn_apply"]</Btn>
             </div>
         </div>
 
@@ -593,14 +592,14 @@
                 <span class="emd-idfield__label">@L["edit_metadata.id_mal_label"]</span>
                 @if (Item.MalId is not null)
                 {
-                    <a href="@($"https://myanimelist.net/anime/{Item.MalId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
+                    <a href="@($"https://myanimelist.net/anime/{Item.MalId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="12" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
                 <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.id_not_linked"]"
                        value="@(_malIdInput ?? "")"
                        @oninput="@(e => _malIdInput = e.Value?.ToString())" />
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyMalAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
+                <Btn Variant="solid" Size="md" OnClick="ApplyMalAsync"><DIcon Name="refresh" Size="16" /> @L["edit_metadata.id_btn_apply"]</Btn>
             </div>
         </div>
 
@@ -609,14 +608,14 @@
                 <span class="emd-idfield__label">@L["edit_metadata.id_imdb_label"]</span>
                 @if (!string.IsNullOrEmpty(Item.ImdbId))
                 {
-                    <a href="@($"https://www.imdb.com/title/{Item.ImdbId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="10" /> @L["edit_metadata.id_open_source"]</a>
+                    <a href="@($"https://www.imdb.com/title/{Item.ImdbId}")" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="external" Size="12" /> @L["edit_metadata.id_open_source"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
                 <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.id_not_linked"]"
                        value="@(_imdbIdInput ?? "")"
                        @oninput="@(e => _imdbIdInput = e.Value?.ToString())" />
-                <button class="emd__btn emd__btn--solid" @onclick="ApplyImdbAsync"><DIcon Name="refresh" Size="13" /> @L["edit_metadata.id_btn_apply"]</button>
+                <Btn Variant="solid" Size="md" OnClick="ApplyImdbAsync"><DIcon Name="refresh" Size="16" /> @L["edit_metadata.id_btn_apply"]</Btn>
             </div>
         </div>
 
@@ -628,19 +627,19 @@
                 <span class="emd-idfield__label">@L["edit_metadata.theme_label"]</span>
                 @if (!string.IsNullOrEmpty(Item.ThemePath))
                 {
-                    <a href="@Animarr.UI.Services.MediaUrl.Theme(Item.Id)" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="play" Size="10" /> @L["edit_metadata.theme_play"]</a>
+                    <a href="@Animarr.UI.Services.MediaUrl.Theme(Item.Id)" target="_blank" rel="noopener" class="emd-idfield__link"><DIcon Name="play" Size="12" /> @L["edit_metadata.theme_play"]</a>
                 }
             </div>
             <div class="emd-idfield__row">
                 <input class="emd-input emd-input--mono" placeholder="@L["edit_metadata.theme_url_placeholder"]"
                        value="@_themeUrlInput"
                        @oninput="@(e => _themeUrlInput = e.Value?.ToString() ?? "")" />
-                <button class="emd__btn emd__btn--solid" disabled="@_themeBusy" @onclick="RescanThemeAsync" title="@L["edit_metadata.theme_rescan_title"]">
-                    <DIcon Name="refresh" Size="13" /> @L["edit_metadata.theme_btn_rescan"]
-                </button>
-                <button class="emd__btn emd__btn--solid" disabled="@(_themeBusy || string.IsNullOrWhiteSpace(_themeUrlInput))" @onclick="ApplyThemeUrlAsync">
-                    <DIcon Name="check" Size="13" /> @L["edit_metadata.theme_btn_add"]
-                </button>
+                <Btn Variant="solid" Size="md" Disabled="@_themeBusy" OnClick="RescanThemeAsync" title="@L["edit_metadata.theme_rescan_title"]">
+                    <DIcon Name="refresh" Size="16" /> @L["edit_metadata.theme_btn_rescan"]
+                </Btn>
+                <Btn Variant="solid" Size="md" Disabled="@(_themeBusy || string.IsNullOrWhiteSpace(_themeUrlInput))" OnClick="ApplyThemeUrlAsync">
+                    <DIcon Name="check" Size="16" /> @L["edit_metadata.theme_btn_add"]
+                </Btn>
             </div>
             @* Provenance — keyed off ThemePath (a theme can be set without a song
                title, in which case the old "No theme set" text was wrong). Shows
@@ -654,7 +653,7 @@
                     <text> · </text>
                     <a href="@($"https://animethemes.moe/search?q={Uri.EscapeDataString(Item.Title)}")"
                        target="_blank" rel="noopener" class="emd-idfield__link">
-                        <DIcon Name="external" Size="10" /> @L["edit_metadata.theme_find"]
+                        <DIcon Name="external" Size="12" /> @L["edit_metadata.theme_find"]
                     </a>
                 </div>
                 <div class="emd-source" style="margin-top: 6px;">@Item.ThemePath</div>
@@ -678,7 +677,7 @@
                 <input class="emd-input" placeholder="https://www.themoviedb.org/tv/12345"
                        value="@_pasteUrl"
                        @oninput="@(e => _pasteUrl = e.Value?.ToString() ?? "")" />
-                <button class="emd__btn emd__btn--solid" @onclick="ParsePastedUrl">@L["edit_metadata.id_btn_parse"]</button>
+                <Btn Variant="solid" Size="md" OnClick="ParsePastedUrl">@L["edit_metadata.id_btn_parse"]</Btn>
             </div>
         </div>
     </div>;
@@ -814,7 +813,7 @@
                         <button type="button" class="emd-tag__x"
                                 @onclick="@(() => RemoveTag(tag))"
                                 aria-label="@L.Get("edit_metadata.tags_remove_tag_aria_fmt", tag)">
-                            <DIcon Name="x" Size="10" />
+                            <DIcon Name="x" Size="12" />
                         </button>
                     </span>
                 }
@@ -825,7 +824,7 @@
                    value="@_newTag"
                    @oninput="@(e => _newTag = e.Value?.ToString() ?? "")"
                    @onkeydown="OnTagKeyDown" />
-            <button class="emd__btn emd__btn--solid" @onclick="AddTag">@L["edit_metadata.tags_btn_add"]</button>
+            <Btn Variant="solid" Size="md" OnClick="AddTag">@L["edit_metadata.tags_btn_add"]</Btn>
         </div>
         <div class="emd-tags-suggest">
             <div class="emd-tags-suggest__label">@L["edit_metadata.tags_suggested_label"]</div>
@@ -907,9 +906,9 @@
         <div class="emd-manage-block">
             <h4>@L["edit_metadata.manage_reidentify_title"]</h4>
             <p>@L["edit_metadata.manage_reidentify_body"]</p>
-            <button class="emd__btn emd__btn--solid" @onclick="ReidentifyAsync">
-                <DIcon Name="magic" Size="13" /> @L["edit_metadata.manage_btn_queue_reidentify"]
-            </button>
+            <Btn Variant="solid" Size="md" OnClick="ReidentifyAsync">
+                <DIcon Name="magic" Size="16" /> @L["edit_metadata.manage_btn_queue_reidentify"]
+            </Btn>
         </div>
 
         <div class="emd-manage-block emd-manage-block--danger">
@@ -921,9 +920,9 @@
                 <span class="emd-manage-block__confirm-box" aria-hidden="true"></span>
                 <span class="emd-manage-block__confirm-label">@L["edit_metadata.manage_confirm_understand"]</span>
             </label>
-            <button class="emd__btn emd__btn--danger" disabled="@(!_confirmDelete)" @onclick="DeleteAsync">
-                <DIcon Name="trash" Size="13" /> @L["edit_metadata.manage_btn_delete"]
-            </button>
+            <Btn Variant="danger" Size="md" Disabled="@(!_confirmDelete)" OnClick="DeleteAsync">
+                <DIcon Name="trash" Size="16" /> @L["edit_metadata.manage_btn_delete"]
+            </Btn>
         </div>
     </div>;
 }

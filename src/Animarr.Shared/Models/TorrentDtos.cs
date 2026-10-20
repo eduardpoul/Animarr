@@ -125,3 +125,16 @@ public sealed record TorrentConfigDto
 
     public string CacheDirectory { get; init; } = "/app/data/torrent-cache";
 }
+
+/// <summary>
+/// One level of the Add-download drawer's subfolder picker: the immediate
+/// subfolders of <c>root/RelativePath</c>, where root is the chosen folder's
+/// path (or the default download directory). <see cref="Path"/> is the
+/// absolute directory that was listed — shown as the "save to" preview.
+/// <see cref="Exists"/> is false when that directory isn't on disk yet (a
+/// fresh default download dir); <see cref="Folders"/> is then empty.
+/// </summary>
+public sealed record DestinationFolderListDto(
+    string   Path,
+    string[] Folders,
+    bool     Exists);

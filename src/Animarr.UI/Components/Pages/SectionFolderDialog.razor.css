@@ -1,16 +1,14 @@
 /*
-    SectionFolderDialog — Settings → Root folders Add/Edit panel.
-
-    Modal scaffold was removed in the v5 panel refactor: this component
-    now embeds inside a <SettingsEditDrawer> (right-edge slide-in). The
-    only styles left are the picker subtree (the filesystem drill-down
-    UI inside the drawer body) and a couple of helper wrappers.
+    SectionFolderDialog — Settings → Root folders Add/Edit, rendered inside
+    a <SettingsEditDrawer> (the drawer owns the chrome). Styles here cover
+    the form wrappers and the filesystem drill-down picker. Fluent 2: 14px
+    body, 12px dim captions, 4px controls, list rows with subtle hover.
 */
 
 .sfd__form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
 }
 
 .sfd__row {
@@ -18,7 +16,8 @@
     gap: 8px;
     align-items: stretch;
 }
-.sfd__row > .d-input { flex: 1; min-width: 0; }
+/* <Input> is a child component — ::deep reaches its .d-input box. */
+.sfd__row ::deep .d-input { flex: 1; min-width: 0; }
 
 /* ── Picker ─── */
 
@@ -30,11 +29,10 @@
 }
 
 .sfd-picker__title {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0;
-    color: var(--text-dim);
-    text-transform: none;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--text);
 }
 
 .sfd-picker__roots {
@@ -43,25 +41,31 @@
     gap: 8px;
 }
 
+/* Mount point / drive tile — Fluent card button. */
 .sfd-picker__root {
     appearance: none;
     cursor: pointer;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-chip);
-    padding: 10px 12px;
+    min-height: 40px;
+    padding: 8px 12px;
     display: flex;
     align-items: center;
     gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
     color: var(--text);
-    font-family: var(--font-mono);
+    font-family: var(--font-code);
     font-size: 12px;
+    line-height: 16px;
     text-align: left;
+    word-break: break-all;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .sfd-picker__root:hover {
-    border-color: var(--accent-line);
-    color: var(--text);
+    background: var(--surface-2);
+    border-color: var(--border-strong);
 }
+.sfd-picker__root:active { background: var(--surface-3); }
 
 .sfd-picker__crumb {
     display: flex;
@@ -69,14 +73,15 @@
     gap: 8px;
 }
 .sfd-picker__crumb-path {
-    font-family: var(--font-mono);
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-code);
     font-size: 12px;
+    line-height: 16px;
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    min-width: 0;
-    flex: 1;
 }
 
 .sfd-picker__list {
@@ -84,29 +89,41 @@
     min-height: 200px;
     max-height: 320px;
     overflow: auto;
+    padding: 4px;
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-card);
-    background: var(--bg-1);
-    padding: 4px 0;
+    border-radius: var(--radius-ctrl);
 }
 
+/* Folder row — Fluent list item: subtle hover fill. */
 .sfd-picker__row {
+    appearance: none;
     cursor: pointer;
-    padding: 8px 14px;
+    width: 100%;
+    min-height: 32px;
+    padding: 6px 10px;
     display: flex;
     align-items: center;
     gap: 8px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-ctrl);
     color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 12px;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    text-align: left;
+    transition: background var(--motion-fast);
 }
-.sfd-picker__row:hover { background: var(--surface-2); }
+.sfd-picker__row:hover  { background: var(--ink-2); }
+.sfd-picker__row:active { background: var(--ink-3); }
 
 .sfd-picker__empty {
-    padding: 22px 12px;
+    padding: 24px 12px;
     text-align: center;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text-dim);
-    font-size: 12.5px;
 }
 
 .sfd-picker__foot {
@@ -117,13 +134,13 @@
 }
 .sfd-picker__selected {
     flex: 1;
-    font-family: var(--font-mono);
-    font-size: 11.5px;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 16px;
     color: var(--text-dim);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    min-width: 0;
 }
 .sfd-picker__selected b {
     color: var(--text);

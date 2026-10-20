@@ -22,14 +22,14 @@
 
 <div class="d-pair">
     <button type="button" class="d-pair__back tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
-        <DIcon Name="arrow-l" Size="13" /> BACK
+        <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
     </button>
 
-    <div class="d-pair__card" role="dialog" aria-label="TV pairing">
+    <div class="d-pair__card" role="dialog" aria-label="@L["pair.aria_dialog"]">
         <header class="d-pair__brand">
-            <BrandMark Size="38" ExtraClass="d-pair__brand-mark" />
+            <BrandMark Size="40" ExtraClass="d-pair__brand-mark" />
             <div>
-                <div class="d-pair__brand-name">ANIMARR</div>
+                <div class="d-pair__brand-name">Animarr</div>
                 <div class="d-pair__brand-sub">@L["pair.title"]</div>
             </div>
         </header>
@@ -37,15 +37,15 @@
         @if (_loading || _init is null)
         {
             <div class="d-pair__loading">
-                <Spinner Size="22" />
+                <Spinner Size="lg" />
             </div>
         }
         else if (_expired)
         {
             <div class="d-pair__expired">
-                <div class="d-pair__expired-msg">Code expired</div>
+                <div class="d-pair__expired-msg">@L["pair.code_expired"]</div>
                 <Btn Variant="primary" Size="md" OnClick="@StartPairAsync">
-                    <DIcon Name="refresh" Size="13" /> NEW CODE
+                    <DIcon Name="refresh" Size="16" /> @L["pair.btn_new_code"]
                 </Btn>
             </div>
         }
@@ -69,14 +69,16 @@
                 </div>
                 <div class="d-pair__digits">
                     <div class="d-pair__code" aria-label="Pairing code">@PrettyCode</div>
-                    <div class="d-pair__url">on your phone: <span class="d-pair__url-mono">Profile → Pair a TV</span></div>
+                    <div class="d-pair__url">@L["pair.on_your_phone"] <span class="d-pair__url-mono">@L["pair.phone_path"]</span></div>
                 </div>
             </div>
         }
 
-        <button type="button" class="d-pair__cancel tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
-            CANCEL
-        </button>
+        <div class="d-pair__actions">
+            <button type="button" class="d-pair__cancel tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
+                @L["common.btn_cancel"]
+            </button>
+        </div>
     </div>
 
     <footer class="d-pair__footer">

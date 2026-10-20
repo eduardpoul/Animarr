@@ -85,7 +85,7 @@
                         @if (card.Year is int y) { <span>@y</span> <span class="frail__dot">·</span> }
                         <span>@FormatLabel(card.Format)</span>
                         @if (card.SpanCount > 1) { <span class="frail__dot">·</span> <span>S1–S@(card.SpanCount)</span> }
-                        else if (card.Episodes is > 1) { <span class="frail__dot">·</span> <span>@card.Episodes EP</span> }
+                        else if (card.Episodes is > 1) { <span class="frail__dot">·</span> <span>@card.Episodes @L["media_detail_hero.episode_count_fmt_short"]</span> }
                     </div>
                     @if (RelationLabel(card.Relation) is string rel)
                     {

@@ -1,42 +1,43 @@
-/* Franchise watch-order rail — numbered cards, current-title outline,
-   dashed not-in-library members. Spec: feat-detail.jsx. */
+/* Franchise watch-order rail — Fluent 2. Numbered poster cards in release
+   order; the current title gets an accent outline + "You are here" badge,
+   members not in the library are dashed with a Want button. Spacing above /
+   below comes from MediaDetail's main-column gap. */
 
-.frail { margin: var(--space-10) 0; }
+.frail { min-width: 0; }
 
 .frail__head {
     display: flex;
     align-items: flex-end;
-    gap: var(--space-4);
-    margin-bottom: var(--space-6);
+    gap: 12px;
+    margin-bottom: 8px;
 }
 .frail__overline {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--accent-hi);
-    margin-bottom: 5px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
 }
 .frail__title {
     margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0;
+    font-family: var(--font-ui);
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 600;
+    color: var(--text);
 }
 .frail__progress {
     margin-left: auto;
-    font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--text-faint);
+    line-height: 16px;
+    color: var(--text-dim);
     white-space: nowrap;
 }
 
 .frail__row {
     display: flex;
-    gap: var(--space-7);
+    gap: 16px;
     overflow-x: auto;
-    padding: 10px 2px 6px;
+    /* Top room for the order badges that overhang each poster. */
+    padding: 10px 2px 6px 10px;
     scrollbar-width: none;
     scroll-snap-type: x proximity;
 }
@@ -48,48 +49,57 @@
     scroll-snap-align: start;
 }
 
-.frail__art-wrap { position: relative; border-radius: var(--radius-lg, 12px); }
+.frail__art-wrap { position: relative; border-radius: var(--radius-card); }
 .frail__art-wrap.is-current {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--accent-hi);
     outline-offset: 2px;
 }
 
+/* Order number — a circular counter badge overhanging the top-left corner. */
 .frail__order {
     position: absolute;
     top: -8px;
     left: -8px;
     z-index: 5;
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
+    width: 24px;
+    height: 24px;
+    box-sizing: border-box;
+    border-radius: var(--radius-pill);
     display: grid;
     place-items: center;
-    font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 700;
-    color: var(--text-dim);
+    line-height: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
     background: var(--surface-3);
     border: 1px solid var(--border-strong);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--shadow-4);
 }
 .frail__art-wrap.is-current .frail__order {
-    color: #fff;
+    color: var(--on-accent);
     background: var(--accent);
-    border-color: var(--accent);
+    border-color: transparent;
 }
 
+/* Posters sit on artwork → always-dark status / accent text colors. */
 .frail__poster,
 .frail__ext {
+    --success:   oklch(0.72 0.14 150);
+    --accent-hi: oklch(0.75 0.14 var(--accent-hue));
     position: relative;
     display: block;
     aspect-ratio: 2 / 3;
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-card);
     overflow: hidden;
     background: var(--surface);
 }
-.frail__poster { border: 1px solid var(--border); }
+.frail__poster {
+    border: 1px solid var(--border);
+    transition: border-color var(--motion-fast);
+}
 .frail__poster:hover { border-color: var(--border-strong); }
-.frail__ext { border: 1px dashed var(--border-strong); }
+.frail__ext { border: 1px dashed var(--stroke-ctrl); }
 
 .frail__img {
     width: 100%;
@@ -97,7 +107,7 @@
     object-fit: cover;
     display: block;
 }
-.frail__img--dim { opacity: 0.78; }
+.frail__img--dim { opacity: 0.75; }
 .frail__ph {
     width: 100%;
     height: 100%;
@@ -106,37 +116,48 @@
     color: var(--text-faint);
 }
 
+/* Watched — glass chip with a success tick (same recipe as the episode chips). */
 .frail__watched {
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 22px;
-    height: 22px;
-    border-radius: 7px;
+    width: 24px;
+    height: 24px;
+    box-sizing: border-box;
+    border-radius: var(--radius-ctrl);
     display: grid;
     place-items: center;
-    font-size: 12px;
-    font-weight: 700;
-    color: #15100b;
-    background: var(--success, oklch(0.74 0.15 150));
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--success);
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
 }
 
+/* "Not in library" — Fluent badge over the artwork. */
 .frail__ext-badge {
     position: absolute;
     top: 8px;
     left: 8px;
-    font-family: var(--font-mono);
-    font-size: 8.5px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: rgba(255, 255, 255, 0.85);
-    background: rgba(0, 0, 0, 0.55);
+    max-width: calc(100% - 16px);
+    box-sizing: border-box;
+    font-size: 12px;
+    line-height: 16px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.16);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-badge);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     pointer-events: none;
 }
 
+/* Want — Fluent primary button pinned to the poster's bottom edge. */
 .frail__want {
     position: absolute;
     left: 8px;
@@ -144,43 +165,53 @@
     bottom: 8px;
     appearance: none;
     cursor: pointer;
-    padding: 7px 0;
-    border-radius: 9px;
-    font-size: 11.5px;
-    font-weight: 700;
-    color: #15100b;
+    min-height: 32px;
+    padding: 5px 8px;
+    box-sizing: border-box;
+    border-radius: var(--radius-ctrl);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--on-accent);
     background: var(--accent);
     border: 1px solid transparent;
-    transition: background var(--motion-base), color var(--motion-base);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
-.frail__want:hover { background: var(--accent-hi); }
-.frail__want.is-on {
-    background: var(--accent-soft);
+.frail__want:hover { background: color-mix(in oklch, var(--accent), #fff 12%); }
+/* Added — a quiet glass state; the button stays put but stops inviting. */
+.frail__want.is-on,
+.frail__want.is-on:hover {
+    background: rgba(0, 0, 0, 0.6);
     color: var(--accent-hi);
-    border-color: var(--accent-line, var(--accent));
+    border-color: rgba(255, 255, 255, 0.16);
     cursor: default;
 }
 
+/* "You are here" — brand badge. */
 .frail__here {
     position: absolute;
     bottom: 8px;
     left: 8px;
     z-index: 4;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-transform: none;
-    color: #fff;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    color: var(--on-accent);
     background: var(--accent);
-    padding: 3px 8px;
-    border-radius: 5px;
+    padding: 2px 6px;
+    border-radius: var(--radius-badge);
 }
 
 .frail__name {
-    margin-top: 10px;
-    font-size: 12.5px;
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -188,67 +219,69 @@
 .frail__meta {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 4px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-faint);
+    flex-wrap: wrap;
+    gap: 0 6px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
 }
-.frail__dot { color: var(--border-strong); }
+.frail__dot { color: var(--text-faint); }
 
+/* Relation (side story / spin-off / …) — tint brand badge. */
 .frail__rel {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
     margin-top: 6px;
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-transform: none;
+    min-height: 20px;
+    box-sizing: border-box;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
     color: var(--accent-hi);
     background: var(--accent-soft);
-    border: 1px solid var(--accent-line, var(--accent));
-    padding: 2px 7px;
-    border-radius: 5px;
+    padding: 1px 6px;
+    border-radius: var(--radius-badge);
 }
 
 @media (max-width: 639px) {
     .frail__cell { width: 138px; }
-    .frail__title { font-size: 19px; }
+    .frail__row { gap: 12px; }
 }
 
-/* ── ‹ › paging + drag-to-scroll (mirrors RecRail) ─────────────────────── */
+/* ── ‹ › paging (Fluent flipper buttons) + drag-to-scroll ─────────── */
 .frail__viewport { position: relative; }
 .frail__row.is-dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; }
 .frail__nav {
     position: absolute;
-    /* The row carries 10px top padding for the order badges. */
-    top: 10px;
-    /* Cover the 2/3 posters of the 164px cells (~246px). */
-    height: 246px;
-    width: 44px;
+    /* Vertically centred on the 164px cells' 2/3 posters (~246px tall,
+       below the row's 10px badge padding). */
+    top: calc(10px + 123px - 16px);
+    width: 32px;
+    height: 32px;
     z-index: 6;
     display: grid;
     place-items: center;
     appearance: none;
     cursor: pointer;
-    border: none;
-    color: #fff;
-    font-size: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 20px;
     line-height: 1;
-    background: linear-gradient(90deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    opacity: 0.75;
-    transition: opacity var(--motion-base);
+    box-shadow: var(--shadow-8);
+    transition: background var(--motion-fast);
 }
-.frail__nav:hover { opacity: 1; }
-.frail__nav--l { left: 0; border-radius: 12px 0 0 12px; }
-.frail__nav--r {
-    right: 0;
-    background: linear-gradient(270deg, rgba(10, 8, 7, 0.72), rgba(10, 8, 7, 0));
-    border-radius: 0 12px 12px 0;
-}
+.frail__nav:hover  { background: var(--surface-2); }
+.frail__nav:active { background: var(--surface-3); }
+.frail__nav--l { left: 4px; }
+.frail__nav--r { right: 4px; }
 @media (hover: none) {
     .frail__nav { display: none; }
 }
 @media (max-width: 639px) {
-    /* 138px cells → shorter posters. */
-    .frail__nav { height: 207px; }
+    /* 138px cells → ~207px posters. */
+    .frail__nav { top: calc(10px + 103px - 16px); }
 }

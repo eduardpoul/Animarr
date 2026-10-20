@@ -5,23 +5,28 @@
 <PageTitle>Animarr</PageTitle>
 
 <div class="th-page">
-@* Header is 1:1 with the active Downloads page (.d-page-header + PageBack +
-   overline/title/sub + right-side action) so the two pages read as one
-   surface. PageBack gives the same arrow-under-the-logo back button every
-   other page has; the right-side button jumps to the active list. *@
-<header class="d-page-header">
+@* Header + Active | History pivot are 1:1 with the Downloads page
+   (Torrents.razor) so the two pages read as one surface. PageBack gives the
+   same back button every other page has; the right-side button (and the
+   pivot) jump to the active list. *@
+<header class="th-head">
     <PageBack />
-    <div class="d-page-header__main">
-        <div class="d-page-header__overline">@L["torrents.page_overline"]</div>
-        <h1 class="d-page-header__title">@L["torrent_history.title"]</h1>
-        <div class="d-page-header__sub">@L["torrent_history.page_sub"]</div>
+    <div class="th-head__main">
+        <h1 class="th-head__title">@L["torrent_history.title"]</h1>
+        <div class="th-head__sub">@L["torrent_history.page_sub"]</div>
     </div>
-    <div class="d-page-header__right">
-        <Btn Variant="ghost" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents"))">
-            <DIcon Name="chev-l" Size="13" /> @L["torrent_history.back_link"]
+    @* The back_link label already starts with "←", so no extra chevron. *@
+    <div class="th-head__actions">
+        <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents"))">
+            @L["torrent_history.back_link"]
         </Btn>
     </div>
 </header>
+
+<nav class="th-pivot" aria-label="@L["torrents.page_title"]">
+    <a href="torrents" class="th-pivot__item tv-focus">@L["torrents.tab_active"]</a>
+    <a href="torrents/history" class="th-pivot__item is-active tv-focus" aria-current="page">@L["torrents.tab_history"]</a>
+</nav>
 
 @if (_loading)
 {
@@ -29,7 +34,10 @@
 }
 else if (_records.Count == 0)
 {
-    <div class="th-empty">@L["torrent_history.empty"]</div>
+    <div class="th-empty">
+        <span class="th-empty__ic"><DIcon Name="history" Size="24" /></span>
+        <div class="th-empty__text">@L["torrent_history.empty"]</div>
+    </div>
 }
 else
 {
@@ -39,11 +47,10 @@ else
         <table class="th-table">
             <thead>
                 <tr>
-                    <th class="th-col-dot"></th>
                     <th>@L["torrent_history.col_name"]</th>
                     <th class="th-col-folder">@L["torrent_history.col_folder"]</th>
-                    <th class="th-col-mono">@L["torrent_history.col_size"]</th>
-                    <th class="th-col-mono">@L["torrent_history.col_speed"]</th>
+                    <th class="th-col-num">@L["torrent_history.col_size"]</th>
+                    <th class="th-col-speed">@L["torrent_history.col_speed"]</th>
                     <th class="th-col-date">@L["torrent_history.col_added"]</th>
                     <th class="th-col-date">@L["torrent_history.col_completed"]</th>
                     <th class="th-col-status">@L["torrent_history.col_status"]</th>
@@ -53,20 +60,19 @@ else
                 @foreach (var r in paged)
                 {
                     <tr>
-                        <td class="th-col-dot">
-                            <span class="tor-dot tor-dot--@StateColorClass(r.State)" title="@r.State.ToString()"></span>
-                        </td>
-                        <td>@r.Name</td>
-                        <td class="tor-cell tor-cell--dim" title="@r.SavePath">
+                        <td class="th-name" title="@r.Name">@r.Name</td>
+                        <td class="th-cell" title="@r.SavePath">
                             @System.IO.Path.GetFileName(r.SavePath.TrimEnd('/', '\\'))
                         </td>
-                        <td class="tor-cell tor-cell--mono">@FormatBytes(r.TotalSize)</td>
-                        <td class="tor-cell tor-cell--mono">@FormatBytes(r.Downloaded) / @FormatBytes(r.Uploaded)</td>
-                        <td class="tor-cell tor-cell--mono">@r.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
-                        <td class="tor-cell tor-cell--mono">
+                        <td class="th-cell th-cell--num">@FormatBytes(r.TotalSize)</td>
+                        <td class="th-cell th-cell--num">@FormatBytes(r.Downloaded) / @FormatBytes(r.Uploaded)</td>
+                        <td class="th-cell th-cell--num">@r.AddedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td class="th-cell th-cell--num">
                             @(r.CompletedAt.HasValue ? r.CompletedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "—")
                         </td>
-                        <td class="tor-cell">@StateLabel(r.State)</td>
+                        <td class="th-col-status">
+                            <span class="@($"th-badge th-badge--{StateColorClass(r.State)}")">@StateLabel(r.State)</span>
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -76,11 +82,11 @@ else
     {
         <div class="th-paginator">
             <Btn Variant="ghost" Size="sm" Disabled="@(_pageIndex == 0)" OnClick="@(() => { _pageIndex--; StateHasChanged(); })">
-                <DIcon Name="chev-l" Size="13" />
+                <DIcon Name="chev-l" Size="16" />
             </Btn>
             <span class="th-paginator__label">@(_pageIndex + 1) / @pageCount</span>
             <Btn Variant="ghost" Size="sm" Disabled="@(_pageIndex >= pageCount - 1)" OnClick="@(() => { _pageIndex++; StateHasChanged(); })">
-                <DIcon Name="chev-r" Size="13" />
+                <DIcon Name="chev-r" Size="16" />
             </Btn>
         </div>
     }

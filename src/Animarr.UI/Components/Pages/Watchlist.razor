@@ -63,7 +63,7 @@
                         }
                         <button type="button" class="wl-remove tv-focus"
                                 title="@L["watchlist.remove"]" aria-label="@L["watchlist.remove"]"
-                                @onclick="@(() => RemoveAsync(item))">✕</button>
+                                @onclick="@(() => RemoveAsync(item))"><DIcon Name="x" Size="14" /></button>
                     </div>
                     <div class="wl-name">@item.Title@(item.Year is int y ? $" · {y}" : "")</div>
                 </div>

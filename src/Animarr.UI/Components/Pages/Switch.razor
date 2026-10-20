@@ -29,22 +29,24 @@
     {
         @* Device-local PIN entry for the chosen profile. *@
         <div class="d-who__pin">
-            <PinKeypad UserName="@pt.User.Name"
-                       Error="@_pinError"
-                       OnSubmit="OnPinSubmit"
-                       OnCancel="OnPinCancel" />
+            <div class="d-who__pin-card">
+                <PinKeypad UserName="@pt.User.Name"
+                           Error="@_pinError"
+                           OnSubmit="OnPinSubmit"
+                           OnCancel="OnPinCancel" />
+            </div>
         </div>
     }
     else
     {
         <header class="d-who__head">
-            <BrandMark Size="34" />
-            <h1 class="d-who__title">Who's watching?</h1>
+            <BrandMark Size="40" />
+            <h1 class="d-who__title">@L["switch.title"]</h1>
         </header>
 
         @if (_loading)
         {
-            <div class="d-who__loading"><Spinner Size="26" /></div>
+            <div class="d-who__loading"><Spinner Size="lg" /></div>
         }
         else
         {
@@ -60,14 +62,14 @@
                                     ImagePath="@prof.User.AvatarPath" Size="lg" />
                             @if (prof.HasPin)
                             {
-                                <span class="d-who__pin-badge" aria-label="PIN required">
-                                    <DIcon Name="lock" Size="11" />
+                                <span class="d-who__pin-badge" aria-label="@L["switch.pin_required_aria"]">
+                                    <DIcon Name="lock" Size="12" />
                                 </span>
                             }
                         </span>
                         <span class="d-who__name">@prof.User.Name</span>
                         <span class="d-who__role">
-                            @(prof.User.Id == _meId ? "you" : prof.User.RoleName)
+                            @(prof.User.Id == _meId ? L["switch.you"] : prof.User.RoleName)
                         </span>
                     </button>
                 }

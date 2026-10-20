@@ -1,49 +1,59 @@
-/* NeedsReviewDialog — v5 panel refactor. Modal scaffold removed; body
-   styles below render inside a <SettingsEditDrawer Tone="warn">. */
+/* NeedsReviewDialog — body content rendered inside a
+   <SettingsEditDrawer Tone="warn"> (the drawer owns the chrome). Fluent 2:
+   one card per title, candidate cards inside, an inline manual-search
+   panel built from the global .fs-select / .fs-input controls. */
 
 .nrm__empty {
-    text-align: center;
     padding: 40px 0;
-    color: var(--text-dim);
+    text-align: center;
     font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
 }
 
 .nrm-row {
-    background: var(--bg-1);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
     padding: 16px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
 }
 .nrm-row:last-child { margin-bottom: 0; }
 
 .nrm-row__folder {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text-dim);
     margin-bottom: 12px;
     word-break: break-all;
 }
+.nrm-row__folder code {
+    font-family: var(--font-code);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    background: none;
+    padding: 0;
+}
 
-/* Single column at drawer width (~508px content area). At wider drawer
-   variants (none today) auto-fill would let two columns coexist. */
+/* Single column at drawer width (~508px content area); auto-fill would let
+   two columns coexist in a wider host. */
 .nrm-row__candidates {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 12px;
+    gap: 8px;
 }
 
-/* candidate card */
+/* Candidate card */
 .nrm-card {
     display: flex;
     gap: 12px;
+    padding: 8px;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-chip);
-    padding: 8px;
+    border-radius: var(--radius-ctrl);
 }
 
+/* Poster tile — artwork placeholder keyed to the title's hue. */
 .nrm-card__poster {
+    position: relative;
     width: 64px;
     height: 92px;
     flex-shrink: 0;
@@ -54,7 +64,6 @@
     display: grid;
     place-items: center;
     overflow: hidden;
-    position: relative;
 }
 
 .nrm-card__poster img {
@@ -65,7 +74,7 @@
 
 .nrm-card__cjk {
     font-family: var(--font-cjk);
-    font-size: 22px;
+    font-size: 20px;
     color: oklch(0.95 0.1 var(--hue) / 0.4);
     writing-mode: vertical-rl;
     text-orientation: upright;
@@ -76,16 +85,17 @@
 
 .nrm-card__body {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    min-width: 0;
+    gap: 8px;
 }
 
 .nrm-card__title {
-    font-family: var(--font-display);
-    font-size: 13px;
-    letter-spacing: 0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
     color: var(--text);
     overflow: hidden;
     display: -webkit-box;
@@ -94,119 +104,109 @@
 }
 
 .nrm-card__meta {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-faint);
-    margin-top: 4px;
-    letter-spacing: 0;
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
 }
 
 .nrm-card__foot {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 8px;
 }
 
 .nrm-card__conf {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
-
 .nrm-card__conf--ok   { color: var(--success); }
 .nrm-card__conf--warn { color: var(--warn); }
 
-.nrm-card__use {
+/* "Search manually" — card-sized subtle button filling the next grid cell. */
+.nrm-search {
     appearance: none;
     cursor: pointer;
-    padding: 4px 9px;
-    background: var(--accent);
-    color: #fff;
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-ctrl);
-    font-family: var(--font-ui);
-    font-size: 11px;
-    font-weight: 600;
-}
-.nrm-card__use:hover:not(:disabled) { background: var(--accent-hi); }
-.nrm-card__use:disabled { opacity: 0.5; cursor: wait; }
-
-.nrm-card__use--loading {
-    display: inline-flex;
+    min-height: 110px;
+    padding: 0 12px;
+    display: flex;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    gap: 8px;
+    background: transparent;
+    border: 1px solid var(--stroke-ctrl);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
+.nrm-search:hover {
+    background: var(--ink-2);
+    border-color: var(--stroke-ctrl-hi);
+}
+.nrm-search:active { background: var(--ink-3); }
 
-/* manual-search panel (inline, opens under the dashed search button) */
+/* Manual-search panel (inline, spans the candidates grid). */
 .nrm-search-panel {
-    margin-top: 12px;
+    grid-column: 1 / -1;
     padding: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: var(--radius-chip);
+    background: var(--ink-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
 }
 .nrm-search-panel__row {
     display: flex;
-    gap: 8px;
-    align-items: center;
     flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
 }
 .nrm-search-panel__src {
-    padding: 6px 8px;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-badge);
-    color: var(--text);
+    min-width: 0;
+    width: 112px;
 }
 .nrm-search-panel__input {
     flex: 1;
     min-width: 140px;
-    padding: 6px 10px;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-badge);
-    color: var(--text);
 }
 .nrm-search-panel__results {
     margin-top: 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
 }
 .nrm-search-panel__result {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 6px 8px;
-    background: var(--ink-1);
-    border-radius: var(--radius-badge);
+    min-height: 40px;
+    padding: 4px 8px 4px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
 }
-.nrm-search-panel__title { flex: 1; min-width: 0; }
+.nrm-search-panel__result:last-child { border-bottom: 0; }
+.nrm-search-panel__title {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .nrm-search-panel__meta {
-    color: var(--text-faint);
-    font-size: 12px;
     min-width: 40px;
     text-align: right;
-}
-
-/* manual-search empty card */
-.nrm-search {
-    appearance: none;
-    cursor: pointer;
-    background: transparent;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-chip);
-    padding: 0 12px;
-    min-height: 108px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 16px;
     color: var(--text-dim);
-    letter-spacing: 0;
-}
-.nrm-search:hover {
-    border-color: var(--accent-line);
-    color: var(--text);
+    font-variant-numeric: tabular-nums;
 }

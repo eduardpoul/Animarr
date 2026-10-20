@@ -1,168 +1,385 @@
-/* Personal stats dashboard. Uses the shared design tokens; charts are pure
-   CSS (flex/height bars + a heatmap grid) so nothing external is pulled in. */
+/* Personal stats dashboard — Fluent 2. Stat tiles, then "wide | side" card
+   rows, then the most-watched titles. Charts are pure CSS (flex bars + one
+   heatmap grid) so nothing external is pulled in; every color is a token. */
 
 .st-page {
-    /* Match the Torrents / Server shell width (.tor-page / .d-server: 1480). */
+    /* Categorical series for the by-type split — Fluent status foregrounds,
+       themed for both dark and light, never tied to the user's accent. */
+    --st-c1: var(--info);
+    --st-c2: var(--danger);
+    --st-c3: var(--success);
+    --st-c4: var(--warn);
+
     max-width: 1480px;
     margin: 0 auto;
-    padding: 20px 20px 64px;
+    padding-bottom: 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
+/* ── header ────────────────────────────────────────────────────────── */
 .st-head {
     display: flex;
     align-items: center;
-    gap: var(--space-5);
-    margin-bottom: var(--space-8);
+    margin-bottom: 4px;
 }
-.st-head__text { display: flex; flex-direction: column; gap: 2px; }
+.st-head__text { display: flex; flex-direction: column; min-width: 0; }
 .st-title {
     margin: 0;
     font-family: var(--font-display);
-    font-size: 30px;
-    font-weight: 800;
-    letter-spacing: 0;
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
 }
-.st-sub { color: var(--text-faint); font-size: 13px; }
+.st-sub { font-size: 14px; line-height: 20px; color: var(--text-dim); }
 
-/* ── empty ─────────────────────────────────────────────────────────── */
-.st-empty { text-align: center; padding: 80px 20px; color: var(--text-faint); }
-.st-empty__title { font-size: 18px; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; }
-.st-empty__text { font-size: 13px; }
+/* ── empty / loading ───────────────────────────────────────────────── */
+.st-empty {
+    text-align: center;
+    padding: 80px 20px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+}
+.st-empty__title {
+    margin-bottom: 4px;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    color: var(--text);
+}
 
-/* ── KPI cards ─────────────────────────────────────────────────────── */
+/* ── stat tiles ────────────────────────────────────────────────────── */
 .st-kpis {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: var(--space-5);
-    margin-bottom: var(--space-9);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
 }
 .st-kpi {
-    position: relative;
-    padding: 18px 16px;
-    border-radius: 14px;
+    min-width: 0;
+    padding: 14px 16px;
+    border-radius: var(--radius-card);
     background: var(--surface);
     border: 1px solid var(--border);
 }
+.st-kpi__lbl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+.st-kpi__lbl ::deep svg { flex-shrink: 0; }
 .st-kpi__val {
+    margin-top: 6px;
     font-family: var(--font-display);
-    font-size: 30px;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: 0;
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.st-kpi__unit { font-size: 15px; font-weight: 700; color: var(--text-faint); margin-left: 3px; }
-.st-kpi__lbl { margin-top: 8px; font-size: 12px; color: var(--text-faint); }
-.st-kpi__note { margin-top: 4px; font-size: 10.5px; color: var(--accent-hi); font-family: var(--font-mono); }
+.st-kpi__unit {
+    margin-left: 2px;
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 600;
+    color: var(--text-dim);
+}
+.st-kpi__note { font-size: 12px; line-height: 16px; color: var(--text-dim); }
 
-/* ── blocks ────────────────────────────────────────────────────────── */
-.st-block { margin-bottom: var(--space-9); }
-.st-block__title {
-    margin: 0 0 var(--space-5);
-    font-family: var(--font-display);
-    font-size: 19px;
-    font-weight: 700;
-    letter-spacing: 0;
+/* ── cards + "wide | side" rows ────────────────────────────────────── */
+.st-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 16px;
 }
-.st-cols {
+.st-card {
+    box-sizing: border-box;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px 20px;
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.st-card--wide { flex: 2 1 560px; }
+.st-card--side { flex: 1 1 300px; }
+.st-card__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+.st-card__title {
+    margin: 0;
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 600;
+}
+.st-card__aside {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* ── activity heatmap ──────────────────────────────────────────────── */
+/* The card is the size container so the cells can grow to fill it. */
+.st-card--heat { container-type: inline-size; }
+.st-heat-scroll { overflow-x: auto; padding-bottom: 2px; }
+.st-heat {
+    --cell: 12px;
+    --gap: 3px;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-7);
+    grid-auto-flow: column;
+    grid-template-columns: auto;              /* weekday axis */
+    grid-template-rows: 16px repeat(7, var(--cell));
+    grid-auto-columns: var(--cell);           /* one column per week */
+    gap: var(--gap);
+    width: max-content;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
 }
-.st-cols .st-block { margin-bottom: var(--space-9); }
+@supports (width: 1cqi) {
+    .st-heat {
+        /* (card content − ~32px axis) / weeks, kept between 10 and 20px. */
+        --cell: clamp(10px, calc((100cqi - 32px) / var(--weeks, 26) - var(--gap)), 20px);
+    }
+}
+.st-heat__col { display: contents; }
+/* Month label: zero-width so it never widens its week, text runs right. */
+.st-heat__month { width: 0; white-space: nowrap; }
+.st-heat__dow {
+    display: flex;
+    align-items: center;
+    padding-right: 4px;
+    line-height: 1;
+    white-space: nowrap;
+}
+.st-heat__cell { border-radius: 2px; background: var(--ink-3); }
+.st-heat__cell:hover { outline: 1px solid var(--text); outline-offset: 1px; }
+/* -1 = no journal entry that day; reads the same as an empty day. */
+.st-heat__cell--l-1,
+.st-heat__cell--l0 { background: var(--ink-3); }
+.st-heat__cell--l1 { background: color-mix(in oklch, var(--accent-hi) 30%, transparent); }
+.st-heat__cell--l2 { background: color-mix(in oklch, var(--accent-hi) 52%, transparent); }
+.st-heat__cell--l3 { background: color-mix(in oklch, var(--accent-hi) 76%, transparent); }
+.st-heat__cell--l4 { background: var(--accent-hi); }
+.st-heat-empty { padding: 8px 0; font-size: 14px; line-height: 20px; color: var(--text-dim); }
 
-/* ── bar rows (genres / studios) ───────────────────────────────────── */
-.st-bars { display: flex; flex-direction: column; gap: 9px; }
-.st-row { display: grid; grid-template-columns: 116px 1fr 58px; align-items: center; gap: 10px; }
-.st-row__lbl { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.st-row__val { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); text-align: right; }
+/* ── by type: stacked bar + legend ─────────────────────────────────── */
+.st-stack {
+    display: flex;
+    gap: 2px;
+    height: 12px;
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
+}
+/* flex-grow comes inline (minutes), so segments share the bar by weight. */
+.st-stack__seg { flex-basis: 0; flex-shrink: 1; min-width: 4px; height: 100%; }
+.st-stack__seg,
+.st-legend__sw { background: var(--text-faint); }
+.st-tone--anime   { background: var(--st-c1); }
+.st-tone--series  { background: var(--st-c2); }
+.st-tone--movie   { background: var(--st-c3); }
+.st-tone--cartoon { background: var(--st-c4); }
 
-.st-bar { height: 10px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.st-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.st-legend__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: 14px;
+    line-height: 20px;
+}
+.st-legend__sw { flex: none; width: 10px; height: 10px; border-radius: 2px; }
+.st-legend__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-legend__meta {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.st-legend__pct {
+    width: 40px;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── hours by month: column chart ──────────────────────────────────── */
+.st-months { display: flex; height: 200px; }
+.st-month {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.st-month__bar-wrap {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    /* Gridlines at 0 / ⅓ / ⅔ of the plot + a stronger baseline. */
+    background-image: linear-gradient(var(--border) 1px, transparent 1px);
+    background-size: 100% 33.333%;
+    border-bottom: 1px solid var(--border-strong);
+}
+.st-month__bar {
+    width: 60%;
+    max-width: 40px;
+    min-height: 2px;
+    border-radius: var(--radius-ctrl) var(--radius-ctrl) 0 0;
+    background: var(--accent-hi);
+    transition: opacity var(--motion-fast);
+}
+/* Hovering a month dims the others (value is in the bar's tooltip). */
+.st-months:hover .st-month__bar { opacity: 0.55; }
+.st-months .st-month:hover .st-month__bar { opacity: 1; }
+.st-month__lbl {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── top genres (meters) + top studios (list) ──────────────────────── */
+.st-part { display: flex; flex-direction: column; gap: 12px; }
+.st-part + .st-part {
+    margin-top: 4px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+.st-meters { display: flex; flex-direction: column; gap: 12px; }
+.st-meter__head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+    font-size: 14px;
+    line-height: 20px;
+}
+.st-meter__lbl,
+.st-list__lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-meter__val,
+.st-list__val { flex-shrink: 0; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.st-bar {
+    height: 8px;
+    border-radius: var(--radius-ctrl);
+    background: var(--ink-3);
+    overflow: hidden;
+}
 .st-bar__fill {
     height: 100%;
-    border-radius: 6px;
-    background: linear-gradient(90deg, var(--accent), var(--accent-hi));
     min-width: 3px;
+    border-radius: var(--radius-ctrl);
+    background: var(--accent-hi);
 }
-.st-bar__fill--alt { background: linear-gradient(90deg, oklch(0.62 0.13 260), oklch(0.72 0.13 260)); }
+.st-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.st-list__row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    line-height: 28px;
+}
 
-/* ── type split ────────────────────────────────────────────────────── */
-.st-types { display: flex; flex-direction: column; gap: 12px; }
-.st-type__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
-.st-type__name { font-size: 13px; font-weight: 600; }
-.st-type__meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
-.st-bar__fill--anime   { background: linear-gradient(90deg, oklch(0.65 0.16 25),  oklch(0.74 0.16 25)); }
-.st-bar__fill--series  { background: linear-gradient(90deg, oklch(0.63 0.14 155), oklch(0.73 0.14 155)); }
-.st-bar__fill--movie   { background: linear-gradient(90deg, oklch(0.62 0.14 285), oklch(0.72 0.14 285)); }
-.st-bar__fill--cartoon { background: linear-gradient(90deg, oklch(0.68 0.15 55),  oklch(0.77 0.15 55)); }
-
-/* ── top titles ────────────────────────────────────────────────────── */
+/* ── most-watched titles ───────────────────────────────────────────── */
 .st-titles {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
 }
 .st-title-card {
     position: relative;
     display: flex;
     flex-direction: column;
+    min-width: 0;
     text-decoration: none;
     color: inherit;
+    border-radius: var(--radius-card);
 }
+/* Rank chip sits on the artwork — always-dark glass. */
 .st-title-card__rank {
     position: absolute;
-    top: -6px; left: -6px;
-    z-index: 3;
-    width: 24px; height: 24px;
-    display: grid; place-items: center;
-    border-radius: 8px;
-    font-family: var(--font-mono); font-size: 12px; font-weight: 700;
-    color: #15100b; background: var(--accent);
-    box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+    top: 6px;
+    left: 6px;
+    z-index: 1;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.65);
 }
 .st-title-card__art {
     display: block;
     aspect-ratio: 2 / 3;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     overflow: hidden;
-    background: var(--surface);
+    background: var(--surface-3);
     border: 1px solid var(--border);
+    transition: border-color var(--motion-fast);
 }
 .st-title-card:hover .st-title-card__art { border-color: var(--border-strong); }
 .st-title-card__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .st-title-card__ph { width: 100%; height: 100%; display: grid; place-items: center; color: var(--text-faint); }
-.st-title-card__name { margin-top: 8px; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.st-title-card__meta { margin-top: 2px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
-
-/* ── heatmap ───────────────────────────────────────────────────────── */
-.st-heat { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
-.st-heat__col { display: flex; flex-direction: column; gap: 3px; }
-.st-heat__cell { width: 13px; height: 13px; border-radius: 3px; background: var(--surface-3); }
-.st-heat__cell--l0 { background: var(--surface-2, var(--surface-3)); }
-.st-heat__cell--l1 { background: oklch(0.42 0.09 var(--accent-hue)); }
-.st-heat__cell--l2 { background: oklch(0.55 0.13 var(--accent-hue)); }
-.st-heat__cell--l3 { background: oklch(0.68 0.16 var(--accent-hue)); }
-.st-heat__cell--l4 { background: oklch(0.80 0.18 var(--accent-hue)); }
-/* level -1 (before first day / future) stays the faint base */
-.st-heat__cell--l-1 { background: transparent; }
-.st-heat-empty { color: var(--text-faint); font-size: 13px; padding: 12px 0; }
-
-/* ── monthly bars ──────────────────────────────────────────────────── */
-.st-months { display: flex; align-items: flex-end; gap: 10px; height: 160px; }
-.st-month { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; height: 100%; }
-.st-month__bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
-.st-month__bar {
-    width: 60%;
-    min-height: 3px;
-    border-radius: 5px 5px 0 0;
-    background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+.st-title-card__name {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.st-month__lbl { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
-
-@media (max-width: 820px) {
-    .st-kpis { grid-template-columns: repeat(2, 1fr); }
-    .st-cols { grid-template-columns: 1fr; }
+.st-title-card__meta {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-@media (max-width: 520px) {
-    .st-title { font-size: 24px; }
-    .st-row { grid-template-columns: 92px 1fr 48px; }
+
+/* ── phones ────────────────────────────────────────────────────────── */
+@media (max-width: 639px) {
+    .st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .st-kpi { padding: 12px; }
+    .st-card { padding: 12px 16px 16px; }
+    .st-titles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+}
+/* Narrow phones: the 26-week grid overflows — start it scrolled to the
+   newest weeks (RTL scroller), cells stay in LTR order. */
+@media (max-width: 479px) {
+    .st-heat-scroll { direction: rtl; }
+    .st-heat { direction: ltr; }
 }

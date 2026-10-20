@@ -13,18 +13,17 @@
       │  └─────────────────────┘ │                          │
       └─────────────────────────────────────────────────────┘
 
-    Visual language matches EpisodeCard:
-      • Left edge strip (3px green) on the wrapping card
-      • 30×30 chips top-right (disk-status) and bottom-right (watched-eye)
+    Visual language matches EpisodeCard (Fluent 2 card, 8px corners):
+      • 32×32 glass chips top-right (disk-status) and bottom-right (watched-eye)
       • 4px progress bar at thumb bottom
-      • Watched-state modifier drops opacity, saturates thumb, etc.
+      • Watched dims the thumbnail; missing dims the card + dashes its stroke
+      • Key/value cells for runtime / resolution / codec / size
 
-    Mobile: stacks vertically (thumb on top), action buttons collapse to icon-only.
+    Narrow container: wraps to a vertical stack (thumb on top); on phones the
+    action buttons collapse to icon-only.
 *@
 
 <div class="@CssClass">
-    <div class="d-mfc__strip"></div>
-
     <div class="d-mfc__art">
         @if (!string.IsNullOrEmpty(ThumbUrl))
         {
@@ -35,21 +34,21 @@
             <div class="d-mfc__placeholder"><DIcon Name="video" Size="32" /></div>
         }
 
-        @* TOP-RIGHT — disk-status chip (30×30 on movie card per §4 sizing). *@
+        @* TOP-RIGHT — disk-status chip (32×32 on the movie card). *@
         @if (Have)
         {
             <div class="d-mfc__chip d-mfc__chip--ok" title="On disk">
-                <DIcon Name="check" Size="14" />
+                <DIcon Name="check" Size="16" />
             </div>
         }
         else
         {
             <div class="d-mfc__chip d-mfc__chip--miss" title="Missing — not downloaded">
-                <DIcon Name="warn" Size="14" />
+                <DIcon Name="warn" Size="16" />
             </div>
         }
 
-        @* BOTTOM-RIGHT — watched-eye chip. Same 30×30 box. *@
+        @* BOTTOM-RIGHT — watched-eye chip. Same 32×32 box. *@
         @if (Have)
         {
             <button type="button"
@@ -57,7 +56,7 @@
                     title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
                     @onclick="OnEyeClick"
                     @onclick:stopPropagation="true">
-                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="14" />
+                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
             </button>
         }
 
@@ -71,29 +70,29 @@
     </div>
 
     <div class="d-mfc__info">
-        <div class="d-mfc__overline">FILE · ON DISK</div>
+        <div class="d-mfc__overline">@L["movie_file_card.overline"]</div>
         <div class="d-mfc__title">@Title</div>
         @if (!string.IsNullOrEmpty(FileName))
         {
             <div class="d-mfc__filename" title="@FileName">@FileName</div>
         }
 
-        @* Four key/value cells — RUNTIME / RES / CODEC / SIZE. CHANGELOG §3. *@
+        @* Four key/value cells — runtime / resolution / codec / size. *@
         <div class="d-mfc__cells">
             <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">RUNTIME</span>
+                <span class="d-mfc__cell-k">@L["movie_file_card.cell_runtime"]</span>
                 <span class="d-mfc__cell-v">@(Runtime ?? "—")</span>
             </div>
             <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">RES</span>
+                <span class="d-mfc__cell-k">@L["movie_file_card.cell_res"]</span>
                 <span class="d-mfc__cell-v">@(Resolution ?? "—")</span>
             </div>
             <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">CODEC</span>
+                <span class="d-mfc__cell-k">@L["movie_file_card.cell_codec"]</span>
                 <span class="d-mfc__cell-v">@(Codec ?? "—")</span>
             </div>
             <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">SIZE</span>
+                <span class="d-mfc__cell-k">@L["movie_file_card.cell_size"]</span>
                 <span class="d-mfc__cell-v">@(Size ?? "—")</span>
             </div>
         </div>
@@ -104,13 +103,13 @@
                un-watched movie the hero has no Continue CTA, so without this
                the remote would land on the Back chip up top. *@
             <Btn Variant="primary" Size="md" OnClick="OnPlay" data-tv-autofocus="true">
-                <DIcon Name="@PlayIcon" Size="14" />
+                <DIcon Name="@PlayIcon" Size="16" />
                 <span class="d-mfc__action-label">@PlayLabel</span>
             </Btn>
             @if (Have)
             {
                 <Btn Variant="solid" Size="md" OnClick="OnEyeClick">
-                    <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="14" />
+                    <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
                     <span class="d-mfc__action-label">@(IsWatched ? "Mark as unwatched" : "Mark as watched")</span>
                 </Btn>
             }

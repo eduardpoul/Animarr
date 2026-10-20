@@ -1,103 +1,144 @@
-/* Phone-side TV pairing companion. Mirrors the d-login card so a user
-   navigating between Login and PairConfirm doesn't see the layout jump. */
+/* Phone-side TV pairing companion. Same Fluent 2 sign-in card as Login so
+   moving between Login and PairConfirm doesn't jump. Tokens only (the
+   camera viewport is the one literal-dark surface). */
 
 .d-pair-confirm {
+    position: relative;
+    z-index: 2;
     min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px 16px;
+    padding: 64px 16px 32px;
     box-sizing: border-box;
 }
 
+/* Back — Fluent subtle button, top-left. */
 .d-pair-confirm__back {
     position: fixed;
-    top: 18px;
-    left: 18px;
+    top: 16px;
+    left: 16px;
+    z-index: 3;
+    appearance: none;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    border-radius: 18px;
-    background: var(--ink-2);
-    border: 1px solid var(--ink-3);
-    color: var(--text-primary, #e6e8ee);
-    font-size: 12px;
-    letter-spacing: 0;
+    min-height: 32px;
+    padding: 5px 12px 5px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
     cursor: pointer;
+    transition: background var(--motion-fast);
 }
+.d-pair-confirm__back:hover  { background: var(--ink-2); }
+.d-pair-confirm__back:active { background: var(--ink-3); }
 
 .d-pair-confirm__card {
-    width: min(100%, 460px);
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    border: 1px solid var(--ink-2);
-    border-radius: 18px;
-    padding: 28px 24px;
-    color: var(--text-primary, #e6e8ee);
-    backdrop-filter: blur(20px);
+    width: 440px;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-16);
+    color: var(--text);
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 20px;
 }
 
 .d-pair-confirm__brand {
     display: flex;
-    align-items: center;
-    gap: 14px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
 }
 
 .d-pair-confirm__brand-name {
-    font-size: 22px;
-    font-weight: 700;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
     letter-spacing: 0;
+    color: var(--text);
 }
 
 .d-pair-confirm__brand-sub {
-    font-size: 12px;
-    color: var(--text-secondary, #94a3b8);
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
 }
 
+/* ── Mode tabs — Fluent TabList (3px accent pill under the selected tab) ── */
 .d-pair-confirm__tabs {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    background: var(--ink-1);
-    padding: 4px;
-    border-radius: 12px;
+    border-bottom: 1px solid var(--border);
 }
 
 .d-pair-confirm__tab {
+    position: relative;
+    appearance: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 10px 14px;
+    min-height: 44px;
+    padding: 10px 12px;
     background: transparent;
     border: 0;
-    border-radius: 9px;
-    color: var(--text-secondary, #94a3b8);
-    font-size: 13px;
-    font-weight: 600;
+    border-radius: var(--radius-ctrl) var(--radius-ctrl) 0 0;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 400;
     letter-spacing: 0;
     cursor: pointer;
+    transition: color var(--motion-fast), background var(--motion-fast);
 }
+.d-pair-confirm__tab:hover {
+    color: var(--text);
+    background: var(--ink-1);
+}
+.d-pair-confirm__tab::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: -1px;
+    height: 3px;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    transition: background var(--motion-fast);
+}
+.d-pair-confirm__tab:hover::after { background: var(--stroke-ctrl-hi); }
 
 .d-pair-confirm__tab.is-active {
-    background: var(--ink-2);
-    color: var(--text-primary, #e6e8ee);
+    color: var(--text);
+    font-weight: 600;
 }
+.d-pair-confirm__tab.is-active::after { background: var(--accent-hi); }
 
+/* ── Scan mode ─────────────────────────────────────────────── */
 .d-pair-confirm__scanner-wrap {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
 }
 
 .d-pair-confirm__scanner {
     width: 100%;
     aspect-ratio: 1 / 1;
-    background: #000;
-    border-radius: 12px;
+    background: #000;   /* camera viewport — always dark */
+    border-radius: var(--radius-ctrl);
     overflow: hidden;
 }
 
@@ -108,56 +149,96 @@
     object-fit: cover;
 }
 
+/* ── Code mode ─────────────────────────────────────────────── */
 .d-pair-confirm__code-wrap {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     align-items: stretch;
 }
+.d-pair-confirm__code-wrap ::deep .d-btn { width: 100%; }
 
+/* Large Fluent input: control stroke, accessible bottom edge, accent
+   underline on focus. */
 .d-pair-confirm__code-input {
+    appearance: none;
     width: 100%;
-    padding: 14px 18px;
+    height: 56px;
+    box-sizing: border-box;
+    padding: 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-display);
     font-size: 28px;
-    font-family: ui-monospace, "JetBrains Mono", "Consolas", monospace;
+    line-height: 36px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     letter-spacing: 0;
     text-align: center;
-    background: var(--ink-1);
-    border: 1px solid var(--ink-2);
-    border-radius: 12px;
-    color: var(--text-primary, #e6e8ee);
-    box-sizing: border-box;
+    outline: none;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
 }
-
+.d-pair-confirm__code-input:hover {
+    background: var(--surface-2);
+    border-color: var(--stroke-ctrl-hi);
+    border-bottom-color: var(--stroke-ctrl-acc);
+}
 .d-pair-confirm__code-input:focus {
-    outline: 2px solid rgba(132, 192, 210, 0.4);
-    border-color: rgba(132, 192, 210, 0.4);
+    background: var(--surface);
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
+}
+.d-pair-confirm__code-input::placeholder {
+    color: var(--text-faint);
+    font-weight: 400;
 }
 
 .d-pair-confirm__hint {
-    font-size: 12px;
-    color: var(--text-secondary, #94a3b8);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
     text-align: center;
 }
 
 .d-pair-confirm__status {
-    font-size: 12px;
-    color: rgb(255, 153, 102);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--warn);
     text-align: center;
 }
 
+/* Confirmation toast — Fluent Toast, bottom centre. */
 .d-pair-confirm__toast {
     position: fixed;
-    bottom: 28px;
+    bottom: 32px;
     left: 50%;
     transform: translateX(-50%);
+    z-index: 110;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 16px;
-    background: rgba(56, 178, 102, 0.16);
-    border: 1px solid rgba(56, 178, 102, 0.4);
-    border-radius: 999px;
-    color: rgb(112, 224, 160);
-    font-size: 13px;
+    gap: 8px;
+    max-width: calc(100vw - 32px);
+    box-sizing: border-box;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-8);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 20px;
+}
+.d-pair-confirm__toast-ic {
+    display: inline-flex;
+    color: var(--success);
+}
+
+@media (max-width: 639px) {
+    .d-pair-confirm__card {
+        width: 100%;
+        padding: 24px 20px;
+    }
 }

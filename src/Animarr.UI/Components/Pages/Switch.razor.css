@@ -1,13 +1,16 @@
-/* "Who's watching?" startup gate. Renders on the AuthLayout backdrop, so
-   this only lays out the centered column + the profile grid. */
+/* "Who's watching?" startup gate. Renders on the AuthLayout page
+   background: title + a centred grid of Fluent profile cards. PIN entry
+   swaps in a centred dialog card around <PinKeypad>. */
 .d-who {
+    position: relative;
+    z-index: 2;   /* above AuthLayout's fixed backdrop layers */
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 32px;
-    padding: 40px 24px;
+    padding: 40px 16px;
     box-sizing: border-box;
 }
 
@@ -20,8 +23,10 @@
 
 .d-who__title {
     margin: 0;
-    font-size: 26px;
-    font-weight: 700;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
     letter-spacing: 0;
     color: var(--text);
     text-align: center;
@@ -33,36 +38,41 @@
     min-height: 120px;
 }
 
-/* Profile grid — wraps, centered, generous gaps. Big enough tap/focus
-   targets for a TV remote across the room and a thumb on a phone. */
+/* Profile grid — wraps, centred. Big enough focus targets for a TV remote
+   across the room and a thumb on a phone. */
 .d-who__grid {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 20px;
+    gap: 16px;
     max-width: 760px;
 }
 
+/* Profile card — Fluent card: surface + stroke, hover surface-2,
+   pressed surface-3. */
 .d-who__card {
     appearance: none;
     cursor: pointer;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
-    padding: 20px 16px 16px;
-    width: 132px;
+    width: 140px;
+    box-sizing: border-box;
+    padding: 20px 12px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    color: var(--text);
+    font-family: var(--font-ui);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .d-who__card:hover:not([disabled]),
 .d-who__card:focus-visible {
-    border-color: var(--border-strong);
     background: var(--surface-2);
-    transform: translateY(-2px);
+    border-color: var(--border-strong);
 }
+.d-who__card:active:not([disabled]) { background: var(--surface-3); }
 .d-who__card[disabled] { cursor: default; opacity: 0.6; }
 
 /* Avatar wrapper holds the disc + the PIN-lock badge in the corner. */
@@ -70,6 +80,7 @@
     position: relative;
     width: 56px;
     height: 56px;
+    margin-bottom: 4px;
     display: grid;
     place-items: center;
     flex-shrink: 0;
@@ -77,45 +88,61 @@
 
 .d-who__pin-badge {
     position: absolute;
-    bottom: -2px;
-    right: -4px;
+    bottom: 0;
+    right: -2px;
     width: 20px;
     height: 20px;
-    border-radius: 999px;
-    background: var(--bg-0);
-    border: 1px solid var(--accent-line);
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
     color: var(--accent-hi);
     display: grid;
     place-items: center;
 }
 
 .d-who__name {
+    max-width: 116px;
     font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
     color: var(--text);
-    line-height: 1.2;
-    max-width: 108px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .d-who__role {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: none;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 400;
     color: var(--text-dim);
 }
 
-/* PIN entry takes over the whole gate. Centered, no card chrome — the
-   PinKeypad component brings its own. */
+/* PIN entry takes over the gate: a centred Fluent dialog card around the
+   keypad (PinKeypad brings no chrome of its own). */
 .d-who__pin {
-    min-height: 100dvh;
+    width: 100%;
     display: grid;
     place-items: center;
-    padding: 24px;
+}
+
+.d-who__pin-card {
+    width: 344px;
+    max-width: 100%;
     box-sizing: border-box;
+    padding: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-16);
+}
+
+@media (max-width: 639px) {
+    .d-who { gap: 24px; }
+    .d-who__grid { gap: 12px; }
+    .d-who__card { width: 128px; }
+    .d-who__pin-card { padding: 24px 20px; }
 }
 
 /* NOTE: TV-mode up-scaling (html.tv-mode ...) can't live here — Blazor scoped

@@ -15,9 +15,9 @@
 
 @if (_count > 0)
 {
-    <button type="button" class="@($"nr-chip {(Compact ? "nr-chip--compact" : "")}")" @onclick="@(() => _open = true)" title="@($"{_count} need review")">
-        <DIcon Name="warn" Size="14" />
-        <span class="nr-chip__label">NEEDS REVIEW ·</span>
+    <button type="button" class="@($"nr-chip {(Compact ? "nr-chip--compact" : "")}")" @onclick="@(() => _open = true)" title="@L.Get("needs_review.chip_title_fmt", _count)">
+        <DIcon Name="warn" Size="16" />
+        <span class="nr-chip__label">@L["needs_review.overline"] ·</span>
         <span class="nr-chip__count">@_count</span>
         <span class="nr-chip__dot"></span>
     </button>
@@ -26,7 +26,7 @@
 <NeedsReviewDialog IsOpen="_open" OnClose="OnDialogClose" />
 
 @code {
-    /// <summary>Compact topbar variant — hides the "NEEDS REVIEW" label + corner
+    /// <summary>Compact topbar variant — hides the "Needs review" label + corner
     /// dot and renders as a small amber pill (warn icon + count) so it can sit
     /// next to the LLM pill. Default false = the full labelled chip.</summary>
     [Parameter] public bool Compact { get; set; }

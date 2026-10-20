@@ -69,38 +69,33 @@
                                                    can exceed 1.0; :P0 on a raw 2.0 would render "200%". *@
                                                 @($"{Math.Clamp(cand.Confidence, 0d, 1d):P0}")
                                             </span>
-                                            <button type="button"
-                                                    class="@($"nrm-card__use {(_busyKey == key ? "nrm-card__use--loading" : "")}")"
-                                                    disabled="@(_busyKey == key)"
-                                                    @onclick="@(() => ApplyAsync(mi.Id, cand))">
-                                                @if (_busyKey == key) { <Spinner Size="sm" Tone="light" /> }
-                                                @L["needs_review.use_btn"]
-                                            </button>
+                                            <Btn Variant="primary" Size="sm" Loading="@(_busyKey == key)"
+                                                 OnClick="@(() => ApplyAsync(mi.Id, cand))">@L["needs_review.use_btn"]</Btn>
                                         </div>
                                     </div>
                                 </div>
                             }
                             <button type="button" class="nrm-search"
                                     @onclick="@(() => ToggleSearchPanel(mi))">
-                                <DIcon Name="search" Size="13" /> @(isExpanded ? L["needs_review.close_search_btn"] : L["needs_review.search_manually_btn"])
+                                <DIcon Name="search" Size="16" /> @(isExpanded ? L["needs_review.close_search_btn"] : L["needs_review.search_manually_btn"])
                             </button>
 
                             @if (isExpanded)
                             {
                                 <div class="nrm-search-panel">
                                     <div class="nrm-search-panel__row">
-                                        <select class="nrm-search-panel__src" value="@_searchSource"
+                                        <select class="nrm-search-panel__src fs-select" value="@_searchSource"
                                                 @onchange="@(e => _searchSource = e.Value?.ToString() ?? "tmdb")">
                                             <option value="tmdb">TMDB</option>
                                             <option value="mal">MAL</option>
                                             <option value="imdb">IMDb</option>
                                         </select>
-                                        <input class="nrm-search-panel__input"
+                                        <input class="nrm-search-panel__input fs-input"
                                                placeholder="@L.Get("needs_review.search_placeholder_fmt", _searchSource.ToUpperInvariant())"
                                                value="@_searchQuery"
                                                @onkeydown="@(e => { if (e.Key == "Enter") _ = RunSearchAsync(mi); })"
                                                @oninput="@(e => _searchQuery = e.Value?.ToString() ?? "")" />
-                                        <Btn Variant="primary" Size="sm" Loading="@_searchBusy"
+                                        <Btn Variant="primary" Size="md" Loading="@_searchBusy"
                                              OnClick="@(() => RunSearchAsync(mi))">@L["media_search.btn_search"]</Btn>
                                     </div>
                                     @if (_searchResults.Length > 0)

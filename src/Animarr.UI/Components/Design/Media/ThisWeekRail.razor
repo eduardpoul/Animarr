@@ -46,7 +46,7 @@
                         <span class="twr__name">@e.Title</span>
                     </span>
                     <span class="twr__meta">
-                        <span class="twr__ep">EP @e.Episode</span>
+                        <span class="twr__ep">@L.Get("common.episode_short_fmt", e.Episode)</span>
                         <span class="@($"cal-chip cal-chip--{e.Status} twr__chip")">@StatusLabel(e.Status)</span>
                     </span>
                 </button>

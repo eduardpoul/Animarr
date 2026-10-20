@@ -9,19 +9,22 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<h1 class="text-danger">@L["error.title"]</h1>
-<h2 class="text-danger">@L["error.subtitle"]</h2>
+<div class="d-status-page">
+    <div class="d-status-page__ic d-status-page__ic--danger" aria-hidden="true"><DIcon Name="warn" Size="24" /></div>
+    <h1 class="d-status-page__title">@L["error.title"]</h1>
+    <h2 class="d-status-page__subtitle">@L["error.subtitle"]</h2>
 
-@if (!string.IsNullOrEmpty(_activityId))
-{
-    <p>
-        <strong>@L["error.trace_id_label"]</strong> <code>@_activityId</code>
+    @if (!string.IsNullOrEmpty(_activityId))
+    {
+        <p class="d-status-page__trace">
+            <strong>@L["error.trace_id_label"]</strong> <code>@_activityId</code>
+        </p>
+    }
+
+    <p class="d-status-page__body">
+        @L["error.body"]
     </p>
-}
-
-<p>
-    @L["error.body"]
-</p>
+</div>
 
 @code {
     private string? _activityId;

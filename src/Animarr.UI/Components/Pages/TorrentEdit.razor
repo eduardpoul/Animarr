@@ -5,11 +5,12 @@
     tree | sidebar cards). The @page directive is gone; the Torrents
     list now opens this component as a drawer instead of navigating.
 
-    Body is a vertical stack at 560px drawer width:
-      • Stats card  (progress bar, downloaded/total, live speed, peers, path)
+    Body is a vertical stack of Fluent sections (title + divider) at 560px
+    drawer width:
+      • Statistics  (big % + 4px bar, speed / peers / state grid, path box)
       • Files       (priority list with Skip / Normal / High)
       • Speed       (DL / UL limits in MB/s)
-      • Options     (toggles)
+      • Options     (label + toggle rows)
 
     Footer has the canonical Save + Cancel pair, with the danger Remove
     pushed to the right so it's separated from the affirmative actions.
@@ -32,7 +33,7 @@
     <Body>
         @if (_loading)
         {
-            <div class="te-loading"><InlineDots Label="Loading torrent" /></div>
+            <div class="te-loading"><InlineDots Label="@L["torrent_edit.loading"]" /></div>
         }
         else if (_record is null)
         {
@@ -42,73 +43,67 @@
         {
             var rec = _record!;
 
-            @* ── STATS CARD ────────────────────────────────────────── *@
-            <div class="te-card">
-                <h3 class="te-card__title">@L["torrent_edit.stats_title"]</h3>
-                <div class="te-stats">
-                    @if (_live is not null)
-                    {
-                        <div class="te-stats__row">
-                            <span class="te-stats__label">@L["torrent_edit.stat_state"]</span>
-                            <span class="te-stats__state">
-                                <span class="@($"tor-dot tor-dot--{StateColorClass()}")"></span>
-                                @_live.State
-                            </span>
-                        </div>
-                    }
-                    @if (!string.IsNullOrEmpty(rec.ErrorMessage))
-                    {
-                        <div class="te-stats__error" title="@rec.ErrorMessage">
-                            <DIcon Name="x" Size="12" /> @rec.ErrorMessage
-                        </div>
-                    }
-                    <div class="te-stats__row">
-                        <span class="te-stats__label">@L["torrent_edit.stat_progress"]</span>
-                        <b>@(Progress.ToString("F1"))%</b>
+            @* ── STATS — big % + 4px bar, then a 2-up key/value grid. ── *@
+            <section class="te-sec">
+                <h3 class="te-sec__title">@L["torrent_edit.stats_title"]</h3>
+                @if (!string.IsNullOrEmpty(rec.ErrorMessage))
+                {
+                    <div class="fs-msgbar fs-msgbar--error" title="@rec.ErrorMessage">
+                        <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+                        <span class="te-error__text">@rec.ErrorMessage</span>
                     </div>
-                    <div class="animarr-progress te-stats__bar">
-                        <div class="animarr-progress__track">
-                            <div class="animarr-progress__fill"
-                                 style="width:@(Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
-                        </div>
+                }
+                <div class="te-prog">
+                    <div class="te-prog__head">
+                        <span class="te-prog__val">@(Progress.ToString("F1"))%</span>
+                        <span class="te-prog__of">@L["torrent_edit.stat_downloaded"] · @FormatBytes(rec.Downloaded) / @FormatBytes(rec.TotalSize)</span>
                     </div>
-                    <div class="te-stats__row">
-                        <span class="te-stats__label">@L["torrent_edit.stat_downloaded"]</span>
-                        <span>@FormatBytes(rec.Downloaded) / @FormatBytes(rec.TotalSize)</span>
-                    </div>
-                    @if (_live is not null)
-                    {
-                        <div class="te-stats__row">
-                            <span class="te-stats__label">@L["torrent_edit.stat_dl_speed"]</span>
-                            <span>@FormatSpeed(_live.DownloadRate)</span>
-                        </div>
-                        <div class="te-stats__row">
-                            <span class="te-stats__label">@L["torrent_edit.stat_ul_speed"]</span>
-                            <span>@FormatSpeed(_live.UploadRate)</span>
-                        </div>
-                        <div class="te-stats__row">
-                            <span class="te-stats__label">@L["torrent_edit.stat_peers"]</span>
-                            <span>@L["torrent_details.seeds_label"] @_live.Seeds &nbsp; @L["torrent_details.peers_label"] @_live.Peers</span>
-                        </div>
-                    }
-                    <hr class="te-hr" />
-                    <div class="te-stats__path">
-                        <div>@L["torrent_edit.path_label"] @rec.SavePath</div>
-                        <div class="te-stats__hash">@L["torrent_edit.hash_label"] @rec.InfoHash[..Math.Min(20, rec.InfoHash.Length)]…</div>
+                    <div class="@($"te-bar te-bar--{StateColorClass()}")" role="progressbar" aria-label="@L["torrent_edit.stat_progress"]">
+                        <div class="te-bar__fill"
+                             style="width:@(Progress.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
                     </div>
                 </div>
-            </div>
+                @if (_live is not null)
+                {
+                    <dl class="te-kv">
+                        <div class="te-kv__item">
+                            <dt>@L["torrent_edit.stat_dl_speed"]</dt>
+                            <dd>@FormatSpeed(_live.DownloadRate)</dd>
+                        </div>
+                        <div class="te-kv__item">
+                            <dt>@L["torrent_edit.stat_ul_speed"]</dt>
+                            <dd>@FormatSpeed(_live.UploadRate)</dd>
+                        </div>
+                        <div class="te-kv__item">
+                            <dt>@L["torrent_edit.stat_peers"]</dt>
+                            <dd>@L["torrent_details.seeds_label"] @_live.Seeds · @L["torrent_details.peers_label"] @_live.Peers</dd>
+                        </div>
+                        <div class="te-kv__item">
+                            <dt>@L["torrent_edit.stat_state"]</dt>
+                            <dd class="te-kv__state">
+                                <span class="@($"tor-dot tor-dot--{StateColorClass()}")"></span>
+                                @_live.State
+                            </dd>
+                        </div>
+                    </dl>
+                }
+                <div class="te-path">
+                    <span class="te-path__ic"><DIcon Name="folder" Size="16" /></span>
+                    <div class="te-path__text">
+                        <div>@L["torrent_edit.path_label"] <span class="te-path__val">@rec.SavePath</span></div>
+                        <div>@L["torrent_edit.hash_label"] <span class="te-path__val te-path__val--code">@rec.InfoHash[..Math.Min(20, rec.InfoHash.Length)]…</span></div>
+                    </div>
+                </div>
+            </section>
 
             @* ── FILE SELECTIONS ───────────────────────────────────── *@
-            <div class="te-card">
-                <h3 class="te-card__title">
+            <section class="te-sec">
+                <h3 class="te-sec__title">
                     @L["torrent_edit.files_title"] (@_files.Count)
                 </h3>
                 @if (_files.Count == 0)
                 {
-                    <div class="te-files-empty">
-                        Files will appear here once the torrent's metadata has downloaded.
-                    </div>
+                    <div class="te-files-empty">@L["torrent_edit.loading_metadata"]</div>
                 }
                 else
                 {
@@ -119,44 +114,46 @@
                                                OnChanged="StateHasChanged" />
                     </div>
                 }
-            </div>
+            </section>
 
             @* ── SPEED LIMITS ──────────────────────────────────────── *@
-            <div class="te-card">
-                <h3 class="te-card__title">@L["torrent_edit.speed_title"]</h3>
-                <label class="te-field">
-                    <span class="te-field__label">@L["torrent_edit.dl_limit_label"]</span>
-                    <input type="number" min="0" class="te-input"
-                           value="@_dlLimit"
-                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _dlLimit))" />
-                </label>
-                <label class="te-field">
-                    <span class="te-field__label">@L["torrent_edit.ul_limit_label"]</span>
-                    <input type="number" min="0" class="te-input"
-                           value="@_ulLimit"
-                           @onchange="@(e => int.TryParse(e.Value?.ToString(), out _ulLimit))" />
-                </label>
-            </div>
+            <section class="te-sec">
+                <h3 class="te-sec__title">@L["torrent_edit.speed_title"]</h3>
+                <div class="fs-grid-2 te-limits">
+                    <label class="d-input-group">
+                        <span class="d-input-group__label">@L["torrent_edit.dl_limit_label"]</span>
+                        <input type="number" min="0" class="fs-input"
+                               value="@_dlLimit"
+                               @onchange="@(e => int.TryParse(e.Value?.ToString(), out _dlLimit))" />
+                    </label>
+                    <label class="d-input-group">
+                        <span class="d-input-group__label">@L["torrent_edit.ul_limit_label"]</span>
+                        <input type="number" min="0" class="fs-input"
+                               value="@_ulLimit"
+                               @onchange="@(e => int.TryParse(e.Value?.ToString(), out _ulLimit))" />
+                    </label>
+                </div>
+            </section>
 
-            @* ── OPTIONS ───────────────────────────────────────────── *@
-            <div class="te-card">
-                <h3 class="te-card__title">@L["torrent_edit.options_title"]</h3>
+            @* ── OPTIONS — label left, Toggle right (Windows settings row). ── *@
+            <section class="te-sec">
+                <h3 class="te-sec__title">@L["torrent_edit.options_title"]</h3>
                 <div class="te-toggle-row">
+                    <span class="te-toggle-row__label">@L["torrent_edit.stop_after_download"]</span>
                     <Toggle Checked="@_stopAfterDownload"
                             CheckedChanged="@((bool v) => { _stopAfterDownload = v; })" />
-                    <span class="te-toggle-row__label">@L["torrent_edit.stop_after_download"]</span>
                 </div>
                 <div class="te-toggle-row te-toggle-row--disabled">
+                    <span class="te-toggle-row__label">@L["torrent_edit.flatten_subfolders"]</span>
                     <Toggle Checked="@_skipSubfolderStructure" Disabled="true"
                             CheckedChanged="@((bool _) => {})" />
-                    <span class="te-toggle-row__label">@L["torrent_edit.flatten_subfolders"]</span>
                 </div>
-            </div>
+            </section>
         }
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" Disabled="@(_saving || _record is null)" OnClick="SaveAllAsync">
-            <DIcon Name="check" Size="13" />
+            <DIcon Name="check" Size="16" />
             @(_saving ? L["torrent_edit.btn_saving"] : L["torrent_edit.btn_save"])
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="OnCloseAsync">@L["common.btn_cancel"]</Btn>
@@ -164,10 +161,10 @@
         @if (_record is not null)
         {
             <Btn Variant="ghost" Size="md" Loading="@_rechecking" OnClick="RecheckTorrentAsync">
-                <DIcon Name="refresh" Size="13" /> Recheck
+                <DIcon Name="refresh" Size="16" /> @L["torrent_edit.btn_recheck"]
             </Btn>
             <Btn Variant="danger" Size="md" OnClick="DeleteAsync">
-                <DIcon Name="trash" Size="13" /> @L["common.btn_remove"]
+                <DIcon Name="trash" Size="16" /> @L["common.btn_remove"]
             </Btn>
         }
     </Footer>

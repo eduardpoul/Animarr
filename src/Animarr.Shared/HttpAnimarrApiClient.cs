@@ -335,7 +335,7 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return await resp.Content.ReadFromJsonAsync<ParsedTorrentDto>(JsonOpts, ct);
     }
 
-    public async Task<int> UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, CancellationToken ct = default)
+    public async Task<int> UploadFilesToFolderAsync(Guid watcherId, IReadOnlyList<UploadFilePart> files, string? subPath = null, CancellationToken ct = default)
     {
         // multipart/form-data — each file becomes one part. The server reads
         // `files` parts and writes each to disk under the chosen watcher's
@@ -350,6 +350,8 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
             form.Add(part, "files", f.FileName);
         }
         var url = ApiRoutes.FolderUpload.Replace("{watcherId}", watcherId.ToString());
+        var sub = SubfolderPath.Normalize(subPath);
+        if (sub is not null) url += $"?subPath={Uri.EscapeDataString(sub)}";
         using var resp = await _http.PostAsync(url, form, ct);
         resp.EnsureSuccessStatusCode();
         // Endpoint returns the count as a plain int (or { written: N }).
@@ -358,6 +360,19 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     }
 
     private sealed record UploadFolderResponse(int Written);
+
+    public async Task<DestinationFolderListDto> BrowseDestinationAsync(Guid? folderId, string? relativePath, CancellationToken ct = default)
+    {
+        var query = new List<string>();
+        if (folderId is Guid id) query.Add($"folderId={id}");
+        var rel = SubfolderPath.Normalize(relativePath);
+        if (rel is not null) query.Add($"path={Uri.EscapeDataString(rel)}");
+        var url = query.Count == 0
+            ? ApiRoutes.TorrentDestinationBrowse
+            : $"{ApiRoutes.TorrentDestinationBrowse}?{string.Join('&', query)}";
+        return await _http.GetFromJsonAsync<DestinationFolderListDto>(url, JsonOpts, ct)
+            ?? new DestinationFolderListDto(string.Empty, Array.Empty<string>(), false);
+    }
 
     // ─── Watch state ──────────────────────────────────────────────────────
 
