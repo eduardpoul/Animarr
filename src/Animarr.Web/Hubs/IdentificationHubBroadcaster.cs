@@ -73,6 +73,22 @@ public sealed class IdentificationHubBroadcaster : IHostedService
                         new IdentificationProgressEnvelope(entry.ToDto()));
                 }
 
+                // Clients refetch their snapshot on ANY QueueChanged — and only
+                // then. Once the last job finishes no Queued/Processing row is
+                // left, so nothing was sent and the NavPane counter / AI popup
+                // froze on "N-1/N, busy" until a reload (same for pause/resume on
+                // an empty queue). Ping once with the latest finished job.
+                if (processing.Count == 0)
+                {
+                    var last = await db.IdentificationQueues
+                        .Include(q => q.Folder)
+                        .OrderByDescending(q => q.ProcessedAt)
+                        .FirstOrDefaultAsync();
+                    await _hub.Clients.All.SendAsync(
+                        IdentificationHubMethods.QueueChanged,
+                        new IdentificationProgressEnvelope(last?.ToDto()!));
+                }
+
                 var needsReview = await db.MediaItems
                     .CountAsync(m => m.IdentificationStatus
                         == Animarr.Web.Data.Models.IdentificationStatus.NeedsReview);
