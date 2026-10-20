@@ -24,6 +24,16 @@ public class FolderWatcherService(
     // folderId → watcher
     private readonly ConcurrentDictionary<Guid, FolderWatcherEntry> _watchers = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
+    /// <summary>Serialises "is this path registered yet? → insert" so the live FSW
+    /// handlers and a discovery pass can't both register the same folder/file.</summary>
+    private readonly SemaphoreSlim _registerLock = new(1, 1);
+    /// <summary>How often sections are re-listed for children the FSW never
+    /// reported. inotify is silent on some bind/FUSE/network mounts, and a folder
+    /// that was still empty 2s after creation (a torrent's root dir is created
+    /// before its first piece lands) or arrived via rename is skipped by the
+    /// live path — without this pass such titles only appear after a manual Rescan.</summary>
+    private static readonly TimeSpan DiscoveryInterval = TimeSpan.FromMinutes(10);
+    private readonly CancellationTokenSource _stopCts = new();
     /// <summary>Paths to skip in OnFileCreated — populated before intentional moves to avoid re-processing. Value = expiry TickCount64.</summary>
     private readonly ConcurrentDictionary<string, long> _suppressedPaths = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>H-2: periodic GC of expired _suppressedPaths entries that never got matched by a watcher event.</summary>
@@ -52,8 +62,10 @@ public class FolderWatcherService(
 
         // Startup reconcile: drop FolderWatcher rows whose folder/file vanished
         // from disk while we were down. Per-section + skips unreachable roots, so
-        // a temporary unmount can't wipe the library. Fire-and-forget so a slow
-        // mount doesn't delay startup.
+        // a temporary unmount can't wipe the library. Then discover children that
+        // appeared while we were down, and keep re-discovering periodically (see
+        // DiscoveryInterval). Fire-and-forget so a slow mount doesn't delay startup.
+        var stopToken = _stopCts.Token;
         _ = Task.Run(async () =>
         {
             try
@@ -62,6 +74,16 @@ public class FolderWatcherService(
                 if (removed > 0) logger.LogInformation("Startup reconcile removed {Count} orphaned folder rows.", removed);
             }
             catch (Exception ex) { logger.LogWarning(ex, "startup orphan cleanup failed"); }
+
+            while (!stopToken.IsCancellationRequested)
+            {
+                try { await DiscoverAllSectionsAsync(stopToken); }
+                catch (OperationCanceledException) when (stopToken.IsCancellationRequested) { break; }
+                catch (Exception ex) { logger.LogWarning(ex, "periodic section discovery failed"); }
+
+                try { await Task.Delay(DiscoveryInterval, stopToken); }
+                catch (OperationCanceledException) { break; }
+            }
         });
 
         // H-2: prune expired _suppressedPaths every 60s
@@ -207,36 +229,42 @@ public class FolderWatcherService(
                     return;
                 }
 
-                await using var db = await dbFactory.CreateDbContextAsync();
-
-                // Skip if this path is already registered
-                if (await db.FolderWatchers.AnyAsync(f => f.Path == dirPath))
-                    return;
-
-                // Bug-fix: also skip paths the user has explicitly dismissed in the past.
-                if (await IsDismissedAsync(db, sectionId, dirPath))
+                FolderWatcher newFolder;
+                await _registerLock.WaitAsync();
+                try
                 {
-                    logger.LogDebug("Skipping auto-register — path was dismissed by user: {Path}", dirPath);
-                    return;
+                    await using var db = await dbFactory.CreateDbContextAsync();
+
+                    // Skip if this path is already registered
+                    if (await db.FolderWatchers.AnyAsync(f => f.Path == dirPath))
+                        return;
+
+                    // Bug-fix: also skip paths the user has explicitly dismissed in the past.
+                    if (await IsDismissedAsync(db, sectionId, dirPath))
+                    {
+                        logger.LogDebug("Skipping auto-register — path was dismissed by user: {Path}", dirPath);
+                        return;
+                    }
+
+                    var section = await db.FolderWatchers.FindAsync(sectionId);
+                    if (section is null) return;
+
+                    newFolder = new FolderWatcher
+                    {
+                        Id              = Guid.NewGuid(),
+                        Path            = dirPath,
+                        Label           = Path.GetFileName(dirPath),
+                        WatchEnabled    = section.WatchEnabled,
+                        IdentifyEnabled = section.IdentifyEnabled,
+                        FolderType      = section.FolderType,
+                        IsSection       = false,
+                        ParentSectionId = sectionId,
+                        CreatedAt       = DateTime.UtcNow,
+                    };
+                    db.FolderWatchers.Add(newFolder);
+                    await db.SaveChangesAsync();
                 }
-
-                var section = await db.FolderWatchers.FindAsync(sectionId);
-                if (section is null) return;
-
-                var newFolder = new FolderWatcher
-                {
-                    Id              = Guid.NewGuid(),
-                    Path            = dirPath,
-                    Label           = Path.GetFileName(dirPath),
-                    WatchEnabled    = section.WatchEnabled,
-                    IdentifyEnabled = section.IdentifyEnabled,
-                    FolderType      = section.FolderType,
-                    IsSection       = false,
-                    ParentSectionId = sectionId,
-                    CreatedAt       = DateTime.UtcNow,
-                };
-                db.FolderWatchers.Add(newFolder);
-                await db.SaveChangesAsync();
+                finally { _registerLock.Release(); }
 
                 logger.LogInformation("Auto-registered subfolder: {Path}", dirPath);
 
@@ -284,43 +312,49 @@ public class FolderWatcherService(
             {
                 await Task.Delay(500);
 
-                await using var db = await dbFactory.CreateDbContextAsync();
-
-                // Skip if already registered by SingleFilePath
-                if (await db.FolderWatchers.AnyAsync(f => f.SingleFilePath == filePath))
-                    return;
-
-                var section = await db.FolderWatchers.FindAsync(sectionId);
-                if (section is null) return;
-
-                // Only auto-register files sitting DIRECTLY in the flat-section
-                // root — a file one level down belongs to a subfolder title,
-                // which OnDirectoryCreated handles. The backing FileSystemWatcher
-                // already sets IncludeSubdirectories=false, but a bulk rescan or
-                // a future caller could route a nested path here, so we re-check
-                // against the section root rather than trusting the watcher.
-                var fileDir  = Path.GetDirectoryName(filePath);
-                var rootNorm = section.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (!string.Equals(fileDir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                        rootNorm, StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                var newFolder = new FolderWatcher
+                FolderWatcher newFolder;
+                await _registerLock.WaitAsync();
+                try
                 {
-                    Id              = Guid.NewGuid(),
-                    Path            = section.Path,
-                    SingleFilePath  = filePath,
-                    Label           = Path.GetFileNameWithoutExtension(filePath),
-                    WatchEnabled    = false,   // flat entries don't need their own watcher
-                    IdentifyEnabled = section.IdentifyEnabled,
-                    FolderType      = FolderType.Movie,
-                    IsSection       = false,
-                    FlatSection     = false,
-                    ParentSectionId = sectionId,
-                    CreatedAt       = DateTime.UtcNow,
-                };
-                db.FolderWatchers.Add(newFolder);
-                await db.SaveChangesAsync();
+                    await using var db = await dbFactory.CreateDbContextAsync();
+
+                    // Skip if already registered by SingleFilePath
+                    if (await db.FolderWatchers.AnyAsync(f => f.SingleFilePath == filePath))
+                        return;
+
+                    var section = await db.FolderWatchers.FindAsync(sectionId);
+                    if (section is null) return;
+
+                    // Only auto-register files sitting DIRECTLY in the flat-section
+                    // root — a file one level down belongs to a subfolder title,
+                    // which OnDirectoryCreated handles. The backing FileSystemWatcher
+                    // already sets IncludeSubdirectories=false, but a bulk rescan or
+                    // a future caller could route a nested path here, so we re-check
+                    // against the section root rather than trusting the watcher.
+                    var fileDir  = Path.GetDirectoryName(filePath);
+                    var rootNorm = section.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (!string.Equals(fileDir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                            rootNorm, StringComparison.OrdinalIgnoreCase))
+                        return;
+
+                    newFolder = new FolderWatcher
+                    {
+                        Id              = Guid.NewGuid(),
+                        Path            = section.Path,
+                        SingleFilePath  = filePath,
+                        Label           = Path.GetFileNameWithoutExtension(filePath),
+                        WatchEnabled    = false,   // flat entries don't need their own watcher
+                        IdentifyEnabled = section.IdentifyEnabled,
+                        FolderType      = FolderType.Movie,
+                        IsSection       = false,
+                        FlatSection     = false,
+                        ParentSectionId = sectionId,
+                        CreatedAt       = DateTime.UtcNow,
+                    };
+                    db.FolderWatchers.Add(newFolder);
+                    await db.SaveChangesAsync();
+                }
+                finally { _registerLock.Release(); }
 
                 logger.LogInformation("Auto-registered flat movie: {Path}", filePath);
 
@@ -431,7 +465,7 @@ public class FolderWatcherService(
     ///
     /// Returns the IDs of the newly-registered child watchers.
     /// </summary>
-    public async Task<List<Guid>> DiscoverChildrenAsync(Guid sectionId)
+    public async Task<List<Guid>> DiscoverChildrenAsync(Guid sectionId, bool pruneOrphans = true)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var section = await db.FolderWatchers.FindAsync(sectionId);
@@ -445,8 +479,25 @@ public class FolderWatcherService(
         // Prune children whose folder/file vanished from disk BEFORE discovering
         // new ones, so a scan both adds and removes. Safe: CleanupOrphanedChildren
         // bails when the section root itself is unreachable (temporary unmount).
-        try { await CleanupOrphanedChildrenAsync(sectionId); }
-        catch (Exception ex) { logger.LogWarning(ex, "orphan cleanup failed for {Path}", section.Path); }
+        if (pruneOrphans)
+        {
+            try { await CleanupOrphanedChildrenAsync(sectionId); }
+            catch (Exception ex) { logger.LogWarning(ex, "orphan cleanup failed for {Path}", section.Path); }
+        }
+
+        await _registerLock.WaitAsync();
+        try
+        {
+            return await RegisterNewChildrenAsync(db, section);
+        }
+        finally { _registerLock.Release(); }
+    }
+
+    /// <summary>Body of <see cref="DiscoverChildrenAsync"/>, run under
+    /// <see cref="_registerLock"/>.</summary>
+    private async Task<List<Guid>> RegisterNewChildrenAsync(AppDbContext db, FolderWatcher section)
+    {
+        var sectionId = section.Id;
 
         string[] dirs;
         string[] files;
@@ -626,6 +677,59 @@ public class FolderWatcherService(
         return total;
     }
 
+    /// <summary>
+    /// Background discovery over every watched section: registers children the
+    /// live FileSystemWatcher missed and queues them for identification under the
+    /// same AutoIdentify policy as the live path. Add-only — orphan pruning
+    /// (which cascades the MediaItem and its watch history) stays with startup
+    /// and the manual Rescan, so a transient mount hiccup between passes can't
+    /// delete a title.
+    /// </summary>
+    private async Task DiscoverAllSectionsAsync(CancellationToken ct)
+    {
+        List<Guid> sectionIds;
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
+        {
+            sectionIds = await db.FolderWatchers
+                .Where(f => f.IsSection && f.WatchEnabled)
+                .Select(f => f.Id)
+                .ToListAsync(ct);
+        }
+
+        var newIds = new List<Guid>();
+        foreach (var id in sectionIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            newIds.AddRange(await DiscoverChildrenAsync(id, pruneOrphans: false));
+        }
+        if (newIds.Count == 0) return;
+
+        using var scope = scopeFactory.CreateScope();
+        var appCfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+        var autoIdentify = await appCfg.GetAsync<bool>(AppConfigKeys.AutoIdentifyEnabled, true, ct);
+
+        var queued = 0;
+        if (autoIdentify)
+        {
+            await using var qdb = await dbFactory.CreateDbContextAsync(ct);
+            var toQueue = await qdb.FolderWatchers
+                .Where(f => newIds.Contains(f.Id) && f.IdentifyEnabled)
+                .Select(f => f.Id)
+                .ToListAsync(ct);
+            foreach (var fid in toQueue)
+                qdb.IdentificationQueues.Add(new Data.Models.IdentificationQueue
+                {
+                    Id       = Guid.NewGuid(),
+                    FolderId = fid,
+                    QueuedAt = DateTime.UtcNow,
+                });
+            if (toQueue.Count > 0) await qdb.SaveChangesAsync(ct);
+            queued = toQueue.Count;
+        }
+        logger.LogInformation("Section discovery registered {New} new item(s), queued {Queued} for identification.",
+            newIds.Count, queued);
+    }
+
     /// <summary>Returns true if <paramref name="childPath"/> was previously dismissed for this section.</summary>
     private static async Task<bool> IsDismissedAsync(AppDbContext db, Guid sectionId, string childPath)
     {
@@ -658,6 +762,10 @@ public class FolderWatcherService(
 
     public void Dispose()
     {
+        // Dispose runs twice (StopAsync, then the DI container) — Cancel on a
+        // disposed CTS throws.
+        try { _stopCts.Cancel(); } catch (ObjectDisposedException) { }
+        _stopCts.Dispose();
         _suppressedGcTimer?.Dispose();
         _suppressedGcTimer = null;
         foreach (var entry in _watchers.Values)
