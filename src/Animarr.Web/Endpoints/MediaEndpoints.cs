@@ -132,9 +132,13 @@ internal static class MediaEndpoints
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // Folder-restricted roles get a 404 for titles outside their scope,
+            // same as the catalog list hides them.
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var row = await db.MediaItems
                 .Include(m => m.Tags)
                 .Include(m => m.Categories).ThenInclude(c => c.Category)
+                .ApplyRoleFolderFilter(me?.Role)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (row is null) return Results.NotFound();
             HashSet<Guid>? favIds = null;
@@ -212,12 +216,15 @@ internal static class MediaEndpoints
         app.MapGet(ApiRoutes.MediaCandidates, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var entity = await db.MediaItems
                 .Include(m => m.Tags)
                 .Include(m => m.Categories).ThenInclude(c => c.Category)
+                .ApplyRoleFolderFilter(me?.Role)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
             return Results.Ok(entity.ToDto().Candidates);
@@ -401,10 +408,13 @@ internal static class MediaEndpoints
 
         app.MapGet(ApiRoutes.MediaBackdropList, async (
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var paths = await db.MediaItems
+                .ApplyRoleFolderFilter(me?.Role)
                 .Where(m => m.FanartPath != null)
                 .OrderByDescending(m => m.Popularity ?? 0)
                 .Take(20)
@@ -415,10 +425,13 @@ internal static class MediaEndpoints
 
         app.MapGet(ApiRoutes.MediaNeedsReview, async (
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.MediaItems
+                .ApplyRoleFolderFilter(me?.Role)
                 .Include(m => m.Tags)
                 .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .Where(m => (int)m.IdentificationStatus == (int)SharedEnums.IdentificationStatus.NeedsReview)
@@ -433,8 +446,13 @@ internal static class MediaEndpoints
         app.MapGet(ApiRoutes.MediaFiles, async (
             Guid id,
             MediaFileResolver resolver,
+            IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            if (!await db.MediaItems.IsVisibleAsync(me?.Role, id, ct)) return Results.NotFound();
             var files = await resolver.ResolveAsync(id, ct);
             return Results.Ok(files);
         });
@@ -526,7 +544,8 @@ internal static class MediaEndpoints
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var entity = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var entity = await db.MediaItems.ApplyRoleFolderFilter(me?.Role).FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
             var uid = userCtx.CurrentUserId;
@@ -694,10 +713,13 @@ internal static class MediaEndpoints
             TmdbClient tmdb,
             IAppConfigService config,
             ILoggerFactory loggerFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().ApplyRoleFolderFilter(me?.Role)
+                .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
             // No TMDB id → no episode list to localize. The UI falls back to
             // "Episode N" titles, so an empty array is the right answer.

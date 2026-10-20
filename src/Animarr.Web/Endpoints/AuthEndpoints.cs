@@ -503,8 +503,10 @@ internal static class AuthEndpoints
                 .ToList();
 
             var mediaIds = byItem.Select(w => w.MediaItemId).ToList();
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var titles = await db.MediaItems
                 .AsNoTracking()
+                .ApplyRoleFolderFilter(me?.Role)
                 .Where(m => mediaIds.Contains(m.Id))
                 .Select(m => new {
                     m.Id, m.Title, m.PosterPath, m.FanartPath, m.Year,
@@ -631,8 +633,10 @@ internal static class AuthEndpoints
 
             var ordered = hits.OrderByDescending(h => h.LastSeenAt).Take(limit).ToList();
             var ids = ordered.Select(h => h.Id).ToList();
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var titles = await db.MediaItems
                 .AsNoTracking()
+                .ApplyRoleFolderFilter(me?.Role)
                 .Where(m => ids.Contains(m.Id))
                 .Select(m => new { m.Id, m.Title, m.PosterPath, m.FanartPath, m.Year })
                 .ToListAsync(ct);

@@ -2,6 +2,7 @@ using Animarr.Shared;
 using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -21,6 +22,7 @@ internal static class CalendarEndpoints
             int? ahead,
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             var now  = DateTime.UtcNow;
@@ -28,7 +30,9 @@ internal static class CalendarEndpoints
             var to   = now.AddDays(Math.Clamp(ahead ?? 60, 1, 120));
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var items = await db.MediaItems.AsNoTracking()
+                .ApplyRoleFolderFilter(me?.Role)
                 .Where(m => (m.NextAirAtUtc != null && m.NextAirAtUtc >= from && m.NextAirAtUtc <= to)
                          || (m.LastAiredAtUtc != null && m.LastAiredAtUtc >= from && m.LastAiredAtUtc <= to))
                 .ToListAsync(ct);
