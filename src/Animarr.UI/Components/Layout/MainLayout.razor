@@ -375,8 +375,8 @@
 
     private async Task StartTorrentHubAsync()
     {
-        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubTorrents);
-        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubTorrents);
+        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy()).Build();
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
         {
             var live = env.Items.Count(s =>
@@ -396,8 +396,8 @@
     /// the queue rarely exceeds ~50 rows in practice.</summary>
     private async Task StartIdentificationHubAsync()
     {
-        var hubUri = new Uri(new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority) + ApiRoutes.HubIdentification);
-        _identHub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubIdentification);
+        _identHub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy()).Build();
         _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
         {
             InvokeAsync(RefreshIdentificationStatusAsync);

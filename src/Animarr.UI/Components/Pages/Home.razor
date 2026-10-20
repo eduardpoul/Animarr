@@ -264,6 +264,11 @@
         }
         catch { /* offline — empty sections */ }
 
+        // A NavPane folder picked on another page (SetActiveFolder, then
+        // navigate here) or while this load ran fired OnChange before
+        // _sections existed — so it never resolved. Pick it up now, as Library
+        // does.
+        _activeSection = ResolveActiveSection();
         _loading = false;
         ApplyFilter();
     }
@@ -297,18 +302,19 @@
     /// clear the filter back to "all sections".</summary>
     private void OnFolderJumpChanged()
     {
-        var name = FolderJump.ActiveFolderName;
-        Guid? newSection = null;
-        if (!string.IsNullOrWhiteSpace(name))
-        {
-            var match = _sections.FirstOrDefault(s =>
-                string.Equals(s.Label, name, StringComparison.OrdinalIgnoreCase));
-            if (match is not null) newSection = match.Id;
-        }
+        var newSection = ResolveActiveSection();
         if (newSection == _activeSection) return;
         _activeSection = newSection;
         ApplyFilter();
         StateHasChanged();
+    }
+
+    private Guid? ResolveActiveSection()
+    {
+        var name = FolderJump.ActiveFolderName;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        return _sections.FirstOrDefault(s =>
+            string.Equals(s.Label, name, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
     private void ApplyFilter()

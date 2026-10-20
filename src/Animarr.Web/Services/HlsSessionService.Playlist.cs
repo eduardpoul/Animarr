@@ -116,8 +116,12 @@ public sealed partial class HlsSessionService
             return HlsPlan.Fmp4SoftwareReencode;
         }
 
-        // No downscale → original codec-driven choice.
-        if (string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase))
+        // No downscale → original codec-driven choice. 8-bit H.264 only:
+        // 10-bit "Hi10P" (old fansubs) decodes in no browser and on no TV SoC —
+        // the Direct Play / Direct Stream / native gates already say so — and a
+        // stream-copy of it was a black screen with no further fallback. It
+        // re-encodes below like the legacy codecs.
+        if (string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && !probe.Is10Bit)
             return HlsPlan.TsStreamCopy;
 
         if (string.Equals(probe.VideoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
@@ -163,6 +167,14 @@ public sealed partial class HlsSessionService
         "aac" or "mp3" or "mp2" => true,
         _ => false,
     };
+
+    /// <summary>TS-path audio passthrough decision. The probe only records the
+    /// FIRST audio stream's codec, so passthrough is safe only when that stream
+    /// is the one mapped: picking track N (e.g. AC3/DTS/FLAC behind an AAC
+    /// track 0) used to stream-copy N on the strength of track 0's codec —
+    /// silence in the browser, or ffmpeg refusing FLAC-in-TS.</summary>
+    private static bool TsAudioPassthrough(string? firstAudioCodec, int audioTrackIndex, bool externalAudio)
+        => !externalAudio && audioTrackIndex == 0 && IsBrowserCompatibleAudioInTs(firstAudioCodec);
 
     private static string BuildMasterPlaylist(ProbeInfo p)
     {

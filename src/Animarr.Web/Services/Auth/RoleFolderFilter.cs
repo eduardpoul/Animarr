@@ -31,7 +31,8 @@ public static class RoleFolderFilter
         // either the item's folder or that folder's parent section. EF Core
         // translates IReadOnlyList<Guid>.Contains to SQL IN (...).
         return source.Where(m => allowed.Contains(m.FolderId)
-            || (m.Folder.ParentSectionId != null && allowed.Contains(m.Folder.ParentSectionId.Value)));
+            || (m.Folder != null && m.Folder.ParentSectionId != null
+                && allowed.Contains(m.Folder.ParentSectionId.Value)));
     }
 
     /// <summary>Ids of every MediaItem the role may see, or <c>null</c> when the

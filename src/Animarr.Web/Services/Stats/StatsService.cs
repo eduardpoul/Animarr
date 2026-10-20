@@ -187,7 +187,7 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
         }
 
         // Current: walk back from today; allow it to have started yesterday.
-        var today = DateTime.UtcNow.Date;
+        var today = DateTime.Today;   // same server-local day WatchEventRecorder buckets by
         var anchor = set.Contains(today) ? today : set.Contains(today.AddDays(-1)) ? today.AddDays(-1) : (DateTime?)null;
         int current = 0;
         if (anchor is DateTime a)

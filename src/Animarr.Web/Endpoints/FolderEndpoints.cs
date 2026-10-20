@@ -313,10 +313,14 @@ internal static class FolderEndpoints
             // created on demand. SubfolderPath.Split drops ".." segments, so it
             // stays inside the watcher root.
             var targetDir = SubfolderPath.Split(subPath).Aggregate(folder.Path, System.IO.Path.Combine);
+
+            // Read the body BEFORE touching the disk: a rejected/aborted upload
+            // used to leave the freshly created (empty) "Show/Season 2" behind.
+            var form = await httpReq.ReadFormAsync(ct);
+            if (form.Files.Count == 0) return Results.Ok(new { Written = 0 });
             try { Directory.CreateDirectory(targetDir); }
             catch (Exception) { return Results.Problem("Couldn't create the subfolder."); }
 
-            var form = await httpReq.ReadFormAsync(ct);
             var written = 0;
             foreach (var file in form.Files)
             {
@@ -326,19 +330,32 @@ internal static class FolderEndpoints
                 var safeName = System.IO.Path.GetFileName(file.FileName);
                 if (string.IsNullOrWhiteSpace(safeName)) continue;
                 var target = System.IO.Path.Combine(targetDir, safeName);
+                // Write beside the target and swap in only when complete:
+                // File.Create(target) truncated an existing same-named file up
+                // front, so a re-upload that failed midway destroyed the original.
+                var part = target + ".part";
                 try
                 {
-                    await using var fs = System.IO.File.Create(target);
-                    await file.CopyToAsync(fs, ct);
+                    await using (var fs = System.IO.File.Create(part))
+                        await file.CopyToAsync(fs, ct);
+                    System.IO.File.Move(part, target, overwrite: true);
                     written++;
                 }
                 catch
                 {
                     // One bad file shouldn't abort the rest of the batch.
+                    try { System.IO.File.Delete(part); } catch { }
                 }
             }
             return Results.Ok(new { Written = written });
-        }).DisableAntiforgery().RequireAuthorization(AuthConstants.Policies.UploadContent);
+        })
+        // Episodes are hundreds of MB to GBs; Kestrel's default body cap
+        // (~28.6 MB) and the 128 MB multipart default rejected every video with
+        // a 413 while the client allows 4 GiB per file. Uploading is already
+        // gated on the UploadContent permission.
+        .WithMetadata(new Microsoft.AspNetCore.Mvc.DisableRequestSizeLimitAttribute())
+        .WithFormOptions(multipartBodyLengthLimit: long.MaxValue)
+        .DisableAntiforgery().RequireAuthorization(AuthConstants.Policies.UploadContent);
 
         return app;
     }

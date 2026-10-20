@@ -11,7 +11,7 @@ namespace Animarr.Web.Services.Segments;
 ///   1. Use the stored <see cref="MediaItem.MalId"/> when present.
 ///   2. Otherwise bridge title → MAL id via AniList (free, no API key) — the same
 ///      bridge MetadataService already uses for theme music.
-/// Results (including misses) are cached per item for the process lifetime, so a
+/// Results (including genuine misses) are cached per item for the process lifetime, so a
 /// season's episodes trigger at most one AniList call.
 ///
 /// A successful bridge also persists MalId + AniListId back onto the MediaItem
@@ -47,11 +47,13 @@ public sealed class MalIdResolver(
             .ToList();
 
         int? mal = null, aniListId = null;
+        var definitive = true;   // every miss below was a real "no such anime"
         foreach (var query in candidates)
         {
             try
             {
-                var match = await aniList.ResolveAsync(query, ct);
+                var (match, answered) = await aniList.TryResolveAsync(query, ct);
+                definitive &= answered;
                 // Keep the first AniList id even when IdMal is missing — donghua
                 // usually exist on AniList but carry no MAL cross-reference.
                 if (match is not null) aniListId ??= match.AniListId;
@@ -65,13 +67,18 @@ public sealed class MalIdResolver(
             }
             catch (Exception ex)
             {
+                definitive = false;
                 logger.LogDebug(ex, "[MalId] AniList resolve failed for query '{Query}'", query);
             }
         }
         if (mal is null)
             logger.LogDebug("[MalId] no MAL id for {Title} (AniList miss / not an anime)", item.Title);
 
-        _cache[item.Id] = (mal, aniListId);
+        // Cache hits and genuine misses only. A miss caused by a 429/5xx or a
+        // cancelled lazy lookup used to stick for the process lifetime, so the
+        // title never got AniSkip intros (or an airing entry) until a restart.
+        if (mal is not null || definitive)
+            _cache[item.Id] = (mal, aniListId);
         await PersistIdsAsync(item, mal, aniListId, ct);
         return mal;
     }

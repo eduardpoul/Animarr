@@ -59,7 +59,11 @@ internal static class PairEndpoints
             IMemoryCache cache,
             HttpContext http) =>
         {
-            var code = GenerateCode();
+            // Never reuse a live code: cache.Set below would replace another TV's
+            // pending (or already-confirmed) pairing, signing the wrong device in.
+            string code;
+            do code = GenerateCode();
+            while (cache.TryGetValue(CacheKeyPrefix + code, out _));
             // Build the deep-link URL the phone can scan. animarr:// is the
             // MAUI URI scheme; the https:// fallback lives in the dto so the
             // /pair page can render a "or visit X" copy beneath the QR.

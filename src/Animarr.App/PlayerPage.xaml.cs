@@ -43,17 +43,25 @@ public partial class PlayerPage : ContentPage
     private string _filePath;
     private readonly long   _resumeMs;
 
-    // Playback timeline. A downscaled quality (maxHeight > 0) plays a server-side
-    // HLS transcode whose manifest is already seeked, so ExoPlayer position 0 maps
-    // to _streamBaseMs on the real runtime. Direct Play (original quality) has base
-    // 0 and ExoPlayer's own absolute position. _knownDurationMs is the full runtime
-    // from the start response (a shortened HLS playlist can't report it).
+    // Playback timeline. All three tiers expose ExoPlayer positions on the file's
+    // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
+    // fragment times, HLS via a full-length playlist — so _streamBaseMs is 0
+    // everywhere today; it stays as the hook for a relative stream.
+    // _knownDurationMs is the full runtime from the start response.
     private int  _maxHeight;
     private long _streamBaseMs;
     private long _knownDurationMs;
     private List<MediaFileDto>? _episodes;
 
     private IDispatcherTimer? _timer;
+
+    // Server HLS session of the current stream (null on Direct Play / Stream).
+    // The server reaps sessions idle for 5 min; ExoPlayer stops fetching while
+    // paused on a full buffer, so — like the web player — ping it, and delete
+    // it when the stream is replaced or the page closes (else the old transcode
+    // ran on for 5 minutes after every episode switch).
+    private string?  _hlsToken;
+    private DateTime _lastKeepaliveUtc;
     private IDispatcherTimer? _hudTimer;
     private int  _ticks;
     private long _durationMs;
@@ -336,6 +344,11 @@ public partial class PlayerPage : ContentPage
             }
             _isDirectStream = directStream;
 
+            var prevToken = _hlsToken;
+            _hlsToken = !directPlay && !directStream ? body?.Token : null;
+            _lastKeepaliveUtc = DateTime.UtcNow;
+            if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
+
             if (directPlay)
             {
                 // Range-seekable raw file — ExoPlayer owns an absolute timeline.
@@ -354,10 +367,14 @@ public partial class PlayerPage : ContentPage
             }
             else
             {
-                // The HLS manifest is already seeked server-side → don't re-seek;
-                // ExoPlayer position 0 == resumeMs on the real runtime.
-                _streamBaseMs = resumeMs;
-                NativePlayerService.Instance?.PlayAsync(mediaUrl, 0);
+                // The server's media playlist lists the FULL run from seg-0 (plus
+                // EXT-X-START at the seek point), so ExoPlayer's position is already
+                // absolute. The old base = resumeMs counted the resume twice — the
+                // HUD, saved progress, skip/Up-Next timing and quality/error
+                // restarts all ran at 2× the real position. Seek explicitly on that
+                // absolute timeline rather than relying on EXT-X-START handling.
+                _streamBaseMs = 0;
+                NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs);
             }
             _ = LoadSegmentsAsync();
         }
@@ -462,6 +479,12 @@ public partial class PlayerPage : ContentPage
             return;
         }
 
+        if (_hlsToken is { } tok && (DateTime.UtcNow - _lastKeepaliveUtc).TotalSeconds >= 30)
+        {
+            _lastKeepaliveUtc = DateTime.UtcNow;
+            _ = KeepAliveAsync(tok);
+        }
+
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
@@ -509,7 +532,13 @@ public partial class PlayerPage : ContentPage
 
     private void DoSkip()
     {
-        if (_skipTarget > 0)
+        if (_skipTarget > 0 && _isDirectStream)
+        {
+            // Same as SeekBy: the remux pipe is unseekable (SeekTo snaps to 0, so
+            // "Skip intro" replayed the chunk) — re-request it at the target.
+            _ = StartStreamAsync((long)(_skipTarget * 1000), _maxHeight);
+        }
+        else if (_skipTarget > 0)
         {
             long rel = (long)(_skipTarget * 1000) - _streamBaseMs;
             if (rel < 0) rel = 0;
@@ -800,8 +829,9 @@ public partial class PlayerPage : ContentPage
             _ = StartStreamAsync(target, _maxHeight);
             return;
         }
-        // Back to the stream's own timeline: 0 for Direct Play; a seeked HLS
-        // transcode can't rewind before its base, so clamp there.
+        // Back to the stream's own timeline (absolute for Direct Play and HLS —
+        // the HLS playlist covers the whole run; the server seek-restarts ffmpeg
+        // for segments before the start point).
         long rel = target - _streamBaseMs;
         if (rel < 0) rel = 0;
         NativePlayerService.Instance?.SeekAsync(rel);
@@ -830,7 +860,20 @@ public partial class PlayerPage : ContentPage
             RecordProgress(_streamBaseMs + st.PositionMs,
                            _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
         _ = NativePlayerService.Instance?.DetachAsync();
+        if (_hlsToken is { } tok) { _hlsToken = null; StopHlsSession(tok); }
     }
+
+    private async Task KeepAliveAsync(string token)
+    {
+        try { using var _ = await _http.PostAsync($"/api/hls/keepalive?token={Uri.EscapeDataString(token)}", null); }
+        catch { /* transient — next tick retries */ }
+    }
+
+    private void StopHlsSession(string token) => _ = Task.Run(async () =>
+    {
+        try { using var _ = await _http.DeleteAsync($"/api/hls/{Uri.EscapeDataString(token)}"); }
+        catch { /* GC reaps it anyway */ }
+    });
 
     private static string Fmt(long ms)
     {

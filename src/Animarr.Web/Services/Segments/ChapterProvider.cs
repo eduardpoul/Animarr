@@ -43,7 +43,10 @@ public sealed partial class ChapterProvider(ILogger<ChapterProvider> logger) : I
     }
 
     // Word-boundary matches so an "Episode 1" title can't trip the bare "op"/"ed".
-    [GeneratedRegex(@"\b(opening|intro|op|avant)\b", RegexOptions.IgnoreCase)]
+    // Not "avant": the Avant(-title) chapter is the story cold open BEFORE the OP —
+    // and the first Intro match wins, so "Avant / Opening / Part A" made "Skip
+    // intro" skip the prologue and land at the start of the OP.
+    [GeneratedRegex(@"\b(opening|intro|op)\b", RegexOptions.IgnoreCase)]
     private static partial Regex IntroRegex();
     [GeneratedRegex(@"\b(ending|credits|outro|ed)\b", RegexOptions.IgnoreCase)]
     private static partial Regex CreditsRegex();

@@ -36,6 +36,13 @@ public class TorrentEngineService : BackgroundService
     private long _lastStatsHash;
     private DateTime _lastStatsPersistAt = DateTime.MinValue;
 
+    /// <summary>Lifetime uploaded bytes per torrent: the persisted total at load
+    /// plus everything sent since. MonoTorrent's Monitor.DataBytesSent is a
+    /// per-session counter — persisting it as-is threw the lifetime total away on
+    /// every restart. Fed by <see cref="AccumulateUploads"/> on the timer loop.</summary>
+    private readonly ConcurrentDictionary<string, long> _uploadedTotal = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _lastBytesSent = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Fires every 500 ms (only if values changed) and on any torrent state change.</summary>
     public event Action? StateChanged;
 
@@ -63,26 +70,14 @@ public class TorrentEngineService : BackgroundService
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                UpdateLiveStats();
-                FlushPendingDownloadedWrites();
-
-                // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
-                if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
+                try { Tick(); }
+                catch (Exception ex)
                 {
-                    _lastStatsPersistAt = DateTime.UtcNow;
-                    _ = Task.Run(async () =>
-                    {
-                        try { await PersistStatsAsync(); }
-                        catch (Exception ex) { _logger.LogWarning(ex, "Periodic PersistStats failed"); }
-                    }, stoppingToken);
-                }
-
-                // H-8: only invoke StateChanged if values actually changed
-                var newHash = ComputeStatsHash();
-                if (newHash != _lastStatsHash)
-                {
-                    _lastStatsHash = newHash;
-                    StateChanged?.Invoke();
+                    // One bad tick (a StateChanged subscriber throwing, a manager
+                    // mid-teardown) used to fall through to the outer catch, which
+                    // logged "crashed" and ShutdownAsync'd the engine: every torrent
+                    // stopped for the rest of the process while the app ran on.
+                    _logger.LogWarning(ex, "Torrent engine tick failed — continuing.");
                 }
             }
         }
@@ -94,6 +89,32 @@ public class TorrentEngineService : BackgroundService
         finally
         {
             await ShutdownAsync();
+        }
+
+        void Tick()
+        {
+            AccumulateUploads();
+            UpdateLiveStats();
+            FlushPendingDownloadedWrites();
+
+            // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
+            if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
+            {
+                _lastStatsPersistAt = DateTime.UtcNow;
+                _ = Task.Run(async () =>
+                {
+                    try { await PersistStatsAsync(); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Periodic PersistStats failed"); }
+                }, stoppingToken);
+            }
+
+            // H-8: only invoke StateChanged if values actually changed
+            var newHash = ComputeStatsHash();
+            if (newHash != _lastStatsHash)
+            {
+                _lastStatsHash = newHash;
+                StateChanged?.Invoke();
+            }
         }
     }
 
@@ -215,9 +236,11 @@ public class TorrentEngineService : BackgroundService
         await using var ctx = await db.CreateDbContextAsync();
 
         var records = await ctx.TorrentRecords
-            // Load everything except user-stopped torrents — Error ones are
-            // loaded too (left idle below) so the user can Recheck/retry them.
-            .Where(r => r.State != TorrentRecordState.Stopped)
+            // Load everything — Stopped, Paused and Error ones are left idle
+            // below. They must still be registered: the Downloads list comes from
+            // the DB, and Resume/Recheck/Remove(+files) all act on the engine's
+            // manager, so an unloaded record made those buttons silent no-ops
+            // (and "delete files" left the data on disk).
             .Include(r => r.FileSelections)
             .Include(r => r.FolderWatcher)
             .ToListAsync();
@@ -245,6 +268,7 @@ public class TorrentEngineService : BackgroundService
                 }
 
                 _names[record.InfoHash] = record.Name;
+                _uploadedTotal[record.InfoHash] = record.Uploaded;
                 _folderWatchers[record.InfoHash] = record.FolderWatcherId;
 
                 await ApplyFileSelectionsAsync(mgr, record.FileSelections);
@@ -265,10 +289,12 @@ public class TorrentEngineService : BackgroundService
                 if (record.SkipSubfolderStructure)
                     await ApplyFlattenAsync(mgr, record.InfoHash, record.CustomRootFolderName);
 
-                // Don't auto-start Paused (user choice) or Error torrents — an
-                // errored one is loaded but left idle so it doesn't re-error in
-                // a boot loop; the user retries it via Recheck.
-                if (record.State != TorrentRecordState.Paused && record.State != TorrentRecordState.Error)
+                // Don't auto-start Stopped/Paused (user choice) or Error torrents
+                // — an errored one is loaded but left idle so it doesn't re-error
+                // in a boot loop; the user retries it via Recheck.
+                if (record.State is not (TorrentRecordState.Stopped
+                                      or TorrentRecordState.Paused
+                                      or TorrentRecordState.Error))
                     await mgr.StartAsync();
             }
             catch (Exception ex)
@@ -362,10 +388,38 @@ public class TorrentEngineService : BackgroundService
                 // pass skips for 30 days (LastSegmentScanAt). Clear that gate so the
                 // background pass revisits the title and fingerprints the new files —
                 // covered-skip keeps it cheap (only new/uncovered episodes run).
-                if (record.FolderWatcherId is Guid fwId)
+                // Which titles received files: the linked folder, PLUS every title
+                // folder holding one of the torrent's files. A torrent added into a
+                // SECTION (the default, and the subfolder-picker flow) keeps the
+                // section's id — which never owns a MediaItem, and TryLinkTorrentAsync
+                // compares SavePath (= the section) so it never relinks — so new
+                // episodes landing in an already-scanned title cleared nothing.
+                var ownerIds = new HashSet<Guid>();
+                if (record.FolderWatcherId is Guid fwId) ownerIds.Add(fwId);
+                var filePaths = mgr.Files
+                    .Where(f => f.Priority != Priority.DoNotDownload)
+                    .Select(f => f.FullPath)
+                    .ToList();
+                if (filePaths.Count > 0)
+                {
+                    var titleFolders = await ctx.FolderWatchers
+                        .Where(f => !f.IsSection)
+                        .Select(f => new { f.Id, f.Path, f.SingleFilePath })
+                        .ToListAsync();
+                    foreach (var f in titleFolders)
+                    {
+                        var root = f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                   + Path.DirectorySeparatorChar;
+                        if (filePaths.Any(p => f.SingleFilePath is { Length: > 0 } single
+                                ? string.Equals(p, single, StringComparison.OrdinalIgnoreCase)
+                                : p.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
+                            ownerIds.Add(f.Id);
+                    }
+                }
+                if (ownerIds.Count > 0)
                 {
                     var cleared = await ctx.MediaItems
-                        .Where(m => m.FolderId == fwId)
+                        .Where(m => ownerIds.Contains(m.FolderId))
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(m => m.LastSegmentScanAt,   (DateTime?)null)
                             .SetProperty(m => m.LastTrickplayScanAt, (DateTime?)null));
@@ -375,10 +429,7 @@ public class TorrentEngineService : BackgroundService
             }
 
             // Stop seeding check
-            var ratio = record.StopSeedingRatio ?? cfg.StopSeedingRatio;
-            var totalSize = mgr.Torrent?.Size ?? 0;
-            bool ratioReached = ratio > 0 && totalSize > 0 &&
-                (record.Uploaded + mgr.Monitor.DataBytesSent) >= (long)(totalSize * ratio);
+            bool ratioReached = SeedRatioReached(infoHash, mgr, record.StopSeedingRatio);
 
             if (record.StopAfterDownload || ratioReached || cfg.StopSeedingAfterDone)
                 await mgr.StopAsync();
@@ -429,13 +480,42 @@ public class TorrentEngineService : BackgroundService
             record.State     = TorrentRecordState.Downloading;
             await ctx.SaveChangesAsync();
 
-            // Apply root folder remap for magnets (metadata just arrived, suppress handled via CreateContainingDirectory)
-            if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
-                await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
+            var remap   = !string.IsNullOrWhiteSpace(record.CustomRootFolderName);
+            var flatten = record.SkipSubfolderStructure;
+            if (remap || flatten)
+            {
+                // MonoTorrent moves files only while the torrent is STOPPED
+                // ("Cannot move files when the torrent is active"), and by now the
+                // magnet has left Metadata and is starting. Every move used to throw
+                // (logged per file), the download landed in the torrent's own folder,
+                // and the next restart's re-apply then moved the finished files out
+                // from under the title the library had registered meanwhile.
+                var wasActive = mgr.State != TorrentState.Stopped;
+                try
+                {
+                    if (wasActive) await mgr.StopAsync();
 
-            // Flatten subfolders for magnets: remap all file paths to the destination root before download starts
-            if (record.SkipSubfolderStructure)
-                await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
+                    // Apply root folder remap for magnets (suppress handled via CreateContainingDirectory)
+                    if (remap)
+                        await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName!);
+
+                    // Flatten subfolders for magnets: remap all file paths to the destination root before download starts
+                    if (flatten)
+                        await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Applying destination layout to magnet {Hash} failed", infoHash);
+                }
+                finally
+                {
+                    if (wasActive && mgr.State == TorrentState.Stopped)
+                    {
+                        try { await mgr.StartAsync(); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Restarting magnet {Hash} failed", infoHash); }
+                    }
+                }
+            }
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -486,7 +566,7 @@ public class TorrentEngineService : BackgroundService
                 DownloadRate:     mgr.Monitor.DownloadRate,
                 UploadRate:       mgr.Monitor.UploadRate,
                 Downloaded:       onDiskBytes,
-                Uploaded:         mgr.Monitor.DataBytesSent,
+                Uploaded:         _uploadedTotal.GetValueOrDefault(hash),
                 TotalSize:        totalSize,
                 Seeds:            mgr.Peers.Seeds,
                 Peers:            mgr.Peers.Leechs,
@@ -501,21 +581,67 @@ public class TorrentEngineService : BackgroundService
             _liveStats.TryRemove(hash, out _);
     }
 
+    /// <summary>Fold each manager's session send counter into
+    /// <see cref="_uploadedTotal"/>. Timer-loop only, so deltas aren't double
+    /// counted. A counter that went backwards was reset (manager restarted) and
+    /// counts from zero.</summary>
+    private void AccumulateUploads()
+    {
+        foreach (var (hash, mgr) in _managers)
+        {
+            var sent  = mgr.Monitor.DataBytesSent;
+            var last  = _lastBytesSent.GetValueOrDefault(hash);
+            var delta = sent >= last ? sent - last : sent;
+            _lastBytesSent[hash] = sent;
+            if (delta > 0) _uploadedTotal.AddOrUpdate(hash, delta, (_, v) => v + delta);
+        }
+    }
+
+    /// <summary>True once a seeding torrent has uploaded its ratio limit
+    /// (per-torrent override, else the global setting; 0 = no limit).</summary>
+    private bool SeedRatioReached(string infoHash, TorrentManager mgr, double? torrentRatio)
+    {
+        var ratio = torrentRatio ?? _cachedConfig.StopSeedingRatio;
+        var size  = mgr.Torrent?.Size ?? 0;
+        return ratio > 0 && size > 0 && _uploadedTotal.GetValueOrDefault(infoHash) >= (long)(size * ratio);
+    }
+
     private async Task PersistStatsAsync()
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
 
+        var ratioReached = new List<TorrentManager>();
         foreach (var (hash, stats) in _liveStats)
         {
             var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == hash);
             if (record is null) continue;
+            // The ratio is reached while SEEDING, long after the one check at
+            // completion in OnStateChangedAsync — so evaluate it here too.
+            if (_managers.TryGetValue(hash, out var seeding) && seeding.State == TorrentState.Seeding
+                && SeedRatioReached(hash, seeding, record.StopSeedingRatio))
+                ratioReached.Add(seeding);
             record.Downloaded = stats.Downloaded;
             record.Uploaded   = stats.Uploaded;
-            record.State      = MapState(stats.State);
+            // A Paused/Error torrent restored idle (or added paused) sits in
+            // MonoTorrent's Stopped state without the user ever stopping it.
+            // Writing that back flipped the record to Stopped within 30 s, the
+            // next boot skipped it, and Resume/Recheck/Remove then no-op'd on a
+            // torrent the engine no longer knew.
+            var live = MapState(stats.State);
+            if (!(live == TorrentRecordState.Stopped
+                  && record.State is TorrentRecordState.Paused or TorrentRecordState.Error))
+                record.State = live;
         }
         await ctx.SaveChangesAsync();
+
+        foreach (var mgr in ratioReached)
+        {
+            _logger.LogInformation("Seed ratio reached for {Name} — stopping.", mgr.Torrent?.Name);
+            try { await mgr.StopAsync(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Stopping {Name} at seed ratio failed", mgr.Torrent?.Name); }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -990,6 +1116,8 @@ public class TorrentEngineService : BackgroundService
         _liveStats.TryRemove(infoHash, out _);
         _names.TryRemove(infoHash, out _);
         _folderWatchers.TryRemove(infoHash, out _);
+        _uploadedTotal.TryRemove(infoHash, out _);
+        _lastBytesSent.TryRemove(infoHash, out _);
 
         // C-1: dispose per-torrent semaphore so it doesn't leak across add/remove cycles.
         if (_torrentLocks.TryRemove(infoHash, out var sem))
@@ -1197,9 +1325,20 @@ public class TorrentEngineService : BackgroundService
     {
         if (mgr.Files.Count == 0) return;
         var destDir = SubfolderPath.Split(customRootFolderName).Aggregate(mgr.SavePath, Path.Combine);
+        // Same file name in two subfolders (RUS Sound/ep01.mka + RUS Sound
+        // (Studio2)/ep01.mka, Season 1/01.mkv + Season 2/01.mkv) would map both
+        // torrent files onto ONE path: MonoTorrent writes both into it and those
+        // pieces never verify. Leave colliding names in their subfolders.
+        var colliding = mgr.Files
+            .Where(f => f.Priority != Priority.DoNotDownload)
+            .GroupBy(f => Path.GetFileName(f.Path), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var file in mgr.Files)
         {
             if (file.Priority == Priority.DoNotDownload) continue;
+            if (colliding.Contains(Path.GetFileName(file.Path))) continue;
             var dest = Path.Combine(destDir, Path.GetFileName(file.Path));
             if (string.Equals(file.FullPath, dest, StringComparison.OrdinalIgnoreCase)) continue;
             try { await mgr.MoveFileAsync(file, dest); }

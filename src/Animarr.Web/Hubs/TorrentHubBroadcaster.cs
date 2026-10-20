@@ -38,12 +38,19 @@ public sealed class TorrentHubBroadcaster : BackgroundService
         try { await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken); }
         catch (OperationCanceledException) { return; }
 
+        var lastCount = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var stats = _engine.GetAll();
-                if (stats.Count > 0)
+                // Idle (no torrents) stays quiet, but the transition TO empty is
+                // sent once: clients only learn the list changed from a snapshot,
+                // so deleting the last torrent left the downloads badge on its
+                // old count until a reload.
+                var send = stats.Count > 0 || lastCount > 0;
+                lastCount = stats.Count;
+                if (send)
                 {
                     var envelope = new TorrentSnapshotEnvelope(
                         stats.Select(s => s.ToDto()).ToArray(),

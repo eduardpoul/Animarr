@@ -121,7 +121,16 @@ internal static class MediaStreamEndpoints
         //    hevc_metadata bitstream filter so the player sees plain HDR10.
         var (videoCodec, hasDolbyVision) = await PeekVideoCodecAsync(fullPath!);
 
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath! });
+        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
+        // AVI carries no pts for B-frames (XviD/DivX): stream-copied into fMP4
+        // they came out as "pts has no value" packets at ≈ -7e14 s — a stream no
+        // player can place on a timeline. Have the demuxer generate them. This is
+        // the route the TV takes for AVI when the device can't decode its audio.
+        if (ext == ".avi" || videoCodec is "mpeg4" or "msmpeg4v3")
+        {
+            args.Add("-fflags"); args.Add("+genpts");
+        }
+        args.AddRange(new[] { "-i", fullPath! });
         if (seekSec > 0)
         {
             // Shift output PTS so the first frame is at time `seekSec`, not 0.
@@ -162,7 +171,17 @@ internal static class MediaStreamEndpoints
             // delay_moov: required because AC3 audio packets don't expose their
             // codec frame size until the first frame is muxed; without this flag
             // ffmpeg refuses to emit the (empty) moov and the response is 0 bytes.
-            "-movflags", "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof",
+            // frag_discont (seek only): with delay_moov the muxer writes every
+            // fragment's tfdt from 0 and parks the -output_ts_offset in a 2-entry
+            // edit list (empty edit + media edit). libavformat (Chrome's progressive
+            // path) honours that, but Media3's FragmentedMp4Extractor only applies
+            // single-entry edit lists — so on the TV each ?seek=N reload restarted
+            // the position at ~0 ("+10 jumps back to the start") with A/V offset by
+            // the GOP pre-roll. frag_discont puts the absolute time into tfdt and
+            // leaves a single-entry edit; libavformat sees the same timestamps.
+            "-movflags", seekSec > 0
+                ? "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof+frag_discont"
+                : "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof",
             "pipe:1",
         });
 
@@ -398,20 +417,39 @@ internal static class MediaStreamEndpoints
             "pipe:1",
         }) psi.ArgumentList.Add(a);
 
+        System.Diagnostics.Process? p = null;
         try
         {
-            using var p = System.Diagnostics.Process.Start(psi)!;
-            http.Response.ContentType = contentType;
+            p = System.Diagnostics.Process.Start(psi)!;
+            // Drain stderr alongside stdout (a full stderr pipe stalls ffmpeg),
+            // and buffer the output — a subtitle track is small — so a failed
+            // conversion can be answered as a failure. Streaming straight to the
+            // response committed a 200 + "public, max-age=3600" up front: a
+            // bitmap track (PGS/VobSub/DVB can't become text) or a broken stream
+            // came back as an EMPTY subtitle that browsers then cached for an hour.
+            var stderr = p.StandardError.ReadToEndAsync(http.RequestAborted);
+            using var buf = new MemoryStream();
+            await p.StandardOutput.BaseStream.CopyToAsync(buf, http.RequestAborted);
+            await p.WaitForExitAsync(http.RequestAborted);
+            var err = await stderr;
+            if (p.ExitCode != 0 || buf.Length == 0)
+            {
+                logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
+                    fullPath, track, p.ExitCode, err.Trim());
+                http.Response.Headers.CacheControl = "no-store";
+                return Results.Problem("This subtitle track can't be converted to text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
             http.Response.Headers.CacheControl = "public, max-age=3600";
-            await p.StandardOutput.BaseStream.CopyToAsync(http.Response.Body, http.RequestAborted);
-            await p.WaitForExitAsync();
-            return Results.Empty;
+            return Results.Bytes(buf.ToArray(), contentType);
         }
         catch (Exception ex)
         {
+            try { if (p is { HasExited: false }) p.Kill(true); } catch { }
             logger.LogError(ex, "ffmpeg subtitle extract failed for {Path} track {Track}", fullPath, track);
             return Results.StatusCode(500);
         }
+        finally { p?.Dispose(); }
     })
     .WithName("GetSubtitle")
     .AllowAnonymous();

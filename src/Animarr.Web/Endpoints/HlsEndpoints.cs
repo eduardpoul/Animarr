@@ -67,6 +67,7 @@ internal static class HlsEndpoints
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
             HlsSessionService hls,
+            HttpContext http,
             ILoggerFactory loggerFactory) =>
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
@@ -105,12 +106,18 @@ internal static class HlsEndpoints
             // where maxHeight/maxBitrate actually apply. Same for an external dub,
             // which needs the HLS mux to combine foreign audio with the video.
             bool wantCap = (maxHeight ?? 0) > 0 || (maxBitrate ?? 0) > 0;
+            // A non-default audio track likewise needs the HLS mux: Direct Play
+            // serves the raw file (the browser plays ITS default track) and the
+            // /api/video remux maps 0:a:0 — so picking e.g. the Russian dub in the
+            // HUD restarted onto the same native path and kept the Japanese audio
+            // while the picker showed Russian as selected.
+            bool wantTrack = (audioTrackIndex ?? 0) > 0;
             IReadOnlySet<string>? caps = string.IsNullOrWhiteSpace(nativeCaps)
                 ? null
                 : nativeCaps.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                             .Select(t => t.ToLowerInvariant())
                             .ToHashSet();
-            var decision = externalAudioFull is null && !wantCap
+            var decision = externalAudioFull is null && !wantCap && !wantTrack
                 ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, nativeCaps: caps)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             if (decision.DirectPlay && decision.DirectUrl is not null)
@@ -176,7 +183,10 @@ internal static class HlsEndpoints
                 maxHeight:        Math.Max(0, maxHeight ?? 0),
                 externalAudioPath: externalAudioFull,
                 clientHevc:       wantHevc,
-                maxBitrate:       Math.Max(0, maxBitrate ?? 0));
+                maxBitrate:       Math.Max(0, maxBitrate ?? 0),
+                // An abandoned start (rapid Next/Prev, player closed mid-start)
+                // stops its ffmpeg instead of encoding on for the 5-min idle GC.
+                ct:               http.RequestAborted);
             return Results.Ok(new
             {
                 token        = result.Token,
@@ -194,6 +204,10 @@ internal static class HlsEndpoints
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
                 output       = result.Output,
             });
+        }
+        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
+        {
+            return Results.Empty;   // client went away; StartAsync already stopped the session
         }
         catch (Exception ex)
         {
