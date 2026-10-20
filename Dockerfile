@@ -1,11 +1,20 @@
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# .NET images pinned to an exact patch + distro. The floating `10.0` tags
+# meant a deploy reused whatever 10.0.x the build host had cached (no
+# --pull), silently missing runtime security patches, and would jump to a
+# new Ubuntu the day MCR flips the default — while several stages below
+# assume Noble (glibc 2.39: the Vulkan llama build, the libva overlay). Bump
+# both with each monthly .NET servicing release.
+ARG DOTNET_SDK_TAG=10.0.402-noble
+ARG DOTNET_RUNTIME_TAG=10.0.13-noble
 
-# Install Node.js 22 LTS (apt ships Node 18 which is too old for
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_TAG} AS build
+
+# Install Node.js 24 LTS (apt ships Node 18 which is too old for
 # @tailwindcss/oxide 4.x used by Animarr.Web's stylesheet build).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
@@ -59,18 +68,24 @@ RUN dotnet publish "Animarr.Web.csproj" -c Release -o /app/publish /p:UseAppHost
 #   • Vulkan build — only invoked after the entrypoint installs libvulkan1 at
 #     runtime (ANIMARR_LLM_VULKAN=1). The binaries cost only tens of MB; the
 #     heavy Vulkan userspace (mesa) is NOT baked in — it's installed on demand.
-FROM ghcr.io/ggml-org/llama.cpp:server AS llama-cpu
+# Both pinned to llama.cpp b11669 (= release v0.7.0): the CPU image by tag +
+# digest, the Vulkan source checkout by the same tag, so the two builds match
+# and a deploy can't silently pick up whatever upstream pushed that day.
+# To bump: pick a `server-bNNNN` tag on ghcr.io/ggml-org/llama.cpp, update the
+# tag + digest here and LLAMA_CPP_REF below.
+FROM ghcr.io/ggml-org/llama.cpp:server-b11669@sha256:8ffe0d28ff5261cc2f78ca1f67db1515bc2529b904a3c25f5b24f4cedfc3411d AS llama-cpu
 
 # Vulkan llama-server is built FROM SOURCE on the same Ubuntu 24.04 / glibc 2.39
 # base as the runtime image. The prebuilt :server-vulkan image is linked against
 # a newer glibc (2.43) and fails to load in dotnet/aspnet:10.0. Build tooling
 # stays in this throwaway stage; only the binary + its .so reach the final image.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS llama-vulkan
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_TAG} AS llama-vulkan
+ARG LLAMA_CPP_REF=b11669
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git cmake ninja-build build-essential \
         libvulkan-dev glslc glslang-tools spirv-headers spirv-tools && \
     rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /src/llama.cpp && \
+RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp /src/llama.cpp && \
     cmake -S /src/llama.cpp -B /src/llama.cpp/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF && \
     cmake --build /src/llama.cpp/build -j --target llama-server && \
@@ -82,20 +97,26 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /src/llama.cpp && 
 # -------------------------------------------------------------------
 # Ubuntu Noble's apt ffmpeg is 6.1.1, vulnerable to CVE-2026-8461 ("PixelSmash":
 # heap out-of-bounds write in the MagicYUV decoder, CVSS 8.8), fixed upstream in
-# 8.1.2 — and Ubuntu has shipped no backport. We instead drop in the static
-# n8.1.2 build from BtbN/FFmpeg-Builds: the Linux build the official
+# 8.1.2 — and Ubuntu has shipped no backport. We instead drop in a static
+# release/8.1 build from BtbN/FFmpeg-Builds: the Linux build the official
 # ffmpeg.org/download page recommends, maintained by FFmpeg upstream developer
 # Timo Rothenpieler ("BtbN"). Pinned to a dated autobuild tag + sha256 so the
 # binary is reproducible and changes only when we consciously bump it. The gpl
 # static binaries link only glibc (verified via ldd); hwaccel (vaapi/nvenc/qsv)
 # is dlopen'd at runtime against the driver libs the final stage installs.
+# Current pin: n8.1.3-9 (keeps the 8.1.2 MagicYUV fix, adds the 8.1.3
+# backports for lcldec / rscc / tiff / zmqsend).
 #
 # To bump: pick a newer tag at https://github.com/BtbN/FFmpeg-Builds/releases
-# and update FFMPEG_URL + FFMPEG_SHA256. The `-version` check below fails the
-# build if the archive is corrupt or the wrong arch.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS ffmpeg
-ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-13-52/ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz
-ARG FFMPEG_SHA256=0c6772b77fdbf127cc1498eca39a40e20b88817f36b66d553cebcfcca32b6d78
+# and update FFMPEG_URL + FFMPEG_SHA256 (the release's checksums.sha256 lists
+# it). ONLY pin a month-end build (autobuild-YYYY-MM-<last day>-…): BtbN keeps
+# those for two years but deletes daily builds after 14 days — the previous
+# mid-month pin (autobuild-2026-06-23) 404'd that way and broke the build.
+# The `-version` check below fails the build if the archive is corrupt or the
+# wrong arch.
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_RUNTIME_TAG} AS ffmpeg
+ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl xz-utils ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
@@ -113,7 +134,7 @@ RUN apt-get update && \
 # (a tiny meson project, libdrm the only dep) and overlay it over the distro
 # libs in the final stage. Same soname (libva.so.2) — mesa's radeonsi VA
 # driver keeps working, ABI is backward compatible.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS libva
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_RUNTIME_TAG} AS libva
 ARG LIBVA_URL=https://github.com/intel/libva/archive/refs/tags/2.22.0.tar.gz
 ARG LIBVA_SHA256=467c418c2640a178c6baad5be2e00d569842123763b80507721ab87eb7af8735
 RUN apt-get update && \
@@ -129,7 +150,7 @@ RUN apt-get update && \
     ninja -C build install
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_RUNTIME_TAG} AS final
 WORKDIR /app
 
 # ffmpeg + ffprobe — needed by /api/video (MKV → fragmented-MP4 remux for
