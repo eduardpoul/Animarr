@@ -1151,7 +1151,7 @@ else
         var next = NextEpisodeOnDisk(_playerSeason, _playerEpisode);
         if (next is not { } n) return Task.CompletedTask;
         if (_playerEpisode is not null)
-            _ = ToggleEpisodeWatched(_playerSeason ?? 1, _playerEpisode.Value, true);
+            _ = ToggleEpisodeWatched(_playerSeason ?? 1, _playerEpisode.Value, true, offerMarkPrevious: false);
         return PlayEpisodeAsync(n.Season, n.Episode);
     }
 
@@ -1365,7 +1365,7 @@ else
         }
     }
 
-    private async Task ToggleEpisodeWatched(int season, int episode, bool watched)
+    private async Task ToggleEpisodeWatched(int season, int episode, bool watched, bool offerMarkPrevious = true)
     {
         if (_item is null) return;
         try
@@ -1382,8 +1382,10 @@ else
             // Marking an episode watched while earlier on-disk episodes are still
             // unwatched is almost always "I watched up to here" — offer to mark
             // the gap. Only on mark-watched (not un-mark), and only when there's
-            // actually a gap to fill.
-            if (watched)
+            // actually a gap to fill. Not from the player's Next/auto-advance:
+            // the dialog sits above the player (z 9500 > 9000) and popped up over
+            // the next episode's opening.
+            if (watched && offerMarkPrevious)
             {
                 _markPrevTargets = PreviousUnwatchedOnDisk(season, episode);
                 _showMarkPrev    = _markPrevTargets.Count > 0;
