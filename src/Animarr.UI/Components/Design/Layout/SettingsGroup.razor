@@ -1,0 +1,40 @@
+@*
+    SettingsGroup — a titled stack of SettingsCards (Windows 11 settings
+    section). Cards sit 4px apart; groups 28px apart. Title + description
+    sit on the left of the head, optional Actions on the right.
+*@
+
+@namespace Animarr.UI.Components.Design.Layout
+
+<section class="fs-group" aria-label="@(string.IsNullOrEmpty(Title) ? null : Title)">
+    @if (!string.IsNullOrEmpty(Title) || !string.IsNullOrEmpty(Description) || Actions is not null)
+    {
+        <div class="fs-group__head">
+            <div class="fs-group__lead">
+                @if (!string.IsNullOrEmpty(Title))
+                {
+                    <h2 class="fs-group__title">@Title</h2>
+                }
+                @if (!string.IsNullOrEmpty(Description))
+                {
+                    <p class="fs-group__desc">@Description</p>
+                }
+            </div>
+            @if (Actions is not null)
+            {
+                <div class="fs-group__actions">@Actions</div>
+            }
+        </div>
+    }
+    <div class="fs-group__cards">
+        @ChildContent
+    </div>
+</section>
+
+@code {
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Description { get; set; }
+    /// <summary>Optional buttons on the right of the group head (e.g. "Add user").</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -16,7 +16,7 @@
 @if (_active is not null)
 {
     var item = _active;
-    var pager = PagerStyle; // f | g | h (computed below)
+    var pager = PagerStyle;
     <section class="@($"d-chero d-chero--pager-{pager}")"
              @ontouchstart="OnTouchStart" @ontouchend="OnTouchEnd">
         <div class="d-chero__bg">
@@ -81,75 +81,28 @@
            section. *@
         @if (Items.Length > 1)
         {
-            @if (pager == "f")
-            {
-                <nav class="d-chero__pager" role="tablist" aria-label="@L["continue.slots_aria"]">
+            <nav class="d-chero__pager-g" role="tablist" aria-label="@L["continue.slots_aria"]">
+                <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
+                        @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
+                    <DIcon Name="chev-l" Size="20" />
+                </button>
+                <div class="d-chero__pager-dashes">
                     @for (int i = 0; i < Items.Length; i++)
                     {
                         var idx = i;
-                        var it  = Items[idx];
                         var active = idx == _index;
                         <button type="button"
-                                class="@($"d-chero__pager-slot tv-focus {(active ? "is-active" : "")}")"
+                                class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
                                 @onclick="@(() => SetActive(idx))"
                                 role="tab" aria-selected="@active.ToString().ToLower()"
-                                title="@it.Title">
-                            <span class="d-chero__pager-stroke"></span>
-                            <span class="d-chero__pager-name">@it.Title</span>
-                        </button>
+                                aria-label="@L.Get("continue.slot_n_aria", idx + 1)"></button>
                     }
-                </nav>
-            }
-            else if (pager == "g")
-            {
-                <nav class="d-chero__pager-g" role="tablist" aria-label="@L["continue.slots_aria"]">
-                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
-                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
-                        <DIcon Name="chev-l" Size="20" />
-                    </button>
-                    <div class="d-chero__pager-dashes">
-                        @for (int i = 0; i < Items.Length; i++)
-                        {
-                            var idx = i;
-                            var active = idx == _index;
-                            <button type="button"
-                                    class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
-                                    @onclick="@(() => SetActive(idx))"
-                                    role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)"></button>
-                        }
-                    </div>
-                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
-                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
-                        <DIcon Name="chev-r" Size="20" />
-                    </button>
-                </nav>
-            }
-            else // pager == "h"
-            {
-                <nav class="d-chero__pager-h" role="tablist" aria-label="@L["continue.slots_aria"]">
-                    <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="PrevSlide" aria-label="@L["continue.prev_slot_aria"]">
-                        <DIcon Name="chev-l" Size="20" />
-                    </button>
-                    <div class="d-chero__pager-pills">
-                        @for (int i = 0; i < Items.Length; i++)
-                        {
-                            var idx = i;
-                            var active = idx == _index;
-                            <button type="button"
-                                    class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
-                                    @onclick="@(() => SetActive(idx))"
-                                    role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@L.Get("continue.slot_n_aria", idx + 1)">@(idx + 1)</button>
-                        }
-                    </div>
-                    <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
-                        <DIcon Name="chev-r" Size="20" />
-                    </button>
-                </nav>
-            }
+                </div>
+                <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
+                        @onclick="NextSlideManual" aria-label="@L["continue.next_slot_aria"]">
+                    <DIcon Name="chev-r" Size="20" />
+                </button>
+            </nav>
         }
     </section>
 }
@@ -175,24 +128,9 @@
             ? $"/catalog/{it.MediaItemId}?s={it.Season ?? 1}&e={e}"
             : $"/catalog/{it.MediaItemId}?play=1";
 
-    /// <summary>Lower-cased pager style: "f" / "g" (default) / "h". Read on every
-    /// render so a change to <c>UserCtx.Preferences.HeroPagerStyle</c> from
-    /// ProfilePanel takes effect without re-mounting the hero. Unknown/empty values
-    /// fall back to "g" (Chevrons) so a stale client can't render a missing branch.</summary>
-    private string PagerStyle
-    {
-        get
-        {
-            var s = UserCtx.Preferences?.HeroPagerStyle;
-            if (string.IsNullOrWhiteSpace(s)) return "g";
-            return s.ToLowerInvariant() switch
-            {
-                "f" => "f",
-                "h" => "h",
-                _   => "g",
-            };
-        }
-    }
+    // Fluent redesign: one pager (dashes + chevrons, the old "g"); the
+    // F/H variants and their picker are gone.
+    private const string PagerStyle = "g";
 
     protected override void OnInitialized()
     {

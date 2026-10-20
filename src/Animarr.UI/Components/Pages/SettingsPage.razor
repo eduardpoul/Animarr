@@ -1,0 +1,253 @@
+@*
+    SettingsPage — single Fluent 2 settings hub (Windows 11 "Settings" app
+    layout). Replaces the profile drawer and the old /server page.
+
+      ┌ (avatar) Name / email ┐  Section title
+      │ Personal               │  ┌ card ──────────────────────┐
+      │   Account · Servers ·  │  │ …                           │
+      │   Appearance · Sound   │  └─────────────────────────────┘
+      │ Server  (admin only)   │
+      │   Users · Categories · │
+      │   Folders · AI/LLM ·   │
+      │   Downloads · Metadata │
+      │   Playback · About     │
+      └────────────────────────┘
+
+    Phones: the left column is a drill-down list (plus Downloads / Pair a TV
+    / Sign out, which the old profile drawer hosted); picking a section flips
+    to its content with a back arrow.
+
+    Deep links: /settings?section=<key>; legacy /server?panel=<key>&openForm=user.
+*@
+
+@page "/settings"
+@page "/server"
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@implements IDisposable
+
+<PageTitle>Animarr</PageTitle>
+
+<div class="fs-page" data-mobile-detail="@(_mobileDetail ? "true" : "false")">
+    <aside class="fs-page__nav">
+        @if (UserCtx.Me is { } me)
+        {
+            <button type="button" class="fs-page__me tv-focus" @onclick="@(() => Select("account"))">
+                <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="lg" />
+                <span class="fs-page__me-text">
+                    <span class="fs-page__me-name">@me.User.Name</span>
+                    <span class="fs-page__me-sub">@(string.IsNullOrEmpty(me.User.Email) ? me.User.Username : me.User.Email)</span>
+                </span>
+            </button>
+        }
+
+        <nav aria-label="@L["settings.page_title"]">
+            <div class="fs-page__group">@L["settings.group_personal"]</div>
+            @foreach (var s in Personal)
+            {
+                @NavItem(s)
+            }
+
+            @if (IsAdmin)
+            {
+                <div class="fs-page__group">@L["settings.group_server"]</div>
+                @foreach (var s in Server)
+                {
+                    @NavItem(s)
+                }
+            }
+        </nav>
+
+        @* Phone-only shortcuts — the profile drawer used to be the phone's
+           navigation hub, so its extra entries live at the end of the list. *@
+        <div class="fs-page__extras">
+            @if (UserCtx.Can(p => p.UploadContent))
+            {
+                <a href="downloads" class="fs-page__item tv-focus">
+                    <span class="fs-page__item-ic"><DIcon Name="download" Size="20" /></span>
+                    <span class="fs-page__item-label">@L["profile.downloads"]</span>
+                    <DIcon Name="chev-r" Size="16" />
+                </a>
+            }
+            @if (!OperatingSystem.IsBrowser())
+            {
+                <a href="pair-confirm" class="fs-page__item tv-focus">
+                    <span class="fs-page__item-ic"><DIcon Name="qr-code" Size="20" /></span>
+                    <span class="fs-page__item-label">@L["profile.pair_tv"]</span>
+                    <DIcon Name="chev-r" Size="16" />
+                </a>
+            }
+            <button type="button" class="fs-page__item fs-page__item--danger tv-focus" @onclick="SignOut">
+                <span class="fs-page__item-ic"><DIcon Name="logout" Size="20" /></span>
+                <span class="fs-page__item-label">@L["profile.sign_out"]</span>
+            </button>
+        </div>
+    </aside>
+
+    <section class="fs-page__content" aria-labelledby="fs-section-title">
+        <header class="fs-page__head">
+            <button type="button" class="fs-page__back tv-focus"
+                    @onclick="@(() => _mobileDetail = false)"
+                    aria-label="@L["common.back"]">
+                <DIcon Name="arrow-l" Size="20" />
+            </button>
+            <div class="fs-page__crumb">
+                <span class="fs-page__crumb-root">@L["settings.page_title"]</span>
+                <DIcon Name="chev-r" Size="16" />
+            </div>
+            <h1 id="fs-section-title" class="fs-page__title">@L[Current.LabelKey]</h1>
+        </header>
+
+        <div class="fs-page__body">
+            @switch (Current.Key)
+            {
+                case "account":
+                case "servers":
+                case "appearance":
+                case "playback":
+                    <PersonalSettings Section="@Current.Key" />
+                    break;
+                case "users":
+                    <UsersRolesPanel OpenCreateForm="@_openCreateUserForm" />
+                    break;
+                case "categories":
+                    <CategoriesPanel />
+                    break;
+                case "folders":
+                    <Settings EmbeddedTab="root_folders" />
+                    break;
+                case "llm":
+                    <Settings EmbeddedTab="ai" />
+                    break;
+                case "downloads":
+                    <Settings EmbeddedTab="torrent" />
+                    break;
+                case "metadata":
+                    <Settings EmbeddedTab="metadata" />
+                    break;
+                case "player":
+                    <Settings EmbeddedTab="player" />
+                    break;
+                case "about":
+                    <AboutPanel />
+                    break;
+            }
+        </div>
+    </section>
+</div>
+
+@code {
+    private sealed record Sec(string Key, string LabelKey, string Icon);
+
+    private static readonly Sec[] Personal =
+    {
+        new("account",    "profile.tab_identity",           "user"),
+        new("servers",    "profile.tab_servers",            "server"),
+        new("appearance", "profile.tab_appearance",         "paint"),
+        new("playback",   "settings.section_playback",      "language"),
+    };
+
+    private static readonly Sec[] Server =
+    {
+        new("users",      "server_settings.tab_users_label",      "users"),
+        new("categories", "server_settings.tab_categories_label", "tag"),
+        new("folders",    "server_settings.tab_folders_label",    "folder"),
+        new("llm",        "server_settings.tab_llm_label",        "bot"),
+        new("downloads",  "server_settings.tab_downloads_label",  "download"),
+        new("metadata",   "server_settings.tab_meta_label",       "database"),
+        new("player",     "settings.section_player",              "video"),
+        new("about",      "server_settings.tab_about_label",      "info"),
+    };
+
+    private string _section = "account";
+    private bool _mobileDetail;
+    private bool _openCreateUserForm;
+
+    private bool IsAdmin => UserCtx.Can(p => p.SystemSettings);
+
+    /// <summary>The requested section, or Account while the user lacks
+    /// admin rights. Resolved per render (not in ApplyQuery) because a deep
+    /// link can land before UserContextState has loaded the permissions.</summary>
+    private Sec Current =>
+        (!IsAdmin && Server.Any(s => s.Key == _section) ? null
+            : Personal.Concat(Server).FirstOrDefault(s => s.Key == _section)) ?? Personal[0];
+
+    protected override void OnInitialized()
+    {
+        ApplyQuery(Nav.Uri);
+        Nav.LocationChanged += OnLocationChanged;
+        UserCtx.OnChange += OnUserChanged;
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        UserCtx.OnChange -= OnUserChanged;
+    }
+
+    private void OnUserChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        var path = new Uri(e.Location).AbsolutePath;
+        if (!path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("/server", StringComparison.OrdinalIgnoreCase)) return;
+        ApplyQuery(e.Location);
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Pick the section from ?section= (or the legacy ?panel= of
+    /// the old /server page). A query-addressed section opens straight into
+    /// its content on phones; a bare /settings shows the list there.</summary>
+    private void ApplyQuery(string uri)
+    {
+        var u = new Uri(uri);
+        var q = System.Web.HttpUtility.ParseQueryString(u.Query);
+        var isServerRoute = u.AbsolutePath.StartsWith("/server", StringComparison.OrdinalIgnoreCase);
+        var key = q["section"] ?? q["panel"];
+        key = key switch
+        {
+            "meta" or "patterns" => "metadata",
+            "identity"           => "account",
+            "audio" or "settings"=> "playback",
+            _                    => key,
+        };
+
+        if (string.IsNullOrEmpty(key))
+            key = isServerRoute ? "users" : null;
+
+        if (key is not null && Personal.Concat(Server).Any(s => s.Key == key))
+        {
+            _section = key;
+            _mobileDetail = true;
+        }
+
+        if (string.Equals(q["openForm"], "user", StringComparison.OrdinalIgnoreCase))
+            _openCreateUserForm = true;
+    }
+
+    private void Select(string key)
+    {
+        _section = key;
+        _mobileDetail = true;
+    }
+
+    private RenderFragment NavItem(Sec s) => __builder =>
+    {
+        var active = Current.Key == s.Key;
+        <button type="button"
+                class="@($"fs-page__item tv-focus {(active ? "is-active" : "")}")"
+                aria-current="@(active ? "page" : null)"
+                @onclick="@(() => Select(s.Key))">
+            <span class="fs-page__item-ic"><DIcon Name="@s.Icon" Size="20" /></span>
+            <span class="fs-page__item-label">@L[s.LabelKey]</span>
+            <span class="fs-page__item-chev"><DIcon Name="chev-r" Size="16" /></span>
+        </button>
+    };
+
+    private async Task SignOut()
+    {
+        await UserCtx.SignOutAsync();
+        Nav.NavigateTo("/welcome");
+    }
+}

@@ -1,0 +1,135 @@
+@*
+    SettingsCard — Fluent 2 / Windows 11 settings row.
+
+      ┌──────────────────────────────────────────────────────────┐
+      │ [icon]  Title                               [control] ⌄ │
+      │         Description                                      │
+      ├──────────────────────────────────────────────────────────┤
+      │         Body (expander content / extra rows)             │
+      └──────────────────────────────────────────────────────────┘
+
+    Modes:
+      • plain      — ChildContent is the control on the right (switch, select…)
+      • Href       — the whole row is a link with a trailing chevron
+      • OnClick    — the whole row is a button with a trailing chevron
+      • Expandable — chevron toggles Body; ChildContent stays an inline control
+    Body without Expandable renders always-open under the header.
+*@
+
+@namespace Animarr.UI.Components.Design.Layout
+
+<div class="@CssClass" id="@Id">
+    @if (!string.IsNullOrEmpty(Href))
+    {
+        <a href="@Href" class="fs-card__head fs-card__head--action tv-focus"
+           target="@(External ? "_blank" : null)" rel="@(External ? "noopener" : null)">
+            @Lead()
+            @if (ChildContent is not null) { <span class="fs-card__value">@ChildContent</span> }
+            <span class="fs-card__chev" aria-hidden="true"><DIcon Name="@(External ? "external" : "chev-r")" Size="16" /></span>
+        </a>
+    }
+    else if (OnClick.HasDelegate)
+    {
+        <button type="button" class="fs-card__head fs-card__head--action tv-focus" @onclick="OnClick" disabled="@Disabled">
+            @Lead()
+            @if (ChildContent is not null) { <span class="fs-card__value">@ChildContent</span> }
+            @if (!HideChevron)
+            {
+                <span class="fs-card__chev" aria-hidden="true"><DIcon Name="chev-r" Size="16" /></span>
+            }
+        </button>
+    }
+    else if (Expandable)
+    {
+        <div class="fs-card__head">
+            <button type="button" class="fs-card__hit tv-focus" @onclick="Toggle"
+                    aria-expanded="@(_expanded ? "true" : "false")">
+                @Lead()
+            </button>
+            @if (ChildContent is not null) { <div class="fs-card__ctrl">@ChildContent</div> }
+            <button type="button" class="fs-card__toggle tv-focus" @onclick="Toggle"
+                    aria-expanded="@(_expanded ? "true" : "false")"
+                    aria-label="@Title">
+                <DIcon Name="chev-d" Size="16" />
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="fs-card__head">
+            @Lead()
+            @if (ChildContent is not null) { <div class="fs-card__ctrl">@ChildContent</div> }
+        </div>
+    }
+
+    @if (Body is not null && (!Expandable || _expanded))
+    {
+        <div class="@($"fs-card__body {(string.IsNullOrEmpty(Icon) || Leading is not null ? "" : "fs-card__body--indent")}")">@Body</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Icon { get; set; }
+    /// <summary>Custom leading visual (avatar, thumbnail) in place of <see cref="Icon"/>.</summary>
+    [Parameter] public RenderFragment? Leading { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Description { get; set; }
+    /// <summary>Trailing control (plain / expandable) or trailing value text (link / button).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>Content under the header — expander body or always-visible extra rows.</summary>
+    [Parameter] public RenderFragment? Body { get; set; }
+    [Parameter] public RenderFragment? Extra { get; set; }
+    [Parameter] public bool Expandable { get; set; }
+    /// <summary>Initial state (uncontrolled), or the bound state when
+    /// <see cref="ExpandedChanged"/> is supplied (controlled).</summary>
+    [Parameter] public bool Expanded { get; set; }
+    [Parameter] public EventCallback<bool> ExpandedChanged { get; set; }
+    [Parameter] public string? Href { get; set; }
+    /// <summary>Href opens in a new tab and shows the external-link glyph.</summary>
+    [Parameter] public bool External { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+    [Parameter] public bool HideChevron { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>"danger" tints title + icon (destructive actions such as sign out).</summary>
+    [Parameter] public string? Tone { get; set; }
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private bool _expanded;
+    private bool _initialised;
+
+    protected override void OnParametersSet()
+    {
+        if (ExpandedChanged.HasDelegate || !_initialised) _expanded = Expanded;
+        _initialised = true;
+    }
+
+    private async Task Toggle()
+    {
+        if (ExpandedChanged.HasDelegate) await ExpandedChanged.InvokeAsync(!_expanded);
+        else _expanded = !_expanded;
+    }
+
+    private string CssClass =>
+        $"fs-card {(Expandable && _expanded ? "is-expanded" : "")} {(Tone is { Length: > 0 } t ? "fs-card--" + t : "")} {Class}".Trim();
+
+    private RenderFragment Lead() => __builder =>
+    {
+        @if (Leading is not null)
+        {
+            <span class="fs-card__lead" aria-hidden="true">@Leading</span>
+        }
+        else if (!string.IsNullOrEmpty(Icon))
+        {
+            <span class="fs-card__ic" aria-hidden="true"><DIcon Name="@Icon" Size="20" /></span>
+        }
+        <span class="fs-card__text">
+            <span class="fs-card__title">@Title</span>
+            @if (!string.IsNullOrEmpty(Description))
+            {
+                <span class="fs-card__desc">@Description</span>
+            }
+            @Extra
+        </span>
+    };
+}

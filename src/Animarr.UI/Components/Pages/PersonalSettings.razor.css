@@ -1,0 +1,258 @@
+/* ============================================================
+   PersonalSettings — the Personal group of /settings. Layout comes
+   from SettingsGroup / SettingsCard; this file only styles the bits
+   that aren't a plain card row.
+   ============================================================ */
+
+/* ── PIN keypad overlay (fast user switch) ───────────────── */
+.d-pin-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 211;
+    display: grid;
+    place-items: center;
+    background: var(--scrim);
+    animation: ps-fade 0.2s ease;
+}
+@keyframes ps-fade {
+    from { opacity: 0; } to { opacity: 1; }
+}
+
+/* ── Account header ("Your info") ────────────────────────── */
+.ps-hero {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin: 0 0 28px;
+}
+.ps-hero__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ps-hero__name {
+    font-family: var(--font-display);
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    color: var(--text);
+}
+.ps-hero__sub {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ps-hero__meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-faint);
+}
+
+/* ── Switch-user strip ───────────────────────────────────── */
+.ps-users {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.ps-user {
+    appearance: none;
+    width: 120px;
+    padding: 14px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.ps-user:hover:not([disabled]) { background: var(--surface-2); }
+.ps-user[disabled] { cursor: default; }
+.ps-user.is-me {
+    border-color: var(--accent-hi);
+    box-shadow: inset 0 0 0 1px var(--accent-hi);
+}
+.ps-user__avatar { position: relative; display: inline-flex; }
+.ps-user__avatar--add {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px dashed var(--stroke-ctrl-acc);
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+}
+.ps-user__pin {
+    position: absolute;
+    right: -4px;
+    bottom: -2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface-3);
+    color: var(--text);
+    box-shadow: 0 0 0 2px var(--surface);
+}
+.ps-user__name {
+    max-width: 100%;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ps-user--add .ps-user__name { font-weight: 400; color: var(--text-dim); }
+.ps-user__meta {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+.ps-user.is-me .ps-user__meta { color: var(--accent-hi); }
+
+/* ── Theme tiles (dark / light) ──────────────────────────── */
+.ps-themes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.ps-theme {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+}
+.ps-theme__preview {
+    position: relative;
+    width: 164px;
+    height: 100px;
+    box-sizing: border-box;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--th-bg);
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    overflow: hidden;
+    transition: box-shadow var(--motion-fast);
+}
+.ps-theme__nav {
+    width: 26px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--th-text) 8%, transparent);
+}
+.ps-theme__card {
+    flex: 1;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--th-text) 6%, transparent);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.ps-theme__sample {
+    font-family: var(--font-display);
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--th-text);
+}
+.ps-theme__btn {
+    width: 44px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--th-accent);
+}
+.ps-theme:hover .ps-theme__preview { box-shadow: var(--shadow-8); }
+.ps-theme.is-active .ps-theme__preview {
+    border-color: var(--accent-hi);
+    box-shadow: 0 0 0 1px var(--accent-hi);
+}
+.ps-theme__name { font-size: 14px; line-height: 20px; }
+.ps-theme.is-active .ps-theme__name { font-weight: 600; }
+
+/* ── Primary color swatches + free hue slider ────────────── */
+.ps-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.ps-swatch {
+    appearance: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 0;
+    background: var(--swatch-color);
+    cursor: pointer;
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
+}
+.ps-swatch:hover { transform: scale(1.08); }
+.ps-swatch.is-active {
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text);
+}
+
+.ps-hue-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    max-width: 420px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(90deg,
+        oklch(0.66 0.16 0), oklch(0.66 0.16 60), oklch(0.66 0.16 120),
+        oklch(0.66 0.16 180), oklch(0.66 0.16 240), oklch(0.66 0.16 300),
+        oklch(0.66 0.16 359));
+    outline-offset: 4px;
+}
+.ps-hue-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 4px solid var(--accent);
+    box-shadow: var(--shadow-4);
+    cursor: pointer;
+}
+.ps-hue-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 4px solid var(--accent);
+    box-shadow: var(--shadow-4);
+    cursor: pointer;
+}
+
+/* ── Home sections list ─────────────────────────────────── */
+.ps-hs { cursor: grab; }
+.ps-hs.is-dragging { opacity: 0.6; background: var(--surface-2); }
+.ps-hs.is-off .fs-list__title,
+.ps-hs.is-off .ps-hs__grip { opacity: 0.5; }
+.ps-hs__grip { display: inline-flex; color: var(--text-faint); }
+
+/* ── Misc ───────────────────────────────────────────────── */
+.ps-grow { flex: 1 1 260px; min-width: 0; }
+.ps-field-w { width: 100%; max-width: 360px; }
+.ps-pin-input { width: 140px; letter-spacing: 0.4em; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 639px) {
+    .ps-hero { gap: 14px; }
+    .ps-user { width: calc(50% - 4px); }
+    .ps-theme { flex: 1 1 140px; }
+    .ps-theme__preview { width: 100%; }
+}

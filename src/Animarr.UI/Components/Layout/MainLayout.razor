@@ -8,7 +8,8 @@
         sections, folders, downloads, server settings, AI status + profile
       • MobileShell.razor (< 960px, top strip + bottom tabbar)
       • <main> body
-      • ProfilePanel drawer (Phase 4 — stub for now)
+      • Settings live on the /settings page (SettingsPage) — the profile
+        item at the bottom of the NavPane / the mobile avatar open it
       • LLMStatusPopup (anchored bottom-left next to the NavPane AI item)
       • Toast stack (bottom-right)
 
@@ -51,24 +52,17 @@
         <NavPane ActiveDownloads="_activeDownloads"
                  LlmDone="_llmDone" LlmTotal="_llmTotal"
                  FolderNames="@_folderNames"
-                 OnProfileClickEvent="@(() => OpenProfile(null))"
+                 OnProfileClickEvent="@(() => OpenSettings("account"))"
                  OnLlmClickEvent="@(() => _llmOpen = !_llmOpen)" />
 
         <MobileShell ActiveDownloads="_activeDownloads"
-                     OnProfileClickEvent="@(() => _profileOpen = true)" />
+                     OnProfileClickEvent="@(() => OpenSettings(null))" />
     }
 
     <main class="animarr-main">
         @Body
     </main>
 
-    @* Phase 4 will replace this stub with the full ProfilePanel drawer. *@
-    @if (_profileOpen && UserCtx.Me is not null)
-    {
-        <ProfilePanel IsOpen="_profileOpen"
-                      InitialTab="@_profileInitialTab"
-                      OnCloseEvent="@(() => _profileOpen = false)" />
-    }
 
     <LLMStatusPopup Open="_llmOpen"
                     Done="_llmDone" Total="_llmTotal"
@@ -98,17 +92,11 @@
     private int _llmDone;
     private int _llmTotal;
     private bool _llmPaused;
-    private bool _profileOpen;
-    /// <summary>v5 multi-server: when the TopBar server pill opens the
-    /// ProfilePanel we pre-focus the Identity tab (where the Server section
-    /// lives). null = default tab.</summary>
-    private string? _profileInitialTab;
+    /// <summary>Open the settings hub. Phones land on its section list
+    /// (section null); desktop callers name the section to show.</summary>
+    private void OpenSettings(string? section)
+        => Nav.NavigateTo(section is null ? "/settings" : $"/settings?section={section}");
 
-    private void OpenProfile(string? tab)
-    {
-        _profileInitialTab = tab;
-        _profileOpen = true;
-    }
     private bool _llmOpen;
     private bool _everywhereBackdropStarted;
     private HubConnection? _hub;

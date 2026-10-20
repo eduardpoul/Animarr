@@ -1,7 +1,7 @@
 @*
-    Settings → Root folders list. One row per section, with child + identified
-    + missing counts. Edit/Delete bubble events up to the parent (Settings)
-    which opens the inline dialogs.
+    Settings → Folders list. One SettingsCard per section folder with
+    child / identified / needs-review counts. Edit/Delete bubble events up
+    to the parent (Settings) which opens the dialogs.
 
     Identification refresh subscribes to IdentificationHub.MediaItemChanged
     so changes propagate without page reload (mirrors the
@@ -16,11 +16,14 @@
 
 @if (_loading)
 {
-    <div class="rfl-empty">@L["rootfolders.loading"]</div>
+    <div class="rfl-loading"><Spinner Size="md" /></div>
 }
 else if (_sections.Count == 0)
 {
-    <div class="rfl-empty">@((MarkupString)L["rootfolders.empty_html"])</div>
+    <div class="fs-msgbar fs-msgbar--info">
+        <span class="fs-msgbar__ic"><DIcon Name="info" Size="16" /></span>
+        <span>@((MarkupString)L["rootfolders.empty_html"])</span>
+    </div>
 }
 else
 {
@@ -28,34 +31,39 @@ else
         @foreach (var s in _sections)
         {
             var section = s.Section;
-            <div class="rfl-row">
-                <div class="rfl-row__thumb" style="--hue:@(section.Hue ?? 25);">
-                    <DIcon Name="folder" Size="14" />
-                </div>
-                <div class="rfl-row__text">
-                    <div class="rfl-row__title">@section.Label</div>
-                    <div class="rfl-row__path">@section.Path</div>
-                </div>
-                <div class="rfl-row__pills">
-                    <span class="rfl-pill">@s.Watchers @L["rootfolders.suffix_watchers"]</span>
-                    <span class="rfl-pill rfl-pill--success">@s.Identified @L["rootfolders.suffix_identified"]</span>
-                    @if (s.Missing > 0)
-                    {
-                        <span class="rfl-pill rfl-pill--warn">@s.Missing ?</span>
-                    }
-                </div>
-                <button type="button" class="rfl-btn" @onclick="@(() => RescanAsync(section.Id))">
-                    <DIcon Name="refresh" Size="13" /> @L["rootfolders.btn_rescan"]
-                </button>
-                <div class="rfl-row__icons">
-                    <button type="button" class="rfl-icon" title="@L["rootfolders.tooltip_edit"]" @onclick="@(() => OnEdit.InvokeAsync(section))">
-                        <DIcon Name="pencil" Size="14" />
+            var stat = s;
+            <SettingsCard Title="@section.Label" Description="@section.Path">
+                <Leading>
+                    <span class="rfl-thumb" style="--hue:@(section.Hue ?? 25);"><DIcon Name="folder" Size="16" /></span>
+                </Leading>
+                <Extra>
+                    <span class="rfl-stats">
+                        <span>@L.Get("rootfolders.stat_folders_fmt", stat.Watchers)</span>
+                        <span class="rfl-stats__ok">@L.Get("rootfolders.stat_identified_fmt", stat.Identified)</span>
+                        @if (stat.Missing > 0)
+                        {
+                            <span class="rfl-stats__warn">@L.Get("rootfolders.stat_review_fmt", stat.Missing)</span>
+                        }
+                    </span>
+                </Extra>
+                <ChildContent>
+                    <Btn Variant="solid" Size="md" Loading="@_rescanning.Contains(section.Id)"
+                         OnClick="@(() => RescanAsync(section.Id))">
+                        @if (!_rescanning.Contains(section.Id)) { <DIcon Name="refresh" Size="16" /> }
+                        @L["rootfolders.btn_rescan"]
+                    </Btn>
+                    <button type="button" class="fs-icon-btn tv-focus"
+                            title="@L["rootfolders.tooltip_edit"]" aria-label="@L["rootfolders.tooltip_edit"]"
+                            @onclick="@(() => OnEdit.InvokeAsync(section))">
+                        <DIcon Name="pencil" Size="16" />
                     </button>
-                    <button type="button" class="rfl-icon rfl-icon--danger" title="@L["rootfolders.tooltip_remove"]" @onclick="@(() => OnDelete.InvokeAsync(section))">
-                        <DIcon Name="trash" Size="14" />
+                    <button type="button" class="fs-icon-btn fs-icon-btn--danger tv-focus"
+                            title="@L["rootfolders.tooltip_remove"]" aria-label="@L["rootfolders.tooltip_remove"]"
+                            @onclick="@(() => OnDelete.InvokeAsync(section))">
+                        <DIcon Name="trash" Size="16" />
                     </button>
-                </div>
-            </div>
+                </ChildContent>
+            </SettingsCard>
         }
     </div>
 }
@@ -72,6 +80,7 @@ else
     private List<SectionStat> _sections = new();
     private int _lastReloadToken = -1;
     private HubConnection? _hub;
+    private readonly HashSet<Guid> _rescanning = new();
 
     private sealed class SectionStat
     {
@@ -147,12 +156,14 @@ else
         // transaction. Here we delegate to two endpoints: ScanFolderAsync kicks
         // off filesystem discovery on the server (which auto-creates children
         // and queues identification jobs for them), then we reload.
+        if (!_rescanning.Add(sectionId)) return;
         try
         {
             await Api.ScanFolderAsync(sectionId);
         }
         catch { /* swallow — UI is best-effort */ }
         await LoadAsync();
+        _rescanning.Remove(sectionId);
     }
 
     private async Task ConnectHubAsync()

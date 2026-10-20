@@ -1,0 +1,199 @@
+/* ============================================================
+   SettingsPage — Windows 11 "Settings" layout on Fluent 2 tokens.
+   Desktop: sticky section nav (account card + groups) | content.
+   Phones (< 960px): drill-down list ⇄ section content.
+   ============================================================ */
+
+.fs-page {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 32px;
+    max-width: 1280px;
+    margin: 0 auto;
+    align-items: start;
+}
+/* Mid-size windows: give the content column the room. */
+@media (min-width: 960px) and (max-width: 1279px) {
+    .fs-page { grid-template-columns: 232px minmax(0, 1fr); gap: 24px; }
+}
+
+/* ── Left column ────────────────────────────────────────── */
+.fs-page__nav {
+    position: sticky;
+    top: var(--main-pad-top);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fs-page__me {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 10px 16px;
+    margin-bottom: 4px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-card);
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.fs-page__me:hover { background: var(--ink-1); }
+.fs-page__me-text { display: flex; flex-direction: column; min-width: 0; }
+.fs-page__me-name {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fs-page__me-sub {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fs-page__group {
+    padding: 14px 10px 4px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    color: var(--text-faint);
+}
+
+.fs-page__item {
+    appearance: none;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 36px;
+    padding: 0 10px;
+    box-sizing: border-box;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--motion-fast);
+}
+.fs-page__item:hover  { background: var(--ink-2); color: var(--text); }
+.fs-page__item:active { background: var(--ink-3); }
+.fs-page__item.is-active {
+    background: var(--ink-3);
+    font-weight: 600;
+}
+.fs-page__item.is-active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 16px;
+    margin-top: -8px;
+    border-radius: 2px;
+    background: var(--accent-hi);
+}
+.fs-page__item.is-active .fs-page__item-ic { color: var(--accent-hi); }
+.fs-page__item-ic {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+}
+.fs-page__item-label { flex: 1; min-width: 0; }
+.fs-page__item-chev { display: none; color: var(--text-faint); }
+.fs-page__item--danger,
+.fs-page__item--danger .fs-page__item-ic { color: var(--danger); }
+
+/* Phone-only shortcuts (Downloads / Pair a TV / Sign out). */
+.fs-page__extras { display: none; }
+
+/* ── Right column ───────────────────────────────────────── */
+.fs-page__content { min-width: 0; }
+
+.fs-page__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 20px;
+}
+.fs-page__back { display: none; }
+.fs-page__crumb {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-faint);
+}
+.fs-page__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.fs-page__body {
+    max-width: 1000px;
+}
+
+/* ── Phones / narrow tablets — drill-down ───────────────── */
+@media (max-width: 959px) {
+    .fs-page {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+    }
+    .fs-page__nav { position: static; }
+    .fs-page__item {
+        min-height: 52px;
+        padding: 0 14px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin-bottom: 4px;
+    }
+    .fs-page__item.is-active { background: var(--surface); font-weight: 400; }
+    .fs-page__item.is-active::before { display: none; }
+    .fs-page__item.is-active .fs-page__item-ic { color: inherit; }
+    .fs-page__item-chev { display: inline-flex; }
+    .fs-page__extras {
+        display: flex;
+        flex-direction: column;
+        margin-top: 20px;
+    }
+
+    .fs-page[data-mobile-detail="false"] .fs-page__content { display: none; }
+    .fs-page[data-mobile-detail="true"]  .fs-page__nav     { display: none; }
+
+    .fs-page__head { margin: 0 0 16px; }
+    .fs-page__back {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        margin-left: -8px;
+        background: transparent;
+        border: 0;
+        border-radius: var(--radius-ctrl);
+        color: var(--text);
+        cursor: pointer;
+    }
+    .fs-page__back:hover { background: var(--ink-2); }
+    .fs-page__title { font-size: 20px; line-height: 28px; }
+}

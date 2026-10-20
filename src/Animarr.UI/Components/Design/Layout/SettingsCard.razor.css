@@ -1,0 +1,161 @@
+/* Fluent 2 / Windows 11 settings card. */
+
+.fs-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+}
+
+.fs-card__head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 68px;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+}
+
+/* Whole-row link / button. */
+.fs-card__head--action {
+    appearance: none;
+    cursor: pointer;
+    transition: background var(--motion-fast);
+}
+.fs-card__head--action:hover:not(:disabled)  { background: var(--surface-2); color: var(--text); }
+.fs-card__head--action:active:not(:disabled) { background: var(--surface-3); }
+.fs-card__head--action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Expander: the leading block is a button, the chevron another. */
+.fs-card__hit {
+    appearance: none;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.fs-card__toggle {
+    appearance: none;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
+    cursor: pointer;
+    transition: background var(--motion-fast), transform var(--motion-base);
+}
+.fs-card__toggle:hover { background: var(--ink-2); }
+.fs-card.is-expanded .fs-card__toggle { transform: rotate(180deg); }
+
+.fs-card__ic {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    color: var(--text);
+}
+
+.fs-card__lead {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.fs-card__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fs-card__title {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+}
+
+.fs-card__desc {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+
+/* Trailing control — keep it from crushing the label on narrow cards. */
+.fs-card__ctrl {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    max-width: 55%;
+    min-width: 0;
+}
+
+.fs-card__value {
+    flex-shrink: 0;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fs-card__chev {
+    flex-shrink: 0;
+    display: inline-flex;
+    color: var(--text-dim);
+}
+
+/* Body — expander content / extra rows, indented under the title. */
+.fs-card__body {
+    border-top: 1px solid var(--border);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.fs-card__body--indent { padding-left: 52px; }
+
+/* Disabled-looking row (category switched off, etc.). */
+.fs-card--muted .fs-card__title,
+.fs-card--muted .fs-card__desc,
+.fs-card--muted .fs-card__ic { opacity: 0.55; }
+
+/* Tone: danger (sign out, delete). */
+.fs-card--danger .fs-card__title,
+.fs-card--danger .fs-card__ic { color: var(--danger); }
+
+/* Phones: stack the control under the label so nothing gets clipped. */
+@media (max-width: 639px) {
+    .fs-card__head { flex-wrap: wrap; min-height: 60px; gap: 12px; }
+    .fs-card__ctrl { max-width: 100%; width: 100%; justify-content: flex-start; padding-left: 36px; }
+    .fs-card__head:not(:has(.fs-card__ic)) .fs-card__ctrl { padding-left: 0; }
+    .fs-card__head:has(.fs-card__lead) .fs-card__ctrl { padding-left: 48px; }
+    .fs-card__body--indent { padding-left: 16px; }
+    .fs-card__value { max-width: 40%; }
+}

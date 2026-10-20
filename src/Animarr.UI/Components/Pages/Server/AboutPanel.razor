@@ -1,56 +1,68 @@
 @*
-    Server Settings → About tab. Spec: screens-v4.jsx 911-934.
+    Settings → About (Fluent 2, Windows 11 "System › About" layout).
 
-    v5 update: Version / Build / Mode now come from /api/server/info on the
-    bound server, not from hardcoded constants — admins moving between
-    builds shouldn't have to grep the source to know what's running.
+    Version / Build / Mode come from /api/server/info on the bound server,
+    not from hardcoded constants — admins moving between builds shouldn't
+    have to grep the source to know what's running.
 *@
 
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 
-<div class="d-srv-card">
-    <header class="d-srv-card__head">
-        <h2 class="d-srv-card__title">@L["about.title"]</h2>
-        <div class="d-srv-card__sub">
-            @L["about.subtitle"]
-        </div>
-    </header>
-
-    <div class="d-srv-about__kv">
-        <span class="d-srv-about__key">@L["about.key_version"]</span> <span class="d-srv-about__val">@VersionLabel</span>
-        <span class="d-srv-about__key">@L["about.key_build"]</span>   <span class="d-srv-about__val">@BuildLabel</span>
-        <span class="d-srv-about__key">@L["about.key_runtime"]</span> <span class="d-srv-about__val">@RuntimeLabel</span>
-        <span class="d-srv-about__key">@L["about.key_mode"]</span>    <span class="d-srv-about__val">@ModeLabel</span>
-        <span class="d-srv-about__key">@L["about.key_license"]</span> <span class="d-srv-about__val">MIT</span>
-    </div>
-
-    <div class="d-srv-card__actions">
-        <a href="https://github.com/eduardpoul/Animarr" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
-            <Btn Variant="solid" Size="md"><DIcon Name="github" Size="14" /> @L["about.btn_view_github"]</Btn>
-        </a>
-        <a href="https://github.com/eduardpoul/Animarr#readme" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
-            <Btn Variant="ghost" Size="md"><DIcon Name="external" Size="13" /> @L["about.btn_docs"]</Btn>
-        </a>
-        <a href="https://github.com/eduardpoul/Animarr/issues" target="_blank" rel="noopener" class="d-srv-about__cta tv-focus">
-            <Btn Variant="ghost" Size="md"><DIcon Name="info" Size="13" /> @L["about.btn_report_issue"]</Btn>
-        </a>
-    </div>
-
-    <div class="d-srv-about__footer">
-        @L["about.footer"]
+<div class="ab-head">
+    <BrandMark Size="48" />
+    <div class="ab-head__text">
+        <div class="ab-head__name">Animarr</div>
+        <div class="ab-head__sub">@L["about.subtitle"]</div>
     </div>
 </div>
 
+<SettingsGroup>
+    <SettingsCard Icon="info" Title="@L["about.specs_title"]" Description="@VersionLabel"
+                  Expandable="true" Expanded="true" Body="@Specs()" />
+</SettingsGroup>
+
+<SettingsGroup Title="@L["about.links_title"]">
+    <SettingsCard Icon="github" Title="@L["about.btn_view_github"]" Description="github.com/eduardpoul/Animarr"
+                  Href="https://github.com/eduardpoul/Animarr" External="true" />
+    <SettingsCard Icon="file" Title="@L["about.btn_docs"]"
+                  Href="https://github.com/eduardpoul/Animarr#readme" External="true" />
+    <SettingsCard Icon="warn" Title="@L["about.btn_report_issue"]"
+                  Href="https://github.com/eduardpoul/Animarr/issues" External="true" />
+</SettingsGroup>
+
+<p class="fs-hint ab-footer">@L["about.footer"]</p>
+
 @code {
     private ServerInfoDto? _info;
+
+    private RenderFragment Specs() => __builder =>
+    {
+        <dl class="ab-kv">
+            <dt>@L["about.key_version"]</dt> <dd>@VersionLabel</dd>
+            <dt>@L["about.key_build"]</dt>   <dd>@BuildLabel</dd>
+            <dt>@L["about.key_runtime"]</dt> <dd>@RuntimeLabel</dd>
+            <dt>@L["about.key_mode"]</dt>    <dd>@ModeLabel</dd>
+            <dt>@L["about.key_license"]</dt> <dd>MIT</dd>
+        </dl>
+    };
 
     /// <summary>Version label.
 
     /// Shows the assembly InformationalVersion the server reports
     /// (e.g. "5.0.0+abc123"), falling back to a dash while in-flight or
     /// on a probe failure so the row never collapses to empty.</summary>
-    private string VersionLabel => _info?.Version is { Length: > 0 } v ? $"v{v}" : "—";
+    private string VersionLabel => _info?.Version is { Length: > 0 } v ? $"v{ShortVersion(v)}" : "—";
+
+    /// <summary>"1.0.0+10d14c8c41e8…" → "1.0.0 (10d14c8)" — the full SHA is
+    /// noise in a settings row.</summary>
+    private static string ShortVersion(string v)
+    {
+        var plus = v.IndexOf('+');
+        if (plus < 0) return v;
+        var sha = v[(plus + 1)..];
+        return $"{v[..plus]} ({(sha.Length > 7 ? sha[..7] : sha)})";
+    }
 
     /// <summary>Build label. We don't ship a separate build-date field over
     /// the wire; surface the bound server's display name + ServerId prefix

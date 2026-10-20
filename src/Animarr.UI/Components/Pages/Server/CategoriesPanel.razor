@@ -1,5 +1,5 @@
 @*
-    Server Settings → Categories tab.
+    Settings → Categories (Fluent 2 settings page).
 
     User-curated taxonomy for the catalog chip strip. Seven built-in
     categories ship by default (Movies / Serials / Anime / Donghua / Dorama /
@@ -9,93 +9,73 @@
     Custom categories: admin enters a Name + Description + Hint, the LLM
     classifier uses the Hint at identification time to decide which items
     belong to the category. After adding a new category the admin should
-    click "Rescan all items" to back-fill existing media.
+    click "Rescan all" to back-fill existing media.
 *@
 
 @inject IAnimarrApiClient Api
 @inject ToastService Toasts
 
-<div class="d-srv-card">
-    <header class="d-srv-card__head d-srv-card__head--with-cta">
-        <div class="d-srv-card__head-text">
-            <h2 class="d-srv-card__title">@L["categories.title"]</h2>
-            <div class="d-srv-card__sub">
-                @L["categories.subtitle"]
-            </div>
-        </div>
-        @* "+ New category" floats top-right next to the header instead of
-           sitting full-width at the bottom — matches the Users/Roles
-           segment-bar pattern. Rescan stays as a ghost CTA alongside. *@
-        <div class="d-srv-card__head-actions">
-            <button type="button" class="d-srv-users__new-btn tv-focus" @onclick="StartAdd">
-                <DIcon Name="plus" Size="13" /> @L["categories.btn_new"]
-            </button>
-            <button type="button" class="d-srv-cat__rescan-btn tv-focus"
-                    @onclick="RescanAsync" disabled="@_rescanning">
-                <DIcon Name="refresh" Size="13" /> @(_rescanning ? L["categories.btn_rescanning"] : L["categories.btn_rescan_all"])
-            </button>
-        </div>
-    </header>
-
-    @if (_loading)
-    {
-        <Spinner Size="md" />
-    }
-    else
-    {
-        <div class="d-srv-cat__rows">
+<SettingsGroup Description="@L["categories.subtitle"]">
+    <Actions>
+        <Btn Variant="solid" OnClick="RescanAsync" Loading="@_rescanning">
+            @if (!_rescanning) { <DIcon Name="refresh" Size="16" /> }
+            @(_rescanning ? L["categories.btn_rescanning"] : L["categories.btn_rescan_all"])
+        </Btn>
+        <Btn Variant="primary" OnClick="StartAdd">
+            <DIcon Name="plus" Size="16" /> @L["categories.btn_new"]
+        </Btn>
+    </Actions>
+    <ChildContent>
+        @if (_loading)
+        {
+            <div class="cat-loading"><Spinner Size="md" /></div>
+        }
+        else
+        {
             @foreach (var c in _categories.OrderBy(x => x.SortOrder).ThenBy(x => x.Name))
             {
                 var cat = c;
-                <div class="@($"d-srv-cat__row {(cat.Enabled ? "" : "is-disabled")}")">
-                    <Toggle Checked="cat.Enabled"
-                            CheckedChanged="@(v => ToggleEnabledAsync(cat, v))" />
-                    <div class="d-srv-cat__row-text">
-                        <div class="d-srv-cat__row-name">
-                            <span class="d-srv-cat__row-title">@cat.Name</span>
-                            @if (cat.BuiltIn)
-                            {
-                                <span class="d-srv-cat__row-builtin">@L["categories.badge_builtin"]</span>
-                            }
-                        </div>
-                        @if (!string.IsNullOrEmpty(cat.Description))
-                        {
-                            <div class="d-srv-cat__row-desc">@cat.Description</div>
-                        }
+                <SettingsCard Icon="tag" Title="@cat.Name" Description="@cat.Description"
+                              Tone="@(cat.Enabled ? null : "muted")">
+                    <Extra>
                         @if (!string.IsNullOrEmpty(cat.Hint))
                         {
-                            <div class="d-srv-cat__row-hint" title="@L["categories.hint_tooltip"]">
-                                <DIcon Name="magic" Size="11" /> @cat.Hint
-                            </div>
+                            <span class="cat-hint" title="@($"{L["categories.hint_tooltip"]}: {cat.Hint}")">
+                                <DIcon Name="sparkle" Size="12" /> @cat.Hint
+                            </span>
                         }
-                    </div>
-                    <span class="d-srv-cat__row-count">@cat.ItemCount</span>
-                    <div class="d-srv-cat__row-actions">
-                        <button type="button" class="d-srv-cat__icon-btn tv-focus"
-                                title="@L["categories.action_edit"]"
+                    </Extra>
+                    <ChildContent>
+                        <span class="cat-count">@L.Get("categories.item_count_fmt", cat.ItemCount)</span>
+                        @if (cat.BuiltIn)
+                        {
+                            <Pill Tone="default">@L["categories.badge_builtin"]</Pill>
+                        }
+                        <button type="button" class="fs-icon-btn tv-focus"
+                                title="@L["categories.action_edit"]" aria-label="@L["categories.action_edit"]"
                                 @onclick="@(() => StartEdit(cat))">
-                            <DIcon Name="pencil" Size="14" />
+                            <DIcon Name="pencil" Size="16" />
                         </button>
                         @if (!cat.BuiltIn)
                         {
-                            <button type="button" class="d-srv-cat__icon-btn tv-focus"
-                                    title="@L["categories.action_delete"]"
+                            <button type="button" class="fs-icon-btn fs-icon-btn--danger tv-focus"
+                                    title="@L["categories.action_delete"]" aria-label="@L["categories.action_delete"]"
                                     @onclick="@(() => DeleteAsync(cat.Id))">
-                                <DIcon Name="trash" Size="14" />
+                                <DIcon Name="trash" Size="16" />
                             </button>
                         }
-                    </div>
-                </div>
+                        <Toggle Checked="cat.Enabled"
+                                CheckedChanged="@(v => ToggleEnabledAsync(cat, v))" />
+                    </ChildContent>
+                </SettingsCard>
             }
-        </div>
+        }
+    </ChildContent>
+</SettingsGroup>
 
-        @* New / Edit drawer fires from the header's "+ New category" button.
-           Rescan also hoisted to the header. Hint stays here so admins see
-           the cost / behaviour callout right under the list. *@
-        <div class="d-srv-cat__rescan-hint">
-            @L["categories.rescan_hint"]
-        </div>
-    }
+<div class="fs-msgbar fs-msgbar--info cat-note">
+    <span class="fs-msgbar__ic"><DIcon Name="info" Size="16" /></span>
+    <span>@L["categories.rescan_hint"]</span>
 </div>
 
 <SettingsEditDrawer IsOpen="@_drawerOpen"
@@ -104,11 +84,11 @@
                     Hint="@(_editingId is null
                             ? L["categories.drawer_hint_create"]
                             : L["categories.drawer_hint_edit"])"
-                    Icon="sparkle"
+                    Icon="tag"
                     OnClose="CancelEdit">
     <Body>
-        <div class="d-srv-cat__drawer-form">
-            <div class="d-srv-cat__form-grid">
+        <div class="cat-form">
+            <div class="cat-form__row">
                 <Input Value="@_editName" ValueChanged="@(v => _editName = v ?? "")"
                        Label="@L["categories.field_name"]" Placeholder="@L["categories.field_name_placeholder"]"
                        Disabled="@(_editingId is not null && _categories.FirstOrDefault(c => c.Id == _editingId)?.BuiltIn == true)" />
@@ -120,7 +100,7 @@
                    Label="@L["categories.field_description"]" Placeholder="@L["categories.field_description_placeholder"]" />
             <label class="d-input-group">
                 <span class="d-input-group__label">@L["categories.field_hint"]</span>
-                <textarea class="d-srv-cat__hint-input" rows="6"
+                <textarea class="fs-input cat-textarea" rows="6"
                           @bind="_editHint"
                           placeholder="@L["categories.field_hint_placeholder"]"></textarea>
             </label>
@@ -128,7 +108,6 @@
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SaveAsync">
-            <DIcon Name="check" Size="13" />
             @(_editingId is null ? L["categories.btn_create"] : L["categories.btn_save_changes"])
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="CancelEdit">@L["common.btn_cancel"]</Btn>

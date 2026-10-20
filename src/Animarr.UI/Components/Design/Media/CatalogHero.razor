@@ -6,13 +6,9 @@
     The hero owns its own visual layer (sharp fanart), separate from the
     global backdrop (blurred). Both layers cross-fade in lockstep.
 
-    v5: pager UI is unified with CatalogContinueHero — the three variants
-    (F transparent strokes / G dash + chevrons / H numbered pills) are
-    picked from UserPreferences.HeroPagerStyle so the picker in
-    ProfilePanel changes BOTH the Continue hero and this Featured fallback.
-    Before that the Featured hero had its own vertical numbered list and
-    flat-out ignored the picker, which surfaced as "смена Hero pager
-    style не меняет стиль hero на главной".
+    Pager UI is shared with CatalogContinueHero: dashes flanked by
+    prev/next chevrons (the Fluent redesign dropped the F/H variants and
+    their picker).
 *@
 
 @implements IDisposable
@@ -87,75 +83,28 @@
            Only rendered when there's more than one featured item. *@
         @if (Items.Count > 1)
         {
-            @if (pager == "f")
-            {
-                <nav class="d-chero__pager" role="tablist" aria-label="@L["catalog_hero.pager_aria_label"]">
+            <nav class="d-chero__pager-g" role="tablist" aria-label="@L["catalog_hero.pager_aria_label"]">
+                <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
+                        @onclick="PrevManual" aria-label="@L["catalog_hero.pager_prev_aria"]">
+                    <DIcon Name="chev-l" Size="20" />
+                </button>
+                <div class="d-chero__pager-dashes">
                     @for (int i = 0; i < Items.Count; i++)
                     {
                         var idx = i;
-                        var it  = Items[idx];
                         var active = idx == _index;
                         <button type="button"
-                                class="@($"d-chero__pager-slot tv-focus {(active ? "is-active" : "")}")"
+                                class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
                                 @onclick="@(() => SetIndex(idx))"
                                 role="tab" aria-selected="@active.ToString().ToLower()"
-                                title="@it.Title">
-                            <span class="d-chero__pager-stroke"></span>
-                            <span class="d-chero__pager-name">@it.Title</span>
-                        </button>
+                                aria-label="@L.Get("catalog_hero.slot_aria_fmt", idx + 1)"></button>
                     }
-                </nav>
-            }
-            else if (pager == "g")
-            {
-                <nav class="d-chero__pager-g" role="tablist" aria-label="@L["catalog_hero.pager_aria_label"]">
-                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--prev tv-focus"
-                            @onclick="PrevManual" aria-label="@L["catalog_hero.pager_prev_aria"]">
-                        <DIcon Name="chev-l" Size="20" />
-                    </button>
-                    <div class="d-chero__pager-dashes">
-                        @for (int i = 0; i < Items.Count; i++)
-                        {
-                            var idx = i;
-                            var active = idx == _index;
-                            <button type="button"
-                                    class="@($"d-chero__pager-dash tv-focus {(active ? "is-active" : "")}")"
-                                    @onclick="@(() => SetIndex(idx))"
-                                    role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@L.Get("catalog_hero.slot_aria_fmt", idx + 1)"></button>
-                        }
-                    </div>
-                    <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
-                            @onclick="NextManual" aria-label="@L["catalog_hero.pager_next_aria"]">
-                        <DIcon Name="chev-r" Size="20" />
-                    </button>
-                </nav>
-            }
-            else // pager == "h"
-            {
-                <nav class="d-chero__pager-h" role="tablist" aria-label="@L["catalog_hero.pager_aria_label"]">
-                    <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="PrevManual" aria-label="@L["catalog_hero.pager_prev_aria"]">
-                        <DIcon Name="chev-l" Size="20" />
-                    </button>
-                    <div class="d-chero__pager-pills">
-                        @for (int i = 0; i < Items.Count; i++)
-                        {
-                            var idx = i;
-                            var active = idx == _index;
-                            <button type="button"
-                                    class="@($"d-chero__pager-pill tv-focus {(active ? "is-active" : "")}")"
-                                    @onclick="@(() => SetIndex(idx))"
-                                    role="tab" aria-selected="@active.ToString().ToLower()"
-                                    aria-label="@L.Get("catalog_hero.slot_aria_fmt", idx + 1)">@(idx + 1)</button>
-                        }
-                    </div>
-                    <button type="button" class="d-chero__pager-chev tv-focus"
-                            @onclick="NextManual" aria-label="@L["catalog_hero.pager_next_aria"]">
-                        <DIcon Name="chev-r" Size="20" />
-                    </button>
-                </nav>
-            }
+                </div>
+                <button type="button" class="d-chero__pager-chev d-chero__pager-chev--next tv-focus"
+                        @onclick="NextManual" aria-label="@L["catalog_hero.pager_next_aria"]">
+                    <DIcon Name="chev-r" Size="20" />
+                </button>
+            </nav>
         }
     </section>
 }
@@ -169,24 +118,9 @@
     private MediaItemDto? _active;
     private System.Threading.Timer? _timer;
 
-    /// <summary>Lower-cased pager style: "f" (default) / "g" / "h". Read on
-    /// every render so a switch in ProfilePanel takes effect without
-    /// remounting the hero. Unknown/empty values fall back to "g" (Chevrons)
-    /// so a stale client can't render an unknown markup branch.</summary>
-    private string PagerStyle
-    {
-        get
-        {
-            var s = UserCtx.Preferences?.HeroPagerStyle;
-            if (string.IsNullOrWhiteSpace(s)) return "g";
-            return s.ToLowerInvariant() switch
-            {
-                "f" => "f",
-                "h" => "h",
-                _   => "g",
-            };
-        }
-    }
+    // Fluent redesign: one pager (dashes + chevrons, the old "g"); the
+    // F/H variants and their picker are gone.
+    private const string PagerStyle = "g";
 
     protected override void OnInitialized()
     {

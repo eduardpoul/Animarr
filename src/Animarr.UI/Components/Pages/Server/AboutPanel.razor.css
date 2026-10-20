@@ -1,34 +1,35 @@
-/* About panel — Server Settings → About tab. Spec: screens-v4.jsx 911-934. */
+/* Settings → About. Cards come from SettingsGroup / SettingsCard. */
 
-.d-srv-about__kv {
-    display: grid;
-    grid-template-columns: 160px 1fr;
-    /* Row gap was 10px — felt cramped between key/value rows on the
-       Quietude theme's dark navy. 16px gives the metadata block proper
-       breathing space and visually separates Version / Build / Runtime /
-       Mode / License so they read as individual facts, not a wall of mono. */
-    gap: 16px 24px;
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    padding: 8px 0;
+.ab-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
 }
-
-.d-srv-about__key { color: var(--text-faint); }
-.d-srv-about__val { color: var(--text-dim); }
-
-.d-srv-about__cta { text-decoration: none; }
-
-/* GitHub / Documentation / Report issue button row — extra top margin
-   so the buttons don't crowd the License row above. */
-::deep .d-srv-card__actions { margin-top: var(--space-6); }
-
-.d-srv-about__footer {
-    margin-top: var(--space-8);
-    padding: 16px 18px;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 12.5px;
+.ab-head__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ab-head__name {
+    font-family: var(--font-display);
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    color: var(--text);
+}
+.ab-head__sub {
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text-dim);
-    line-height: 1.65;
 }
+
+/* "Device specifications"-style key/value list. */
+.ab-kv {
+    display: grid;
+    grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+    gap: 8px 24px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 20px;
+}
+.ab-kv dt { color: var(--text-dim); }
+.ab-kv dd { margin: 0; color: var(--text); overflow-wrap: anywhere; user-select: text; }
+
+.ab-footer { margin-top: 4px; max-width: 720px; }

@@ -27,5 +27,6 @@
 .d-avatar--sm { width: 28px; height: 28px; font-size: 11px; }
 .d-avatar--md { width: 36px; height: 36px; font-size: 13px; }
 .d-avatar--lg { width: 48px; height: 48px; font-size: 17px; letter-spacing: 0; }
+.d-avatar--xl { width: 72px; height: 72px; font-size: 26px; letter-spacing: 0; }
 
 img.d-avatar { object-fit: cover; }

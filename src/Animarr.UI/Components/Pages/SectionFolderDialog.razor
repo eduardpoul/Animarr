@@ -46,7 +46,7 @@
 
                 <label class="d-input-group">
                     <span class="d-input-group__label">@L["settings.root_folders.field_type"]</span>
-                    <select class="d-profile__select"
+                    <select class="fs-select fs-select--wide"
                             value="@_typeStr"
                             @onchange="@(e => _typeStr = e.Value?.ToString() ?? "Auto")">
                         <option value="Auto">@L["settings.root_folders.type_auto"]</option>

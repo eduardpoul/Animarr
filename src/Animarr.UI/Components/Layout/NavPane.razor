@@ -10,9 +10,9 @@
       │            ⋮
       │ Needs review (when any)
       │ Downloads ⓶              ← uploadContent
-      │ Server settings          ← systemSettings
+      │ Settings                 ← /settings (Server group: admins)
       │ ● AI identification 78/78 ← opens LLMStatusPopup
-      └ (E) Eduard · master      ← opens ProfilePanel
+      └ (E) Eduard · master      ← /settings → Account
 
     Collapses to a 56px icon rail; the choice is persisted in localStorage
     ("animarr-nav-collapsed") and mirrored onto <html class="nav-collapsed">
@@ -111,10 +111,8 @@
             </div>
         }
 
-        @if (UserCtx.Can(p => p.SystemSettings))
-        {
-            @Item("server", "settings", "settings-f", L["profile.server_settings_title"], IsRoute("/server"))
-        }
+        @* One settings hub for everyone; its Server group shows for admins. *@
+        @Item("settings", "settings", "settings-f", L["nav.settings"], IsRoute("/settings") || IsRoute("/server"))
 
         <button type="button" class="d-nav__item d-nav__item--ai tv-focus"
                 @onclick="OnLlmClick"

@@ -1,56 +1,32 @@
 @*
-    Settings — component-only after v4 cleanup. The standalone /settings route
-    is gone; this body is embedded inside ServerSettings.razor's admin shell
-    via <Settings EmbeddedTab="..." />. Setting EmbeddedTab forces a single
-    tab body to render without the page header / tab bar.
+    Settings — the "Server" group bodies of the /settings hub, drawn as
+    Fluent 2 settings cards. Embedded only: <Settings EmbeddedTab="..." />
+    with EmbeddedTab = root_folders | ai | torrent | metadata | player.
+    (The old standalone tabs — general / appearance / audio / hardware /
+    parsing — are gone; appearance + audio live in PersonalSettings, the
+    hardware report moved under "player".)
 *@
 @inject IAnimarrApiClient Api
-@inject NavigationManager Nav
 @implements IDisposable
 
-@*
-    Settings — 11-tab layout mirroring Animarr.Web's structure.
-
-    Each tab fetches its own slice via IAnimarrApiClient. Heavy operations
-    (folder picker, audio sync test playback, LLM model probe) are skipped
-    relative to the server-side page — those need additional API surface
-    or interop. Everything users edit on a day-to-day basis is here.
-*@
-
-@if (string.IsNullOrEmpty(EmbeddedTab))
+@switch (_activeTab)
 {
-    <PageTitle>Animarr</PageTitle>
-
-    <header class="d-page-header">
-        <div class="d-page-header__main">
-            <div class="d-page-header__overline">@L["settings.page_overline"]</div>
-            <h1 class="d-page-header__title">@L["settings.page_title"]</h1>
-            <div class="d-page-header__sub">@L["settings.header_sub_sqlite"]</div>
-        </div>
-    </header>
-
-    <nav class="settings-tabs">
-        @foreach (var (key, label) in _settingsTabs)
-        {
-            var k = key;
-            <button type="button"
-                    class="@($"settings-tab {(_activeTab == k ? "settings-tab--active" : "")}")"
-                    @onclick="@(() => SwitchTabAsync(k))">
-                @L[label]
-            </button>
-        }
-    </nav>
+    case "root_folders":
+        @RootFoldersTab()
+        break;
+    case "ai":
+        @AiTab()
+        break;
+    case "torrent":
+        @TorrentTab()
+        break;
+    case "metadata":
+        @MetadataTab()
+        break;
+    case "player":
+        @PlayerTab()
+        break;
 }
-
-@if      (_activeTab == "general")        { @GeneralTab()       }
-else if  (_activeTab == "root_folders")   { @RootFoldersTab()   }
-else if  (_activeTab == "appearance")     { @AppearanceTab()    }
-else if  (_activeTab == "audio")          { @AudioTab()         }
-else if  (_activeTab == "hardware")       { @HardwareTab()      }
-else if  (_activeTab == "ai")             { @AiTab()            }
-else if  (_activeTab == "patterns")       { @PatternsTab()      }
-else if  (_activeTab == "torrent")        { @TorrentTab()       }
-else if  (_activeTab == "metadata")       { @MetadataTab()      }
 
 @if (_folderDialogOpen)
 {
@@ -66,29 +42,45 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
 }
 
 @code {
-    /// <summary>When set, the component renders as a single tab body without
-    /// its own page header / tab bar. Used by ServerSettings to embed each
-    /// v3 tab inside the v4 admin shell. Allowed values mirror the
-    /// <c>_settingsTabs</c> keys (e.g. "root_folders", "ai", "patterns").</summary>
+    /// <summary>Which server section to render (see file header).</summary>
     [Parameter] public string? EmbeddedTab { get; set; }
 
-    private string _activeTab = "general";
-    /// <summary>Tracks the tab we last loaded data for so flipping
-    /// <see cref="EmbeddedTab"/> from "rules" to "torrent" (which Blazor
-    /// services by reusing the Settings instance, not re-mounting) still
-    /// kicks off the per-tab fetch. Previously this only ran inside
-    /// OnInitializedAsync and embedded panels stayed stuck on "Loading…". </summary>
+    private string _activeTab = "root_folders";
+    /// <summary>The tab we last loaded data for — Blazor reuses this
+    /// instance when the hub switches EmbeddedTab, so the per-tab fetch has
+    /// to re-fire from OnParametersSetAsync.</summary>
     private string? _lastLoadedTab;
+
+    // ── Tab state (lazy, per tab) ────────────────────────────────────
+    private Dictionary<string, string?> _config = new();
+    private bool _configLoaded;
+    private HardwareReportDto? _hw;
+    private TorrentConfigDto? _torrentCfg;
+    private SegmentScanStatusDto? _segStatus;
+    private MetadataLanguageStatusDto? _langStatus;
+
+    // ── Folder dialogs ──
+    private bool _folderDialogOpen;
+    private FolderWatcherDto? _folderDialogTarget;
+    private bool _folderDeleteOpen;
+    private FolderWatcherDto? _folderDeleteTarget;
+    private int _foldersReloadToken;
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.IsNullOrEmpty(EmbeddedTab))
-            _activeTab = EmbeddedTab;
-        // When the parent re-renders us with a different EmbeddedTab the
-        // OnInitializedAsync hook has long since run, so the per-tab fetch
-        // is skipped. Re-fire EnsureTabDataAsync here whenever the tab
-        // identity differs from what we last loaded. Cheap branch (no
-        // fetch) for tabs that read straight from the _config dict.
+        if (!string.IsNullOrEmpty(EmbeddedTab)) _activeTab = EmbeddedTab;
+
+        if (!_configLoaded)
+        {
+            _configLoaded = true;
+            try
+            {
+                var pairs = await Api.GetAppConfigAsync();
+                _config = pairs.ToDictionary(p => p.Key, p => p.Value);
+            }
+            catch { /* offline — config dict stays empty */ }
+        }
+
         if (_activeTab != _lastLoadedTab)
         {
             _lastLoadedTab = _activeTab;
@@ -96,80 +88,20 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         }
     }
 
-    // Label holds an i18n key resolved through L at render time (@L[label]).
-    private static readonly (string Key, string Label)[] _settingsTabs =
-    [
-        ("general",        "settings.tab_general"),
-        ("root_folders",   "settings.tab_root_folders"),
-        ("appearance",     "settings.tab_appearance"),
-        ("audio",          "settings.tab_audio"),
-        ("hardware",       "settings.tab_hardware"),
-        ("ai",             "settings.tab_ai"),
-        ("patterns",       "settings.tab_parsing"),
-        ("torrent",        "settings.tab_torrent"),
-        ("metadata",       "settings.tab_metadata"),
-    ];
-
-    // ── Tab-state (lazy-initialised on first tab visit) ──────────────
-    private Dictionary<string, string?> _config = new();
-    private HardwareReportDto? _hw;
-    private RenamePatternDto[]? _patterns;
-    private TorrentConfigDto? _torrentCfg;
-    private SegmentScanStatusDto? _segStatus;
-    private MetadataLanguageStatusDto? _langStatus;
-
-    // ── Dialog state ──
-    private bool _folderDialogOpen;
-    private FolderWatcherDto? _folderDialogTarget;
-    private bool _folderDeleteOpen;
-    private FolderWatcherDto? _folderDeleteTarget;
-    private int _foldersReloadToken;
-
-    protected override async Task OnInitializedAsync()
-    {
-        try
-        {
-            var pairs = await Api.GetAppConfigAsync();
-            _config = pairs.ToDictionary(p => p.Key, p => p.Value);
-        }
-        catch { /* offline — config dict stays empty */ }
-
-        // Deep-link via ?tab= — e.g. /settings?tab=patterns (legacy Patterns
-        // redirect). Skip when we're embedded inside ServerSettings so a
-        // ?panel=… query string for that page doesn't accidentally clobber
-        // the EmbeddedTab the parent picked for us.
-        if (string.IsNullOrEmpty(EmbeddedTab))
-        {
-            var uri = new Uri(Nav.Uri);
-            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-            var requestedTab = query["tab"];
-            if (!string.IsNullOrEmpty(requestedTab) && _settingsTabs.Any(t => t.Key == requestedTab))
-                _activeTab = requestedTab;
-        }
-
-        _lastLoadedTab = _activeTab;
-        await EnsureTabDataAsync(_activeTab);
-    }
-
-    /// <summary>Lazy-fetch the per-tab data the first time the tab is opened.
-    /// Tabs that just read from the pre-loaded <c>_config</c> dict don't need
-    /// extra work — those are no-ops here.</summary>
-    private async Task SwitchTabAsync(string key)
-    {
-        _activeTab = key;
-        await EnsureTabDataAsync(key);
-        StateHasChanged();
-    }
-
     private async Task EnsureTabDataAsync(string key) => await (key switch
     {
-        "hardware" when _hw is null         => LoadHardwareAsync(),
-        "patterns" when _patterns is null   => LoadPatternsAsync(),
         "torrent"  when _torrentCfg is null => LoadTorrentAsync(),
         "ai"       when _catalog is null    => LoadEmbeddedAsync(),
-        "metadata"                          => LoadMetadataAuxAsync(),
+        "metadata"                          => LoadLangStatusAsync(),
+        "player"                            => LoadPlayerAuxAsync(),
         _ => Task.CompletedTask,
     });
+
+    private bool Flag(string key, bool dflt)
+    {
+        var v = _config.GetValueOrDefault(key);
+        return v is null ? dflt : v == "true";
+    }
 
     private async Task SetConfigAsync(string key, string? value)
     {
@@ -182,110 +114,30 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         StateHasChanged();
     }
 
-    private async Task LoadSegStatusAsync()
+    private Task SetFlagAsync(string key, bool v) => SetConfigAsync(key, v ? "true" : "false");
+
+    public void Dispose()
     {
-        try { _segStatus = await Api.GetSegmentScanStatusAsync(); }
-        catch { /* offline */ }
-        StateHasChanged();
+        try { _pollCts?.Cancel(); _pollCts?.Dispose(); } catch { /* ignore */ }
+        try { _langPollCts?.Cancel(); _langPollCts?.Dispose(); } catch { /* ignore */ }
     }
 
-    private async Task RescanSegmentsAsync()
+    // ══ Root folders ═══════════════════════════════════════════════
+    private RenderFragment RootFoldersTab() => __builder =>
     {
-        try
-        {
-            await Api.RescanSegmentsAsync();
-            _segStatus = await Api.GetSegmentScanStatusAsync();
-        }
-        catch { /* swallow */ }
-        StateHasChanged();
-    }
-
-    private async Task LoadMetadataAuxAsync()
-    {
-        if (_segStatus is null) await LoadSegStatusAsync();
-        await LoadLangStatusAsync();
-    }
-
-    private async Task LoadLangStatusAsync()
-    {
-        try
-        {
-            _langStatus = await Api.GetMetadataLanguageStatusAsync();
-            // Resume the progress poll if a pass is still running (e.g. tab re-opened mid-run).
-            if (_langStatus is { Phase: "running" }) _ = PollLangAsync();
-        }
-        catch { /* offline */ }
-        StateHasChanged();
-    }
-
-    private async Task SetMetadataLanguageAsync(string code)
-    {
-        try
-        {
-            await Api.SetMetadataLanguageAsync(code);
-            _config[AppConfigKeys.MetadataLanguage] = code;
-            _langStatus = await Api.GetMetadataLanguageStatusAsync();
-            _ = PollLangAsync();
-        }
-        catch { /* swallow */ }
-        StateHasChanged();
-    }
-
-    private async Task PollLangAsync()
-    {
-        _langPollCts?.Cancel();
-        _langPollCts = new CancellationTokenSource();
-        var ct = _langPollCts.Token;
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                await Task.Delay(750, ct);
-                _langStatus = await Api.GetMetadataLanguageStatusAsync();
-                await InvokeAsync(StateHasChanged);
-                if (_langStatus is null || _langStatus.Phase != "running")
-                    break;
-            }
-        }
-        catch (OperationCanceledException) { /* navigated away / superseded */ }
-        catch { /* swallow */ }
-    }
-
-    // ── General tab ──
-    private RenderFragment GeneralTab() => @<section class="settings-section">
-        <h2>@L["settings.tab_general"]</h2>
-        <label class="settings-field">
-            <span class="settings-field__label">@L["settings.section_language"]</span>
-            <select class="settings-field__select"
-                    value="@(_config.GetValueOrDefault(AppConfigKeys.Language) ?? "en")"
-                    @onchange="@(e => SetConfigAsync(AppConfigKeys.Language, e.Value?.ToString()))">
-                <option value="en">English</option>
-                <option value="ru">Русский</option>
-                <option value="uk">Українська</option>
-                <option value="de">Deutsch</option>
-                <option value="es">Español</option>
-            </select>
-        </label>
-        <p class="settings-hint">@L["settings.general_language_hint"]</p>
-    </section>;
-
-    // ── Root folders tab ──
-    private RenderFragment RootFoldersTab() => @<section class="settings-section">
-        <div class="settings-section-head">
-            <h2>@L["settings.tab_root_folders"]</h2>
-            @* Use the same compact accent CTA the v5 panels use elsewhere
-               (Users/Roles, Categories). The old Btn Size="sm" was visually
-               undersized next to the heading and looked cramped on wide
-               viewports. *@
-            <button type="button" class="settings-section-head__new tv-focus"
-                    @onclick="@(() => { _folderDialogTarget = null; _folderDialogOpen = true; })">
-                <DIcon Name="plus" Size="13" /> @L["settings.btn_add_section"]
-            </button>
-        </div>
-        <RootFoldersList ReloadToken="_foldersReloadToken"
-                         OnEdit="OnFolderEdit"
-                         OnDelete="OnFolderDelete" />
-    </section>;
+        <SettingsGroup Description="@L["settings.root_folders_desc"]">
+            <Actions>
+                <Btn Variant="primary" OnClick="@(() => { _folderDialogTarget = null; _folderDialogOpen = true; })">
+                    <DIcon Name="plus" Size="16" /> @L["settings.btn_add_section"]
+                </Btn>
+            </Actions>
+            <ChildContent>
+                <RootFoldersList ReloadToken="_foldersReloadToken"
+                                 OnEdit="OnFolderEdit"
+                                 OnDelete="OnFolderDelete" />
+            </ChildContent>
+        </SettingsGroup>
+    };
 
     private void OnFolderEdit(FolderWatcherDto f)   { _folderDialogTarget = f; _folderDialogOpen = true; }
     private void OnFolderDelete(FolderWatcherDto f) { _folderDeleteTarget = f; _folderDeleteOpen = true; }
@@ -303,238 +155,140 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         StateHasChanged();
     }
 
-    // ── Appearance tab ──
-    private RenderFragment AppearanceTab()
+    // ══ AI / LLM ═══════════════════════════════════════════════════
+    private RenderFragment AiTab() => __builder =>
     {
-        var hueStr   = _config.GetValueOrDefault(AppConfigKeys.AccentColor) ?? "25";
-        var enabled  = (_config.GetValueOrDefault(AppConfigKeys.BackdropEnabled) ?? "true") != "false";
-        var blurStr  = _config.GetValueOrDefault(AppConfigKeys.BackdropBlurPx) ?? "30";
-        return @<section class="settings-section">
-            <h2>@L["settings.tab_appearance"]</h2>
-            <div class="settings-field">
-                <span class="settings-field__label">@L["settings.accent_hue_label"]</span>
-                <div class="accent-swatches">
-                    @foreach (var preset in new[] { ("settings.accent_crimson", 25), ("settings.accent_amber", 75), ("settings.accent_green", 150), ("settings.accent_blue", 240), ("settings.accent_violet", 300) })
-                    {
-                        var hue = preset.Item2;
-                        var name = L[preset.Item1];
-                        var isActive = int.TryParse(hueStr, out var current) && current == hue;
-                        <button type="button"
-                                class="@($"accent-swatch {(isActive ? "accent-swatch--active" : "")}")"
-                                style="--accent-hue:@hue"
-                                title="@name"
-                                aria-label="@name"
-                                @onclick="@(() => SetConfigAsync(AppConfigKeys.AccentColor, hue.ToString()))">
-                            @if (isActive)
-                            {
-                                <DIcon Name="check" Size="14" />
-                            }
-                        </button>
-                    }
-                </div>
-                <span class="settings-hint">@L.Get("settings.accent_current_fmt", hueStr)</span>
-            </div>
-
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@enabled"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.BackdropEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.backdrop_on_catalog_label"]</span>
-            </label>
-
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.backdrop_blur_px_label"]</span>
-                <input class="settings-field__input" type="number" min="0" max="80"
-                       value="@blurStr"
-                       @onchange="@(e => SetConfigAsync(AppConfigKeys.BackdropBlurPx, e.Value?.ToString()))" />
-            </label>
-        </section>;
-    }
-
-    // ── Audio tab ──
-    // The audio-offset values are localStorage-backed (per-browser) and the
-    // canonical store is window.animarrCalibrate, defined in
-    // animarr-calibrate.js. Sliders read the cached value on init via
-    // getCached() and write back through setManual().
-    private RenderFragment AudioTab() => @<section class="settings-section settings-audio">
-        <h2>@L["settings.audio_sync_title"]</h2>
-        <p class="settings-hint">
-            @((MarkupString)L["settings.audio_sync_hint_html"])
-        </p>
-
-        <div class="audio-sync-slider">
-            <label class="settings-field">
-                <span class="settings-field__label">
-                    @L["settings.audio_hw_label"] ·
-                    <strong id="animarr-sync-hw-value">70</strong> ms
-                </span>
-                <input type="range" min="-200" max="300" step="5"
-                       id="animarr-sync-hw-range" class="settings-range" value="70"
-                       oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-hw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('hw',v);})(this)" />
-            </label>
-        </div>
-
-        <div class="audio-sync-slider">
-            <label class="settings-field">
-                <span class="settings-field__label">
-                    @L["settings.audio_sw_label"] ·
-                    <strong id="animarr-sync-sw-value">0</strong> ms
-                </span>
-                <input type="range" min="-200" max="700" step="5"
-                       id="animarr-sync-sw-range" class="settings-range" value="0"
-                       oninput="(function(el){var v=parseInt(el.value,10);document.getElementById('animarr-sync-sw-value').innerText=v;window.animarrCalibrate&&window.animarrCalibrate.setManual('sw',v);})(this)" />
-            </label>
-        </div>
-
-        <script suppress-error="BL9992">
-            // Pull current values out of localStorage so the sliders show the
-            // actual stored offsets when the tab opens.
-            (function syncSlidersInitial() {
-                if (!window.animarrCalibrate) return;
-                var init = function (rangeId, labelId, channel, dflt) {
-                    var range = document.getElementById(rangeId);
-                    var label = document.getElementById(labelId);
-                    if (!range || !label) return;
-                    var stored = window.animarrCalibrate.getCached(channel);
-                    var v = (stored === null || stored === undefined) ? dflt : stored;
-                    range.value = v;
-                    label.innerText = v;
-                };
-                init('animarr-sync-hw-range', 'animarr-sync-hw-value', 'hw', 70);
-                init('animarr-sync-sw-range', 'animarr-sync-sw-value', 'sw', 0);
-            })();
-        </script>
-    </section>;
-
-    // ── Hardware tab ──
-    private RenderFragment HardwareTab() => @<section class="settings-section">
-        <h2>@L["settings.hw_title"]</h2>
-        @if (_hw is null)
-        {
-            <p>@L["settings.hw_probing"] <Btn Variant="ghost" Size="sm" OnClick="@(() => LoadHardwareAsync())">@L["settings.hw_probe_now"]</Btn></p>
-        }
-        else
-        {
-            <ul class="hw-list">
-                <li><strong>VAAPI:</strong> @StatusLine(_hw.Vaapi)</li>
-                <li><strong>NVENC:</strong> @StatusLine(_hw.Nvenc)</li>
-                <li><strong>QSV:</strong> @StatusLine(_hw.Qsv)</li>
-            </ul>
-            <Btn Variant="primary" Size="sm" OnClick="@(() => LoadHardwareAsync(rescan: true))">@L["settings.hw_btn_rescan"]</Btn>
-        }
-    </section>;
-
-    private async Task LoadHardwareAsync(bool rescan = false)
-    {
-        try { _hw = await Api.GetHardwareReportAsync(rescan); }
-        catch { /* offline */ }
-        StateHasChanged();
-    }
-
-    // ── AI tab ──
-    private RenderFragment AiTab()
-    {
-        var enabled  = (_config.GetValueOrDefault(AppConfigKeys.LlmEnabled) ?? "false") == "true";
+        var enabled  = Flag(AppConfigKeys.LlmEnabled, false);
         var provider = _config.GetValueOrDefault(AppConfigKeys.LlmProvider) ?? "openai";
-        var baseUrl  = _config.GetValueOrDefault(AppConfigKeys.LlmBaseUrl) ?? "";
-        var apiKey   = _config.GetValueOrDefault(AppConfigKeys.LlmApiKey) ?? "";
-        var model    = _config.GetValueOrDefault(AppConfigKeys.LlmModel) ?? "";
-        var epMap    = (_config.GetValueOrDefault(AppConfigKeys.LlmEpisodeMapping) ?? "false") == "true";
-        return @<section class="settings-section">
-            <h2>@L["settings.tab_ai"]</h2>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@enabled"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.llm_use_during_id"]</span>
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.llm_provider_label"]</span>
-                <select class="settings-field__select" value="@provider"
-                        @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmProvider, e.Value?.ToString()))">
-                    <option value="openai">@L["settings.llm_provider_opt_openai"]</option>
-                    <option value="compatible">@L["settings.llm_provider_opt_compatible"]</option>
-                    <option value="embedded">@L["settings.llm_provider_opt_embedded"]</option>
-                </select>
-            </label>
-            @if (provider != "embedded")
-            {
-                <label class="settings-field">
-                    <span class="settings-field__label">@L["settings.llm_base_url_label"]</span>
-                    <input class="settings-field__input" placeholder="http://ollama:11434/v1"
-                           value="@baseUrl"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmBaseUrl, e.Value?.ToString()))" />
-                </label>
-                <label class="settings-field">
-                    <span class="settings-field__label">@L["settings.llm_api_key_label"]</span>
-                    <input class="settings-field__input" type="password" placeholder="sk-…"
-                           value="@apiKey"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmApiKey, e.Value?.ToString()))" />
-                </label>
-                <label class="settings-field">
-                    <span class="settings-field__label">@L["settings.llm_model_label"]</span>
-                    <input class="settings-field__input" placeholder="qwen2.5:1.5b"
-                           value="@model"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmModel, e.Value?.ToString()))" />
-                </label>
-            }
-            else
-            {
-                @EmbeddedBlock()
-            }
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@epMap"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.LlmEpisodeMapping, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.llm_episode_mapping_switch"]</span>
-            </label>
+        var epMap    = Flag(AppConfigKeys.LlmEpisodeMapping, false);
 
-            @* ── Test connection card ──────────────────────────────────
-               Runs a single small ping against the configured LLM and
-               surfaces { latency, sample, error } so the admin can
-               confirm the provider works without queuing a real
-               identification job. Uses saved AppConfig — admin must
-               Save changes (input @onchange already does that
-               per-field) before hitting Test. *@
-            <div class="settings-llm-test">
-                <button type="button" class="settings-section-head__new tv-focus"
-                        @onclick="TestLlmAsync"
-                        disabled="@_llmTesting">
-                    <DIcon Name="@(_llmTesting ? "refresh" : "magic")" Size="13" />
+        <SettingsGroup Title="@L["settings.ai_group_identify"]">
+            <SettingsCard Icon="sparkle" Title="@L["settings.llm_use_during_id"]" Description="@L["settings.llm_use_desc"]">
+                <Toggle Checked="@enabled" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.LlmEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="list" Title="@L["settings.llm_episode_mapping_switch"]" Description="@L["settings.llm_episode_mapping_desc"]">
+                <Toggle Checked="@epMap" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.LlmEpisodeMapping, v))" />
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["settings.ai_group_model"]">
+            <SettingsCard Icon="bot" Title="@L["settings.llm_provider_label"]" Description="@L["settings.llm_provider_desc"]">
+                <ChildContent>
+                    <select class="fs-select" value="@provider"
+                            @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmProvider, e.Value?.ToString()))">
+                        <option value="embedded">@L["settings.llm_provider_opt_embedded"]</option>
+                        <option value="compatible">@L["settings.llm_provider_opt_compatible"]</option>
+                        <option value="openai">@L["settings.llm_provider_opt_openai"]</option>
+                    </select>
+                </ChildContent>
+                <Body>
+                    @if (provider == "embedded")
+                    {
+                        @EmbeddedBlock()
+                    }
+                    else
+                    {
+                        @RemoteBlock()
+                    }
+                </Body>
+            </SettingsCard>
+
+            @* Test connection — one small ping against the saved config. *@
+            <SettingsCard Icon="flash" Title="@L["settings.llm_test_title"]" Description="@L["settings.llm_test_desc"]"
+                          Body="@(_llmTestResult is null ? null : LlmTestResult())">
+                <Btn Variant="solid" Loading="@_llmTesting" OnClick="TestLlmAsync">
                     @(_llmTesting ? L["settings.llm_hero_btn_testing"] : L["settings.llm_hero_btn_test"])
-                </button>
-                @if (_llmTestResult is { } r)
+                </Btn>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["settings.ai_group_help"]">
+            <SettingsCard Icon="info" Title="@L["settings.llm_docs_title"]" Description="@L["settings.llm_docs_desc"]" Expandable="true">
+                <Body>
+                    <ul class="set-docs">
+                        <li>@((MarkupString)L["settings.llm_docs_li_cpu_html"])</li>
+                        <li>@((MarkupString)L["settings.llm_docs_li_gpu_html"])</li>
+                        <li>@((MarkupString)L["settings.llm_docs_li_compatible_html"])</li>
+                        <li>@((MarkupString)L["settings.llm_docs_li_openai_html"])</li>
+                    </ul>
+                    <p class="fs-hint">@((MarkupString)L["settings.llm_docs_footer_html"])</p>
+                </Body>
+            </SettingsCard>
+        </SettingsGroup>
+    };
+
+    private RenderFragment RemoteBlock() => __builder =>
+    {
+        var baseUrl = _config.GetValueOrDefault(AppConfigKeys.LlmBaseUrl) ?? "";
+        var apiKey  = _config.GetValueOrDefault(AppConfigKeys.LlmApiKey) ?? "";
+        var model   = _config.GetValueOrDefault(AppConfigKeys.LlmModel) ?? "";
+        <label class="fs-field">
+            <span class="fs-field__label">@L["settings.llm_base_url_label"]</span>
+            <input class="fs-input fs-input--wide" placeholder="http://ollama:11434/v1"
+                   value="@baseUrl"
+                   @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmBaseUrl, e.Value?.ToString()))" />
+        </label>
+        <div class="fs-grid-2">
+            <label class="fs-field">
+                <span class="fs-field__label">@L["settings.llm_api_key_label"]</span>
+                <input class="fs-input fs-input--wide" type="password" placeholder="sk-…"
+                       value="@apiKey"
+                       @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmApiKey, e.Value?.ToString()))" />
+            </label>
+            <label class="fs-field">
+                <span class="fs-field__label">@L["settings.llm_model_label"]</span>
+                <input class="fs-input fs-input--wide" placeholder="qwen2.5:1.5b"
+                       value="@model"
+                       @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmModel, e.Value?.ToString()))" />
+            </label>
+        </div>
+    };
+
+    private RenderFragment LlmTestResult() => __builder =>
+    {
+        if (_llmTestResult is not { } r) return;
+        <div class="@($"fs-msgbar {(r.Ok ? "fs-msgbar--success" : "fs-msgbar--error")}")">
+            <span class="fs-msgbar__ic"><DIcon Name="@(r.Ok ? "check" : "warn")" Size="16" /></span>
+            <div>
+                @if (r.Ok)
                 {
-                    <div class="@($"settings-llm-test__result {(r.Ok ? "is-ok" : "is-err")}")">
-                        @if (r.Ok)
-                        {
-                            <div class="settings-llm-test__line">
-                                <strong>@L["settings.llm_test_connected"]</strong> @L.Get("settings.llm_test_latency_fmt", r.LatencyMs)
-                            </div>
-                            @if (!string.IsNullOrEmpty(r.Sample))
-                            {
-                                <div class="settings-llm-test__sample">
-                                    @L["settings.llm_test_sample_label"] <code>@r.Sample</code>
-                                </div>
-                            }
-                        }
-                        else
-                        {
-                            <div class="settings-llm-test__line">
-                                <strong>@L["settings.llm_test_failed"]</strong> @L.Get("settings.llm_test_after_fmt", r.LatencyMs)
-                            </div>
-                            @if (!string.IsNullOrEmpty(r.Error))
-                            {
-                                <div class="settings-llm-test__sample">@r.Error</div>
-                            }
-                        }
-                    </div>
+                    <div><strong>@L["settings.llm_test_connected"]</strong> @L.Get("settings.llm_test_latency_fmt", r.LatencyMs)</div>
+                    @if (!string.IsNullOrEmpty(r.Sample))
+                    {
+                        <div class="fs-hint">@L["settings.llm_test_sample_label"] <code>@r.Sample</code></div>
+                    }
+                }
+                else
+                {
+                    <div><strong>@L["settings.llm_test_failed"]</strong> @L.Get("settings.llm_test_after_fmt", r.LatencyMs)</div>
+                    @if (!string.IsNullOrEmpty(r.Error))
+                    {
+                        <div class="fs-hint">@r.Error</div>
+                    }
                 }
             </div>
-
-            @LlmDocs()
-        </section>;
-    }
+        </div>
+    };
 
     private bool _llmTesting;
     private LlmTestResponse? _llmTestResult;
+
+    private async Task TestLlmAsync()
+    {
+        if (_llmTesting) return;
+        _llmTesting = true;
+        _llmTestResult = null;
+        StateHasChanged();
+        try { _llmTestResult = await Api.TestLlmAsync(); }
+        catch (Exception ex)
+        {
+            // Transport-level failure — synthesise an error so the result
+            // card path is unified.
+            _llmTestResult = new LlmTestResponse(Ok: false, LatencyMs: 0, Sample: null, Error: ex.Message);
+        }
+        _llmTesting = false;
+        StateHasChanged();
+    }
 
     // ── Embedded llama.cpp (provider = "embedded") ──────────────────────────
     private LlamaCatalogResponse? _catalog;
@@ -634,42 +388,41 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
         return mb >= 1024 ? $"{mb / 1024:F1} GB" : $"{mb:F0} MB";
     }
 
-    public void Dispose()
+    private static string StateTone(string? state) => (state ?? "").ToLowerInvariant() switch
     {
-        try { _pollCts?.Cancel(); _pollCts?.Dispose(); } catch { /* ignore */ }
-        try { _langPollCts?.Cancel(); _langPollCts?.Dispose(); } catch { /* ignore */ }
-    }
+        "running" or "ready" or "started" => "fs-status--ok",
+        "error" or "failed"               => "fs-status--err",
+        _                                 => "fs-status--warn",
+    };
 
-    // The embedded-provider panel: runtime status, model picker (curated +
-    // custom HF), download progress, and installed-model management.
-    private RenderFragment EmbeddedBlock() => @<div class="settings-llm-embedded">
-        @{
-            var selId       = _config.GetValueOrDefault(AppConfigKeys.LlmEmbeddedModelId) ?? "";
-            var selCurated  = _catalog?.Curated.FirstOrDefault(c => c.Id == selId);
-            var dl          = _download;
-            var downloading = dl is { Phase: "downloading" };
-        }
+    // Runtime status, model picker (curated + custom HF), download progress,
+    // installed-model management.
+    private RenderFragment EmbeddedBlock() => __builder =>
+    {
+        var selId       = _config.GetValueOrDefault(AppConfigKeys.LlmEmbeddedModelId) ?? "";
+        var selCurated  = _catalog?.Curated.FirstOrDefault(c => c.Id == selId);
+        var dl          = _download;
+        var downloading = dl is { Phase: "downloading" };
 
-        @if (_embeddedStatus is { } st)
+        if (_embeddedStatus is { } st)
         {
-            <div class="settings-llm-gpu">
-                <span class="settings-llm-gpu__badge">@st.State</span>
-                @if (!string.IsNullOrEmpty(st.ModelFile)) { <span class="settings-llm-gpu__meta">@st.ModelFile</span> }
-                <span class="settings-llm-gpu__meta">@(st.GpuActive ? $"GPU · {st.GpuMode}" : "CPU")</span>
-                <button type="button" class="settings-llm-gpu__restart tv-focus"
-                        @onclick="RestartEmbeddedAsync" disabled="@_embeddedBusy">
-                    <DIcon Name="refresh" Size="12" /> @L["settings.embedded_btn_restart"]
-                </button>
-                @if (!string.IsNullOrEmpty(st.Error))
-                {
-                    <div class="settings-llm-gpu__err">@st.Error</div>
-                }
+            <div class="fs-row set-status-row">
+                <span class="@($"fs-status {StateTone(st.State)}")">@st.State</span>
+                <span class="fs-hint">llama-server · @(st.GpuActive ? $"GPU · {st.GpuMode}" : "CPU")@(string.IsNullOrEmpty(st.ModelFile) ? "" : " · " + st.ModelFile)</span>
+                <span class="set-spacer"></span>
+                <Btn Variant="solid" Loading="@_embeddedBusy" OnClick="RestartEmbeddedAsync">
+                    <DIcon Name="refresh" Size="16" /> @L["settings.embedded_btn_restart"]
+                </Btn>
             </div>
+            if (!string.IsNullOrEmpty(st.Error))
+            {
+                <div class="fs-msgbar fs-msgbar--error"><span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@st.Error</div>
+            }
         }
 
-        <label class="settings-field">
-            <span class="settings-field__label">@L["settings.llm_model_label"]</span>
-            <select class="settings-field__select" value="@selId"
+        <label class="fs-field">
+            <span class="fs-field__label">@L["settings.llm_model_label"]</span>
+            <select class="fs-select fs-select--wide" value="@selId"
                     @onchange="@(e => SetConfigAsync(AppConfigKeys.LlmEmbeddedModelId, e.Value?.ToString()))">
                 <option value="">@L["settings.embedded_select_model"]</option>
                 @if (_catalog is { } cat)
@@ -681,251 +434,125 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                 }
                 <option value="custom">@L["settings.embedded_custom_hf"]</option>
             </select>
+            @if (selCurated is { } sc)
+            {
+                <span class="fs-hint">@sc.Notes @L.Get("settings.embedded_ram_fmt", sc.RecommendedRamMb)</span>
+            }
         </label>
 
-        @if (selId == "custom")
+        if (selId == "custom")
         {
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.embedded_hf_repo_label"]</span>
-                <input class="settings-field__input" placeholder="Qwen/Qwen2.5-1.5B-Instruct-GGUF"
-                       value="@_customRepo" @oninput="@(e => _customRepo = e.Value?.ToString() ?? "")" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.embedded_gguf_file_label"]</span>
-                <input class="settings-field__input" placeholder="qwen2.5-1.5b-instruct-q4_k_m.gguf"
-                       value="@_customFile" @oninput="@(e => _customFile = e.Value?.ToString() ?? "")" />
-            </label>
-            <p class="settings-hint">@((MarkupString)L["settings.embedded_custom_hint_html"])</p>
-        }
-        else if (selCurated is { } sc)
-        {
-            <p class="settings-hint">@sc.Notes @L.Get("settings.embedded_ram_fmt", sc.RecommendedRamMb)</p>
+            <div class="fs-grid-2">
+                <label class="fs-field">
+                    <span class="fs-field__label">@L["settings.embedded_hf_repo_label"]</span>
+                    <input class="fs-input fs-input--wide" placeholder="Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+                           value="@_customRepo" @oninput="@(e => _customRepo = e.Value?.ToString() ?? "")" />
+                </label>
+                <label class="fs-field">
+                    <span class="fs-field__label">@L["settings.embedded_gguf_file_label"]</span>
+                    <input class="fs-input fs-input--wide" placeholder="qwen2.5-1.5b-instruct-q4_k_m.gguf"
+                           value="@_customFile" @oninput="@(e => _customFile = e.Value?.ToString() ?? "")" />
+                </label>
+            </div>
+            <p class="fs-hint">@((MarkupString)L["settings.embedded_custom_hint_html"])</p>
         }
 
-        <div class="settings-llm-test">
-            <button type="button" class="settings-section-head__new tv-focus"
-                    @onclick="StartDownloadAsync"
-                    disabled="@(_embeddedBusy || string.IsNullOrEmpty(selId) || downloading)">
-                <DIcon Name="download" Size="13" />
+        <div class="fs-row">
+            <Btn Variant="primary" Disabled="@(_embeddedBusy || string.IsNullOrEmpty(selId) || downloading)" OnClick="StartDownloadAsync">
+                <DIcon Name="download" Size="16" />
                 @(downloading ? L["settings.embedded_downloading"] : L["settings.embedded_download_model"])
-            </button>
-
-            @if (dl is { } d && d.Phase != "idle")
-            {
-                <div class="settings-llm-progress">
-                    <div class="settings-llm-progress__bar">
-                        <div class="settings-llm-progress__fill" style="width:@((int)d.Percent)%"></div>
-                    </div>
-                    <div class="settings-llm-progress__text">
-                        @if (d.Phase == "downloading")
-                        {
-                            <span>@FormatBytes(d.BytesReceived) / @(d.TotalBytes is { } t ? FormatBytes(t) : "?") (@((int)d.Percent)%)</span>
-                            <button type="button" class="settings-llm-progress__cancel tv-focus" @onclick="CancelDownloadAsync">@L["common.btn_cancel"]</button>
-                        }
-                        else if (d.Phase == "done")      { <span class="is-ok">@L["settings.embedded_done"]</span> }
-                        else if (d.Phase == "cancelled") { <span class="is-warn">@L["settings.embedded_cancelled"]</span> }
-                        else if (d.Phase == "error")     { <span class="is-err">@L.Get("folder_files.toast_error", d.Error)</span> }
-                    </div>
-                </div>
-            }
+            </Btn>
         </div>
 
-        @if (_catalog is { Installed.Length: > 0 } c2)
+        if (dl is { } d && d.Phase != "idle")
         {
-            <div class="settings-llm-models">
-                <div class="settings-llm-models__label">@L["settings.embedded_installed_label"]</div>
-                @foreach (var m in c2.Installed)
-                {
-                    <div class="settings-llm-models__row">
-                        <span class="settings-llm-models__name">@m.FileName @(m.IsActive ? L["settings.embedded_active_suffix"] : "")</span>
-                        <span class="settings-llm-models__size">@FormatBytes(m.Bytes)</span>
-                        <button type="button" class="settings-llm-models__del tv-focus"
-                                disabled="@m.IsActive" @onclick="@(() => DeleteModelAsync(m.FileName))"
-                                title="@(m.IsActive ? L["settings.embedded_active_tooltip"] : L["settings.btn_delete_tooltip"])">
-                            <DIcon Name="trash" Size="12" />
-                        </button>
-                    </div>
-                }
+            <div class="set-progress">
+                <div class="set-progress__bar"><div class="set-progress__fill" style="width:@((int)d.Percent)%"></div></div>
+                <div class="set-progress__text">
+                    @if (d.Phase == "downloading")
+                    {
+                        <span>@FormatBytes(d.BytesReceived) / @(d.TotalBytes is { } t ? FormatBytes(t) : "?") (@((int)d.Percent)%)</span>
+                        <Btn Variant="flat" Size="sm" OnClick="CancelDownloadAsync">@L["common.btn_cancel"]</Btn>
+                    }
+                    else if (d.Phase == "done")      { <span class="is-ok">@L["settings.embedded_done"]</span> }
+                    else if (d.Phase == "cancelled") { <span class="is-warn">@L["settings.embedded_cancelled"]</span> }
+                    else if (d.Phase == "error")     { <span class="is-err">@L.Get("folder_files.toast_error", d.Error ?? "")</span> }
+                </div>
             </div>
         }
-    </div>;
 
-    // Documentation block shown under every provider — explains all four ways
-    // to run the LLM and how to enable each.
-    private RenderFragment LlmDocs() => @<section class="settings-llm-docs">
-        <h3>@L["settings.llm_docs_title"]</h3>
-        <ul>
-            <li>@((MarkupString)L["settings.llm_docs_li_cpu_html"])</li>
-            <li>@((MarkupString)L["settings.llm_docs_li_gpu_html"])</li>
-            <li>@((MarkupString)L["settings.llm_docs_li_compatible_html"])</li>
-            <li>@((MarkupString)L["settings.llm_docs_li_openai_html"])</li>
-        </ul>
-        <p class="settings-hint">@((MarkupString)L["settings.llm_docs_footer_html"])</p>
-    </section>;
-
-    // ─── Metadata sources — enable flags ─────────────────────────────
-    // Backend MetadataService.GatherCandidatesAsync reads
-    // metadata.search_source_order as a JSON array of {Id, Enabled}.
-    // We mirror that schema here verbatim instead of inventing parallel
-    // boolean keys so the UI and server stay in lockstep.
-    private sealed record SourceFlag(string Id, bool Enabled);
-
-    /// <summary>Default flags applied when the AppConfig value is missing or
-    /// malformed — kept in sync with MetadataService.ParseSourceOrder's
-    /// defaults so a fresh install behaves identically with or without
-    /// the row.</summary>
-    private static readonly SourceFlag[] DefaultSourceFlags =
-    {
-        new("tmdb_tv",     true),
-        new("tmdb_movie",  true),
-        new("mal",         false),
-        new("imdb_search", true),
+        if (_catalog is { Installed.Length: > 0 } c2)
+        {
+            <div class="fs-field">
+                <span class="fs-field__label">@L["settings.embedded_installed_label"]</span>
+                <div class="fs-list">
+                    @foreach (var m in c2.Installed)
+                    {
+                        var file = m.FileName;
+                        <div class="fs-list__row">
+                            <DIcon Name="@(m.IsActive ? "check" : "file")" Size="16" />
+                            <span class="fs-list__main">
+                                <span class="fs-list__title set-mono">@m.FileName</span>
+                                <span class="fs-list__meta">@FormatBytes(m.Bytes)@(m.IsActive ? " · " + L["settings.embedded_active_suffix"] : "")</span>
+                            </span>
+                            <button type="button" class="fs-icon-btn fs-icon-btn--danger tv-focus"
+                                    disabled="@m.IsActive" @onclick="@(() => DeleteModelAsync(file))"
+                                    title="@(m.IsActive ? L["settings.embedded_active_tooltip"] : L["settings.btn_delete_tooltip"])"
+                                    aria-label="@L["settings.btn_delete_tooltip"]">
+                                <DIcon Name="trash" Size="16" />
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     };
 
-    private List<SourceFlag> ReadSourceFlags()
+    // ══ Downloads (torrent engine) ═════════════════════════════════
+    private RenderFragment TorrentTab() => __builder =>
     {
-        var json = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder);
-        if (string.IsNullOrWhiteSpace(json)) return DefaultSourceFlags.ToList();
-        try
+        if (_torrentCfg is not { } cfg)
         {
-            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<SourceFlag>>(json,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            return parsed is { Count: > 0 } ? parsed : DefaultSourceFlags.ToList();
+            <div class="fs-msgbar fs-msgbar--info">
+                <span class="fs-msgbar__ic"><Spinner Size="sm" /></span>
+                @L["common.loading"]
+            </div>
+            return;
         }
-        catch { return DefaultSourceFlags.ToList(); }
-    }
 
-    private bool _sourceEnabled(string id)
-        => ReadSourceFlags().FirstOrDefault(f =>
-            string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase))?.Enabled ?? false;
-
-    private async Task SetSourceEnabledAsync(string id, bool enabled)
-    {
-        var flags = ReadSourceFlags();
-        var idx = flags.FindIndex(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
-        if (idx >= 0) flags[idx] = flags[idx] with { Enabled = enabled };
-        else          flags.Add(new SourceFlag(id, enabled));
-        var json = System.Text.Json.JsonSerializer.Serialize(flags);
-        await SetConfigAsync(AppConfigKeys.SearchSourceOrder, json);
-    }
-
-    /// <summary>TMDb is stored as two separate source IDs on the server
-    /// (tmdb_tv + tmdb_movie). The Settings UI hides that under one toggle
-    /// for clarity — flipping it touches both flags at once.</summary>
-    private async Task ToggleTmdbAsync(bool enabled)
-    {
-        await SetSourceEnabledAsync("tmdb_tv", enabled);
-        await SetSourceEnabledAsync("tmdb_movie", enabled);
-    }
-
-    private Task ToggleMalAsync(bool enabled)  => SetSourceEnabledAsync("mal",         enabled);
-    private Task ToggleImdbAsync(bool enabled) => SetSourceEnabledAsync("imdb_search", enabled);
-
-    private async Task TestLlmAsync()
-    {
-        if (_llmTesting) return;
-        _llmTesting = true;
-        _llmTestResult = null;
-        StateHasChanged();
-        try { _llmTestResult = await Api.TestLlmAsync(); }
-        catch (Exception ex)
-        {
-            // Transport-level failure (DelegatingHandler couldn't resolve,
-            // server unreachable, etc.) — synthesise an error response so
-            // the result card path is unified.
-            _llmTestResult = new LlmTestResponse(
-                Ok: false, LatencyMs: 0, Sample: null, Error: ex.Message);
-        }
-        _llmTesting = false;
-        StateHasChanged();
-    }
-
-    // ── Patterns tab ──
-    private RenderFragment PatternsTab() => @<section class="settings-section">
-        <div class="settings-section-head">
-            <h2>@L["settings.patterns_title"]</h2>
-            <Btn Variant="primary" Size="sm" OnClick="LoadPatternsAsync">@L["settings.btn_reload"]</Btn>
-        </div>
-        @if (_patterns is null)
-        {
-            <p>@L["common.loading"]</p>
-        }
-        else if (_patterns.Length == 0)
-        {
-            <p>@L["settings.patterns_empty"]</p>
-        }
-        else
-        {
-            <table class="d-table">
-                <thead><tr><th>@L["settings.patterns_th_name"]</th><th>@L["settings.patterns_th_pattern"]</th><th>@L["settings.patterns_th_scope"]</th><th>@L["settings.patterns_th_priority"]</th><th>@L["settings.patterns_th_builtin"]</th></tr></thead>
-                <tbody>
-                    @foreach (var p in _patterns.OrderBy(p => p.Priority))
-                    {
-                        <tr>
-                            <td>@p.Name</td>
-                            <td><code>@p.Pattern</code></td>
-                            <td>@p.Scope</td>
-                            <td>@p.Priority</td>
-                            <td>@(p.IsBuiltIn ? "✓" : "")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        }
-    </section>;
-
-    private async Task LoadPatternsAsync()
-    {
-        try { _patterns = await Api.GetPatternsAsync(); }
-        catch { /* offline */ }
-        StateHasChanged();
-    }
-
-    // ── Torrent tab ──
-    private RenderFragment TorrentTab() => @<section class="settings-section">
-        <h2>@L["settings.torrent_engine_title"]</h2>
-        @if (_torrentCfg is null)
-        {
-            <p>@L["common.loading"] <Btn Variant="ghost" Size="sm" OnClick="LoadTorrentAsync">@L["settings.btn_load_now"]</Btn></p>
-        }
-        else
-        {
-            var cfg = _torrentCfg;
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.torrent_dl_limit_mbs"]</span>
-                <input class="settings-field__input" type="number" min="0"
+        <SettingsGroup Title="@L["settings.torrent_group_speed"]" Description="@L["settings.torrent_limit_desc"]">
+            <SettingsCard Icon="download" Title="@L["settings.torrent_dl_limit_mbs"]">
+                <input class="fs-input fs-input--num" type="number" min="0"
+                       aria-label="@L["settings.torrent_dl_limit_mbs"]"
                        value="@(cfg.GlobalDownloadLimit / 125_000)"
                        @onchange="@(e => UpdateTorrentDownload(int.TryParse(e.Value?.ToString(), out var v) ? v : 0))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.torrent_ul_limit_mbs"]</span>
-                <input class="settings-field__input" type="number" min="0"
+            </SettingsCard>
+            <SettingsCard Icon="upload" Title="@L["settings.torrent_ul_limit_mbs"]">
+                <input class="fs-input fs-input--num" type="number" min="0"
+                       aria-label="@L["settings.torrent_ul_limit_mbs"]"
                        value="@(cfg.GlobalUploadLimit / 125_000)"
                        @onchange="@(e => UpdateTorrentUpload(int.TryParse(e.Value?.ToString(), out var v) ? v : 0))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.torrent_port_label"]</span>
-                <input class="settings-field__input" type="number" min="1" max="65535"
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["settings.torrent_group_network"]">
+            <SettingsCard Icon="link" Title="@L["settings.torrent_port_label"]" Description="@L["settings.torrent_port_desc"]">
+                <input class="fs-input fs-input--num" type="number" min="1" max="65535"
+                       aria-label="@L["settings.torrent_port_label"]"
                        value="@cfg.ListenPort"
                        @onchange="@(e => UpdateTorrentField(c => c with { ListenPort = int.TryParse(e.Value?.ToString(), out var v) ? v : c.ListenPort }))" />
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@cfg.EnableDHT"
-                        CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableDHT = v }))" />
-                <span class="settings-field__label">@L["settings.torrent_dht_short"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@cfg.EnableLSD"
-                        CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableLSD = v }))" />
-                <span class="settings-field__label">@L["settings.torrent_lsd_full"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@cfg.EnableUPnP"
-                        CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableUPnP = v }))" />
-                <span class="settings-field__label">@L["settings.torrent_upnp_short"]</span>
-            </label>
-        }
-    </section>;
+            </SettingsCard>
+            <SettingsCard Icon="globe" Title="@L["settings.torrent_dht_short"]" Description="@L["settings.torrent_dht_desc"]">
+                <Toggle Checked="@cfg.EnableDHT" CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableDHT = v }))" />
+            </SettingsCard>
+            <SettingsCard Icon="server" Title="@L["settings.torrent_lsd_full"]" Description="@L["settings.torrent_lsd_desc"]">
+                <Toggle Checked="@cfg.EnableLSD" CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableLSD = v }))" />
+            </SettingsCard>
+            <SettingsCard Icon="shield" Title="@L["settings.torrent_upnp_short"]" Description="@L["settings.torrent_upnp_desc"]">
+                <Toggle Checked="@cfg.EnableUPnP" CheckedChanged="@((bool v) => UpdateTorrentField(c => c with { EnableUPnP = v }))" />
+            </SettingsCard>
+        </SettingsGroup>
+    };
 
     private async Task LoadTorrentAsync()
     {
@@ -949,87 +576,105 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
     private Task UpdateTorrentUpload(int mbps)
         => UpdateTorrentField(c => c with { GlobalUploadLimit = mbps * 125_000 });
 
-    // ── Metadata tab ──
-    private RenderFragment MetadataTab()
+    // ══ Metadata ═══════════════════════════════════════════════════
+    // Source enable flags live in metadata.search_source_order as a JSON
+    // array of {Id, Enabled} — MetadataService.GatherCandidatesAsync reads
+    // that format, so the UI mirrors it verbatim.
+    private sealed record SourceFlag(string Id, bool Enabled);
+
+    /// <summary>Defaults when the AppConfig value is missing or malformed —
+    /// kept in sync with MetadataService.ParseSourceOrder.</summary>
+    private static readonly SourceFlag[] DefaultSourceFlags =
     {
-        var auto    = (_config.GetValueOrDefault(AppConfigKeys.AutoIdentifyEnabled) ?? "true") != "false";
-        var thumbs  = (_config.GetValueOrDefault(AppConfigKeys.DownloadEpisodeThumbs) ?? "false") == "true";
-        var ep      = (_config.GetValueOrDefault(AppConfigKeys.IncludeEpisodeNameInFile) ?? "true") != "false";
-        var autoApp = _config.GetValueOrDefault(AppConfigKeys.AutoApplyConfidence) ?? "0.85";
-        var nrThr   = _config.GetValueOrDefault(AppConfigKeys.NeedsReviewConfidence) ?? "0.50";
-        var extPlay = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayer) ?? "mpv";
-        var extCust = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayerCustom) ?? "";
-        var segAniSkip    = (_config.GetValueOrDefault(AppConfigKeys.SegmentsAniSkipEnabled)     ?? "true")  != "false";
-        var segChapters   = (_config.GetValueOrDefault(AppConfigKeys.SegmentsChaptersEnabled)    ?? "true")  != "false";
-        var segChroma     = (_config.GetValueOrDefault(AppConfigKeys.SegmentsChromaprintEnabled) ?? "true")  != "false";
-        var segBlackFrame = (_config.GetValueOrDefault(AppConfigKeys.SegmentsBlackFrameEnabled)  ?? "false") == "true";
-        // Source enable flags live in metadata.search_source_order as a JSON
-        // array — MetadataService.GatherCandidatesAsync already reads that
-        // format. _sourceEnabled parses it once per render; SetSourceEnabledAsync
-        // mutates one flag and re-serialises.
-        var tmdbOn = _sourceEnabled("tmdb_tv") || _sourceEnabled("tmdb_movie");
-        var malOn  = _sourceEnabled("mal");
-        var imdbOn = _sourceEnabled("imdb_search");
-        var tmdbKey = _config.GetValueOrDefault(AppConfigKeys.TmdbApiKey) ?? "";
-        var malKey  = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
+        new("tmdb_tv",     true),
+        new("tmdb_movie",  true),
+        new("mal",         false),
+        new("imdb_search", true),
+    };
+
+    private List<SourceFlag> ReadSourceFlags()
+    {
+        var json = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder);
+        if (string.IsNullOrWhiteSpace(json)) return DefaultSourceFlags.ToList();
+        try
+        {
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<SourceFlag>>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return parsed is { Count: > 0 } ? parsed : DefaultSourceFlags.ToList();
+        }
+        catch { return DefaultSourceFlags.ToList(); }
+    }
+
+    private bool SourceEnabled(string id)
+        => ReadSourceFlags().FirstOrDefault(f =>
+            string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase))?.Enabled ?? false;
+
+    private async Task SetSourceEnabledAsync(string id, bool enabled)
+    {
+        var flags = ReadSourceFlags();
+        var idx = flags.FindIndex(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0) flags[idx] = flags[idx] with { Enabled = enabled };
+        else          flags.Add(new SourceFlag(id, enabled));
+        await SetConfigAsync(AppConfigKeys.SearchSourceOrder, System.Text.Json.JsonSerializer.Serialize(flags));
+    }
+
+    /// <summary>TMDb is two source IDs on the server (tv + movie) behind one switch.</summary>
+    private async Task ToggleTmdbAsync(bool enabled)
+    {
+        await SetSourceEnabledAsync("tmdb_tv", enabled);
+        await SetSourceEnabledAsync("tmdb_movie", enabled);
+    }
+
+    private RenderFragment MetadataTab() => __builder =>
+    {
+        var auto     = Flag(AppConfigKeys.AutoIdentifyEnabled, true);
+        var autoApp  = _config.GetValueOrDefault(AppConfigKeys.AutoApplyConfidence) ?? "0.85";
+        var nrThr    = _config.GetValueOrDefault(AppConfigKeys.NeedsReviewConfidence) ?? "0.50";
+        var tmdbOn   = SourceEnabled("tmdb_tv") || SourceEnabled("tmdb_movie");
+        var malOn    = SourceEnabled("mal");
+        var imdbOn   = SourceEnabled("imdb_search");
+        var tmdbKey  = _config.GetValueOrDefault(AppConfigKeys.TmdbApiKey) ?? "";
+        var malKey   = _config.GetValueOrDefault(AppConfigKeys.MalClientId) ?? "";
         var metaLang = _config.GetValueOrDefault(AppConfigKeys.MetadataLanguage) ?? "en";
-        return @<section class="settings-section">
-            <h2>@L["settings.meta_sources_title"]</h2>
-            <p class="settings-hint">
-                @L["settings.meta_sources_intro"]
-            </p>
-            <div class="settings-providers">
 
-                <div class="settings-provider">
-                    <div class="settings-provider__head">
-                        <Toggle Checked="@tmdbOn"
-                                CheckedChanged="@((bool v) => ToggleTmdbAsync(v))" />
-                        <div class="settings-provider__name">
-                            TMDb
-                            <span class="settings-provider__hint">@L["settings.meta_tmdb_hint"]</span>
-                        </div>
-                    </div>
-                    <input class="settings-field__input" type="password"
-                           placeholder="@L["settings.meta_tmdb_key_placeholder"]"
-                           value="@tmdbKey"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.TmdbApiKey, e.Value?.ToString()))" />
-                </div>
+        <SettingsGroup Title="@L["settings.meta_sources_title"]" Description="@L["settings.meta_sources_intro"]">
+            <SettingsCard Icon="database" Title="TMDb" Description="@L["settings.meta_tmdb_hint"]">
+                <ChildContent>
+                    <Toggle Checked="@tmdbOn" CheckedChanged="@((bool v) => ToggleTmdbAsync(v))" />
+                </ChildContent>
+                <Body>
+                    <label class="fs-field">
+                        <span class="fs-field__label">@L["settings.meta_api_key_label"]</span>
+                        <input class="fs-input set-key" type="password"
+                               placeholder="@L["settings.meta_tmdb_key_placeholder"]"
+                               value="@tmdbKey"
+                               @onchange="@(e => SetConfigAsync(AppConfigKeys.TmdbApiKey, e.Value?.ToString()))" />
+                    </label>
+                </Body>
+            </SettingsCard>
+            <SettingsCard Icon="database" Title="MyAnimeList" Description="@L["settings.meta_mal_hint"]">
+                <ChildContent>
+                    <Toggle Checked="@malOn" CheckedChanged="@((bool v) => SetSourceEnabledAsync("mal", v))" />
+                </ChildContent>
+                <Body>
+                    <label class="fs-field">
+                        <span class="fs-field__label">@L["settings.meta_client_id_label"]</span>
+                        <input class="fs-input set-key" type="password"
+                               placeholder="@L["settings.meta_mal_key_placeholder"]"
+                               value="@malKey"
+                               @onchange="@(e => SetConfigAsync(AppConfigKeys.MalClientId, e.Value?.ToString()))" />
+                    </label>
+                </Body>
+            </SettingsCard>
+            <SettingsCard Icon="database" Title="IMDb" Description="@L["settings.meta_imdb_hint"]">
+                <Toggle Checked="@imdbOn" CheckedChanged="@((bool v) => SetSourceEnabledAsync("imdb_search", v))" />
+            </SettingsCard>
+        </SettingsGroup>
 
-                <div class="settings-provider">
-                    <div class="settings-provider__head">
-                        <Toggle Checked="@malOn"
-                                CheckedChanged="@((bool v) => ToggleMalAsync(v))" />
-                        <div class="settings-provider__name">
-                            MAL
-                            <span class="settings-provider__hint">@L["settings.meta_mal_hint"]</span>
-                        </div>
-                    </div>
-                    <input class="settings-field__input" type="password"
-                           placeholder="@L["settings.meta_mal_key_placeholder"]"
-                           value="@malKey"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.MalClientId, e.Value?.ToString()))" />
-                </div>
-
-                <div class="settings-provider">
-                    <div class="settings-provider__head">
-                        <Toggle Checked="@imdbOn"
-                                CheckedChanged="@((bool v) => ToggleImdbAsync(v))" />
-                        <div class="settings-provider__name">
-                            IMDb
-                            <span class="settings-provider__hint">@L["settings.meta_imdb_hint"]</span>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-
-            <h3>@L["settings.meta_language_title"]</h3>
-            <p class="settings-hint">
-                @L["settings.meta_language_intro"]
-            </p>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.meta_language_label"]</span>
-                <select class="settings-field__select" value="@metaLang"
+        <SettingsGroup Title="@L["settings.meta_language_title"]">
+            <SettingsCard Icon="language" Title="@L["settings.meta_language_label"]" Description="@L["settings.meta_language_intro"]"
+                          Body="@(_langStatus is { } ls && ls.Phase != "idle" ? LangProgress(ls) : null)">
+                <select class="fs-select" value="@metaLang"
                         @onchange="@(e => SetMetadataLanguageAsync(e.Value?.ToString() ?? "en"))">
                     <option value="en">English</option>
                     <option value="ru">Русский</option>
@@ -1037,55 +682,99 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                     <option value="de">Deutsch</option>
                     <option value="es">Español</option>
                 </select>
-            </label>
-            @if (_langStatus is { } ls && ls.Phase != "idle")
-            {
-                var pct = ls.Total > 0 ? ls.Done * 100 / ls.Total : (ls.Phase == "done" ? 100 : 0);
-                <div class="settings-llm-progress">
-                    <div class="settings-llm-progress__bar">
-                        <div class="settings-llm-progress__fill" style="width:@(pct)%"></div>
-                    </div>
-                    <div class="settings-llm-progress__text">
-                        @if (ls.Phase == "running")   { <span>@L.Get("settings.meta_lang_progress_fmt", ls.Done, ls.Total, pct)</span> }
-                        else if (ls.Phase == "done")  { <span class="is-ok">@L.Get("settings.meta_lang_done_fmt", ls.Done, ls.Total)</span> }
-                        else if (ls.Phase == "error") { <span class="is-err">@L.Get("folder_files.toast_error", ls.Error)</span> }
-                    </div>
-                </div>
-            }
+            </SettingsCard>
+        </SettingsGroup>
 
-            <h3>@L["settings.auto_id_title"]</h3>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@auto"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.AutoIdentifyEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.auto_id_new_folders"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@thumbs"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.DownloadEpisodeThumbs, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.download_ep_thumbs_short"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@ep"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.IncludeEpisodeNameInFile, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.include_ep_name_switch"]</span>
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.auto_apply_threshold"]</span>
-                <input class="settings-field__input" type="number" step="0.01" min="0" max="1"
+        <SettingsGroup Title="@L["settings.auto_id_title"]">
+            <SettingsCard Icon="sparkle" Title="@L["settings.auto_id_new_folders"]" Description="@L["settings.auto_id_desc"]">
+                <Toggle Checked="@auto" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.AutoIdentifyEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="check" Title="@L["settings.auto_apply_threshold"]" Description="@L["settings.auto_apply_desc"]">
+                <input class="fs-input fs-input--num" type="number" step="0.01" min="0" max="1"
+                       aria-label="@L["settings.auto_apply_threshold"]"
                        value="@autoApp"
                        @onchange="@(e => SetConfigAsync(AppConfigKeys.AutoApplyConfidence, e.Value?.ToString()))" />
-            </label>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.needs_review_threshold"]</span>
-                <input class="settings-field__input" type="number" step="0.01" min="0" max="1"
+            </SettingsCard>
+            <SettingsCard Icon="warn" Title="@L["settings.needs_review_threshold"]" Description="@L["settings.needs_review_desc"]">
+                <input class="fs-input fs-input--num" type="number" step="0.01" min="0" max="1"
+                       aria-label="@L["settings.needs_review_threshold"]"
                        value="@nrThr"
                        @onchange="@(e => SetConfigAsync(AppConfigKeys.NeedsReviewConfidence, e.Value?.ToString()))" />
-            </label>
+            </SettingsCard>
+        </SettingsGroup>
+    };
 
-            <h3>@L["settings.ext_player_title"]</h3>
-            <label class="settings-field">
-                <span class="settings-field__label">@L["settings.ext_player_label"]</span>
-                <select class="settings-field__select" value="@extPlay"
+    private RenderFragment LangProgress(MetadataLanguageStatusDto ls) => __builder =>
+    {
+        var pct = ls.Total > 0 ? ls.Done * 100 / ls.Total : (ls.Phase == "done" ? 100 : 0);
+        <div class="set-progress">
+            <div class="set-progress__bar"><div class="set-progress__fill" style="width:@(pct)%"></div></div>
+            <div class="set-progress__text">
+                @if (ls.Phase == "running")   { <span>@L.Get("settings.meta_lang_progress_fmt", ls.Done, ls.Total, pct)</span> }
+                else if (ls.Phase == "done")  { <span class="is-ok">@L.Get("settings.meta_lang_done_fmt", ls.Done, ls.Total)</span> }
+                else if (ls.Phase == "error") { <span class="is-err">@L.Get("folder_files.toast_error", ls.Error ?? "")</span> }
+            </div>
+        </div>
+    };
+
+    private async Task LoadLangStatusAsync()
+    {
+        try
+        {
+            _langStatus = await Api.GetMetadataLanguageStatusAsync();
+            // Resume the progress poll if a pass is still running.
+            if (_langStatus is { Phase: "running" }) _ = PollLangAsync();
+        }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task SetMetadataLanguageAsync(string code)
+    {
+        try
+        {
+            await Api.SetMetadataLanguageAsync(code);
+            _config[AppConfigKeys.MetadataLanguage] = code;
+            _langStatus = await Api.GetMetadataLanguageStatusAsync();
+            _ = PollLangAsync();
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task PollLangAsync()
+    {
+        _langPollCts?.Cancel();
+        _langPollCts = new CancellationTokenSource();
+        var ct = _langPollCts.Token;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(750, ct);
+                _langStatus = await Api.GetMetadataLanguageStatusAsync();
+                await InvokeAsync(StateHasChanged);
+                if (_langStatus is null || _langStatus.Phase != "running")
+                    break;
+            }
+        }
+        catch (OperationCanceledException) { /* navigated away / superseded */ }
+        catch { /* swallow */ }
+    }
+
+    // ══ Playback (server) — external player, skip intro, HW accel ═══
+    private RenderFragment PlayerTab() => __builder =>
+    {
+        var extPlay       = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayer) ?? "mpv";
+        var segAniSkip    = Flag(AppConfigKeys.SegmentsAniSkipEnabled, true);
+        var segChapters   = Flag(AppConfigKeys.SegmentsChaptersEnabled, true);
+        var segChroma     = Flag(AppConfigKeys.SegmentsChromaprintEnabled, true);
+        var segBlackFrame = Flag(AppConfigKeys.SegmentsBlackFrameEnabled, false);
+
+        <SettingsGroup Title="@L["settings.ext_player_title"]">
+            <SettingsCard Icon="external" Title="@L["settings.ext_player_label"]" Description="@L["settings.ext_player_desc"]"
+                          Body="@(extPlay == "custom" ? CustomPlayerBody() : null)">
+                <select class="fs-select" value="@extPlay"
                         @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayer, e.Value?.ToString()))">
                     <option value="mpv">mpv</option>
                     <option value="iina">IINA (macOS)</option>
@@ -1094,60 +783,99 @@ else if  (_activeTab == "metadata")       { @MetadataTab()      }
                     <option value="m3u">@L["settings.ext_player_m3u"]</option>
                     <option value="custom">@L["settings.ext_player_custom_opt"]</option>
                 </select>
-            </label>
-            @if (extPlay == "custom")
-            {
-                <label class="settings-field">
-                    <span class="settings-field__label">@((MarkupString)L["settings.ext_player_custom_label_html"])</span>
-                    <input class="settings-field__input" placeholder="potplayer://{url}"
-                           value="@extCust"
-                           @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayerCustom, e.Value?.ToString()))" />
-                </label>
-            }
+            </SettingsCard>
+        </SettingsGroup>
 
-            <h3>@L["settings.skip_intro_title"]</h3>
-            <p class="settings-hint">
-                @L["settings.skip_intro_intro"]
-            </p>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@segAniSkip"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsAniSkipEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.seg_aniskip_label"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@segChapters"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChaptersEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.seg_chapters_label"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@segChroma"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsChromaprintEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.seg_chroma_label"]</span>
-            </label>
-            <label class="settings-field settings-field--inline">
-                <Toggle Checked="@segBlackFrame"
-                        CheckedChanged="@((bool v) => SetConfigAsync(AppConfigKeys.SegmentsBlackFrameEnabled, v ? "true" : "false"))" />
-                <span class="settings-field__label">@L["settings.seg_blackframe_label"]</span>
-            </label>
-            <div class="settings-field settings-field--inline" style="justify-content: space-between; gap: 12px;">
-                <span class="settings-hint">
-                    @if (_segStatus is { } seg)
-                    {
-                        @L.Get("settings.seg_analysed_fmt", seg.ScannedTitles, seg.TotalTitles, seg.TitlesWithSegments)
-                    }
-                    else
-                    {
-                        @L["settings.seg_analysis_progress"]
-                    }
-                </span>
-                <button type="button" class="settings-section-head__new tv-focus" @onclick="RescanSegmentsAsync">@L["settings.btn_rescan_all"]</button>
-            </div>
-        </section>;
+        <SettingsGroup Title="@L["settings.skip_intro_title"]" Description="@L["settings.skip_intro_intro"]">
+            <SettingsCard Icon="globe" Title="@L["settings.seg_aniskip_label"]">
+                <Toggle Checked="@segAniSkip" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.SegmentsAniSkipEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="list" Title="@L["settings.seg_chapters_label"]">
+                <Toggle Checked="@segChapters" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.SegmentsChaptersEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="audio" Title="@L["settings.seg_chroma_label"]">
+                <Toggle Checked="@segChroma" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.SegmentsChromaprintEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="video" Title="@L["settings.seg_blackframe_label"]">
+                <Toggle Checked="@segBlackFrame" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.SegmentsBlackFrameEnabled, v))" />
+            </SettingsCard>
+            <SettingsCard Icon="refresh" Title="@L["settings.seg_scan_title"]"
+                          Description="@(_segStatus is { } seg ? L.Get("settings.seg_analysed_fmt", seg.ScannedTitles, seg.TotalTitles, seg.TitlesWithSegments) : L["settings.seg_analysis_progress"])">
+                <Btn Variant="solid" OnClick="RescanSegmentsAsync">@L["settings.btn_rescan_all"]</Btn>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["settings.hw_title"]" Description="@L["settings.hw_desc"]">
+            @if (_hw is null)
+            {
+                <SettingsCard Icon="flash" Title="@L["settings.hw_probing"]">
+                    <Btn Variant="solid" OnClick="@(() => LoadHardwareAsync())">@L["settings.hw_probe_now"]</Btn>
+                </SettingsCard>
+            }
+            else
+            {
+                @HwCard("VAAPI", "Intel / AMD (Linux)", _hw.Vaapi)
+                @HwCard("NVENC", "NVIDIA", _hw.Nvenc)
+                @HwCard("QSV", "Intel Quick Sync", _hw.Qsv)
+                <SettingsCard Icon="refresh" Title="@L["settings.hw_btn_rescan"]">
+                    <Btn Variant="solid" OnClick="@(() => LoadHardwareAsync(rescan: true))">@L["settings.hw_btn_rescan"]</Btn>
+                </SettingsCard>
+            }
+        </SettingsGroup>
+    };
+
+    private RenderFragment CustomPlayerBody() => __builder =>
+    {
+        var extCust = _config.GetValueOrDefault(AppConfigKeys.ExternalPlayerCustom) ?? "";
+        <label class="fs-field">
+            <span class="fs-field__label">@((MarkupString)L["settings.ext_player_custom_label_html"])</span>
+            <input class="fs-input fs-input--code set-key" placeholder="potplayer://{url}"
+                   value="@extCust"
+                   @onchange="@(e => SetConfigAsync(AppConfigKeys.ExternalPlayerCustom, e.Value?.ToString()))" />
+        </label>
+    };
+
+    private RenderFragment HwCard(string name, string vendor, EncoderStatusDto s) => __builder =>
+    {
+        <SettingsCard Icon="flash" Title="@name" Description="@(s.Available ? StatusLine(s) : (s.Detail ?? vendor))">
+            <span class="@($"fs-status {(s.Available ? "fs-status--ok" : "")}")">
+                @(s.Available ? L["settings.hw_status_available"] : L["settings.hw_status_unavailable"])
+            </span>
+        </SettingsCard>
+    };
+
+    private async Task LoadPlayerAuxAsync()
+    {
+        if (_segStatus is null) await LoadSegStatusAsync();
+        if (_hw is null) await LoadHardwareAsync();
     }
 
-    // ── Helpers ──
-    // Instance method (not static) so it can localise the fallback strings
-    // through the injected LocalizationService.
+    private async Task LoadSegStatusAsync()
+    {
+        try { _segStatus = await Api.GetSegmentScanStatusAsync(); }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    private async Task RescanSegmentsAsync()
+    {
+        try
+        {
+            await Api.RescanSegmentsAsync();
+            _segStatus = await Api.GetSegmentScanStatusAsync();
+        }
+        catch { /* swallow */ }
+        StateHasChanged();
+    }
+
+    private async Task LoadHardwareAsync(bool rescan = false)
+    {
+        try { _hw = await Api.GetHardwareReportAsync(rescan); }
+        catch { /* offline */ }
+        StateHasChanged();
+    }
+
+    // Instance method (not static) so it can localise the fallback strings.
     private string StatusLine(EncoderStatusDto s)
     {
         if (!s.Available) return s.Detail ?? L["settings.hw_status_unavailable"];

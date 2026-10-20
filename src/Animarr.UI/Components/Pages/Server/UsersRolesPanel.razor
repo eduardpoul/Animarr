@@ -1,13 +1,11 @@
 @*
-    Server Settings → Users & Roles tab.
-    Spec: screens-v4.jsx → AdminUsersRoles, UsersList, RolesList, RoleBuilder,
-    UserBuilder, lines 709-907.
+    Settings → Users & roles (Fluent 2 settings page).
 
-    Sub-views switched by a segmented control:
-      • users    — UsersList
-      • roles    — RolesList
-      • newUser  — UserBuilder (form)
-      • newRole  — RoleBuilder (form)
+    Two SettingsGroups stacked like Windows 11 "Accounts": Users (one card
+    per account: avatar, login · email, role badge, last seen, edit/delete)
+    and Roles (one card per role: permission badges + folder scope).
+    Create / edit opens a SettingsEditDrawer on the right so the list stays
+    visible behind it.
 
     Reads /api/users + /api/roles. Create/Edit/Delete wired through
     IAnimarrApiClient (manageUsers policy enforced server-side).
@@ -16,49 +14,96 @@
 @inject IAnimarrApiClient Api
 @inject ToastService Toasts
 
-<div class="d-srv-users">
-
-    @* ── Segmented Users / Roles control + contextual "+ New …" button ── *@
-    @* v5 drawer refactor: segments only toggle between the two lists.
-       Add / Edit affordances now slide a SettingsEditDrawer in from the
-       right (560px), leaving the list visible behind the backdrop.
-
-       "+ New user" / "+ New role" sits on the right edge of the segment
-       bar — label switches with the active tab so a single button covers
-       both create actions without the wide full-width CTA at the bottom. *@
-    <div class="d-srv-users__segment-bar">
-        <div class="d-srv-users__segment" role="tablist">
-            @foreach (var (key, labelKey) in new[] { ("users", "users_roles.seg_users"), ("roles", "users_roles.seg_roles") })
+@if (_loading)
+{
+    <div class="urp-loading"><Spinner Size="md" /></div>
+}
+else
+{
+    <SettingsGroup Title="@L["users_roles.users_card_title"]" Description="@L["users_roles.users_card_sub"]">
+        <Actions>
+            <Btn Variant="primary" OnClick="OpenCreateUserDrawer">
+                <DIcon Name="plus" Size="16" /> @L["users_roles.btn_new_user"]
+            </Btn>
+        </Actions>
+        <ChildContent>
+            @foreach (var u in _users)
             {
-                var k = key;
-                var lk = labelKey;
-                var active = _view == k;
-                <button type="button"
-                        class="@($"d-srv-users__seg-item tv-focus {(active ? "is-active" : "")}")"
-                        @onclick="@(() => _view = k)">@L[lk]</button>
+                var user = u;
+                var isMaster = string.Equals(user.RoleName, "Master", StringComparison.OrdinalIgnoreCase);
+                <SettingsCard Title="@user.Name" Description="@UserMeta(user)">
+                    <Leading><Avatar Name="@user.Name" HueOverride="user.AvatarHue" Size="md" /></Leading>
+                    <ChildContent>
+                        <span class="urp-seen">@(user.LastSeenAt is null ? "—" : RelativeTime(user.LastSeenAt.Value))</span>
+                        <Pill Tone="@(isMaster ? "accent" : "default")">@user.RoleName</Pill>
+                        <button type="button" class="fs-icon-btn tv-focus" title="@L["users_roles.action_edit"]"
+                                aria-label="@L["users_roles.action_edit"]"
+                                @onclick="@(() => StartEditUser(user))">
+                            <DIcon Name="pencil" Size="16" />
+                        </button>
+                        @if (!isMaster)
+                        {
+                            <button type="button" class="fs-icon-btn fs-icon-btn--danger tv-focus" title="@L["users_roles.action_delete"]"
+                                    aria-label="@L["users_roles.action_delete"]"
+                                    @onclick="@(() => DeleteUserAsync(user.Id))">
+                                <DIcon Name="trash" Size="16" />
+                            </button>
+                        }
+                    </ChildContent>
+                </SettingsCard>
             }
-        </div>
-        <button type="button" class="d-srv-users__new-btn tv-focus"
-                @onclick="OpenCurrentCreateDrawer">
-            <DIcon Name="plus" Size="13" /> @(_view == "users" ? L["users_roles.btn_new_user"] : L["users_roles.btn_new_role"])
-        </button>
-    </div>
+        </ChildContent>
+    </SettingsGroup>
 
-    @if (_loading)
-    {
-        <div class="d-srv-users__loading"><Spinner Size="md" /></div>
-    }
-    else
-    {
-        @switch (_view)
-        {
-            case "users": @RenderUsersList; break;
-            case "roles": @RenderRolesList; break;
-        }
-    }
-</div>
+    <SettingsGroup Title="@L["users_roles.roles_card_title"]" Description="@L["users_roles.roles_card_sub"]">
+        <Actions>
+            <Btn Variant="solid" OnClick="OpenCreateRoleDrawer">
+                <DIcon Name="plus" Size="16" /> @L["users_roles.btn_new_role"]
+            </Btn>
+        </Actions>
+        <ChildContent>
+            @foreach (var r in _roles)
+            {
+                var role = r;
+                <SettingsCard Icon="shield" Title="@role.Name" Description="@role.Description">
+                    <Extra>
+                        <span class="urp-perms">
+                            @if (role.Permissions.ViewContent)    { <Pill Tone="success">@L["users_roles.perm_view_title"]</Pill> }
+                            @if (role.Permissions.UploadContent)  { <Pill Tone="accent">@L["users_roles.perm_upload_title"]</Pill> }
+                            @if (role.Permissions.SystemSettings) { <Pill Tone="warn">@L["users_roles.perm_system_title"]</Pill> }
+                            @if (role.Permissions.ManageUsers)    { <Pill Tone="warn">@L["users_roles.perm_manage_title"]</Pill> }
+                            <span class="urp-folders">
+                                <DIcon Name="folder" Size="14" />
+                                @(role.FolderIds is null
+                                    ? L["users_roles.role_all_folders"]
+                                    : L.Get(role.FolderIds.Length == 1
+                                            ? "users_roles.role_folder_count_one_fmt"
+                                            : "users_roles.role_folder_count_many_fmt", role.FolderIds.Length))
+                            </span>
+                        </span>
+                    </Extra>
+                    <ChildContent>
+                        <span class="urp-seen">@L.Get("users_roles.role_user_count_fmt", role.UserCount)</span>
+                        @if (role.BuiltIn)
+                        {
+                            <Pill Tone="default">@L["users_roles.badge_builtin"]</Pill>
+                        }
+                        else
+                        {
+                            <button type="button" class="fs-icon-btn tv-focus" title="@L["users_roles.action_edit"]"
+                                    aria-label="@L["users_roles.action_edit"]"
+                                    @onclick="@(() => StartEditRole(role))">
+                                <DIcon Name="pencil" Size="16" />
+                            </button>
+                        }
+                    </ChildContent>
+                </SettingsCard>
+            }
+        </ChildContent>
+    </SettingsGroup>
+}
 
-@* ── Edit/Create drawer — only one open at a time (User vs Role). ── *@
+@* ── Edit/Create drawers — only one open at a time (user vs role). ── *@
 <SettingsEditDrawer IsOpen="@_userDrawerOpen"
                     Title="@(_editingUserId is null ? L["users_roles.user_drawer_title_create"] : L["users_roles.user_drawer_title_edit"])"
                     Overline="@L["users_roles.user_drawer_overline"]"
@@ -68,7 +113,7 @@
                     Icon="user"
                     OnClose="CloseUserDrawer">
     <Body>
-        <div class="d-srv-users__form-grid">
+        <div class="fs-grid-2">
             <Input Value="@_newUserName" ValueChanged="@(v => _newUserName = v ?? "")"
                    Label="@L["users_roles.user_field_name"]" Placeholder="@L["users_roles.user_field_name_placeholder"]" />
             <Input Value="@_newUserUsername" ValueChanged="@(v => _newUserUsername = v ?? "")"
@@ -78,7 +123,7 @@
                    Label="@L["users_roles.user_field_email"]" Placeholder="@L["users_roles.user_field_email_placeholder"]" />
             <label class="d-input-group">
                 <span class="d-input-group__label">@L["users_roles.user_field_role"]</span>
-                <select class="d-profile__select" @bind="_newUserRoleId">
+                <select class="fs-select fs-select--wide" @bind="_newUserRoleId">
                     @foreach (var r in _roles)
                     {
                         <option value="@r.Id">@r.Name</option>
@@ -95,7 +140,7 @@
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SubmitUserAsync">
-            <DIcon Name="check" Size="13" /> @(_editingUserId is null ? L["users_roles.btn_create_user"] : L["users_roles.btn_save_changes"])
+            @(_editingUserId is null ? L["users_roles.btn_create_user"] : L["users_roles.btn_save_changes"])
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="CloseUserDrawer">@L["common.btn_cancel"]</Btn>
     </Footer>
@@ -108,101 +153,52 @@
                     Icon="shield"
                     OnClose="CloseRoleDrawer">
     <Body>
-        <div class="d-srv-form__col">
-            <Input Value="@_newRoleName" ValueChanged="@(v => _newRoleName = v ?? "")"
-                   Label="@L["users_roles.role_field_name"]" Placeholder="@L["users_roles.role_field_name_placeholder"]" />
+        <Input Value="@_newRoleName" ValueChanged="@(v => _newRoleName = v ?? "")"
+               Label="@L["users_roles.role_field_name"]" Placeholder="@L["users_roles.role_field_name_placeholder"]" />
 
-            <div class="d-srv-form__block">
-                <div class="d-srv-form__block-label">@L["users_roles.role_block_permissions"]</div>
-                <div class="d-srv-form__perms">
-                    <label class="d-srv-form__perm">
-                        <Toggle Checked="@_newRoleView" CheckedChanged="@(v => _newRoleView = v)" />
-                        <div>
-                            <div class="d-srv-form__perm-title">@L["users_roles.perm_view_title"]</div>
-                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_view_hint"]</div>
-                        </div>
-                    </label>
-                    <label class="d-srv-form__perm">
-                        <Toggle Checked="@_newRoleUpload" CheckedChanged="@(v => _newRoleUpload = v)" />
-                        <div>
-                            <div class="d-srv-form__perm-title">@L["users_roles.perm_upload_title"]</div>
-                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_upload_hint"]</div>
-                        </div>
-                    </label>
-                    <label class="d-srv-form__perm">
-                        <Toggle Checked="@_newRoleSys" CheckedChanged="@(v => _newRoleSys = v)" />
-                        <div>
-                            <div class="d-srv-form__perm-title">@L["users_roles.perm_system_title"]</div>
-                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_system_hint"]</div>
-                        </div>
-                    </label>
-                    <label class="d-srv-form__perm">
-                        <Toggle Checked="@_newRoleUsers" CheckedChanged="@(v => _newRoleUsers = v)" />
-                        <div>
-                            <div class="d-srv-form__perm-title">@L["users_roles.perm_manage_title"]</div>
-                            <div class="d-srv-form__perm-hint">@L["users_roles.perm_manage_hint"]</div>
-                        </div>
-                    </label>
-                </div>
+        <div class="urp-block">
+            <div class="d-input-group__label">@L["users_roles.role_block_permissions"]</div>
+            <div class="urp-cards">
+                <SettingsCard Title="@L["users_roles.perm_view_title"]" Description="@L["users_roles.perm_view_hint"]">
+                    <Toggle Checked="@_newRoleView" CheckedChanged="@(v => _newRoleView = v)" />
+                </SettingsCard>
+                <SettingsCard Title="@L["users_roles.perm_upload_title"]" Description="@L["users_roles.perm_upload_hint"]">
+                    <Toggle Checked="@_newRoleUpload" CheckedChanged="@(v => _newRoleUpload = v)" />
+                </SettingsCard>
+                <SettingsCard Title="@L["users_roles.perm_system_title"]" Description="@L["users_roles.perm_system_hint"]">
+                    <Toggle Checked="@_newRoleSys" CheckedChanged="@(v => _newRoleSys = v)" />
+                </SettingsCard>
+                <SettingsCard Title="@L["users_roles.perm_manage_title"]" Description="@L["users_roles.perm_manage_hint"]">
+                    <Toggle Checked="@_newRoleUsers" CheckedChanged="@(v => _newRoleUsers = v)" />
+                </SettingsCard>
             </div>
+        </div>
 
-            <div class="d-srv-form__block">
-                <div class="d-srv-form__block-label">@L["users_roles.role_block_folders"]</div>
-                <div class="d-srv-form__segment">
-                    @foreach (var (key, labelKey) in new[] { ("all", "users_roles.folder_mode_all"), ("selected", "users_roles.folder_mode_selected") })
-                    {
-                        var k = key; var lk = labelKey;
-                        <button type="button"
-                                class="@($"d-srv-form__seg-item tv-focus {(_newRoleFolderMode == k ? "is-active" : "")}")"
-                                @onclick="@(() => _newRoleFolderMode = k)">@L[lk]</button>
-                    }
-                </div>
-                @if (_newRoleFolderMode == "selected")
-                {
-                    <div class="d-srv-form__folders">
-                        @if (_allFolders.Length == 0)
-                        {
-                            <div class="d-srv-form__folder-empty">
-                                @L["users_roles.folders_empty"]
-                            </div>
-                        }
-                        @foreach (var f in _allFolders)
-                        {
-                            var folderId = f.Id;
-                            var active = _newRoleFolders.Contains(folderId);
-                            <label class="@($"d-srv-form__folder {(active ? "is-active" : "")}")">
-                                <input type="checkbox" checked="@active"
-                                       @onchange="@(e => ToggleFolder(folderId, (bool)e.Value!))" />
-                                <DIcon Name="folder" Size="13" />
-                                <span>@f.Label</span>
-                            </label>
-                        }
-                    </div>
-                }
-            </div>
+        <div class="urp-block">
+            <SettingsCard Icon="folder" Title="@L["users_roles.role_block_folders"]"
+                          Body="@(_newRoleFolderMode == "selected" ? FolderPicker() : null)">
+                <select class="fs-select" value="@_newRoleFolderMode"
+                        @onchange="@(e => _newRoleFolderMode = e.Value?.ToString() ?? "all")">
+                    <option value="all">@L["users_roles.folder_mode_all"]</option>
+                    <option value="selected">@L["users_roles.folder_mode_selected"]</option>
+                </select>
+            </SettingsCard>
         </div>
     </Body>
     <Footer>
         <Btn Variant="primary" Size="md" OnClick="SubmitRoleAsync">
-            <DIcon Name="check" Size="13" /> @(_editingRoleId is null ? L["users_roles.btn_create_role"] : L["users_roles.btn_save_changes"])
+            @(_editingRoleId is null ? L["users_roles.btn_create_role"] : L["users_roles.btn_save_changes"])
         </Btn>
         <Btn Variant="ghost" Size="md" OnClick="CloseRoleDrawer">@L["common.btn_cancel"]</Btn>
     </Footer>
 </SettingsEditDrawer>
 
 @code {
-    /// <summary>v5 deep-link: when true, the panel mounts with the inline
-    /// UserBuilder open instead of the users list. Set by ServerSettings.razor
-    /// after parsing ?openForm=user (from ProfilePanel's "+ Add user" button).
-    /// The flag is consumed once on first render then ignored — switching
-    /// tabs / re-visiting the page uses _view local state. </summary>
+    /// <summary>Deep-link: when true, the panel mounts with the create-user
+    /// drawer open. Set by SettingsPage after parsing ?openForm=user. The flag
+    /// is consumed once, then ignored.</summary>
     [Parameter] public bool OpenCreateForm { get; set; }
 
-    /// <summary>"users" or "roles" — segmented list under the panel header.
-    /// v5 drawer refactor: add/edit no longer mutate _view; they flip
-    /// <see cref="_userDrawerOpen"/> / <see cref="_roleDrawerOpen"/> instead
-    /// so the list stays visible behind the drawer backdrop.</summary>
-    private string _view = "users";
     private bool _userDrawerOpen;
     private bool _roleDrawerOpen;
 
@@ -226,7 +222,6 @@
         {
             _consumedOpenForm = true;
             ResetUserForm();
-            _view = "users";
             _userDrawerOpen = true;
         }
     }
@@ -255,15 +250,6 @@
     {
         ResetRoleForm();
         _roleDrawerOpen = true;
-    }
-
-    /// <summary>Single-handler proxy used by the segment-bar's "+ New …"
-    /// button — picks the right drawer based on the active tab so the
-    /// button label and target stay in sync.</summary>
-    private void OpenCurrentCreateDrawer()
-    {
-        if (_view == "users") OpenCreateUserDrawer();
-        else                  OpenCreateRoleDrawer();
     }
 
     private async Task LoadAsync()
@@ -343,7 +329,6 @@
             ResetUserForm();
             await LoadAsync();
             _userDrawerOpen = false;
-            _view = "users";
         }
         catch (Exception ex)
         {
@@ -384,7 +369,6 @@
             ResetRoleForm();
             await LoadAsync();
             _roleDrawerOpen = false;
-            _view = "roles";
         }
         catch (Exception ex)
         {
@@ -486,99 +470,32 @@
         _newRoleFolders.Clear();
     }
 
-    // ─── Users list ────────────────────────────────────────────
-    private RenderFragment RenderUsersList => __builder =>
-    {
-        <div class="d-srv-card">
-            <header class="d-srv-card__head">
-                <h2 class="d-srv-card__title">@L["users_roles.users_card_title"]</h2>
-                <div class="d-srv-card__sub">@L["users_roles.users_card_sub"]</div>
-            </header>
-            <div class="d-srv-users__rows">
-                @foreach (var u in _users)
-                {
-                    var isMaster = string.Equals(u.RoleName, "Master", StringComparison.OrdinalIgnoreCase);
-                    <div class="d-srv-users__row">
-                        <Avatar Name="@u.Name" HueOverride="u.AvatarHue" Size="md" />
-                        <div class="d-srv-users__row-text">
-                            <div class="d-srv-users__row-name">@u.Name</div>
-                            <div class="d-srv-users__row-meta">
-                                @u.Username@(string.IsNullOrEmpty(u.Email) ? "" : " · " + u.Email)
-                            </div>
-                        </div>
-                        <Pill Tone="@(isMaster ? "accent" : "")">@u.RoleName</Pill>
-                        <span class="d-srv-users__row-seen">@(u.LastSeenAt is null ? "—" : RelativeTime(u.LastSeenAt.Value))</span>
-                        <div class="d-srv-users__row-actions">
-                            <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_edit"]"
-                                    @onclick="@(() => StartEditUser(u))">
-                                <DIcon Name="pencil" Size="14" />
-                            </button>
-                            @if (!isMaster)
-                            {
-                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_delete"]"
-                                        @onclick="@(() => DeleteUserAsync(u.Id))">
-                                    <DIcon Name="trash" Size="14" />
-                                </button>
-                            }
-                        </div>
-                    </div>
-                }
-            </div>
-        </div>
-    };
+    private static string UserMeta(UserDto u) =>
+        string.IsNullOrEmpty(u.Email) ? u.Username : $"{u.Username} · {u.Email}";
 
-    // ─── Roles list ────────────────────────────────────────────
-    private RenderFragment RenderRolesList => __builder =>
+    // ─── Role drawer: folder checklist (shown for "Selected only") ───
+    private RenderFragment FolderPicker() => __builder =>
     {
-        <div class="d-srv-card">
-            <header class="d-srv-card__head">
-                <h2 class="d-srv-card__title">@L["users_roles.roles_card_title"]</h2>
-                <div class="d-srv-card__sub">@L["users_roles.roles_card_sub"]</div>
-            </header>
-            <div class="d-srv-roles__rows">
-                @foreach (var r in _roles)
+        if (_allFolders.Length == 0)
+        {
+            <p class="fs-hint">@L["users_roles.folders_empty"]</p>
+        }
+        else
+        {
+            <div class="fs-list">
+                @foreach (var f in _allFolders)
                 {
-                    <div class="d-srv-roles__row">
-                        <header class="d-srv-roles__row-head">
-                            <div class="@($"d-srv-roles__icon {(r.BuiltIn ? "is-builtin" : "")}")">
-                                <DIcon Name="shield" Size="14" />
-                            </div>
-                            <div class="d-srv-roles__row-text">
-                                <div class="d-srv-roles__row-name">
-                                    @r.Name
-                                    @if (r.BuiltIn)
-                                    {
-                                        <span class="d-srv-roles__row-builtin">@L["users_roles.role_builtin_suffix"]</span>
-                                    }
-                                </div>
-                                <div class="d-srv-roles__row-desc">@r.Description</div>
-                            </div>
-                            <span class="d-srv-roles__row-count">@L.Get("users_roles.role_user_count_fmt", r.UserCount)</span>
-                            @if (!r.BuiltIn)
-                            {
-                                <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_edit"]"
-                                        @onclick="@(() => StartEditRole(r))">
-                                    <DIcon Name="pencil" Size="14" />
-                                </button>
-                            }
-                        </header>
-                        <div class="d-srv-roles__perms">
-                            @if (r.Permissions.ViewContent)    { <Pill Tone="success">@L["users_roles.perm_view_title"]</Pill> }
-                            @if (r.Permissions.UploadContent)  { <Pill Tone="accent">@L["users_roles.perm_upload_title"]</Pill> }
-                            @if (r.Permissions.SystemSettings) { <Pill Tone="warn">@L["users_roles.perm_system_title"]</Pill> }
-                            @if (r.Permissions.ManageUsers)    { <Pill Tone="warn">@L["users_roles.perm_manage_title"]</Pill> }
-                            <span class="d-srv-roles__folders">
-                                @(r.FolderIds is null
-                                    ? L["users_roles.role_all_folders"]
-                                    : L.Get(r.FolderIds.Length == 1
-                                            ? "users_roles.role_folder_count_one_fmt"
-                                            : "users_roles.role_folder_count_many_fmt", r.FolderIds.Length))
-                            </span>
-                        </div>
-                    </div>
+                    var folderId = f.Id;
+                    var active = _newRoleFolders.Contains(folderId);
+                    <label class="fs-list__row urp-folder">
+                        <input type="checkbox" class="urp-check" checked="@active"
+                               @onchange="@(e => ToggleFolder(folderId, (bool)e.Value!))" />
+                        <DIcon Name="folder" Size="16" />
+                        <span class="fs-list__title">@f.Label</span>
+                    </label>
                 }
             </div>
-        </div>
+        }
     };
 
     private void ToggleFolder(Guid id, bool on)
@@ -587,14 +504,14 @@
         else    _newRoleFolders.Remove(id);
     }
 
-    private static string RelativeTime(DateTime utc)
+    private string RelativeTime(DateTime utc)
     {
         var d = DateTime.UtcNow - utc;
-        if (d.TotalMinutes < 1)  return "now";
-        if (d.TotalHours   < 1)  return $"{(int)d.TotalMinutes}m ago";
-        if (d.TotalDays    < 1)  return $"{(int)d.TotalHours}h ago";
-        if (d.TotalDays    < 2)  return "yesterday";
-        if (d.TotalDays    < 7)  return $"{(int)d.TotalDays}d ago";
-        return utc.ToString("yyyy-MM-dd");
+        if (d.TotalMinutes < 1)  return L["users_roles.seen_now"];
+        if (d.TotalHours   < 1)  return L.Get("users_roles.seen_minutes_fmt", (int)d.TotalMinutes);
+        if (d.TotalDays    < 1)  return L.Get("users_roles.seen_hours_fmt", (int)d.TotalHours);
+        if (d.TotalDays    < 2)  return L["users_roles.seen_yesterday"];
+        if (d.TotalDays    < 7)  return L.Get("users_roles.seen_days_fmt", (int)d.TotalDays);
+        return utc.ToLocalTime().ToString("yyyy-MM-dd");
     }
 }

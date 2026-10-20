@@ -1,0 +1,1406 @@
+@*
+    PersonalSettings — the "Personal" group of the /settings hub, drawn as
+    Fluent 2 settings cards. Section = account | servers | appearance |
+    playback. This was ProfilePanel (a right-edge drawer with tabs); the
+    drawer chrome is gone, the state + handlers are unchanged.
+*@
+
+@inject UserContextState UserCtx
+@inject NavigationManager Nav
+@inject IAnimarrApiClient Api
+@inject IJSRuntime JS
+@inject LocalizationService Loc
+@inject ServerRegistryState ServerReg
+@inject ToastService Toasts
+@inject DeviceProfilesState DeviceProfiles
+@implements IDisposable
+
+@if (_keypadOpen && _keypadTarget is { } kt)
+{
+    @* ── PIN keypad overlay (v5 fast switch) ──
+         Full-screen shell at z-index 211 — ABOVE the drawer + its backdrop
+         (200/201) so the keypad isn't tinted out or click-blocked. Clicking
+         the shell's empty area cancels; the card wrapper stops propagation so
+         taps on the digits keep the dialog open.
+         We use stopPropagation (NOT a pointer-events trick) on purpose: the
+         keypad is a CHILD component, so a scoped `pointer-events:auto` rule
+         can't reach into its element — which is exactly why mouse taps used
+         to fall through to the backdrop and close the dialog. *@
+    <div class="d-pin-shell" @onclick="OnKeypadCancel">
+        <div class="d-pin-card" @onclick:stopPropagation="true"
+             role="dialog" aria-modal="true" aria-label="@L["pin.enter_aria"]">
+            <PinKeypad UserName="@kt.Name"
+                       Error="@_keypadError"
+                       OnSubmit="OnKeypadSubmit"
+                       OnCancel="OnKeypadCancel" />
+        </div>
+    </div>
+}
+
+@if (UserCtx.Me is { } me)
+{
+    @switch (Section)
+    {
+        case "servers":
+            @RenderServers()
+            break;
+        case "appearance":
+            @RenderAppearance()
+            break;
+        case "playback":
+            @RenderAudio()
+            break;
+        default:
+            @RenderIdentity(me)
+            break;
+    }
+}
+
+@code {
+    /// <summary>account | servers | appearance | playback.</summary>
+    [Parameter] public string Section { get; set; } = "account";
+
+    // Local edit state mirrors UserContextState.Preferences. On every change
+    // we PATCH /api/me/preferences and update the global state so any other
+    // subscriber (MainLayout's backdrop, accent hue applier) re-renders.
+    private int _accentHue => _huePreview ?? UserCtx.Preferences?.AccentHue ?? Animarr.UI.Services.ThemeService.DefaultHue;
+    private bool _backdropEnabled = true;
+    private bool _tvMode          = false;
+    private string _audioPref     = "Japanese";
+    private string _subPref       = "Russian";
+    private int _subSize          = 18;
+    private bool _themeMusic       = false;
+    private int  _themeMusicVolume = 40;
+    private string _language      = "en";
+    private string _theme         = "dark";
+    /// <summary>Default episode-list layout on a title's detail page —
+    /// "grid" (poster cards) or "list" (detailed rows). The page's grid⇄list
+    /// toggle writes the same preference, so this is the shared default.</summary>
+    private string _episodeListView = "grid";
+
+    /// <summary>Player HUD style: "full" (icons + text + glass background)
+    /// or "icons" (just icons, no background, no labels). Device-local only —
+    /// stored in localStorage by animarr-player.js, not persisted server-side.
+    /// Set in OnAfterRenderAsync once JS is available.</summary>
+    private string _playerStyle = "full";
+
+    // ─── Edit-profile + Change-password inline form state ──────────────
+    private bool   _editProfileOpen;
+    private bool   _editProfileBusy;
+    private string _editProfileError = "";
+    private string _editName   = "";
+    private string _editEmail  = "";
+    private int    _editAvatarHue;
+
+    private bool   _changePwOpen;
+    private bool   _changePwBusy;
+    private string _changePwError = "";
+    private string _pwCurrent = "";
+    private string _pwNew     = "";
+    private string _pwRepeat  = "";
+
+    // ─── Set / change / remove a DEVICE-LOCAL PIN ─────────────────────
+    // The PIN locks fast-switching INTO this profile on THIS device. It's
+    // stored + verified locally (DeviceProfilesState), never on the server —
+    // so a PIN set here doesn't follow the account onto other devices.
+    private bool   _pinOpen;
+    private bool   _pinBusy;
+    private string _pinError = "";
+    private string _pinValue = "";      // the new 4-digit PIN (device-local)
+    private bool   _myHasDevicePin;     // does the CURRENT user have a device-local PIN here?
+
+    // Kept so the navigation handlers below read the same as before; there is
+    // no drawer to close any more.
+    private Task Close() => Task.CompletedTask;
+
+    // The hub can mount this before /api/me + preferences arrive (direct
+    // navigation to /settings), so follow UserContextState instead of reading
+    // it once — the old drawer only ever opened after boot.
+    protected override void OnInitialized() => UserCtx.OnChange += OnUserCtxChanged;
+
+    public void Dispose() => UserCtx.OnChange -= OnUserCtxChanged;
+
+    private void OnUserCtxChanged() => InvokeAsync(async () =>
+    {
+        SyncFromPreferences();
+        // First /api/me after a cold load: build the switch-user strip now
+        // that we know who "me" is.
+        if (_profiles.Count == 0 && UserCtx.Me is not null) await LoadProfilesAsync();
+        StateHasChanged();
+    });
+
+    protected override void OnParametersSet() => SyncFromPreferences();
+
+    private void SyncFromPreferences()
+    {
+        var p = UserCtx.Preferences;
+        if (p is null) return;
+        _backdropEnabled = p.BackdropEnabled;
+        _tvMode          = p.TvMode;
+        _audioPref       = p.AudioPreferredLanguage;
+        _subPref         = p.SubtitlePreferredLanguage;
+        _subSize         = p.SubtitleSize;
+        _themeMusic       = p.ThemeMusicEnabled;
+        _themeMusicVolume = p.ThemeMusicVolume;
+        _language        = p.Language;
+        _theme           = string.Equals(p.Theme, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
+        _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
+        _homeSections    = HomeSections.Parse(p.HomeSectionsJson);
+        _recsScope       = string.IsNullOrEmpty(p.RecsScope) ? "everywhere" : p.RecsScope.ToLowerInvariant();
+        _hideFillers     = p.HideFillers;
+    }
+
+    // ─── Edit profile / change password handlers ───────────────────────
+
+    private void ToggleEditProfile()
+    {
+        if (_editProfileOpen)
+        {
+            _editProfileOpen = false;
+            return;
+        }
+        // Reset form when opening so a previous abandoned edit doesn't leak in.
+        if (UserCtx.Me is { } me)
+        {
+            _editName       = me.User.Name;
+            _editEmail      = me.User.Email ?? "";
+            _editAvatarHue  = me.User.AvatarHue;
+        }
+        _editProfileError = "";
+        _editProfileOpen = true;
+        // Mutually exclusive with the password form to keep the drawer tidy.
+        _changePwOpen = false;
+    }
+
+    private void ToggleChangePassword()
+    {
+        _changePwOpen = !_changePwOpen;
+        if (_changePwOpen)
+        {
+            _pwCurrent = _pwNew = _pwRepeat = "";
+            _changePwError = "";
+            _editProfileOpen = false;
+            _pinOpen = false;
+        }
+    }
+
+    private void ToggleSetPin()
+    {
+        _pinOpen = !_pinOpen;
+        if (_pinOpen)
+        {
+            _pinValue = ""; _pinError = "";
+            _editProfileOpen = false;
+            _changePwOpen = false;
+        }
+    }
+
+    /// <summary>Keep only the first <paramref name="max"/> digits of raw input —
+    /// the PIN is numeric and fixed-length (matches the switch-user keypad).</summary>
+    private static string DigitsOnly(string? raw, int max)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        var sb = new System.Text.StringBuilder(max);
+        foreach (var ch in raw)
+        {
+            if (ch is >= '0' and <= '9') { sb.Append(ch); if (sb.Length >= max) break; }
+        }
+        return sb.ToString();
+    }
+
+    private async Task SubmitSetPinAsync()
+    {
+        _pinError = "";
+        if (_pinValue.Length < 4) { _pinError = L["profile.pin_err_len"]; return; }
+        if (UserCtx.Me is not { } me) return;
+        _pinBusy = true; StateHasChanged();
+        try
+        {
+            // Device-local: store the hashed PIN on THIS device only.
+            await DeviceProfiles.SetPinAsync(me.User.Id, _pinValue);
+            _myHasDevicePin = true;
+            await LoadProfilesAsync();        // refresh the strip's lock badge
+            _pinOpen = false; _pinValue = "";
+            Toasts.ShowSuccess(L["profile.pin_toast_saved"]);
+        }
+        catch (Exception ex) { _pinError = L.Get("profile.pin_err_save", ex.Message); }
+        finally { _pinBusy = false; StateHasChanged(); }
+    }
+
+    private async Task RemovePinAsync()
+    {
+        _pinError = "";
+        if (UserCtx.Me is not { } me) return;
+        _pinBusy = true; StateHasChanged();
+        try
+        {
+            await DeviceProfiles.SetPinAsync(me.User.Id, null);
+            _myHasDevicePin = false;
+            await LoadProfilesAsync();
+            _pinOpen = false; _pinValue = "";
+            Toasts.ShowSuccess(L["profile.pin_toast_removed"]);
+        }
+        catch (Exception ex) { _pinError = L.Get("profile.pin_err_remove", ex.Message); }
+        finally { _pinBusy = false; StateHasChanged(); }
+    }
+
+    private async Task SubmitEditProfileAsync()
+    {
+        _editProfileError = "";
+        var trimmedName = _editName.Trim();
+        if (string.IsNullOrEmpty(trimmedName))
+        {
+            _editProfileError = L["profile.err_name_empty"];
+            return;
+        }
+        _editProfileBusy = true;
+        StateHasChanged();
+        try
+        {
+            var updated = await Api.UpdateMyProfileAsync(new UpdateMyProfileRequest(
+                Name:      trimmedName,
+                Email:     string.IsNullOrWhiteSpace(_editEmail) ? null : _editEmail.Trim(),
+                AvatarHue: _editAvatarHue));
+            // Refresh global Me cache so the topbar avatar chip + sidebar
+            // pick up the new values without a full reload. RefreshMeAsync
+            // re-pulls /api/me which carries the freshly-saved Name/Email/Hue.
+            await UserCtx.RefreshMeAsync();
+            _editProfileOpen = false;
+            Toasts.ShowSuccess(L["profile.toast_updated"]);
+        }
+        catch (Exception ex)
+        {
+            _editProfileError = L.Get("profile.err_save_failed", ex.Message);
+        }
+        finally
+        {
+            _editProfileBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitChangePasswordAsync()
+    {
+        _changePwError = "";
+        if (string.IsNullOrEmpty(_pwCurrent))
+        {
+            _changePwError = L["profile.err_pw_current_required"];
+            return;
+        }
+        if (_pwNew.Length < 6)
+        {
+            _changePwError = L["profile.err_pw_min"];
+            return;
+        }
+        if (_pwNew != _pwRepeat)
+        {
+            _changePwError = L["profile.err_pw_mismatch"];
+            return;
+        }
+        _changePwBusy = true;
+        StateHasChanged();
+        try
+        {
+            await Api.ChangeMyPasswordAsync(new ChangePasswordRequest(_pwCurrent, _pwNew));
+            _changePwOpen = false;
+            _pwCurrent = _pwNew = _pwRepeat = "";
+            Toasts.ShowSuccess(L["profile.toast_pw_changed"]);
+        }
+        catch (Exception ex)
+        {
+            // The server returns 400 with {error} JSON for the "current password is
+            // incorrect" + min-length cases. Surface the underlying message when we
+            // can, otherwise the generic message keeps the form open.
+            _changePwError = L.Get("profile.err_update_failed", ex.Message);
+        }
+        finally
+        {
+            _changePwBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Read the device-local player-style preference from localStorage
+    /// once JS is available. localStorage holds the source of truth — there
+    /// is no server-side mirror because the choice (icons-only vs full) is
+    /// often per-device (e.g. icons-only on living-room TV, full on phone).
+    /// Merged with the user-roster fetch (second pre-merge block had a
+    /// duplicate OnAfterRenderAsync override that broke the build).</summary>
+    private async Task LoadPlayerStyleAsync()
+    {
+        try
+        {
+            var v = await JS.InvokeAsync<string?>(
+                "eval", "localStorage.getItem('animarr_player_style')");
+            if (v == "icons" || v == "full")
+            {
+                _playerStyle = v;
+                StateHasChanged();
+            }
+        }
+        catch { /* localStorage unavailable — keep default */ }
+    }
+
+    private async Task OnPlayerStyleSelect(string style)
+    {
+        if (style != "full" && style != "icons") return;
+        _playerStyle = style;
+        try
+        {
+            // animarrPlayer.setStyle writes to localStorage AND updates any
+            // live HUD via data-style attribute swap, so the change is live
+            // even when the user toggles while the player is open.
+            await JS.InvokeVoidAsync("animarrPlayer.setStyle", style);
+        }
+        catch { /* JS unavailable — preference is still set in _playerStyle */ }
+        StateHasChanged();
+    }
+
+    /// <summary>PATCH /api/me/preferences with the diff this tab cares about,
+    /// store the new payload in UserContextState so accent/backdrop/etc.
+    /// re-apply globally. Errors are swallowed — UI still reflects the local
+    /// change while the server retry happens; next LoadAsync converges.</summary>
+    private async Task PatchAsync(UpdatePreferencesRequest req)
+    {
+        try
+        {
+            var updated = await Api.UpdateMyPreferencesAsync(req);
+            UserCtx.SetPreferences(updated);
+        }
+        catch { }
+    }
+
+    private async Task OnBackdropToggle(bool v)
+    {
+        _backdropEnabled = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, BackdropEnabled: v, null, null, null, null, null, null, null, null, null, null, null));
+    }
+
+    private async Task OnTvModeToggle(bool v)
+    {
+        _tvMode = v;
+        try
+        {
+            // Reflect the toggle in the DOM immediately so .tv-focus heavier
+            // rings and the larger base font-size kick in without a reload.
+            // Mirror to localStorage too — the boot resolver in index.html
+            // reads `animarr_tv_mode` on first paint, before MainLayout has
+            // had a chance to fetch /api/me/preferences, so persisting here
+            // keeps the bootstrap class application aligned with the user's
+            // explicit choice (no flash of wrong layout on next launch).
+            await JS.InvokeVoidAsync("eval",
+                v ? "document.documentElement.classList.add('tv-mode');" +
+                    "try{localStorage.setItem('animarr_tv_mode','1');}catch(_){};"
+                  : "document.documentElement.classList.remove('tv-mode');" +
+                    "try{localStorage.setItem('animarr_tv_mode','0');}catch(_){};");
+        }
+        catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, TvMode: v, null, null, null, null, null, null, null));
+    }
+
+    private async Task OnThemeMusicToggle(bool v)
+    {
+        _themeMusic = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            ThemeMusicEnabled: v));
+    }
+
+    private async Task OnThemeMusicVolumeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _themeMusicVolume = n;
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                ThemeMusicVolume: n));
+        }
+    }
+
+    private async Task OnAudioPrefChanged(ChangeEventArgs e)
+    {
+        _audioPref = e.Value?.ToString() ?? _audioPref;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, AudioPreferredLanguage: _audioPref, null, null, null, null, null, null));
+    }
+
+    private async Task OnSubPrefChanged(ChangeEventArgs e)
+    {
+        _subPref = e.Value?.ToString() ?? _subPref;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, SubtitlePreferredLanguage: _subPref, null, null, null, null, null));
+    }
+
+    private async Task OnSubSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _subSize = n;
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, SubtitleSize: n, null, null, null, null));
+        }
+    }
+
+
+    private async Task OnLanguageChanged(ChangeEventArgs e)
+    {
+        _language = e.Value?.ToString() ?? _language;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, Language: _language));
+        // Hot-swap the pack so subscribers (MainLayout) see the new dict
+        // immediately — but most page-level components don't subscribe to
+        // L.LanguageChanged and would keep rendering English strings.
+        // The honest fix: a hard reload of the current URL. UserCtx.Loaded
+        // re-runs, prefs come back from the server with the new language,
+        // and MainLayout calls Loc.LoadAsync(prefLang) at boot. Every L[...]
+        // lookup across the app now resolves against the new dict. Losing
+        // current-page state (filter chip, scroll position) is acceptable —
+        // language changes are rare and the user just asked for one.
+        try { await Loc.LoadAsync(_language); } catch { /* fallback handled in Loc */ }
+        // Cache for the boot resolver (Program.cs) so the forced reload below —
+        // and every future boot — paints straight in the new language.
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "animarr-lang", _language); } catch { }
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    private async Task SignOut()
+    {
+        await UserCtx.SignOutAsync();
+        await Close();
+        Nav.NavigateTo("/welcome", forceLoad: false);
+    }
+
+    // ─── Tab body renderers ────────────────────────────────────
+
+    private RenderFragment RenderIdentity(MeDto me) => __builder =>
+    {
+        @* Account summary — Windows "Your info" header. *@
+        <div class="ps-hero">
+            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="xl" />
+            <div class="ps-hero__text">
+                <div class="ps-hero__name">@me.User.Name</div>
+                <div class="ps-hero__sub">@me.User.Username@(string.IsNullOrEmpty(me.User.Email) ? "" : " · " + me.User.Email)</div>
+                <div class="ps-hero__meta">
+                    <Pill Tone="accent">@me.User.RoleName</Pill>
+                    <span>@L.Get("profile.created_fmt", me.User.CreatedAt.ToString("yyyy-MM-dd"))</span>
+                </div>
+            </div>
+        </div>
+
+        @* Switch profile (device-local): profiles that signed in on THIS
+           device. No PIN → switch at once; PIN → keypad, verified locally. *@
+        <SettingsGroup Title="@(string.Format(L["profile.switch_user_label"], ServerReg.Current?.Name ?? "Animarr"))">
+            <div class="ps-users" role="list">
+                @foreach (var p in _profiles)
+                {
+                    var prof = p;
+                    var isMe = prof.User.Id == me.User.Id;
+                    <button type="button"
+                            class="@($"ps-user tv-focus {(isMe ? "is-me" : "")}")"
+                            role="listitem"
+                            title="@prof.User.Name"
+                            disabled="@(_switchBusy || isMe)"
+                            @onclick="@(() => OnUserCardClick(prof))">
+                        <span class="ps-user__avatar">
+                            <Avatar Name="@prof.User.Name" HueOverride="prof.User.AvatarHue"
+                                    ImagePath="@prof.User.AvatarPath" Size="lg" />
+                            @if (prof.HasPin)
+                            {
+                                <span class="ps-user__pin" aria-label="@L["profile.pin_required_aria"]">
+                                    <DIcon Name="lock" Size="12" />
+                                </span>
+                            }
+                        </span>
+                        <span class="ps-user__name">@prof.User.Name</span>
+                        <span class="ps-user__meta">@(isMe ? L["profile.you"] : prof.User.RoleName)</span>
+                    </button>
+                }
+                <button type="button" class="ps-user ps-user--add tv-focus" @onclick="OnAddAccountClick">
+                    <span class="ps-user__avatar ps-user__avatar--add"><DIcon Name="plus" Size="20" /></span>
+                    <span class="ps-user__name">@L["profile.add_account"]</span>
+                </button>
+            </div>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_profile"]">
+            <SettingsCard Icon="pencil" Title="@L["profile.edit_profile"]" Description="@L["profile.edit_profile_desc"]"
+                          Expandable="true" Expanded="@_editProfileOpen"
+                          ExpandedChanged="@((bool v) => { if (v != _editProfileOpen) ToggleEditProfile(); })">
+                <Body>
+                    @if (!string.IsNullOrEmpty(_editProfileError))
+                    {
+                        <div class="fs-msgbar fs-msgbar--error"><span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@_editProfileError</div>
+                    }
+                    <div class="fs-grid-2">
+                        <label class="fs-field">
+                            <span class="fs-field__label">@L["profile.field_display_name"]</span>
+                            <input class="fs-input fs-input--wide" type="text" value="@_editName"
+                                   @oninput="@((ChangeEventArgs e) => _editName = e.Value?.ToString() ?? "")" />
+                        </label>
+                        <label class="fs-field">
+                            <span class="fs-field__label">@L["profile.field_email_optional"]</span>
+                            <input class="fs-input fs-input--wide" type="email" value="@_editEmail"
+                                   @oninput="@((ChangeEventArgs e) => _editEmail = e.Value?.ToString() ?? "")" />
+                        </label>
+                    </div>
+                    <label class="fs-field">
+                        <span class="fs-field__label">@L["profile.field_avatar_hue"] · @_editAvatarHue°</span>
+                        <input class="ps-hue-slider tv-focus" type="range" min="0" max="359" step="1" value="@_editAvatarHue"
+                               @oninput="@((ChangeEventArgs e) => { if (int.TryParse(e.Value?.ToString(), out var n)) _editAvatarHue = n; })" />
+                    </label>
+                    <div class="fs-row">
+                        <Btn Variant="primary" Loading="@_editProfileBusy" OnClick="SubmitEditProfileAsync">@L["profile.btn_save_changes"]</Btn>
+                        <Btn Variant="solid" OnClick="@(() => _editProfileOpen = false)">@L["common.btn_cancel"]</Btn>
+                    </div>
+                </Body>
+            </SettingsCard>
+
+            <SettingsCard Icon="key" Title="@L["profile.change_password"]" Description="@L["profile.password_desc"]"
+                          Expandable="true" Expanded="@_changePwOpen"
+                          ExpandedChanged="@((bool v) => { if (v != _changePwOpen) ToggleChangePassword(); })">
+                <Body>
+                    @if (!string.IsNullOrEmpty(_changePwError))
+                    {
+                        <div class="fs-msgbar fs-msgbar--error"><span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@_changePwError</div>
+                    }
+                    <label class="fs-field">
+                        <span class="fs-field__label">@L["profile.field_current_password"]</span>
+                        <input class="fs-input ps-field-w" type="password" value="@_pwCurrent"
+                               @oninput="@((ChangeEventArgs e) => _pwCurrent = e.Value?.ToString() ?? "")" />
+                    </label>
+                    <div class="fs-grid-2">
+                        <label class="fs-field">
+                            <span class="fs-field__label">@L["profile.field_new_password"]</span>
+                            <input class="fs-input fs-input--wide" type="password" value="@_pwNew"
+                                   @oninput="@((ChangeEventArgs e) => _pwNew = e.Value?.ToString() ?? "")" />
+                        </label>
+                        <label class="fs-field">
+                            <span class="fs-field__label">@L["profile.field_repeat_password"]</span>
+                            <input class="fs-input fs-input--wide" type="password" value="@_pwRepeat"
+                                   @oninput="@((ChangeEventArgs e) => _pwRepeat = e.Value?.ToString() ?? "")" />
+                        </label>
+                    </div>
+                    <div class="fs-row">
+                        <Btn Variant="primary" Loading="@_changePwBusy" OnClick="SubmitChangePasswordAsync">@L["profile.btn_update_password"]</Btn>
+                        <Btn Variant="solid" OnClick="@(() => _changePwOpen = false)">@L["common.btn_cancel"]</Btn>
+                    </div>
+                </Body>
+            </SettingsCard>
+
+            @* PIN (device-local): locks fast-switching INTO this profile on
+               THIS device. Stored + verified locally, never on the server. *@
+            <SettingsCard Icon="lock" Title="@L["profile.pin_title"]" Description="@L["profile.pin_desc"]"
+                          Expandable="true" Expanded="@_pinOpen"
+                          ExpandedChanged="@((bool v) => { if (v != _pinOpen) ToggleSetPin(); })">
+                <ChildContent>
+                    <span class="@($"fs-status {(_myHasDevicePin ? "fs-status--ok" : "")}")">
+                        @(_myHasDevicePin ? L["profile.pin_status_on"] : L["profile.pin_status_off"])
+                    </span>
+                </ChildContent>
+                <Body>
+                    @if (!string.IsNullOrEmpty(_pinError))
+                    {
+                        <div class="fs-msgbar fs-msgbar--error"><span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@_pinError</div>
+                    }
+                    <label class="fs-field">
+                        <span class="fs-field__label">@(_myHasDevicePin ? L["profile.field_new_pin"] : L["profile.field_pin"])</span>
+                        <input class="fs-input ps-pin-input" type="password"
+                               inputmode="numeric" autocomplete="off" maxlength="4"
+                               value="@_pinValue"
+                               @oninput="@((ChangeEventArgs e) => _pinValue = DigitsOnly(e.Value?.ToString(), 4))" />
+                    </label>
+                    <div class="fs-row">
+                        <Btn Variant="primary" Loading="@_pinBusy" OnClick="SubmitSetPinAsync">
+                            @(_myHasDevicePin ? L["profile.btn_update_pin"] : L["profile.btn_set_pin"])
+                        </Btn>
+                        @if (_myHasDevicePin)
+                        {
+                            <Btn Variant="danger" OnClick="RemovePinAsync">@L["profile.btn_remove_pin"]</Btn>
+                        }
+                    </div>
+                </Body>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_device"]">
+            @if (!OperatingSystem.IsBrowser())
+            {
+                <SettingsCard Icon="qr-code" Title="@L["profile.pair_tv"]" Description="@L["profile.pair_tv_sub"]" OnClick="OnPairTvClick" />
+            }
+            <SettingsCard Icon="logout" Title="@L["profile.sign_out"]" Description="@L["profile.sign_out_desc"]"
+                          Tone="danger" OnClick="SignOut" HideChevron="true" />
+        </SettingsGroup>
+    };
+
+    private async Task OnPairTvClick()
+    {
+        // Close the drawer first so the user lands on a dedicated pairing
+        // screen — /pair-confirm offers tabs for QR scan and manual 6-digit
+        // code entry, both wired to POST /api/auth/pair/confirm.
+        await Close();
+        Nav.NavigateTo("/pair-confirm");
+    }
+
+    private async Task OnDownloadsClick()
+    {
+        // Phone replaces the bottom tabbar with this drilldown list, so the
+        // Downloads tab moved here. /downloads is the v4 alias that renders
+        // the same Torrents page — easier-to-read URL for the user.
+        await Close();
+        Nav.NavigateTo("/downloads");
+    }
+
+    private async Task OnServerSettingsClick()
+    {
+        await Close();
+        Nav.NavigateTo("/server");
+    }
+
+    // ─── v5 multi-server: switch / add server helpers ─────────────────
+
+    private bool _addServerOpen;
+    private string _addUrl = "";
+    private string _addError = "";
+    private bool _adding;
+
+    /// <summary>Switch the active server. SetCurrentAsync already flipped the
+    /// shared HttpClient's BaseAddress to the new origin, so subsequent calls
+    /// resolve correctly. WASM still wants a hard navigate when origins differ
+    /// (cookies + bundle origin are domain-scoped); MAUI keeps a soft nav
+    /// because the WebView never reloads and forceLoad on an external host
+    /// gets bounced to the system browser.</summary>
+    private async Task OnSwitchServer(RegisteredServerDto target)
+    {
+        await ServerReg.SetCurrentAsync(target.ServerId);
+        await Close();
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var sameOrigin = string.Equals(
+                new Uri(target.BaseUrl).GetLeftPart(UriPartial.Authority),
+                new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase);
+
+            if (sameOrigin)
+                Nav.NavigateTo("/login", replace: true);
+            else
+                Nav.NavigateTo(target.BaseUrl.TrimEnd('/') + "/login", forceLoad: true);
+        }
+        else
+        {
+            // MAUI / native shell — HttpClient is already pointed at the new
+            // origin; stay inside the WebView and let /login mount fresh.
+            Nav.NavigateTo("/login", replace: true);
+        }
+    }
+
+    private async Task OnAddServer()
+    {
+        _addError = "";
+        var url = _addUrl.Trim();
+        if (string.IsNullOrEmpty(url)) { _addError = L["profile.err_enter_url"]; return; }
+        if (!url.Contains("://", StringComparison.Ordinal)) url = "http://" + url;
+
+        _adding = true;
+        StateHasChanged();
+        try
+        {
+            var entry = await ServerReg.AddServerAsync(url);
+            if (entry is null)
+            {
+                _addError = L["profile.err_server_unreachable"];
+                return;
+            }
+            _addUrl = "";
+            _addServerOpen = false;
+        }
+        catch (Exception ex)
+        {
+            _addError = L.Get("profile.err_probe_failed", ex.Message);
+        }
+        finally
+        {
+            _adding = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnAddKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_adding) await OnAddServer();
+    }
+
+    // ─── v5 PIN per-user-per-device: switch-user helpers ──────────────
+    //
+    // Lifecycle:
+    //   • drawer opens → OnAfterRender fetches /api/auth/roster (any user).
+    //   • user taps card →
+    //         current user → ignored (button is disabled but defence in depth)
+    //         no PIN       → SwitchUserAsync(target, null) directly
+    //         has PIN      → opens keypad dialog
+    //   • keypad submits → SwitchUserAsync(target, pin); null result = wrong
+    //                       PIN, set _keypadError and let the keypad shake.
+    //   • success → UserCtx.RefreshMeAsync + close drawer + reload root.
+    //
+    // Device-local switch strip: the server roster intersected with the
+    // profiles that have signed in on THIS device. Reloaded when the page
+    // mounts. The PIN lives on the device (DeviceProfilesState), not the account.
+    private sealed record Prof(RosterUserDto User, bool HasPin);
+    private List<Prof> _profiles = new();
+    private bool _switchBusy;
+
+    private bool _keypadOpen;
+    private RosterUserDto? _keypadTarget;
+    private string? _keypadError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Device-local player style (localStorage) + the switch-user strip.
+        await LoadPlayerStyleAsync();
+        await LoadProfilesAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>Build the strip = server roster ∩ this device's profiles, with
+    /// the device-local PIN flag attached to each.</summary>
+    private async Task LoadProfilesAsync()
+    {
+        try
+        {
+            if (UserCtx.Me is { } cur) await DeviceProfiles.EnsureAsync(cur.User.Id);
+            var deviceIds = await DeviceProfiles.GetIdsAsync();
+            var roster = await Api.GetRosterAsync();
+            var list = new List<Prof>();
+            foreach (var u in roster)
+            {
+                if (!deviceIds.Contains(u.Id)) continue;
+                list.Add(new Prof(u, await DeviceProfiles.HasPinAsync(u.Id)));
+            }
+            _profiles = list;
+            _myHasDevicePin = UserCtx.Me is { } m && await DeviceProfiles.HasPinAsync(m.User.Id);
+        }
+        catch
+        {
+            // Transport failure — leave whatever we had rather than blanking.
+        }
+    }
+
+    private async Task OnUserCardClick(Prof prof)
+    {
+        if (UserCtx.Me is not { } me || prof.User.Id == me.User.Id) return;
+        if (_switchBusy) return;
+
+        if (prof.HasPin)
+        {
+            // Device-local PIN — prompt + verify on the CLIENT before switching.
+            _keypadTarget = prof.User;
+            _keypadError = null;
+            _keypadOpen  = true;
+            return;
+        }
+        await TrySwitchAsync(prof.User);
+    }
+
+    private async Task OnKeypadSubmit(string pin)
+    {
+        if (_keypadTarget is not { } t) return;
+        if (!await DeviceProfiles.VerifyPinAsync(t.Id, pin))
+        {
+            // Wrong PIN — keypad shakes + clears via its OnParametersSet.
+            _keypadError = L["pin.invalid"];
+            StateHasChanged();
+            return;
+        }
+        await TrySwitchAsync(t);
+    }
+
+    private void OnKeypadCancel()
+    {
+        _keypadOpen = false;
+        _keypadTarget = null;
+        _keypadError = null;
+    }
+
+    private async Task TrySwitchAsync(RosterUserDto target)
+    {
+        _switchBusy = true;
+        StateHasChanged();
+        try
+        {
+            // Server no longer gates by PIN — the device verified it above.
+            var newMe = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, null));
+            if (newMe is null)
+            {
+                _keypadError = L["profile.err_switch_failed"];
+                _switchBusy = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Success: refresh the global me cache so the topbar + sidebar
+            // re-paint with the new identity; ensure the target is registered
+            // on this device.
+            await UserCtx.RefreshMeAsync();
+            await DeviceProfiles.EnsureAsync(target.Id);
+            UserCtx.SwitchGatePassed = true;
+            _keypadOpen = false;
+            _keypadTarget = null;
+            _keypadError = null;
+            _profiles = new();
+            await Close();
+            // Soft nav to / so page-scoped state re-resolves for the new user.
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            _keypadError = L["profile.err_switch_failed"];
+        }
+        finally
+        {
+            _switchBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>v5 fix: previously this just routed to /server which landed
+    /// the admin on the Server Settings landing page (Users & Roles tab open
+    /// but in "list" view). To actually CREATE a user they had to click
+    /// "+ New user" again. The "+ Add user" affordance in the profile drawer
+    /// implies "I want to add a user right now" — so we deep-link with
+    /// ?panel=users&openForm=user and let ServerSettings + UsersRolesPanel
+    /// jump straight to the inline builder form. ServerSettings reads the
+    /// query string on first render to pick the active tab + forward
+    /// OpenCreateForm=true into UsersRolesPanel.</summary>
+    private async Task OnAddUserClick()
+    {
+        await Close();
+        Nav.NavigateTo("/server?panel=users&openForm=user");
+    }
+
+    /// <summary>Add another EXISTING account to this device by signing in with
+    /// its own credentials. Available to everyone (you prove the account's
+    /// password). After login that account joins this device's profile strip,
+    /// so you can fast-switch into it later (with its device-local PIN if set).
+    /// This is distinct from <see cref="OnAddUserClick"/>, which is the admin
+    /// "create a brand-new account" deep-link.</summary>
+    private async Task OnAddAccountClick()
+    {
+        await Close();
+        Nav.NavigateTo("/login");
+    }
+
+    // ─── Servers tab ────────────────────────────────────────────────
+    //
+    // v5: server management lives in its own tab (was tucked at the top of
+    // the Identity tab and crowded the user info). Beyond switch / add, the
+    // tab also lets the user rename a registered server in the local
+    // registry — useful when two boxes both call themselves "Animarr" or
+    // when a Tailscale alias is more memorable than the LAN IP. Pure
+    // client-side rename — see ServerRegistryState.RenameAsync for the
+    // "why we don't push it to the server" rationale.
+
+    /// <summary>ServerId of the row currently in rename mode (null = none).
+    /// We allow only one active edit at a time to keep keyboard focus sane.</summary>
+    private string? _renameServerId;
+    /// <summary>Working buffer for the rename field.</summary>
+    private string  _renameDraft = "";
+
+    private void StartRename(RegisteredServerDto s)
+    {
+        _renameServerId = s.ServerId;
+        _renameDraft    = s.Name;
+    }
+
+    private async Task CommitRename()
+    {
+        if (_renameServerId is null) return;
+        var id = _renameServerId;
+        var name = _renameDraft;
+        _renameServerId = null;
+        _renameDraft    = "";
+        await ServerReg.RenameAsync(id, name);
+    }
+
+    private void CancelRename()
+    {
+        _renameServerId = null;
+        _renameDraft    = "";
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")      await CommitRename();
+        else if (e.Key == "Escape") CancelRename();
+    }
+
+    private RenderFragment RenderServers() => __builder =>
+    {
+        <SettingsGroup Title="@L["profile.servers_label"]">
+            @if (ServerReg.Count == 0)
+            {
+                <div class="fs-msgbar fs-msgbar--info"><span class="fs-msgbar__ic"><DIcon Name="info" Size="16" /></span>@L["profile.servers_empty"]</div>
+            }
+
+            @if (ServerReg.Current is { } current)
+            {
+                @ServerRow(current, isCurrent: true)
+            }
+
+            @foreach (var other in ServerReg.Servers.Where(s =>
+                ServerReg.Current is null || s.ServerId != ServerReg.Current.ServerId))
+            {
+                @ServerRow(other, isCurrent: false)
+            }
+
+            <SettingsCard Icon="plus" Title="@L["profile.add_server"]" Description="@L["profile.add_server_sub"]"
+                          Expandable="true" Expanded="@_addServerOpen"
+                          ExpandedChanged="@((bool v) => { _addServerOpen = v; if (!v) _addError = ""; })">
+                <Body>
+                    <div class="fs-row">
+                        <input type="text"
+                               class="fs-input ps-grow"
+                               placeholder="http://192.168.1.50:8080"
+                               value="@_addUrl"
+                               @oninput="@((ChangeEventArgs e) => _addUrl = e.Value?.ToString() ?? "")"
+                               @onkeypress="OnAddKeyPress" />
+                        <Btn Variant="primary" Loading="@_adding" OnClick="OnAddServer"
+                             Disabled="@(string.IsNullOrWhiteSpace(_addUrl))">@L["profile.btn_probe"]</Btn>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_addError))
+                    {
+                        <div class="fs-msgbar fs-msgbar--error"><span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@_addError</div>
+                    }
+                </Body>
+            </SettingsCard>
+        </SettingsGroup>
+    };
+
+    /// <summary>One registered server as a settings card. Current server shows
+    /// a "current" badge; others a Switch button. Rename opens the card body.</summary>
+    private RenderFragment ServerRow(RegisteredServerDto s, bool isCurrent) => __builder =>
+    {
+        var srv = s;
+        var editing = _renameServerId == srv.ServerId;
+        var meta = srv.BaseUrl + (srv.TitleCount is int c ? L.Get("profile.server_titles_suffix_fmt", c) : "");
+
+        <SettingsCard Icon="server" Title="@srv.Name" Description="@meta"
+                      Body="@(editing ? RenameBody() : null)">
+            @if (isCurrent)
+            {
+                <span class="fs-status fs-status--ok">@L["profile.server_current"]</span>
+            }
+            <button type="button" class="fs-icon-btn tv-focus"
+                    @onclick="@(() => StartRename(srv))"
+                    title="@L["profile.aria_rename_server"]"
+                    aria-label="@L["profile.aria_rename_server"]">
+                <DIcon Name="pencil" Size="16" />
+            </button>
+            @if (!isCurrent)
+            {
+                <Btn Variant="solid" OnClick="@(() => OnSwitchServer(srv))">@L["profile.server_switch"]</Btn>
+            }
+        </SettingsCard>
+    };
+
+    private RenderFragment RenameBody() => __builder =>
+    {
+        <div class="fs-row">
+            <input type="text"
+                   class="fs-input ps-grow"
+                   value="@_renameDraft"
+                   @oninput="@((ChangeEventArgs e) => _renameDraft = e.Value?.ToString() ?? "")"
+                   @onkeydown="OnRenameKey"
+                   autofocus />
+            <Btn Variant="primary" OnClick="CommitRename">@L["profile.aria_save_name"]</Btn>
+            <Btn Variant="solid" OnClick="CancelRename">@L["common.btn_cancel"]</Btn>
+        </div>
+        <p class="fs-hint">@L["profile.rename_hint"]</p>
+    };
+
+    private RenderFragment RenderAppearance() => __builder =>
+    {
+        <SettingsGroup Title="@L["profile.group_theme"]">
+            <SettingsCard Icon="paint" Title="@L["profile.theme_title"]" Description="@L["profile.theme_hint"]">
+                <Body>
+                    <div class="ps-themes" role="radiogroup" aria-label="@L["profile.theme_title"]">
+                        @foreach (var th in Themes)
+                        {
+                            var t = th;
+                            var active = string.Equals(_theme, t.Slug, StringComparison.OrdinalIgnoreCase);
+                            <button type="button" role="radio"
+                                    aria-checked="@(active ? "true" : "false")"
+                                    aria-label="@L[t.Name]"
+                                    class="@($"ps-theme tv-focus {(active ? "is-active" : "")}")"
+                                    @onclick="@(() => OnSelectTheme(t.Slug))">
+                                <span class="ps-theme__preview"
+                                      style="@($"--th-bg: {t.PreviewBg}; --th-accent: {t.PreviewAccent}; --th-text: {t.PreviewText};")">
+                                    <span class="ps-theme__nav"></span>
+                                    <span class="ps-theme__card"><span class="ps-theme__sample">Aa</span><span class="ps-theme__btn"></span></span>
+                                </span>
+                                <span class="ps-theme__name">@L[t.Name]</span>
+                            </button>
+                        }
+                    </div>
+                </Body>
+            </SettingsCard>
+
+            <SettingsCard Icon="sparkle" Title="@L["profile.accent_title"]" Description="@L["profile.accent_hint"]">
+                <Body>
+                    <div class="ps-swatches" role="radiogroup" aria-label="@L["profile.accent_title"]">
+                        @foreach (var sw in AccentSwatches)
+                        {
+                            var sd = sw;
+                            var active = _accentHue == sd.Hue;
+                            <button type="button" role="radio"
+                                    aria-checked="@(active ? "true" : "false")"
+                                    aria-label="@L[sd.Label]"
+                                    title="@L[sd.Label]"
+                                    class="@($"ps-swatch tv-focus {(active ? "is-active" : "")}")"
+                                    style="@SwatchStyle(sd)"
+                                    @onclick="@(() => OnSelectAccent(sd.Hue))"></button>
+                        }
+                    </div>
+                    @* Free hue — previewed live while dragging, saved on release. *@
+                    <label class="fs-field">
+                        <span class="fs-field__label">@L["profile.accent_custom"] · @(_accentHue)°</span>
+                        <input type="range" min="0" max="359" step="1"
+                               class="ps-hue-slider tv-focus"
+                               value="@_accentHue"
+                               @oninput="OnHuePreview"
+                               @onchange="OnHueCommit" />
+                    </label>
+                </Body>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_screen"]">
+            <SettingsCard Icon="image" Title="@L["profile.backdrop_toggle_title"]" Description="@L["profile.backdrop_toggle_hint"]">
+                <Toggle Checked="@_backdropEnabled" CheckedChanged="OnBackdropToggle" />
+            </SettingsCard>
+            <SettingsCard Icon="tv" Title="@L["profile.tv_mode_title"]" Description="@L["profile.tv_mode_hint"]">
+                <Toggle Checked="@_tvMode" CheckedChanged="OnTvModeToggle" />
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_home"]">
+            @* Home sections — order + visibility. Rows drag to reorder (HTML5
+               DnD); the arrows cover keyboard / TV / Firefox. *@
+            <SettingsCard Icon="home" Title="@L["profile.home_sections_title"]" Description="@L["profile.home_sections_hint"]"
+                          Expandable="true">
+                <Body>
+                    <div class="fs-list">
+                        @{
+                            var hsVisible = _homeSections
+                                .Where(e => HomeSections.ImplementedKeys.Contains(e.Key))
+                                .ToList();
+                        }
+                        @for (int i = 0; i < hsVisible.Count; i++)
+                        {
+                            var entry = hsVisible[i];
+                            var idx   = i;
+                            <div class="@($"fs-list__row ps-hs {(entry.Enabled ? "" : "is-off")} {(_hsDragKey == entry.Key ? "is-dragging" : "")}")"
+                                 draggable="true"
+                                 @ondragstart="@(() => OnHsDragStart(entry.Key))"
+                                 @ondragover="@(() => OnHsDragOver(entry.Key))"
+                                 @ondragover:preventDefault
+                                 @ondragend="OnHsDragEnd">
+                                <span class="ps-hs__grip" aria-hidden="true"><DIcon Name="navigation" Size="16" /></span>
+                                <span class="fs-list__main"><span class="fs-list__title">@L[HsLabelKey(entry.Key)]</span></span>
+                                <button type="button" class="fs-icon-btn tv-focus"
+                                        disabled="@(idx == 0)"
+                                        aria-label="@L["profile.home_sections_up"]"
+                                        @onclick="@(() => OnHsMove(entry.Key, -1))"><DIcon Name="chev-d" Size="16" style="transform: rotate(180deg)" /></button>
+                                <button type="button" class="fs-icon-btn tv-focus"
+                                        disabled="@(idx == hsVisible.Count - 1)"
+                                        aria-label="@L["profile.home_sections_down"]"
+                                        @onclick="@(() => OnHsMove(entry.Key, +1))"><DIcon Name="chev-d" Size="16" /></button>
+                                <Toggle Checked="@entry.Enabled" CheckedChanged="@(v => OnHsToggle(entry.Key, v))" />
+                            </div>
+                        }
+                    </div>
+                </Body>
+            </SettingsCard>
+
+            <SettingsCard Icon="sparkle" Title="@L["profile.recs_scope_title"]" Description="@L["profile.recs_scope_hint"]">
+                <select class="fs-select" value="@_recsScope"
+                        @onchange="@(e => OnRecsScopeSelect(e.Value?.ToString() ?? "everywhere"))">
+                    <option value="everywhere">@L["profile.recs_scope_everywhere"]</option>
+                    <option value="library">@L["profile.recs_scope_library"]</option>
+                </select>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_player"]">
+            @* Player HUD style is device-local (localStorage). *@
+            <SettingsCard Icon="video" Title="@L["profile.player_style_title"]" Description="@L["profile.player_style_hint"]">
+                <select class="fs-select" value="@_playerStyle"
+                        @onchange="@(e => OnPlayerStyleSelect(e.Value?.ToString() ?? "full"))">
+                    <option value="full">@L["profile.player_style_full"]</option>
+                    <option value="icons">@L["profile.player_style_icons"]</option>
+                </select>
+            </SettingsCard>
+            <SettingsCard Icon="list" Title="@L["profile.episode_view_title"]" Description="@L["profile.episode_view_hint"]">
+                <select class="fs-select" value="@_episodeListView"
+                        @onchange="@(e => OnSelectEpisodeView(e.Value?.ToString() ?? "grid"))">
+                    <option value="grid">@L["profile.episode_view_grid"]</option>
+                    <option value="list">@L["profile.episode_view_list"]</option>
+                </select>
+            </SettingsCard>
+            <SettingsCard Icon="eye-off" Title="@L["profile.fillers_title"]" Description="@L["profile.fillers_hint"]">
+                <Toggle Checked="@_hideFillers" CheckedChanged="OnHideFillersToggle" />
+            </SettingsCard>
+        </SettingsGroup>
+    };
+
+    // ─── Home sections editor (order + visibility) ─────────────────────
+    // Works on the FULL HomeSections list (including keys the app hasn't
+    // shipped yet) so a future section keeps its saved slot; the markup only
+    // shows ImplementedKeys. Drag reorders live (dragover moves the row under
+    // the cursor), dragend / arrows / toggles persist through PatchAsync —
+    // which mirrors into UserCtx, so the Home page restacks behind the drawer
+    // immediately.
+    private List<HomeSections.Entry> _homeSections = HomeSections.Defaults();
+    private string? _hsDragKey;
+
+    private static string HsLabelKey(string key) => key switch
+    {
+        "continue" => "home.continue_watching",
+        "nextup"   => "home.next_up",
+        "thisweek" => "home.this_week",
+        "foryou"   => "home.for_you",
+        "library"  => "home.library_title",
+        _          => $"home.section_{key}",
+    };
+
+    private void OnHsDragStart(string key) => _hsDragKey = key;
+
+    private void OnHsDragOver(string overKey)
+    {
+        if (_hsDragKey is null || _hsDragKey == overKey) return;
+        MoveHsEntry(_hsDragKey, overKey);
+        StateHasChanged();
+    }
+
+    private async Task OnHsDragEnd()
+    {
+        if (_hsDragKey is null) return;
+        _hsDragKey = null;
+        await SaveHomeSectionsAsync();
+    }
+
+    private async Task OnHsMove(string key, int dir)
+    {
+        var visible = _homeSections.Where(e => HomeSections.ImplementedKeys.Contains(e.Key)).ToList();
+        var i = visible.FindIndex(e => e.Key == key);
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= visible.Count) return;
+        MoveHsEntry(key, visible[j].Key);
+        await SaveHomeSectionsAsync();
+    }
+
+    private void MoveHsEntry(string key, string targetKey)
+    {
+        var from = _homeSections.FindIndex(e => e.Key == key);
+        var to   = _homeSections.FindIndex(e => e.Key == targetKey);
+        if (from < 0 || to < 0 || from == to) return;
+        var item = _homeSections[from];
+        _homeSections.RemoveAt(from);
+        _homeSections.Insert(to, item);
+    }
+
+    private async Task OnHsToggle(string key, bool on)
+    {
+        var i = _homeSections.FindIndex(e => e.Key == key);
+        if (i < 0) return;
+        _homeSections[i] = _homeSections[i] with { Enabled = on };
+        await SaveHomeSectionsAsync();
+    }
+
+    private async Task SaveHomeSectionsAsync()
+    {
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            HomeSectionsJson: HomeSections.Serialize(_homeSections)));
+        StateHasChanged();
+    }
+
+    // ─── Recommendation scope (everywhere / library-only) ──────────────
+    private string _recsScope = "everywhere";
+
+    private async Task OnRecsScopeSelect(string key)
+    {
+        if (_recsScope == key) return;
+        _recsScope = key;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            RecsScope: key));
+        StateHasChanged();
+    }
+
+    // ─── Hide fillers (global default; per-title override lives on MediaDetail) ──
+    private bool _hideFillers;
+
+    private async Task OnHideFillersToggle(bool v)
+    {
+        _hideFillers = v;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            HideFillers: v));
+        StateHasChanged();
+    }
+
+    /// <summary>Episode-list layout picker. PATCHes the preference and mirrors
+    /// it into UserCtx so the MediaDetail page (which reads
+    /// <c>UserCtx.Preferences.EpisodeListView</c>) renders the chosen layout
+    /// the next time it's opened. Same optimistic pattern as the pager picker.</summary>
+    private async Task OnSelectEpisodeView(string key)
+    {
+        _episodeListView = key;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            EpisodeListView: key));
+        StateHasChanged();
+    }
+
+    // Fluent 2: two themes. Name is a localization KEY; Preview* are the
+    // literal page / accent / text colors drawn in the little "Aa" tile.
+    private static readonly ThemeOption[] Themes = new[]
+    {
+        new ThemeOption("dark",  "profile.theme_dark",  "#202020", "oklch(0.75 0.14 var(--accent-hue))", "#ffffff"),
+        new ThemeOption("light", "profile.theme_light", "#f3f3f3", "oklch(0.48 0.15 var(--accent-hue))", "#1f1f1f"),
+    };
+
+    private sealed record ThemeOption(
+        string Slug, string Name,
+        string PreviewBg, string PreviewAccent, string PreviewText);
+
+    private async Task OnSelectTheme(string slug)
+    {
+        _theme = slug;
+        // Live-apply via JS so the cascade swaps instantly — Razor doesn't
+        // need to re-render before the user sees the result.
+        try { await JS.InvokeVoidAsync("animarr_setTheme", slug); } catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, null, null,
+            Theme: slug));
+    }
+
+    private RenderFragment RenderAudio() => __builder =>
+    {
+        <SettingsGroup Title="@L["profile.group_language"]">
+            @* Changing the interface language reloads the app so every screen
+               re-renders in the new locale. *@
+            <SettingsCard Icon="language" Title="@L["profile.language_title"]"
+                          Description="@StripTags(L["profile.language_hint_html"])">
+                <select class="fs-select" value="@_language" @onchange="OnLanguageChanged">
+                    <option value="en">English</option>
+                    <option value="ru">Русский</option>
+                    <option value="uk">Українська</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                </select>
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.group_audio"]">
+            <SettingsCard Icon="audio" Title="@L["profile.audio_preferred_label"]" Description="@L["profile.audio_preferred_desc"]">
+                <select class="fs-select" value="@_audioPref" @onchange="OnAudioPrefChanged">
+                    <option value="Japanese">@L["edit_metadata.basics_lang_japanese"]</option>
+                    <option value="Mandarin">@L["edit_metadata.basics_lang_mandarin"]</option>
+                    <option value="English">@L["edit_metadata.basics_lang_english"]</option>
+                    <option value="Russian">@L["edit_metadata.basics_lang_russian"]</option>
+                    <option value="Korean">@L["edit_metadata.basics_lang_korean"]</option>
+                </select>
+            </SettingsCard>
+            <SettingsCard Icon="cc" Title="@L["profile.subtitle_lang_label"]" Description="@L["profile.subtitle_lang_desc"]">
+                <select class="fs-select" value="@_subPref" @onchange="OnSubPrefChanged">
+                    <option value="Russian">@L["edit_metadata.basics_lang_russian"]</option>
+                    <option value="English">@L["edit_metadata.basics_lang_english"]</option>
+                    <option value="Off">@L["profile.subtitle_off"]</option>
+                    <option value="Japanese">@L["edit_metadata.basics_lang_japanese"]</option>
+                </select>
+            </SettingsCard>
+            <SettingsCard Icon="cc" Title="@L["profile.subtitle_size_label"]" Description="@($"{_subSize} px")">
+                <input type="range" min="12" max="32" step="1" class="fs-range"
+                       aria-label="@L["profile.subtitle_size_label"]"
+                       value="@_subSize" @onchange="OnSubSizeChanged" />
+            </SettingsCard>
+        </SettingsGroup>
+
+        <SettingsGroup Title="@L["profile.theme_music_title"]">
+            @* Theme music (anime OP/ED) — soft autoplay on a title's page. *@
+            <SettingsCard Icon="music" Title="@L["profile.theme_music_title"]" Description="@L["profile.theme_music_hint"]"
+                          Body="@(_themeMusic ? ThemeVolumeBody() : null)">
+                <Toggle Checked="@_themeMusic" CheckedChanged="OnThemeMusicToggle" />
+            </SettingsCard>
+        </SettingsGroup>
+    };
+
+    private RenderFragment ThemeVolumeBody() => __builder =>
+    {
+        <label class="fs-field">
+            <span class="fs-field__label">@L["profile.theme_volume_label"] · @_themeMusicVolume %</span>
+            <input type="range" min="0" max="100" step="1" class="fs-range"
+                   value="@_themeMusicVolume" @onchange="OnThemeMusicVolumeChanged" />
+        </label>
+    };
+
+    private static string StripTags(string html)
+        => System.Text.RegularExpressions.Regex.Replace(html, "<.*?>", "");
+
+    // Label holds an existing localization KEY (settings.accent_*) resolved via
+    // L[...] at the swatch render site — reuses the palette names already
+    // translated for the admin Settings page.
+    private record SwatchDef(int Hue, double L, double C, string Label);
+    // Preset "primary colors" — swatch dots drawn at a mid lightness so they
+    // read on both themes; the actual UI shades come from tokens.css.
+    private static readonly SwatchDef[] AccentSwatches =
+    {
+        new(25,  0.62, 0.19, "settings.accent_crimson"),
+        new(50,  0.68, 0.17, "settings.accent_orange"),
+        new(80,  0.76, 0.15, "settings.accent_amber"),
+        new(150, 0.66, 0.15, "settings.accent_green"),
+        new(195, 0.66, 0.11, "settings.accent_teal"),
+        new(250, 0.60, 0.16, "settings.accent_blue"),
+        new(295, 0.60, 0.18, "settings.accent_violet"),
+        new(350, 0.64, 0.18, "settings.accent_pink"),
+    };
+
+    /// <summary>Inline style for an accent swatch. Built with InvariantCulture
+    /// so a comma-decimal device locale (ru / uk) doesn't emit
+    /// <c>oklch(0,66 0,20 25)</c> — invalid CSS that makes the swatch
+    /// transparent (reported as "кружочки цветов не видно"). The default
+    /// interpolation uses the current culture, which is the bug.</summary>
+    private static string SwatchStyle(SwatchDef s) =>
+        System.FormattableString.Invariant($"--swatch-color: oklch({s.L} {s.C} {s.Hue});");
+
+    private int? _huePreview;
+
+    private async Task OnHuePreview(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hue)) return;
+        _huePreview = hue;
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+    }
+
+    private async Task OnHueCommit(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hue)) return;
+        _huePreview = null;
+        await OnSelectAccent(hue);
+    }
+
+    private async Task OnSelectAccent(int hue)
+    {
+        // Optimistic update — set local state + DOM accent variable, then
+        // PATCH. The DOM update is immediate so the user sees the new accent
+        // before the server confirms.
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+        await PatchAsync(new UpdatePreferencesRequest(
+            AccentHue: hue, null, null, null, null, null, null, null, null, null, null, null, null));
+        StateHasChanged();
+    }
+}

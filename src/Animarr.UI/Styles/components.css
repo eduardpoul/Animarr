@@ -1431,179 +1431,6 @@ html.tv-mode .d-mobile-nav {
     color: var(--text-dim);
 }
 
-/* ====== §10 Settings ====== */
-
-.settings-grid {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 32px;
-}
-.settings-tabs {
-    position: sticky;
-    top: 20px;
-    align-self: start;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card-lg);
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-.settings-tabs__item {
-    appearance: none;
-    background: transparent;
-    border: 0;
-    border-left: 2px solid transparent;
-    cursor: pointer;
-    padding: 9px 14px 9px 12px;
-    border-radius: 7px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text-dim);
-    font-family: var(--font-ui);
-    text-align: left;
-    transition: background var(--motion-base), color var(--motion-base);
-}
-.settings-tabs__item:hover { color: var(--text); background: var(--ink-1); }
-.settings-tabs__item--active {
-    color: var(--text);
-    background: var(--surface-3);
-    border-left-color: var(--accent);
-}
-
-/* SettingsCard wrapper — section title + sub + content. */
-.settings-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-panel);
-    padding: 26px;
-    margin-bottom: 20px;
-}
-.settings-card__head { margin-bottom: 18px; }
-.settings-card__title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    letter-spacing: 0;
-    text-transform: none;
-}
-.settings-card__sub {
-    color: var(--text-dim);
-    font-size: 13px;
-    margin-top: 6px;
-}
-
-/* Two-column field grid (settings forms). */
-.settings-form {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-}
-.settings-form--single { grid-template-columns: 1fr; }
-.settings-form--triple { grid-template-columns: 1fr 1fr 1fr; }
-.settings-form__fullrow { grid-column: 1 / -1; }
-
-/* Folder list row (SettingsFolders). */
-.settings-folder {
-    display: grid;
-    grid-template-columns: 44px 1fr 110px auto auto;
-    gap: 14px;
-    align-items: center;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
-    padding: 12px 14px;
-}
-.settings-folder__thumb {
-    width: 36px; height: 36px;
-    border-radius: 8px;
-    background-size: cover;
-    background-position: center;
-    position: relative;
-    overflow: hidden;
-}
-.settings-folder__thumb::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, oklch(0.20 0.06 var(--accent-hue) / 0.4), oklch(0.10 0.04 var(--accent-hue) / 0.7));
-}
-.settings-folder__title {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--text);
-}
-.settings-folder__path {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-faint);
-    margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.settings-folder__actions {
-    display: flex;
-    gap: 6px;
-}
-
-/* Read-only key/value list (SettingsGeneral app params). */
-.settings-kv {
-    display: grid;
-    grid-template-columns: 160px 1fr;
-    gap: 10px 24px;
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
-.settings-kv__key   { color: var(--text-faint); }
-.settings-kv__val   { color: var(--text); }
-.settings-kv__val--dim { color: var(--text-dim); }
-
-/* Theme picker row (SettingsAppearance). */
-.theme-picker {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-.theme-swatch {
-    appearance: none;
-    cursor: pointer;
-    padding: 14px 20px;
-    border-radius: var(--radius-card);
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    font-size: 13px;
-    font-weight: 600;
-    min-width: 100px;
-    text-align: center;
-    transition: background var(--motion-base), border-color var(--motion-base), color var(--motion-base);
-}
-.theme-swatch--active {
-    background: var(--accent-soft);
-    border-color: var(--accent-line);
-    color: var(--text);
-}
-
-.accent-picker {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-.accent-dot {
-    appearance: none;
-    cursor: pointer;
-    width: 42px; height: 42px;
-    border-radius: 22px;
-    border: none;
-    position: relative;
-    transition: box-shadow var(--motion-base);
-}
-.accent-dot--active {
-    box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px currentColor;
-}
-
 /* ====== §11 History ====== */
 
 .hist-date {
@@ -2246,27 +2073,6 @@ html.tv-mode .d-mobile-nav {
     }
     .d-kpi { padding: 14px; }
     .d-kpi__value { font-size: 28px; }
-
-    /* Settings — vertical tabs become horizontal scrolling rail above content.
-       The actual page uses .settings-nav / .settings-nav__btn (Settings.razor +
-       Settings.razor.css). The legacy .settings-tabs ruleset stays so any
-       prototype markup that still uses it gets the same treatment. */
-    .settings-grid {
-        grid-template-columns: 1fr;
-        gap: 16px;
-    }
-    .settings-nav,
-    .settings-tabs {
-        position: static;
-        flex-direction: row;
-        overflow-x: auto;
-        scrollbar-width: none;
-        padding: 6px;
-        gap: 4px;
-        top: auto;
-    }
-    .settings-nav::-webkit-scrollbar,
-    .settings-tabs::-webkit-scrollbar { display: none; }
     .settings-nav__btn,
     .settings-tabs__item {
         border-left: 0;
@@ -2280,15 +2086,6 @@ html.tv-mode .d-mobile-nav {
         border-left-color: transparent;
         border-bottom-color: var(--accent);
     }
-    .settings-card { padding: 18px; }
-    .settings-form { grid-template-columns: 1fr; gap: 14px; }
-    .settings-form--triple { grid-template-columns: 1fr; }
-    .settings-folder {
-        grid-template-columns: 36px 1fr;
-        grid-template-rows: auto auto;
-        row-gap: 8px;
-    }
-    .settings-folder__actions { grid-column: 1 / -1; }
     .settings-kv,
     .settings-readonly { grid-template-columns: 1fr; gap: 4px 0; }
     .settings-readonly__val--dim { word-break: break-word; }
@@ -2443,125 +2240,11 @@ html.tv-mode .d-mobile-nav {
     .d-ep-card__thumb { height: 120px; }
     .d-ep-card__number { font-size: 28px; }
 
-    /* Settings card paddings */
-    .settings-card { padding: 14px; border-radius: var(--radius-card-lg); }
+    
 
     /* Page header right actions wrap nicely. */
     .d-page-header__right > * { flex: 1; min-width: 0; }
     .d-page-header__right .tor-stats { width: 100%; }
-}
-
-/* ============================================================
-   §15 — Cross-component primitives moved out of scoped CSS.
-
-   These classes are used in MULTIPLE Razor components (Settings.razor,
-   HistoryView.razor, Torrents.razor, etc.). Blazor scoped CSS attaches
-   a [b-xxxxx] attribute selector that only matches elements in the
-   owning component's template. When a child component (e.g. HistoryView
-   inside Settings) renders a <select> with class="settings-field__select",
-   the parent's scope-id is NOT on the child's elements — so a scoped
-   rule never matches. Moving them here makes them global. The class
-   names are unique enough that collision risk is low.
-   ============================================================ */
-
-/* Settings card content — gap between immediate children so subheads,
-   field grids, toggle blocks and divider rows breathe without per-child
-   margins. */
-.settings-card > * + * { margin-top: 16px; }
-.settings-card > .settings-divider + * { margin-top: 14px; }
-.settings-card > .settings-actions { margin-top: 22px; }
-
-/* Field/Input/Select trio — Field primitive (screens.jsx::Field). */
-.settings-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-}
-.settings-field--240 { max-width: 240px; }
-.settings-field--160 { max-width: 160px; }
-.settings-field--grow { flex: 1 1 auto; min-width: 0; }
-
-.settings-field__label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-faint);
-    letter-spacing: 0;
-    text-transform: none;
-}
-.settings-field__label--inline {
-    font-size: 13px;
-    letter-spacing: normal;
-    text-transform: none;
-    color: var(--text-dim);
-}
-
-.settings-field__input,
-.settings-field__select {
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 13px;
-    font-family: var(--font-ui);
-    outline: none;
-    transition: border-color var(--motion-base);
-    width: 100%;
-    box-sizing: border-box;
-}
-.settings-field__input:focus,
-.settings-field__select:focus { border-color: var(--accent-line); }
-.settings-field__input:disabled,
-.settings-field__select:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.settings-field__input--mono { font-family: var(--font-mono); font-size: 12.5px; }
-.settings-field__input--120  { max-width: 120px; }
-
-.settings-field__select {
-    appearance: none;
-    cursor: pointer;
-    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a8a097' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 28px;
-}
-
-.settings-field__hint {
-    font-size: 11.5px;
-    color: var(--text-faint);
-}
-
-/* Inline field — label + input on the same row (e.g. "Or stop at ratio:"). */
-.settings-inline-field {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-/* Toggle rows — Toggle primitive + 13px text-dim label. */
-.settings-toggles {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-.settings-toggle-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: var(--text-dim);
-    cursor: pointer;
-}
-.settings-toggle-block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.settings-toggle-block__hint {
-    font-size: 11.5px;
-    color: var(--text-faint);
-    padding-left: 44px;
 }
 
 /* Add-torrent drawer file input — must be visually hidden so the dashed
@@ -2574,99 +2257,6 @@ html.tv-mode .d-mobile-nav {
     height: 1px;
     opacity: 0;
     pointer-events: none;
-}
-
-/* ── Settings page section primitives ───────────────────────────────────
-   Used inside Settings.razor's tab bodies AND inside the panels embedded
-   under ServerSettings (via <Settings EmbeddedTab="..." />). Settings.razor
-   referenced these classes but never defined them, so its tab bodies fell
-   back to raw <section> + <h2> default styling on Quietude: an unbordered
-   block with no margins, sitting flush against the d-server__content card
-   padding. Lifting them global means both the standalone Settings page and
-   the ServerSettings shell pick up the same look. */
-.settings-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-6);
-    margin-bottom: var(--space-9);
-}
-.settings-section + .settings-section {
-    border-top: 1px solid var(--border);
-    padding-top: var(--space-9);
-    margin-top: var(--space-3);
-}
-.settings-section > h2 {
-    font-family: var(--font-display);
-    font-size: 20px;
-    letter-spacing: 0;
-    color: var(--text);
-    margin: 0 0 var(--space-2);
-    text-transform: var(--label-casing, none);
-}
-.settings-section > h3 {
-    font-family: var(--font-display);
-    font-size: 15px;
-    color: var(--text);
-    margin: var(--space-4) 0 var(--space-2);
-    font-weight: 600;
-}
-.settings-section > p {
-    color: var(--text-dim);
-    font-size: 13px;
-    line-height: 1.55;
-    margin: 0;
-}
-
-.settings-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-5);
-    flex-wrap: wrap;
-}
-.settings-section-head > h2 {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 20px;
-    letter-spacing: 0;
-    color: var(--text);
-    text-transform: var(--label-casing, none);
-}
-
-/* Compact accent CTA for "+ Add … " buttons in a section heading. Pairs with
-   the segment-bar pattern used by Users/Roles + Categories — keeps the
-   create button visually anchored next to the heading instead of dropping
-   to a wide full-width bar at the bottom. Global, not scoped, because the
-   Settings page composes RenderFragments and the scoped CSS bundle isn't
-   loaded for nested fragments. */
-.settings-section-head__new {
-    appearance: none;
-    cursor: pointer;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 14px;
-    height: 36px;
-    border-radius: 8px;
-    background: var(--accent);
-    border: 1px solid var(--accent-line);
-    color: #fff;
-    font-family: var(--font-ui);
-    font-size: 12.5px;
-    font-weight: 600;
-    line-height: 1;
-    transition: background var(--motion-fast), border-color var(--motion-fast);
-}
-.settings-section-head__new:hover:not([disabled]) {
-    background: var(--accent-hi);
-    border-color: var(--accent-hi);
-}
-.settings-section-head__new[disabled] {
-    cursor: not-allowed;
-    opacity: 0.6;
 }
 
 /* ============================================================
@@ -2796,357 +2386,17 @@ html.animarr-tv-host .catalog-grid {
     min-width: 0;
 }
 
+/* Fluent 2 field label: 14/20 regular, sentence case. */
 .d-input-group__label {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: var(--label-tracking, 0.4px);
-    color: var(--text-faint);
-    text-transform: var(--label-casing, uppercase);
-}
-
-/* ============================================================
-   .d-srv-card — global shell shared by every Server Settings panel
-   (Users/Roles, Categories, About, Folders embed, …). Lives in
-   components.css instead of any panel's scoped razor.css because
-   Blazor scoped CSS doesn't cross component boundaries — previously
-   only UsersRolesPanel saw these styles and About / Categories
-   rendered card content with zero gaps.
-   ============================================================ */
-.d-srv-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);          /* 18px — generous breathing between
-                                     header → list → footer rows */
-}
-
-.d-srv-card__head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);          /* 8px between title + subtitle */
-    margin-bottom: var(--space-5);
-}
-
-.d-srv-card__title {
-    font-family: var(--font-display);
-    font-size: 20px;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
     letter-spacing: 0;
     color: var(--text);
-    margin: 0;
-    line-height: 1.2;
-}
-
-.d-srv-card__sub {
-    font-size: 12.5px;
-    color: var(--text-dim);
-    line-height: 1.55;
-}
-
-/* Bottom-of-card actions row — used when actions can't fit in the
-   header (e.g. multiple CTAs that would crowd the heading). Most v5
-   panels hoist their primary CTA into the header via
-   .d-srv-card__head--with-cta below. */
-.d-srv-card__actions {
-    display: flex;
-    gap: 10px;
-    margin-top: var(--space-6);
-    flex-wrap: wrap;
-}
-
-/* Header variant: hoist a "+ New …" CTA cluster to the right of the
-   title + subtitle column instead of stacking it under the description.
-   Used by Categories, future panels that want the same pattern. */
-.d-srv-card__head--with-cta {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: var(--space-7);
-    flex-wrap: wrap;
-}
-
-.d-srv-card__head-text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);          /* same 8px as base header */
-    flex: 1;
-    min-width: 220px;
-}
-
-.d-srv-card__head-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
-/* ── AI / LLM "Test connection" result card ─────────────────────
-   Inline status surface under the LLM config form. Green tint on
-   success, red tint on failure. The button itself reuses
-   .settings-section-head__new for visual continuity with the
-   other primary CTAs. */
-.settings-llm-test {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: var(--space-6);
-    padding-top: var(--space-6);
-    border-top: 1px solid var(--border);
-    /* Keep the Test button compact instead of stretching to row width.
-       Flex-column descendants default to "stretch" cross-axis, which
-       made the inline-flex button render full-width. Pin start-aligned
-       so it sits naturally next to the result card below. */
-    align-items: flex-start;
-}
-
-.settings-llm-test__result {
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--bg-1);
-    font-size: 12.5px;
-    line-height: 1.55;
-    color: var(--text-dim);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.settings-llm-test__result.is-ok {
-    border-color: oklch(0.55 0.12 155 / 0.6);
-    background: oklch(0.55 0.12 155 / 0.08);
-}
-.settings-llm-test__result.is-err {
-    border-color: oklch(0.66 0.20 25 / 0.55);
-    background: oklch(0.66 0.20 25 / 0.08);
-}
-
-.settings-llm-test__line { color: var(--text); }
-.settings-llm-test__sample {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text-dim);
-    background: var(--bg-0);
-    padding: 6px 8px;
-    border-radius: 6px;
-    word-break: break-word;
-}
-.settings-llm-test__sample > code {
-    font-family: inherit;
-    color: var(--accent-hi);
-}
-
-/* ── Embedded llama.cpp provider panel (Settings → AI / LLM) ──────────────
-   Shown when Provider = "embedded": runtime status, model picker, download
-   progress, installed-model list, and the all-options docs block.          */
-.settings-llm-embedded {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.settings-llm-gpu {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface-2);
-    font-size: 12.5px;
-}
-.settings-llm-gpu__badge {
     text-transform: none;
-    font-size: 10.5px;
-    letter-spacing: 0;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: oklch(0.55 0.12 155 / 0.16);
-    color: var(--accent-hi);
 }
-.settings-llm-gpu__meta { color: var(--text-faint); }
-.settings-llm-gpu__restart {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid var(--border-strong);
-    background: transparent;
-    color: var(--text);
-    border-radius: 8px;
-    padding: 4px 10px;
-    font-size: 11.5px;
-    cursor: pointer;
-}
-.settings-llm-gpu__restart:disabled { opacity: 0.5; cursor: not-allowed; }
-.settings-llm-gpu__err {
-    flex-basis: 100%;
-    color: oklch(0.74 0.15 70);
-    font-size: 11.5px;
-    line-height: 1.5;
-}
-
-.settings-llm-progress {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-    max-width: 480px;
-}
-.settings-llm-progress__bar {
-    height: 8px;
-    border-radius: 999px;
-    background: var(--surface-3);
-    overflow: hidden;
-}
-.settings-llm-progress__fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.3s ease;
-}
-.settings-llm-progress__text {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--text-faint);
-}
-.settings-llm-progress__text .is-ok   { color: oklch(0.72 0.13 155); }
-.settings-llm-progress__text .is-warn { color: oklch(0.80 0.13 80); }
-.settings-llm-progress__text .is-err  { color: oklch(0.70 0.18 25); }
-.settings-llm-progress__cancel {
-    border: 1px solid var(--border-strong);
-    background: transparent;
-    color: var(--text-faint);
-    border-radius: 7px;
-    padding: 2px 9px;
-    font-size: 11.5px;
-    cursor: pointer;
-}
-.settings-llm-progress__cancel:hover { color: var(--text); }
-
-.settings-llm-models {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.settings-llm-models__label {
-    font-size: 10.5px;
-    letter-spacing: 0;
-    color: var(--text-faint);
-    margin-bottom: 2px;
-}
-.settings-llm-models__row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 12px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-}
-.settings-llm-models__name {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.settings-llm-models__size {
-    margin-left: auto;
-    color: var(--text-faint);
-    font-size: 11.5px;
-    white-space: nowrap;
-}
-.settings-llm-models__del {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--border-strong);
-    border-radius: 7px;
-    background: transparent;
-    color: var(--text-faint);
-    cursor: pointer;
-}
-.settings-llm-models__del:hover:not(:disabled) {
-    color: oklch(0.70 0.18 25);
-    border-color: oklch(0.66 0.20 25 / 0.55);
-}
-.settings-llm-models__del:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.settings-llm-docs {
-    margin-top: var(--space-4);
-    padding: 14px 16px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface-2);
-}
-.settings-llm-docs h3 {
-    margin: 0 0 10px;
-    font-size: 13px;
-    color: var(--text);
-}
-.settings-llm-docs ul {
-    margin: 0 0 10px;
-    padding-left: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-}
-.settings-llm-docs li {
-    font-size: 12.5px;
-    color: var(--text-faint);
-    line-height: 1.55;
-}
-.settings-llm-docs li strong { color: var(--text); }
-.settings-llm-docs code {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--accent-hi);
-    background: var(--surface-3);
-    padding: 1px 5px;
-    border-radius: 5px;
-}
-
-.settings-hint {
-    font-size: 12px;
-    color: var(--text-faint);
-    line-height: 1.55;
-    margin: 0;
-}
-
-/* Native <input type="range"> styled for Audio + Hardware tabs. Browsers
-   render the track + thumb very differently — accent-color + custom
-   sizing covers Firefox/Chromium/Safari without per-engine pseudos.  */
-.settings-range {
-    width: 100%;
-    max-width: 480px;
-    accent-color: var(--accent);
-    height: 22px;
-    cursor: pointer;
-}
-
-/* Hardware-acceleration probe list in Settings → Hardware. */
-.hw-list {
-    list-style: none;
-    padding: 0;
-    margin: var(--space-2) 0 var(--space-5);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    font-size: 13px;
-    color: var(--text-dim);
-}
-.hw-list li {
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-ctrl);
-    padding: var(--space-3) var(--space-5);
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
-.hw-list strong { color: var(--text); margin-right: var(--space-3); }
+.d-input-group > .fs-select,
+.d-input-group > .fs-input { width: 100%; }
 
 /* Generic table used by Settings → Patterns / Ignore rules.
    Mirrors .tor-table chrome so the two read as the same data-table family. */
@@ -3395,113 +2645,14 @@ table.d-table tbody td code {
 }
 
 /* ============================================================================
-   Hero pager — F / G / H variants. Global so BOTH heros share them:
-   • CatalogContinueHero (Continue Watching block on Home)
-   • CatalogHero         (Featured block when Continue is empty)
-
-   The variant is picked from UserPreferences.HeroPagerStyle and lives on the
-   hero section as a `.d-chero--pager-{f|g|h}` modifier (legacy class kept on
-   CatalogContinueHero). Each variant has its own root class
-   (`.d-chero__pager`, `.d-chero__pager-g`, `.d-chero__pager-h`) so only one
-   markup branch is rendered at a time.
+   Hero pager — dashes flanked by prev/next chevrons. Global so BOTH heros
+   share it: CatalogContinueHero (Continue watching on Home) and CatalogHero
+   (Featured block when Continue is empty). The Fluent redesign dropped the
+   F / H variants and their picker; the hero keeps a `.d-chero--pager-g`
+   modifier for the rules below.
    ============================================================================ */
 
-/* F-variant pager — short, centered dashes; active dash is a touch
-   longer and accent-coloured. v5 rev: was a `grid-auto-columns: 1fr`
-   layout that stretched every stroke to fill the hero width — the
-   visual read as a continuous bar with one tinted segment instead of
-   a discrete pager. Now each slot is fixed-width with a flex centre,
-   so the strip is a row of "—  —  —  ━  —" beneath the title. */
-.d-chero__pager {
-    position: absolute;
-    /* Sits just above the fade zone (A1) so the overlapping rail never covers it. */
-    inset: auto 0 calc(var(--hero-fade, 30px) - 16px) 0;
-    z-index: 3;
-    display: flex;
-    justify-content: center;
-    align-items: flex-end;
-    gap: var(--space-3);
-    padding: 0 var(--space-7);
-}
-
-.d-chero__pager-slot {
-    appearance: none;
-    cursor: pointer;
-    background: transparent;
-    border: 0;
-    padding: var(--space-2) 0 0;
-    color: var(--text-faint);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    text-align: center;
-    transition: color var(--motion-base);
-    /* Cap slot width so very long titles don't push neighbours apart. */
-    max-width: 140px;
-}
-.d-chero__pager-slot:hover { color: var(--text-dim); }
-
-.d-chero__pager-stroke {
-    display: block;
-    height: 2px;
-    width: 28px;
-    background: rgba(255,255,255,0.30);
-    border-radius: 2px;
-    transition: background var(--motion-base), width var(--motion-base);
-}
-.d-chero__pager-slot:hover .d-chero__pager-stroke {
-    background: rgba(255,255,255,0.55);
-}
-.d-chero__pager-slot.is-active .d-chero__pager-stroke {
-    background: var(--accent);
-    width: 48px;
-    box-shadow: 0 0 0 1px var(--accent-soft);
-}
-
-.d-chero__pager-name {
-    font-family: var(--font-ui);
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.2;
-    color: var(--text-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 140px;
-    /* Only show the label for the active slot — otherwise the row becomes
-       a wall of small text under each dash and competes with the title. */
-    opacity: 0;
-    transition: opacity var(--motion-base);
-}
-.d-chero__pager-slot.is-active .d-chero__pager-name {
-    color: var(--text);
-    font-weight: 600;
-    opacity: 1;
-}
-.d-chero__pager-slot:hover .d-chero__pager-name { opacity: 0.7; }
-
-/* Phone: kill the slot-name labels entirely. On a 360px viewport the labels
-   wrapped onto two rows and overflowed onto the hero title (the bug the
-   user screenshotted as "Renegade Immortal: Battle of Gods" rendered twice
-   with tag pills bleeding off the right edge). The dashes still convey
-   position; the active slot's name lives in the hero title itself, so
-   showing them under each dash is redundant on a small screen. */
-@media (max-width: 720px) {
-    .d-chero__pager-name        { display: none; }
-    /* Even, generous dashes — all inactive ones identical width, active one
-       clearly wider. The previous 16px / 28px pair read as ragged little
-       ticks; 22px / 44px gives a clean "▬ ▬ ▭ ▬ ▬" rhythm with the active
-       slot reading as a filled segment. Slot drops its name-driven width
-       cap so every tap target is just the stroke + padding, keeping the
-       row visually balanced. */
-    .d-chero__pager-slot        { max-width: none; padding: 8px 0 0; }
-    .d-chero__pager-stroke      { width: 22px; height: 3px; }
-    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 44px; }
-    .d-chero__pager              { gap: 8px; padding: 0 var(--space-4); inset: auto 0 var(--space-4) 0; }
-}
-
-/* G variant — hover-revealed chevrons + dash pager. Chevrons sit anchored
+/* Hover-revealed chevrons + dash pager. Chevrons sit anchored
    to the left / right of the hero; dashes live in the centre. Chevrons fade
    up on the hero's :hover so they don't compete with the title at rest. */
 .d-chero__pager-g {
@@ -3561,75 +2712,10 @@ table.d-table tbody td code {
     width: 44px;
 }
 
-/* H variant — numbered pills + always-visible chevrons. */
-.d-chero__pager-h {
-    position: absolute;
-    inset: auto var(--space-11) calc(var(--hero-fade, 30px) - 16px) var(--space-11);
-    z-index: 3;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-}
-.d-chero__pager-h .d-chero__pager-chev {
-    opacity: 1; /* H keeps chevrons visible at rest */
-}
-
-.d-chero__pager-pills {
-    display: flex;
-    gap: 8px;
-}
-
-.d-chero__pager-pill {
-    appearance: none;
-    cursor: pointer;
-    background: rgba(20, 23, 27, 0.55);
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    width: 32px;
-    height: 32px;
-    display: grid;
-    place-items: center;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    padding: 0;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    transition: background var(--motion-base), color var(--motion-base), border-color var(--motion-base);
-}
-.d-chero__pager-pill:hover {
-    background: rgba(20, 23, 27, 0.85);
-    color: var(--text);
-}
-.d-chero__pager-pill.is-active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-}
-
-@media (max-width: 959px) {
-    /* Uniform, generous dashes. This block comes after the 720px rule in
-       source so it wins the cascade on phones too — keep the numbers in
-       sync (22px inactive / 44px active / 3px tall) so there's one clean
-       pager rhythm across every narrow viewport. */
-    .d-chero__pager      { gap: 8px; padding: 0 var(--space-5); inset: auto 0 var(--space-4) 0; }
-    .d-chero__pager-slot { max-width: none; padding: 8px 0 0; }
-    .d-chero__pager-stroke              { width: 22px; height: 3px; }
-    .d-chero__pager-slot.is-active .d-chero__pager-stroke { width: 44px; }
-    /* Tight viewports drop the per-slot caption altogether — the active
-       title still lives in the hero's own headline above. */
-    .d-chero__pager-name { display: none; }
-}
-
 @media (max-width: 639px) {
-    .d-chero__pager    { inset: auto 0 var(--space-4) 0; padding: 0 var(--space-4); }
     .d-chero__pager-g  { inset: auto 0 var(--space-4) 0; gap: var(--space-3); }
-    .d-chero__pager-h  { inset: auto var(--space-5) var(--space-4) var(--space-5); gap: var(--space-3); }
     .d-chero__pager-dash { width: 22px; }
     .d-chero__pager-dash.is-active { width: 32px; }
-    .d-chero__pager-pill { width: 28px; height: 28px; font-size: 11px; }
 }
 
 /* Bottom tabbar is hidden on every form factor now. Phone uses the
@@ -3651,3 +2737,184 @@ table.d-table tbody td code {
 .catalog-page > * {
     position: relative;
 }
+
+/* ============================================================
+   Fluent 2 · Settings controls (used inside SettingsCard rows and
+   bodies across /settings). Global so every section shares them.
+   ============================================================ */
+.fs-select,
+.fs-input {
+    appearance: none;
+    box-sizing: border-box;
+    height: 32px;
+    min-width: 0;
+    padding: 0 10px;
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
+    border-radius: var(--radius-ctrl);
+    background-color: var(--surface);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    outline: none;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast);
+}
+.fs-select {
+    min-width: 180px;
+    padding-right: 32px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20'%3E%3Cpath fill='%238f8f8f' d='M15.85 7.65c.2.2.2.5 0 .7l-5.46 5.49a.55.55 0 0 1-.78 0L4.15 8.35a.5.5 0 1 1 .7-.7L10 12.8l5.15-5.16c.2-.2.5-.2.7 0'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+.fs-select:hover,
+.fs-input:hover { background-color: var(--surface-2); border-color: var(--stroke-ctrl-hi); border-bottom-color: var(--stroke-ctrl-acc); }
+.fs-select:focus-visible,
+.fs-input:focus,
+.fs-input:focus-visible {
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
+    background-color: var(--surface);
+}
+.fs-input::placeholder { color: var(--text-faint); }
+.fs-input--wide, .fs-select--wide { width: 100%; }
+.fs-input--num { width: 96px; text-align: right; }
+.fs-input--code { font-family: var(--font-code); font-size: 13px; }
+
+.fs-range {
+    width: 220px;
+    max-width: 100%;
+    accent-color: var(--accent);
+}
+
+.fs-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.fs-field__label {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+}
+.fs-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+.fs-hint code,
+.fs-msgbar code {
+    font-family: var(--font-code);
+    font-size: 12px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--ink-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+.fs-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.fs-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+@media (max-width: 639px) {
+    .fs-grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Fluent MessageBar — inline status / error / info strip. */
+.fs-msgbar {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-ctrl);
+    border: 1px solid var(--border);
+    background: var(--ink-1);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+}
+.fs-msgbar > .fs-msgbar__ic { flex-shrink: 0; display: inline-flex; margin-top: 2px; }
+.fs-msgbar--info    { background: color-mix(in oklch, var(--info) 12%, transparent);    border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+.fs-msgbar--info    > .fs-msgbar__ic { color: var(--info); }
+.fs-msgbar--success { background: color-mix(in oklch, var(--success) 12%, transparent); border-color: color-mix(in oklch, var(--success) 35%, transparent); }
+.fs-msgbar--success > .fs-msgbar__ic { color: var(--success); }
+.fs-msgbar--warn    { background: color-mix(in oklch, var(--warn) 12%, transparent);    border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
+.fs-msgbar--warn    > .fs-msgbar__ic { color: var(--warn); }
+.fs-msgbar--error   { background: color-mix(in oklch, var(--danger) 12%, transparent);  border-color: color-mix(in oklch, var(--danger) 35%, transparent); }
+.fs-msgbar--error   > .fs-msgbar__ic { color: var(--danger); }
+
+/* Small status badge with a dot, for "Running / Stopped" etc. */
+.fs-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    background: var(--ink-2);
+    color: var(--text-dim);
+}
+.fs-status::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.fs-status--ok   { background: color-mix(in oklch, var(--success) 16%, transparent); color: var(--success); }
+.fs-status--warn { background: color-mix(in oklch, var(--warn) 16%, transparent);    color: var(--warn); }
+.fs-status--err  { background: color-mix(in oklch, var(--danger) 16%, transparent);  color: var(--danger); }
+
+/* List rows inside a card body (installed models, servers, sections…). */
+.fs-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
+}
+.fs-list__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 6px 8px 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.fs-list__row:last-child { border-bottom: 0; }
+.fs-list__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fs-list__title { font-size: 14px; line-height: 20px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-list__meta  { font-size: 12px; line-height: 16px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Icon-only subtle button (rename / delete in list rows). */
+.fs-icon-btn {
+    appearance: none;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-ctrl);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+.fs-icon-btn:hover  { background: var(--ink-2); }
+.fs-icon-btn:active { background: var(--ink-3); }
+.fs-icon-btn--danger { color: var(--danger); }
