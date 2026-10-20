@@ -215,9 +215,11 @@ public class TorrentEngineService : BackgroundService
         await using var ctx = await db.CreateDbContextAsync();
 
         var records = await ctx.TorrentRecords
-            // Load everything except user-stopped torrents — Error ones are
-            // loaded too (left idle below) so the user can Recheck/retry them.
-            .Where(r => r.State != TorrentRecordState.Stopped)
+            // Load everything — Stopped, Paused and Error ones are left idle
+            // below. They must still be registered: the Downloads list comes from
+            // the DB, and Resume/Recheck/Remove(+files) all act on the engine's
+            // manager, so an unloaded record made those buttons silent no-ops
+            // (and "delete files" left the data on disk).
             .Include(r => r.FileSelections)
             .Include(r => r.FolderWatcher)
             .ToListAsync();
@@ -265,10 +267,12 @@ public class TorrentEngineService : BackgroundService
                 if (record.SkipSubfolderStructure)
                     await ApplyFlattenAsync(mgr, record.InfoHash, record.CustomRootFolderName);
 
-                // Don't auto-start Paused (user choice) or Error torrents — an
-                // errored one is loaded but left idle so it doesn't re-error in
-                // a boot loop; the user retries it via Recheck.
-                if (record.State != TorrentRecordState.Paused && record.State != TorrentRecordState.Error)
+                // Don't auto-start Stopped/Paused (user choice) or Error torrents
+                // — an errored one is loaded but left idle so it doesn't re-error
+                // in a boot loop; the user retries it via Recheck.
+                if (record.State is not (TorrentRecordState.Stopped
+                                      or TorrentRecordState.Paused
+                                      or TorrentRecordState.Error))
                     await mgr.StartAsync();
             }
             catch (Exception ex)
@@ -513,7 +517,15 @@ public class TorrentEngineService : BackgroundService
             if (record is null) continue;
             record.Downloaded = stats.Downloaded;
             record.Uploaded   = stats.Uploaded;
-            record.State      = MapState(stats.State);
+            // A Paused/Error torrent restored idle (or added paused) sits in
+            // MonoTorrent's Stopped state without the user ever stopping it.
+            // Writing that back flipped the record to Stopped within 30 s, the
+            // next boot skipped it, and Resume/Recheck/Remove then no-op'd on a
+            // torrent the engine no longer knew.
+            var live = MapState(stats.State);
+            if (!(live == TorrentRecordState.Stopped
+                  && record.State is TorrentRecordState.Paused or TorrentRecordState.Error))
+                record.State = live;
         }
         await ctx.SaveChangesAsync();
     }
