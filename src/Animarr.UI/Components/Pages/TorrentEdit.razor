@@ -224,6 +224,14 @@
         }
     }
 
+    /// <summary>Bytes/s to save for a limit field shown in whole Mbps. The Add
+    /// drawer stores KB/s × 1024, which whole Mbps can't represent (100 KB/s
+    /// shows as 0), so an untouched field keeps the stored value — re-deriving
+    /// it from the rounded display turned such limits into "unlimited" on any
+    /// Save, even one that only changed file priorities.</summary>
+    private static int LimitBytes(int shownMbps, int storedBytes)
+        => shownMbps == storedBytes / 125_000 ? storedBytes : shownMbps * 125_000;
+
     private async Task LoadAsync()
     {
         try
@@ -331,8 +339,8 @@
             await Api.UpdateTorrentAsync(_record.Id, new UpdateTorrentRequest(
                 FolderWatcherId:        _record.FolderWatcherId,
                 StopAfterDownload:      _stopAfterDownload,
-                DownloadLimit:          _dlLimit * 125_000,
-                UploadLimit:            _ulLimit * 125_000,
+                DownloadLimit:          LimitBytes(_dlLimit, _record.DownloadLimit),
+                UploadLimit:            LimitBytes(_ulLimit, _record.UploadLimit),
                 StopSeedingRatio:       _record.StopSeedingRatio,
                 SkipSubfolderStructure: _skipSubfolderStructure,
                 SuppressRootFolder:     _record.SuppressRootFolder,
