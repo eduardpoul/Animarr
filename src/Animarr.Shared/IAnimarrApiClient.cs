@@ -235,18 +235,26 @@ public interface IAnimarrApiClient
     /// + avatar without an extra <c>GET /api/me</c> round-trip.</summary>
     Task<UserDto>           UpdateMyProfileAsync(UpdateMyProfileRequest request, CancellationToken ct = default);
 
-    // ─── PIN (v5 per-user-per-device fast switch) ─────────────────────────
-    /// <summary>POST /api/me/pin. Set or change the PIN. The server validates
-    /// 4-digit format + re-verifies the current password as anti-CSRF.</summary>
-    Task                    SetMyPinAsync(SetPinRequest request, CancellationToken ct = default);
-    /// <summary>DELETE /api/me/pin. Clear the PIN entirely — subsequent
-    /// switch-user requests to this user no longer prompt for a keypad.</summary>
-    Task                    ClearMyPinAsync(ClearPinRequest request, CancellationToken ct = default);
-    /// <summary>POST /api/auth/switch-user. Swap the auth cookie to another
-    /// user on this server. Returns null when the target has a PIN configured
-    /// and the supplied PIN doesn't verify (401) so the UI can show an error
-    /// without try/catch.</summary>
-    Task<UserDto?>          SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default);
+    // ─── Per-device profiles + PINs ───────────────────────────────────────
+    /// <summary>GET /api/auth/device (anonymous-safe). This device's profiles,
+    /// their PIN flags, the current user's PIN state and the "sign in by
+    /// default" profile. Empty state when the device was never signed in.</summary>
+    Task<DeviceStateDto>    GetDeviceStateAsync(CancellationToken ct = default);
+    /// <summary>POST /api/auth/switch-user. Sign in on this device as a profile
+    /// by its PIN for this device (with or without a current session). The
+    /// expected failures (wrong PIN, cooldown, no PIN here, unknown user) come
+    /// back as a <see cref="PinAuthResult"/> status, not as exceptions.</summary>
+    Task<PinAuthResult>     SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default);
+    /// <summary>POST /api/auth/device/pin. Set (first time on this device) or
+    /// change (with the current PIN) the signed-in user's PIN on this device.</summary>
+    Task<PinAuthResult>     SetDevicePinAsync(SetDevicePinRequest request, CancellationToken ct = default);
+    /// <summary>PUT /api/auth/device/default. Enabled → the signed-in user opens
+    /// this device by default (no picker, no PIN); disabled → clear the default.
+    /// Returns the refreshed device state, or null when refused (no PIN here).</summary>
+    Task<DeviceStateDto?>   SetDeviceDefaultAsync(SetDeviceDefaultRequest request, CancellationToken ct = default);
+    /// <summary>POST /api/auth/device/enter-default (anonymous-safe). Sign in as
+    /// the device's default profile. Null when the device has no default.</summary>
+    Task<UserDto?>          EnterDeviceDefaultAsync(CancellationToken ct = default);
 
     // ─── Per-user favorites + continue watching (v5) ─────────────────────
     Task                    AddFavoriteAsync(Guid mediaItemId, CancellationToken ct = default);

@@ -159,9 +159,9 @@ public partial class ServerPickerPage : ContentPage
             _addr.Current = new Uri(url);
             SetStatus($"{info.Name} · {info.TitleCount} тайтлов");
 
-            // Server picked — decide the next stage by session state.
-            var status = await _api.GetAuthStatusAsync();
-            TvRoot.Go(status.Authenticated ? new CatalogNativePage() : new PairingPage());
+            // Server picked — the same device gates as a launch (default
+            // profile / picker / Set-a-PIN / catalog / pairing).
+            await TvAuthFlow.RouteOnOpenAsync();
         }
         catch
         {

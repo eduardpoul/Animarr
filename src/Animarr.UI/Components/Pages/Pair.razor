@@ -16,6 +16,7 @@
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
 @inject Animarr.UI.Services.ServerAddressProvider ServerAddr
+@inject DeviceProfilesState DeviceProfiles
 @implements IDisposable
 
 <PageTitle>Animarr</PageTitle>
@@ -87,6 +88,13 @@
 </div>
 
 @code {
+    /// <summary>"Forgot PIN" on a TV: the phone-confirmed pairing stands in
+    /// for the password — the server clears the confirming account's PIN on
+    /// this device and the "Set a PIN" step follows the reload.</summary>
+    // String, not bool: Blazor's bool query binding rejects "?forgot=1".
+    [SupplyParameterFromQuery(Name = "forgot")] public string? ForgotParam { get; set; }
+    private bool Forgot => ForgotParam is "1" or "true" or "True";
+
     private PairInitDto? _init;
     private bool _loading = true;
     private bool _expired;
@@ -146,7 +154,7 @@
 
         try
         {
-            _init = await Api.InitPairAsync(new PairInitRequest(_deviceName));
+            _init = await Api.InitPairAsync(new PairInitRequest(_deviceName, ResetPin: Forgot));
             _loading = false;
             StateHasChanged();
 
@@ -180,7 +188,7 @@
 
         try
         {
-            var fresh = await Api.InitPairAsync(new PairInitRequest(_deviceName));
+            var fresh = await Api.InitPairAsync(new PairInitRequest(_deviceName, ResetPin: Forgot));
             _init = fresh;
             await InvokeAsync(StateHasChanged);              // swap displayed QR + digits
             _ = PollLoopAsync(fresh.Code, ct);               // poll the new code (same CTS)
@@ -209,6 +217,10 @@
                 var poll = await Api.PollPairAsync(code, ct);
                 if (poll.Status == "confirmed")
                 {
+                    // Pairing is an explicit sign-in: skip the startup picker.
+                    // The reload's MainLayout still runs the mandatory
+                    // "Set a PIN" step when this profile has none here.
+                    await DeviceProfiles.MarkGatePassedAsync();
                     // Hard reload — the cookie is in the jar now, so the
                     // very first /api/auth/status request will report
                     // authenticated and the SPA's router will land us

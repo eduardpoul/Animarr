@@ -101,6 +101,11 @@
     place-items: center;
 }
 
+/* No PIN on this device yet → a key: entering needs the password. */
+.d-who__pin-badge--key {
+    color: var(--text-dim);
+}
+
 .d-who__name {
     max-width: 116px;
     font-size: 14px;
@@ -136,6 +141,47 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-16);
+}
+
+.d-who__msg {
+    max-width: 480px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Bottom of the picker: the "Sign in by default" switch + its hint, then
+   the secondary actions (back / another account). */
+.d-who__foot {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+
+.d-who__default {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+}
+
+.d-who__default-hint {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+
+.d-who__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
 }
 
 @media (max-width: 639px) {

@@ -1,5 +1,5 @@
 /* ============================================================
-   PinKeypad — 4-digit numeric keypad, Fluent 2.
+   PinKeypad — 4–6 digit numeric keypad, Fluent 2.
 
    The component is unstyled relative to the surrounding container —
    the parent decides whether to embed it in a centered card, a
@@ -137,6 +137,37 @@
     pointer-events: none;
 }
 
+/* Disabled keys (verifying on the server / OK below the minimum length). */
+.d-pin__key:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+.d-pin__key:disabled:hover {
+    background: var(--surface);
+    border-color: var(--stroke-ctrl);
+}
+
+/* OK — Fluent accent button: the submit for a 4–6 digit PIN. */
+.d-pin__key--ok {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--on-accent);
+}
+.d-pin__key--ok:hover:not(:disabled) {
+    /* Same Fluent hover as Btn primary: toward the page ink. */
+    background: color-mix(in oklch, var(--accent), var(--text) 12%);
+    border-color: transparent;
+}
+.d-pin__key--ok:active:not(:disabled) {
+    background: color-mix(in oklch, var(--accent), var(--bg-0) 18%);
+}
+.d-pin__key--ok:disabled,
+.d-pin__key--ok:disabled:hover {
+    background: var(--surface);
+    border-color: var(--stroke-ctrl);
+    color: var(--text-dim);
+}
+
 /* Backspace — subtle button so the eye doesn't read it as "10". */
 .d-pin__key--back {
     background: transparent;
@@ -149,6 +180,16 @@
     color: var(--text);
 }
 .d-pin__key--back:active { background: var(--ink-3); }
+
+/* Links row under the keypad: "Forgot PIN?" + "Cancel". */
+.d-pin__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 8px;
+    margin-top: 16px;
+}
+.d-pin__links .d-pin__cancel { margin-top: 0; }
 
 /* ── Cancel under the keypad — Fluent subtle button ─────────── */
 .d-pin__cancel {

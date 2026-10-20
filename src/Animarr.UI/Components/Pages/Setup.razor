@@ -113,9 +113,10 @@
                 return;
             }
             await UserCtx.RefreshMeAsync();
-            try { await DeviceProfiles.EnsureAsync(created.Id); } catch { }
-            UserCtx.SwitchGatePassed = true;
-            Nav.NavigateTo("/", replace: true);
+            // First account, first device: the mandatory "Set a PIN" step.
+            await DeviceProfiles.RefreshAsync();
+            await DeviceProfiles.MarkGatePassedAsync();
+            Nav.NavigateTo(DeviceProfiles.CurrentUserNeedsPin ? "/set-pin" : "/", replace: true);
         }
         catch (Exception ex)
         {

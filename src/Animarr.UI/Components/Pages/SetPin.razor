@@ -1,0 +1,145 @@
+@*
+    SetPin — the blocking "Set a PIN" step.
+
+    Shown right after a sign-in (password, first-run setup, TV pairing) when
+    the account has no PIN on THIS device yet, and on next use for accounts
+    migrated from the old device-local PINs. MainLayout routes every app page
+    here while the PIN is missing, so there is no way past it: no Skip, no
+    Cancel — the only exit is Sign out.
+
+    The PIN (4–6 digits, entered twice) is stored on the server, per user per
+    device, and is what the "Who's watching" picker and every profile switch
+    on this device verify.
+*@
+
+@page "/set-pin"
+@layout AuthLayout
+@inject IAnimarrApiClient Api
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject DeviceProfilesState DeviceProfiles
+
+<PageTitle>Animarr</PageTitle>
+
+<div class="d-setpin">
+    @if (!_ready)
+    {
+        <Spinner Size="lg" />
+    }
+    else
+    {
+        <div class="d-setpin__card">
+            <header class="d-setpin__brand">
+                <BrandMark Size="32" />
+                <span class="d-setpin__step">@L.Get("setpin.step_fmt", _repeat ? 2 : 1)</span>
+            </header>
+
+            <PinKeypad Title="@(_repeat ? L["setpin.repeat_title"] : L.Get("setpin.title_fmt", _name))"
+                       Subtitle="@(_repeat ? L["setpin.repeat_sub"] : L["setpin.sub"])"
+                       MinLength="@_min" MaxLength="@_max"
+                       ShowCancel="false"
+                       Busy="@_busy"
+                       Error="@_error"
+                       ResetToken="@_resetToken"
+                       OnSubmit="OnSubmitAsync" />
+
+            <p class="d-setpin__why">@L["setpin.why"]</p>
+
+            <div class="d-setpin__foot">
+                <Btn Variant="flat" Disabled="@_busy" OnClick="SignOutAsync">
+                    <DIcon Name="logout" Size="16" /> @L["profile.sign_out"]
+                </Btn>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _ready;
+    private bool _busy;
+    private bool _repeat;
+    private string? _first;
+    private string? _error;
+    private int _resetToken;
+    private string _name = "";
+    private int _min = 4, _max = 6;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!UserCtx.Loaded) await UserCtx.LoadAsync();
+        if (!UserCtx.IsAuthenticated)
+        {
+            Nav.NavigateTo("/", replace: true);   // the root's gates route on
+            return;
+        }
+
+        var state = await DeviceProfiles.RefreshAsync();
+        // Older server (no per-device PINs) or the PIN already exists (set in
+        // another tab, or a stale bookmark): nothing to do here.
+        if (state is null || state.CurrentUserHasPin)
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _name = UserCtx.Me?.User.Name ?? "";
+        _min  = state.PinMinLength;
+        _max  = state.PinMaxLength;
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task OnSubmitAsync(string pin)
+    {
+        if (_busy) return;
+        if (!_repeat)
+        {
+            _first = pin;
+            _repeat = true;
+            _error = null;
+            _resetToken++;
+            return;
+        }
+
+        if (pin != _first)
+        {
+            // Back to step 1; the fresh error shakes + clears the keypad.
+            _first = null;
+            _repeat = false;
+            _error = L["setpin.mismatch"];
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        StateHasChanged();
+
+        var result = await Api.SetDevicePinAsync(new SetDevicePinRequest(pin));
+        if (result.Ok || result.Status == PinAuthStatus.WrongPin)
+        {
+            // WrongPin = a PIN appeared meanwhile (another tab) — either way the
+            // profile is protected now; the root re-checks.
+            var state = await DeviceProfiles.RefreshAsync();
+            await DeviceProfiles.MarkGatePassedAsync();
+            if (UserCtx.Me is { } me && state?.CurrentUserHasPin == true)
+                await DeviceProfiles.ApplyPendingDefaultAsync(me.User.Id);
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _busy = false;
+        _first = null;
+        _repeat = false;
+        _error = result.Status == PinAuthStatus.Invalid
+            ? L.Get("setpin.err_length_fmt", _min, _max)
+            : L["setpin.err_save"];
+    }
+
+    private async Task SignOutAsync()
+    {
+        _busy = true;
+        await UserCtx.SignOutAsync();
+        Nav.NavigateTo(await DeviceProfiles.RouteAfterSignOutAsync(), replace: true);
+    }
+}

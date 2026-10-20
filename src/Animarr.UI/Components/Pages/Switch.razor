@@ -1,18 +1,25 @@
 @*
-    Switch — the device-local "who's watching?" gate (v5.1).
+    Switch — "Who's watching?" profile picker.
 
-    Shown on NATIVE app launch (TV + phone) when ≥2 profiles have signed in on
-    THIS device (MainLayout's boot gate redirects here once per app session).
-    The roster is the SERVER's user list intersected with this device's local
-    profile registry (DeviceProfilesState) — so it only lists accounts that
-    actually signed in here, NOT every account on the server.
+    Two ways in:
+      • startup (/switch) — MainLayout sends a new browser session / app launch
+        here when this device knows ≥2 profiles and has no "Sign in by default"
+        profile, and also when the session expired but PIN-protected profiles
+        remain on the device. Every profile asks its PIN — including the one
+        whose session is still alive, otherwise the last user would be waved
+        through.
+      • switch (/switch?mode=switch) — Settings → Switch user. Always shows the
+        picker; picking yourself just applies the default toggle.
 
-    PIN is device-local: the lock badge + the keypad check read/verify the PIN
-    stored on THIS device (never the server). A profile with no device PIN
-    switches straight through.
+    The list is the SERVER's view of this device (GET /api/auth/device): only
+    profiles that signed in here. PINs are verified on the server
+    (POST /api/auth/switch-user); a profile without a PIN on this device can't
+    be entered by PIN — it goes through the password sign-in (and then the
+    mandatory "Set a PIN" step).
 
-    Auth gate: signed-in only (we switch FROM the current cookie). With <2
-    device profiles there's nothing to choose → go straight home.
+    The "Sign in by default" toggle at the bottom applies to the profile you
+    pick: on → that profile opens this device straight away next time (no
+    picker, no PIN); off → the default is cleared.
 *@
 
 @page "/switch"
@@ -27,13 +34,15 @@
 <div class="d-who">
     @if (_pinTarget is { } pt)
     {
-        @* Device-local PIN entry for the chosen profile. *@
         <div class="d-who__pin">
             <div class="d-who__pin-card">
-                <PinKeypad UserName="@pt.User.Name"
+                <PinKeypad UserName="@pt.Name"
+                           MinLength="@_min" MaxLength="@_max"
+                           Busy="@_busy"
                            Error="@_pinError"
-                           OnSubmit="OnPinSubmit"
-                           OnCancel="OnPinCancel" />
+                           OnSubmit="OnPinSubmitAsync"
+                           OnCancel="OnPinCancel"
+                           OnForgot="OnForgot" />
             </div>
         </div>
     }
@@ -55,135 +64,261 @@
                 {
                     var prof = p;
                     <button type="button" class="d-who__card tv-focus" role="listitem"
-                            disabled="@_busy" title="@prof.User.Name"
-                            @onclick="@(() => OnPick(prof))">
+                            disabled="@_busy" title="@prof.Name"
+                            @onclick="@(() => OnPickAsync(prof))">
                         <span class="d-who__avatar">
-                            <Avatar Name="@prof.User.Name" HueOverride="prof.User.AvatarHue"
-                                    ImagePath="@prof.User.AvatarPath" Size="lg" />
-                            @if (prof.HasPin)
-                            {
-                                <span class="d-who__pin-badge" aria-label="@L["switch.pin_required_aria"]">
-                                    <DIcon Name="lock" Size="12" />
-                                </span>
-                            }
+                            <Avatar Name="@prof.Name" HueOverride="prof.AvatarHue"
+                                    ImagePath="@prof.AvatarPath" Size="lg" />
+                            <span class="@($"d-who__pin-badge {(prof.HasPin ? "" : "d-who__pin-badge--key")}")"
+                                  aria-label="@(prof.HasPin ? L["switch.pin_required_aria"] : L["switch.password_required_aria"])">
+                                <DIcon Name="@(prof.HasPin ? "lock" : "key")" Size="12" />
+                            </span>
                         </span>
-                        <span class="d-who__name">@prof.User.Name</span>
-                        <span class="d-who__role">
-                            @(prof.User.Id == _meId ? L["switch.you"] : prof.User.RoleName)
-                        </span>
+                        <span class="d-who__name">@prof.Name</span>
+                        <span class="d-who__role">@RoleLine(prof)</span>
                     </button>
                 }
             </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="fs-msgbar fs-msgbar--error d-who__msg" role="alert">
+                    <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>@_error
+                </div>
+            }
+
+            <footer class="d-who__foot">
+                <div class="d-who__default">
+                    <Toggle Checked="@_defaultOn" CheckedChanged="OnDefaultToggledAsync"
+                            Disabled="@_busy" Label="@L["switch.default_label"]" />
+                    <span class="d-who__default-hint">@DefaultHint</span>
+                </div>
+                <div class="d-who__actions">
+                    @if (SwitchMode)
+                    {
+                        <Btn Variant="flat" OnClick="@(() => Nav.NavigateTo("/"))">
+                            <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
+                        </Btn>
+                    }
+                    <Btn Variant="flat" OnClick="@(() => Nav.NavigateTo("/login"))">
+                        <DIcon Name="user" Size="16" /> @L["switch.other_account"]
+                    </Btn>
+                </div>
+            </footer>
         }
     }
 </div>
 
 @code {
-    private sealed record Profile(RosterUserDto User, bool HasPin);
+    /// <summary>"switch" = reached through Settings → Switch user.</summary>
+    [SupplyParameterFromQuery(Name = "mode")] public string? Mode { get; set; }
 
-    private List<Profile> _profiles = new();
+    private bool SwitchMode => string.Equals(Mode, "switch", StringComparison.OrdinalIgnoreCase);
+
+    private List<DeviceProfileDto> _profiles = new();
     private bool _loading = true;
     private bool _busy;
-    private Profile? _pinTarget;
+    private DeviceProfileDto? _pinTarget;
     private string? _pinError;
-    private Guid _meId;
+    private string? _error;
+    private bool _defaultOn;
+    private int _min = 4, _max = 6;
+
+    private string DefaultHint
+    {
+        get
+        {
+            if (!_defaultOn) return L["switch.default_hint_off"];
+            var current = DeviceProfiles.DefaultProfile;
+            return current is not null
+                ? L.Get("switch.default_hint_current_fmt", current.Name)
+                : L["switch.default_hint_on"];
+        }
+    }
+
+    private string RoleLine(DeviceProfileDto p)
+    {
+        if (!p.HasPin) return L["switch.password_needed"];
+        if (p.IsDefault) return L["switch.default_badge"];
+        return p.IsCurrent && UserCtx.IsAuthenticated ? L["switch.you"] : p.RoleName;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-
         if (!UserCtx.Loaded) await UserCtx.LoadAsync();
-        if (!UserCtx.IsAuthenticated)
-        {
-            Nav.NavigateTo("/welcome", replace: true);
-            return;
-        }
-        UserCtx.SwitchGatePassed = true;
-        _meId = UserCtx.Me!.User.Id;
-        await DeviceProfiles.EnsureAsync(_meId);   // current user is always on this device
 
-        try
+        var state = await DeviceProfiles.RefreshAsync();
+        if (state is null)
         {
-            var deviceIds = await DeviceProfiles.GetIdsAsync();
-            var roster = await Api.GetRosterAsync();
-            var list = new List<Profile>();
-            foreach (var u in roster)
-            {
-                if (!deviceIds.Contains(u.Id)) continue;
-                list.Add(new Profile(u, await DeviceProfiles.HasPinAsync(u.Id)));
-            }
-            _profiles = list;
-        }
-        catch { _profiles = new(); }
-        _loading = false;
-
-        // Nothing to choose between — skip straight to the catalog.
-        if (_profiles.Count < 2)
-        {
+            // Server predates per-device profiles — nothing to pick from.
             Nav.NavigateTo("/", replace: true);
             return;
         }
+        _min = state.PinMinLength;
+        _max = state.PinMaxLength;
+        _profiles = state.Profiles.ToList();
+        _defaultOn = state.DefaultUserId is not null;
+
+        if (!SwitchMode)
+        {
+            // Startup gate with nothing to choose between → straight on.
+            if (UserCtx.IsAuthenticated && _profiles.Count < 2)
+            {
+                await DeviceProfiles.MarkGatePassedAsync();
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+            if (!UserCtx.IsAuthenticated && !_profiles.Any(p => p.HasPin))
+            {
+                Nav.NavigateTo("/welcome", replace: true);
+                return;
+            }
+        }
+
+        _loading = false;
         StateHasChanged();
     }
 
-    private async Task OnPick(Profile prof)
+    private async Task OnPickAsync(DeviceProfileDto prof)
     {
         if (_busy) return;
+        _error = null;
+
+        // Settings → Switch user → yourself: you're already in; just apply the
+        // default toggle.
+        if (SwitchMode && prof.IsCurrent && UserCtx.IsAuthenticated && prof.HasPin)
+        {
+            await FinishAsync();
+            return;
+        }
+
         if (prof.HasPin)
         {
             _pinTarget = prof;
             _pinError = null;
-            StateHasChanged();
             return;
         }
-        await SwitchAsync(prof.User.Id);
+
+        // No PIN on this device yet: the password sign-in (or, for the live
+        // session's own profile, the Set-a-PIN step) — park the default choice
+        // until the PIN exists.
+        await DeviceProfiles.SetPendingDefaultAsync(_defaultOn ? prof.Id : null);
+        if (prof.IsCurrent && UserCtx.IsAuthenticated)
+        {
+            await DeviceProfiles.MarkGatePassedAsync();
+            Nav.NavigateTo("/set-pin", replace: true);
+        }
+        else
+        {
+            Nav.NavigateTo("/login");
+        }
     }
 
-    private async Task OnPinSubmit(string pin)
+    private async Task OnPinSubmitAsync(string pin)
     {
-        if (_pinTarget is not { } pt) return;
-        if (!await DeviceProfiles.VerifyPinAsync(pt.User.Id, pin))
+        if (_pinTarget is not { } target || _busy) return;
+        _busy = true;
+        _pinError = null;
+        StateHasChanged();
+
+        var result = await Api.SwitchUserAsync(new SwitchUserRequest(target.Id, pin));
+        switch (result.Status)
         {
-            _pinError = L["pin.invalid"];   // wrong PIN — keypad shakes + clears
-            StateHasChanged();
-            return;
+            case PinAuthStatus.Ok:
+                await FinishAsync();
+                return;
+            case PinAuthStatus.WrongPin:
+                _pinError = result.AttemptsLeft is int left
+                    ? L.Get("pin.wrong_attempts_fmt", left)
+                    : L["pin.invalid"];
+                break;
+            case PinAuthStatus.Locked:
+                _pinError = L.Get("pin.locked_fmt", MinutesOf(result.RetryAfterSeconds));
+                break;
+            case PinAuthStatus.Invalid:
+                _pinError = L.Get("setpin.err_length_fmt", _min, _max);
+                break;
+            case PinAuthStatus.PinNotSet:
+            case PinAuthStatus.NotFound:
+                // The profile lost its PIN here (signed out / reset elsewhere)
+                // or was deleted — back to a fresh list.
+                _pinTarget = null;
+                _error = L["switch.profile_gone"];
+                await ReloadAsync();
+                break;
+            default:
+                _pinError = L["profile.err_switch_failed"];
+                break;
         }
-        await SwitchAsync(pt.User.Id);
+        _busy = false;
+        StateHasChanged();
     }
 
     private void OnPinCancel()
     {
         _pinTarget = null;
         _pinError = null;
-        StateHasChanged();
     }
 
-    private async Task SwitchAsync(Guid userId)
+    private void OnForgot()
+    {
+        // Password sign-in that also clears this account's PIN here; on a TV
+        // the login page forwards to pairing with the same flag.
+        Nav.NavigateTo("/login?forgot=1");
+    }
+
+    private async Task OnDefaultToggledAsync(bool on)
+    {
+        _defaultOn = on;
+        // Turning the default OFF from Settings → Switch user applies right
+        // away (it only brings the picker back). Turning it ON waits for the
+        // pick — it needs to know which profile.
+        if (!on && SwitchMode && UserCtx.IsAuthenticated && DeviceProfiles.State?.DefaultUserId is not null)
+        {
+            try
+            {
+                var state = await Api.SetDeviceDefaultAsync(new SetDeviceDefaultRequest(false));
+                if (state is not null)
+                {
+                    DeviceProfiles.Apply(state);
+                    _profiles = state.Profiles.ToList();
+                }
+            }
+            catch { _error = L["switch.default_err"]; }
+        }
+    }
+
+    /// <summary>The picked profile is now the session: apply the default
+    /// toggle to it, refresh identity + device state, and go home.</summary>
+    private async Task FinishAsync()
     {
         _busy = true;
         StateHasChanged();
         try
         {
-            var me = await Api.SwitchUserAsync(new SwitchUserRequest(userId, null));
-            if (me is null)
-            {
-                _pinError = "Couldn't switch — try again.";
-                _busy = false;
-                StateHasChanged();
-                return;
-            }
-            await UserCtx.RefreshMeAsync();
-            await DeviceProfiles.EnsureAsync(userId);
-            UserCtx.SwitchGatePassed = true;
-            // Soft nav so the latch survives — a hard reload would reset it and
-            // bounce us back to /switch.
-            Nav.NavigateTo("/", replace: true);
+            if (_defaultOn)
+                await Api.SetDeviceDefaultAsync(new SetDeviceDefaultRequest(true));
+            else if (DeviceProfiles.State?.DefaultUserId is not null)
+                await Api.SetDeviceDefaultAsync(new SetDeviceDefaultRequest(false));
         }
-        catch
-        {
-            _pinError = "Couldn't switch — try again.";
-            _busy = false;
-            StateHasChanged();
-        }
+        catch { /* the switch itself succeeded; the default can be fixed in Settings */ }
+
+        await UserCtx.RefreshMeAsync();
+        await DeviceProfiles.RefreshAsync();
+        await DeviceProfiles.MarkGatePassedAsync();
+        _pinTarget = null;
+        // Soft nav: MainLayout mounts fresh for "/" and re-applies the new
+        // profile's language / theme / accent.
+        Nav.NavigateTo("/", replace: true);
     }
+
+    private async Task ReloadAsync()
+    {
+        var state = await DeviceProfiles.RefreshAsync();
+        _profiles = state?.Profiles.ToList() ?? new();
+    }
+
+    private static int MinutesOf(int? seconds)
+        => Math.Max(1, (int)Math.Ceiling((seconds ?? 300) / 60.0));
 }

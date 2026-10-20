@@ -27,6 +27,9 @@ public partial class ProfilePanelPage : ContentPage
     private readonly HttpClient _http;
     private readonly ServerAddressProvider _addr;
     private string _currentLang = "en";
+    /// <summary>This TV's profiles (server view); null on a server without
+    /// per-device profiles — the roster + plain switch are used then.</summary>
+    private DeviceStateDto? _device;
 
     public ICommand ChangeServerCommand { get; }
     public ICommand LogoutCommand { get; }
@@ -51,6 +54,11 @@ public partial class ProfilePanelPage : ContentPage
         BackFocus.Command         = new Command(async () => await Navigation.PopAsync());
         LangSelectFocus.Command   = new Command(async () => await PickLanguageAsync());
         ScaleSelectFocus.Command  = new Command(async () => await PickScaleAsync());
+        SwitchUserFocus.Command   = new Command(async () =>
+            await Navigation.PushAsync(new WhosWatchingPage(WhosWatchingPage.PickerMode.Switch)));
+        DefaultFocus.Command      = new Command(async () => await ToggleDefaultAsync());
+        ChangePinFocus.Command    = new Command(async () =>
+            await Navigation.PushAsync(TvPinPage.ForChange(_device?.PinMinLength ?? 4, _device?.PinMaxLength ?? 6)));
 
         ApplyStrings();
         ApplyScaleValue();
@@ -66,7 +74,49 @@ public partial class ProfilePanelPage : ContentPage
         ScaleTitle.Text        = TvL.T("profile.ui_scale", "Масштаб интерфейса", "Interface scale");
         ServerTitle.Text       = TvL.T("profile.server", "Сервер", "Server");
         ChangeServerLabel.Text = TvL.T("profile.change_server", "Сменить сервер", "Change server");
-        LogoutLabel.Text       = TvL.T("profile.logout", "Выйти", "Log out");
+        LogoutLabel.Text       = TvL.T("profile.sign_out", "Выйти", "Sign out");
+        DeviceTitle.Text       = TvL.T("profile.group_device", "Это устройство", "This device");
+        SwitchUserLabel.Text   = TvL.T("profile.switch_user", "Сменить пользователя", "Switch user");
+        DefaultLabel.Text      = TvL.T("switch.default_label", "Входить по умолчанию", "Sign in by default");
+        ChangePinLabel.Text    = TvL.T("profile.pin_change_title", "Сменить PIN", "Change PIN");
+    }
+
+    /// <summary>Paint the "Sign in by default" value + hint from the device state.</summary>
+    private void RenderDefault()
+    {
+        if (_device is null) return;
+        var def = _device.DefaultUserId is Guid id ? _device.Profiles.FirstOrDefault(p => p.Id == id) : null;
+        DefaultValue.Text      = def is not null ? TvL.T("common.on", "Вкл.", "On") : TvL.T("common.off", "Выкл.", "Off");
+        DefaultValue.TextColor = def is not null ? Color.FromArgb("#e8772e") : Color.FromArgb("#7b8290");
+        DefaultHint.Text = def is null
+            ? TvL.T("profile.default_desc_off", "Выключено — при запуске Animarr спрашивает, кто смотрит.",
+                "Off — Animarr asks who's watching when it opens.")
+            : def.IsCurrent
+                ? TvL.T("profile.default_desc_me", "Animarr сразу открывает ваш профиль на этом устройстве.",
+                    "Animarr opens straight into your profile on this device.")
+                : TvL.F("profile.default_desc_other_fmt", "Animarr сразу открывает профиль «{0}» на этом устройстве.",
+                    "Animarr opens straight into {0}'s profile on this device.", def.Name);
+    }
+
+    /// <summary>On → this profile opens the TV by default (no picker, no PIN);
+    /// off → clear the default, whoever it was.</summary>
+    private async Task ToggleDefaultAsync()
+    {
+        if (_device is null) return;
+        var turnOn = _device.DefaultUserId is null;
+        try
+        {
+            var fresh = await _api.SetDeviceDefaultAsync(new SetDeviceDefaultRequest(turnOn));
+            if (fresh is not null) _device = fresh;
+            else StatusLabel.Text = TvL.T("profile.default_err_pin", "Сначала задайте PIN на этом устройстве.",
+                "Set a PIN on this device first.");
+        }
+        catch
+        {
+            StatusLabel.Text = TvL.T("switch.default_err", "Не удалось изменить профиль по умолчанию.",
+                "Couldn't change the default profile.");
+        }
+        RenderDefault();
     }
 
     private async Task LoadAsync()
@@ -79,6 +129,22 @@ public partial class ProfilePanelPage : ContentPage
         catch { }
         BuildLanguages();
 
+        // This TV's profiles (server view, with PIN flags + default). A server
+        // without per-device profiles falls back to the full roster.
+        _device = await TvAuthFlow.TryGetDeviceAsync();
+        if (_device is not null)
+        {
+            DeviceSection.IsVisible = true;
+            RenderDefault();
+            RosterHost.Children.Clear();
+            foreach (var p in _device.Profiles)
+            {
+                var u = new RosterUserDto(p.Id, p.Name, p.RoleName, p.AvatarHue, p.AvatarPath, p.HasPin);
+                RosterHost.Children.Add(BuildProfileCard(u, p.IsCurrent, () => OpenProfileAsync(p)));
+            }
+            return;
+        }
+
         try
         {
             // Who is signed in — the roster itself doesn't say, so the active
@@ -89,12 +155,24 @@ public partial class ProfilePanelPage : ContentPage
             var roster = await _api.GetRosterAsync();
             RosterHost.Children.Clear();
             foreach (var u in roster)
-                RosterHost.Children.Add(BuildProfileCard(u, u.Id == meId));
+                RosterHost.Children.Add(BuildProfileCard(u, u.Id == meId, () => LegacySwitchAsync(u)));
         }
         catch { }
     }
 
-    private View BuildProfileCard(RosterUserDto u, bool current)
+    /// <summary>Tap on a profile of this TV: its PIN (server-verified) when it
+    /// has one here; else pairing — the TV's password sign-in — then Set-a-PIN.</summary>
+    private async Task OpenProfileAsync(DeviceProfileDto p)
+    {
+        if (p.IsCurrent) return;
+        if (p.HasPin)
+            await Navigation.PushAsync(TvPinPage.ForVerify(p, null,
+                _device?.PinMinLength ?? 4, _device?.PinMaxLength ?? 6));
+        else
+            await Navigation.PushAsync(new PairingPage());
+    }
+
+    private View BuildProfileCard(RosterUserDto u, bool current, Func<Task> open)
     {
         var initial = string.IsNullOrWhiteSpace(u.Name) ? "?" : u.Name.Trim()[..1].ToUpperInvariant();
         var disc = new Border
@@ -139,7 +217,7 @@ public partial class ProfilePanelPage : ContentPage
         card.Behaviors.Add(new TvFocusBehavior { Radius = 12 });
         card.GestureRecognizers.Add(new TapGestureRecognizer
         {
-            Command = new Command(async () => await SwitchAsync(u)),
+            Command = new Command(async () => await open()),
         });
         return card;
     }
@@ -237,15 +315,13 @@ public partial class ProfilePanelPage : ContentPage
 #endif
     }
 
-    private async Task SwitchAsync(RosterUserDto u)
+    /// <summary>Server without per-device profiles: the old PIN-less switch.</summary>
+    private async Task LegacySwitchAsync(RosterUserDto u)
     {
-        try
-        {
-            var res = await _api.SwitchUserAsync(new SwitchUserRequest(u.Id, null));
-            if (res is not null) TvRoot.Go(new CatalogNativePage());
-            else StatusLabel.Text = "Не удалось сменить профиль";
-        }
-        catch { StatusLabel.Text = "Не удалось сменить профиль"; }
+        var res = await _api.SwitchUserAsync(new SwitchUserRequest(u.Id, null));
+        if (res.Ok) TvRoot.Go(new CatalogNativePage());
+        else StatusLabel.Text = TvL.T("profile.err_switch_failed", "Не удалось переключиться — попробуйте снова.",
+            "Couldn't switch — try again.");
     }
 
     private async Task SetLanguageAsync(string code)
@@ -271,10 +347,7 @@ public partial class ProfilePanelPage : ContentPage
         }
     }
 
-    private async Task LogoutAsync()
-    {
-        try { await _http.PostAsync(ApiRoutes.AuthLogout, null); }
-        catch { }
-        TvRoot.Go(new PairingPage());
-    }
+    /// <summary>Sign out of this TV (the server also removes the profile from
+    /// the device); then the picker if other PIN profiles remain, else pairing.</summary>
+    private Task LogoutAsync() => TvAuthFlow.SignOutAsync();
 }

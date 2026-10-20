@@ -23,16 +23,16 @@ public sealed class AuthService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<AuthService> _logger;
-    private readonly DeviceTrust _deviceTrust;
+    private readonly DevicePinService _devicePins;
 
     public AuthService(
         IDbContextFactory<AppDbContext> dbFactory,
         ILogger<AuthService> logger,
-        DeviceTrust deviceTrust)
+        DevicePinService devicePins)
     {
-        _dbFactory   = dbFactory;
-        _logger      = logger;
-        _deviceTrust = deviceTrust;
+        _dbFactory  = dbFactory;
+        _logger     = logger;
+        _devicePins = devicePins;
     }
 
     /// <summary>Work-factor-12 hash of a throwaway value, verified against when
@@ -203,12 +203,14 @@ public sealed class AuthService
 
     /// <summary>Issue the auth cookie for a verified user. Persistent across
     /// browser restarts (14-day expiry) — the cookie is the session, no
-    /// server-side store needed. Every sign-in also records the user in the
-    /// device's <see cref="DeviceTrust"/> list, which is what later lets this
-    /// device switch back to them without a password.</summary>
-    public Task SignInCookieAsync(HttpContext http, User user)
+    /// server-side store needed. Every sign-in also registers the user as a
+    /// profile of the calling device (<see cref="DevicePinService"/>), which the
+    /// "Who's watching" picker and the mandatory per-device PIN hang off.
+    /// <paramref name="resetDevicePin"/> clears their PIN on this device — the
+    /// "Forgot PIN" path, only after a password / pairing sign-in.</summary>
+    public async Task SignInCookieAsync(HttpContext http, User user, bool resetDevicePin = false)
     {
-        _deviceTrust.Remember(http, user.Id);
+        await _devicePins.RegisterSignInAsync(http, user.Id, resetDevicePin, http.RequestAborted);
         var claims = new[]
         {
             new Claim(AuthConstants.UserIdClaim, user.Id.ToString()),
@@ -217,7 +219,7 @@ public sealed class AuthService
         };
         var identity = new ClaimsIdentity(claims, AuthConstants.CookieScheme);
         var principal = new ClaimsPrincipal(identity);
-        return http.SignInAsync(AuthConstants.CookieScheme, principal,
+        await http.SignInAsync(AuthConstants.CookieScheme, principal,
             new AuthenticationProperties
             {
                 IsPersistent = true,
@@ -232,18 +234,17 @@ public sealed class AuthService
     public static string HashPassword(string raw) =>
         BCrypt.Net.BCrypt.HashPassword(raw, workFactor: 12);
 
-    // ─── PIN helpers (v5 per-user-per-device fast switch) ──────────────────
+    // ─── PIN helpers (per-device profile PINs) ─────────────────────────────
     //
     // PINs share the same hash algorithm + cost as passwords on purpose — even
-    // though a 4-digit PIN has only 10k possible values, the bottleneck for an
-    // attacker is online (the server) where rate-limiting + the auth cookie
-    // requirement already gate brute force. If the SQLite file leaks the BCrypt
-    // work factor of 12 buys roughly the same ~250 ms/attempt offline cost as
-    // PasswordHash, which is more than enough for a stolen-laptop scenario.
+    // though a 4–6 digit PIN has at most a million values, the bottleneck for
+    // an attacker is online (the server), where the per-(device, profile)
+    // lockout in DevicePinService and the sealed device cookie gate brute
+    // force. If the SQLite file leaks, BCrypt work factor 12 buys roughly the
+    // same ~250 ms/attempt offline cost as PasswordHash.
 
-    /// <summary>Hash a 4-digit PIN for storage. Caller MUST run
-    /// <see cref="ValidatePinFormat"/> first so non-numeric / wrong-length input
-    /// never reaches BCrypt.</summary>
+    /// <summary>Hash a PIN for storage. Callers validate the format first
+    /// (<see cref="DevicePinService.IsValidPinFormat"/>).</summary>
     public static string HashPin(string pin) =>
         BCrypt.Net.BCrypt.HashPassword(pin, workFactor: 12);
 
@@ -254,22 +255,6 @@ public sealed class AuthService
         if (string.IsNullOrEmpty(pin) || string.IsNullOrEmpty(pinHash)) return false;
         try { return BCrypt.Net.BCrypt.Verify(pin, pinHash); }
         catch { return false; }
-    }
-
-    /// <summary>Throw <see cref="ArgumentException"/> unless the PIN is exactly
-    /// 4 ASCII digits (0-9). Endpoint handlers catch the exception and surface
-    /// it as 400 Bad Request — the keypad UI should already enforce this on
-    /// the client so a real user never trips it.</summary>
-    public static void ValidatePinFormat(string pin)
-    {
-        if (string.IsNullOrEmpty(pin) || pin.Length != 4)
-            throw new ArgumentException("PIN must be exactly 4 digits.", nameof(pin));
-        for (int i = 0; i < pin.Length; i++)
-        {
-            var c = pin[i];
-            if (c < '0' || c > '9')
-                throw new ArgumentException("PIN must contain only digits 0-9.", nameof(pin));
-        }
     }
 
     /// <summary>Map User → UserDto. Centralised so password hash never leaks.</summary>
@@ -284,7 +269,9 @@ public sealed class AuthService
         u.Role?.Name ?? "",
         u.CreatedAt,
         u.LastSeenAt,
-        HasPin: !string.IsNullOrEmpty(u.PinHash));
+        // Legacy account-level PIN flag (User.PinHash is no longer written or
+        // checked); per-device PIN state lives in DeviceStateDto.
+        HasPin: false);
 
     /// <summary>Map Role → RoleDto.</summary>
     public static RoleDto ToDto(Role r, int userCount) => new(

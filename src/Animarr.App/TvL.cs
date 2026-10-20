@@ -30,9 +30,23 @@ internal static class TvL
             {
                 _map = map;
                 Lang = code;
+                // Remembered for the next launch: the "Who's watching" picker
+                // and pairing run before any profile (and its language) is known.
+                try { Microsoft.Maui.Storage.Preferences.Set(LastLangKey, code); } catch { }
             }
         }
         catch { /* offline / older server — fallbacks apply */ }
+    }
+
+    private const string LastLangKey = "animarr_tv_lang";
+
+    /// <summary>Load the pack of the language last used on this TV (before a
+    /// profile is signed in). Defaults to ru.</summary>
+    public static Task LoadLastAsync(HttpClient http)
+    {
+        string? last = null;
+        try { last = Microsoft.Maui.Storage.Preferences.Get(LastLangKey, "ru"); } catch { }
+        return LoadAsync(http, last);
     }
 
     /// <summary>Pack value for <paramref name="key"/>, else the ru/en fallback.</summary>

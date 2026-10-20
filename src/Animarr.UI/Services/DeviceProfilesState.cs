@@ -1,117 +1,149 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+using Animarr.Shared;
+using Animarr.Shared.Models;
 using Microsoft.JSInterop;
 
 namespace Animarr.UI.Services;
 
 /// <summary>
-/// DEVICE-LOCAL profile registry (v5.1). The switch-user / "who's watching"
-/// picker is per-DEVICE, not per-server: it lists only the accounts that have
-/// actually signed in on THIS device, and each can carry a PIN that is stored
-/// and verified LOCALLY (never sent to the server). This matches how profile
-/// PINs work on a shared device (TV / console): the lock lives on the device,
-/// not as a global account flag — so a PIN set in a browser does NOT surface
-/// on a phone where you only signed into one account.
+/// Client view of THIS device's profiles — a cache of the SERVER's
+/// <c>GET /api/auth/device</c> (profiles that signed in here, which of them
+/// have a PIN on this device, the "Sign in by default" profile) plus the
+/// per-session latch of the "Who's watching" startup picker.
 ///
-/// Storage: one localStorage key holding a JSON array of { Id, Pin } entries
-/// (Pin = SHA-256 hex of the 4-digit code, or null). Profile name/avatar are
-/// deliberately NOT cached here — they're re-read from the server roster and
-/// intersected with these ids, so renames / avatar changes always show fresh.
+/// PINs are no longer stored or checked here: they live on the server per
+/// user per device, and every switch is verified there. The old device-local
+/// registry (localStorage <c>animarr_device_profiles</c>, SHA-256 PINs) is
+/// purged on first load — those PINs can't be trusted server-side, so their
+/// users get the mandatory "Set a PIN" step on next use instead.
 ///
-/// Security: client-side PIN verification is intentionally light. The threat
-/// model is "keep a kid from tapping into a parent's profile on the couch",
-/// not a determined attacker (who could clear localStorage or hit the API
-/// directly). The server no longer gates fast-switching by PIN — see
-/// AuthEndpoints' switch-user.
+/// Session latch: the picker runs once per browser session / app launch. It
+/// is kept in sessionStorage (survives a reload in the same tab, not a new
+/// tab or a browser restart) and mirrored in memory (the MAUI WebView lives
+/// exactly as long as the app process).
 /// </summary>
 public sealed class DeviceProfilesState
 {
+    private const string GateKey           = "animarr_profile_gate";
+    private const string PendingDefaultKey = "animarr_pending_default";
+    private const string LegacyKey         = "animarr_device_profiles";
+
+    private readonly IAnimarrApiClient _api;
     private readonly IJSRuntime _js;
-    private const string Key = "animarr_device_profiles";
+    private bool _gatePassed;
+    private bool _legacyPurged;
 
-    public DeviceProfilesState(IJSRuntime js) { _js = js; }
+    public DeviceProfilesState(IAnimarrApiClient api, IJSRuntime js)
+    {
+        _api = api;
+        _js  = js;
+    }
 
-    public sealed record Entry(string Id, string? Pin);
+    /// <summary>Last state read from the server; null before the first read or
+    /// when the server is older than per-device PINs (no /api/auth/device) —
+    /// callers then skip the device gates entirely.</summary>
+    public DeviceStateDto? State { get; private set; }
 
-    public async Task<List<Entry>> GetAllAsync()
+    public event Action? OnChange;
+
+    /// <summary>Re-read the device state from the server. Returns null (and
+    /// clears <see cref="State"/>) when the endpoint is unavailable.</summary>
+    public async Task<DeviceStateDto?> RefreshAsync(CancellationToken ct = default)
+    {
+        await PurgeLegacyAsync();
+        try { State = await _api.GetDeviceStateAsync(ct); }
+        catch { State = null; }
+        OnChange?.Invoke();
+        return State;
+    }
+
+    /// <summary>Adopt a state returned by a mutation (e.g. the default toggle).</summary>
+    public void Apply(DeviceStateDto state)
+    {
+        State = state;
+        OnChange?.Invoke();
+    }
+
+    /// <summary>True when the signed-in user still has to set their PIN for
+    /// this device — the blocking "Set a PIN" step. False when unknown.</summary>
+    public bool CurrentUserNeedsPin =>
+        State is { CurrentUserId: not null, CurrentUserHasPin: false };
+
+    /// <summary>Profiles that can be entered by PIN on this device.</summary>
+    public int PinnedProfileCount => State?.Profiles.Count(p => p.HasPin) ?? 0;
+
+    public DeviceProfileDto? DefaultProfile =>
+        State?.DefaultUserId is Guid id ? State.Profiles.FirstOrDefault(p => p.Id == id) : null;
+
+    // ─── Startup-picker session latch ─────────────────────────────────────
+
+    public async Task<bool> IsGatePassedAsync()
+    {
+        if (_gatePassed) return true;
+        try { _gatePassed = await _js.InvokeAsync<string?>("sessionStorage.getItem", GateKey) == "1"; }
+        catch { }
+        return _gatePassed;
+    }
+
+    /// <summary>The user identified themselves this session (picked a profile,
+    /// signed in, set a PIN, or the device default kicked in).</summary>
+    public async Task MarkGatePassedAsync()
+    {
+        _gatePassed = true;
+        try { await _js.InvokeVoidAsync("sessionStorage.setItem", GateKey, "1"); } catch { }
+    }
+
+    public async Task ResetGateAsync()
+    {
+        _gatePassed = false;
+        try { await _js.InvokeVoidAsync("sessionStorage.removeItem", GateKey); } catch { }
+    }
+
+    // ─── Pending default ──────────────────────────────────────────────────
+    // The picker's "Sign in by default" toggle applies to the profile picked.
+    // When that profile can't finish in the picker (no PIN here yet → password
+    // sign-in → Set-a-PIN), the choice is parked here and applied once the PIN
+    // exists.
+
+    public async Task SetPendingDefaultAsync(Guid? userId)
     {
         try
         {
-            var json = await _js.InvokeAsync<string?>("localStorage.getItem", Key);
-            if (string.IsNullOrWhiteSpace(json)) return new();
-            return JsonSerializer.Deserialize<List<Entry>>(json) ?? new();
+            if (userId is Guid id) await _js.InvokeVoidAsync("sessionStorage.setItem", PendingDefaultKey, id.ToString());
+            else await _js.InvokeVoidAsync("sessionStorage.removeItem", PendingDefaultKey);
         }
-        catch { return new(); }
-    }
-
-    private async Task SaveAsync(List<Entry> list)
-    {
-        try { await _js.InvokeVoidAsync("localStorage.setItem", Key, JsonSerializer.Serialize(list)); }
         catch { }
     }
 
-    /// <summary>Register a profile on this device (idempotent). Called after a
-    /// successful sign-in / setup / switch so the account becomes switchable.</summary>
-    public async Task EnsureAsync(Guid userId)
+    /// <summary>Apply (and clear) a parked default if it is for
+    /// <paramref name="userId"/>, who must have a PIN by now.</summary>
+    public async Task ApplyPendingDefaultAsync(Guid userId)
     {
-        var id = userId.ToString();
-        var list = await GetAllAsync();
-        if (list.Any(e => e.Id == id)) return;
-        list.Add(new Entry(id, null));
-        await SaveAsync(list);
+        string? raw = null;
+        try { raw = await _js.InvokeAsync<string?>("sessionStorage.getItem", PendingDefaultKey); } catch { }
+        if (raw is null) return;
+        await SetPendingDefaultAsync(null);
+        if (!Guid.TryParse(raw, out var id) || id != userId) return;
+        try
+        {
+            var state = await _api.SetDeviceDefaultAsync(new Shared.Requests.SetDeviceDefaultRequest(true));
+            if (state is not null) Apply(state);
+        }
+        catch { }
     }
 
-    /// <summary>Forget a profile on this device (e.g. "remove from this device").</summary>
-    public async Task RemoveAsync(Guid userId)
+    /// <summary>Where to land after a sign-out: the picker when other
+    /// PIN-protected profiles remain on this device, else the welcome page.</summary>
+    public async Task<string> RouteAfterSignOutAsync()
     {
-        var id = userId.ToString();
-        var list = await GetAllAsync();
-        if (list.RemoveAll(e => e.Id == id) > 0) await SaveAsync(list);
+        await ResetGateAsync();
+        var state = await RefreshAsync();
+        return state?.Profiles.Any(p => p.HasPin) == true ? "/switch" : "/welcome";
     }
 
-    /// <summary>Ids of every profile registered on this device.</summary>
-    public async Task<HashSet<Guid>> GetIdsAsync()
+    private async Task PurgeLegacyAsync()
     {
-        var set = new HashSet<Guid>();
-        foreach (var e in await GetAllAsync())
-            if (Guid.TryParse(e.Id, out var g)) set.Add(g);
-        return set;
-    }
-
-    /// <summary>True iff this profile has a device-local PIN set on THIS device.</summary>
-    public async Task<bool> HasPinAsync(Guid userId)
-    {
-        var id = userId.ToString();
-        return (await GetAllAsync()).Any(e => e.Id == id && !string.IsNullOrEmpty(e.Pin));
-    }
-
-    /// <summary>Set (non-null raw code) or clear (null) the device-local PIN for
-    /// a profile. The raw 4-digit code is hashed before storage.</summary>
-    public async Task SetPinAsync(Guid userId, string? rawPin)
-    {
-        var id = userId.ToString();
-        var hash = string.IsNullOrEmpty(rawPin) ? null : HashPin(rawPin);
-        var list = await GetAllAsync();
-        var idx = list.FindIndex(e => e.Id == id);
-        if (idx < 0) list.Add(new Entry(id, hash));
-        else list[idx] = list[idx] with { Pin = hash };
-        await SaveAsync(list);
-    }
-
-    /// <summary>Verify a typed PIN against the device-local hash. Returns true
-    /// when the profile has no PIN set (nothing to gate).</summary>
-    public async Task<bool> VerifyPinAsync(Guid userId, string rawPin)
-    {
-        var id = userId.ToString();
-        var entry = (await GetAllAsync()).FirstOrDefault(e => e.Id == id);
-        if (entry is null || string.IsNullOrEmpty(entry.Pin)) return true;
-        return HashPin(rawPin) == entry.Pin;
-    }
-
-    private static string HashPin(string raw)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes("animarr-device-pin" + raw));
-        return Convert.ToHexString(bytes);
+        if (_legacyPurged) return;
+        _legacyPurged = true;
+        try { await _js.InvokeVoidAsync("localStorage.removeItem", LegacyKey); } catch { }
     }
 }
