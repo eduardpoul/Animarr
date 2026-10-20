@@ -140,5 +140,5 @@
     private static string ArtStyle(CalendarEventDto e)
         => string.IsNullOrEmpty(e.BackdropUrl ?? e.PosterUrl)
             ? ""
-            : $"background-image:url('{(e.BackdropUrl ?? e.PosterUrl)!.Replace("'", "%27")}')";
+            : $"background-image:url('{Animarr.UI.Services.MediaUrl.Absolute(e.BackdropUrl ?? e.PosterUrl).Replace("'", "%27")}')";
 }

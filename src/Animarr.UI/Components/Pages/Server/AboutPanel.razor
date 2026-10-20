@@ -22,6 +22,16 @@
                   Expandable="true" Expanded="true" Body="@Specs()" />
 </SettingsGroup>
 
+<SettingsGroup Title="@L["about.integrations_title"]">
+    <SettingsCard Icon="key" Title="@L["about.dashboard_key_title"]"
+                  Description="@L["about.dashboard_key_desc"]"
+                  Body="@DashboardKeyBody()">
+        <Btn Variant="@(_dashKey is null ? "primary" : "solid")" Loading="_dashBusy" OnClick="RegenerateDashboardKeyAsync">
+            @(_dashKey is null ? L["about.dashboard_key_generate"] : L["about.dashboard_key_regenerate"])
+        </Btn>
+    </SettingsCard>
+</SettingsGroup>
+
 <SettingsGroup Title="@L["about.links_title"]">
     <SettingsCard Icon="github" Title="@L["about.btn_view_github"]" Description="github.com/eduardpoul/Animarr"
                   Href="https://github.com/eduardpoul/Animarr" External="true" />
@@ -35,6 +45,68 @@
 
 @code {
     private ServerInfoDto? _info;
+
+    // ── External dashboard API key (gethomepage etc.) ─────────────────
+    private string? _dashKey;
+    private bool _dashBusy;
+
+    /// <summary>Origin the dashboard should poll — the server this panel talks
+    /// to (MediaUrl.Base under MAUI, the page origin in the browser).</summary>
+    private string ServerOrigin =>
+        (string.IsNullOrEmpty(Animarr.UI.Services.MediaUrl.Base)
+            ? Nav.BaseUri
+            : Animarr.UI.Services.MediaUrl.Base).TrimEnd('/');
+
+    private string DashboardUrl => $"{ServerOrigin}{ApiRoutes.ServerDashboard}?key={_dashKey}";
+
+    private RenderFragment DashboardKeyBody() => __builder =>
+    {
+        @if (_dashKey is null)
+        {
+            <p class="fs-hint">@L["about.dashboard_key_none"]</p>
+        }
+        else
+        {
+            <div class="ab-key">
+                <label class="fs-field">
+                    <span class="fs-field__label">@L["about.dashboard_key_label"]</span>
+                    <input class="fs-input fs-input--code fs-input--wide" readonly value="@_dashKey"
+                           onfocus="this.select()" spellcheck="false" />
+                </label>
+                <label class="fs-field">
+                    <span class="fs-field__label">@L["about.dashboard_url_label"]</span>
+                    <input class="fs-input fs-input--code fs-input--wide" readonly value="@DashboardUrl"
+                           onfocus="this.select()" spellcheck="false" />
+                </label>
+                <p class="fs-hint">@((MarkupString)L["about.dashboard_header_hint_html"])</p>
+                <div class="fs-row">
+                    <Btn Variant="ghost" Size="sm" Disabled="_dashBusy" OnClick="RevokeDashboardKeyAsync">@L["about.dashboard_key_revoke"]</Btn>
+                </div>
+            </div>
+        }
+    };
+
+    private async Task LoadDashboardKeyAsync()
+    {
+        try { _dashKey = (await Api.GetDashboardKeyAsync()).Key; }
+        catch { _dashKey = null; }
+    }
+
+    private async Task RegenerateDashboardKeyAsync()
+    {
+        _dashBusy = true;
+        try { _dashKey = (await Api.RegenerateDashboardKeyAsync()).Key; }
+        catch { /* keep the current state */ }
+        finally { _dashBusy = false; }
+    }
+
+    private async Task RevokeDashboardKeyAsync()
+    {
+        _dashBusy = true;
+        try { await Api.RevokeDashboardKeyAsync(); _dashKey = null; }
+        catch { /* keep the current state */ }
+        finally { _dashBusy = false; }
+    }
 
     private RenderFragment Specs() => __builder =>
     {
@@ -105,5 +177,6 @@
         {
             _info = null;
         }
+        await LoadDashboardKeyAsync();
     }
 }

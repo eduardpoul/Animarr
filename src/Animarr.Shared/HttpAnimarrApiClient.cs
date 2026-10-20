@@ -977,4 +977,32 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
             new SetMediaCategoriesRequest(categoryIds), JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
     }
+
+    // ─── Media tokens + external-dashboard key ───────────────────────────
+
+    public async Task<MediaTokenDto?> GetMediaTokenAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.GetAsync(ApiRoutes.MediaToken, ct);
+        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            or HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<MediaTokenDto>(JsonOpts, ct);
+    }
+
+    public async Task<DashboardKeyDto> GetDashboardKeyAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<DashboardKeyDto>(ApiRoutes.ServerDashboardKey, JsonOpts, ct)
+            ?? new DashboardKeyDto(null);
+
+    public async Task<DashboardKeyDto> RegenerateDashboardKeyAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.ServerDashboardKey, content: null, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<DashboardKeyDto>(JsonOpts, ct) ?? new DashboardKeyDto(null);
+    }
+
+    public async Task RevokeDashboardKeyAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.DeleteAsync(ApiRoutes.ServerDashboardKey, ct);
+        resp.EnsureSuccessStatusCode();
+    }
 }

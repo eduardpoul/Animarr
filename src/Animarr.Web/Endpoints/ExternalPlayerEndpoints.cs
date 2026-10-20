@@ -1,6 +1,7 @@
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -9,7 +10,13 @@ namespace Animarr.Web.Endpoints;
 /// Endpoints for native external players (mpv + its animarr-tracker.lua):
 /// a progress-ping sink that maps a disk path back to a MediaItem + (season,
 /// episode) and writes watch state, plus the installable tracker script with a
-/// baked-in server URL. AllowAnonymous — the mpv script has no auth cookie.
+/// baked-in server URL.
+///
+/// The player has no cookie. The stream URL it was handed (/api/playlist.m3u,
+/// "Send to TV", …) carries a link token signed for that file and the user who
+/// opened it; the tracker forwards that token (<c>?mt=</c>) with every ping, so
+/// progress lands in THAT user's watch state + stats. A missing, invalid,
+/// expired or other-file token writes nothing (401 / 403).
 /// </summary>
 internal static class ExternalPlayerEndpoints
 {
@@ -27,12 +34,17 @@ internal static class ExternalPlayerEndpoints
             IDbContextFactory<AppDbContext> dbFactory,
             IPatternMatchService patternMatch,
             IWatchStateService watchSvc,
+            IUserContext userCtx,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
     {
         var logger = loggerFactory.CreateLogger("ExternalProgress");
+        // The account the link was signed for (or the cookie's user). DLNA
+        // MediaServer links carry no account and can't record progress.
+        if (userCtx.CurrentUserId is not Guid uid) return Results.Unauthorized();
         if (string.IsNullOrWhiteSpace(body.Path)) return Results.BadRequest("path required");
 
+        // Also enforces the link binding: a token signed for another file → 403.
         var (ok, fullPath, early) = await pathValidator.ResolveLibraryFileAsync(body.Path);
         if (!ok) return early!;
 
@@ -46,14 +58,16 @@ internal static class ExternalPlayerEndpoints
         foreach (var m in items)
         {
             if (m.Folder is null) continue;
+            // Compare canonical forms — fullPath is Path.GetFullPath'd by the
+            // validator, stored folder paths may use the other separator.
             if (!string.IsNullOrEmpty(m.Folder.SingleFilePath)
-                && string.Equals(m.Folder.SingleFilePath, fullPath, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(Path.GetFullPath(m.Folder.SingleFilePath), fullPath, StringComparison.OrdinalIgnoreCase))
             {
                 owner = m; break;
             }
             if (!string.IsNullOrEmpty(m.Folder.Path) && !m.Folder.IsSection)
             {
-                var folderRoot = m.Folder.Path
+                var folderRoot = Path.GetFullPath(m.Folder.Path)
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     + Path.DirectorySeparatorChar;
                 if (fullPath!.StartsWith(folderRoot, StringComparison.OrdinalIgnoreCase))
@@ -92,17 +106,20 @@ internal static class ExternalPlayerEndpoints
         // mpv that keeps reporting position 0 doesn't inflate TotalWatchTimeSec.
         var delta = Math.Clamp(body.PlayedDeltaSec ?? 5, 0, 30);
 
-        await watchSvc.RecordProgressAsync(owner.Id, season, episode, fullPath,
+        await watchSvc.RecordProgressAsync(uid, owner.Id, season, episode, fullPath,
             positionMs, runtimeMs, delta, ct);
 
         return Results.NoContent();
     })
     .WithName("ExternalProgress")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/mpv-tracker.lua — installable mpv script with baked-in URL ────
-    // User downloads this once, drops into mpv's scripts/ dir. Reports playback
-    // position to /api/watch/external-progress every 5 seconds, plus on end-of-
-    // file so the final position is captured even when mpv is closed abruptly.
+    // User downloads this once (from a signed-in browser), drops into mpv's
+    // scripts/ dir. Reports playback position to /api/watch/external-progress
+    // every 5 seconds, plus on end-of-file so the final position is captured
+    // even when mpv is closed abruptly. The script holds no secret — the token
+    // it authenticates with travels in each stream URL — but like everything
+    // else it's served to signed-in users only (fallback policy).
     app.MapGet("/api/mpv-tracker.lua", (HttpContext http, DlnaService dlna) =>
     {
         // Use the same advertised origin as DLNA — that's the URL the user
@@ -112,8 +129,7 @@ internal static class ExternalPlayerEndpoints
         http.Response.Headers["Content-Disposition"] = "attachment; filename=\"animarr-tracker.lua\"";
         return Results.Text(lua, "text/x-lua; charset=utf-8");
     })
-    .WithName("MpvTrackerScript")
-    .AllowAnonymous();
+    .WithName("MpvTrackerScript");
 
         return app;
     }

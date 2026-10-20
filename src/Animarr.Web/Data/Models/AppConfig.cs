@@ -111,4 +111,13 @@ public static class AppConfigKeys
     /// <summary>Black-frame video analysis to approximate a credits start —
     /// expensive (decodes video), so off by default.</summary>
     public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
+
+    // ─── Server access ────────────────────────────────────────────────────────
+    /// <summary>"true" switches on the UPnP/DLNA MediaServer (LAN TVs browse the
+    /// library). OFF by default — it can't authenticate its clients.</summary>
+    public const string DlnaServerEnabled = "dlna.server_enabled";
+    /// <summary>API key for GET /api/server/dashboard (external dashboards such
+    /// as gethomepage). Unset = the dashboard endpoint answers 401. Encrypted at
+    /// rest (SecretProtector).</summary>
+    public const string DashboardApiKey   = "server.dashboard_api_key";
 }

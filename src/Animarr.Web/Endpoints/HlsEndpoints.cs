@@ -5,9 +5,19 @@ namespace Animarr.Web.Endpoints;
 
 /// <summary>
 /// HLS streaming lifecycle: POST start (with Direct Play / Direct Stream
-/// probing), segment + playlist serving, keepalive and stop. The diagnostic
-/// session list + bulk-stop are admin-gated; the rest are AllowAnonymous and
-/// path-validated because the browser player fetches them without a cookie.
+/// probing), segment + playlist serving, keepalive and stop.
+///
+/// Authorization:
+///   • start — cookie or media token (+ MediaPathValidator: library roots, role
+///     folders, link binding);
+///   • keepalive / stop — cookie or session media token;
+///   • playlist + segment GETs — authorised by the session token in the URL
+///     PATH itself: a 128-bit random id minted only by an authorised start,
+///     served only while that session lives (idle-GC'd after 5 minutes). hls.js
+///     and ExoPlayer resolve segment URIs relative to the playlist, so a query
+///     token on the manifest URL would not reach them — the path capability is
+///     what a signed segment URL would be, minus the extra plumbing;
+///   • the diagnostic session list + bulk-stop are admin-gated.
 /// </summary>
 internal static class HlsEndpoints
 {
@@ -217,7 +227,7 @@ internal static class HlsEndpoints
         }
     })
     .WithName("StartHls")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
 
     app.MapGet("/api/hls/{token}/{file}", async (
             string token,
@@ -284,12 +294,15 @@ internal static class HlsEndpoints
         return Results.File(full, mime, enableRangeProcessing: true);
     })
     .WithName("GetHlsFile")
+    // Capability URL — see the class summary: the unguessable, short-lived
+    // session id in the path is the authorization (only an authorised start
+    // can mint one). No cookie / query token reaches relative segment fetches.
     .AllowAnonymous();
 
     app.MapPost("/api/hls/keepalive", (string token, HlsSessionService hls) =>
             hls.Touch(token) ? Results.NoContent() : Results.NotFound())
         .WithName("HlsKeepalive")
-        .AllowAnonymous();
+        .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
     app.MapDelete("/api/hls/{token}", (string token, HlsSessionService hls) =>
     {
@@ -297,7 +310,7 @@ internal static class HlsEndpoints
         return Results.NoContent();
     })
     .WithName("StopHls")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
     // Diagnostic: list every active session with ffmpeg state + segment progress.
     // Hit this when a player is stuck on a frame to see whether the backing

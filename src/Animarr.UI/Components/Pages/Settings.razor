@@ -770,6 +770,15 @@
         var segChapters   = Flag(AppConfigKeys.SegmentsChaptersEnabled, true);
         var segChroma     = Flag(AppConfigKeys.SegmentsChromaprintEnabled, true);
         var segBlackFrame = Flag(AppConfigKeys.SegmentsBlackFrameEnabled, false);
+        var dlnaServer    = Flag(AppConfigKeys.DlnaServerEnabled, false);
+
+        @* UPnP MediaServer for LAN TVs. Opt-in: it can't authenticate its
+           clients, so it serves the whole library to the local network. *@
+        <SettingsGroup Title="@L["settings.dlna_server_title"]">
+            <SettingsCard Icon="tv" Title="@L["settings.dlna_server_label"]" Description="@L["settings.dlna_server_desc"]">
+                <Toggle Checked="@dlnaServer" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.DlnaServerEnabled, v))" />
+            </SettingsCard>
+        </SettingsGroup>
 
         <SettingsGroup Title="@L["settings.ext_player_title"]">
             <SettingsCard Icon="external" Title="@L["settings.ext_player_label"]" Description="@L["settings.ext_player_desc"]"

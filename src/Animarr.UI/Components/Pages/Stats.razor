@@ -213,7 +213,7 @@
                             <span class="st-title-card__art">
                                 @if (!string.IsNullOrEmpty(t.PosterUrl))
                                 {
-                                    <img loading="lazy" src="@t.PosterUrl" alt="@t.Title" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(t.PosterUrl)" alt="@t.Title" />
                                 }
                                 else
                                 {

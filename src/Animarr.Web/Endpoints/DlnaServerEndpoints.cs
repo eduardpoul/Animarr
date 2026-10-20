@@ -1,4 +1,5 @@
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 
 namespace Animarr.Web.Endpoints;
 
@@ -6,7 +7,16 @@ namespace Animarr.Web.Endpoints;
 /// DLNA / UPnP MediaServer surface — device description + ContentDirectory /
 /// ConnectionManager SCPDs and their SOAP control + event-subscription stubs.
 /// SSDP advertisement itself lives in <see cref="DlnaService"/> (a hosted
-/// service). All AllowAnonymous: LAN TVs reach these without a cookie.
+/// service).
+///
+/// These are the only library-facing routes that stay AllowAnonymous: a UPnP
+/// control point (a smart TV's media browser) has no way to sign in. Instead:
+///   • the whole surface answers 404 unless the admin switched the DLNA server
+///     on in Settings (<c>dlna.server_enabled</c>, OFF by default);
+///   • it answers only LAN clients — a direct connection from a private /
+///     loopback / link-local address without reverse-proxy forwarding headers;
+///   • every res URL it emits carries a file-bound DLNA link token, which
+///     /api/file honours only under the same two conditions.
 /// </summary>
 internal static class DlnaServerEndpoints
 {
@@ -23,11 +33,12 @@ internal static class DlnaServerEndpoints
     // clients on the LAN are talking to us directly.)
     static string DlnaBaseUrl(HttpContext http) => $"{http.Request.Scheme}://{http.Request.Host}";
 
-    // DLNA_ENABLED=false (or no LAN IP found) only stopped the SSDP announcer —
-    // these anonymous routes kept answering, so anyone who could reach the port
-    // could still Browse the whole library. Answer 404 while DLNA is off.
+    // 404 unless DLNA networking is up AND the admin opted the MediaServer in,
+    // and only for LAN clients (see the class summary).
     var server = app.MapGroup(string.Empty).AddEndpointFilter(async (ctx, next) =>
-        ctx.HttpContext.RequestServices.GetRequiredService<DlnaService>().IsEnabled
+        await ctx.HttpContext.RequestServices.GetRequiredService<DlnaService>()
+                .IsServerEnabledAsync(ctx.HttpContext.RequestAborted)
+            && LanRequest.IsLan(ctx.HttpContext)
             ? await next(ctx)
             : Results.NotFound());
 

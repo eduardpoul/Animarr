@@ -2,8 +2,8 @@ namespace Animarr.Shared.Models;
 
 /// <summary>
 /// Aggregate-only summary for external dashboards (e.g. Homepage's
-/// <c>customapi</c> widget, polled every minute). Anonymous-accessible — flat
-/// numbers, no titles, no users, no paths.
+/// <c>customapi</c> widget, polled every minute). Gated by the dashboard API
+/// key (no cookie) — flat numbers, no titles, no users, no paths.
 /// </summary>
 public sealed record ServerDashboardDto(
     /// <summary>Total MediaItems in the library.</summary>
@@ -31,3 +31,10 @@ public sealed record ServerDashboardDto(
 
     /// <summary>Sum of Downloaded across active downloads.</summary>
     long DownloadingBytesDone);
+
+/// <summary>
+/// Admin view of the external-dashboard API key (GET/POST/DELETE
+/// /api/server/dashboard/key). <see cref="Key"/> is null when no key is set,
+/// in which case /api/server/dashboard answers 401 to everyone.
+/// </summary>
+public sealed record DashboardKeyDto(string? Key);

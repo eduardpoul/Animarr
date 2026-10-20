@@ -44,7 +44,7 @@
                             <a class="frail__poster tv-focus" href="/catalog/@mid" title="@card.Title">
                                 @if (!string.IsNullOrEmpty(card.CoverUrl))
                                 {
-                                    <img loading="lazy" src="@card.CoverUrl" alt="@card.Title" class="frail__img" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(card.CoverUrl)" alt="@card.Title" class="frail__img" />
                                 }
                                 else
                                 {
@@ -61,7 +61,7 @@
                             <div class="frail__ext" title="@card.Title">
                                 @if (!string.IsNullOrEmpty(card.CoverUrl))
                                 {
-                                    <img loading="lazy" src="@card.CoverUrl" alt="@card.Title" class="frail__img frail__img--dim" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(card.CoverUrl)" alt="@card.Title" class="frail__img frail__img--dim" />
                                 }
                                 else
                                 {

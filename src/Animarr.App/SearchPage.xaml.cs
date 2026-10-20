@@ -99,6 +99,7 @@ public partial class SearchPage : ContentPage
 
         try
         {
+            await TvMedia.EnsureTokenAsync();   // poster URLs need it
             var items = await _http.GetFromJsonAsync<ApiItem[]>(
                 $"/api/media?search={Uri.EscapeDataString(q)}&take=120", Json, ct)
                 ?? Array.Empty<ApiItem>();
@@ -129,9 +130,9 @@ public partial class SearchPage : ContentPage
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
-            ImageUrl    = $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
+            ImageUrl    = TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330"),
             BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
-                        : $"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
+                        : TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280"),
             TypeLabel   = i.MediaType switch
             {
                 "Anime" => "ANIME", "Movie" => "MOVIE", "Series" => "SERIES",

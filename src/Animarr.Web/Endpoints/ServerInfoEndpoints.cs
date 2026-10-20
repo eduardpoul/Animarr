@@ -80,11 +80,13 @@ internal static class ServerInfoEndpoints
                 ServerId:      serverId!));
         }).AllowAnonymous();
 
-        // GET /api/server/dashboard — anonymous aggregates for external
-        // dashboards (Homepage's customapi widget, polled every minute).
-        // Same reasoning as /api/server/info above: no titles, no users, no
-        // paths — just COUNT/SUM over indexed columns, cheap enough for a
-        // SQLite database to answer once a minute forever. Deliberately
+        // GET /api/server/dashboard — aggregates for external dashboards
+        // (Homepage's customapi widget, polled every minute). No cookie — the
+        // dashboard authenticates with the admin-generated API key, sent as
+        // the X-Api-Key header or ?key= (see DashboardKeyFilter). No key set
+        // → 401 for everyone. No titles, no users, no paths — just COUNT/SUM
+        // over indexed columns, cheap enough for a SQLite database to answer
+        // once a minute forever. Deliberately
         // excludes on-disk library size (would mean walking the filesystem)
         // and download SPEED (TorrentRecord only has cumulative Downloaded/
         // Uploaded, not bytes/sec — that lives in the live torrent engine,
@@ -116,8 +118,62 @@ internal static class ServerInfoEndpoints
                                            .CountAsync(t => t.State == Animarr.Web.Data.Models.TorrentRecordState.Seeding, ct),
                 DownloadingBytesTotal: await downloading.SumAsync(t => t.TotalSize, ct),
                 DownloadingBytesDone:  await downloading.SumAsync(t => t.Downloaded, ct)));
-        }).AllowAnonymous();
+        })
+        // AllowAnonymous only at the cookie layer: the API-key filter is the gate.
+        .AllowAnonymous()
+        .AddEndpointFilter(DashboardKeyFilter);
+
+        // ─── Dashboard API key management (admin) ──────────────────────
+        // GET shows the current key, POST generates a fresh one (the old key
+        // stops working at once), DELETE revokes it (dashboard → 401). Stored
+        // encrypted in AppConfig (SecretProtector) — no extra table.
+        var keyAdmin = app.MapGroup(ApiRoutes.ServerDashboardKey)
+            .RequireAuthorization(AuthConstants.Policies.SystemSettings);
+
+        keyAdmin.MapGet(string.Empty, async (IAppConfigService config, CancellationToken ct) =>
+            Results.Ok(new DashboardKeyDto(NullIfEmpty(await config.GetAsync(Animarr.Web.Data.Models.AppConfigKeys.DashboardApiKey, ct)))));
+
+        keyAdmin.MapPost(string.Empty, async (IAppConfigService config, CancellationToken ct) =>
+        {
+            // 32 random bytes → 43-char URL-safe string (fits a query param as-is).
+            var key = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(
+                System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            await config.SetAsync(Animarr.Web.Data.Models.AppConfigKeys.DashboardApiKey, key, ct);
+            return Results.Ok(new DashboardKeyDto(key));
+        });
+
+        keyAdmin.MapDelete(string.Empty, async (IAppConfigService config, CancellationToken ct) =>
+        {
+            await config.SetAsync(Animarr.Web.Data.Models.AppConfigKeys.DashboardApiKey, null, ct);
+            return Results.Ok(new DashboardKeyDto(null));
+        });
 
         return app;
+    }
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>Lets the request through only with the configured dashboard
+    /// API key in <c>X-Api-Key</c> or <c>?key=</c>. Constant-time compare.</summary>
+    private static async ValueTask<object?> DashboardKeyFilter(
+        EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        var http     = ctx.HttpContext;
+        var config   = http.RequestServices.GetRequiredService<IAppConfigService>();
+        var expected = NullIfEmpty(await config.GetAsync(Animarr.Web.Data.Models.AppConfigKeys.DashboardApiKey, http.RequestAborted));
+
+        var supplied = http.Request.Headers["X-Api-Key"].ToString();
+        if (string.IsNullOrEmpty(supplied)) supplied = http.Request.Query["key"].ToString();
+
+        if (expected is null || string.IsNullOrEmpty(supplied)
+            || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                   System.Text.Encoding.UTF8.GetBytes(supplied),
+                   System.Text.Encoding.UTF8.GetBytes(expected)))
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.Unauthorized();
+        }
+        http.Response.Headers.CacheControl = "no-store";
+        return await next(ctx);
     }
 }

@@ -35,8 +35,13 @@ namespace Animarr.Web.Services;
 ///     reports as "object.item.videoItem" which all major clients accept.
 ///   • Event subscriptions — many TVs don't subscribe at all; the ones that
 ///     do tolerate a stub. If something acts up we'll fill this in.
-///   • Per-section access control — Animarr is single-user no-auth by design,
-///     so the DLNA surface mirrors the catalog as-is.
+///   • Per-section access control — the MediaServer has no notion of a
+///     signed-in user, so it mirrors the whole catalog. That's why it is an
+///     opt-in admin setting (<c>dlna.server_enabled</c>, OFF by default),
+///     answers only LAN clients (<see cref="Animarr.Web.Services.Auth.LanRequest"/>),
+///     and every res URL it hands out carries a file-bound signed link token
+///     (<see cref="Animarr.Web.Services.Auth.MediaTokenKind.DlnaLink"/>) that is
+///     itself only honoured while the setting is on.
 ///
 /// **Deployment note:** SSDP needs LAN multicast (UDP 239.255.255.250:1900).
 /// Docker bridge networking does NOT pass multicast through. Run animarr
@@ -52,6 +57,7 @@ public sealed class DlnaService : IHostedService, IDisposable
     private readonly ILogger<DlnaService>   _logger;
     private readonly IServiceScopeFactory   _scopes;
     private readonly IConfiguration         _config;
+    private readonly Animarr.Web.Services.Auth.MediaTokenService _tokens;
     // Optional ControlPoint side — when DI provides it, every NOTIFY frame
     // we receive on the multicast socket gets forwarded so the renderer
     // cache stays warm without us having to poll.
@@ -66,18 +72,47 @@ public sealed class DlnaService : IHostedService, IDisposable
     private bool         _enabled  = true;
 
     public DlnaService(ILogger<DlnaService> logger, IServiceScopeFactory scopes, IConfiguration config,
-        DlnaCastService? cast = null)
+        Animarr.Web.Services.Auth.MediaTokenService tokens, DlnaCastService? cast = null)
     {
         _logger = logger;
         _scopes = scopes;
         _config = config;
+        _tokens = tokens;
         _cast   = cast;
     }
 
+    /// <summary>How long a ContentDirectory res URL stays playable. TVs cache
+    /// browse results for a while; half a day covers a long evening.</summary>
+    private static readonly TimeSpan DlnaLinkLifetime = TimeSpan.FromHours(12);
+
+    /// <summary>Last answer of <see cref="IsServerEnabledAsync"/> — drives the
+    /// SSDP alive/bye-bye transitions.</summary>
+    private bool _serverAdvertised;
+
     public string Uuid     => _uuid;
     /// <summary>False when DLNA_ENABLED=false or no LAN IP could be picked —
-    /// the MediaServer HTTP routes then answer 404.</summary>
+    /// no SSDP at all (neither the MediaServer nor cast discovery).</summary>
     public bool IsEnabled  => _enabled;
+
+    /// <summary>Is the UPnP MediaServer (ContentDirectory browse for LAN TVs)
+    /// switched on? Needs DLNA networking (<see cref="IsEnabled"/>) AND the admin
+    /// setting <c>dlna.server_enabled</c>, which is OFF by default: the
+    /// MediaServer can't authenticate its clients, so it exposes the whole
+    /// library to the LAN and must be an explicit choice. Cast ("Send to TV")
+    /// doesn't depend on it. AppConfig reads are served from a process-wide
+    /// cache, so this is cheap enough to call per request.</summary>
+    public async Task<bool> IsServerEnabledAsync(CancellationToken ct = default)
+    {
+        if (!_enabled) return false;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var cfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+            var v = await cfg.GetAsync(Animarr.Shared.AppConfigKeys.DlnaServerEnabled, ct);
+            return string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
     public string FriendlyName => "Animarr";
     /// <summary>The IP/port the SSDP LOCATION header advertises. Cast targets
     /// must use this exact origin so a TV can reach the stream URL we hand it
@@ -155,12 +190,28 @@ public sealed class DlnaService : IHostedService, IDisposable
         }
 
         _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
-        SendAlive();
-        // Re-announce every ~25 minutes (we say cache-control: max-age=1800).
-        _aliveTimer = new Timer(_ => SendAlive(), null, TimeSpan.FromMinutes(25), TimeSpan.FromMinutes(25));
+        // The MediaServer is announced only while the admin setting is on. Check
+        // every minute so flipping it in Settings takes effect promptly (alive on
+        // → on, bye-bye on → off); re-announce every ~25 minutes while on (we
+        // say cache-control: max-age=1800).
+        var lastAlive = DateTime.MinValue;
+        _aliveTimer = new Timer(_ => _ = Task.Run(async () =>
+        {
+            var on = await IsServerEnabledAsync();
+            if (on && (!_serverAdvertised || DateTime.UtcNow - lastAlive > TimeSpan.FromMinutes(25)))
+            {
+                SendAlive();
+                lastAlive = DateTime.UtcNow;
+            }
+            else if (!on && _serverAdvertised)
+            {
+                SendByeBye();
+            }
+            _serverAdvertised = on;
+        }), null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
 
-        _logger.LogInformation("DLNA: MediaServer up at http://{Ip}:{Port}/dlna/desc.xml (uuid={Uuid})",
-            _localIp, _httpPort, _uuid);
+        _logger.LogInformation("DLNA: SSDP up on {Ip}; MediaServer at http://{Ip}:{Port}/dlna/desc.xml when enabled in Settings (uuid={Uuid})",
+            _localIp, _localIp, _httpPort, _uuid);
         return Task.CompletedTask;
     }
 
@@ -168,7 +219,7 @@ public sealed class DlnaService : IHostedService, IDisposable
     {
         if (!_enabled) return Task.CompletedTask;
         _aliveTimer?.Dispose();
-        try { if (_udp is not null) SendByeBye(); } catch { }
+        try { if (_udp is not null && _serverAdvertised) SendByeBye(); } catch { }
         try { _cts?.Cancel(); } catch { }
         try { _udp?.Dispose(); } catch { }
         return Task.CompletedTask;
@@ -226,7 +277,11 @@ public sealed class DlnaService : IHostedService, IDisposable
                 var res = await _udp.ReceiveAsync(ct);
                 var text = Encoding.ASCII.GetString(res.Buffer);
                 if (text.StartsWith("M-SEARCH", StringComparison.OrdinalIgnoreCase))
-                    HandleMSearch(text, res.RemoteEndPoint);
+                {
+                    // Only answer for the MediaServer while it's switched on.
+                    if (await IsServerEnabledAsync(ct))
+                        HandleMSearch(text, res.RemoteEndPoint);
+                }
                 else if (text.StartsWith("NOTIFY", StringComparison.OrdinalIgnoreCase))
                 {
                     // Forward NOTIFY frames to the ControlPoint so renderers
@@ -572,14 +627,20 @@ public sealed class DlnaService : IHostedService, IDisposable
     private static string Container(string id, string parent, string title, int childCount)
         => $"""<container id="{Xml(id)}" parentID="{Xml(parent)}" restricted="1" childCount="{childCount}"><dc:title>{Xml(title)}</dc:title><upnp:class>object.container</upnp:class></container>""";
 
-    private static string VideoItem(string id, string parentId, string title, string filePath, string baseUrl)
+    private string VideoItem(string id, string parentId, string title, string filePath, string baseUrl)
     {
         // /api/file serves the source file byte-for-byte with Range support.
         // No transcode → TVs decode HEVC / DV / Atmos with their own
         // hardware, 5.1 surround intact, no Animarr CPU cost. Browser-only
         // clients still hit /api/video for re-mux; DLNA clients (which is
         // what reads this DIDL) always handle the source codec natively.
-        var streamUrl = $"{baseUrl}/api/file?path={Uri.EscapeDataString(filePath)}";
+        // The URL carries a file-bound DLNA link token: /api/file requires
+        // authorization, and a TV can't sign in. Signed over the canonical
+        // path — the exact form MediaPathValidator resolves and checks.
+        var canonical = Path.GetFullPath(filePath);
+        var streamUrl = Animarr.Web.Services.Auth.MediaTokenService.AppendToUrl(
+            $"{baseUrl}/api/file?path={Uri.EscapeDataString(canonical)}",
+            _tokens.IssueDlnaLink(canonical, DlnaLinkLifetime));
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
         var mime = ext switch
         {

@@ -32,11 +32,11 @@ namespace Animarr.App.Services;
 public sealed class LocalMediaProxyService
 {
     private readonly ServerAddressProvider _addr;
-    private readonly CookieContainer _cookies;
 
-    // One shared client; no cookies (player endpoints are AllowAnonymous, auth
-    // rides the Blazor-side IAnimarrApiClient). No auto-redirect so we can pass
-    // 3xx straight back to hls.js. Generous timeout for HLS segments on slow LAN.
+    // One shared client; no cookies (the media endpoints are authorised by the
+    // ?mt= session token in each URL; the REST cookie stays with the Blazor-side
+    // IAnimarrApiClient). No auto-redirect so we can pass 3xx straight back to
+    // hls.js. Generous timeout for HLS segments on slow LAN.
     private static readonly HttpClient s_http = new(new HttpClientHandler
     {
         AllowAutoRedirect = false,
@@ -56,10 +56,9 @@ public sealed class LocalMediaProxyService
     public static LocalMediaProxyService? Instance { get; private set; }
     public static void RegisterStaticInstance(LocalMediaProxyService svc) => Instance = svc;
 
-    public LocalMediaProxyService(ServerAddressProvider addr, CookieContainer cookies)
+    public LocalMediaProxyService(ServerAddressProvider addr)
     {
         _addr = addr;
-        _cookies = cookies;
     }
 
     /// <summary>Bind a free loopback port and start serving. Idempotent.</summary>
@@ -158,24 +157,10 @@ public sealed class LocalMediaProxyService
                     fwd.Content?.Headers.TryAddWithoutValidation(key, value);
             }
 
-            // The WebView cannot attach the auth cookie to a cross-site <img>
-            // itself (SameSite strips it, and the plain-HTTP cookie can't be
-            // marked None+Secure), so the proxy signs the request on the
-            // page's behalf — but ONLY for the cookie-gated thumbnail GET.
-            // The loopback port is reachable by every app on the device, so a
-            // general authenticated tunnel would leak the session; a narrow
-            // read-only allowlist keeps the exposure to episode stills.
-            if (HttpMethod.Get.Method.Equals(req.HttpMethod, StringComparison.OrdinalIgnoreCase)
-                && target.AbsolutePath.Contains("/episode-thumb", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var cookieHeader = _cookies.GetCookieHeader(target);
-                    if (!string.IsNullOrEmpty(cookieHeader))
-                        fwd.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
-                }
-                catch { /* no cookie — the request degrades to anonymous */ }
-            }
+            // No credentials are added here. The loopback port is reachable by
+            // every app on the device, so the proxy must not be an
+            // authenticated tunnel: requests are authorised by the media token
+            // the page itself put in the URL (?mt=), and forwarded as-is.
 
             using var upstream = await s_http
                 .SendAsync(fwd, HttpCompletionOption.ResponseHeadersRead)

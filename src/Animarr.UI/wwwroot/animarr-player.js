@@ -71,7 +71,22 @@
     // first animarrSetApiBase().
     const apiBase = () => (typeof window !== 'undefined' &&
         (window.animarrLocalProxyBase || window.animarrApiBase)) || '';
-    const apiUrl  = (path) => apiBase() + path;
+    // Signed media token (?mt=). The media endpoints require authorization;
+    // a same-origin browser sends its cookie, but the MAUI WebView talks to the
+    // server cross-origin (via the loopback proxy or directly) where the
+    // SameSite cookie never rides along. Blazor publishes the user's session
+    // token through animarrSetMediaToken only in that case — unset (plain
+    // browser) means "cookie only" and URLs stay untouched. Evaluated per call
+    // so a token refresh applies to the next request.
+    const withMediaToken = (url) => {
+        const t = (typeof window !== 'undefined') && window.animarrMediaToken;
+        if (!t || !url || /[?&]mt=/.test(url)) return url;
+        return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'mt=' + encodeURIComponent(t);
+    };
+    const apiUrl  = (path) => withMediaToken(apiBase() + path);
+    window.animarrSetMediaToken = function (token) {
+        window.animarrMediaToken = token || '';
+    };
 
     // animarrSetApiBase — passthrough setter. The mixed-content workaround
     // moved from "rewrite the base" to "wrap fetch + XHR" (see the IIFE

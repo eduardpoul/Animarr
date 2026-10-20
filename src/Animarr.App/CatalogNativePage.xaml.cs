@@ -101,6 +101,8 @@ public partial class CatalogNativePage : ContentPage
     {
         try
         {
+            // Media token first: every poster / backdrop URL built below needs it.
+            var tokenTask    = TvMedia.EnsureTokenAsync();
             var libraryTask  = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500", Json);
             var continueTask = SafeGetAsync<ContinueApi[]>("/api/me/continue?take=12");
             var nextUpTask   = SafeGetAsync<ContinueApi[]>("/api/me/next-up?take=12");
@@ -116,6 +118,7 @@ public partial class CatalogNativePage : ContentPage
             // The lang pack must be in before any text is built.
             await TvL.LoadAsync(_http, (await prefsTask)?.Language);
             ApplyStrings();
+            await tokenTask;
 
             var items = await libraryTask  ?? Array.Empty<ApiItem>();
             var cont  = await continueTask ?? Array.Empty<ContinueApi>();
@@ -361,11 +364,11 @@ public partial class CatalogNativePage : ContentPage
         {
             var local = e.AiringAtUtc.ToLocalTime();
             var art   = e.BackdropUrl ?? e.PosterUrl;
-            var img   = string.IsNullOrEmpty(art) ? null : $"{ImageBase}{art}&w=640";
+            var img   = string.IsNullOrEmpty(art) ? null : TvMedia.Url($"{ImageBase}{art}&w=640");
             var title = e.Title ?? "";
             var open  = new Command(async () => await Navigation.PushAsync(
                 new NativeDetailPage(e.MediaItemId, title,
-                    string.IsNullOrEmpty(e.BackdropUrl) ? null : $"{ImageBase}{e.BackdropUrl}&w=1280")));
+                    string.IsNullOrEmpty(e.BackdropUrl) ? null : TvMedia.Url($"{ImageBase}{e.BackdropUrl}&w=1280"))));
             WeekHost.Children.Add(TvCards.BuildWeekCard(
                 title, $"{DayLabel(local)} · {local:HH:mm}", $"EP {e.Episode}",
                 e.Status ?? "upcoming", StatusLabel(e.Status), img, open));
@@ -414,7 +417,7 @@ public partial class CatalogNativePage : ContentPage
         LibrarySection.IsVisible = _libraryItems.Length > 0;
     }
 
-    private string Img(string path, int w) => $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w={w}";
+    private string Img(string path, int w) => TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w={w}");
 
     private static string EpisodeLabel(int? season, int? episode)
     {

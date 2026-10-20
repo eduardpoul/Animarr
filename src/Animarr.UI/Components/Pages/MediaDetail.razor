@@ -1061,7 +1061,9 @@ else
                             : await Api.GetTrickplayAsync(_item.Id, null, null);
                         if (tp is not null)
                             trickplay = new {
-                                spriteUrl   = tp.SpriteUrl,
+                                // Relative /api/image URL → absolute server URL
+                                // (+ media token on cross-origin hosts).
+                                spriteUrl   = Animarr.UI.Services.MediaUrl.Absolute(tp.SpriteUrl),
                                 intervalSec = tp.IntervalSec,
                                 tileWidth   = tp.TileWidth,
                                 tileHeight  = tp.TileHeight,

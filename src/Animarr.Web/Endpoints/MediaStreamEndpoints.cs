@@ -1,4 +1,5 @@
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 
 namespace Animarr.Web.Endpoints;
 
@@ -7,13 +8,20 @@ namespace Animarr.Web.Endpoints;
 /// (raw Range file + on-the-fly ffmpeg remux), the external-player .m3u
 /// handoff, ffprobe JSON, sideloaded track discovery and subtitle extraction.
 ///
-/// All of these are AllowAnonymous and consumed by cookie-less clients (the
-/// browser &lt;video&gt; element, DLNA renderers, the MAUI WebView proxy), so
-/// access is gated by <see cref="MediaPathValidator"/> — the path must resolve
-/// inside a registered library root — rather than by an auth cookie.
+/// All of these require authorization (<see cref="MediaAuth.Policies.Media"/>):
+/// the auth cookie (same-origin web client) OR a signed media token in
+/// <c>?mt=</c> — a session token for the MAUI WebView / TV native player, or a
+/// file-bound link token for DLNA renderers and external players. On top of
+/// that, <see cref="MediaPathValidator"/> requires the path to resolve inside
+/// a registered library root, inside the caller's role folders, and — for a
+/// link token — to be the very file the link was signed for.
 /// </summary>
 internal static class MediaStreamEndpoints
 {
+    /// <summary>Lifetime of the link an .m3u hands to an external player —
+    /// enough to open it now and finish (or pause and resume) the evening.</summary>
+    private static readonly TimeSpan ExternalLinkLifetime = TimeSpan.FromHours(12);
+
     public static IEndpointRouteBuilder MapMediaStreamEndpoints(this IEndpointRouteBuilder app)
     {
         // ─── /api/image — serve poster / backdrop images from disk ────────
@@ -47,13 +55,15 @@ internal static class MediaStreamEndpoints
 
             // Cache-busting: a version stamp (t>0) makes the URL unique per file
             // version → cache immutably for a year; otherwise always revalidate.
+            // private: the response is per-user (role folders) — shared caches
+            // (a reverse proxy) must not hand it to someone else.
             ctx.Response.Headers.CacheControl = t is > 0
-                ? "public, max-age=31536000, immutable"
-                : "no-cache";
+                ? "private, max-age=31536000, immutable"
+                : "private, no-cache";
             return Results.File(servePath, mime);
         })
         .WithName("GetMediaImage")
-        .AllowAnonymous();
+        .RequireAuthorization(MediaAuth.Policies.Media);
 
     // ─── /api/video — stream video files for in-browser playback ──────────────
     // MP4 / WebM:   served as a static file with HTTP Range support.
@@ -243,7 +253,7 @@ internal static class MediaStreamEndpoints
         return Results.Empty;
     })
     .WithName("GetVideo")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/file — raw passthrough for DLNA / external native players ──────
     // Streams the source file byte-for-byte with HTTP Range support. No demux,
     // no transcode, no re-mux — TVs, VLC, Kodi, Infuse get bit-identical
@@ -266,7 +276,7 @@ internal static class MediaStreamEndpoints
         // Cache headers — same file always same content; clients can cache
         // aggressively. The path itself is the cache key because file rename
         // changes the URL.
-        http.Response.Headers.CacheControl = "public, max-age=86400";
+        http.Response.Headers.CacheControl = "private, max-age=86400";
         http.Response.Headers.AcceptRanges = "bytes";
         // DLNA hint headers — some renderers require these to enable seeking.
         http.Response.Headers["TransferMode.DLNA.ORG"] = "Streaming";
@@ -276,7 +286,7 @@ internal static class MediaStreamEndpoints
         return Results.File(fullPath!, mime, enableRangeProcessing: true);
     })
     .WithName("GetRawFile")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/playlist.m3u — universal external-player handoff ────────────────
     // Returns a tiny .m3u file pointing at /api/file for the requested path.
     // Triggered by the "External Player" icon when the user has picked "m3u"
@@ -288,20 +298,28 @@ internal static class MediaStreamEndpoints
     app.MapGet("/api/playlist.m3u", async (
             string path,
             MediaPathValidator pathValidator,
+            MediaTokenService tokens,
+            IUserContext userCtx,
             HttpContext http) =>
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
         if (!ok) return earlyResult!;
+        if (userCtx.CurrentUserId is not Guid uid) return Results.Unauthorized();
 
         var fileName     = Path.GetFileNameWithoutExtension(fullPath!);
         var safeFileName = string.Concat(fileName.Where(c => !char.IsControl(c) && c != '"'));
         // Build absolute stream URL — players opening the .m3u won't know our
         // server's hostname otherwise. Use plain HTTP on the raw 8080 port so
         // Caddy's self-signed cert doesn't trip up non-browser TLS stacks.
+        // The player has no cookie, so the URL carries a link token signed for
+        // THIS file and THIS user (the mpv tracker forwards it with its progress
+        // pings, which then land in this user's watch state).
         var scheme = "http";
         var host   = http.Request.Host.Host;
         var port   = "8080";
-        var streamUrl = $"{scheme}://{host}:{port}/api/file?path={Uri.EscapeDataString(fullPath!)}";
+        var streamUrl = MediaTokenService.AppendToUrl(
+            $"{scheme}://{host}:{port}/api/file?path={Uri.EscapeDataString(fullPath!)}",
+            tokens.IssueLink(uid, fullPath!, ExternalLinkLifetime));
 
         var m3u =
             "#EXTM3U\n" +
@@ -313,7 +331,7 @@ internal static class MediaStreamEndpoints
         return Results.Content(m3u, "audio/x-mpegurl");
     })
     .WithName("PlaylistM3u")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/probe — return ffprobe stream list as JSON for player UI menus ──
     app.MapGet("/api/probe", async (
             string path,
@@ -360,7 +378,7 @@ internal static class MediaStreamEndpoints
         }
     })
     .WithName("GetProbe")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/external-tracks — sideload audio/subtitle files for a video ─────
     // Deterministic Tier-0 (sidecar) + Tier-1 (episode bucket) discovery — see
     // ExternalTrackService. Returns ExternalTrackDto[]; the player merges audio
@@ -378,7 +396,7 @@ internal static class MediaStreamEndpoints
         return Results.Ok(tracks);
     })
     .WithName("GetExternalTracks")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/subtitle — extract one subtitle track as VTT (default) or ASS ───
     // Browsers only render WebVTT natively via <track>. For ASS/SSA (anime
     // fansubs) the front-end uses libass-wasm and asks for `?format=ass` here.
@@ -440,7 +458,7 @@ internal static class MediaStreamEndpoints
                 return Results.Problem("This subtitle track can't be converted to text.",
                     statusCode: StatusCodes.Status422UnprocessableEntity);
             }
-            http.Response.Headers.CacheControl = "public, max-age=3600";
+            http.Response.Headers.CacheControl = "private, max-age=3600";
             return Results.Bytes(buf.ToArray(), contentType);
         }
         catch (Exception ex)
@@ -452,7 +470,7 @@ internal static class MediaStreamEndpoints
         finally { p?.Dispose(); }
     })
     .WithName("GetSubtitle")
-    .AllowAnonymous();
+    .RequireAuthorization(MediaAuth.Policies.Media);
 
         return app;
     }

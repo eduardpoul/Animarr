@@ -712,10 +712,7 @@ else
         Nav.LocationChanged += OnLocationChangedForAdd;
 
         var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubTorrents);
-        _hub = new HubConnectionBuilder()
-            .WithUrl(hubUri)
-            .WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy())
-            .Build();
+        _hub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         // Mutate on the renderer's context: under MAUI hub callbacks arrive on a
         // pool thread while the render loop enumerates _live.
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env => InvokeAsync(() =>

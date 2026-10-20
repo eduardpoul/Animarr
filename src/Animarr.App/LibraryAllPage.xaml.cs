@@ -48,11 +48,13 @@ public partial class LibraryAllPage : ContentPage
     {
         try
         {
+            var tokenTask    = TvMedia.EnsureTokenAsync();   // poster URLs need it
             var itemsTask    = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=1000", Json);
             var sectionsTask = SafeAsync(_api.GetSectionFoldersAsync());
             var foldersTask  = SafeAsync(_api.GetFoldersAsync());
 
             _items = await itemsTask ?? Array.Empty<ApiItem>();
+            await tokenTask;
 
             var sections = await sectionsTask;
             var folders  = await foldersTask;
@@ -141,9 +143,9 @@ public partial class LibraryAllPage : ContentPage
         {
             Id          = i.Id ?? "",
             Title       = (i.Title ?? "").ToUpperInvariant(),
-            ImageUrl    = $"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330",
+            ImageUrl    = TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(path)}&w=330"),
             BackdropUrl = string.IsNullOrEmpty(i.FanartPath) ? null
-                        : $"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280",
+                        : TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(i.FanartPath)}&w=1280"),
             TypeLabel   = TypeLabel(i.MediaType),
             Meta        = string.Join(" · ", parts),
         };
