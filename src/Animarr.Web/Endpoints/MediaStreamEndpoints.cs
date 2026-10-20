@@ -121,7 +121,16 @@ internal static class MediaStreamEndpoints
         //    hevc_metadata bitstream filter so the player sees plain HDR10.
         var (videoCodec, hasDolbyVision) = await PeekVideoCodecAsync(fullPath!);
 
-        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning", "-i", fullPath! });
+        args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
+        // AVI carries no pts for B-frames (XviD/DivX): stream-copied into fMP4
+        // they came out as "pts has no value" packets at ≈ -7e14 s — a stream no
+        // player can place on a timeline. Have the demuxer generate them. This is
+        // the route the TV takes for AVI when the device can't decode its audio.
+        if (ext == ".avi" || videoCodec is "mpeg4" or "msmpeg4v3")
+        {
+            args.Add("-fflags"); args.Add("+genpts");
+        }
+        args.AddRange(new[] { "-i", fullPath! });
         if (seekSec > 0)
         {
             // Shift output PTS so the first frame is at time `seekSec`, not 0.
