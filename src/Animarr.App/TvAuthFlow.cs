@@ -87,7 +87,8 @@ internal static class TvAuthFlow
         var dev = await TryGetDeviceAsync();
         if (dev is { CurrentUserId: not null, CurrentUserHasPin: false })
         {
-            TvRoot.Go(TvPinPage.ForSetup(makeDefaultAfterPin));
+            var name = dev.Profiles.FirstOrDefault(p => p.Id == dev.CurrentUserId)?.Name;
+            TvRoot.Go(TvPinPage.ForSetup(makeDefaultAfterPin, name));
             return;
         }
         TvRoot.Go(new CatalogNativePage());

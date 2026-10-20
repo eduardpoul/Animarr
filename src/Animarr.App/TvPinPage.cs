@@ -55,8 +55,8 @@ public sealed class TvPinPage : ContentPage
     public static TvPinPage ForVerify(DeviceProfileDto target, bool? makeDefault, int min, int max)
         => new(PinMode.Verify, target, makeDefault, min, max);
 
-    public static TvPinPage ForSetup(bool makeDefault)
-        => new(PinMode.Setup, null, makeDefault ? true : null, 4, 6);
+    public static TvPinPage ForSetup(bool makeDefault, string? userName = null)
+        => new(PinMode.Setup, null, makeDefault ? true : null, 4, 6, userName);
 
     public static TvPinPage ForChange(int min, int max)
         => new(PinMode.Change, null, null, min, max);
@@ -77,6 +77,7 @@ public sealed class TvPinPage : ContentPage
     private int _step;            // Setup: 0 enter, 1 repeat · Change: 0 current, 1 new, 2 repeat
     private string? _firstPin;    // Setup / Change: the PIN to repeat
     private string? _currentPin;  // Change: the old PIN
+    private readonly string? _userName;   // Setup: whose PIN ("Set a PIN for Anna")
 
     private readonly Label _title = new() { TextColor = Colors.White, FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold, FontSize = 30, HorizontalTextAlignment = TextAlignment.Center };
     private readonly Label _sub   = new() { TextColor = Color.FromArgb("#aeb4c0"), FontFamily = "Geist", FontSize = 15, HorizontalTextAlignment = TextAlignment.Center };
@@ -85,11 +86,12 @@ public sealed class TvPinPage : ContentPage
     private readonly Label _okLabel = new() { Text = "OK", TextColor = Colors.White, FontFamily = "Geist", FontAttributes = FontAttributes.Bold, FontSize = 18, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
     private Border? _firstKey;
 
-    private TvPinPage(PinMode mode, DeviceProfileDto? target, bool? makeDefault, int min, int max)
+    private TvPinPage(PinMode mode, DeviceProfileDto? target, bool? makeDefault, int min, int max, string? userName = null)
     {
         _mode = mode;
         _target = target;
         _makeDefault = makeDefault;
+        _userName = userName;
         _min = min;
         _max = max;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -162,26 +164,43 @@ public sealed class TvPinPage : ContentPage
                 break;
         }
 
-        var stack = new VerticalStackLayout
+        // 16:9 screen: text + actions on the left, the keypad on the right, so
+        // everything fits a 540dp-high TV viewport without scrolling.
+        var text = new VerticalStackLayout
         {
-            Spacing = 16,
+            Spacing = 14,
             WidthRequest = 460,
-            HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
-            Children = { eyebrow, _title, _sub, _dots, _error, keys, actions },
+            Children = { eyebrow, _title, _sub, _dots, _error, actions },
         };
+        eyebrow.HorizontalTextAlignment = TextAlignment.Start;
+        _title.HorizontalTextAlignment  = TextAlignment.Start;
+        _sub.HorizontalTextAlignment    = TextAlignment.Start;
+        _error.HorizontalTextAlignment  = TextAlignment.Start;
+        _dots.HorizontalOptions         = LayoutOptions.Start;
+        actions.HorizontalOptions       = LayoutOptions.Start;
         if (_mode == PinMode.Setup)
         {
-            stack.Children.Add(new Label
+            text.Children.Add(new Label
             {
                 Text = TvL.T("setpin.why",
                     "У каждого профиля свой PIN на этом устройстве, поэтому никто другой не откроет ваш.",
                     "Each profile has its own PIN on this device, so no one else can open yours."),
                 TextColor = Dim, FontFamily = "Geist", FontSize = 12,
-                HorizontalTextAlignment = TextAlignment.Center,
             });
         }
-        return new Grid { Padding = new Thickness(40), Children = { stack } };
+
+        var layout = new Grid
+        {
+            ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Auto) },
+            ColumnSpacing = 64,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+        };
+        layout.Add(text, 0, 0);
+        keys.VerticalOptions = LayoutOptions.Center;
+        layout.Add(keys, 1, 0);
+        return new Grid { Padding = new Thickness(40, 24), Children = { layout } };
     }
 
     private static Border Key(Label label, Action act, bool accent = false)
@@ -241,7 +260,9 @@ public sealed class TvPinPage : ContentPage
                 _sub.Text   = TvL.T("pin.subtitle", "Введите PIN", "Enter your PIN");
                 break;
             case PinMode.Setup when _step == 0:
-                _title.Text = TvL.T("setpin.new_title", "Введите новый PIN", "Enter a new PIN");
+                _title.Text = string.IsNullOrWhiteSpace(_userName)
+                    ? TvL.T("setpin.new_title", "Введите новый PIN", "Enter a new PIN")
+                    : TvL.F("setpin.title_fmt", "Задайте PIN для {0}", "Set a PIN for {0}", _userName);
                 _sub.Text   = TvL.T("setpin.sub",
                     "4–6 цифр. Он понадобится, чтобы открыть ваш профиль на этом устройстве.",
                     "4–6 digits. You'll need it to open your profile on this device.");

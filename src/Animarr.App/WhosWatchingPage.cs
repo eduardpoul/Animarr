@@ -36,7 +36,7 @@ public sealed class WhosWatchingPage : ContentPage
     };
     private readonly Label _toggleValue = new() { FontFamily = "Geist", FontSize = 15, FontAttributes = FontAttributes.Bold, VerticalOptions = LayoutOptions.Center };
     private readonly Label _toggleHint  = new() { TextColor = Dim, FontFamily = "Geist", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _status      = new() { TextColor = Color.FromArgb("#e0908f"), FontFamily = "Geist", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _status      = new() { TextColor = Color.FromArgb("#e0908f"), FontFamily = "Geist", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center, IsVisible = false };
     private DeviceStateDto? _state;
     private bool _defaultOn;
     private bool _loaded;
@@ -69,7 +69,7 @@ public sealed class WhosWatchingPage : ContentPage
         {
             Text = TvL.T("switch.title", "Кто смотрит?", "Who's watching?"),
             TextColor = Colors.White, FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold,
-            FontSize = 34, HorizontalTextAlignment = TextAlignment.Center,
+            FontSize = 30, HorizontalTextAlignment = TextAlignment.Center,
         };
 
         var toggle = new Border
@@ -94,10 +94,13 @@ public sealed class WhosWatchingPage : ContentPage
         };
         toggle.Behaviors.Add(new TvFocusBehavior { Radius = 10, Command = new Command(async () => await ToggleDefaultAsync()) });
 
-        var actions = new HorizontalStackLayout { Spacing = 12, HorizontalOptions = LayoutOptions.Center };
+        // Footer: the default switch with the secondary actions beside it, the
+        // hint underneath — one row, so the page fits a TV screen unscrolled.
+        var footer = new HorizontalStackLayout { Spacing = 12, HorizontalOptions = LayoutOptions.Center };
+        footer.Children.Add(toggle);
         if (_mode == PickerMode.Switch)
-            actions.Children.Add(Link(TvL.T("login.back", "Назад", "Back"), async () => await Navigation.PopAsync()));
-        actions.Children.Add(Link(TvL.T("switch.pair_phone", "Войти через телефон", "Sign in with a phone"),
+            footer.Children.Add(Link(TvL.T("login.back", "Назад", "Back"), async () => await Navigation.PopAsync()));
+        footer.Children.Add(Link(TvL.T("switch.pair_phone", "Войти через телефон", "Sign in with a phone"),
             async () => await Navigation.PushAsync(new PairingPage())));
 
         RenderToggle();
@@ -106,21 +109,12 @@ public sealed class WhosWatchingPage : ContentPage
         {
             Content = new VerticalStackLayout
             {
-                Padding = new Thickness(56, 60, 56, 40),
-                Spacing = 28,
+                Padding = new Thickness(56, 36, 56, 24),
+                Spacing = 18,
                 MaximumWidthRequest = 1100,
                 HorizontalOptions = LayoutOptions.Center,
                 VerticalOptions = LayoutOptions.Center,
-                Children =
-                {
-                    title,
-                    _grid,
-                    _status,
-                    new BoxView { HeightRequest = 1, Color = Color.FromArgb("#1fffffff"), Margin = new Thickness(120, 4) },
-                    toggle,
-                    _toggleHint,
-                    actions,
-                },
+                Children = { title, _grid, _status, footer, _toggleHint },
             },
         };
     }
@@ -180,16 +174,16 @@ public sealed class WhosWatchingPage : ContentPage
 
         var disc = new Border
         {
-            WidthRequest = 96, HeightRequest = 96,
+            WidthRequest = 80, HeightRequest = 80,
             StrokeThickness = p.IsDefault ? 3 : 0,
             Stroke = p.IsDefault ? Accent : null,
             BackgroundColor = Color.FromHsla(p.AvatarHue / 360.0, 0.5, 0.5),
-            StrokeShape = new RoundRectangle { CornerRadius = 48 },
+            StrokeShape = new RoundRectangle { CornerRadius = 40 },
             HorizontalOptions = LayoutOptions.Center,
             Content = new Label
             {
                 Text = initial, TextColor = Colors.White, FontFamily = "ArchivoBlack",
-                FontAttributes = FontAttributes.Bold, FontSize = 36,
+                FontAttributes = FontAttributes.Bold, FontSize = 30,
                 HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center,
             },
         };
@@ -231,7 +225,7 @@ public sealed class WhosWatchingPage : ContentPage
     private async Task PickAsync(DeviceProfileDto p)
     {
         if (_state is null) return;
-        _status.Text = "";
+        _status.Text = ""; _status.IsVisible = false;
         var signedInAsThem = _state.CurrentUserId == p.Id;
 
         // Profile menu → yourself: already in; just apply the default switch.
@@ -249,7 +243,7 @@ public sealed class WhosWatchingPage : ContentPage
         // No PIN on this TV yet: the live session's own profile sets one now;
         // anyone else signs in by pairing first (the TV's password sign-in).
         if (signedInAsThem)
-            TvRoot.Go(TvPinPage.ForSetup(_defaultOn));
+            TvRoot.Go(TvPinPage.ForSetup(_defaultOn, p.Name));
         else
             await Navigation.PushAsync(new PairingPage());
     }
@@ -270,7 +264,7 @@ public sealed class WhosWatchingPage : ContentPage
             }
             catch
             {
-                _status.Text = TvL.T("switch.default_err", "Не удалось изменить профиль по умолчанию.",
+                _status.IsVisible = true; _status.Text = TvL.T("switch.default_err", "Не удалось изменить профиль по умолчанию.",
                     "Couldn't change the default profile.");
             }
             RenderToggle();
