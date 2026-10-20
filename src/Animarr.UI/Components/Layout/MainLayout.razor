@@ -108,6 +108,10 @@
 
     protected override void OnInitialized()
     {
+        // Same-origin browser → cookie; anything else needs the media token on
+        // byte URLs (see MediaUrl.NeedsToken).
+        Animarr.UI.Services.MediaUrl.SetPageOrigin(Nav.BaseUri);
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnMediaUrlChanged;
         UserCtx.OnChange += OnUserCtxChanged;
         ThemeService.OnChange += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
@@ -121,7 +125,40 @@
         // isn't instantiated on those routes.
     }
 
-    private void OnUserCtxChanged() => InvokeAsync(StateHasChanged);
+    private void OnUserCtxChanged() => InvokeAsync(async () =>
+    {
+        // Sign-out drops the token; a profile switch needs the new user's token
+        // (it is bound to the user, so role folders follow the profile).
+        if (!UserCtx.IsAuthenticated) Animarr.UI.Services.MediaUrl.ClearToken();
+        else await RefreshMediaTokenAsync();
+        StateHasChanged();
+    });
+
+    // ── Media token (MAUI / cross-origin hosts) ───────────────────────────
+    private System.Threading.Timer? _mediaTokenTimer;
+
+    /// <summary>Fetch / refresh the session media token for the signed-in user
+    /// and hand it to the player JS. No-op for the same-origin web client.</summary>
+    private async Task RefreshMediaTokenAsync()
+    {
+        if (!Animarr.UI.Services.MediaUrl.NeedsToken || !UserCtx.IsAuthenticated) return;
+        await Animarr.UI.Services.MediaUrl.EnsureTokenAsync(Api, UserCtx.Me?.User.Id);
+        await PushMediaTokenToJsAsync();
+    }
+
+    private async Task PushMediaTokenToJsAsync()
+    {
+        var t = Animarr.UI.Services.MediaUrl.NeedsToken ? Animarr.UI.Services.MediaUrl.Token : null;
+        try { await JS.InvokeVoidAsync("animarrSetMediaToken", t); }
+        catch { /* player script not loaded yet — apiUrl reads it on the next call */ }
+    }
+
+    /// <summary>Base or token changed — re-render (image URLs) and keep JS in sync.</summary>
+    private void OnMediaUrlChanged() => InvokeAsync(async () =>
+    {
+        await PushMediaTokenToJsAsync();
+        StateHasChanged();
+    });
     private void OnThemeChanged()   => InvokeAsync(ApplyAccentHueToDomAsync);
     private void OnLanguageChanged() => InvokeAsync(StateHasChanged);
 
@@ -167,6 +204,16 @@
         // 2. Boot auth probe — /api/auth/status (anonymous-safe) then /api/me
         //    if the cookie is valid.
         await UserCtx.LoadAsync();
+
+        // 2-. Media token: in the MAUI WebView every <img>/<video> loads the
+        //     remote server cross-origin, where the auth cookie isn't sent —
+        //     fetch the session token BEFORE the hubs / backdrop start, and keep
+        //     it fresh (tokens live 6–12 h; the server returns the same value
+        //     within a 6 h window, so this is cheap and URLs stay cache-stable).
+        await RefreshMediaTokenAsync();
+        _mediaTokenTimer ??= new System.Threading.Timer(
+            _ => InvokeAsync(RefreshMediaTokenAsync), null,
+            TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
 
         // 2a. Apply user's saved interface language. Web.Client preloads "en"
         //     at boot in its own Program.cs; Animarr.App (MAUI) does NOT,
@@ -265,7 +312,10 @@
             await ApplyAccentHueToDomAsync();
             await StartBackdropAsync();
             await LoadFolderNamesAsync();
-            await StartTorrentHubAsync();
+            // The torrent hub carries the torrent REST gate (UploadContent) —
+            // don't knock on it without the permission.
+            if (UserCtx.Can(p => p.UploadContent))
+                await StartTorrentHubAsync();
             await StartIdentificationHubAsync();
             await RefreshIdentificationStatusAsync();
             StateHasChanged();
@@ -376,7 +426,7 @@
     private async Task StartTorrentHubAsync()
     {
         var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubTorrents);
-        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy()).Build();
+        _hub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
         {
             var live = env.Items.Count(s =>
@@ -397,7 +447,7 @@
     private async Task StartIdentificationHubAsync()
     {
         var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubIdentification);
-        _identHub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy()).Build();
+        _identHub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
         {
             InvokeAsync(RefreshIdentificationStatusAsync);
@@ -433,6 +483,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnMediaUrlChanged;
+        _mediaTokenTimer?.Dispose();
         UserCtx.OnChange -= OnUserCtxChanged;
         ThemeService.OnChange -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;

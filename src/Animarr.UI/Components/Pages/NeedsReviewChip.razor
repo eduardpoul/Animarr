@@ -55,10 +55,7 @@
     private async Task ConnectHubAsync()
     {
         var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubIdentification);
-        _hub = new HubConnectionBuilder()
-            .WithUrl(hubUri)
-            .WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy())
-            .Build();
+        _hub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
 
         _hub.On<NeedsReviewCountEnvelope>(
             IdentificationHubMethods.NeedsReviewCountChanged,

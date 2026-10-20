@@ -276,4 +276,16 @@ public interface IAnimarrApiClient
     /// <summary>Replace the item's manual category set. Manual rows survive
     /// future LLM rescans (the classifier preserves Source="manual").</summary>
     Task                    SetMediaCategoriesAsync(Guid mediaItemId, Guid[] categoryIds, CancellationToken ct = default);
+
+    // ─── Media tokens + external-dashboard key ───────────────────────────
+    /// <summary>GET /api/media-token — the signed-in user's session media
+    /// token, appended as <c>?mt=</c> by clients that can't attach the auth
+    /// cookie to media requests. Null when not signed in.</summary>
+    Task<MediaTokenDto?>    GetMediaTokenAsync(CancellationToken ct = default);
+    /// <summary>Admin: the current external-dashboard API key (null = none).</summary>
+    Task<DashboardKeyDto>   GetDashboardKeyAsync(CancellationToken ct = default);
+    /// <summary>Admin: generate a fresh dashboard API key (the old one stops working).</summary>
+    Task<DashboardKeyDto>   RegenerateDashboardKeyAsync(CancellationToken ct = default);
+    /// <summary>Admin: revoke the dashboard API key (/api/server/dashboard → 401).</summary>
+    Task                    RevokeDashboardKeyAsync(CancellationToken ct = default);
 }

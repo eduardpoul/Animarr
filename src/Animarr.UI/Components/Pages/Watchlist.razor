@@ -39,7 +39,7 @@
                             <a class="wl-card tv-focus" href="/catalog/@mid" title="@item.Title">
                                 @if (!string.IsNullOrEmpty(item.PosterUrl))
                                 {
-                                    <img loading="lazy" src="@item.PosterUrl" alt="@item.Title" class="wl-img" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(item.PosterUrl)" alt="@item.Title" class="wl-img" />
                                 }
                                 else
                                 {
@@ -52,7 +52,7 @@
                             <div class="wl-card wl-card--ext" title="@item.Title">
                                 @if (!string.IsNullOrEmpty(item.PosterUrl))
                                 {
-                                    <img loading="lazy" src="@item.PosterUrl" alt="@item.Title" class="wl-img" />
+                                    <img loading="lazy" src="@Animarr.UI.Services.MediaUrl.Absolute(item.PosterUrl)" alt="@item.Title" class="wl-img" />
                                 }
                                 else
                                 {
