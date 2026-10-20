@@ -297,6 +297,19 @@ builder.Services.AddRateLimiter(options =>
                 Window      = TimeSpan.FromMinutes(1),
                 QueueLimit  = 0,
             }));
+    // Password guessing: BCrypt's ~250 ms/verify is the only other brake, and
+    // it burns server CPU per guess. 10 tries a minute per IP is plenty for a
+    // human mistyping. (Behind a reverse proxy every client shares the proxy's
+    // IP, so this is then a global cap — still fine for a household.)
+    options.AddPolicy(RateLimitPolicies.Login, httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window      = TimeSpan.FromMinutes(1),
+                QueueLimit  = 0,
+            }));
 });
 builder.Services.AddSingleton<TorrentHubBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentHubBroadcaster>());

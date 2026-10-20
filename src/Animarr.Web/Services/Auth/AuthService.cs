@@ -35,6 +35,11 @@ public sealed class AuthService
         _deviceTrust = deviceTrust;
     }
 
+    /// <summary>Work-factor-12 hash of a throwaway value, verified against when
+    /// the username is unknown (see <see cref="VerifyPasswordAsync"/>).</summary>
+    private static readonly Lazy<string> DummyHash =
+        new(() => BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString(), workFactor: 12));
+
     public static string NormaliseUsername(string username) =>
         (username ?? "").Trim().ToLowerInvariant();
 
@@ -148,7 +153,13 @@ public sealed class AuthService
         var user = await db.Users
             .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Username == normalised, ct);
-        if (user is null) return null;
+        if (user is null)
+        {
+            // Burn the same BCrypt cost as a real check so response time doesn't
+            // reveal which usernames exist.
+            BCrypt.Net.BCrypt.Verify(password, DummyHash.Value);
+            return null;
+        }
 
         bool ok;
         try { ok = BCrypt.Net.BCrypt.Verify(password, user.PasswordHash); }

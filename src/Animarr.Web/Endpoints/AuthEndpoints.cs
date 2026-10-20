@@ -66,7 +66,7 @@ internal static class AuthEndpoints
 
             await auth.SignInCookieAsync(http, user);
             return Results.Ok(AuthService.ToDto(user));
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Login);
 
         // ─── Login / Logout ──────────────────────────────────────────────
         app.MapPost(ApiRoutes.AuthLogin, async (
@@ -80,7 +80,7 @@ internal static class AuthEndpoints
                 return Results.Unauthorized();
             await auth.SignInCookieAsync(http, user);
             return Results.Ok(AuthService.ToDto(user));
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Login);
 
         app.MapPost(ApiRoutes.AuthLogout, async (
             AuthService auth,
