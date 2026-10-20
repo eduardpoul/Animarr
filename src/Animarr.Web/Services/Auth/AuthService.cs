@@ -43,6 +43,27 @@ public sealed class AuthService
     public static string NormaliseUsername(string username) =>
         (username ?? "").Trim().ToLowerInvariant();
 
+    // Cookie validation runs on every authenticated request (a player issues
+    // dozens of Range requests a minute), so existence answers are cached for a
+    // short while; deleting a user evicts its entry for an immediate cut-off.
+    private static readonly TimeSpan ExistsCacheTtl = TimeSpan.FromSeconds(30);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (bool Exists, DateTime At)> _exists = new();
+
+    /// <summary>Does the user behind a cookie still exist? Used by the cookie
+    /// handler's OnValidatePrincipal to end sessions of deleted accounts.</summary>
+    public async Task<bool> UserExistsAsync(Guid userId, CancellationToken ct = default)
+    {
+        if (_exists.TryGetValue(userId, out var hit) && DateTime.UtcNow - hit.At < ExistsCacheTtl)
+            return hit.Exists;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var exists = await db.Users.AnyAsync(u => u.Id == userId, ct);
+        _exists[userId] = (exists, DateTime.UtcNow);
+        return exists;
+    }
+
+    /// <summary>Drop the cached existence answer (call after deleting a user).</summary>
+    public void ForgetUser(Guid userId) => _exists.TryRemove(userId, out _);
+
     /// <summary>True iff the <c>Users</c> table is empty — first-run wizard required.</summary>
     public async Task<bool> IsSetupRequiredAsync(CancellationToken ct = default)
     {

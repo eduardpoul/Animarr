@@ -7,6 +7,7 @@ using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Segments;
 using Animarr.Web.Services.Trickplay;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
@@ -246,6 +247,21 @@ builder.Services
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;
+        };
+        // The cookie only proves who the user was when it was issued, and it
+        // slides for 14 days. Permission policies re-read the user from the DB,
+        // but the plain signed-in fallback (catalog, files, folders, me/*) looks
+        // at the cookie alone — so a deleted account kept that access until the
+        // cookie expired. Reject (and clear) cookies whose user row is gone.
+        options.Events.OnValidatePrincipal = async ctx =>
+        {
+            var auth = ctx.HttpContext.RequestServices.GetRequiredService<AuthService>();
+            var claim = ctx.Principal?.FindFirst(AuthConstants.UserIdClaim)?.Value;
+            if (Guid.TryParse(claim, out var uid)
+                && await auth.UserExistsAsync(uid, ctx.HttpContext.RequestAborted))
+                return;
+            ctx.RejectPrincipal();
+            await ctx.HttpContext.SignOutAsync(AuthConstants.CookieScheme);
         };
     });
 

@@ -117,6 +117,7 @@ internal static class UsersEndpoints
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             IUserContext userCtx,
+            AuthService auth,
             CancellationToken ct) =>
         {
             // Don't allow self-delete — admins must demote/transfer first.
@@ -140,6 +141,7 @@ internal static class UsersEndpoints
             }
             db.Users.Remove(user);
             await db.SaveChangesAsync(ct);
+            auth.ForgetUser(id);   // their live cookies stop working on the next request
             return Results.NoContent();
         }).RequireAuthorization(AuthConstants.Policies.ManageUsers);
 
