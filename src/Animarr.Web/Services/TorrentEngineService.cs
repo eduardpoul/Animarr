@@ -433,13 +433,42 @@ public class TorrentEngineService : BackgroundService
             record.State     = TorrentRecordState.Downloading;
             await ctx.SaveChangesAsync();
 
-            // Apply root folder remap for magnets (metadata just arrived, suppress handled via CreateContainingDirectory)
-            if (!string.IsNullOrWhiteSpace(record.CustomRootFolderName))
-                await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName);
+            var remap   = !string.IsNullOrWhiteSpace(record.CustomRootFolderName);
+            var flatten = record.SkipSubfolderStructure;
+            if (remap || flatten)
+            {
+                // MonoTorrent moves files only while the torrent is STOPPED
+                // ("Cannot move files when the torrent is active"), and by now the
+                // magnet has left Metadata and is starting. Every move used to throw
+                // (logged per file), the download landed in the torrent's own folder,
+                // and the next restart's re-apply then moved the finished files out
+                // from under the title the library had registered meanwhile.
+                var wasActive = mgr.State != TorrentState.Stopped;
+                try
+                {
+                    if (wasActive) await mgr.StopAsync();
 
-            // Flatten subfolders for magnets: remap all file paths to the destination root before download starts
-            if (record.SkipSubfolderStructure)
-                await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
+                    // Apply root folder remap for magnets (suppress handled via CreateContainingDirectory)
+                    if (remap)
+                        await ApplyRootFolderRemapAsync(mgr, infoHash, record.CustomRootFolderName!);
+
+                    // Flatten subfolders for magnets: remap all file paths to the destination root before download starts
+                    if (flatten)
+                        await ApplyFlattenAsync(mgr, infoHash, record.CustomRootFolderName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Applying destination layout to magnet {Hash} failed", infoHash);
+                }
+                finally
+                {
+                    if (wasActive && mgr.State == TorrentState.Stopped)
+                    {
+                        try { await mgr.StartAsync(); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Restarting magnet {Hash} failed", infoHash); }
+                    }
+                }
+            }
         }
         catch (DbUpdateConcurrencyException ex)
         {
