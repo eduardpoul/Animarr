@@ -44,6 +44,7 @@ public class SecretProtector
         AppConfigKeys.TmdbApiKey,
         AppConfigKeys.MalClientId,
         AppConfigKeys.LlmApiKey,
+        AppConfigKeys.DashboardApiKey,
     };
 
     public static bool IsSecret(string key) => SecretKeys.Contains(key);
