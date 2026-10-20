@@ -59,6 +59,13 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
 
     public event Action<Guid>? WatchStateChanged;
 
+    /// <summary>This service has no user context (its only caller is the
+    /// anonymous mpv tracker) and writes UserId=null rows — so it must only
+    /// ever see those. Querying db.WatchStates directly matched whichever
+    /// profile's row came first and overwrote that user's progress.</summary>
+    private static IQueryable<WatchState> Anonymous(AppDbContext db)
+        => db.WatchStates.Where(w => w.UserId == null);
+
     private void Notify(Guid mediaItemId)
     {
         try { WatchStateChanged?.Invoke(mediaItemId); }
@@ -68,21 +75,21 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     public async Task<WatchState?> GetForMovieAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.WatchStates.FirstOrDefaultAsync(
+        return await Anonymous(db).FirstOrDefaultAsync(
             w => w.MediaItemId == mediaItemId && w.Season == null && w.Episode == null, ct);
     }
 
     public async Task<WatchState?> GetForEpisodeAsync(Guid mediaItemId, int season, int episode, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.WatchStates.FirstOrDefaultAsync(
+        return await Anonymous(db).FirstOrDefaultAsync(
             w => w.MediaItemId == mediaItemId && w.Season == season && w.Episode == episode, ct);
     }
 
     public async Task<IReadOnlyList<WatchState>> GetForSeriesAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.WatchStates
+        return await Anonymous(db)
             .Where(w => w.MediaItemId == mediaItemId)
             .OrderBy(w => w.Season).ThenBy(w => w.Episode)
             .ToListAsync(ct);
@@ -91,14 +98,14 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     public async Task<int> CountWatchedEpisodesAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.WatchStates.CountAsync(
+        return await Anonymous(db).CountAsync(
             w => w.MediaItemId == mediaItemId && w.IsWatched && w.Episode != null, ct);
     }
 
     public async Task MarkMovieAsync(Guid mediaItemId, bool watched, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var row = await db.WatchStates.FirstOrDefaultAsync(
+        var row = await Anonymous(db).FirstOrDefaultAsync(
             w => w.MediaItemId == mediaItemId && w.Season == null && w.Episode == null, ct);
         if (row is null)
         {
@@ -124,7 +131,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     public async Task MarkEpisodeAsync(Guid mediaItemId, int season, int episode, bool watched, string? filePath = null, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var row = await db.WatchStates.FirstOrDefaultAsync(
+        var row = await Anonymous(db).FirstOrDefaultAsync(
             w => w.MediaItemId == mediaItemId && w.Season == season && w.Episode == episode, ct);
         if (row is null)
         {
@@ -155,7 +162,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
         // a single-season series. Multi-season series should call MarkEpisodeAsync
         // per (season, episode) — drivers from the UI side.
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.WatchStates
+        var existing = await Anonymous(db)
             .Where(w => w.MediaItemId == mediaItemId && w.Episode != null)
             .ToListAsync(ct);
         var byKey = existing.ToDictionary(w => (w.Season ?? 1, w.Episode!.Value));
@@ -187,7 +194,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
         CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var row = await db.WatchStates.FirstOrDefaultAsync(
+        var row = await Anonymous(db).FirstOrDefaultAsync(
             w => w.MediaItemId == mediaItemId && w.Season == season && w.Episode == episode, ct);
         if (row is null)
         {
@@ -225,7 +232,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     public async Task ClearAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        await db.WatchStates
+        await Anonymous(db)
             .Where(w => w.MediaItemId == mediaItemId)
             .ExecuteDeleteAsync(ct);
         Notify(mediaItemId);
@@ -234,7 +241,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     public async Task<TimeSpan> GetGlobalWatchTimeAsync(CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var totalSec = await db.WatchStates.SumAsync(w => (long?)w.TotalWatchTimeSec, ct) ?? 0;
+        var totalSec = await Anonymous(db).SumAsync(w => (long?)w.TotalWatchTimeSec, ct) ?? 0;
         return TimeSpan.FromSeconds(totalSec);
     }
 
@@ -242,7 +249,7 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         // "In progress" = has a position, hasn't been auto-marked watched, last touched recently.
-        return await db.WatchStates
+        return await Anonymous(db)
             .Where(w => !w.IsWatched && w.ProgressMs != null && w.ProgressMs > 0)
             .OrderByDescending(w => w.LastSeenAt)
             .Take(limit)
