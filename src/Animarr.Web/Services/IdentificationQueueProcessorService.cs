@@ -82,11 +82,29 @@ public class IdentificationQueueProcessorService(
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollMs));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            // Paused → don't pick up the next job, but keep refreshing depth so the
-            // popup still reflects newly-queued items piling up behind the pause.
-            if (!IsPaused)
-                await ProcessNextJobAsync(stoppingToken);
-            await RefreshQueueDepthAsync(stoppingToken);
+            try
+            {
+                // Paused → don't pick up the next job, but keep refreshing depth so the
+                // popup still reflects newly-queued items piling up behind the pause.
+                if (!IsPaused)
+                    await ProcessNextJobAsync(stoppingToken);
+                await RefreshQueueDepthAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                // An exception escaping ExecuteAsync faults the BackgroundService,
+                // and the host's default (StopHost) then shuts the WHOLE app down.
+                // Reachable: delete a folder (or let the orphan cleanup drop it)
+                // while its job is Processing — the queue row cascades away and
+                // the job's final SaveChanges throws DbUpdateConcurrencyException.
+                logger.LogError(ex, "Identification queue tick failed — continuing.");
+                if (CurrentlyProcessingFolderId is not null)
+                {
+                    CurrentlyProcessingFolderId = null;
+                    QueueChanged?.Invoke();
+                }
+            }
         }
     }
 
