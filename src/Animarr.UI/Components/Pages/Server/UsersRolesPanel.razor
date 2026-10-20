@@ -506,7 +506,7 @@
                                 @u.Username@(string.IsNullOrEmpty(u.Email) ? "" : " · " + u.Email)
                             </div>
                         </div>
-                        <Pill Tone="@(isMaster ? "accent" : "")">@u.RoleName.ToUpperInvariant()</Pill>
+                        <Pill Tone="@(isMaster ? "accent" : "")">@u.RoleName</Pill>
                         <span class="d-srv-users__row-seen">@(u.LastSeenAt is null ? "—" : RelativeTime(u.LastSeenAt.Value))</span>
                         <div class="d-srv-users__row-actions">
                             <button type="button" class="d-srv-users__icon-btn tv-focus" title="@L["users_roles.action_edit"]"

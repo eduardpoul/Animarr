@@ -1,5 +1,7 @@
 /* ============================================================
-   LLMStatusPopup — anchored top-right popup. Spec: screens-v4.jsx 386-451.
+   LLMStatusPopup — Fluent flyout anchored bottom-left, beside the
+   NavPane's "AI identification" item. Phones: top-right under the
+   mobile strip.
    ============================================================ */
 
 .d-llm-popup__backdrop {
@@ -11,16 +13,25 @@
 
 .d-llm-popup {
     position: fixed;
-    top: 70px;
-    right: 24px;
+    left: calc(var(--nav-cur) + 8px);
+    bottom: 64px;
     z-index: 61;
     width: 360px;
-    background: var(--surface-2);
-    border: 1px solid var(--border-strong);
-    border-radius: 14px;
-    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+    max-width: calc(100vw - 24px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-28);
     color: var(--text);
     padding: 16px;
+}
+@media (max-width: 959px) {
+    .d-llm-popup {
+        left: auto;
+        right: 12px;
+        bottom: auto;
+        top: calc(64px + var(--animarr-safe-top));
+    }
 }
 
 .d-llm-popup__head {
@@ -50,8 +61,8 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--success);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .d-llm-popup__head-dot {
@@ -85,7 +96,7 @@
     display: grid;
     place-items: center;
 }
-.d-llm-popup__close:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.d-llm-popup__close:hover { color: var(--text); background: var(--ink-1); }
 
 /* ── Progress ────────────────────────────────────────────── */
 .d-llm-popup__progress-row {
@@ -133,8 +144,8 @@
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     margin-bottom: 4px;
 }
 .d-llm-popup__stat-value {
@@ -151,8 +162,8 @@
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     margin-bottom: 6px;
 }
 .d-llm-popup__recent-row {
@@ -193,7 +204,7 @@
     flex-shrink: 0;
     transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
-.d-llm-popup__pause:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.d-llm-popup__pause:hover { color: var(--text); background: var(--ink-1); }
 .d-llm-popup__pause.is-paused {
     color: var(--accent-hi);
     border-color: var(--accent-soft);

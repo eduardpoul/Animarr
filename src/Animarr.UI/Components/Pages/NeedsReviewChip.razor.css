@@ -17,7 +17,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     box-sizing: border-box;
     transition: background var(--motion-base), border-color var(--motion-base);
 }
@@ -40,7 +40,7 @@
 .nr-chip--compact .nr-chip__dot { display: none; }
 
 .nr-chip__label {
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .nr-chip__count {

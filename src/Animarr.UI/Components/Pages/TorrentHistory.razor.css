@@ -44,8 +44,8 @@
     font-family: var(--font-display);
     font-size: 28px;
     line-height: 1.0;
-    letter-spacing: -0.018em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text);
     margin: 0;
 }
@@ -80,8 +80,8 @@
     text-align: left;
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-faint);
     padding: var(--space-3) var(--space-4);
     background: var(--bg-1);

@@ -20,7 +20,7 @@
     font-family: var(--font-display);
     font-size: 30px;
     font-weight: 800;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
 }
 .st-sub { color: var(--text-faint); font-size: 13px; }
 
@@ -48,7 +48,7 @@
     font-size: 30px;
     font-weight: 800;
     line-height: 1;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
 }
 .st-kpi__unit { font-size: 15px; font-weight: 700; color: var(--text-faint); margin-left: 3px; }
 .st-kpi__lbl { margin-top: 8px; font-size: 12px; color: var(--text-faint); }
@@ -61,7 +61,7 @@
     font-family: var(--font-display);
     font-size: 19px;
     font-weight: 700;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
 }
 .st-cols {
     display: grid;

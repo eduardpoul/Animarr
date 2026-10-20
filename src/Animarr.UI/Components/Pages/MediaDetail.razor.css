@@ -14,7 +14,7 @@
 
 .md-hero__poster {
     aspect-ratio: 2 / 3;
-    background: #14171b;
+    background: var(--bg-1);
     border: 1px solid #21262d;
     border-radius: 8px;
     overflow: hidden;
@@ -31,8 +31,8 @@
     color: #5b6470;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .md-hero__title {
@@ -122,7 +122,7 @@
     margin: 0 0 18px;
     font-family: var(--font-mono);
     font-size: 11.5px;
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
     color: var(--text-faint);
 }
 .md-secmeta b {
@@ -238,7 +238,7 @@
 .md-movie-row {
     margin-top: 24px;
     padding: 16px;
-    background: #14171b;
+    background: var(--bg-1);
     border: 1px solid #21262d;
     border-radius: 8px;
     display: flex;
@@ -291,10 +291,10 @@
 .md-overline {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.14em;
+    letter-spacing: 0;
     color: var(--accent-hi);
     margin-bottom: var(--space-5);
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .md-overline--dim  { color: var(--text-faint); }
@@ -376,9 +376,9 @@
     width: 38px;
     flex-shrink: 0;
     font-size: 10px;
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
     color: var(--text-dim);
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .md-id-row__val {
@@ -395,7 +395,7 @@
 
 .md-id-row__conf {
     font-size: 10.5px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
 }
 .md-id-row__conf--ok   { color: var(--success); }
 .md-id-row__conf--warn { color: var(--warn); }
@@ -504,7 +504,7 @@
 .md-nr-card__title {
     font-family: var(--font-display);
     font-size: 13px;
-    letter-spacing: -0.018em;
+    letter-spacing: 0;
     color: var(--text);
 }
 
@@ -513,8 +513,8 @@
     font-size: 10.5px;
     color: var(--text-faint);
     margin-top: var(--space-1);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .md-nr-card__overview {
@@ -540,12 +540,12 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--accent-hi);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .md-nr-card__src:hover { color: var(--text); }
 
@@ -569,7 +569,7 @@
     font-family: var(--font-display);
     font-size: 44px;
     line-height: 1;
-    letter-spacing: -0.018em;
+    letter-spacing: 0;
     margin: var(--space-2) 0 0;
     color: var(--text);
 }
@@ -596,7 +596,7 @@
     border-radius: var(--radius-chip);
     font-family: var(--font-mono);
     font-size: 11.5px;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     background: var(--surface);
     color: var(--text-dim);
     border: 1px solid var(--border);
@@ -758,11 +758,11 @@
     height: 22px;
     padding: 0 8px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--ink-2);
     color: rgba(255, 255, 255, 0.82);
     font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
     white-space: nowrap;
 }
 /* HDR-type chips get a warm gold accent — same convention Plex uses,
@@ -806,7 +806,7 @@
     width: 280px;
     padding: 12px 14px;
     background: rgba(24, 24, 24, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--ink-3);
     border-radius: 8px;
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
     color: rgba(255, 255, 255, 0.92);
@@ -846,7 +846,7 @@
     min-width: 220px;
     max-width: 320px;
     background: rgba(24, 24, 24, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--ink-3);
     border-radius: var(--radius-md);
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
     padding: 6px;
@@ -875,7 +875,7 @@
     transition: background var(--motion-fast);
 }
 .vp-cast-item:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--ink-2);
 }
 .vp-cast-item:disabled {
     opacity: 0.5;
@@ -891,7 +891,7 @@
     margin-top: 4px;
     padding: 6px 10px;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--ink-3);
     border-radius: var(--radius-ctrl);
     color: rgba(255, 255, 255, 0.7);
     font-size: 11px;
@@ -899,7 +899,7 @@
     transition: background var(--motion-fast), color var(--motion-fast);
 }
 .vp-cast-refresh:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--ink-2);
     color: #fff;
 }
 .vp-cast-refresh:disabled { opacity: 0.5; cursor: progress; }
@@ -912,7 +912,7 @@
     color: rgba(255, 255, 255, 0.92);
     padding: 8px 14px;
     border-radius: var(--radius-md);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--ink-3);
     font-size: 12px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
     z-index: 10;
@@ -1003,7 +1003,7 @@
     .md-files-grid {
         grid-template-columns: 1fr;
     }
-    .md-eps__title { font-size: 24px; letter-spacing: -0.01em; }
+    .md-eps__title { font-size: 24px; letter-spacing: 0; }
     .md-eps__count { font-size: 13px; }
     .md-eps__season-btn { padding: 8px 12px; font-size: 11px; }
     .md-ident { padding: var(--space-6); }
@@ -1015,9 +1015,9 @@
 .md-unmatched {
     margin-top: var(--space-6);
     padding: var(--space-5);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--ink-3);
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--ink-1);
 }
 .md-unmatched__head {
     display: flex;
@@ -1029,7 +1029,7 @@
 .md-unmatched__title { font-size: 18px; font-weight: 600; margin: 0; }
 .md-unmatched__count {
     display: inline-block; margin-left: 6px; padding: 1px 8px;
-    border-radius: 999px; font-size: 12px; background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px; font-size: 12px; background: var(--ink-3);
 }
 .md-unmatched__ai {
     padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer;
@@ -1041,7 +1041,7 @@
 .md-unmatched__status { font-size: 13px; margin: 0 0 var(--space-3); color: var(--accent, #6c5ce7); }
 .md-unmatched__row {
     display: flex; align-items: center; gap: var(--space-3);
-    padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 8px 0; border-top: 1px solid var(--ink-2);
 }
 .md-unmatched__name {
     flex: 1 1 auto; min-width: 0; font-size: 13px;
@@ -1050,14 +1050,14 @@
 .md-unmatched__field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.8; }
 .md-unmatched__num {
     width: 56px; padding: 6px 8px; font-size: 13px;
-    border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px; border: 1px solid var(--ink-4);
     background: rgba(0, 0, 0, 0.2); color: inherit;
 }
 .md-unmatched__save {
-    padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; font-size: 13px;
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--ink-4);
+    background: var(--ink-2); color: inherit; cursor: pointer; font-size: 13px;
 }
-.md-unmatched__save:hover { background: rgba(255, 255, 255, 0.12); }
+.md-unmatched__save:hover { background: var(--ink-3); }
 
 /* ── Hide-fillers toggle (next to the view toggle; only when flags exist) ── */
 .md-filler-toggle {

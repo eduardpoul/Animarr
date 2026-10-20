@@ -17,10 +17,10 @@ public class UserPreferences
 
     // ─── Appearance ──────────────────────────────────────────────────────────
 
-    /// <summary>Accent hue 0..359 (oklch chroma stays in the design tokens).
-    /// 5 swatches in ProfilePanel are: crimson 25, amber 50, green 145, blue 230,
-    /// violet 295. Free entry via TweaksPanel for dev work.</summary>
-    public int AccentHue { get; set; } = 25;
+    /// <summary>Accent ("primary") color as an OKLCH hue 0..359 — the design tokens
+    /// derive the fill / text / soft variants from it for both themes. Picked in
+    /// ProfilePanel → Appearance (preset swatches + a free hue slider).</summary>
+    public int AccentHue { get; set; } = 50;
 
     /// <summary>Show the rotating fanart backdrop behind the catalog/detail shell.</summary>
     public bool BackdropEnabled { get; set; } = true;
@@ -39,12 +39,11 @@ public class UserPreferences
     /// or BlazorWebView on Android TV.</summary>
     public bool TvMode { get; set; }
 
-    /// <summary>Personality theme (v5) — controls fonts, palette, and decorative
-    /// layers via <c>html[data-theme="..."]</c>. One of:
-    /// quietude (default) / cinematic / terminal / anime / ember-edge /
-    /// mountain-sect / immortal-path / heavens-defiance / ink-and-paper / cyberpunk.
-    /// Stored as a slug so adding a new theme is a CSS-only change.</summary>
-    public string Theme { get; set; } = "quietude";
+    /// <summary>Color theme — <c>"dark"</c> (default) or <c>"light"</c>, applied as
+    /// <c>html[data-theme="..."]</c>. Rows written before the Fluent 2 redesign
+    /// may still hold a v5 personality slug (quietude, cinematic, …); the API
+    /// normalises those to dark/light on read and write.</summary>
+    public string Theme { get; set; } = "dark";
 
     /// <summary>Hero pager style — one of: f (transparent named pager),
     /// g (hover chevrons + dash pager, default), h (numbered pills + chevrons).

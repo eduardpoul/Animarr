@@ -11,7 +11,7 @@
 .emd-gallery--backdrops { grid-template-columns: repeat(2, 1fr); }
 .emd-gallery__card {
     position: relative;
-    background: #14171b;
+    background: var(--bg-1);
     border: 1px solid #21262d;
     border-radius: 6px;
     overflow: hidden;
@@ -39,7 +39,7 @@
     color: #fff;
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.3px;
+    letter-spacing: 0;
     pointer-events: none;
 }
 
@@ -55,7 +55,7 @@
     padding: 32px;
     text-align: center;
     color: #5b6470;
-    background: #14171b;
+    background: var(--bg-1);
     border: 1px dashed #21262d;
     border-radius: 6px;
 }
@@ -125,13 +125,13 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--accent-hi);
-    letter-spacing: 0.14em;
+    letter-spacing: 0;
 }
 
 .emd__title {
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     margin-top: 4px;
     line-height: 1.1;
     color: var(--text);
@@ -223,7 +223,7 @@
     width: 40px;
     height: 40px;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     color: var(--text-dim);
     display: grid;
@@ -231,7 +231,7 @@
     flex-shrink: 0;
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.emd__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); }
+.emd__back:hover { color: var(--text); background: var(--ink-3); border-color: var(--border-strong); }
 
 .emd-form {
     display: flex;
@@ -294,8 +294,8 @@
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .emd-idfield__link {
@@ -349,8 +349,8 @@
     color: var(--text-dim);
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     padding: 4px 10px;
     border-radius: calc(var(--radius-ctrl) - 2px);
     transition: background var(--motion-base), color var(--motion-base);
@@ -422,7 +422,7 @@ select.emd-input option {
     font-size: 12px;
     line-height: 1.4;
     color: var(--text-dim);
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 9px 12px;
@@ -456,8 +456,8 @@ select.emd-input option {
 .emd-field > span:first-child {
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-faint);
 }
 
@@ -527,7 +527,7 @@ select.emd-input option {
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     text-align: center;
     margin-top: 6px;
 }
@@ -587,7 +587,7 @@ select.emd-input option {
     font-family: var(--font-mono);
     font-size: 9px;
     color: #fff;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
 }
 
@@ -646,7 +646,7 @@ select.emd-input option {
     padding: 6px 8px 6px 10px;
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.03em;
+    letter-spacing: 0;
 }
 
 .emd-tag__x {
@@ -676,7 +676,7 @@ select.emd-input option {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 0.12em;
+    letter-spacing: 0;
     margin-bottom: 8px;
 }
 
@@ -777,8 +777,8 @@ select.emd-input option {
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 9px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-faint);
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -811,7 +811,7 @@ select.emd-input option {
     width: 28px;
     height: 28px;
     border-radius: var(--radius-ctrl);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     color: var(--text-dim);
     display: grid;
     place-items: center;
@@ -1199,7 +1199,7 @@ select.emd-input option {
 
     .emd__mlist-row {
         appearance: none;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--ink-1);
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 14px 16px;
@@ -1216,7 +1216,7 @@ select.emd-input option {
     }
     .emd__mlist-row:hover,
     .emd__mlist-row:focus-visible {
-        background: rgba(255, 255, 255, 0.07);
+        background: var(--ink-2);
         border-color: var(--border-strong);
     }
     .emd__mlist-ic {

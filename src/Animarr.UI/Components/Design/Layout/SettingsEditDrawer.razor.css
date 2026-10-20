@@ -1,25 +1,17 @@
-/* SettingsEditDrawer — 560px right-edge slide-in. Aesthetic mirrors
-   EditMetadataDrawer.razor.css (.emd*) so the admin experience is
-   consistent: same surface gradient, same animation curve, same header
-   layout, same footer placement.
+/* SettingsEditDrawer — Fluent 2 OverlayDrawer, right edge, 560px.
+   Used for every "edit / add one thing" flow: Add torrent, users, roles,
+   categories… The list underneath keeps its context; the drawer slides in
+   over it with the Fluent elevation-64 shadow and a dimming scrim.
 
-   Used by UsersRolesPanel + CategoriesPanel for Add/Edit affordances —
-   the inline form pattern they used to render replaced the entire panel
-   body. This drawer slides over the list so the admin keeps context. */
+   z 70/71 clears the NavPane (50) and LLM flyout (61). MainLayout no longer
+   sets a z-index on .animarr-main, so this pair sits above everything
+   except the player. */
 
 .d-srv-drawer__backdrop {
     position: fixed;
     inset: 0;
-    /* TopBar lives at z-index: 50, MobileShell tabbar at 49. The drawer
-       must clear both. Earlier z-60/61 worked at the root stacking level
-       but used to get trapped under TopBar because .animarr-main carried
-       z-index:2 (creating a stacking context that pinned TopBar above any
-       nested z-60). MainLayout no longer sets z-index, so this 70/71 pair
-       safely sits above the TopBar in every case. */
     z-index: 70;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
+    background: var(--scrim);
     animation: d-srv-drawer-fade 0.2s ease;
 }
 @keyframes d-srv-drawer-fade {
@@ -36,107 +28,108 @@
     z-index: 71;
     display: flex;
     flex-direction: column;
-    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
-    border-left: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-drawer, -30px 0 60px -20px rgba(0, 0, 0, 0.6));
-    animation: d-srv-drawer-in 0.3s ease;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-64);
+    animation: d-srv-drawer-in 0.25s cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
 @keyframes d-srv-drawer-in {
-    from { transform: translateX(40px); opacity: 0; }
-    to   { transform: translateX(0);     opacity: 1; }
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
 }
 
 /* ── Header ─────────────────────────────────────────────── */
 .d-srv-drawer__head {
     display: flex;
     align-items: flex-start;
-    gap: 14px;
-    padding: 22px 26px 18px;
-    border-bottom: 1px solid var(--border);
+    gap: 12px;
+    padding: 20px 24px 16px;
     flex-shrink: 0;
 }
 
 .d-srv-drawer__head-ic {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-chip);
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-card);
     display: grid;
     place-items: center;
     background: var(--accent-soft);
     color: var(--accent-hi);
-    border: 1px solid var(--accent-line);
     flex-shrink: 0;
 }
 
 /* Tone variants — Tone="warn"/"danger" swap the head icon chip and the
    overline to a non-accent palette. Body and footer stay neutral. */
 .d-srv-drawer--warn .d-srv-drawer__head-ic {
-    background: oklch(0.80 0.17 75 / 0.18);
+    background: color-mix(in oklch, var(--warn) 16%, transparent);
     color: var(--warn);
-    border-color: oklch(0.60 0.16 75 / 0.40);
 }
 .d-srv-drawer--warn .d-srv-drawer__overline { color: var(--warn); }
 
 .d-srv-drawer--danger .d-srv-drawer__head-ic {
-    background: oklch(0.66 0.20 25 / 0.18);
-    color: oklch(0.78 0.20 25);
-    border-color: oklch(0.66 0.20 25 / 0.45);
+    background: color-mix(in oklch, var(--danger) 16%, transparent);
+    color: var(--danger);
 }
-.d-srv-drawer--danger .d-srv-drawer__overline { color: oklch(0.78 0.20 25); }
+.d-srv-drawer--danger .d-srv-drawer__overline { color: var(--danger); }
 
 .d-srv-drawer__head-text { flex: 1; min-width: 0; }
 
 .d-srv-drawer__overline {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
     color: var(--accent-hi);
-    letter-spacing: 0.14em;
 }
 
 .d-srv-drawer__title {
     font-family: var(--font-display);
-    font-size: 22px;
-    letter-spacing: -0.4px;
-    margin-top: 4px;
-    line-height: 1.1;
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    margin-top: 2px;
     color: var(--text);
 }
 
 .d-srv-drawer__hint {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-faint);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
     margin-top: 4px;
 }
 
 .d-srv-drawer__close {
     appearance: none;
     cursor: pointer;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: 0;
-    color: var(--text-dim);
-    padding: 4px;
+    border-radius: var(--radius-ctrl);
+    color: var(--text);
     flex-shrink: 0;
+    margin: -4px -8px 0 0;
 }
-.d-srv-drawer__close:hover { color: var(--text); }
+.d-srv-drawer__close:hover  { background: var(--ink-2); }
+.d-srv-drawer__close:active { background: var(--ink-3); }
 
 /* ── Body (scrollable form area) ────────────────────────── */
 .d-srv-drawer__body {
     flex: 1;
     overflow-y: auto;
-    padding: 22px 26px 24px;
-    /* The sticky footer at the bottom needs breathing room above its border
-       — the body's last child shouldn't touch the divider. */
+    padding: 4px 24px 24px;
 }
 
-/* ── Footer (sticky action row) ─────────────────────────── */
+/* ── Footer (action row) ────────────────────────────────── */
 .d-srv-drawer__footer {
-    padding: 16px 26px;
-    background: linear-gradient(180deg, transparent, var(--surface-2) 30%);
-    border-top: 1px solid var(--border);
+    padding: 16px 24px 24px;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     flex-shrink: 0;
 }
@@ -152,7 +145,7 @@
         width: 100%;
         max-width: 100%;
         border-left: 0;
-        border-top: 1px solid var(--border-strong);
+        border-top: 1px solid var(--border);
         border-top-left-radius: var(--radius-modal);
         border-top-right-radius: var(--radius-modal);
         animation: d-srv-drawer-sheet-in 0.3s cubic-bezier(.16, 1, .3, 1);
@@ -163,8 +156,8 @@
         to   { transform: translateY(0); }
     }
     .d-srv-drawer__head   { padding: 14px 18px 12px; }
-    .d-srv-drawer__title  { font-size: 18px; }
+    .d-srv-drawer__title  { font-size: 18px; line-height: 24px; }
     .d-srv-drawer__head-ic { width: 36px; height: 36px; }
-    .d-srv-drawer__body   { padding: 14px 18px 24px; }
+    .d-srv-drawer__body   { padding: 4px 18px 24px; }
     .d-srv-drawer__footer { padding: 14px 18px calc(22px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
 }

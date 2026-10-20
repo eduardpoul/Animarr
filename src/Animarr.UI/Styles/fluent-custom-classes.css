@@ -187,7 +187,7 @@ fluent-nav-menu {
     font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 500;
-    letter-spacing: 0.1px;
+    letter-spacing: 0;
     line-height: 1;
     transition: background var(--motion-fast), color var(--motion-fast);
     cursor: pointer;

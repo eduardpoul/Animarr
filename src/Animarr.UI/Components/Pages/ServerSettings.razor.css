@@ -51,7 +51,7 @@
 }
 
 .d-server__rail-item:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--ink-1);
     color: var(--text);
 }
 
@@ -79,7 +79,7 @@
     background: var(--accent-soft);
     padding: 2px 6px;
     border-radius: 999px;
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
 }
 
 /* ── Content card ────────────────────────────────────────── */
@@ -109,7 +109,7 @@
 .d-server__placeholder-title {
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     color: var(--text);
     margin: 0 0 10px;
 }
@@ -127,7 +127,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-faint);
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
 }
 
 /* ── Mobile drilldown list — replaces the rail on phones. ─────────── */
@@ -144,14 +144,14 @@
     width: 40px;
     height: 40px;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     color: var(--text-dim);
     align-self: flex-start;
     margin-bottom: 8px;
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-server__mback:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); color: var(--text); }
+.d-server__mback:hover { background: var(--ink-3); border-color: var(--border-strong); color: var(--text); }
 
 /* ── Mobile collapse ─────────────────────────────────────── */
 @media (max-width: 959px) {
@@ -207,7 +207,7 @@
         font-size: 11px;
         color: var(--text-faint);
         font-family: var(--font-mono);
-        letter-spacing: 0.2px;
+        letter-spacing: 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -219,7 +219,7 @@
         background: var(--accent-soft);
         padding: 2px 6px;
         border-radius: 999px;
-        letter-spacing: 0.4px;
+        letter-spacing: 0;
     }
 
     /* Toggle list ⇄ content via the parent's data attribute. List mode

@@ -32,9 +32,9 @@
 .sfd-picker__title {
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.1em;
+    letter-spacing: 0;
     color: var(--text-dim);
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .sfd-picker__roots {

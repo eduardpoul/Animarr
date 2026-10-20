@@ -60,7 +60,7 @@
 .d-welcome__name {
     font-family: var(--font-display);
     font-size: 44px;
-    letter-spacing: -1.6px;
+    letter-spacing: 0;
     line-height: 1;
     margin: 0;
     color: var(--text);
@@ -81,7 +81,7 @@
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-faint);
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
     text-decoration: none;
     padding: 6px 14px;
     border-radius: 999px;
@@ -89,7 +89,7 @@
 }
 .d-welcome__gh:hover {
     color: var(--text-dim);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--ink-1);
 }
 
 @media (max-width: 639px) {
@@ -99,7 +99,7 @@
        here. This rule kept for mobile-specific border-radius / shadow
        adjustments only. */
     .d-welcome__mark { border-radius: 18px; }
-    .d-welcome__name { font-size: 36px; letter-spacing: -1.2px; }
+    .d-welcome__name { font-size: 36px; letter-spacing: 0; }
     .d-welcome__tagline { font-size: 14px; }
     .d-welcome__cjk { font-size: clamp(240px, 50vw, 320px); right: -8%; }
 }

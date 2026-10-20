@@ -8,11 +8,13 @@
        laptop viewports but never collapses below 480px so the
        backdrop image keeps its proportions. */
     height: clamp(480px, 75vh, 720px);
-    /* Flush against the transparent TopBar (top -96px to cancel .animarr-main
-       padding-top) and edge-to-edge horizontally (sides -24px). No rounding
-       on any corner — clean bleed on all four edges. The TopBar floats over
-       this with its own glass pills; no separator needed. */
-    margin: -96px -24px var(--space-9);
+    /* A1 (Fluent redesign): borderless hero — flush with the top and both
+       sides of the content column (negates .animarr-main's padding), and its
+       artwork dissolves into the page over the bottom --hero-fade px. In dark
+       the next rail slides up into that fade so hero and rail read as one
+       surface; light keeps them apart (dark ink over dark art would fail). */
+    --hero-fade: 160px;
+    margin: calc(-1 * var(--main-pad-top)) calc(-1 * var(--main-pad-x)) calc(48px - var(--hero-fade));
     border-radius: 0;
     overflow: hidden;
     isolation: isolate;
@@ -21,14 +23,21 @@
 /* Mobile: .animarr-main now reserves 56px+safe-area top padding for the
    fixed transparent mobile nav. Hero negates that whole stack so it
    bleeds up behind the bar. */
+html[data-theme="light"] .d-chero {
+    margin-bottom: var(--space-7);
+}
+
 @media (max-width: 959px) {
     .d-chero {
+        --hero-fade: 96px;
         margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
 }
 
 .d-chero__bg {
     position: absolute; inset: 0; z-index: 0;
+    -webkit-mask-image: linear-gradient(to top, transparent 0, #000 var(--hero-fade));
+    mask-image: linear-gradient(to top, transparent 0, #000 var(--hero-fade));
 }
 .d-chero__bg-img {
     width: 100%; height: 100%;
@@ -44,16 +53,16 @@
 .d-chero__wash {
     position: absolute; inset: 0;
     background:
-        linear-gradient(180deg, transparent 30%, rgba(15, 17, 21, 0.85) 100%),
-        linear-gradient(90deg, rgba(15, 17, 21, 0.6) 0%, transparent 60%);
+        linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, 0.55) 100%),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.35) 38%, transparent 66%);
     pointer-events: none;
 }
 
 .d-chero__content {
     position: absolute;
-    inset: auto 0 60px 0;
+    inset: auto 0 calc(var(--hero-fade) + 16px) 0;
     z-index: 2;
-    padding: 0 var(--space-11);
+    padding: 0 40px;
     max-width: 720px;
 }
 
@@ -71,7 +80,7 @@
     font-size: clamp(36px, 6vw, 56px);
     line-height: 1.05;
     margin: 0 0 var(--space-4);
-    letter-spacing: -1px;
+    letter-spacing: 0;
     color: var(--text);
 }
 

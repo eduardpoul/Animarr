@@ -258,7 +258,7 @@
     // Local edit state mirrors UserContextState.Preferences. On every change
     // we PATCH /api/me/preferences and update the global state so any other
     // subscriber (MainLayout's backdrop, accent hue applier) re-renders.
-    private int _accentHue => UserCtx.Preferences?.AccentHue ?? 25;
+    private int _accentHue => _huePreview ?? UserCtx.Preferences?.AccentHue ?? Animarr.UI.Services.ThemeService.DefaultHue;
     private bool _backdropEnabled = true;
     private bool _tvMode          = false;
     private string _audioPref     = "Japanese";
@@ -268,7 +268,7 @@
     private bool _themeMusic       = false;
     private int  _themeMusicVolume = 40;
     private string _language      = "en";
-    private string _theme         = "quietude";
+    private string _theme         = "dark";
     /// <summary>F / G / H — see <see cref="PagerOptions"/>. Default "g"
     /// (Chevrons) — the hover-revealed prev/next chevrons + dash pager.</summary>
     private string _heroPagerStyle = "g";
@@ -338,7 +338,7 @@
         _themeMusic       = p.ThemeMusicEnabled;
         _themeMusicVolume = p.ThemeMusicVolume;
         _language        = p.Language;
-        _theme           = string.IsNullOrEmpty(p.Theme) ? "quietude" : p.Theme;
+        _theme           = string.Equals(p.Theme, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
         _heroPagerStyle  = string.IsNullOrEmpty(p.HeroPagerStyle) ? "g" : p.HeroPagerStyle.ToLowerInvariant();
         _episodeListView = string.IsNullOrEmpty(p.EpisodeListView) ? "grid" : p.EpisodeListView.ToLowerInvariant();
         _homeSections    = HomeSections.Parse(p.HomeSectionsJson);
@@ -745,7 +745,7 @@
                 <span class="d-profile__kv-key">@L["profile.kv_username"]</span>
                 <span class="d-profile__kv-val">@me.User.Username</span>
                 <span class="d-profile__kv-key">@L["profile.kv_role"]</span>
-                <span class="d-profile__kv-val d-profile__kv-val--accent">@me.User.RoleName.ToUpperInvariant()</span>
+                <span class="d-profile__kv-val d-profile__kv-val--accent">@me.User.RoleName</span>
                 <span class="d-profile__kv-key">@L["profile.kv_email"]</span>
                 <span class="d-profile__kv-val">@(string.IsNullOrEmpty(me.User.Email) ? "—" : me.User.Email)</span>
                 <span class="d-profile__kv-key">@L["profile.kv_created"]</span>
@@ -1396,20 +1396,22 @@
                     <div class="d-profile__section-title">@L["profile.theme_title"]</div>
                     <div class="d-profile__section-hint">@L["profile.theme_hint"]</div>
                 </div>
-                <div class="d-profile__theme-grid">
+                <div class="d-profile__theme-grid d-profile__theme-grid--two" role="radiogroup" aria-label="@L["profile.theme_title"]">
                     @foreach (var th in Themes)
                     {
                         var t = th;
                         var active = string.Equals(_theme, t.Slug, StringComparison.OrdinalIgnoreCase);
                         <button type="button"
+                                role="radio"
+                                aria-checked="@(active ? "true" : "false")"
+                                aria-label="@L[t.Name]"
                                 class="@($"d-profile__theme-card tv-focus {(active ? "is-active" : "")}")"
-                                title="@L[t.Description]"
                                 @onclick="@(() => OnSelectTheme(t.Slug))">
                             <span class="d-profile__theme-card__preview"
                                   style="@($"--th-bg: {t.PreviewBg}; --th-accent: {t.PreviewAccent}; --th-text: {t.PreviewText};")">
                                 <span class="d-profile__theme-card__sample">Aa</span>
                             </span>
-                            <span class="d-profile__theme-card__name">@t.Name</span>
+                            <span class="d-profile__theme-card__name">@L[t.Name]</span>
                         </button>
                     }
                 </div>
@@ -1420,18 +1422,31 @@
                     <div class="d-profile__section-title">@L["profile.accent_title"]</div>
                     <div class="d-profile__section-hint">@L["profile.accent_hint"]</div>
                 </div>
-                <div class="d-profile__swatches">
+                <div class="d-profile__swatches" role="radiogroup" aria-label="@L["profile.accent_title"]">
                     @foreach (var sw in AccentSwatches)
                     {
                         var s = sw;
                         var active = _accentHue == s.Hue;
                         <button type="button"
+                                role="radio"
+                                aria-checked="@(active ? "true" : "false")"
+                                aria-label="@L[s.Label]"
                                 class="@($"d-profile__swatch tv-focus {(active ? "is-active" : "")}")"
                                 style="@SwatchStyle(s)"
                                 title="@L[s.Label]"
                                 @onclick="@(() => OnSelectAccent(s.Hue))"></button>
                     }
                 </div>
+                @* Free hue — any OKLCH hue, previewed live while dragging and
+                   saved on release (change), so dragging doesn't PATCH 360 times. *@
+                <label class="d-profile__hue">
+                    <span class="d-profile__field-label">@L["profile.accent_custom"] · @(_accentHue)°</span>
+                    <input type="range" min="0" max="359" step="1"
+                           class="d-profile__hue-slider tv-focus"
+                           value="@_accentHue"
+                           @oninput="OnHuePreview"
+                           @onchange="OnHueCommit" />
+                </label>
             </div>
 
             <div class="d-profile__toggle-row">
@@ -1828,27 +1843,16 @@
         StateHasChanged();
     }
 
-    // 10 personality themes. PreviewBg / PreviewAccent / PreviewText are tiny
-    // swatches rendered in the picker — they don't have to match the theme's
-    // CSS exactly, just convey the vibe. Name is the theme's proper (brand-like)
-    // palette name and is kept literal; Description holds a localization KEY
-    // resolved via L[...] at the render site (tooltip helper text).
+    // Fluent 2: two themes. Name is a localization KEY; Preview* are the
+    // literal page / accent / text colors drawn in the little "Aa" tile.
     private static readonly ThemeOption[] Themes = new[]
     {
-        new ThemeOption("quietude",        "Quietude",           "profile.theme_desc_quietude",        "#181c24", "#65b6c8", "#e9ecf2"),
-        new ThemeOption("cinematic",       "Cinematic",          "profile.theme_desc_cinematic",       "#15110e", "#e25a4d", "#f4eee6"),
-        new ThemeOption("terminal",        "Terminal",           "profile.theme_desc_terminal",        "#000000", "#5aff8c", "#c6ffd2"),
-        new ThemeOption("anime",           "Anime",              "profile.theme_desc_anime",           "#1c1320", "#f3a8c8", "#f8e8f0"),
-        new ThemeOption("ember-edge",      "Ember Edge",         "profile.theme_desc_ember_edge",      "#131826", "#8870ff", "#e6e9f5"),
-        new ThemeOption("mountain-sect",   "Mountain Sect",      "profile.theme_desc_mountain_sect",   "#1a1410", "#c43a3a", "#f3e5c8"),
-        new ThemeOption("immortal-path",   "Immortal Path",      "profile.theme_desc_immortal_path",   "#28231b", "#5aa57b", "#f5ecd8"),
-        new ThemeOption("heavens-defiance","Heaven's Defiance",  "profile.theme_desc_heavens_defiance","#0d1018", "#cc2a2a", "#f0e8e0"),
-        new ThemeOption("ink-and-paper",   "Ink & Paper",        "profile.theme_desc_ink_and_paper",   "#f5f0e6", "#b03030", "#1a1612"),
-        new ThemeOption("cyberpunk",       "Cyberpunk",          "profile.theme_desc_cyberpunk",       "#0d0d0d", "#fcd14d", "#e0fcff"),
+        new ThemeOption("dark",  "profile.theme_dark",  "#202020", "oklch(0.75 0.14 var(--accent-hue))", "#ffffff"),
+        new ThemeOption("light", "profile.theme_light", "#f3f3f3", "oklch(0.48 0.15 var(--accent-hue))", "#1f1f1f"),
     };
 
     private sealed record ThemeOption(
-        string Slug, string Name, string Description,
+        string Slug, string Name,
         string PreviewBg, string PreviewAccent, string PreviewText);
 
     private async Task OnSelectTheme(string slug)
@@ -1952,13 +1956,18 @@
     // L[...] at the swatch render site — reuses the palette names already
     // translated for the admin Settings page.
     private record SwatchDef(int Hue, double L, double C, string Label);
+    // Preset "primary colors" — swatch dots drawn at a mid lightness so they
+    // read on both themes; the actual UI shades come from tokens.css.
     private static readonly SwatchDef[] AccentSwatches =
     {
-        new(25,  0.66, 0.20, "settings.accent_crimson"),
-        new(60,  0.72, 0.17, "settings.accent_amber"),
-        new(150, 0.74, 0.15, "settings.accent_green"),
-        new(240, 0.66, 0.16, "settings.accent_blue"),
-        new(290, 0.66, 0.20, "settings.accent_violet"),
+        new(25,  0.62, 0.19, "settings.accent_crimson"),
+        new(50,  0.68, 0.17, "settings.accent_orange"),
+        new(80,  0.76, 0.15, "settings.accent_amber"),
+        new(150, 0.66, 0.15, "settings.accent_green"),
+        new(195, 0.66, 0.11, "settings.accent_teal"),
+        new(250, 0.60, 0.16, "settings.accent_blue"),
+        new(295, 0.60, 0.18, "settings.accent_violet"),
+        new(350, 0.64, 0.18, "settings.accent_pink"),
     };
 
     /// <summary>Inline style for an accent swatch. Built with InvariantCulture
@@ -1968,6 +1977,22 @@
     /// interpolation uses the current culture, which is the bug.</summary>
     private static string SwatchStyle(SwatchDef s) =>
         System.FormattableString.Invariant($"--swatch-color: oklch({s.L} {s.C} {s.Hue});");
+
+    private int? _huePreview;
+
+    private async Task OnHuePreview(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hue)) return;
+        _huePreview = hue;
+        try { await JS.InvokeVoidAsync("animarr_setAccentHue", hue); } catch { }
+    }
+
+    private async Task OnHueCommit(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hue)) return;
+        _huePreview = null;
+        await OnSelectAccent(hue);
+    }
 
     private async Task OnSelectAccent(int hue)
     {

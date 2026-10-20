@@ -32,8 +32,8 @@
     height: 40px;
     padding: 0 16px;
     border-radius: var(--radius-ctrl);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--ink-1);
+    border: 1px solid var(--ink-2);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     color: var(--text-dim);
@@ -55,7 +55,7 @@
     font-family: var(--font-display);
     /* Large but not screaming — it's the page's primary control. */
     font-size: 20px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     line-height: 1;
     padding: 0;
 }
@@ -77,7 +77,7 @@
     width: 24px;
     height: 24px;
     border-radius: var(--radius-pill);
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--ink-2);
     border: 0;
     color: var(--text-dim);
     display: grid;
@@ -85,7 +85,7 @@
     transition: background var(--motion-fast), color var(--motion-fast);
 }
 .search-page__clear:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--ink-3);
     color: var(--text);
 }
 
@@ -93,12 +93,12 @@
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
     color: var(--text-dim);
     display: inline-flex;
     align-items: baseline;
     gap: 4px;
-    text-transform: uppercase;
+    text-transform: none;
 }
 .search-page__count-sep { color: var(--text-faint); padding: 0 2px; }
 .search-page__count-label {

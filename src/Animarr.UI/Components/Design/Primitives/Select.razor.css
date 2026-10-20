@@ -7,20 +7,23 @@
 .d-select__field {
     appearance: none;
     height: 32px;
-    padding: 0 var(--space-9) 0 var(--space-5);
+    padding: 0 var(--space-9) 0 var(--space-4);
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
     border-radius: var(--radius-ctrl);
     color: var(--text);
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
     transition: border-color var(--motion-base);
 }
 
+.d-select__field:hover { border-color: var(--stroke-ctrl-hi); border-bottom-color: var(--stroke-ctrl-acc); }
 .d-select__field:focus-visible {
     outline: none;
-    border-color: var(--accent-line);
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
 }
 
 .d-select__field option {

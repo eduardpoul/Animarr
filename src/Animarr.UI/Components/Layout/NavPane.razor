@@ -1,0 +1,257 @@
+@*
+    NavPane — Fluent 2 navigation drawer (A1 redesign). Replaces the v4
+    TopBar on desktop (≥ 960px); MobileShell still owns phones.
+
+      ┌ ☰  A Animarr            ← collapse toggle + brand (→ home)
+      │ 🔍 Search library  ^K    ← opens /search
+      │ ▌Home / Library / Calendar / Watchlist / Stats
+      │ ─ Folders ─              ← root-folder filter (was the TopBar pills)
+      │   Anime 34 · Movies …
+      │            ⋮
+      │ Needs review (when any)
+      │ Downloads ⓶              ← uploadContent
+      │ Server settings          ← systemSettings
+      │ ● AI identification 78/78 ← opens LLMStatusPopup
+      └ (E) Eduard · master      ← opens ProfilePanel
+
+    Collapses to a 56px icon rail; the choice is persisted in localStorage
+    ("animarr-nav-collapsed") and mirrored onto <html class="nav-collapsed">
+    so .animarr-main's left offset follows without a re-render (index.html
+    applies the class before first paint).
+*@
+
+@inject NavigationManager Nav
+@inject UserContextState UserCtx
+@inject FolderJumpService FolderJump
+@inject CategoryNavService CategoryNav
+@inject IJSRuntime JS
+@implements IDisposable
+
+<nav class="@($"d-nav {(_collapsed ? "is-collapsed" : "")}")" aria-label="@L["nav.primary_aria"]">
+    <div class="d-nav__head">
+        <button type="button" class="d-nav__toggle tv-focus"
+                @onclick="ToggleCollapsed"
+                aria-expanded="@(_collapsed ? "false" : "true")"
+                aria-label="@(_collapsed ? L["nav.expand"] : L["nav.collapse"])"
+                title="@(_collapsed ? L["nav.expand"] : L["nav.collapse"])">
+            <DIcon Name="navigation" Size="20" />
+        </button>
+        <button type="button" class="d-nav__brand tv-focus" @onclick="GoHome" aria-label="@L["topbar.brand_aria"]">
+            <BrandMark Size="24" ExtraClass="d-nav__brand-mark" />
+            <span class="d-nav__brand-name">Animarr</span>
+        </button>
+    </div>
+
+    <a href="search" class="@($"d-nav__search tv-focus {(IsRoute("/search") ? "is-active" : "")}")"
+       title="@L["search.title"]" aria-label="@L["search.title"]">
+        <DIcon Name="search" Size="16" />
+        <span class="d-nav__search-text">@L["nav.search_placeholder"]</span>
+    </a>
+
+    <div class="d-nav__list">
+        @Item("", "home", "home-f", L["nav.home"], IsHomeActive())
+        @Item("library", "library", "library-f", L["nav.library"], IsRoute("/library") && FolderJump.ActiveFolderName is null)
+        @Item("calendar", "calendar", "calendar-f", L["calendar.title"], IsRoute("/calendar"))
+        @Item("watchlist", "bookmark", "bookmark-f", L["watchlist.title"], IsRoute("/watchlist"))
+        @Item("stats", "stats", "stats-f", L["stats.title"], IsRoute("/stats"))
+    </div>
+
+    @if (FolderNames is { Count: > 0 })
+    {
+        <div class="d-nav__sep" role="separator"></div>
+        <div class="d-nav__section">@L["nav.folders"]</div>
+        <div class="d-nav__list" role="group" aria-label="@L["topbar.folder_nav_aria"]">
+            @foreach (var name in FolderNames)
+            {
+                var n = name;
+                var active = IsFolderActive(n);
+                <button type="button"
+                        class="@($"d-nav__item tv-focus {(active ? "is-active" : "")}")"
+                        aria-pressed="@(active ? "true" : "false")"
+                        title="@n"
+                        @onclick="@(() => OnPickFolder(n))">
+                    <span class="d-nav__ic"><DIcon Name="folder" Size="20" /></span>
+                    <span class="d-nav__label">@n</span>
+                </button>
+            }
+        </div>
+    }
+
+    <div class="d-nav__spacer"></div>
+
+    <div class="d-nav__list d-nav__list--bottom">
+        <div class="d-nav__review"><NeedsReviewChip Compact="true" /></div>
+
+        @if (UserCtx.Can(p => p.UploadContent))
+        {
+            <div class="d-nav__row">
+            <a href="downloads"
+               class="@($"d-nav__item d-nav__item--has-quick tv-focus {(IsRoute("/downloads") ? "is-active" : "")}")"
+               aria-current="@(IsRoute("/downloads") ? "page" : null)"
+               title="@L["topbar.downloads"]">
+                <span class="d-nav__ic">
+                    <DIcon Name="@(IsRoute("/downloads") ? "download-f" : "download")" Size="20" />
+                    @if (ActiveDownloads > 0)
+                    {
+                        <span class="d-nav__dot" aria-hidden="true"></span>
+                    }
+                </span>
+                <span class="d-nav__label">@L["topbar.downloads"]</span>
+                @if (ActiveDownloads > 0)
+                {
+                    <span class="d-nav__badge">@ActiveDownloads</span>
+                }
+            </a>
+            @* Quick add — opens the Downloads page with its right-side Add drawer. *@
+            <a href="downloads?add=1" class="d-nav__quick tv-focus"
+               title="@L["torrents.add_download_aria"]"
+               aria-label="@L["torrents.add_download_aria"]">
+                <DIcon Name="plus" Size="16" />
+            </a>
+            </div>
+        }
+
+        @if (UserCtx.Can(p => p.SystemSettings))
+        {
+            @Item("server", "settings", "settings-f", L["profile.server_settings_title"], IsRoute("/server"))
+        }
+
+        <button type="button" class="d-nav__item d-nav__item--ai tv-focus"
+                @onclick="OnLlmClick"
+                title="@L["nav.ai_label"] · @LlmDone/@LlmTotal"
+                aria-label="@L["sidebar_llm.popup_aria"]: @LlmDone / @LlmTotal">
+            <span class="d-nav__ic">
+                <DIcon Name="sparkle" Size="20" />
+                <span class="@($"d-nav__dot d-nav__dot--status {(LlmDone < LlmTotal ? "is-busy" : "")}")" aria-hidden="true"></span>
+            </span>
+            <span class="d-nav__label">@L["nav.ai_label"]</span>
+            <span class="d-nav__meta">@LlmDone/@LlmTotal</span>
+        </button>
+
+        @if (UserCtx.Me is { } me)
+        {
+            <button type="button" class="d-nav__item d-nav__item--profile tv-focus"
+                    @onclick="OnProfileClick"
+                    title="@me.User.Name"
+                    aria-label="@L["topbar.open_profile"]">
+                <span class="d-nav__ic d-nav__ic--avatar">
+                    <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
+                </span>
+                <span class="d-nav__profile-text">
+                    <span class="d-nav__profile-name">@me.User.Name</span>
+                    <span class="d-nav__profile-role">@me.User.RoleName</span>
+                </span>
+                <span class="d-nav__chev"><DIcon Name="settings" Size="16" /></span>
+            </button>
+        }
+    </div>
+</nav>
+
+@code {
+    [Parameter] public int ActiveDownloads { get; set; }
+    [Parameter] public int LlmDone { get; set; }
+    [Parameter] public int LlmTotal { get; set; }
+    [Parameter] public EventCallback OnProfileClickEvent { get; set; }
+    [Parameter] public EventCallback OnLlmClickEvent { get; set; }
+    /// <summary>Root-folder section labels, fetched once by MainLayout.</summary>
+    [Parameter] public IReadOnlyList<string>? FolderNames { get; set; }
+
+    private const string CollapsedKey = "animarr-nav-collapsed";
+    private bool _collapsed;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        FolderJump.OnChange  += OnStateChanged;
+        CategoryNav.OnChange += OnStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", CollapsedKey);
+            if (stored == "1" && !_collapsed)
+            {
+                _collapsed = true;
+                StateHasChanged();
+            }
+        }
+        catch { /* storage blocked — stay expanded */ }
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        FolderJump.OnChange  -= OnStateChanged;
+        CategoryNav.OnChange -= OnStateChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task ToggleCollapsed()
+    {
+        _collapsed = !_collapsed;
+        try
+        {
+            await JS.InvokeVoidAsync("animarr_setNavCollapsed", _collapsed);
+        }
+        catch { }
+    }
+
+    /// <summary>A route item: filled icon + accent indicator when active.</summary>
+    private RenderFragment Item(string href, string icon, string iconActive, string label, bool active) => __builder =>
+    {
+        <a href="@href"
+           class="@($"d-nav__item tv-focus {(active ? "is-active" : "")}")"
+           aria-current="@(active ? "page" : null)"
+           title="@label">
+            <span class="d-nav__ic"><DIcon Name="@(active ? iconActive : icon)" Size="20" /></span>
+            <span class="d-nav__label">@label</span>
+        </a>
+    };
+
+    private string CurrentPath => new Uri(Nav.Uri).AbsolutePath;
+
+    private bool IsRoute(string path)
+        => CurrentPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsCatalogRoute()
+    {
+        // Home ("/") and the full Library page share the folder filter state.
+        var path = CurrentPath;
+        return string.IsNullOrEmpty(path) || path == "/" || path == "/catalog" || path == "/library";
+    }
+
+    private bool IsHomeActive()
+    {
+        var path = CurrentPath;
+        return (path == "/" || path == "/catalog") && FolderJump.ActiveFolderName is null;
+    }
+
+    private bool IsFolderActive(string name)
+        => IsCatalogRoute()
+        && string.Equals(FolderJump.ActiveFolderName, name, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Pick a root folder: filters Home / Library in place. Clicking
+    /// the active folder again clears the filter (back to "all").</summary>
+    private void OnPickFolder(string name)
+    {
+        var next = IsFolderActive(name) ? null : name;
+        FolderJump.SetActiveFolder(next);
+        if (!IsCatalogRoute()) Nav.NavigateTo("/");
+    }
+
+    private void GoHome()
+    {
+        FolderJump.SetActiveFolder(null);
+        CategoryNav.SetActiveCategory(null);
+        Nav.NavigateTo("/");
+    }
+
+    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
+    private Task OnLlmClick()     => OnLlmClickEvent.InvokeAsync();
+}

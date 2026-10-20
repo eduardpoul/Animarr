@@ -1,7 +1,7 @@
 /* ============================================================
-   MainLayout (v4) — scoped styles. The TopBar is fixed at top 0,
-   60px tall; the <main> column pushes down by that amount so the
-   first content doesn't sit under the topbar's blur.
+   MainLayout — scoped styles. Desktop: the NavPane is fixed to the
+   left edge (width --nav-cur) and <main> is offset by it. Phones:
+   MobileShell's fixed top strip, main padded below it.
    ============================================================ */
 
 .animarr-shell {
@@ -34,37 +34,44 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
+    /* Theme-aware veil: dims the fanart into a quiet "Mica" in dark, washes
+       it out to near-white in light. */
     background: radial-gradient(120% 80% at 50% 30%,
-        transparent 0%,
-        rgba(10, 8, 7, 0.5) 60%,
-        rgba(10, 8, 7, 0.95) 100%);
+        var(--veil-mid) 0%,
+        var(--veil-mid) 45%,
+        var(--veil-end) 100%);
 }
 
 .animarr-backdrop__hue-tint {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: oklch(0.66 0.20 var(--accent-hue) / 0.10);
+    background: oklch(0.66 0.20 var(--accent-hue) / 0.08);
     mix-blend-mode: color;
 }
 
-/* Main content column — pushed down by 60px to clear the fixed TopBar.
-   No height constraint and no overflow: document body scrolls natively,
-   so the catalog grid / media detail / settings page can be as tall as
-   they need without us managing a custom scroll container.
+/* Main content column — offset right of the fixed NavPane. No height
+   constraint and no overflow: document body scrolls natively. Heroes
+   (CatalogHero / CatalogContinueHero / MediaDetailHero) cancel the
+   --main-pad-* padding with negative margins so they bleed to the
+   column's top and side edges (A1: borderless hero).
 
    No z-index here on purpose — assigning one creates a stacking context
-   that would trap fixed-position drawers (SettingsEditDrawer z-60,
-   ProfilePanel z-60) below the fixed TopBar (root z-50). Stay
-   position:relative without z-index so the drawers compete with TopBar
-   at the root stacking level. */
+   that would trap fixed-position drawers (SettingsEditDrawer, ProfilePanel)
+   below the fixed NavPane (z 50). */
 .animarr-main {
-    padding: 96px 24px 24px;   /* 60 topbar + 36 breathing — was tight on tabs */
+    margin-left: var(--nav-cur);
+    padding: var(--main-pad-top) var(--main-pad-x) 48px;
     position: relative;
+    min-height: 100vh;
+    box-sizing: border-box;
+    background: var(--layer);
+    transition: margin-left var(--motion-base);
 }
 
 @media (max-width: 959px) {
     .animarr-main {
+        margin-left: 0;
         /* d-mobile-nav (56px) is in-flow; no fixed-element clearance needed.
            Bottom padding leaves room above the d-tabbar (78px). */
         padding: 14px 16px 96px;
@@ -98,7 +105,7 @@
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
     border-left: 3px solid var(--accent);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     padding: 12px 14px;
     color: var(--text);
     box-shadow: var(--shadow-modal);
@@ -116,7 +123,7 @@
 
 .ml-toast--success { border-left-color: var(--success); }
 .ml-toast--warning { border-left-color: var(--warn); }
-.ml-toast--error   { border-left-color: oklch(0.66 0.20 25); }
+.ml-toast--error   { border-left-color: var(--danger); }
 .ml-toast--info    { border-left-color: var(--info); }
 
 .ml-toast__msg { flex: 1; }

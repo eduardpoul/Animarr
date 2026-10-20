@@ -5,20 +5,26 @@
        content, not two heros at different scales. ~700px on a typical
        desktop. */
     height: clamp(480px, 75vh, 720px);
-    /* Negative margins exactly negate .animarr-main padding (96 top + 24 sides
-       on desktop, 14 + 16 on mobile) so the hero sits flush against the
-       transparent TopBar and reaches both viewport edges. Bottom margin keeps
-       the breathing room before the category strip / grid below.
-       No border-radius — straight bleed on every edge per user request. */
-    margin: -96px -24px var(--space-9);
+    /* A1: borderless — negative margins negate .animarr-main's padding so
+       the hero is flush with the content column's top and sides; artwork
+       dissolves into the page over --hero-fade, and (dark only) the next
+       rail slides up into the fade. Same ladder as .d-chero. */
+    --hero-fade: 160px;
+    margin: calc(-1 * var(--main-pad-top)) calc(-1 * var(--main-pad-x)) calc(48px - var(--hero-fade));
     overflow: hidden;
     border-radius: 0;
+}
+
+html[data-theme="light"] .d-hero {
+    margin-bottom: var(--space-7);
 }
 
 .d-hero__bg {
     position: absolute;
     inset: 0;
     z-index: 0;
+    -webkit-mask-image: linear-gradient(to top, transparent 0, #000 var(--hero-fade));
+    mask-image: linear-gradient(to top, transparent 0, #000 var(--hero-fade));
 }
 
 .d-hero__bg-img {
@@ -34,8 +40,8 @@
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(90deg, rgba(10, 8, 7, 0.85) 0%, transparent 55%),
-        linear-gradient(180deg, transparent 50%, rgba(10, 8, 7, 0.95) 100%),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.35) 40%, transparent 62%),
+        linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.6) 100%),
         radial-gradient(
             70% 50% at 12% 100%,
             oklch(0.66 0.20 var(--hue) / 0.30),
@@ -64,7 +70,8 @@
     position: absolute;
     inset: auto 0 0 0;
     z-index: 2;
-    padding: var(--space-9) var(--space-11) var(--space-11);
+    /* Bottom padding keeps the copy above the artwork's fade zone. */
+    padding: var(--space-9) 40px calc(var(--hero-fade) + 16px);
     display: flex;
     flex-direction: column;
     /* Explicit flex-start — overrides the legacy .d-hero__content rule in
@@ -92,7 +99,7 @@
        one surface that swaps content. */
     font-size: clamp(36px, 6vw, 56px);
     line-height: 1.05;
-    letter-spacing: -1px;
+    letter-spacing: 0;
     color: var(--text);
     text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
     margin: 0;
@@ -101,8 +108,8 @@
 .d-hero__meta {
     font-family: var(--font-mono);
     font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-dim);
     display: flex;
     /* CatalogV3 line 126: 22px gap, no inline separator dots. */
@@ -143,6 +150,7 @@
 /* ── Mobile / tablet — shrink hero. */
 @media (max-width: 959px) {
     .d-hero {
+        --hero-fade: 96px;
         height: clamp(400px, 54vh, 520px);
         /* Negate animarr-main's mobile top padding (which is now
            56px + safe-area-inset-top to clear the fixed mobile nav) +
@@ -151,7 +159,7 @@
         margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
     .d-hero__content {
-        padding: var(--space-6) var(--space-7) var(--space-7);
+        padding: var(--space-6) var(--space-7) calc(var(--hero-fade) + 8px);
         gap: var(--space-4);
         max-width: 100%;
     }

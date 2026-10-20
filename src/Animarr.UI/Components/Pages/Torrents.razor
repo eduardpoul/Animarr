@@ -608,6 +608,11 @@ else
     {
         await LoadAsync();
 
+        // NavPane's "+" next to Downloads lands here as ?add=1 — open the
+        // Add drawer straight away (it slides in from the right).
+        if (WantsAdd(Nav.Uri)) OpenAdd();
+        Nav.LocationChanged += OnLocationChangedForAdd;
+
         var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubTorrents);
         _hub = new HubConnectionBuilder()
             .WithUrl(hubUri)
@@ -967,7 +972,19 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        Nav.LocationChanged -= OnLocationChangedForAdd;
         if (_hub is not null) await _hub.DisposeAsync();
+    }
+
+    private static bool WantsAdd(string uri)
+        => new Uri(uri).Query.Contains("add=1", StringComparison.Ordinal);
+
+    // Same-page navigation (already on /downloads) doesn't re-init the
+    // component, so the NavPane quick-add is picked up here too.
+    private void OnLocationChangedForAdd(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!WantsAdd(e.Location) || _addOpen) return;
+        InvokeAsync(() => { OpenAdd(); StateHasChanged(); });
     }
 
     private static string FormatRate(long bps)

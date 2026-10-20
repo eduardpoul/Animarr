@@ -81,7 +81,7 @@
 .d-profile__head-name {
     font-family: var(--font-display);
     font-size: 20px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     color: var(--text);
     line-height: 1.15;
 }
@@ -90,7 +90,7 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
-    letter-spacing: 0.8px;
+    letter-spacing: 0;
     margin-top: 2px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -110,7 +110,7 @@
     place-items: center;
     flex-shrink: 0;
 }
-.d-profile__close:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
+.d-profile__close:hover { background: var(--ink-1); color: var(--text); }
 
 /* ── Tab strip ───────────────────────────────────────────── */
 /* v5: now FIVE tabs (Identity / Servers / Appearance / Audio / Language)
@@ -186,7 +186,7 @@
 
 .d-profile__mlist-row {
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 14px 16px;
@@ -202,7 +202,7 @@
 }
 .d-profile__mlist-row:hover,
 .d-profile__mlist-row:focus-visible {
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--ink-2);
     border-color: var(--border-strong);
 }
 .d-profile__mlist-ic {
@@ -224,7 +224,7 @@
     color: rgb(232, 88, 88);
     margin-top: 10px;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
 }
 .d-profile__mlist-row--danger:hover {
     background: rgba(232, 88, 88, 0.06);
@@ -244,7 +244,7 @@
     cursor: pointer;
     width: 40px; height: 40px;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     color: var(--text-dim);
     display: inline-grid;
@@ -252,7 +252,7 @@
     flex-shrink: 0;
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
-.d-profile__back:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); border-color: var(--border-strong); }
+.d-profile__back:hover { color: var(--text); background: var(--ink-3); border-color: var(--border-strong); }
 
 /* Root-level "back to main" arrow — sits to the LEFT of the avatar on the
    phone so the profile root has the same left-back affordance as its
@@ -321,8 +321,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .d-profile__select {
@@ -367,9 +367,9 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 12px;
 }
-.d-profile__kv-key { color: var(--text-faint); letter-spacing: 0.4px; }
+.d-profile__kv-key { color: var(--text-faint); letter-spacing: 0; }
 .d-profile__kv-val { color: var(--text); word-break: break-word; }
-.d-profile__kv-val--accent { color: var(--accent-hi); letter-spacing: 0.4px; }
+.d-profile__kv-val--accent { color: var(--accent-hi); letter-spacing: 0; }
 .d-profile__kv-val--dim    { color: var(--text-dim); }
 
 /* ── Deep-link row (Server settings entry above SIGN OUT) ──
@@ -403,7 +403,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     width: 32px;
     height: 32px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     color: var(--text-dim);
     display: grid;
@@ -430,7 +430,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
-    letter-spacing: 0.3px;
+    letter-spacing: 0;
     line-height: 1.3;
     word-break: break-word;
 }
@@ -456,7 +456,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -466,9 +466,9 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 .d-profile__signout:hover { background: oklch(0.74 0.20 25 / 0.10); }
 
 /* ── Accent swatches ────────────────────────────────────── */
-/* ── Theme picker grid (v5) ─────────────────────────────
-   10 personality themes laid out 2 per row with a preview
-   swatch + label. Click swaps instantly via JS interop. */
+/* ── Theme picker (Fluent 2) ────────────────────────────
+   Two options — dark / light — side by side, each a preview tile + label.
+   Click swaps instantly via JS interop. */
 .d-profile__theme-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -495,17 +495,18 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     background: var(--surface);
 }
 .d-profile__theme-card.is-active {
-    border-color: var(--accent-line);
-    background: linear-gradient(135deg, var(--accent-soft), transparent 60%), var(--bg-1);
+    border-color: var(--accent-hi);
+    box-shadow: inset 0 0 0 1px var(--accent-hi);
+    background: var(--accent-soft);
 }
 
 .d-profile__theme-card__preview {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: 10px;
-    background: var(--th-bg, #181c24);
-    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius-ctrl);
+    background: var(--th-bg, #202020);
+    border: 1px solid var(--border-strong);
     display: grid;
     place-items: center;
     overflow: hidden;
@@ -519,7 +520,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     right: 0; bottom: 0;
     width: 14px; height: 14px;
     background: var(--th-accent, #65b6c8);
-    border-top-left-radius: 6px;
+    border-top-left-radius: 4px;
 }
 
 .d-profile__theme-card__sample {
@@ -540,16 +541,17 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 
 .d-profile__swatches {
     display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
     margin-top: 6px;
 }
 
 .d-profile__swatch {
     appearance: none;
     cursor: pointer;
-    width: 36px;
-    height: 36px;
-    border-radius: 36px;
+    width: 32px;
+    height: 32px;
+    border-radius: 32px;
     border: 0;
     background: var(--swatch-color);
     transition: box-shadow var(--motion-fast), transform var(--motion-fast);
@@ -673,7 +675,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     flex-shrink: 0;
 }
 .d-profile__server-row__ic--dim {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--ink-2);
     border-color: var(--border);
     color: var(--text-dim);
 }
@@ -706,7 +708,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
-    letter-spacing: 0.3px;
+    letter-spacing: 0;
     line-height: 1.3;
     word-break: break-all;
 }
@@ -715,7 +717,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     flex-shrink: 0;
     text-transform: var(--label-casing, none);
 }
@@ -808,8 +810,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     padding: 0 10px;
     font-family: var(--font-mono);
     font-size: 9.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .d-profile__server-rename {
@@ -943,8 +945,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     line-height: 1.2;
     max-width: 76px;
     overflow: hidden;
@@ -1101,7 +1103,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 .d-profile__pager-card__stroke {
     display: block;
     height: 2px;
-    background: rgba(255,255,255,0.18);
+    background: var(--ink-4);
     border-radius: 2px;
 }
 .d-profile__pager-card__stroke.is-active { background: var(--accent); }
@@ -1147,7 +1149,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     width: 14px;
     height: 14px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.08);
+    background: var(--ink-2);
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 8.5px;
@@ -1180,8 +1182,8 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     font-size: 9px;
     font-weight: 600;
     color: var(--text);
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.10);
+    background: var(--ink-2);
+    border: 1px solid var(--ink-3);
     line-height: 1;
 }
 .d-profile__player-style-chip.is-primary {
@@ -1237,7 +1239,7 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
 .d-profile__hs-grip {
     font-size: 13px;
     color: var(--text-faint);
-    letter-spacing: -2px;
+    letter-spacing: 0;
     flex-shrink: 0;
 }
 .d-profile__hs-name {
@@ -1311,4 +1313,43 @@ html.tv-mode .d-profile__desktop-actions { display: block; }
     border-color: var(--accent);
     background: var(--accent);
     box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+/* Free hue slider under the swatches — the track previews the whole wheel. */
+.d-profile__hue {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+}
+.d-profile__hue-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(90deg,
+        oklch(0.66 0.16 0), oklch(0.66 0.16 60), oklch(0.66 0.16 120),
+        oklch(0.66 0.16 180), oklch(0.66 0.16 240), oklch(0.66 0.16 300),
+        oklch(0.66 0.16 359));
+    outline-offset: 4px;
+}
+.d-profile__hue-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 4px solid var(--accent);
+    box-shadow: var(--shadow-4);
+    cursor: pointer;
+}
+.d-profile__hue-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 4px solid var(--accent);
+    box-shadow: var(--shadow-4);
+    cursor: pointer;
 }

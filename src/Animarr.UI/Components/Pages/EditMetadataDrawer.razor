@@ -40,7 +40,7 @@
                 <div class="emd__header-icon"><DIcon Name="pencil" Size="18" /></div>
             }
             <div class="emd__header-text">
-                <div class="emd__overline">@(_mobileShowingDetail ? CurrentTabLabel.ToUpperInvariant() : L["edit_metadata.overline"])</div>
+                <div class="emd__overline">@(_mobileShowingDetail ? CurrentTabLabel : L["edit_metadata.overline"])</div>
                 <div class="emd__title">@Item.Title</div>
                 @if (!_mobileShowingDetail)
                 {

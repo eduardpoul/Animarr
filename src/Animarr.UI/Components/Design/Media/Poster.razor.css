@@ -98,8 +98,8 @@
     left: 8px;
     font-family: var(--font-mono);
     font-size: 9px;
-    letter-spacing: 1.4px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.55);
@@ -126,8 +126,8 @@
 .d-poster__title {
     font-family: var(--font-display);
     font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: -0.022em;
+    text-transform: none;
+    letter-spacing: 0;
     color: #fff;
     line-height: 1.05;
     text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
@@ -140,8 +140,8 @@
 .d-poster__meta {
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-dim);
     display: flex;
     gap: 4px;

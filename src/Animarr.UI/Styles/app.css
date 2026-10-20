@@ -28,28 +28,21 @@
    shadow-card, font-display, etc. work.
    ──────────────────────────────────────────────────────── */
 @theme {
-    /* Font tokens — default (Quietude) values.
+    /* Font tokens — Fluent 2 (Segoe UI Variable).
 
        Tailwind v4's @theme block emits these as a `:root, :host` rule
        that lands in the compiled output AFTER tokens.css's `:root`
        block AND AFTER `@import "tailwindcss/theme"`. The latter sets
        Tailwind's own default --font-mono = ui-monospace, which would
-       otherwise wipe out our 'Hanken Grotesk'. Keeping the literals
-       here ensures the default typography survives the cascade.
+       otherwise wipe out our UI face. Keeping the literals here ensures
+       the default typography survives the cascade.
 
-       These MUST stay in sync with tokens.css's :root font tokens —
-       the app's display + mono identity is Hanken Grotesk (the old
-       Cinematic 'Geist' / 'Archivo Black' gamer/digital look is now
-       retired; Cinematic itself maps to Hanken in tokens.css too).
-
-       Theme overrides for non-default palettes live in
-       Styles/themes/<name>.css. To beat this @theme's
-       :root,:host output (specificity 0,0,1,0) they must use
-       `html[data-theme="<name>"]` (specificity 0,0,1,1). Same trick
-       applied to the Cinematic block in tokens.css. */
-    --font-ui:      'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-display: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-mono:    'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+       These MUST stay in sync with tokens.css's :root font tokens.
+       The light theme overrides tokens with `html[data-theme="light"]`
+       (0,1,1) so it beats this block's `:root, :host` output. */
+    --font-ui:      'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-cjk:     'Noto Serif SC', 'Noto Serif JP', serif;
 
     /* Backgrounds → bg-page, bg-panel, bg-surface, bg-surface-2, bg-surface-3 */
@@ -88,20 +81,21 @@
        value AND every consumer falls back to 0 (initial border-radius). The
        result: the entire app rendered with sharp corners. Keep these in sync
        with tokens.css. */
-    --radius-badge:    6px;
-    --radius-ctrl:     8px;
-    --radius-chip:    10px;
-    --radius-card:    12px;
-    --radius-card-lg: 14px;
-    --radius-panel:   16px;
-    --radius-hero:    20px;
-    --radius-modal:   24px;
+    --radius-badge:    4px;
+    --radius-ctrl:     4px;
+    --radius-chip:     4px;
+    --radius-card:     8px;
+    --radius-card-lg:  8px;
+    --radius-panel:    8px;
+    --radius-hero:     8px;
+    --radius-modal:    8px;
 
-    /* Shadows — literal values for the same reason. */
-    --shadow-card:    0 10px 30px -16px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04);
-    --shadow-card-hi: 0 14px 36px -14px rgba(0,0,0,0.78), inset 0 0 0 1px rgba(255,255,255,0.06);
-    --shadow-modal:   0 40px 80px -20px rgba(0,0,0,0.7);
-    --shadow-drawer:  -30px 0 60px -20px rgba(0,0,0,0.6);
+    /* Shadows — point at the Fluent elevation steps in tokens.css (not
+       self-references, so no cycle); the light theme re-tints the steps. */
+    --shadow-card:    var(--shadow-4);
+    --shadow-card-hi: var(--shadow-8);
+    --shadow-modal:   var(--shadow-64);
+    --shadow-drawer:  var(--shadow-64);
 
     /* Fixed shell dimensions */
     --width-sidebar: 230px;
@@ -119,18 +113,6 @@
    episode cards, etc.) plus mobile responsive breakpoints. ─── */
 @import "./components.css";
 
-/* ── Personality themes (v5). Each file overrides design tokens
-   via [data-theme="<name>"]. Order doesn't matter — only one block
-   is ever active because data-theme is a single attribute. The
-   default look (no data-theme) is Quietude from tokens.css. ─── */
-@import "./themes/terminal.css";
-@import "./themes/anime.css";
-@import "./themes/ember-edge.css";
-@import "./themes/mountain-sect.css";
-@import "./themes/immortal-path.css";
-@import "./themes/heavens-defiance.css";
-@import "./themes/ink-and-paper.css";
-@import "./themes/cyberpunk.css";
 
 /* ── Base resets ──────────────────────────────────────── */
 @layer base {
@@ -172,8 +154,8 @@
 
     h1, h2, h3, h4, h5, h6 {
         font-family: var(--font-display);
-        font-weight: normal;
-        letter-spacing: -0.02em;
+        font-weight: 600;
+        letter-spacing: 0;
         color: var(--text);
         margin: 0;
     }
@@ -255,8 +237,8 @@
         font-size: 11px;
         font-weight: 600;
         font-style: normal;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
+        text-transform: none;
+        letter-spacing: 0;
     }
 
     /* Buttons without an explicit class still pick up the d-btn--solid look
@@ -290,21 +272,21 @@
         font-family: var(--font-display);
         font-size: clamp(72px, 8vw, 120px);
         line-height: 0.87;
-        letter-spacing: -0.022em;
-        text-transform: uppercase;
+        letter-spacing: 0;
+        font-weight: 600;
     }
     .text-display-l {
         font-family: var(--font-display);
         font-size: 44px;
         line-height: 0.95;
-        letter-spacing: -0.018em;
-        text-transform: uppercase;
+        letter-spacing: 0;
+        font-weight: 600;
     }
     .text-display-m {
         font-family: var(--font-display);
         font-size: 22px;
         line-height: 1.1;
-        letter-spacing: -0.018em;
+        letter-spacing: 0;
     }
     .text-body {
         font-family: var(--font-ui);
@@ -320,8 +302,6 @@
         font-family: var(--font-mono);
         font-size: 11.5px;
         line-height: 1.4;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
         color: var(--text-dim);
     }
 

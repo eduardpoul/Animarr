@@ -18,7 +18,7 @@
     border-radius: 8px;
     min-width: 0;
 }
-.tft__row:hover { background: rgba(255, 255, 255, 0.04); }
+.tft__row:hover { background: var(--ink-1); }
 .tft__row--skip .tft__name { opacity: 0.45; text-decoration: line-through; }
 
 /* Per-file download progress — a subtle left-anchored fill spanning the full

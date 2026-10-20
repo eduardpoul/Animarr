@@ -11,8 +11,8 @@
     color: var(--text-dim);
     font-family: var(--font-mono);
     font-size: 11.5px;
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .d-dots {

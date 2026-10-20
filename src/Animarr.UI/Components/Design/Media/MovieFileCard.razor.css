@@ -162,15 +162,15 @@ button.d-mfc__chip--eye:hover { transform: scale(1.08); }
 .d-mfc__overline {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 1.4px;
+    letter-spacing: 0;
     color: var(--accent-hi);
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .d-mfc__title {
     font-family: var(--font-display);
     font-size: 26px;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     line-height: 1.1;
     color: var(--text);
     margin: 0;
@@ -205,9 +205,9 @@ button.d-mfc__chip--eye:hover { transform: scale(1.08); }
 .d-mfc__cell-k {
     font-family: var(--font-mono);
     font-size: 9.5px;
-    letter-spacing: 1.1px;
+    letter-spacing: 0;
     color: var(--text-faint);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-mfc__cell-v {
     font-family: var(--font-mono);

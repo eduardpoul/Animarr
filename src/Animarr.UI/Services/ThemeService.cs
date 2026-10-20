@@ -18,14 +18,13 @@ public enum ThemeMode
 /// property on document.documentElement; Settings page reflects the
 /// active swatch).
 ///
-/// Accent is hue-degree based per CANVAS §01.2. The five canonical presets
-/// (crimson 25, amber 75, green 150, blue 240, violet 300) drive every
-/// <c>oklch(L C var(--accent-hue))</c> rule throughout the stylesheet — a
-/// single CSS variable swap rotates the entire palette without re-bundling.
+/// Accent is hue-degree based: every <c>oklch(L C var(--accent-hue))</c> rule in
+/// Styles/tokens.css reads it, so a single CSS variable swap recolors the
+/// whole UI (both themes) without re-bundling.
 /// </summary>
 public sealed class ThemeService
 {
-    public const int DefaultHue = 25; // crimson
+    public const int DefaultHue = 50; // orange — Animarr's default accent
 
     public ThemeMode Mode { get; private set; } = ThemeMode.System;
     public int AccentHue { get; private set; } = DefaultHue;

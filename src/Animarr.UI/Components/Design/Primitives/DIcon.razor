@@ -1,12 +1,19 @@
 @*
-    Inline stroke-based icon (Design Icon — DIcon to avoid name clash with
+    Inline icon (Design Icon — DIcon to avoid name clash with
     Microsoft.FluentUI.AspNetCore.Components.Icon used in legacy pages).
-    Source-of-truth = design_handoff_animarr/components.jsx::Icon.
-    Stroke uses currentColor — color via CSS, not parameter.
+    Fluent 2: names mapped in FluentIconPaths render the Fluent System Icon
+    (20px grid, filled path, currentColor). Names without a Fluent glyph
+    (e.g. github) fall back to the original stroke drawings below.
 
     Use:  <DIcon Name="search" Size="16" />
 *@
 
+@if (FluentIconPaths.Map.TryGetValue(Name, out var fluentPath))
+{
+    <svg @attributes="@F"><path d="@fluentPath" /></svg>
+}
+else
+{
 @switch (Name)
 {
     case "catalog":   <svg @attributes="@P"><rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /></svg> break;
@@ -75,6 +82,7 @@
     case "stats":     <svg @attributes="@P"><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-7" /><path d="M22 20H2" /></svg> break;
     default:          <span class="design-icon-missing" title="Unknown icon: @Name">?</span> break;
 }
+}
 
 @code {
     [Parameter] public string Name { get; set; } = "";
@@ -98,6 +106,25 @@
                 ["stroke-width"]     = Stroke,
                 ["stroke-linecap"]   = "round",
                 ["stroke-linejoin"]  = "round",
+            };
+            if (Extra is not null) foreach (var kv in Extra) d[kv.Key] = kv.Value;
+            return d;
+        }
+    }
+
+    private Dictionary<string, object> F
+    {
+        get
+        {
+            var d = new Dictionary<string, object>
+            {
+                ["xmlns"]       = "http://www.w3.org/2000/svg",
+                ["width"]       = Size,
+                ["height"]      = Size,
+                ["viewBox"]     = "0 0 20 20",
+                ["fill"]        = "currentColor",
+                ["aria-hidden"] = "true",
+                ["focusable"]   = "false",
             };
             if (Extra is not null) foreach (var kv in Extra) d[kv.Key] = kv.Value;
             return d;

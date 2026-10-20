@@ -12,7 +12,7 @@
     font-family: var(--font-display);
     font-size: 22px;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     text-transform: none;
     color: var(--text);
 }
@@ -82,8 +82,8 @@
     padding: 3px 8px;
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     border-radius: var(--radius-badge);
     color: #0f1115;
     background: var(--accent-hi);

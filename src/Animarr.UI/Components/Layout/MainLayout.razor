@@ -2,12 +2,14 @@
     MainLayout (v4) — default layout for authenticated routes.
 
     Composition:
-      • Backdrop layer (fanart slideshow + vignette + hue tint)
-      • TopBar.razor (desktop ≥ 960px)
+      • Backdrop layer (fanart slideshow + vignette + hue tint) — the
+        Fluent "Mica" the NavPane and pages sit on
+      • NavPane.razor (desktop ≥ 960px) — Fluent nav drawer; owns search,
+        sections, folders, downloads, server settings, AI status + profile
       • MobileShell.razor (< 960px, top strip + bottom tabbar)
       • <main> body
       • ProfilePanel drawer (Phase 4 — stub for now)
-      • LLMStatusPopup (anchored top-right under TopBar)
+      • LLMStatusPopup (anchored bottom-left next to the NavPane AI item)
       • Toast stack (bottom-right)
 
     Boots /api/auth/status + /api/me on first render through
@@ -44,15 +46,13 @@
         <div class="animarr-backdrop__hue-tint" aria-hidden="true"></div>
     </div>
 
-    <div class="film-grain"></div>
-
     @if (UserCtx.Loaded && UserCtx.IsAuthenticated)
     {
-        <TopBar ActiveDownloads="_activeDownloads"
-                LlmDone="_llmDone" LlmTotal="_llmTotal"
-                FolderNames="@_folderNames"
-                OnProfileClickEvent="@(() => OpenProfile(null))"
-                OnLlmClickEvent="@(() => _llmOpen = true)" />
+        <NavPane ActiveDownloads="_activeDownloads"
+                 LlmDone="_llmDone" LlmTotal="_llmTotal"
+                 FolderNames="@_folderNames"
+                 OnProfileClickEvent="@(() => OpenProfile(null))"
+                 OnLlmClickEvent="@(() => _llmOpen = !_llmOpen)" />
 
         <MobileShell ActiveDownloads="_activeDownloads"
                      OnProfileClickEvent="@(() => _profileOpen = true)" />

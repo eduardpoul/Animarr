@@ -65,11 +65,11 @@
     align-items: center;
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     padding: 3px 7px;
     border-radius: var(--radius-badge);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     color: var(--text-dim);
     border: 1px solid var(--border);
 }

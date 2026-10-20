@@ -4,18 +4,21 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    height: 36px;
-    padding: 0 14px;
+    height: 32px;
+    padding: 0 10px;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--stroke-ctrl);
+    border-bottom-color: var(--stroke-ctrl-acc);
     border-radius: var(--radius-ctrl);
     color: var(--text-dim);
     box-sizing: border-box;
     transition: border-color var(--motion-base);
 }
 
+/* Fluent focus: the bottom edge becomes a 2px accent underline. */
 .d-input:focus-within {
-    border-color: var(--accent-line);
+    border-bottom-color: var(--accent-hi);
+    box-shadow: inset 0 -1px 0 var(--accent-hi);
     color: var(--text);
 }
 
@@ -26,9 +29,10 @@
     border: 0;
     outline: 0;
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text);
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-1);
 }
 
 .d-input__field::placeholder {
@@ -67,10 +71,11 @@
 .d-input-group .d-input { width: 100%; }
 
 .d-input-group__label {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: var(--label-tracking, 0.4px);
-    color: var(--text-faint);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    letter-spacing: 0;
+    color: var(--text);
     /* v5 Quietude default — sentence case. Other themes (Cinematic /
        Terminal / Mountain Sect) override --label-casing to uppercase. */
     text-transform: var(--label-casing, none);

@@ -61,7 +61,7 @@
                 @if (item.Year is not null) { <span>@item.Year</span> }
                 @if (item.EpisodeCount is > 0) { <span>@item.EpisodeCount @L["catalog_hero.episode_count_short"]</span> }
                 @if (!string.IsNullOrEmpty(item.Studio)) { <span>@item.Studio</span> }
-                @if (!string.IsNullOrEmpty(item.Language)) { <span>@item.Language.ToUpperInvariant()</span> }
+                @if (!string.IsNullOrEmpty(item.Language)) { <span>@item.Language</span> }
             </div>
 
             @if (!string.IsNullOrEmpty(item.Description))
@@ -305,7 +305,7 @@
     {
         // Limit to 3 tags; the DTO already deserialises the JSON column into
         // a string[] for us so we don't parse a second time.
-        foreach (var t in item.Tags.Take(3)) yield return t.ToUpperInvariant();
+        foreach (var t in item.Tags.Take(3)) yield return t;
     }
 
     public void Dispose()

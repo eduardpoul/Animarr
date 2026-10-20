@@ -684,7 +684,7 @@ internal static class AuthEndpoints
         p.AudioPassthrough,
         p.NormalizeVolume,
         p.Language,
-        p.Theme,
+        ValidateTheme(p.Theme),
         p.HeroPagerStyle,
         p.ThemeMusicEnabled,
         p.ThemeMusicVolume,
@@ -713,17 +713,15 @@ internal static class AuthEndpoints
         catch { return null; }
     }
 
-    // Whitelist of valid theme slugs — must match the [data-theme] keys in
-    // Styles/themes/*.css. Unknown slugs fall back to "quietude" so a stale
-    // client can't write a value that breaks the cascade.
-    private static readonly HashSet<string> ValidThemes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "quietude", "cinematic", "terminal", "anime",
-        "ember-edge", "mountain-sect", "immortal-path",
-        "heavens-defiance", "ink-and-paper", "cyberpunk",
-    };
-    private static string ValidateTheme(string t)
-        => ValidThemes.Contains(t) ? t.ToLowerInvariant() : "quietude";
+    // Fluent 2 redesign: exactly two themes, "dark" and "light" (the
+    // <html data-theme> keys in Styles/tokens.css). The v5 personality slugs
+    // still stored in older rows / sent by stale clients collapse onto them:
+    // the paper-white "ink-and-paper" → light, everything else → dark.
+    private static string ValidateTheme(string? t)
+        => string.Equals(t, "light", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(t, "ink-and-paper", StringComparison.OrdinalIgnoreCase)
+            ? "light"
+            : "dark";
 
     private static readonly HashSet<string> ValidPagerStyles = new(StringComparer.OrdinalIgnoreCase) { "f", "g", "h" };
     private static string ValidatePagerStyle(string s)

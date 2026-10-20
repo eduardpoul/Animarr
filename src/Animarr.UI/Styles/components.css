@@ -146,8 +146,8 @@ button.d-pill:focus-visible {
     font-size: 9.5px;
     color: var(--text-faint);
     padding: 8px 10px 6px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .sb-llm {
@@ -174,8 +174,8 @@ button.d-pill:focus-visible {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .sb-llm__meta {
     font-family: var(--font-mono);
@@ -185,7 +185,7 @@ button.d-pill:focus-visible {
 }
 .sb-llm__progress {
     height: 4px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--ink-1);
     border-radius: 4px;
     margin-top: 10px;
     overflow: hidden;
@@ -325,7 +325,7 @@ html.tv-mode .d-mobile-nav {
 .d-tabbar__label {
     font-size: 10.5px;
     font-weight: 500;
-    letter-spacing: 0.2px;
+    letter-spacing: 0;
 }
 .d-tabbar__item--active .d-tabbar__label { font-weight: 600; }
 
@@ -345,9 +345,9 @@ html.tv-mode .d-mobile-nav {
 .d-page-header__overline {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 1.4px;
+    letter-spacing: 0;
     color: var(--accent-hi);
-    text-transform: uppercase;
+    text-transform: none;
     margin-bottom: 8px;
 }
 .d-page-header__title {
@@ -355,17 +355,17 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-display);
     font-size: 38px;
     line-height: 0.95;
-    letter-spacing: -0.8px;
+    letter-spacing: 0;
     color: var(--text);
     /* Design title strings (TORRENTS, SETTINGS, EXPLORER, RENAME HISTORY) are
        always uppercase. Localised values (e.g. "Torrents", "Проводник") arrive
        mixed-case — uppercase here so the display is consistent regardless of
        whether the caller hand-types the title or pulls from L11n. */
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-page-header--big .d-page-header__title {
     font-size: 64px;
-    letter-spacing: -1.6px;
+    letter-spacing: 0;
 }
 .d-page-header__sub {
     color: var(--text-dim);
@@ -402,15 +402,15 @@ html.tv-mode .d-mobile-nav {
 .d-screen-header__overline {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 1.4px;
+    letter-spacing: 0;
     color: var(--accent-hi);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-screen-header__title {
     margin: 6px 0 0;
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
 }
 
 /* ====== §4 Primitives ======
@@ -429,8 +429,8 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .d-field__hint {
     font-size: 11.5px;
@@ -617,8 +617,8 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .d-kpi__value {
     font-family: var(--font-display);
@@ -745,7 +745,7 @@ html.tv-mode .d-mobile-nav {
     line-height: 0.85;
     writing-mode: vertical-rl;
     text-orientation: upright;
-    letter-spacing: 6px;
+    letter-spacing: 0;
     user-select: none;
     pointer-events: none;
     animation: hero-cjk-in 1.4s ease forwards;
@@ -775,10 +775,10 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-display);
     font-size: 120px;
     line-height: 0.86;
-    letter-spacing: -3.8px;
+    letter-spacing: 0;
     color: #fff;
     text-shadow: 0 4px 30px rgba(0,0,0,0.6);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-hero__meta {
     display: flex;
@@ -787,7 +787,7 @@ html.tv-mode .d-mobile-nav {
     margin-top: 20px;
     font-family: var(--font-mono);
     font-size: 12px;
-    letter-spacing: 1px;
+    letter-spacing: 0;
     color: var(--text-dim);
     flex-wrap: wrap;
 }
@@ -832,7 +832,7 @@ html.tv-mode .d-mobile-nav {
 .d-hero__pager-item--active { color: var(--accent-hi); }
 .d-hero__pager-tick {
     width: 14px; height: 2px;
-    background: rgba(255,255,255,0.18);
+    background: var(--ink-4);
     transition: width var(--motion-base), background var(--motion-base);
 }
 .d-hero__pager-item--active .d-hero__pager-tick {
@@ -852,7 +852,7 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     margin-left: auto;
 }
 
@@ -868,9 +868,9 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 1px;
+    letter-spacing: 0;
     margin-right: 4px;
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-folder-chip {
     appearance: none;
@@ -879,7 +879,7 @@ html.tv-mode .d-mobile-nav {
     border-radius: 999px;
     font-size: 11.5px;
     font-weight: 600;
-    letter-spacing: 0.2px;
+    letter-spacing: 0;
     color: var(--text-dim);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -911,7 +911,7 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
 }
 .d-nr-badge::after {
     content: "";
@@ -966,12 +966,12 @@ html.tv-mode .d-mobile-nav {
     background: rgba(10,8,7,0.55);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.12);
+    border: 1px solid var(--ink-3);
     color: var(--text);
     font-size: 12.5px;
     font-weight: 600;
     font-family: var(--font-mono);
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     transition: background var(--motion-base), border-color var(--motion-base);
 }
 .d-md-hero__btn--back { left: 40px; }
@@ -998,10 +998,10 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-display);
     font-size: 96px;
     line-height: 0.88;
-    letter-spacing: -3px;
+    letter-spacing: 0;
     color: #fff;
     text-shadow: 0 4px 30px rgba(0,0,0,0.6);
-    text-transform: uppercase;
+    text-transform: none;
     max-width: 1400px;
 }
 .d-md-hero__meta {
@@ -1012,7 +1012,7 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-dim);
-    letter-spacing: 0.8px;
+    letter-spacing: 0;
 }
 .d-md-hero__rating { color: var(--accent-hi); font-weight: 700; font-size: 13px; }
 .d-md-hero__match--ok   { color: var(--success); }
@@ -1030,10 +1030,10 @@ html.tv-mode .d-mobile-nav {
 .d-md-body__section-label {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 1.4px;
+    letter-spacing: 0;
     color: var(--accent-hi);
     margin-bottom: 12px;
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 /* Identification card — list of source IDs with confidence per row. */
@@ -1046,10 +1046,10 @@ html.tv-mode .d-mobile-nav {
 .d-ident__label {
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 1.2px;
+    letter-spacing: 0;
     color: var(--text-faint);
     margin-bottom: 12px;
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-ident__row {
     display: flex;
@@ -1063,9 +1063,9 @@ html.tv-mode .d-mobile-nav {
     width: 38px;
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.8px;
+    letter-spacing: 0;
     color: var(--text-dim);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .d-ident__id {
     flex: 1;
@@ -1103,7 +1103,7 @@ html.tv-mode .d-mobile-nav {
 .d-section-divider__title {
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     margin: 0;
 }
 .d-section-divider__rule {
@@ -1242,8 +1242,8 @@ html.tv-mode .d-mobile-nav {
     color: var(--warn);
     font-family: var(--font-mono);
     font-size: 9px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     gap: 3px;
 }
 
@@ -1284,8 +1284,8 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 9px;
     color: var(--text-faint);
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .tor-stats__value {
     font-family: var(--font-display);
@@ -1314,9 +1314,9 @@ html.tv-mode .d-mobile-nav {
     border-bottom: 1px solid var(--border);
     font-family: var(--font-mono);
     font-size: 9.5px;
-    letter-spacing: 1.2px;
+    letter-spacing: 0;
     color: var(--text-faint);
-    text-transform: uppercase;
+    text-transform: none;
 }
 .tor-row {
     display: grid;
@@ -1329,7 +1329,7 @@ html.tv-mode .d-mobile-nav {
     position: relative;
     transition: background var(--motion-base);
 }
-.tor-row:hover { background: rgba(255,255,255,0.025); }
+.tor-row:hover { background: var(--ink-1); }
 .tor-row:last-child { border-bottom: 0; }
 .tor-row__name {
     display: flex;
@@ -1367,7 +1367,7 @@ html.tv-mode .d-mobile-nav {
 .tor-row__dest--unmatched { color: var(--warn); }
 .tor-row__bar {
     height: 4px;
-    background: rgba(255,255,255,0.05);
+    background: var(--ink-1);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -1381,7 +1381,7 @@ html.tv-mode .d-mobile-nav {
     background: linear-gradient(90deg, var(--success), oklch(0.85 0.15 150));
     box-shadow: none;
 }
-.tor-row__bar-fill--idle { background: rgba(255,255,255,0.2); box-shadow: none; }
+.tor-row__bar-fill--idle { background: var(--ink-4); box-shadow: none; }
 .tor-row__pct {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -1465,7 +1465,7 @@ html.tv-mode .d-mobile-nav {
     text-align: left;
     transition: background var(--motion-base), color var(--motion-base);
 }
-.settings-tabs__item:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.settings-tabs__item:hover { color: var(--text); background: var(--ink-1); }
 .settings-tabs__item--active {
     color: var(--text);
     background: var(--surface-3);
@@ -1485,8 +1485,8 @@ html.tv-mode .d-mobile-nav {
     margin: 0;
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .settings-card__sub {
     color: var(--text-dim);
@@ -1615,8 +1615,8 @@ html.tv-mode .d-mobile-nav {
 .hist-date__label {
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .hist-date__rule { flex: 1; height: 1px; background: var(--border); }
 .hist-date__count {
@@ -1735,13 +1735,13 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--accent-hi);
-    letter-spacing: 1.4px;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .d-drawer__header-title {
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
     margin-top: 4px;
     line-height: 1.1;
 }
@@ -1852,7 +1852,7 @@ html.tv-mode .d-mobile-nav {
     width: 36px;
     height: 4px;
     border-radius: 4px;
-    background: rgba(255,255,255,0.18);
+    background: var(--ink-4);
 }
 .d-sheet__body {
     flex: 1;
@@ -1941,7 +1941,7 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     text-align: center;
     margin-top: 6px;
 }
@@ -1980,7 +1980,7 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 9px;
     color: #fff;
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     text-shadow: 0 1px 4px rgba(0,0,0,0.7);
 }
 
@@ -1996,7 +1996,7 @@ html.tv-mode .d-mobile-nav {
     padding: 6px 8px 6px 10px;
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
 }
 .emd__tag-x {
     appearance: none;
@@ -2036,7 +2036,7 @@ html.tv-mode .d-mobile-nav {
     width: 28px; height: 28px;
     flex-shrink: 0;
     border-radius: 6px;
-    background: rgba(255,255,255,0.05);
+    background: var(--ink-1);
     color: var(--text-dim);
     display: grid;
     place-items: center;
@@ -2162,8 +2162,8 @@ html.tv-mode .d-mobile-nav {
         align-items: flex-start;
         gap: 14px;
     }
-    .d-page-header__title { font-size: 30px; letter-spacing: -0.4px; }
-    .d-page-header--big .d-page-header__title { font-size: 44px; letter-spacing: -0.8px; }
+    .d-page-header__title { font-size: 30px; letter-spacing: 0; }
+    .d-page-header--big .d-page-header__title { font-size: 44px; letter-spacing: 0; }
     .d-page-header__right { width: 100%; flex-wrap: wrap; }
     /* Pin the back chip to the TOP of the header (a constant distance below the
        logo) instead of vertically centring it. Centred, it slid up/down with
@@ -2199,7 +2199,7 @@ html.tv-mode .d-mobile-nav {
         flex-direction: column;
         align-items: stretch;
     }
-    .d-hero__title { font-size: 60px; letter-spacing: -1.6px; }
+    .d-hero__title { font-size: 60px; letter-spacing: 0; }
     .d-hero__cjk   { font-size: 200px; right: -10px; top: 20px; }
     .d-hero__pager { flex-direction: row; padding-bottom: 0; }
     .d-hero__pager-tick { width: 14px; }
@@ -2221,7 +2221,7 @@ html.tv-mode .d-mobile-nav {
         gap: 18px;
     }
     .d-md-hero__poster { width: 160px; }
-    .d-md-hero__title  { font-size: 48px; letter-spacing: -1.2px; }
+    .d-md-hero__title  { font-size: 48px; letter-spacing: 0; }
 
     /* Drawer becomes full-width sheet-like (still side-anchored on tablet). */
     .d-drawer    { width: 100%; max-width: 100%; }
@@ -2375,7 +2375,7 @@ html.tv-mode .d-mobile-nav {
     /* Hero — even smaller, single button row scrolls. */
     .d-hero--fullbleed,
     .d-hero--v3   { height: 460px; min-height: 380px; }
-    .d-hero__title { font-size: 38px; letter-spacing: -1.2px; }
+    .d-hero__title { font-size: 38px; letter-spacing: 0; }
     .d-hero__overview { font-size: 13.5px; }
     .d-hero__actions { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
     .d-hero__meta { gap: 12px; font-size: 10.5px; }
@@ -2383,7 +2383,7 @@ html.tv-mode .d-mobile-nav {
     .d-md-hero { height: 540px; min-height: 420px; }
     .d-md-hero__row { flex-direction: column; align-items: flex-start; bottom: 22px; gap: 14px; }
     .d-md-hero__poster { width: 110px; }
-    .d-md-hero__title  { font-size: 26px; letter-spacing: -0.6px; }
+    .d-md-hero__title  { font-size: 26px; letter-spacing: 0; }
     .d-md-body { padding: 24px 14px 8px; gap: 22px; }
 
     /* Drawers become full-screen sheets (slide up from bottom). */
@@ -2486,8 +2486,8 @@ html.tv-mode .d-mobile-nav {
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 .settings-field__label--inline {
     font-size: 13px;
@@ -2598,7 +2598,7 @@ html.tv-mode .d-mobile-nav {
 .settings-section > h2 {
     font-family: var(--font-display);
     font-size: 20px;
-    letter-spacing: -0.3px;
+    letter-spacing: 0;
     color: var(--text);
     margin: 0 0 var(--space-2);
     text-transform: var(--label-casing, none);
@@ -2630,7 +2630,7 @@ html.tv-mode .d-mobile-nav {
     margin: 0;
     font-family: var(--font-display);
     font-size: 20px;
-    letter-spacing: -0.3px;
+    letter-spacing: 0;
     color: var(--text);
     text-transform: var(--label-casing, none);
 }
@@ -2699,7 +2699,7 @@ html.tv-mode .d-mobile-nav {
     color: var(--text-faint);
     font-size: 13px;
     font-family: var(--font-mono);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
 }
 
 @media (max-width: 959px) {
@@ -2763,13 +2763,13 @@ html.animarr-tv-host .catalog-grid {
     border-radius: 10px;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     color: var(--text-dim);
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
 .d-page-back:hover {
-    background: rgba(255, 255, 255, 0.09);
+    background: var(--ink-3);
     border-color: var(--border-strong);
     color: var(--text);
 }
@@ -2829,7 +2829,7 @@ html.animarr-tv-host .catalog-grid {
 .d-srv-card__title {
     font-family: var(--font-display);
     font-size: 20px;
-    letter-spacing: -0.3px;
+    letter-spacing: 0;
     color: var(--text);
     margin: 0;
     line-height: 1.2;
@@ -2953,9 +2953,9 @@ html.animarr-tv-host .catalog-grid {
     font-size: 12.5px;
 }
 .settings-llm-gpu__badge {
-    text-transform: uppercase;
+    text-transform: none;
     font-size: 10.5px;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 999px;
@@ -3031,7 +3031,7 @@ html.animarr-tv-host .catalog-grid {
 }
 .settings-llm-models__label {
     font-size: 10.5px;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     color: var(--text-faint);
     margin-bottom: 2px;
 }
@@ -3163,8 +3163,8 @@ table.d-table thead th {
     text-align: left;
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-faint);
     padding: var(--space-3) var(--space-5);
     background: var(--bg-1);
@@ -3218,14 +3218,14 @@ table.d-table tbody td code {
     position: absolute;
     top: 22px; left: 22px;
     appearance: none;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--ink-1);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 7px 14px;
     color: var(--text-dim);
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.6px;
+    letter-spacing: 0;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -3281,7 +3281,7 @@ table.d-table tbody td code {
 .d-setup__brand-name {
     font-family: var(--font-display);
     font-size: 18px;
-    letter-spacing: -0.3px;
+    letter-spacing: 0;
     line-height: 1;
     /* Themed casing: Cinematic / Terminal etc. opt into UPPERCASE. */
     text-transform: var(--label-casing, none);
@@ -3293,7 +3293,7 @@ table.d-table tbody td code {
     font-size: 10.5px;
     color: var(--text-faint);
     margin-top: 4px;
-    letter-spacing: 0.3px;
+    letter-spacing: 0;
 }
 
 .d-login__form,
@@ -3340,7 +3340,7 @@ table.d-table tbody td code {
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-faint);
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
     text-decoration: none;
 }
 .d-login__footer-link:hover,
@@ -3414,7 +3414,8 @@ table.d-table tbody td code {
    so the strip is a row of "—  —  —  ━  —" beneath the title. */
 .d-chero__pager {
     position: absolute;
-    inset: auto 0 var(--space-6) 0;
+    /* Sits just above the fade zone (A1) so the overlapping rail never covers it. */
+    inset: auto 0 calc(var(--hero-fade, 30px) - 16px) 0;
     z-index: 3;
     display: flex;
     justify-content: center;
@@ -3505,7 +3506,7 @@ table.d-table tbody td code {
    up on the hero's :hover so they don't compete with the title at rest. */
 .d-chero__pager-g {
     position: absolute;
-    inset: auto 0 var(--space-6) 0;
+    inset: auto 0 calc(var(--hero-fade, 30px) - 16px) 0;
     z-index: 3;
     display: flex;
     align-items: center;
@@ -3563,7 +3564,7 @@ table.d-table tbody td code {
 /* H variant — numbered pills + always-visible chevrons. */
 .d-chero__pager-h {
     position: absolute;
-    inset: auto var(--space-11) var(--space-6) var(--space-11);
+    inset: auto var(--space-11) calc(var(--hero-fade, 30px) - 16px) var(--space-11);
     z-index: 3;
     display: flex;
     align-items: center;
@@ -3640,3 +3641,13 @@ table.d-table tbody td code {
    prebuilt Tailwind output (wwwroot/app.css) until the next css:build
    regenerates it. */
 .d-tabbar { display: none !important; }
+
+
+/* ============================================================
+   Fluent 2 · A1 — rails slide over the hero's fade zone.
+   Home's sections must be positioned so they paint above the
+   (positioned, isolated) hero that precedes them in the DOM.
+   ============================================================ */
+.catalog-page > * {
+    position: relative;
+}

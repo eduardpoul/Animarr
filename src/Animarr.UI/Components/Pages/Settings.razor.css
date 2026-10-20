@@ -65,8 +65,8 @@
     margin: 0 0 6px;
     font-family: var(--font-display);
     font-size: 22px;
-    letter-spacing: -0.018em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text);
 }
 
@@ -138,7 +138,7 @@
 .llm-hero__title {
     font-family: var(--font-display);
     font-size: 14px;
-    letter-spacing: -0.018em;
+    letter-spacing: 0;
     color: var(--text);
 }
 
@@ -295,8 +295,8 @@
     font-family: var(--font-mono);
     font-size: 9.5px;
     color: var(--text-faint);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 /* Patterns: SRC pill / NAME / REGEX / SCOPE / PRIO / actions.
@@ -386,9 +386,9 @@
     margin: 0 0 8px;
     font-family: var(--font-display);
     font-size: 14px;
-    letter-spacing: -0.018em;
+    letter-spacing: 0;
     color: var(--text);
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .settings-subhead__hint {
@@ -434,8 +434,8 @@
     padding: 12px;
     margin-top: 12px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--ink-1);
+    border: 1px solid var(--ink-2);
 }
 .audio-sync-slider + .audio-sync-slider {
     /* Visual separation between the two channel blocks. */
@@ -463,8 +463,8 @@
     justify-content: center;
     padding: 6px 14px;
     border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--ink-3);
+    background: var(--ink-2);
     color: var(--text, #fff);
     font-size: 13px;
     font-weight: 500;
@@ -474,11 +474,11 @@
     white-space: nowrap;
 }
 .settings-btn:hover {
-    background: rgba(255, 255, 255, 0.10);
-    border-color: rgba(255, 255, 255, 0.20);
+    background: var(--ink-3);
+    border-color: var(--ink-4);
 }
 .settings-btn:active {
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--ink-4);
 }
 .settings-btn:focus-visible {
     outline: 2px solid var(--accent);
@@ -565,8 +565,8 @@
     align-items: start;
     padding: 12px 14px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--ink-1);
+    border: 1px solid var(--ink-2);
 }
 .hw-row--ok {
     background: rgba(120, 255, 180, 0.05);
@@ -710,8 +710,8 @@
 .ptest-panel__title {
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-faint);
     margin-bottom: 8px;
     font-weight: 600;
@@ -842,7 +842,7 @@
     margin: 0;
     font-family: var(--font-display);
     font-size: 18px;
-    letter-spacing: -0.018em;
+    letter-spacing: 0;
     color: var(--text);
 }
 
@@ -933,9 +933,9 @@
         gap: 4px 0;
     }
     .settings-readonly__key {
-        text-transform: uppercase;
+        text-transform: none;
         font-size: 10px;
-        letter-spacing: 0.1em;
+        letter-spacing: 0;
         margin-top: 4px;
     }
     .settings-readonly__val--dim { word-break: break-word; }
@@ -1022,7 +1022,7 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
-    letter-spacing: 0.3px;
+    letter-spacing: 0;
     margin-top: 2px;
     font-weight: 400;
 }
