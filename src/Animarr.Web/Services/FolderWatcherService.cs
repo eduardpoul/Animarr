@@ -190,6 +190,7 @@ public class FolderWatcherService(
                     EnableRaisingEvents = true,
                 };
                 dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
+                dirWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: false);
                 dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
             }
 
@@ -202,7 +203,7 @@ public class FolderWatcherService(
                 EnableRaisingEvents = true,
             };
             fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
-            fileWatcher.Renamed += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+            fileWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: true);
             fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
         }
 
@@ -383,6 +384,76 @@ public class FolderWatcherService(
             {
                 logger.LogError(ex, "Error auto-registering flat movie {Path}", filePath);
             }
+        });
+    }
+
+    /// <summary>
+    /// A child folder (or root-level video file) renamed inside a section. When
+    /// it was a registered title, re-point that row instead of orphaning it: the
+    /// row owns the MediaItem and, through it, every profile's watch history,
+    /// which the next orphan cleanup would cascade-delete while the new name got
+    /// registered as a fresh, unidentified title. Anything not yet registered is
+    /// handled like a new arrival ("New folder" → "Show", "ep.mkv.part" → "ep.mkv").
+    /// </summary>
+    private void OnChildRenamed(string oldPath, string newPath, Guid sectionId, bool isFile)
+    {
+        // A movie renamed away from a video extension isn't a movie any more —
+        // leave its row to the orphan cleanup.
+        if (isFile && !_videoExtensions.Contains(Path.GetExtension(newPath))) return;
+
+        _ = Task.Run(async () =>
+        {
+            Guid? movedId = null;
+            try
+            {
+                await _registerLock.WaitAsync();
+                try
+                {
+                    await using var db = await dbFactory.CreateDbContextAsync();
+                    var row = isFile
+                        ? await db.FolderWatchers.FirstOrDefaultAsync(f =>
+                            f.ParentSectionId == sectionId && f.SingleFilePath == oldPath)
+                        : await db.FolderWatchers.FirstOrDefaultAsync(f =>
+                            f.ParentSectionId == sectionId && !f.IsSection
+                            && f.SingleFilePath == null && f.Path == oldPath);
+                    var taken = isFile
+                        ? await db.FolderWatchers.AnyAsync(f => f.SingleFilePath == newPath)
+                        : await db.FolderWatchers.AnyAsync(f => f.Path == newPath);
+                    if (row is not null && !taken)
+                    {
+                        var oldName = isFile ? Path.GetFileNameWithoutExtension(oldPath) : Path.GetFileName(oldPath);
+                        var newName = isFile ? Path.GetFileNameWithoutExtension(newPath) : Path.GetFileName(newPath);
+                        if (isFile) row.SingleFilePath = newPath;
+                        else        row.Path = newPath;
+                        // Keep an auto-derived label in step; a user-edited one stays.
+                        if (row.Label == oldName) row.Label = newName;
+                        await db.SaveChangesAsync();
+                        movedId = row.Id;
+                    }
+                }
+                finally { _registerLock.Release(); }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error handling rename {Old} → {New}", oldPath, newPath);
+                return;
+            }
+
+            if (movedId is Guid id)
+            {
+                logger.LogInformation("Registered {Kind} renamed: {Old} → {New}",
+                    isFile ? "file" : "folder", oldPath, newPath);
+                if (!isFile)
+                {
+                    // Re-root the title's own watcher on the new path.
+                    try { await StopWatcherAsync(id); await StartWatcherAsync(id); }
+                    catch (Exception ex) { logger.LogWarning(ex, "Watcher restart failed for {Path}", newPath); }
+                }
+                return;
+            }
+
+            if (isFile) OnVideoFileCreated(newPath, sectionId);
+            else        OnDirectoryCreated(newPath, sectionId);
         });
     }
 
