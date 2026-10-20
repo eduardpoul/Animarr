@@ -509,7 +509,13 @@ public partial class PlayerPage : ContentPage
 
     private void DoSkip()
     {
-        if (_skipTarget > 0)
+        if (_skipTarget > 0 && _isDirectStream)
+        {
+            // Same as SeekBy: the remux pipe is unseekable (SeekTo snaps to 0, so
+            // "Skip intro" replayed the chunk) — re-request it at the target.
+            _ = StartStreamAsync((long)(_skipTarget * 1000), _maxHeight);
+        }
+        else if (_skipTarget > 0)
         {
             long rel = (long)(_skipTarget * 1000) - _streamBaseMs;
             if (rel < 0) rel = 0;
