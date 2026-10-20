@@ -20,7 +20,9 @@
 <PageTitle>Animarr</PageTitle>
 
 <div class="d-login">
-    <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
+    @* "Forgot PIN" arrives here with ?forgot=1 — back then returns to the
+       app root, whose gates route on (picker / home). *@
+    <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo(Forgot ? "/" : "/welcome"))">
         <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
     </button>
 
@@ -29,7 +31,7 @@
             <BrandMark Size="40" ExtraClass="d-login__brand-mark" />
             <div>
                 <div class="d-login__brand-name">Animarr</div>
-                <div class="d-login__brand-sub">@L["login.brand_sub"]</div>
+                <div class="d-login__brand-sub">@(Forgot ? L["login.forgot_pin_sub"] : L["login.brand_sub"])</div>
             </div>
         </header>
 
@@ -123,6 +125,12 @@
 </div>
 
 @code {
+    /// <summary>"Forgot PIN": the password sign-in also clears this account's
+    /// PIN on this device, and the mandatory "Set a PIN" step follows.</summary>
+    // String, not bool: Blazor's bool query binding rejects "?forgot=1".
+    [SupplyParameterFromQuery(Name = "forgot")] public string? ForgotParam { get; set; }
+    private bool Forgot => ForgotParam is "1" or "true" or "True";
+
     private string _username = "";
     private string _password = "";
     private string? _error;
@@ -166,7 +174,7 @@
                     "document.documentElement.classList.contains('tv-mode')");
                 if (isTv)
                 {
-                    Nav.NavigateTo("/pair", replace: true);
+                    Nav.NavigateTo(Forgot ? "/pair?forgot=1" : "/pair", replace: true);
                     return;
                 }
             }
@@ -184,7 +192,7 @@
         _loading = true;
         try
         {
-            var user = await Api.LoginAsync(new LoginRequest(_username, _password));
+            var user = await Api.LoginAsync(new LoginRequest(_username, _password, ResetDevicePin: Forgot));
             if (user is null)
             {
                 _error = L["login.error_wrong_credentials"];
@@ -192,12 +200,13 @@
                 return;
             }
             await UserCtx.RefreshMeAsync();
-            // Register this account on the device so it joins the switch picker.
-            try { await DeviceProfiles.EnsureAsync(user.Id); } catch { }
-            // Explicit sign-in already identified the user — don't bounce them
-            // through the native "who's watching" picker on the next render.
-            UserCtx.SwitchGatePassed = true;
-            Nav.NavigateTo("/", replace: true);
+            // The server registered this account as a profile of this device.
+            // An explicit sign-in identifies the user, so skip the startup
+            // picker — but a profile without a PIN here (first sign-in on this
+            // device, or "Forgot PIN") must set one before anything else.
+            await DeviceProfiles.RefreshAsync();
+            await DeviceProfiles.MarkGatePassedAsync();
+            Nav.NavigateTo(DeviceProfiles.CurrentUserNeedsPin ? "/set-pin" : "/", replace: true);
         }
         catch (Exception ex)
         {

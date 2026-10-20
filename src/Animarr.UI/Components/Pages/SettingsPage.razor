@@ -24,6 +24,7 @@
 @page "/server"
 @inject NavigationManager Nav
 @inject UserContextState UserCtx
+@inject DeviceProfilesState DeviceProfiles
 @implements IDisposable
 
 <PageTitle>Animarr</PageTitle>
@@ -247,7 +248,9 @@
 
     private async Task SignOut()
     {
+        // Sign-out also removes the profile from this device; other profiles
+        // still here → the "Who's watching" picker, else the welcome page.
         await UserCtx.SignOutAsync();
-        Nav.NavigateTo("/welcome");
+        Nav.NavigateTo(await DeviceProfiles.RouteAfterSignOutAsync());
     }
 }

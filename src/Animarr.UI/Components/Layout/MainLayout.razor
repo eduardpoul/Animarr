@@ -16,6 +16,9 @@
     Boots /api/auth/status + /api/me on first render through
     UserContextState. Redirects anonymous users to /welcome or /setup as
     needed — those routes have their own AuthLayout that skips this shell.
+    Before that, the device gates (RunDeviceGatesAsync) apply this device's
+    "Sign in by default" profile, the once-per-session "Who's watching"
+    picker (/switch) and the mandatory per-device PIN (/set-pin).
 *@
 
 @inherits LayoutComponentBase
@@ -168,6 +171,11 @@
         //    if the cookie is valid.
         await UserCtx.LoadAsync();
 
+        // 2-pre. Device gates (default profile / "Who's watching" picker /
+        //    mandatory PIN). May sign in as the device default, or leave for
+        //    an AuthLayout page — then nothing below runs for this layout.
+        if (!await RunDeviceGatesAsync()) return;
+
         // 2a. Apply user's saved interface language. Web.Client preloads "en"
         //     at boot in its own Program.cs; Animarr.App (MAUI) does NOT,
         //     so on MAUI the dict is empty for the first render and any
@@ -245,23 +253,6 @@
 
         if (UserCtx.IsAuthenticated)
         {
-            // Register the signed-in account on THIS device, then run the
-            // DEVICE-LOCAL "who's watching" startup gate: native app + ≥2
-            // profiles that have actually signed in on this device → show the
-            // picker once per app session. Web stays frictionless (IsBrowser →
-            // skip); a personal phone with a single account skips it too
-            // (count < 2). Soft-nav so the latch survives the hop into /switch.
-            await DeviceProfiles.EnsureAsync(UserCtx.Me!.User.Id);
-            if (!UserCtx.SwitchGatePassed)
-            {
-                UserCtx.SwitchGatePassed = true;
-                if (!OperatingSystem.IsBrowser() && (await DeviceProfiles.GetIdsAsync()).Count >= 2)
-                {
-                    Nav.NavigateTo("/switch", replace: true);
-                    return;
-                }
-            }
-
             await ApplyAccentHueToDomAsync();
             await StartBackdropAsync();
             await LoadFolderNamesAsync();
@@ -279,6 +270,87 @@
         try { await JS.InvokeVoidAsync("eval",
             "window.dispatchEvent(new Event('Animarr:navigated'));"); }
         catch { }
+    }
+
+    /// <summary>
+    /// Device gates, run once per MainLayout mount (i.e. on app open and on
+    /// every return from an AuthLayout page such as /switch or /set-pin):
+    ///
+    ///   • anonymous: the device's "Sign in by default" profile → straight in
+    ///     (server-side, no PIN); else PIN-protected profiles on this device →
+    ///     the "Who's watching" picker; else /welcome.
+    ///   • signed in, first time this browser session / app launch: a default
+    ///     profile → enter it (switching if another profile's session was
+    ///     left behind); else ≥2 profiles on this device → the picker.
+    ///   • signed in without a PIN on this device → the blocking /set-pin.
+    ///
+    /// Returns false when it navigated away (the caller stops booting this
+    /// layout). An older server without /api/auth/device skips the device
+    /// gates entirely and keeps the plain signed-in/anonymous routing.
+    /// </summary>
+    private async Task<bool> RunDeviceGatesAsync()
+    {
+        var state = await DeviceProfiles.RefreshAsync();
+        if (state is null) return true;
+
+        var gatePassed = await DeviceProfiles.IsGatePassedAsync();
+
+        if (!UserCtx.IsAuthenticated)
+        {
+            if (state.DefaultUserId is not null && await TryEnterDefaultAsync())
+            {
+                state = DeviceProfiles.State ?? state;   // now signed in as the default
+            }
+            else if (state.Profiles.Any(p => p.HasPin))
+            {
+                Nav.NavigateTo("/switch", replace: true);
+                return false;
+            }
+            else
+            {
+                return true;   // the plain anonymous route guard sends to /welcome
+            }
+        }
+        else if (!gatePassed)
+        {
+            if (state.DefaultUserId is Guid defaultId)
+            {
+                if (defaultId != UserCtx.Me!.User.Id) await TryEnterDefaultAsync();
+                await DeviceProfiles.MarkGatePassedAsync();
+                state = DeviceProfiles.State ?? state;
+            }
+            else if (state.Profiles.Length >= 2)
+            {
+                Nav.NavigateTo("/switch", replace: true);
+                return false;
+            }
+            else
+            {
+                await DeviceProfiles.MarkGatePassedAsync();
+            }
+        }
+
+        if (UserCtx.IsAuthenticated && DeviceProfiles.CurrentUserNeedsPin)
+        {
+            Nav.NavigateTo("/set-pin", replace: true);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Sign in as the device default profile; refreshes identity and
+    /// device state. False when the server refused (no default any more).</summary>
+    private async Task<bool> TryEnterDefaultAsync()
+    {
+        try
+        {
+            if (await Api.EnterDeviceDefaultAsync() is null) return false;
+        }
+        catch { return false; }
+        await UserCtx.RefreshMeAsync();
+        await DeviceProfiles.RefreshAsync();
+        await DeviceProfiles.MarkGatePassedAsync();
+        return UserCtx.IsAuthenticated;
     }
 
     /// <summary>Recompute LLM popup counters (_llmDone, _llmTotal, recent list)
