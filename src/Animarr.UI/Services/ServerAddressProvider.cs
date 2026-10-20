@@ -33,4 +33,18 @@ public sealed class ServerAddressProvider
     /// an ERR_ADDRESS_UNREACHABLE, which the catch-everything UI loaders
     /// handle gracefully).</summary>
     public Uri? Current { get; set; }
+
+    /// <summary>Absolute URL of a SignalR hub route. HubConnection talks through
+    /// its own .NET HTTP stack, so under MAUI it must target the real server —
+    /// the BlazorWebView origin (NavigationManager: https://0.0.0.0 on Android,
+    /// 0.0.0.1 on Windows) never reaches it and every hub silently stayed
+    /// disconnected. Falls back to <paramref name="pageUri"/>'s authority (WASM,
+    /// where the page IS the server).</summary>
+    public Uri HubUri(string pageUri, string route)
+    {
+        var authority = Current?.GetLeftPart(UriPartial.Authority);
+        if (string.IsNullOrEmpty(authority))
+            authority = new Uri(pageUri).GetLeftPart(UriPartial.Authority);
+        return new Uri(authority.TrimEnd('/') + route);
+    }
 }

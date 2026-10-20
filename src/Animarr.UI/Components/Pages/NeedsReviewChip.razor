@@ -1,6 +1,7 @@
 @implements IAsyncDisposable
 @inject IAnimarrApiClient Api
 @inject NavigationManager Nav
+@inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 
 @using Microsoft.AspNetCore.SignalR.Client
 
@@ -53,7 +54,7 @@
 
     private async Task ConnectHubAsync()
     {
-        var hubUri = new Uri(new Uri(Nav.BaseUri), ApiRoutes.HubIdentification);
+        var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubIdentification);
         _hub = new HubConnectionBuilder()
             .WithUrl(hubUri)
             .WithAutomaticReconnect()
