@@ -15,13 +15,15 @@ public static class SubfolderPath
     public const string InvalidNameChars = "/\\:*?\"<>|";
 
     /// <summary>Split any '/' or '\' path into clean segments: trimmed, with
-    /// empty / "." / ".." segments and control characters dropped.</summary>
+    /// empty / "." / ".." segments and control characters dropped. A segment
+    /// that is itself rooted (a Windows drive like "C:") is dropped too —
+    /// Path.Combine would otherwise throw away the root it's appended to.</summary>
     public static string[] Split(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return Array.Empty<string>();
         return path.Split('/', '\\')
             .Select(s => new string(s.Where(c => !char.IsControl(c)).ToArray()).Trim())
-            .Where(s => s.Length > 0 && s != "." && s != "..")
+            .Where(s => s.Length > 0 && s != "." && s != ".." && !Path.IsPathRooted(s))
             .ToArray();
     }
 

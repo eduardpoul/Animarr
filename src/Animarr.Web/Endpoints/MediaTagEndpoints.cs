@@ -3,6 +3,7 @@ using Animarr.Shared.Requests;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
 using Animarr.Web.Mapping;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Endpoints;
@@ -44,7 +45,7 @@ internal static class MediaTagEndpoints
             db.MediaTags.Add(entity);
             await db.SaveChangesAsync(ct);
             return Results.Created(ApiRoutes.MediaTag(entity.Id), entity.ToDto(0));
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPut(ApiRoutes.MediaTagById, async (
             Guid id,
@@ -64,7 +65,7 @@ internal static class MediaTagEndpoints
             entity.IsAutoTag = request.IsAutoTag;
             await db.SaveChangesAsync(ct);
             return Results.Ok(entity.ToDto(entity.Items.Count));
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapDelete(ApiRoutes.MediaTagById, async (
             Guid id,
@@ -77,7 +78,7 @@ internal static class MediaTagEndpoints
             db.MediaTags.Remove(entity);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPost(ApiRoutes.MediaTagAssign, async (
             Guid tagId,
@@ -93,7 +94,7 @@ internal static class MediaTagEndpoints
             db.MediaItemTags.Add(new MediaItemTag { MediaItemId = mediaItemId, MediaTagId = tagId });
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapDelete(ApiRoutes.MediaTagAssign, async (
             Guid tagId,
@@ -108,7 +109,7 @@ internal static class MediaTagEndpoints
             db.MediaItemTags.Remove(link);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         return app;
     }

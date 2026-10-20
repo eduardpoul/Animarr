@@ -18,20 +18,31 @@ internal static class RecsEndpoints
     public static IEndpointRouteBuilder MapRecsEndpoints(this IEndpointRouteBuilder app)
     {
         // ── rails ────────────────────────────────────────────────────────
+        // Both rails are scored over the whole catalog; folder-restricted roles
+        // only get local cards for titles they can see (external TMDB cards stay).
         app.MapGet(ApiRoutes.MediaSimilar, async (
-            Guid id, RecsService recs, IUserContext userCtx, CancellationToken ct) =>
+            Guid id, RecsService recs, IUserContext userCtx,
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
-            return Results.Ok(await recs.GetSimilarAsync(id, uid.Value, ct));
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var visible = await db.MediaItems.VisibleIdsAsync(me?.Role, ct);
+            if (visible is not null && !visible.Contains(id)) return Results.NotFound();
+            return Results.Ok(OnlyVisible(await recs.GetSimilarAsync(id, uid.Value, ct), visible));
         }).RequireAuthorization();
 
         app.MapGet(ApiRoutes.MeForYou, async (
-            RecsService recs, IUserContext userCtx, CancellationToken ct) =>
+            RecsService recs, IUserContext userCtx,
+            IDbContextFactory<AppDbContext> dbFactory, CancellationToken ct) =>
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
-            return Results.Ok(await recs.GetForYouAsync(uid.Value, ct));
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var visible = await db.MediaItems.VisibleIdsAsync(me?.Role, ct);
+            return Results.Ok(OnlyVisible(await recs.GetForYouAsync(uid.Value, ct), visible));
         }).RequireAuthorization();
 
         // ── "don't suggest" ──────────────────────────────────────────────
@@ -73,7 +84,9 @@ internal static class RecsEndpoints
             // Local entries render live library data (title/poster may have
             // been re-identified since the add).
             var ids = rows.Where(r => r.MediaItemId != null).Select(r => r.MediaItemId!.Value).ToList();
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var items = await db.MediaItems.AsNoTracking()
+                .ApplyRoleFolderFilter(me?.Role)
                 .Where(m => ids.Contains(m.Id))
                 .ToDictionaryAsync(m => m.Id, ct);
             return Results.Ok(rows.Select(r =>
@@ -137,4 +150,9 @@ internal static class RecsEndpoints
 
         return app;
     }
+
+    private static List<RecCardDto> OnlyVisible(List<RecCardDto> cards, HashSet<Guid>? visible)
+        => visible is null
+            ? cards
+            : cards.Where(c => c.MediaItemId is not Guid mid || visible.Contains(mid)).ToList();
 }

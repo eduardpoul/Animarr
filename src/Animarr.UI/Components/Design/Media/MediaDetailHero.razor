@@ -125,11 +125,15 @@
                         @onclick="OnFavorite">
                     <DIcon Name="@(Item.IsFavorite ? "bookmark-f" : "bookmark")" Size="20" />
                 </button>
-                <button type="button" class="d-mdhero__act d-mdhero__act--icon tv-focus" @onclick="OnEdit"
-                        aria-label="@L["media_detail_hero.edit_metadata_tooltip"]"
-                        title="@L["media_detail_hero.edit_metadata_tooltip"]">
-                    <DIcon Name="pencil" Size="20" />
-                </button>
+                @* Metadata editing is admin-only server-side — hide it otherwise. *@
+                @if (ShowEdit)
+                {
+                    <button type="button" class="d-mdhero__act d-mdhero__act--icon tv-focus" @onclick="OnEdit"
+                            aria-label="@L["media_detail_hero.edit_metadata_tooltip"]"
+                            title="@L["media_detail_hero.edit_metadata_tooltip"]">
+                        <DIcon Name="pencil" Size="20" />
+                    </button>
+                }
             </div>
         </div>
     </div>
@@ -139,6 +143,8 @@
     [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
     [Parameter] public string BackHref { get; set; } = "/";
     [Parameter] public EventCallback OnEditClick { get; set; }
+    /// <summary>False hides the Edit chip — metadata editing is admin-only server-side.</summary>
+    [Parameter] public bool ShowEdit { get; set; } = true;
     /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
     [Parameter] public ContinueAction? Continue { get; set; }
     [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }

@@ -18,25 +18,33 @@ internal static class FolderEndpoints
 {
     public static IEndpointRouteBuilder MapFolderEndpoints(this IEndpointRouteBuilder app)
     {
+        // Read side is open to every signed-in user (catalog section tabs), but a
+        // folder-restricted role only sees its own sections and their folders.
         app.MapGet(ApiRoutes.Folders, async (
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.FolderWatchers
                 .OrderBy(f => f.Label)
                 .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+            return Results.Ok(rows.Where(r => me?.Role.AllowsFolder(r) ?? true).Select(r => r.ToDto()).ToArray());
         });
 
         app.MapGet(ApiRoutes.FolderById, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var row = await db.FolderWatchers.FirstOrDefaultAsync(f => f.Id == id, ct);
-            return row is null ? Results.NotFound() : Results.Ok(row.ToDto());
+            return row is null || !(me?.Role.AllowsFolder(row) ?? true)
+                ? Results.NotFound()
+                : Results.Ok(row.ToDto());
         });
 
         // NOTE: the watcher service auto-discovers FolderWatcher rows via DB polling
@@ -218,26 +226,30 @@ internal static class FolderEndpoints
         app.MapGet(ApiRoutes.FolderChildren, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.FolderWatchers
                 .Where(f => f.ParentSectionId == id)
                 .OrderBy(f => f.Label)
                 .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+            return Results.Ok(rows.Where(r => me?.Role.AllowsFolder(r) ?? true).Select(r => r.ToDto()).ToArray());
         });
 
         app.MapGet(ApiRoutes.SectionFolders, async (
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.FolderWatchers
                 .Where(f => f.IsSection)
                 .OrderBy(f => f.Label)
                 .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+            return Results.Ok(rows.Where(r => me?.Role.AllowsFolder(r) ?? true).Select(r => r.ToDto()).ToArray());
         });
 
         // Filesystem browser — backs the SectionFolderDialog's drill-down picker.

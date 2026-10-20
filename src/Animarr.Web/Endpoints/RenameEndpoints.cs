@@ -130,7 +130,7 @@ internal static class RenameEndpoints
 
             // The processor polls every few seconds; no manual nudge needed.
             return Results.Created($"{ApiRoutes.IdentificationQueue}/{entity.Id}", entity.ToDto());
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         app.MapPost(ApiRoutes.IdentificationCancel, async (
             Guid id,
@@ -145,7 +145,7 @@ internal static class RenameEndpoints
             db.IdentificationQueues.Remove(entity);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         // ─── Pause / resume / status (AI popup controls) ─────────────────
         // The processor is a singleton hosted service, so we can flip its in-memory
@@ -154,12 +154,12 @@ internal static class RenameEndpoints
         {
             proc.SetPaused(true);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
         app.MapPost(ApiRoutes.IdentificationResume, (IdentificationQueueProcessorService proc) =>
         {
             proc.SetPaused(false);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
         app.MapGet(ApiRoutes.IdentificationStatus, (IdentificationQueueProcessorService proc) =>
             Results.Ok(new Animarr.Shared.Models.IdentificationQueueStatusDto(
                 proc.IsPaused, proc.QueueDepth, proc.QueueProcessedSinceStart, proc.HitRate)));

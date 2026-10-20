@@ -107,6 +107,7 @@ else
                      Watched="@(isMovieLike && movieFile is not null ? _movieWatched : (bool?)null)"
                      OnToggleWatchedClick="OnMovieToggleWatched"
                      OnEditClick="OpenEditPanel"
+                     ShowEdit="@CanCurate"
                      OnFavoriteClick="ToggleFavoriteAsync" />
 
     @* ── Two-column body — main (synopsis · episodes · franchise) + side
@@ -373,7 +374,7 @@ else
                  (Episode == null). They're invisible in the episode grid above, so
                  surface them here: set (season, episode) by hand — Tier 2 manual
                  override — or hit "Resolve with AI" to run the LLM (Tier 1). *@
-            @if (item.MediaType == MediaItemType.Series && _files.Any(f => f.Episode is null))
+            @if (CanCurate && item.MediaType == MediaItemType.Series && _files.Any(f => f.Episode is null))
             {
                 var unmatched = _files.Where(f => f.Episode is null)
                                       .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
@@ -483,11 +484,14 @@ else
                         <span class="md-id-row__val">@item.ImdbId <DIcon Name="external" Size="14" /></span>
                     </a>
                 }
-                <div class="md-ident__actions">
-                    <Btn Variant="solid" Size="md" OnClick="ReidentifyAsync">
-                        <DIcon Name="refresh" Size="16" /> @L["catalog.btn_reidentify"]
-                    </Btn>
-                </div>
+                @if (CanCurate)
+                {
+                    <div class="md-ident__actions">
+                        <Btn Variant="solid" Size="md" OnClick="ReidentifyAsync">
+                            <DIcon Name="refresh" Size="16" /> @L["catalog.btn_reidentify"]
+                        </Btn>
+                    </div>
+                }
             </section>
         </aside>
     </div>
@@ -558,6 +562,9 @@ else
     private bool _hideFillers;
     private bool _movieWatched;
     private bool _editOpen;
+    // Editing, re-identifying and manual episode mapping are SystemSettings-only
+    // on the server — don't offer controls that would just 403.
+    private bool CanCurate => UserCtx.Can(p => p.SystemSettings);
 
     // "Mark previous episodes watched" popup — set when the user marks an
     // episode watched and earlier on-disk episodes are still unwatched.

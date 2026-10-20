@@ -75,6 +75,9 @@ public sealed class DlnaService : IHostedService, IDisposable
     }
 
     public string Uuid     => _uuid;
+    /// <summary>False when DLNA_ENABLED=false or no LAN IP could be picked —
+    /// the MediaServer HTTP routes then answer 404.</summary>
+    public bool IsEnabled  => _enabled;
     public string FriendlyName => "Animarr";
     /// <summary>The IP/port the SSDP LOCATION header advertises. Cast targets
     /// must use this exact origin so a TV can reach the stream URL we hand it

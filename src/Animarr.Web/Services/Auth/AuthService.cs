@@ -23,17 +23,46 @@ public sealed class AuthService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<AuthService> _logger;
+    private readonly DeviceTrust _deviceTrust;
 
     public AuthService(
         IDbContextFactory<AppDbContext> dbFactory,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger,
+        DeviceTrust deviceTrust)
     {
-        _dbFactory = dbFactory;
-        _logger    = logger;
+        _dbFactory   = dbFactory;
+        _logger      = logger;
+        _deviceTrust = deviceTrust;
     }
+
+    /// <summary>Work-factor-12 hash of a throwaway value, verified against when
+    /// the username is unknown (see <see cref="VerifyPasswordAsync"/>).</summary>
+    private static readonly Lazy<string> DummyHash =
+        new(() => BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString(), workFactor: 12));
 
     public static string NormaliseUsername(string username) =>
         (username ?? "").Trim().ToLowerInvariant();
+
+    // Cookie validation runs on every authenticated request (a player issues
+    // dozens of Range requests a minute), so existence answers are cached for a
+    // short while; deleting a user evicts its entry for an immediate cut-off.
+    private static readonly TimeSpan ExistsCacheTtl = TimeSpan.FromSeconds(30);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (bool Exists, DateTime At)> _exists = new();
+
+    /// <summary>Does the user behind a cookie still exist? Used by the cookie
+    /// handler's OnValidatePrincipal to end sessions of deleted accounts.</summary>
+    public async Task<bool> UserExistsAsync(Guid userId, CancellationToken ct = default)
+    {
+        if (_exists.TryGetValue(userId, out var hit) && DateTime.UtcNow - hit.At < ExistsCacheTtl)
+            return hit.Exists;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var exists = await db.Users.AnyAsync(u => u.Id == userId, ct);
+        _exists[userId] = (exists, DateTime.UtcNow);
+        return exists;
+    }
+
+    /// <summary>Drop the cached existence answer (call after deleting a user).</summary>
+    public void ForgetUser(Guid userId) => _exists.TryRemove(userId, out _);
 
     /// <summary>True iff the <c>Users</c> table is empty — first-run wizard required.</summary>
     public async Task<bool> IsSetupRequiredAsync(CancellationToken ct = default)
@@ -145,7 +174,13 @@ public sealed class AuthService
         var user = await db.Users
             .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Username == normalised, ct);
-        if (user is null) return null;
+        if (user is null)
+        {
+            // Burn the same BCrypt cost as a real check so response time doesn't
+            // reveal which usernames exist.
+            BCrypt.Net.BCrypt.Verify(password, DummyHash.Value);
+            return null;
+        }
 
         bool ok;
         try { ok = BCrypt.Net.BCrypt.Verify(password, user.PasswordHash); }
@@ -168,9 +203,12 @@ public sealed class AuthService
 
     /// <summary>Issue the auth cookie for a verified user. Persistent across
     /// browser restarts (14-day expiry) — the cookie is the session, no
-    /// server-side store needed.</summary>
+    /// server-side store needed. Every sign-in also records the user in the
+    /// device's <see cref="DeviceTrust"/> list, which is what later lets this
+    /// device switch back to them without a password.</summary>
     public Task SignInCookieAsync(HttpContext http, User user)
     {
+        _deviceTrust.Remember(http, user.Id);
         var claims = new[]
         {
             new Claim(AuthConstants.UserIdClaim, user.Id.ToString()),

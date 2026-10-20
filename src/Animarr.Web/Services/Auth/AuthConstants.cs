@@ -41,4 +41,8 @@ public static class RateLimitPolicies
     /// <summary>Per-IP window for the anonymous TV-pairing endpoints — see
     /// the registration comment in <c>Program.cs</c> for the budget math.</summary>
     public const string Pair = "pair";
+
+    /// <summary>Per-IP window for password login and first-run setup — the
+    /// only anonymous endpoints that check a password.</summary>
+    public const string Login = "login";
 }

@@ -139,7 +139,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.13" />
         <!-- v5 multi-server: browse-side mDNS so MAUI can discover Animarr
              servers publishing _animarr._tcp.local. Pure WASM in a browser
              can't open a UDP socket on 5353, but the MAUI host's native

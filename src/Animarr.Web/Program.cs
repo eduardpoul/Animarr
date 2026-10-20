@@ -7,6 +7,7 @@ using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
 using Animarr.Web.Services.Segments;
 using Animarr.Web.Services.Trickplay;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
@@ -222,6 +223,7 @@ builder.Services.AddMemoryCache();
 // ─── v4 auth: cookie session + per-request user context ────────────────
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserContext, UserContext>();
+builder.Services.AddSingleton<DeviceTrust>();
 builder.Services.AddSingleton<AuthService>();
 
 builder.Services
@@ -245,6 +247,21 @@ builder.Services
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;
+        };
+        // The cookie only proves who the user was when it was issued, and it
+        // slides for 14 days. Permission policies re-read the user from the DB,
+        // but the plain signed-in fallback (catalog, files, folders, me/*) looks
+        // at the cookie alone — so a deleted account kept that access until the
+        // cookie expired. Reject (and clear) cookies whose user row is gone.
+        options.Events.OnValidatePrincipal = async ctx =>
+        {
+            var auth = ctx.HttpContext.RequestServices.GetRequiredService<AuthService>();
+            var claim = ctx.Principal?.FindFirst(AuthConstants.UserIdClaim)?.Value;
+            if (Guid.TryParse(claim, out var uid)
+                && await auth.UserExistsAsync(uid, ctx.HttpContext.RequestAborted))
+                return;
+            ctx.RejectPrincipal();
+            await ctx.HttpContext.SignOutAsync(AuthConstants.CookieScheme);
         };
     });
 
@@ -293,6 +310,19 @@ builder.Services.AddRateLimiter(options =>
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
                 PermitLimit = 60,
+                Window      = TimeSpan.FromMinutes(1),
+                QueueLimit  = 0,
+            }));
+    // Password guessing: BCrypt's ~250 ms/verify is the only other brake, and
+    // it burns server CPU per guess. 10 tries a minute per IP is plenty for a
+    // human mistyping. (Behind a reverse proxy every client shares the proxy's
+    // IP, so this is then a global cap — still fine for a household.)
+    options.AddPolicy(RateLimitPolicies.Login, httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
                 Window      = TimeSpan.FromMinutes(1),
                 QueueLimit  = 0,
             }));

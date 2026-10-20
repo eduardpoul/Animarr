@@ -45,16 +45,16 @@
     <script>document.write('<link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css?v=' + Date.now() + '">');</script>
 
     <!-- Artplayer + hls.js. -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js" integrity="sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr" crossorigin="anonymous"></script>
     <!-- Pinned to 5.4.0 (the version Animarr was built/tested against). The
          floating `artplayer@5` tag silently shipped a newer 5.x that tightened
          option validation (option.subtitle must be an object) and broke
          playback on media without subtitles — pin to avoid surprise CDN drift. -->
-    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js" integrity="sha384-w5IjjTXa5FVlGgCubBLyhTG2jrrNp7ktdnxNNUdVZuYwpQ5OqIab8c1gjKDD3+uO" crossorigin="anonymous"></script>
 
     <!-- v5 Phase 7: html5-qrcode for the Login → "Scan QR from TV" modal.
          Loaded on every page so the Pair flow works in either WASM or MAUI. -->
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
 
     <script>
         // Accent-hue setter — every oklch(L C var(--accent-hue)) rule reads it.
