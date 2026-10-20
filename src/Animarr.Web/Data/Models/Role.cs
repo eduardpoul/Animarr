@@ -63,4 +63,23 @@ public class Role
             return null;
         }
     }
+
+    /// <summary>True when <paramref name="other"/> grants nothing this role
+    /// doesn't already have — every permission bit and the folder scope.
+    /// Guards privilege-changing actions: a ManageUsers admin can't hand out
+    /// (or touch accounts holding) rights above their own, and a profile switch
+    /// that would gain rights needs device trust.</summary>
+    public bool Covers(Role other)
+    {
+        if (other.PermViewContent    && !PermViewContent)    return false;
+        if (other.PermUploadContent  && !PermUploadContent)  return false;
+        if (other.PermSystemSettings && !PermSystemSettings) return false;
+        if (other.PermManageUsers    && !PermManageUsers)    return false;
+
+        var mine = GetAllowedFolderIds();
+        if (mine is null) return true;                 // this role sees every folder
+        var theirs = other.GetAllowedFolderIds();
+        if (theirs is null) return false;              // other would widen the scope
+        return theirs.All(mine.Contains);
+    }
 }

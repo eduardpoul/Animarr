@@ -222,6 +222,7 @@ builder.Services.AddMemoryCache();
 // ─── v4 auth: cookie session + per-request user context ────────────────
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserContext, UserContext>();
+builder.Services.AddSingleton<DeviceTrust>();
 builder.Services.AddSingleton<AuthService>();
 
 builder.Services

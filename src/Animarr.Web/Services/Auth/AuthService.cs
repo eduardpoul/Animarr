@@ -23,13 +23,16 @@ public sealed class AuthService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<AuthService> _logger;
+    private readonly DeviceTrust _deviceTrust;
 
     public AuthService(
         IDbContextFactory<AppDbContext> dbFactory,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger,
+        DeviceTrust deviceTrust)
     {
-        _dbFactory = dbFactory;
-        _logger    = logger;
+        _dbFactory   = dbFactory;
+        _logger      = logger;
+        _deviceTrust = deviceTrust;
     }
 
     public static string NormaliseUsername(string username) =>
@@ -168,9 +171,12 @@ public sealed class AuthService
 
     /// <summary>Issue the auth cookie for a verified user. Persistent across
     /// browser restarts (14-day expiry) — the cookie is the session, no
-    /// server-side store needed.</summary>
+    /// server-side store needed. Every sign-in also records the user in the
+    /// device's <see cref="DeviceTrust"/> list, which is what later lets this
+    /// device switch back to them without a password.</summary>
     public Task SignInCookieAsync(HttpContext http, User user)
     {
+        _deviceTrust.Remember(http, user.Id);
         var claims = new[]
         {
             new Claim(AuthConstants.UserIdClaim, user.Id.ToString()),

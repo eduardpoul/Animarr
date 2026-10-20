@@ -311,21 +311,18 @@ internal static class AuthEndpoints
         }).RequireAuthorization();
 
         // Switch-user. The caller must already be signed in; we sign them out
-        // of the current cookie, then sign in as the target. The PIN check
-        // (when PinHash is set on the target) is the gate that keeps a guest
-        // who borrows a signed-in laptop from hopping into the Master account
-        // just by clicking. No PIN configured → any signed-in user can switch
-        // to that target (typical for the Master "no PIN" setup on a trusted
-        // home server).
+        // of the current cookie, then sign in as the target.
         app.MapPost(ApiRoutes.AuthSwitchUser, async (
             SwitchUserRequest req,
             AuthService auth,
+            DeviceTrust deviceTrust,
             IUserContext userCtx,
             HttpContext http,
             IDbContextFactory<AppDbContext> dbFactory,
             CancellationToken ct) =>
         {
-            if (userCtx.CurrentUserId is null) return Results.Unauthorized();
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var target = await db.Users
@@ -333,14 +330,25 @@ internal static class AuthEndpoints
                 .FirstOrDefaultAsync(u => u.Id == req.UserId, ct);
             if (target is null) return Results.NotFound(new { error = "User not found" });
 
-            // No server-side PIN gate (v5.1): fast-switching is protected on the
-            // DEVICE — a device-local PIN, verified client-side — not as a global
-            // account property. The caller is already authenticated on a trusted
-            // household device, so switching just swaps the cookie. req.Pin is
-            // accepted for wire-compat but ignored. (target == current is a
-            // harmless no-op: the cookie is already that user.)
-            if (userCtx.CurrentUserId == req.UserId)
+            // The device-local PIN (v5.1) is verified client-side — UX only; any
+            // signed-in user can call this endpoint directly. req.Pin is accepted
+            // for wire-compat but ignored. The real gate is DeviceTrust: a switch
+            // that would GAIN permissions (kid → Master) needs the target to have
+            // signed in on this device before; a downward/sideways switch is free.
+            // (target == current is a harmless no-op: the cookie is already that user.)
+            if (caller.Id == req.UserId)
                 return Results.Ok(AuthService.ToDto(target));
+
+            if (target.Role is null
+                || (!caller.Role.Covers(target.Role)
+                    && !deviceTrust.IsRemembered(http, target.Id)))
+                return Results.Json(
+                    new { error = "This profile hasn't signed in on this device. Sign in with its password once." },
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            // The caller is authenticated right now, so remember them too — the
+            // device can switch back later even if its sign-in predates DeviceTrust.
+            deviceTrust.Remember(http, caller.Id);
 
             // Reset LastSeenAt opportunistically so the strip's "last active"
             // hint stays useful across switches.
