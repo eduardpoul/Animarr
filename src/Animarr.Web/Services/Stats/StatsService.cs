@@ -17,7 +17,9 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private const int HeatmapDays = 182;   // ~26 weeks — a half-year wall
 
-    public async Task<StatsDto> BuildAsync(Guid userId, CancellationToken ct = default)
+    /// <param name="viewerTz">The viewer's zone — "today" for the streaks.
+    /// Day buckets were already filed in it by WatchEventRecorder.</param>
+    public async Task<StatsDto> BuildAsync(Guid userId, TimeZoneInfo? viewerTz = null, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
@@ -110,7 +112,8 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
                 g.Key.ToString("yyyy-MM"), g.Sum(e => e.SecondsWatched) / 60, g.Count()))
             .ToList();
 
-        var (current, longest) = Streaks(perDay.Keys);
+        var today = RequestTimeZone.LocalDay(DateTime.UtcNow, viewerTz ?? TimeZoneInfo.Local);
+        var (current, longest) = Streaks(perDay.Keys, today);
 
         var summary = new StatsSummary(
             summaryEpisodes, summaryTitles, totalMinutes,
@@ -171,7 +174,7 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
 
     /// <summary>Current streak (consecutive active days ending today or
     /// yesterday) and the longest run ever, from the set of active days.</summary>
-    private static (int Current, int Longest) Streaks(IEnumerable<DateTime> days)
+    private static (int Current, int Longest) Streaks(IEnumerable<DateTime> days, DateTime today)
     {
         var set = days.Select(d => d.Date).ToHashSet();
         if (set.Count == 0) return (0, 0);
@@ -187,7 +190,6 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
         }
 
         // Current: walk back from today; allow it to have started yesterday.
-        var today = DateTime.Today;   // same server-local day WatchEventRecorder buckets by
         var anchor = set.Contains(today) ? today : set.Contains(today.AddDays(-1)) ? today.AddDays(-1) : (DateTime?)null;
         int current = 0;
         if (anchor is DateTime a)

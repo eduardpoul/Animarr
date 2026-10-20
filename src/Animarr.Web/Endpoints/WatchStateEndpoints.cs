@@ -43,6 +43,7 @@ internal static class WatchStateEndpoints
             RecordProgressRequest request,
             IDbContextFactory<AppDbContext> dbFactory,
             IUserContext userCtx,
+            HttpContext http,
             CancellationToken ct) =>
         {
             var uid = userCtx.CurrentUserId;
@@ -93,7 +94,8 @@ internal static class WatchStateEndpoints
             row.LastSeenAt = now;
             row.TotalWatchTimeSec += deltaSec;
             await WatchEventRecorder.RecordAsync(
-                db, uid, request.MediaItemId, request.Season, request.Episode, deltaSec, now, ct);
+                db, uid, request.MediaItemId, request.Season, request.Episode, deltaSec, now, ct,
+                RequestTimeZone.Resolve(http));
 
             // IsWatched tracks "near the end of THIS playthrough": flip ON at
             // ≥90% of runtime (per CHANGELOG §1), and back OFF below 90% so a

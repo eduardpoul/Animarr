@@ -184,7 +184,8 @@ WORKDIR /app
 # `--gpus all` for NVIDIA). One image, any GPU.
 # NOTE: ffmpeg/ffprobe are NOT installed from apt anymore — they come from the
 # pinned static BtbN stage above (CVE-2026-8461 fix; see the COPY below). apt
-# here installs only the hwaccel userspace those static binaries dlopen at runtime.
+# here installs only the hwaccel userspace those static binaries dlopen at runtime,
+# plus tzdata so the viewer's X-Time-Zone (IANA id) resolves for the stats.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         mesa-va-drivers \
@@ -193,6 +194,7 @@ RUN apt-get update && \
         libva-drm2 libva2 \
         libgomp1 \
         libvulkan1 \
+        tzdata \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 

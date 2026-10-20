@@ -29,7 +29,19 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
 
     private readonly HttpClient _http;
 
-    public HttpAnimarrApiClient(HttpClient http) { _http = http; }
+    public HttpAnimarrApiClient(HttpClient http)
+    {
+        _http = http;
+        // Tell the server which time zone this device is in (browser / phone /
+        // TV OS zone) so watch-history days and "today" in the stats follow
+        // the viewer. WASM reports the browser's IANA zone here.
+        try
+        {
+            if (!_http.DefaultRequestHeaders.Contains(AnimarrHeaders.TimeZone))
+                _http.DefaultRequestHeaders.TryAddWithoutValidation(AnimarrHeaders.TimeZone, TimeZoneInfo.Local.Id);
+        }
+        catch { /* header is a hint — never block the client on it */ }
+    }
 
     // ─── Media catalog ────────────────────────────────────────────────────
 

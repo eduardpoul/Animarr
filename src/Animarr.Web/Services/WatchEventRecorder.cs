@@ -20,15 +20,15 @@ internal static class WatchEventRecorder
 
     public static async Task RecordAsync(
         AppDbContext db, Guid? userId, Guid mediaItemId, int? season, int? episode,
-        long secondsWatched, DateTime nowUtc, CancellationToken ct)
+        long secondsWatched, DateTime nowUtc, CancellationToken ct, TimeZoneInfo? viewerTz = null)
     {
         if (secondsWatched <= 0) return;
 
-        // Bucket by the server's local calendar day (the container's TZ, see
-        // docker-compose) — the household's day. A UTC bucket filed a 01:00
-        // Moscow binge under yesterday, off by one against the stats page,
-        // which lays the heatmap out by the browser's local "today".
-        var day = nowUtc.ToLocalTime().Date;
+        // Bucket by the VIEWER's calendar day — the zone their device reports
+        // (X-Time-Zone, see RequestTimeZone). A UTC bucket filed a 01:00 binge
+        // under yesterday. Callers without a request (the external mpv path)
+        // fall back to the server's local zone.
+        var day = RequestTimeZone.LocalDay(nowUtc, viewerTz ?? TimeZoneInfo.Local);
         var row = await db.WatchEvents.FirstOrDefaultAsync(e =>
             e.UserId      == userId &&
             e.MediaItemId == mediaItemId &&
