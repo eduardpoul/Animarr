@@ -33,3 +33,11 @@
 .ab-kv dd { margin: 0; color: var(--text); overflow-wrap: anywhere; user-select: text; }
 
 .ab-footer { margin-top: 4px; max-width: 720px; }
+
+/* Dashboard API key body: stacked read-only fields. */
+.ab-key {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 720px;
+}
