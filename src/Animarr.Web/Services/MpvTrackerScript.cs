@@ -27,14 +27,19 @@ public static class MpvTrackerScript
         -- watched, and "watched" auto-flip work exactly the same as the
         -- in-browser HLS player.
         --
-        -- Install:
-        --   curl {{url}}/api/mpv-tracker.lua \
-        --     > ~/.config/mpv/scripts/animarr-tracker.lua   # Linux/macOS
-        --   Or for mpv.net on Windows:
-        --     %APPDATA%\mpv.net\scripts\animarr-tracker.lua
+        -- Install: download {{url}}/api/mpv-tracker.lua from a browser that is
+        -- signed in to Animarr, and save it as
+        --   ~/.config/mpv/scripts/animarr-tracker.lua   (Linux/macOS)
+        --   %APPDATA%\mpv.net\scripts\animarr-tracker.lua   (mpv.net on Windows)
         --
         -- The script only fires for URLs served by this Animarr instance
         -- ({{url}}); other files mpv plays are ignored.
+        --
+        -- Auth: Animarr hands external players stream URLs that carry a signed
+        -- link token (?mt=...) bound to that file and to the profile that opened
+        -- it. The tracker forwards that same token with each progress ping, so
+        -- progress lands in that profile's "Continue watching" and stats. Links
+        -- expire after a few hours; pings with an expired token are rejected.
 
         local mp    = require 'mp'
         local utils = require 'mp.utils'
@@ -45,6 +50,7 @@ public static class MpvTrackerScript
         local POLL_INTERVAL = 5  -- seconds between progress POSTs
 
         local current_path = nil   -- canonical /Poul-D1/... path on the Animarr server
+        local current_token = nil  -- the stream URL's signed media token (mt=)
         local last_post_pos = -1   -- seconds; we skip POSTs when position hasn't moved
 
         -- URL-decode (mpv URLs come encoded for cyrillic / spaces).
@@ -63,10 +69,17 @@ public static class MpvTrackerScript
             return url_decode(q)
         end
 
+        -- The signed media token (mt=...) of an Animarr stream URL. Base64url,
+        -- so it is passed on verbatim.
+        local function extract_animarr_token(url)
+            if not url or url == "" then return nil end
+            return url:match("[?&]mt=([^&]+)")
+        end
+
         -- POST progress to Animarr. We shell out to curl since lua doesn't
         -- have HTTP built in, and mpv ships subprocess support cross-platform.
         local function post_progress(path, pos, dur, delta)
-            if not path then return end
+            if not path or not current_token then return end
             local body = string.format(
                 '{"path":%q,"positionSec":%s,"durationSec":%s,"playedDeltaSec":%d}',
                 path,
@@ -78,7 +91,7 @@ public static class MpvTrackerScript
                          "-H", "Content-Type: application/json",
                          "--max-time", "3",
                          "-d", body,
-                         POST_ENDPOINT },
+                         POST_ENDPOINT .. "?mt=" .. current_token },
                 cancellable = false,
             })
             if res.status ~= 0 then
@@ -89,6 +102,11 @@ public static class MpvTrackerScript
         mp.register_event("file-loaded", function()
             local raw = mp.get_property("path")
             current_path = extract_animarr_path(raw)
+            current_token = extract_animarr_token(raw)
+            if current_path and not current_token then
+                msg.warn("animarr: stream URL has no media token - progress can't be saved")
+                current_path = nil
+            end
             if current_path then
                 msg.info("animarr: tracking " .. current_path)
                 last_post_pos = -1
@@ -119,6 +137,7 @@ public static class MpvTrackerScript
                 post_progress(current_path, pos, dur > 0 and dur or nil, 0)
             end
             current_path = nil
+            current_token = nil
             last_post_pos = -1
         end)
 

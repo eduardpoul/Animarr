@@ -29,13 +29,17 @@ public interface IWatchStateService
     Task MarkEpisodeAsync(Guid mediaItemId, int season, int episode, bool watched, string? filePath = null, CancellationToken ct = default);
     Task MarkAllAsync(Guid mediaItemId, bool watched, int totalEpisodes, CancellationToken ct = default);
 
-    /// <summary>Record a progress tick from the player. <paramref name="positionMs"/>
-    /// is the current seek position; <paramref name="runtimeMs"/> is the file's
-    /// total runtime (for the 0..1 progress fraction); <paramref name="playedDeltaSec"/>
-    /// is seconds played since the last tick (for cumulative totals).
-    /// Auto-flips IsWatched=true once position ≥ 90% of runtime.</summary>
+    /// <summary>Record a progress tick from an external player (mpv tracker)
+    /// for <paramref name="userId"/> — the account whose signed link the player
+    /// was opened with. <paramref name="positionMs"/> is the current seek
+    /// position; <paramref name="runtimeMs"/> is the file's total runtime (for
+    /// the 0..1 progress fraction); <paramref name="playedDeltaSec"/> is seconds
+    /// played since the last tick (for cumulative totals + the WatchEvent day
+    /// bucket). Same rules as the in-app player's POST /api/watch-states/progress:
+    /// IsWatched is ON at ≥ 90% of runtime and OFF below it, and a ping after a
+    /// 30-minute gap counts as a new play.</summary>
     Task RecordProgressAsync(
-        Guid mediaItemId, int? season, int? episode, string? filePath,
+        Guid userId, Guid mediaItemId, int? season, int? episode, string? filePath,
         long positionMs, long? runtimeMs, int playedDeltaSec,
         CancellationToken ct = default);
 
@@ -59,10 +63,12 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
 
     public event Action<Guid>? WatchStateChanged;
 
-    /// <summary>This service has no user context (its only caller is the
-    /// anonymous mpv tracker) and writes UserId=null rows — so it must only
-    /// ever see those. Querying db.WatchStates directly matched whichever
-    /// profile's row came first and overwrote that user's progress.</summary>
+    /// <summary>The read / mark helpers below have no user context and only
+    /// ever see legacy UserId=null rows (written by the pre-v4 single-user
+    /// build and, until the external player got signed links, by the mpv
+    /// tracker). Querying db.WatchStates directly matched whichever profile's
+    /// row came first and overwrote that user's progress.
+    /// <see cref="RecordProgressAsync"/> is user-scoped.</summary>
     private static IQueryable<WatchState> Anonymous(AppDbContext db)
         => db.WatchStates.Where(w => w.UserId == null);
 
@@ -189,41 +195,53 @@ public class WatchStateService(IDbContextFactory<AppDbContext> dbFactory, ILogge
     }
 
     public async Task RecordProgressAsync(
-        Guid mediaItemId, int? season, int? episode, string? filePath,
+        Guid userId, Guid mediaItemId, int? season, int? episode, string? filePath,
         long positionMs, long? runtimeMs, int playedDeltaSec,
         CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var row = await Anonymous(db).FirstOrDefaultAsync(
-            w => w.MediaItemId == mediaItemId && w.Season == season && w.Episode == episode, ct);
+        var now = DateTime.UtcNow;
+        var row = await db.WatchStates.FirstOrDefaultAsync(w =>
+            w.UserId      == userId &&
+            w.MediaItemId == mediaItemId &&
+            w.Season      == season &&
+            w.Episode     == episode, ct);
         if (row is null)
         {
             row = new WatchState
             {
                 Id          = Guid.NewGuid(),
+                UserId      = userId,
                 MediaItemId = mediaItemId,
                 Season      = season,
                 Episode     = episode,
                 FilePath    = filePath,
                 PlayCount   = 1,
-                CreatedAt   = DateTime.UtcNow,
+                CreatedAt   = now,
             };
             db.WatchStates.Add(row);
         }
-        var now = DateTime.UtcNow;
-        row.ProgressMs        = positionMs;
-        if (runtimeMs is { } rt) row.RuntimeMs = rt;
-        row.TotalWatchTimeSec += Math.Max(0, playedDeltaSec);
-        row.LastSeenAt        = now;
-        if (filePath is not null && row.FilePath is null) row.FilePath = filePath;
-        // Journal the played delta for the stats surface. UserId=null mirrors
-        // this service's anonymous WatchState rows (external mpv tracker).
-        await WatchEventRecorder.RecordAsync(
-            db, userId: null, mediaItemId, season, episode, Math.Max(0, playedDeltaSec), now, ct);
+        else if (row.LastSeenAt is { } seen && (now - seen).TotalMinutes >= 30)
+        {
+            // A ping after a quiet gap starts a new playback session.
+            row.PlayCount++;
+        }
 
-        // Auto-flip watched when the player crosses the threshold.
-        if (!row.IsWatched && runtimeMs is > 0 && positionMs >= runtimeMs * AutoWatchedThreshold)
-            row.IsWatched = true;
+        var delta = Math.Clamp(playedDeltaSec, 0, WatchEventRecorder.MaxTickSeconds);
+        row.ProgressMs        = positionMs;
+        if (runtimeMs is > 0) row.RuntimeMs = runtimeMs;
+        row.TotalWatchTimeSec += delta;
+        row.LastSeenAt        = now;
+        if (!string.IsNullOrEmpty(filePath)) row.FilePath = filePath;
+        // Journal the played delta for this user's stats (same day bucketing
+        // as the in-app player — WatchEventRecorder).
+        await WatchEventRecorder.RecordAsync(
+            db, userId, mediaItemId, season, episode, delta, now, ct);
+
+        // Near the end of THIS playthrough: ON at ≥ 90%, back OFF below it so a
+        // rewatch shows as in progress again (mirrors WatchStateEndpoints).
+        if (row.ProgressMs is > 0 && row.RuntimeMs is > 0)
+            row.IsWatched = (double)row.ProgressMs.Value / row.RuntimeMs.Value >= AutoWatchedThreshold;
 
         await db.SaveChangesAsync(ct);
         Notify(mediaItemId);
