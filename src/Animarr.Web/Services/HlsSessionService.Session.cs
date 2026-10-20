@@ -23,6 +23,8 @@ public sealed partial class HlsSessionService
         // First audio stream's codec from the start probe — the seek-restart
         // has no probe and needs it for the TS passthrough decision.
         public string? AudioCodec { get; }
+        // Source bit depth, likewise for the restart (Hi10P must not hw-decode).
+        public bool    Is10Bit    { get; }
         public HlsPlan Plan       { get; }
         public double  AudioOffsetSec { get; }
         public double  TotalDurationSec { get; }
@@ -63,7 +65,7 @@ public sealed partial class HlsSessionService
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
             int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
-            string? audioCodec = null)
+            string? audioCodec = null, bool is10Bit = false)
         {
             Token       = token;
             SourcePath  = source;
@@ -73,6 +75,7 @@ public sealed partial class HlsSessionService
             SegmentCount = segCount;
             VideoCodec  = videoCodec;
             AudioCodec  = audioCodec;
+            Is10Bit     = is10Bit;
             Plan        = plan;
             AudioOffsetSec = audioOffsetSec;
             TotalDurationSec = totalDurationSec;

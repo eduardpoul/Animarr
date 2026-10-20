@@ -37,6 +37,13 @@ public sealed partial class HlsSessionService
         var args = new List<string>();
         var videoCodec = probe?.VideoCodec;
         var audioCodec = probe?.AudioCodec;
+        // NVDEC and VAAPI have no H.264 High10 decoder: hand Hi10P to the GPU
+        // re-encoders as a non-hw-decodable input so it takes their software-
+        // decode + upload path (as legacy codecs do) instead of failing in
+        // -hwaccel init.
+        var hwDecodeCodec = probe?.Is10Bit == true
+            && string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase)
+            ? null : videoCodec;
 
         // PTS positioning rules (applies to fMP4 paths; TS doesn't need
         // -copyts because PCR carries absolute time inside each segment):
@@ -55,11 +62,11 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, videoCodec);
+                    externalAudioPath, maxBitrate, hwDecodeCodec);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, videoCodec);
+                    externalAudioPath, maxBitrate, hwDecodeCodec);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
