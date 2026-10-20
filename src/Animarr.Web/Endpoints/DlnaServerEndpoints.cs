@@ -23,18 +23,26 @@ internal static class DlnaServerEndpoints
     // clients on the LAN are talking to us directly.)
     static string DlnaBaseUrl(HttpContext http) => $"{http.Request.Scheme}://{http.Request.Host}";
 
-    app.MapGet("/dlna/desc.xml", (HttpContext http, DlnaService dlna) =>
+    // DLNA_ENABLED=false (or no LAN IP found) only stopped the SSDP announcer —
+    // these anonymous routes kept answering, so anyone who could reach the port
+    // could still Browse the whole library. Answer 404 while DLNA is off.
+    var server = app.MapGroup(string.Empty).AddEndpointFilter(async (ctx, next) =>
+        ctx.HttpContext.RequestServices.GetRequiredService<DlnaService>().IsEnabled
+            ? await next(ctx)
+            : Results.NotFound());
+
+    server.MapGet("/dlna/desc.xml", (HttpContext http, DlnaService dlna) =>
     {
         return Results.Content(dlna.GetDeviceDescriptionXml(DlnaBaseUrl(http)), "text/xml; charset=\"utf-8\"");
     }).AllowAnonymous();
 
-    app.MapGet("/dlna/cd.xml", (DlnaService dlna) =>
+    server.MapGet("/dlna/cd.xml", (DlnaService dlna) =>
         Results.Content(dlna.GetContentDirectoryScpd(), "text/xml; charset=\"utf-8\"")).AllowAnonymous();
 
-    app.MapGet("/dlna/cm.xml", (DlnaService dlna) =>
+    server.MapGet("/dlna/cm.xml", (DlnaService dlna) =>
         Results.Content(dlna.GetConnectionManagerScpd(), "text/xml; charset=\"utf-8\"")).AllowAnonymous();
 
-    app.MapPost("/dlna/cd/control", async (HttpContext http, DlnaService dlna) =>
+    server.MapPost("/dlna/cd/control", async (HttpContext http, DlnaService dlna) =>
     {
         using var sr = new StreamReader(http.Request.Body);
         var body = await sr.ReadToEndAsync();
@@ -42,7 +50,7 @@ internal static class DlnaServerEndpoints
         return Results.Content(resp, "text/xml; charset=\"utf-8\"");
     }).AllowAnonymous();
 
-    app.MapPost("/dlna/cm/control", async (HttpContext http, DlnaService dlna) =>
+    server.MapPost("/dlna/cm/control", async (HttpContext http, DlnaService dlna) =>
     {
         using var sr = new StreamReader(http.Request.Body);
         var body = await sr.ReadToEndAsync();
@@ -52,13 +60,13 @@ internal static class DlnaServerEndpoints
 
     // Event subscription stubs — many TVs SUBSCRIBE just to confirm the service
     // is alive. We return a fake SID + 200 OK; we don't actually emit events.
-    app.MapMethods("/dlna/cd/event", new[] { "SUBSCRIBE", "UNSUBSCRIBE" }, (HttpContext http) =>
+    server.MapMethods("/dlna/cd/event", new[] { "SUBSCRIBE", "UNSUBSCRIBE" }, (HttpContext http) =>
     {
         http.Response.Headers["SID"] = "uuid:" + Guid.NewGuid().ToString();
         http.Response.Headers["TIMEOUT"] = "Second-1800";
         return Results.Ok();
     }).AllowAnonymous();
-    app.MapMethods("/dlna/cm/event", new[] { "SUBSCRIBE", "UNSUBSCRIBE" }, (HttpContext http) =>
+    server.MapMethods("/dlna/cm/event", new[] { "SUBSCRIBE", "UNSUBSCRIBE" }, (HttpContext http) =>
     {
         http.Response.Headers["SID"] = "uuid:" + Guid.NewGuid().ToString();
         http.Response.Headers["TIMEOUT"] = "Second-1800";
