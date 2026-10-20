@@ -375,10 +375,38 @@ public class TorrentEngineService : BackgroundService
                 // pass skips for 30 days (LastSegmentScanAt). Clear that gate so the
                 // background pass revisits the title and fingerprints the new files —
                 // covered-skip keeps it cheap (only new/uncovered episodes run).
-                if (record.FolderWatcherId is Guid fwId)
+                // Which titles received files: the linked folder, PLUS every title
+                // folder holding one of the torrent's files. A torrent added into a
+                // SECTION (the default, and the subfolder-picker flow) keeps the
+                // section's id — which never owns a MediaItem, and TryLinkTorrentAsync
+                // compares SavePath (= the section) so it never relinks — so new
+                // episodes landing in an already-scanned title cleared nothing.
+                var ownerIds = new HashSet<Guid>();
+                if (record.FolderWatcherId is Guid fwId) ownerIds.Add(fwId);
+                var filePaths = mgr.Files
+                    .Where(f => f.Priority != Priority.DoNotDownload)
+                    .Select(f => f.FullPath)
+                    .ToList();
+                if (filePaths.Count > 0)
+                {
+                    var titleFolders = await ctx.FolderWatchers
+                        .Where(f => !f.IsSection)
+                        .Select(f => new { f.Id, f.Path, f.SingleFilePath })
+                        .ToListAsync();
+                    foreach (var f in titleFolders)
+                    {
+                        var root = f.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                   + Path.DirectorySeparatorChar;
+                        if (filePaths.Any(p => f.SingleFilePath is { Length: > 0 } single
+                                ? string.Equals(p, single, StringComparison.OrdinalIgnoreCase)
+                                : p.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
+                            ownerIds.Add(f.Id);
+                    }
+                }
+                if (ownerIds.Count > 0)
                 {
                     var cleared = await ctx.MediaItems
-                        .Where(m => m.FolderId == fwId)
+                        .Where(m => ownerIds.Contains(m.FolderId))
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(m => m.LastSegmentScanAt,   (DateTime?)null)
                             .SetProperty(m => m.LastTrickplayScanAt, (DateTime?)null));
