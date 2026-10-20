@@ -81,6 +81,16 @@ internal static class UsersEndpoints
             {
                 var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == rid, ct);
                 if (role is null) return Results.BadRequest(new { error = "Role not found" });
+                // Same rule as DELETE: demoting the last Master (the edit form
+                // always sends RoleId, so editing your own account to "User" did
+                // it) leaves nobody able to manage users or settings.
+                if (rid != user.RoleId && user.Role?.BuiltIn == true && user.Role.Name == "Master")
+                {
+                    var mastersLeft = await db.Users
+                        .CountAsync(u => u.RoleId == user.RoleId && u.Id != user.Id, ct);
+                    if (mastersLeft == 0)
+                        return Results.BadRequest(new { error = "Cannot demote the last Master account" });
+                }
                 user.RoleId = rid;
                 user.Role = role;
             }
