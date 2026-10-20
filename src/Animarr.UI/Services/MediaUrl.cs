@@ -54,6 +54,10 @@ public static class MediaUrl
     {
         var next = string.IsNullOrWhiteSpace(url) ? "" : url!.TrimEnd('/');
         if (string.Equals(next, _base, StringComparison.OrdinalIgnoreCase)) return;
+        // A token is signed by ONE server — switching to another (or first
+        // learning the real one) invalidates it; the next EnsureTokenAsync
+        // fetches the new server's token.
+        if (!string.IsNullOrEmpty(_base)) _token = null;
         _base = next;
         OnBaseChanged?.Invoke();
     }

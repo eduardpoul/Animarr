@@ -156,6 +156,11 @@
     /// <summary>Base or token changed — re-render (image URLs) and keep JS in sync.</summary>
     private void OnMediaUrlChanged() => InvokeAsync(async () =>
     {
+        // A server switch drops the old server's token — fetch the new one
+        // (no loop: a failed fetch leaves the token null without re-firing).
+        if (Animarr.UI.Services.MediaUrl.NeedsToken && UserCtx.IsAuthenticated
+            && Animarr.UI.Services.MediaUrl.Token is null)
+            await Animarr.UI.Services.MediaUrl.EnsureTokenAsync(Api, UserCtx.Me?.User.Id);
         await PushMediaTokenToJsAsync();
         StateHasChanged();
     });
