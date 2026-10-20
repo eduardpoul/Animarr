@@ -137,10 +137,15 @@ else
                             @foreach (var s in item.Seasons.OrderBy(s => s.Number))
                             {
                                 var n = s.Number;
+                                // TMDB's count lags for an airing season (often 0
+                                // in our snapshot) — never show fewer than the
+                                // episodes actually on disk for it.
+                                var onDisk = _files.Where(f => (f.Season ?? 1) == n && f.Episode is not null)
+                                                   .Select(f => f.Episode).Distinct().Count();
                                 <button type="button"
                                         class="@($"md-season-tab tv-focus {(_activeSeason == n ? "md-season-tab--active" : "")}")"
                                         @onclick="@(() => _activeSeason = n)">
-                                    @L.Get("media_detail.season_default", n) <span class="md-season-tab__count">@s.EpisodeCount</span>
+                                    @L.Get("media_detail.season_default", n) <span class="md-season-tab__count">@Math.Max(s.EpisodeCount, onDisk)</span>
                                 </button>
                             }
                             @* Disk-only seasons TMDB metadata doesn't list — chiefly
