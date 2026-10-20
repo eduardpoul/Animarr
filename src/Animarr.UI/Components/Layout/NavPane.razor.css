@@ -28,8 +28,24 @@
     transition: width var(--motion-base);
 }
 
+/* Phones: the pane becomes a slide-in drawer ("More" in the tab bar).
+   Always expanded there, whatever the desktop collapse preference is. */
 @media (max-width: 959px) {
-    .d-nav { display: none; }
+    .d-nav {
+        width: min(320px, 86vw);
+        z-index: 70;
+        padding-bottom: calc(12px + var(--animarr-safe-bottom, 0px));
+        background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+        transform: translateX(-102%);
+        visibility: hidden;
+        transition: transform var(--motion-base), visibility 0s linear 200ms;
+    }
+    .d-nav.is-drawer-open {
+        transform: none;
+        visibility: visible;
+        box-shadow: var(--shadow-28);
+        transition: transform var(--motion-base);
+    }
 }
 
 /* ── Header: collapse toggle + brand ────────────────────── */

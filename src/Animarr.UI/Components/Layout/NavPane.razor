@@ -27,10 +27,10 @@
 @inject IJSRuntime JS
 @implements IDisposable
 
-<nav class="@($"d-nav {(_collapsed ? "is-collapsed" : "")}")" aria-label="@L["nav.primary_aria"]">
+<nav class="@($"d-nav {(_collapsed && !DrawerOpen ? "is-collapsed" : "")} {(DrawerOpen ? "is-drawer-open" : "")}")" aria-label="@L["nav.primary_aria"]">
     <div class="d-nav__head">
         <button type="button" class="d-nav__toggle tv-focus"
-                @onclick="ToggleCollapsed"
+                @onclick="OnToggleClick"
                 aria-expanded="@(_collapsed ? "false" : "true")"
                 aria-label="@(_collapsed ? L["nav.expand"] : L["nav.collapse"])"
                 title="@(_collapsed ? L["nav.expand"] : L["nav.collapse"])">
@@ -147,6 +147,14 @@
 
 @code {
     [Parameter] public int ActiveDownloads { get; set; }
+    /// <summary>Phones (&lt; 960px): the pane is a slide-in drawer opened by
+    /// the tab bar's "More"; always shown expanded there.</summary>
+    [Parameter] public bool DrawerOpen { get; set; }
+    /// <summary>Asks the layout to close the phone drawer (its ☰ button).</summary>
+    [Parameter] public EventCallback OnRequestClose { get; set; }
+
+    // ☰ collapses the pane on desktop; in the phone drawer it closes it.
+    private Task OnToggleClick() => DrawerOpen ? OnRequestClose.InvokeAsync() : ToggleCollapsed();
     [Parameter] public int LlmDone { get; set; }
     [Parameter] public int LlmTotal { get; set; }
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }

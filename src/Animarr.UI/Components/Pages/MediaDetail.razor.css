@@ -46,9 +46,10 @@
 }
 
 /* < 1200px: one column. .md-main dissolves (display: contents) so its
-   sections become siblings of the side cards and `order` can keep the old
-   reading order — synopsis, then Details / Identification, then episodes,
-   unmatched files and the franchise rail. */
+   sections become siblings of the side cards and `order` sets the reading
+   order for one column: synopsis → episodes / file → unmatched files →
+   franchise → Details / Identification (reference info last — what people
+   open the page for on a phone is the episode list). */
 @media (max-width: 1199px) {
     .md-layout {
         display: flex;
@@ -58,8 +59,11 @@
     }
     .md-main { display: contents; }
     .md-synopsis { order: -2; }
+    .md-seasons,
+    .md-movie-section,
+    .md-unmatched { order: -1; }
     .md-aside {
-        order: -1;
+        order: 0;
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         align-items: start;

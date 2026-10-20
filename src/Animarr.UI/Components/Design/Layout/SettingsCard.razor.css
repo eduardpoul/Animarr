@@ -150,12 +150,27 @@
 .fs-card--danger .fs-card__title,
 .fs-card--danger .fs-card__ic { color: var(--danger); }
 
-/* Phones: stack the control under the label so nothing gets clipped. */
+/* Phones: compact trailing controls (switch, badge, icon buttons) stay on
+   the right of the label, like Windows / Android settings. Only wide ones —
+   selects, text fields, sliders, text buttons — drop under the label so
+   nothing gets clipped. */
 @media (max-width: 639px) {
-    .fs-card__head { flex-wrap: wrap; min-height: 60px; gap: 12px; }
-    .fs-card__ctrl { max-width: 100%; width: 100%; justify-content: flex-start; padding-left: 36px; }
+    .fs-card__head { min-height: 60px; gap: 12px; }
+    .fs-card__ctrl { max-width: 60%; }
+    .fs-card__head:has(.fs-card__ctrl :is(select, input:not([type="checkbox"]), textarea, .d-btn, .d-input, .fs-row)) {
+        flex-wrap: wrap;
+    }
+    .fs-card__head:has(.fs-card__ctrl :is(select, input:not([type="checkbox"]), textarea, .d-btn, .d-input, .fs-row)) .fs-card__ctrl {
+        max-width: 100%;
+        width: 100%;
+        justify-content: flex-start;
+        padding-left: 36px;
+    }
+    /* Wrapped control: indent it under the title (none when there's no icon). */
     .fs-card__head:not(:has(.fs-card__ic)) .fs-card__ctrl { padding-left: 0; }
-    .fs-card__head:has(.fs-card__lead) .fs-card__ctrl { padding-left: 48px; }
+    .fs-card__head:has(.fs-card__lead):has(.fs-card__ctrl :is(select, input:not([type="checkbox"]), textarea, .d-btn, .d-input, .fs-row)) .fs-card__ctrl {
+        padding-left: 48px;
+    }
     .fs-card__body--indent { padding-left: 16px; }
     .fs-card__value { max-width: 40%; }
 }

@@ -1,8 +1,12 @@
 @*
-    Mobile shell — top 56px strip + bottom tabbar. Only rendered on
-    viewports < 960px (see d-mobile-nav / d-tabbar media queries in
-    Styles/components.css). Mirrors the v3 pattern; v4 adds an
-    Avatar-icon entry point to the /settings hub.
+    Mobile shell (< 960px) — Fluent 2 mobile pattern:
+      • top app bar (brand + live-downloads pill + avatar). Transparent over
+        the hero at the top of the page, acrylic once the page scrolls
+        (html.is-scrolled, set by app-shell.js).
+      • bottom tab bar with the main destinations — Home · Library · Search ·
+        Downloads · More. "More" opens the full NavPane as a slide-in drawer
+        (Calendar, Watchlist, Stats, folders, settings, profile…).
+    Hidden on desktop, where the NavPane is pinned on the left.
 *@
 
 @inject NavigationManager Nav
@@ -31,40 +35,57 @@
 </nav>
 
 <nav class="d-tabbar" aria-label="@L["mobile.tabbar_aria"]">
-    <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.All" href="" ActiveClass="d-tabbar__item--active">
-        <DIcon Name="catalog" Size="22" />
-        <span class="d-tabbar__label">@L["nav.catalog"]</span>
-    </NavLink>
+    @Tab("", "home", "home-f", L["nav.home"], !MoreOpen && IsHome())
+    @Tab("library", "library", "library-f", L["nav.library"], !MoreOpen && IsRoute("/library"))
+    @Tab("search", "search", "search", L["search.title"], !MoreOpen && IsRoute("/search"))
     @if (UserCtx.Can(p => p.UploadContent))
     {
-        <NavLink class="d-tabbar__item tv-focus" Match="NavLinkMatch.Prefix" href="downloads" ActiveClass="d-tabbar__item--active">
-            <DIcon Name="torrent" Size="22" />
-            <span class="d-tabbar__label">@L["nav.torrents"]</span>
-        </NavLink>
+        @Tab("downloads", "download", "download-f", L["topbar.downloads"], !MoreOpen && (IsRoute("/downloads") || IsRoute("/torrents")))
     }
-    @* Settings tab — always visible. Opens the /settings hub (its section
-       list doubles as the phone's navigation: personal + server sections,
-       Downloads, Pair a TV, Sign out). *@
-    <button type="button" class="d-tabbar__item tv-focus" @onclick="OnSettingsClick"
-            aria-label="@L["nav.settings"]">
-        <DIcon Name="settings" Size="22" />
-        <span class="d-tabbar__label">@L["nav.settings"]</span>
+    <button type="button" class="@($"d-tabbar__item tv-focus {(MoreOpen ? "d-tabbar__item--active" : "")}")"
+            aria-expanded="@(MoreOpen ? "true" : "false")" @onclick="OnMoreClick">
+        <DIcon Name="more" Size="24" />
+        <span class="d-tabbar__label">@L["mobile.tab_more"]</span>
     </button>
 </nav>
 
 @code {
     [Parameter] public int ActiveDownloads { get; set; }
     [Parameter] public EventCallback OnProfileClickEvent { get; set; }
-    private Task OnProfileClick()  => OnProfileClickEvent.InvokeAsync();
-    private Task OnSettingsClick() => OnProfileClickEvent.InvokeAsync();
+    /// <summary>"More" tab — the layout opens / closes the NavPane drawer.</summary>
+    [Parameter] public EventCallback OnMoreClickEvent { get; set; }
+    /// <summary>Whether that drawer is open (highlights the More tab).</summary>
+    [Parameter] public bool MoreOpen { get; set; }
 
-    // Re-render when the language pack finishes loading — on MAUI the tabbar
-    // mounts before MainLayout.OnAfterRenderAsync hydrates the dict, so the
-    // first paint sees "nav.catalog" / "nav.torrents" / "nav.settings" raw.
-    // L.LanguageChanged fires once Loc.LoadAsync resolves.
+    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
+    private Task OnMoreClick()    => OnMoreClickEvent.InvokeAsync();
+
+    private RenderFragment Tab(string href, string icon, string iconActive, string label, bool active) => __builder =>
+    {
+        <a href="@href" class="@($"d-tabbar__item tv-focus {(active ? "d-tabbar__item--active" : "")}")"
+           aria-current="@(active ? "page" : null)">
+            <DIcon Name="@(active ? iconActive : icon)" Size="24" />
+            <span class="d-tabbar__label">@label</span>
+        </a>
+    };
+
+    private string Path => "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimStart('/');
+    private bool IsHome() => Path == "/";
+    private bool IsRoute(string prefix) => Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+
+    // Re-render on navigation (active tab) and when the language pack finishes
+    // loading — on MAUI the tab bar mounts before MainLayout hydrates the dict.
     protected override void OnInitialized()
-        => Loc.LanguageChanged += OnLangChanged;
+    {
+        Loc.LanguageChanged += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
     public void Dispose()
-        => Loc.LanguageChanged -= OnLangChanged;
-    private void OnLangChanged() => InvokeAsync(StateHasChanged);
+    {
+        Loc.LanguageChanged -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
 }

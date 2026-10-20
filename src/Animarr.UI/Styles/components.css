@@ -163,6 +163,15 @@ html.tv-mode .d-mobile-nav {
     height: 56px;
     padding: 0 16px;
 }
+/* Once the page scrolls the bar gets acrylic so it no longer floats over
+   card text (app-shell.js toggles html.is-scrolled). */
+.d-mobile-nav { transition: background var(--motion-base), border-color var(--motion-base); }
+html.is-scrolled .d-mobile-nav {
+    background: color-mix(in srgb, var(--bg-1) 84%, transparent);
+    backdrop-filter: blur(30px) saturate(1.25);
+    -webkit-backdrop-filter: blur(30px) saturate(1.25);
+    border-bottom: 1px solid var(--border);
+}
 
 .d-mobile-nav__brand {
     display: inline-flex;
@@ -174,20 +183,23 @@ html.tv-mode .d-mobile-nav {
 
 .d-mobile-nav__spacer { flex: 1; }
 
-/* Mobile bottom tab bar — only used by mobile shells. Match the
-   mobile-app.jsx TabBar (3 columns, 78px tall, blur backdrop). */
+/* Mobile bottom tab bar (Fluent 2 mobile TabBar): 4–5 destinations, icon
+   on top of a 10/14 label, selected = brand colour + filled icon. Acrylic
+   over the content; grows by the home-indicator inset. */
 .d-tabbar {
     display: none;
     position: fixed;
     left: 0; right: 0; bottom: 0;
-    height: 78px;
-    background: linear-gradient(180deg, rgba(20,15,12,0.65), rgba(15,12,10,0.92));
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    height: calc(56px + var(--animarr-safe-bottom, 0px));
+    padding-bottom: var(--animarr-safe-bottom, 0px);
+    box-sizing: border-box;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+    backdrop-filter: blur(30px) saturate(1.25);
+    -webkit-backdrop-filter: blur(30px) saturate(1.25);
     border-top: 1px solid var(--border);
-    grid-template-columns: repeat(3, 1fr);
-    padding-bottom: max(18px, var(--animarr-safe-bottom));
-    z-index: 20;
+    z-index: 40;
 }
 
 .d-tabbar__item {
@@ -199,26 +211,25 @@ html.tv-mode .d-mobile-nav {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 2px;
+    min-width: 0;
     position: relative;
     color: var(--text-dim);
     text-decoration: none;
     padding: 0;
+    -webkit-tap-highlight-color: transparent;
 }
+.d-tabbar__item:active { color: var(--text); }
 .d-tabbar__item--active { color: var(--accent-hi); }
-.d-tabbar__item--active::before {
-    content: "";
-    position: absolute;
-    top: 4px;
-    width: 32px; height: 3px;
-    border-radius: 3px;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-soft);
-}
 .d-tabbar__label {
-    font-size: 12px;
-    font-weight: 500;
+    max-width: 100%;
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
     letter-spacing: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .d-tabbar__item--active .d-tabbar__label { font-weight: 600; }
 
@@ -498,7 +509,7 @@ html.tv-mode .d-mobile-nav {
         padding: 16px 18px 22px;
     }
     .d-mobile-nav { display: flex; }
-    .d-tabbar     { display: none; }
+    .d-tabbar     { display: grid; }
 
     /* Media-detail pages carry their OWN top chrome on the hero (BACK +
        favorite + edit-metadata), so the global mobile nav (brand + avatar)
@@ -1040,15 +1051,10 @@ table.d-table tbody td code {
     .d-chero__pager-dash.is-active { width: 32px; }
 }
 
-/* Bottom tabbar is hidden on every form factor now. Phone uses the
-   ProfilePanel drilldown (Catalog stays the home page, Downloads + all
-   other nav moves into Settings). TV uses DPad-driven navigation from
-   the topbar / sidebar — having a stick-to-bottom strip duplicated the
-   nav and ate vertical space the catalog grid wanted. !important kills
-   any leftover .d-tabbar { display: grid } that may still live in a
-   prebuilt Tailwind output (wwwroot/app.css) until the next css:build
-   regenerates it. */
-.d-tabbar { display: none !important; }
+/* The bottom tab bar is the phone's navigation (< 960px). TV mode never
+   shows it — the remote drives the NavPane, and a stick-to-bottom strip
+   would duplicate that nav and eat the grid's vertical space. */
+html.tv-mode .d-tabbar { display: none !important; }
 
 
 /* ============================================================

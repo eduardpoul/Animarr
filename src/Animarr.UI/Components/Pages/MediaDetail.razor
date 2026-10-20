@@ -215,7 +215,7 @@ else
                         <div class="md-secmeta">
                             <span class="md-secmeta__track" aria-hidden="true"><span class="md-secmeta__fill" style="width: @(epsWatched * 100 / loopEpCount)%"></span></span>
                             <span class="md-secmeta__text">
-                                @((MarkupString)L.Get("media_detail.watched_of_html_fmt", epsWatched, loopEpCount))
+                                @((MarkupString)L.Get("media_detail.watched_of_html_fmt", epsWatched, loopEpCount))@(" ")
                                 @if (epsOnDisk >= loopEpCount)
                                 {
                                     <span>· @L["media_detail.all_on_disk"]</span>

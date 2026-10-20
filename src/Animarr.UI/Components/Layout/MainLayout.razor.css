@@ -137,3 +137,18 @@
     margin: -2px -4px;
 }
 .ml-toast__close:hover { color: var(--text); }
+
+/* Phone NavPane drawer scrim (tab bar "More"). */
+.ml-nav-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 69;
+    background: var(--scrim);
+}
+@media (min-width: 960px) {
+    .ml-nav-scrim { display: none; }
+}
+@media (max-width: 959px) {
+    /* Clear the bottom tab bar. */
+    .ml-toast-stack { right: 12px; left: 12px; bottom: calc(68px + var(--animarr-safe-bottom, 0px)); }
+}

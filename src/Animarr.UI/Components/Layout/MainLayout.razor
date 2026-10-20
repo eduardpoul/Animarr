@@ -53,13 +53,23 @@
     @if (UserCtx.Loaded && UserCtx.IsAuthenticated)
     {
         <NavPane ActiveDownloads="_activeDownloads"
+                 DrawerOpen="_navDrawerOpen"
+                 OnRequestClose="@(() => _navDrawerOpen = false)"
                  LlmDone="_llmDone" LlmTotal="_llmTotal"
                  FolderNames="@_folderNames"
                  OnProfileClickEvent="@(() => OpenSettings("account"))"
                  OnLlmClickEvent="@(() => _llmOpen = !_llmOpen)" />
 
         <MobileShell ActiveDownloads="_activeDownloads"
+                     MoreOpen="_navDrawerOpen"
+                     OnMoreClickEvent="@(() => _navDrawerOpen = !_navDrawerOpen)"
                      OnProfileClickEvent="@(() => OpenSettings(null))" />
+
+        @* Phone nav drawer scrim — tap outside the drawer to close it. *@
+        @if (_navDrawerOpen)
+        {
+            <div class="ml-nav-scrim" @onclick="@(() => _navDrawerOpen = false)" aria-hidden="true"></div>
+        }
     }
 
     <main class="animarr-main">
@@ -101,6 +111,8 @@
         => Nav.NavigateTo(section is null ? "/settings" : $"/settings?section={section}");
 
     private bool _llmOpen;
+    /// <summary>Phone NavPane drawer (tab bar "More"); closes on navigation.</summary>
+    private bool _navDrawerOpen;
     private bool _everywhereBackdropStarted;
     private HubConnection? _hub;
     private HubConnection? _identHub;
@@ -119,6 +131,7 @@
         ThemeService.OnChange += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
         Toasts.OnShow += OnToastShown;
+        Nav.LocationChanged += OnLocationChangedCloseDrawer;
         // Default-focus on navigation lives in tv-nav.js — it hooks
         // history.pushState/replaceState so every Blazor NavigateTo fires
         // an Animarr:navigated window event. Hooking the JS layer means
@@ -557,6 +570,13 @@
         InvokeAsync(StateHasChanged);
     }
 
+    private void OnLocationChangedCloseDrawer(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!_navDrawerOpen) return;
+        _navDrawerOpen = false;
+        InvokeAsync(StateHasChanged);
+    }
+
     public async ValueTask DisposeAsync()
     {
         Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnMediaUrlChanged;
@@ -565,6 +585,7 @@
         ThemeService.OnChange -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;
         Toasts.OnShow -= OnToastShown;
+        Nav.LocationChanged -= OnLocationChangedCloseDrawer;
         ServerReg.OnChange -= ApplyServerBase;
         if (_hub is not null) await _hub.DisposeAsync();
         if (_identHub is not null) await _identHub.DisposeAsync();

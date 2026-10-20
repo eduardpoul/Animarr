@@ -299,58 +299,16 @@
             </div>
         </div>
 
-        @* ── 4. Bandwidth caps — per-torrent rate limits in KB/s. Zero = no
-              limit. Only meaningful for magnet/.torrent — the upload-files
-              tab doesn't go through the engine. *@
+        @* ── 4. Advanced — bandwidth caps (KB/s, 0 = unlimited) and the
+              post-processing toggles, folded into one Fluent expander: they're
+              rarely changed, and the summary line shows what's set. Upload
+              files skip the engine, so it shows a note instead. *@
         @if (_addSource != "upload")
         {
-            <div class="fs-grid-2 tor-add__limits">
-                <label class="d-input-group tor-add__field">
-                    <span class="d-input-group__label">@L["torrents.dl_limit_kbps_label"]</span>
-                    <input type="number" min="0" step="50"
-                           class="fs-input"
-                           placeholder="0"
-                           value="@_addDownloadKBps"
-                           @oninput="@(e => _addDownloadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
-                </label>
-                <label class="d-input-group tor-add__field">
-                    <span class="d-input-group__label">@L["torrents.ul_limit_kbps_label"]</span>
-                    <input type="number" min="0" step="50"
-                           class="fs-input"
-                           placeholder="0"
-                           value="@_addUploadKBps"
-                           @oninput="@(e => _addUploadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
-                </label>
-            </div>
-        }
-
-        @* ── 5. POST-PROCESSING TOGGLES. Hidden in the Upload tab: the toggles
-              only make sense for torrents (seeding, root-folder stripping…). *@
-        @if (_addSource != "upload")
-        {
-            <div class="tor-add__toggles">
-                <div class="tor-add__toggle-row">
-                    <div class="tor-add__toggle-text">
-                        <div class="tor-add__toggle-title">@L["torrents.toggle_stop_after_title"]</div>
-                        <div class="tor-add__toggle-hint">@L["torrents.toggle_stop_after_hint"]</div>
-                    </div>
-                    <Toggle Checked="@_addStopAfter" CheckedChanged="@((bool v) => _addStopAfter = v)" />
-                </div>
-                <div class="tor-add__toggle-row">
-                    <div class="tor-add__toggle-text">
-                        <div class="tor-add__toggle-title">@L["torrents.toggle_flatten_title"]</div>
-                        <div class="tor-add__toggle-hint">@L["torrents.toggle_flatten_hint"]</div>
-                    </div>
-                    <Toggle Checked="@_addFlatten" CheckedChanged="@((bool v) => _addFlatten = v)" />
-                </div>
-                <div class="tor-add__toggle-row">
-                    <div class="tor-add__toggle-text">
-                        <div class="tor-add__toggle-title">@L["torrents.toggle_strip_root_title"]</div>
-                        <div class="tor-add__toggle-hint">@L["torrents.toggle_strip_root_hint"]</div>
-                    </div>
-                    <Toggle Checked="@_addStripRoot" CheckedChanged="@((bool v) => _addStripRoot = v)" />
-                </div>
-            </div>
+            <SettingsCard Icon="settings" Class="tor-add__advanced"
+                          Title="@L["torrents.advanced_title"]" Description="@AdvancedSummary"
+                          Expandable="true" Expanded="@_addAdvancedOpen" ExpandedChanged="@(v => _addAdvancedOpen = v)"
+                          Body="@AdvancedBody()" />
         }
         else
         {
@@ -634,6 +592,7 @@ else
     /// cancelled session doesn't bleed into the next attempt.</summary>
     private void OpenAdd()
     {
+        _addAdvancedOpen = false;
         _addSource     = "file";
         _addMagnet     = "";
         _addFileName   = null;
@@ -890,6 +849,68 @@ else
         "metadata"                                      => L["torrents.state_metadata"],
         "starting"                                      => L["torrents.state_starting"],
         _                                               => raw,
+    };
+
+    // ── Add drawer: Advanced expander (limits + post-processing) ─────────
+    private bool _addAdvancedOpen;
+
+    private string AdvancedSummary
+    {
+        get
+        {
+            var bits = new List<string>();
+            if (_addDownloadKBps > 0) bits.Add(L.Get("torrents.advanced_dl_fmt", _addDownloadKBps));
+            if (_addUploadKBps > 0)   bits.Add(L.Get("torrents.advanced_ul_fmt", _addUploadKBps));
+            if (_addStopAfter)        bits.Add(L["torrents.advanced_no_seed"]);
+            if (_addFlatten)          bits.Add(L["torrents.advanced_flat"]);
+            if (_addStripRoot)        bits.Add(L["torrents.advanced_no_root"]);
+            return bits.Count == 0 ? L["torrents.advanced_default"] : string.Join(" · ", bits);
+        }
+    }
+
+    private RenderFragment AdvancedBody() => __builder =>
+    {
+        <div class="fs-grid-2 tor-add__limits">
+            <label class="d-input-group tor-add__field">
+                <span class="d-input-group__label">@L["torrents.dl_limit_kbps_label"]</span>
+                <input type="number" min="0" step="50"
+                       class="fs-input"
+                       placeholder="0"
+                       value="@_addDownloadKBps"
+                       @oninput="@(e => _addDownloadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
+            </label>
+            <label class="d-input-group tor-add__field">
+                <span class="d-input-group__label">@L["torrents.ul_limit_kbps_label"]</span>
+                <input type="number" min="0" step="50"
+                       class="fs-input"
+                       placeholder="0"
+                       value="@_addUploadKBps"
+                       @oninput="@(e => _addUploadKBps = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0)" />
+            </label>
+        </div>
+        <div class="tor-add__toggles">
+            <div class="tor-add__toggle-row">
+                <div class="tor-add__toggle-text">
+                    <div class="tor-add__toggle-title">@L["torrents.toggle_stop_after_title"]</div>
+                    <div class="tor-add__toggle-hint">@L["torrents.toggle_stop_after_hint"]</div>
+                </div>
+                <Toggle Checked="@_addStopAfter" CheckedChanged="@((bool v) => _addStopAfter = v)" />
+            </div>
+            <div class="tor-add__toggle-row">
+                <div class="tor-add__toggle-text">
+                    <div class="tor-add__toggle-title">@L["torrents.toggle_flatten_title"]</div>
+                    <div class="tor-add__toggle-hint">@L["torrents.toggle_flatten_hint"]</div>
+                </div>
+                <Toggle Checked="@_addFlatten" CheckedChanged="@((bool v) => _addFlatten = v)" />
+            </div>
+            <div class="tor-add__toggle-row">
+                <div class="tor-add__toggle-text">
+                    <div class="tor-add__toggle-title">@L["torrents.toggle_strip_root_title"]</div>
+                    <div class="tor-add__toggle-hint">@L["torrents.toggle_strip_root_hint"]</div>
+                </div>
+                <Toggle Checked="@_addStripRoot" CheckedChanged="@((bool v) => _addStripRoot = v)" />
+            </div>
+        </div>
     };
 
     /// <summary>Folder name of a server path, Windows (\) or POSIX (/) —

@@ -754,7 +754,7 @@
     .tor-fab {
         position: fixed;
         right: 16px;
-        bottom: calc(24px + env(safe-area-inset-bottom));
+        bottom: calc(72px + var(--animarr-safe-bottom, 0px));   /* above the tab bar */
         z-index: 30;
         display: inline-grid;
         place-items: center;
