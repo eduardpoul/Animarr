@@ -224,6 +224,38 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserContext, UserContext>();
 builder.Services.AddSingleton<DeviceTrust>();
+
+// Behind Caddy / cloudflared every request arrives from the proxy's address.
+// Honour X-Forwarded-For/-Proto ONLY from the proxies the operator lists in
+// ANIMARR_TRUSTED_PROXIES (comma-separated IPs or CIDRs) — trusting them from
+// anyone would let a client spoof a LAN address. With it set, the auth cookie
+// gets Secure behind TLS, HSTS is sent and rate limits key on the real client.
+// Unset = X-Forwarded-* ignored (the previous behaviour).
+var trustedProxySpec = builder.Configuration["ANIMARR_TRUSTED_PROXIES"];
+var trustedProxies = new List<System.Net.IPAddress>();
+var trustedNetworks = new List<System.Net.IPNetwork>();
+foreach (var part in (trustedProxySpec ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+{
+    if (part.Contains('/') && System.Net.IPNetwork.TryParse(part, out var net)) trustedNetworks.Add(net);
+    else if (System.Net.IPAddress.TryParse(part, out var ip)) trustedProxies.Add(ip);
+}
+var hasTrustedProxies = trustedProxies.Count > 0 || trustedNetworks.Count > 0;
+if (hasTrustedProxies)
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                           | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        // Defaults trust loopback; replace them with exactly the configured set.
+        o.KnownProxies.Clear();
+        o.KnownIPNetworks.Clear();
+        foreach (var ip in trustedProxies) o.KnownProxies.Add(ip);
+        foreach (var net in trustedNetworks) o.KnownIPNetworks.Add(net);
+        // cloudflared → Caddy → Animarr is two hops; walk the chain while each
+        // hop is trusted (the middleware stops at the first untrusted address).
+        o.ForwardLimit = null;
+    });
+}
 builder.Services.AddSingleton<AuthService>();
 // Signed media tokens (session + per-file links) for clients that can't send
 // the auth cookie on byte requests — see MediaTokenService / MediaAuth.
@@ -403,6 +435,13 @@ using (var scope = app.Services.CreateScope())
 // The server no longer needs an in-process LocalizationService / ThemeService.
 
 // Configure the HTTP request pipeline.
+// Forwarded headers first, so everything after (HSTS, cookie Secure, rate
+// limiter partitions, the LAN checks) sees the real client address + scheme.
+if (hasTrustedProxies)
+    app.UseForwardedHeaders();
+app.Logger.LogInformation("Trusted proxies: {Proxies}",
+    hasTrustedProxies ? trustedProxySpec : "none (X-Forwarded-* ignored)");
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();

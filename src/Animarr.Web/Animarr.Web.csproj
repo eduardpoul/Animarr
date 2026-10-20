@@ -24,6 +24,11 @@
          provides ServiceProfile + ServiceDiscovery.Advertise, which is what we
          need. Compatible with net10.0 via netstandard2.0. -->
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+    <!-- Makaretu pulls in IPNetwork2, whose System.Net.IPNetwork collides with
+         the BCL type of the same name (used for ANIMARR_TRUSTED_PROXIES /
+         ForwardedHeadersOptions.KnownIPNetworks). Same version, aliased away
+         so the plain name means the BCL type. -->
+    <PackageReference Include="IPNetwork2" Version="2.1.2" Aliases="IPNetwork2" />
     <!-- v5 Phase 7 TV pairing: server-side QR generation. PngByteQRCode is
          a pure-managed PNG encoder (no System.Drawing native deps) so it
          runs cleanly under the Debian-slim runtime image. -->
