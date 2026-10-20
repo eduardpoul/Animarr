@@ -160,54 +160,68 @@ public class FolderWatcherService(
             return;
         }
 
-        var watcher = new FileSystemWatcher(path)
-        {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.FileName,
-            EnableRaisingEvents = true,
-        };
-
-        // Renaming was removed — the per-folder watcher now only surfaces errors.
-        // Section-level dir/file watchers (below) still drive auto-registration.
-        watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
-
-        // Sections always get both watchers: directories (for new subfolder per-title
-        // entries) AND files (for standalone movies dropped right in the section root).
-        // The previous "either/or" controlled by flatSection meant a Movies section
-        // with mixed content (one Title-subfolder + loose .mkv files) only picked up
-        // one mode. flatSection is kept as the toggle that turns OFF the dir-watcher
-        // — useful for sections that should never auto-register subfolders.
+        FileSystemWatcher? watcher = null;
         FileSystemWatcher? dirWatcher = null;
         FileSystemWatcher? fileWatcher = null;
-        if (isSection)
+        try
         {
-            if (!flatSection)
+            watcher = new FileSystemWatcher(path)
             {
-                dirWatcher = new FileSystemWatcher(path)
-                {
-                    IncludeSubdirectories = false,
-                    NotifyFilter = NotifyFilters.DirectoryName,
-                    EnableRaisingEvents = true,
-                };
-                dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
-                dirWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: false);
-                dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
-            }
-
-            // Standalone video files in the section root → always register a SingleFilePath
-            // entry per file. Filtering happens inside OnVideoFileCreated.
-            fileWatcher = new FileSystemWatcher(path)
-            {
-                IncludeSubdirectories = false,
+                IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.FileName,
                 EnableRaisingEvents = true,
             };
-            fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
-            fileWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: true);
-            fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
-        }
 
-        _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher, fileWatcher);
+            // Renaming was removed — the per-folder watcher now only surfaces errors.
+            // Section-level dir/file watchers (below) still drive auto-registration.
+            watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
+
+            // Sections always get both watchers: directories (for new subfolder per-title
+            // entries) AND files (for standalone movies dropped right in the section root).
+            // The previous "either/or" controlled by flatSection meant a Movies section
+            // with mixed content (one Title-subfolder + loose .mkv files) only picked up
+            // one mode. flatSection is kept as the toggle that turns OFF the dir-watcher
+            // — useful for sections that should never auto-register subfolders.
+            if (isSection)
+            {
+                if (!flatSection)
+                {
+                    dirWatcher = new FileSystemWatcher(path)
+                    {
+                        IncludeSubdirectories = false,
+                        NotifyFilter = NotifyFilters.DirectoryName,
+                        EnableRaisingEvents = true,
+                    };
+                    dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
+                    dirWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: false);
+                    dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
+                }
+
+                // Standalone video files in the section root → always register a SingleFilePath
+                // entry per file. Filtering happens inside OnVideoFileCreated.
+                fileWatcher = new FileSystemWatcher(path)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.FileName,
+                    EnableRaisingEvents = true,
+                };
+                fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+                fileWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: true);
+                fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
+            }
+
+            _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher, fileWatcher);
+        }
+        catch (Exception ex)
+        {
+            // One unwatchable folder (inotify instance/watch limit, EACCES…) must
+            // not abort the caller — from StartAsync that takes the whole host
+            // down at boot. Release whatever was already opened.
+            watcher?.Dispose();
+            dirWatcher?.Dispose();
+            fileWatcher?.Dispose();
+            logger.LogError(ex, "Cannot start watcher for {Path}", path);
+        }
     }
 
     private void OnDirectoryCreated(string dirPath, Guid sectionId)
