@@ -82,8 +82,12 @@ public sealed class MetadataLanguageService(
             var metadata  = sp.GetRequiredService<MetadataService>();
 
             await using var db = await dbFactory.CreateDbContextAsync();
+            // Manual = the user picked/confirmed the match (NeedsReview "Use",
+            // manual identify) — just as identified, and the most curated part
+            // of the library; skipping it left those titles in the old language.
             var items = await db.MediaItems
-                .Where(m => m.IdentificationStatus == IdentificationStatus.Identified && m.TmdbId != null)
+                .Where(m => (m.IdentificationStatus == IdentificationStatus.Identified
+                          || m.IdentificationStatus == IdentificationStatus.Manual) && m.TmdbId != null)
                 .ToListAsync();
 
             _total = items.Count;
@@ -110,6 +114,10 @@ public sealed class MetadataLanguageService(
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Re-localise failed for \"{Title}\" ({Id})", item.Title, item.Id);
+                    // One context serves the whole pass: an entity whose save failed
+                    // (e.g. the title was deleted meanwhile) stays Modified and would
+                    // make every later SaveChanges throw, failing the rest of the run.
+                    db.Entry(item).State = EntityState.Detached;
                 }
                 _done++;
             }
