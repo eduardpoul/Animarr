@@ -479,7 +479,7 @@ else
                     var state = live?.State ?? t.State.ToString();
                     var stateKey = state.ToLowerInvariant();
                     var paused = t.State == TorrentRecordState.Paused;
-                    var folderName = System.IO.Path.GetFileName(t.SavePath.TrimEnd('/', '\\'));
+                    var folderName = LastSegment(t.SavePath);
                     <tr class="@($"tor-row tor-st--{stateKey}")">
                         <td class="tor-name">
                             <button type="button" class="tor-name__text"
@@ -492,7 +492,7 @@ else
                                 @FormatBytesShort(t.TotalSize)
                             </span>
                         </td>
-                        <td class="tor-cell-state"><span class="tor-badge">@state</span></td>
+                        <td class="tor-cell-state"><span class="tor-badge">@StateText(stateKey, state)</span></td>
                         <td>
                             <div class="tor-progress">
                                 <div class="tor-bar">
@@ -875,6 +875,30 @@ else
         }
         catch { /* swallow */ }
         finally { _adding = false; StateHasChanged(); }
+    }
+
+    /// <summary>Localised label for a MonoTorrent state name (lower-cased key);
+    /// unknown states fall back to the raw name.</summary>
+    private string StateText(string key, string raw) => key switch
+    {
+        "downloading"                                   => L["torrent_history.state_downloading"],
+        "seeding"                                       => L["torrent_history.state_seeding"],
+        "paused"                                        => L["torrent_history.state_paused"],
+        "stopped" or "stopping"                         => L["torrent_history.state_stopped"],
+        "error"                                         => L["torrent_history.state_error"],
+        "hashing" or "hashingpaused" or "fetchinghashes" => L["torrent_history.state_hashing"],
+        "metadata"                                      => L["torrents.state_metadata"],
+        "starting"                                      => L["torrents.state_starting"],
+        _                                               => raw,
+    };
+
+    /// <summary>Folder name of a server path, Windows (\) or POSIX (/) —
+    /// System.IO.Path in WASM only splits on '/'.</summary>
+    private static string LastSegment(string? path)
+    {
+        var p = (path ?? "").TrimEnd('/', '\\');
+        var cut = p.LastIndexOfAny(new[] { '/', '\\' });
+        return cut >= 0 ? p[(cut + 1)..] : p;
     }
 
     private static string FormatBytesShort(long bytes)

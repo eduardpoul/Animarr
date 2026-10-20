@@ -383,40 +383,6 @@ html.tv-mode .d-mobile-nav {
     padding: 18px;
 }
 
-/* ====== §9 Torrents ====== */
-
-/* Top-right stats card on Torrents page header. */
-.tor-stats {
-    display: flex;
-    gap: 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
-    padding: 10px 18px;
-    flex-wrap: wrap;
-}
-
-/* Torrents table — desktop grid layout. */
-.tor-table {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card-lg);
-    overflow: hidden;
-}
-.tor-row {
-    display: grid;
-    grid-template-columns: 1fr 240px 160px 150px 90px 100px;
-    gap: 16px;
-    padding: 14px 22px;
-    align-items: center;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    position: relative;
-    transition: background var(--motion-base);
-}
-.tor-row:hover { background: var(--ink-1); }
-.tor-row:last-child { border-bottom: 0; }
-
 /* ====== §12 Drawer / Modal / Sheet ======
    Three overlay variants:
      .d-drawer  — right-side slide-in (Edit Metadata, AddTorrent)
@@ -602,27 +568,6 @@ html.tv-mode .d-mobile-nav {
     .ntable__head,
     .ntable__row { padding: 10px 12px; gap: 8px; }
 
-    /* Torrents table → stacked card layout. */
-    .tor-table { background: transparent; border: 0; }
-    .tor-row {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        grid-template-areas:
-            "name name"
-            "dest dest"
-            "bar  bar"
-            "speed size";
-        gap: 8px 14px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-card);
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tor-row:last-child { border-bottom: 1px solid var(--border); }
-    .tor-row__progress { grid-area: bar; }
-    .hist-row__diff    { grid-area: file; }
-    .hist-row__pattern { grid-area: pattern; }
 }
 
 /* ── Phone (< 640px) ── */
