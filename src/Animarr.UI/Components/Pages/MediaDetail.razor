@@ -683,6 +683,10 @@ else
             _activeSeason = 1;
             _didAutoFocus = false;   // re-focus the new title's hero CTA
             _themeStarted = false;   // switch theme music to the new title
+            // StartThemeAsync only ever STARTS a theme — it bails for a non-anime
+            // title (or music off), so the previous anime's OP kept looping on
+            // e.g. a live-action film opened from "More like this".
+            await StopThemeAsync();
         }
         await LoadAsync();
     }
