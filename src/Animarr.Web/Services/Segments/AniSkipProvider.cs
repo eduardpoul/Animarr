@@ -65,7 +65,7 @@ public sealed class AniSkipProvider(AniSkipClient client, MalIdResolver malResol
     }
 
     /// <summary>Maps Animarr's disk (season, episode) onto the episode number
-    /// AniSkip expects for this title's MAL id. Conservative: only Season ≤ 1
+    /// AniSkip expects for this title's MAL id. Conservative: only Season 1
     /// (single-season title, or S1 of a multi-season one) is unambiguous; returns
     /// false otherwise so the caller skips AniSkip rather than risk a wrong key.</summary>
     private static bool TryResolveEpisodeNumber(SegmentEpisodeContext ctx, out int episodeNumber)
@@ -73,6 +73,9 @@ public sealed class AniSkipProvider(AniSkipClient client, MalIdResolver malResol
         episodeNumber = 0;
         if (ctx.Episode <= 0) return false;
         if (ctx.Season > 1) return false;   // needs a per-season MAL id we don't store
+        // Season 0 = a Specials/OVA/NCOP folder: its "episode 1" is not the main
+        // series' episode 1, whose OP/ED times AniSkip would hand back.
+        if (ctx.Season < 1) return false;
         episodeNumber = ctx.Episode;
         return true;
     }
