@@ -28,6 +28,39 @@
                 <FlexLayout x:Name="RosterHost" Wrap="Wrap" Direction="Row" />
             </VerticalStackLayout>
 
+            <!-- this device: "Who's watching" picker, default profile, own PIN.
+                 Hidden on servers without per-device profiles. -->
+            <VerticalStackLayout x:Name="DeviceSection" Spacing="16" IsVisible="False">
+                <Label x:Name="DeviceTitle" Text="Это устройство" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <HorizontalStackLayout Spacing="12">
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                            BackgroundColor="#151a21" Padding="22,13">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="SwitchUserFocus" Radius="10" />
+                        </Border.Behaviors>
+                        <Label x:Name="SwitchUserLabel" Text="Сменить пользователя" TextColor="White" FontFamily="Geist" FontSize="15" />
+                    </Border>
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                            BackgroundColor="#151a21" Padding="22,13">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="DefaultFocus" Radius="10" />
+                        </Border.Behaviors>
+                        <HorizontalStackLayout Spacing="12">
+                            <Label x:Name="DefaultLabel" Text="Входить по умолчанию" TextColor="White" FontFamily="Geist" FontSize="15" />
+                            <Label x:Name="DefaultValue" Text="Выкл." TextColor="#7b8290" FontFamily="Geist" FontAttributes="Bold" FontSize="15" />
+                        </HorizontalStackLayout>
+                    </Border>
+                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                            BackgroundColor="#151a21" Padding="22,13">
+                        <Border.Behaviors>
+                            <local:TvFocusBehavior x:Name="ChangePinFocus" Radius="10" />
+                        </Border.Behaviors>
+                        <Label x:Name="ChangePinLabel" Text="Сменить PIN" TextColor="White" FontFamily="Geist" FontSize="15" />
+                    </Border>
+                </HorizontalStackLayout>
+                <Label x:Name="DefaultHint" Text="" TextColor="#7b8290" FontFamily="Geist" FontSize="13" />
+            </VerticalStackLayout>
+
             <!-- interface language. HorizontalStackLayout, NOT FlexLayout: a
                  FlexLayout mis-measures chips added after the first layout pass
                  (async prefs load) and clips the last glyph of each label. -->

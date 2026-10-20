@@ -19,11 +19,15 @@ public partial class PairingPage : ContentPage
 {
     private readonly IAnimarrApiClient _api;
     private readonly ServerAddressProvider _addr;
+    private readonly bool _resetPin;
     private CancellationTokenSource? _cts;
 
     private string ImageBase => _addr.Current!.ToString().TrimEnd('/');
 
-    public PairingPage()
+    /// <param name="resetPin">"Forgot PIN": once a phone confirms, the server
+    /// clears the confirming profile's PIN on this TV and the "Set a PIN" step
+    /// follows — pairing is the TV's stand-in for a password sign-in.</param>
+    public PairingPage(bool resetPin = false)
     {
         InitializeComponent();
         NavigationPage.SetHasNavigationBar(this, false);
@@ -32,10 +36,15 @@ public partial class PairingPage : ContentPage
             ?? throw new InvalidOperationException("MAUI DI container not ready.");
         _api  = services.GetRequiredService<IAnimarrApiClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
+        _resetPin = resetPin;
 
         HintLabel.Text =
             $"Откройте {ImageBase} на телефоне или в браузере, войдите и введите код — " +
             "или отсканируйте QR камерой.";
+        if (resetPin)
+            HintLabel.Text += "\n" + TvL.T("pair.forgot_hint",
+                "Подтвердите вход с телефона, где открыт ваш аккаунт, — затем задайте новый PIN.",
+                "Confirm on a phone signed in to your account — then set a new PIN.");
     }
 
     protected override void OnAppearing()
@@ -58,7 +67,7 @@ public partial class PairingPage : ContentPage
             PairInitDto init;
             try
             {
-                init = await _api.InitPairAsync(new PairInitRequest("Android TV"), ct);
+                init = await _api.InitPairAsync(new PairInitRequest("Android TV", _resetPin), ct);
             }
             catch
             {
@@ -83,7 +92,9 @@ public partial class PairingPage : ContentPage
                 if (poll.Status == "confirmed")
                 {
                     StatusLabel.Text = "Готово!";
-                    TvRoot.Go(new CatalogNativePage());
+                    // Signed in on this TV → the mandatory "Set a PIN" step
+                    // when the profile has none here yet, else the catalog.
+                    await TvAuthFlow.AfterSignInAsync();
                     return;
                 }
                 if (poll.Status == "expired") break;

@@ -323,6 +323,8 @@ public class MainActivity : MauiAppCompatActivity
     public override bool OnKeyDown(Android.Views.Keycode keyCode, Android.Views.KeyEvent? e)
     {
         if (PlayerPage.HandleGlobalKey((int)keyCode)) return true;
+        // The native PIN keypad takes the remote's number keys (0-9, DEL).
+        if (TvPinPage.HandleGlobalKey((int)keyCode)) return true;
         return base.OnKeyDown(keyCode, e);
     }
 
