@@ -215,7 +215,7 @@ internal static class TorrentEndpoints
 
         // Recheck — re-hash the torrent against on-disk data, then resume.
         // Recovers an errored torrent and corrects stale per-file progress.
-        app.MapPost(ApiRoutes.TorrentRecheck, async (
+        torrents.MapPost(ApiRoutes.TorrentRecheck, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             TorrentEngineService engine,
@@ -358,7 +358,10 @@ internal static class TorrentEndpoints
 
             await engine.UpdateGlobalSettingsAsync(entity);
             return Results.Ok(entity.ToDto());
-        });
+        })
+        // Engine-wide settings (listen port, DHT/UPnP, cache directory on disk)
+        // are server configuration — Settings → Downloads is an admin section.
+        .RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         // v5: parse-only endpoint. Lets the Add drawer preview the file list
         // inside a .torrent before the user commits, without spinning up a

@@ -49,10 +49,13 @@
                 <span class="d-mdhero__fav-star">☆</span>
             }
         </button>
-        <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
-                aria-label="@L["media_detail_hero.edit_metadata_tooltip"]" title="@L["media_detail_hero.edit_metadata_tooltip"]">
-            <DIcon Name="pencil" Size="16" />
-        </button>
+        @if (ShowEdit)
+        {
+            <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
+                    aria-label="@L["media_detail_hero.edit_metadata_tooltip"]" title="@L["media_detail_hero.edit_metadata_tooltip"]">
+                <DIcon Name="pencil" Size="16" />
+            </button>
+        }
     </div>
 
     <div class="d-mdhero__content">
@@ -130,6 +133,8 @@
     [Parameter, EditorRequired] public MediaItemDto Item { get; set; } = null!;
     [Parameter] public string BackHref { get; set; } = "/";
     [Parameter] public EventCallback OnEditClick { get; set; }
+    /// <summary>False hides the Edit chip — metadata editing is admin-only server-side.</summary>
+    [Parameter] public bool ShowEdit { get; set; } = true;
     /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
     [Parameter] public ContinueAction? Continue { get; set; }
     [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }

@@ -33,6 +33,13 @@ internal static class MediaEndpoints
     // don't re-decode its audio every time. Cleared on restart (cheap to redo).
     private static readonly ConcurrentDictionary<string, byte> _lazyHeavyTried = new();
 
+    // Library curation — editing/deleting titles, re-identifying, picking art or
+    // theme URLs (server-side fetches), manual episode/segment overrides. The
+    // built-in view-only User role must not reach these; SystemSettings is the
+    // admin bit ("Access Server Settings"). One constant so a looser choice
+    // (e.g. UploadContent) stays a one-line change.
+    private const string CuratePolicy = AuthConstants.Policies.SystemSettings;
+
     public static IEndpointRouteBuilder MapMediaEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet(ApiRoutes.Media, async (
@@ -187,7 +194,7 @@ internal static class MediaEndpoints
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(entity.ToDto());
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         app.MapDelete(ApiRoutes.MediaById, async (
             Guid id,
@@ -200,7 +207,7 @@ internal static class MediaEndpoints
             db.MediaItems.Remove(entity);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         app.MapGet(ApiRoutes.MediaCandidates, async (
             Guid id,
@@ -242,7 +249,7 @@ internal static class MediaEndpoints
                 .Include(m => m.Categories).ThenInclude(c => c.Category)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             return updated is null ? Results.NoContent() : Results.Ok(updated.ToDto());
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // "Refresh" routes through the identification queue with ForceRefresh=true
         // so we benefit from the same retry / log handling as auto-identify.
@@ -265,7 +272,7 @@ internal static class MediaEndpoints
             });
             await db.SaveChangesAsync(ct);
             return Results.Accepted();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Poster / backdrop alternatives — projects the TMDB-image set fetched
         // by MetadataService into the candidate list the EditMetadataDrawer
@@ -328,7 +335,7 @@ internal static class MediaEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // ── Theme music ────────────────────────────────────────────────────────
         // Serves the cached anime OP/ED theme for the detail page's soft autoplay.
@@ -378,7 +385,7 @@ internal static class MediaEndpoints
             return path is null
                 ? Results.NotFound(new { error = "No theme found for this title on AnimeThemes." })
                 : Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Manual override (THEME MUSIC → Add): download a user-supplied direct audio URL.
         app.MapPost(ApiRoutes.MediaThemeManual, async (
@@ -390,7 +397,7 @@ internal static class MediaEndpoints
             return path is null
                 ? Results.BadRequest(new { error = "Couldn't download audio from that URL." })
                 : Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         app.MapGet(ApiRoutes.MediaBackdropList, async (
             IDbContextFactory<AppDbContext> dbFactory,
@@ -463,7 +470,7 @@ internal static class MediaEndpoints
             row.UpdatedAt  = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Clear a stored override (?path=…) — reverts that file to the
         // deterministic parse. No-op if no row exists.
@@ -478,7 +485,7 @@ internal static class MediaEndpoints
                 .Where(m => m.MediaItemId == id && m.FilePath == path)
                 .ExecuteDeleteAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Tier 1 — ask the LLM to place files the deterministic parser left
         // unmatched. Stores Source="llm" overrides; returns the count placed
@@ -490,7 +497,7 @@ internal static class MediaEndpoints
         {
             var placed = await llmResolver.ResolveAsync(id, ct);
             return Results.Ok(placed);
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Compute per-season absolute offsets from TMDB air-date gaps (donghua:
         // TMDB one season, disk split). Stores MediaItem.SeasonOffsetsJson;
@@ -502,7 +509,7 @@ internal static class MediaEndpoints
         {
             var offsets = await seasonResolver.ResolveAsync(id, ct);
             return Results.Ok(offsets ?? new Dictionary<int, int>());
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // Continue-watching hint for the MediaDetail hero CTA. Resolution order:
         //   1) Resume the most-recently-touched in-progress episode/movie.
@@ -902,7 +909,7 @@ internal static class MediaEndpoints
             row.DetectedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         // ── Trickplay (seek-preview sprites) ─────────────────────────────────
         // Manifest for one episode (?season=&episode=) or the movie file (no
@@ -960,7 +967,7 @@ internal static class MediaEndpoints
             await db.MediaItems.ExecuteUpdateAsync(
                 s => s.SetProperty(m => m.LastSegmentScanAt, (DateTime?)null), ct);
             return Results.Accepted();
-        });
+        }).RequireAuthorization(CuratePolicy);
 
         return app;
     }
