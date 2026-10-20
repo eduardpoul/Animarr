@@ -26,8 +26,13 @@ public sealed partial class HlsSessionService
 
             // Crash detection: ffmpeg exited with non-zero. Player will get
             // 503s on every segment, so kill the session decisively rather
-            // than letting it linger another 5 minutes.
-            if (session.Process.HasExited && session.Process.ExitCode != 0)
+            // than letting it linger another 5 minutes. Not while a seek-restart
+            // holds the lock: it has just Kill()ed the old ffmpeg (non-zero exit)
+            // and hasn't swapped the new one in yet — reaping there disposed the
+            // lock under the restart and orphaned the new ffmpeg, so playback
+            // died with 404s right after a scrub.
+            if (session.Process.HasExited && session.Process.ExitCode != 0
+                && session.RestartLock.CurrentCount > 0)
             {
                 _logger.LogInformation("Reaping crashed HLS session {Token} (ffmpeg exit {Code})", token, session.Process.ExitCode);
                 Stop(token);
