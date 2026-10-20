@@ -225,6 +225,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserContext, UserContext>();
 builder.Services.AddSingleton<DeviceTrust>();
 builder.Services.AddSingleton<AuthService>();
+// Signed media tokens (session + per-file links) for clients that can't send
+// the auth cookie on byte requests — see MediaTokenService / MediaAuth.
+builder.Services.AddSingleton<MediaTokenService>();
 
 builder.Services
     .AddAuthentication(AuthConstants.CookieScheme)
@@ -263,7 +266,13 @@ builder.Services
             ctx.RejectPrincipal();
             await ctx.HttpContext.SignOutAsync(AuthConstants.CookieScheme);
         };
-    });
+    })
+    // Media tokens. Never part of the default/fallback policy — only the media
+    // policies below name these schemes, so a token can't reach the REST API.
+    .AddScheme<MediaTokenAuthOptions, MediaTokenAuthenticationHandler>(
+        MediaAuth.TokenScheme,   o => o.AllowLinks = true)
+    .AddScheme<MediaTokenAuthOptions, MediaTokenAuthenticationHandler>(
+        MediaAuth.SessionScheme, o => o.AllowLinks = false);
 
 builder.Services.AddScoped<
     Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
@@ -287,13 +296,35 @@ builder.Services.AddAuthorization(options =>
 
     // Default-deny: every endpoint that doesn't explicitly opt out with
     // .AllowAnonymous() (or carry its own policy) requires a signed-in user.
-    // The media-byte surface (video/file/HLS segments/image/DLNA, pairing,
-    // server-info) opts out deliberately — those are consumed by cookie-less
-    // clients (DLNA renderers, mpv, the Android WebView proxy) and rely on
-    // library-path validation instead.
+    // Cookie only — media tokens are accepted solely by the media policies.
     options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(AuthConstants.CookieScheme)
         .RequireAuthenticatedUser()
         .Build();
+
+    // Media byte surface: the auth cookie OR a signed media token. The cookie
+    // stays the path for the same-origin web client; tokens serve the MAUI
+    // WebView (cross-origin <img>/<video>), the TV's native image loader and
+    // ExoPlayer, DLNA renderers and external players. Role folder filtering
+    // and link-to-file binding are enforced in MediaPathValidator.
+    options.AddPolicy(MediaAuth.Policies.Media,
+        new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(
+                AuthConstants.CookieScheme, MediaAuth.TokenScheme)
+            .RequireAuthenticatedUser()
+            .Build());
+    // Cookie or SESSION token (no per-file links): id-addressed media endpoints,
+    // HLS keepalive/stop, DLNA cast control, SignalR hubs.
+    options.AddPolicy(MediaAuth.Policies.MediaSession,
+        new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(
+                AuthConstants.CookieScheme, MediaAuth.SessionScheme)
+            .RequireAuthenticatedUser()
+            .RequireClaim(AuthConstants.UserIdClaim)
+            .Build());
+    options.AddPolicy(MediaAuth.Policies.UploadLive,
+        new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(
+                AuthConstants.CookieScheme, MediaAuth.SessionScheme)
+            .RequireAuthenticatedUser()
+            .AddRequirements(new PermissionRequirement(r => r.PermUploadContent))
+            .Build());
 });
 
 // Pairing endpoints are anonymous by design (the TV has no cookie yet), which
@@ -460,20 +491,24 @@ app.MapSearchEndpoints();
 app.MapDlnaCastEndpoints();
 // v5 multi-server: anonymous /api/server/info probe used by Discovery.
 app.MapServerInfoEndpoints();
+app.MapMediaTokenEndpoints();
 
 // SignalR hubs — push-only telemetry for torrents + identification queue.
-// AllowAnonymous: the MAUI apps connect with a bare HubConnection that carries
-// no auth cookie (only the app's REST HttpClient holds the cookie jar), so a
-// required-auth hub would silently break native live updates. The hubs never
-// accept client invocations — they only broadcast status snapshots.
-app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents).AllowAnonymous();
-app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification).AllowAnonymous();
+// Signed-in only: the web client rides its same-origin cookie; the MAUI app's
+// HubConnection (its own .NET HTTP stack, no cookie jar) sends the session
+// media token as its access token. The torrent hub carries the same gate as
+// the torrent REST group; the identification hub routes each broadcast to the
+// connections allowed to see it (see IdentificationHub).
+app.MapHub<TorrentHub>(Animarr.Shared.ApiRoutes.HubTorrents)
+    .RequireAuthorization(MediaAuth.Policies.UploadLive);
+app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification)
+    .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
 
 // ─── Media byte surface — extracted from Program.cs into endpoint files ───
 // Image/video/file/playlist/probe/subtitle/external-tracks, HLS lifecycle,
 // the DLNA MediaServer SOAP surface, and the external-player (mpv) hooks.
-// All are AllowAnonymous + MediaPathValidator-gated (see each file).
+// Cookie-or-media-token policies + MediaPathValidator (see each file).
 app.MapMediaStreamEndpoints();
 app.MapHlsEndpoints();
 app.MapDlnaServerEndpoints();

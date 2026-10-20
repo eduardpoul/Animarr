@@ -253,9 +253,19 @@ public static class ApiRoutes
     /// registry to refresh stale entries (title count / version drift).</summary>
     public const string ServerInfo   = "/api/server/info";
 
-    /// <summary>Anonymous summary for external dashboards (e.g. Homepage's
-    /// customapi widget). Aggregates only — returns <c>ServerDashboardDto</c>.</summary>
+    /// <summary>Summary for external dashboards (e.g. Homepage's customapi
+    /// widget). Aggregates only — returns <c>ServerDashboardDto</c>. Requires
+    /// the dashboard API key (<c>X-Api-Key</c> header or <c>?key=</c>).</summary>
     public const string ServerDashboard = "/api/server/dashboard";
+    /// <summary>Admin: GET the dashboard API key, POST to (re)generate it,
+    /// DELETE to revoke it. Returns <c>DashboardKeyDto</c>.</summary>
+    public const string ServerDashboardKey = "/api/server/dashboard/key";
+
+    // ─── Media tokens ────────────────────────────────────────────────────
+    /// <summary>GET (cookie) — the caller's session media token
+    /// (<c>MediaTokenDto</c>). Appended as <c>?mt=</c> to byte URLs by
+    /// clients that can't attach the cookie (MAUI WebView, TV native player).</summary>
+    public const string MediaToken     = "/api/media-token";
 
     // ─── TV pairing (v5 Phase 7) ─────────────────────────────────────────
     /// <summary>POST anonymous — TV asks for a fresh 6-char pair code +
@@ -407,4 +417,11 @@ public static class AppConfigKeys
     public const string SegmentsChaptersEnabled    = "segments.chapters_enabled";
     public const string SegmentsChromaprintEnabled = "segments.chromaprint_enabled";
     public const string SegmentsBlackFrameEnabled  = "segments.blackframe_enabled";
+
+    // ─── Server access ────────────────────────────────────────────────────
+    /// <summary>"true" switches on the UPnP/DLNA MediaServer. OFF by default.</summary>
+    public const string DlnaServerEnabled = "dlna.server_enabled";
+    /// <summary>API key gating GET /api/server/dashboard. Managed through
+    /// <see cref="ApiRoutes.ServerDashboardKey"/>, not the generic config PUT.</summary>
+    public const string DashboardApiKey   = "server.dashboard_api_key";
 }

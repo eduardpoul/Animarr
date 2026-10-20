@@ -2,6 +2,7 @@ using Animarr.Shared;
 using Animarr.Shared.Models;
 using Animarr.Shared.Requests;
 using Animarr.Web.Services;
+using Animarr.Web.Services.Auth;
 
 namespace Animarr.Web.Endpoints;
 
@@ -10,14 +11,19 @@ namespace Animarr.Web.Endpoints;
 /// (SSDP NOTIFY / ContentDirectory) endpoints live in Program.cs; this
 /// wraps the cast (control-point) side only.
 ///
-/// AllowAnonymous: both endpoints are called by the player's JS overlay,
-/// which in the MAUI apps runs behind a cookie-less WebView proxy — a
-/// required-auth gate would break casting from the native apps. The play
-/// path is validated against the library roots before anything is sent to
-/// the renderer.
+/// Signed-in only (<see cref="MediaAuth.Policies.MediaSession"/>): the web
+/// player sends its cookie, the MAUI WebView player (behind the cookie-less
+/// loopback proxy) appends its session media token. The play path is checked
+/// by <see cref="MediaPathValidator"/> (library roots + the caller's role
+/// folders), and the URL handed to the renderer — which can never sign in —
+/// carries a link token signed for that one file and that user.
 /// </summary>
 internal static class DlnaCastEndpoints
 {
+    /// <summary>How long a cast URL stays playable: a long film plus a pause.
+    /// TVs re-request with Range on every seek, so it must outlive the session.</summary>
+    private static readonly TimeSpan CastLinkLifetime = TimeSpan.FromHours(8);
+
     public static IEndpointRouteBuilder MapDlnaCastEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet(ApiRoutes.DlnaRenderers, async (
@@ -35,13 +41,15 @@ internal static class DlnaCastEndpoints
                     LastSeenUtc:   r.LastSeen))
                 .ToArray();
             return Results.Ok(dtos);
-        }).AllowAnonymous();
+        }).RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         app.MapPost(ApiRoutes.DlnaPlay, async (
             DlnaPlayRequest request,
             DlnaCastService cast,
             DlnaService dlna,
             MediaPathValidator pathValidator,
+            MediaTokenService tokens,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.RendererUdn))
@@ -49,6 +57,7 @@ internal static class DlnaCastEndpoints
 
             var (ok, fullPath, early) = await pathValidator.ResolveLibraryFileAsync(request.FilePath, ct);
             if (!ok) return early!;
+            if (userCtx.CurrentUserId is not Guid uid) return Results.Unauthorized();
 
             // Build the stream URL from the SAME origin the DLNA description
             // advertises. Using the inbound Request.Host header would break
@@ -66,12 +75,16 @@ internal static class DlnaCastEndpoints
             // /api/video's stereo AAC downmix). Use the *validated* fullPath,
             // not request.FilePath — the URL pointed at the TV must be the
             // same canonical form /api/file will accept.
-            var streamUrl = $"{baseUrl}{ApiRoutes.File}?path={Uri.EscapeDataString(fullPath!)}";
+            // The renderer can't sign in: the URL carries a link token bound
+            // to this file + this user (role folders keep applying on fetch).
+            var streamUrl = MediaTokenService.AppendToUrl(
+                $"{baseUrl}{ApiRoutes.File}?path={Uri.EscapeDataString(fullPath!)}",
+                tokens.IssueLink(uid, fullPath!, CastLinkLifetime));
             var title = Path.GetFileNameWithoutExtension(fullPath!);
 
             var success = await cast.PlayAsync(request.RendererUdn, streamUrl, title, mime, ct);
             return success ? Results.NoContent() : Results.Problem("Renderer rejected the request.", statusCode: 502);
-        }).AllowAnonymous();
+        }).RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         return app;
     }

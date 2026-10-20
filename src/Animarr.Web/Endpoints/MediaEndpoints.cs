@@ -349,17 +349,21 @@ internal static class MediaEndpoints
         // Lazy: on a cache miss for an anime-like item it fetches from AnimeThemes
         // on the fly (first hit is slow, then cached next to the media in .animarr/),
         // which backfills the existing library without a full re-identify. 404 when
-        // the title has no theme. Range-enabled for seeking; AllowAnonymous so the
-        // <audio> element loads cross-origin under MAUI like /api/image does. The
-        // file path comes from the DB (not the client) so there's no path-injection.
+        // the title has no theme. Range-enabled for seeking. Cookie or session
+        // media token (the MAUI <audio> element loads cross-origin and carries
+        // ?mt=, like /api/image). The file path comes from the DB (not the
+        // client) so there's no path-injection; role folders apply (404).
         app.MapGet(ApiRoutes.MediaTheme, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
             MetadataService metadata,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().ApplyRoleFolderFilter(me?.Role)
+                .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
 
             var path = item.ThemePath;
@@ -381,7 +385,7 @@ internal static class MediaEndpoints
             return Results.File(path, mime, enableRangeProcessing: true);
         })
         .WithName("GetMediaTheme")
-        .AllowAnonymous();
+        .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         // Re-fetch the theme from AnimeThemes (Edit Metadata → THEME MUSIC → Rescan).
         // Forces a fresh lookup and bypasses the global enabled-gate (explicit action).
@@ -671,10 +675,13 @@ internal static class MediaEndpoints
             MediaFileResolver resolver,
             TmdbClient tmdb,
             MediaCachePaths cachePaths,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == id, ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var item = await db.MediaItems.ApplyRoleFolderFilter(me?.Role)
+                .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
 
             static bool Ok(string p) => File.Exists(p) && new FileInfo(p).Length > 0;
@@ -715,11 +722,11 @@ internal static class MediaEndpoints
 
             return Results.NotFound();
         })
-        // Anonymous like the other visual endpoints (/api/image, theme, trickplay):
-        // the path is derived server-side from (id, season, episode), never taken
-        // raw from the client, so there's nothing to gate with a cookie — and the
-        // native TV Image.Source loader can't attach one anyway.
-        .AllowAnonymous();
+        // Cookie or session media token, like the other visual endpoints: the
+        // path is derived server-side from (id, season, episode), never taken raw
+        // from the client; the native TV Image.Source loader / MAUI <img> can't
+        // attach the cookie, so they append ?mt=. Role folders apply (404).
+        .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         // ── Per-episode metadata (detailed-list view) ────────────────────────
         // Lazy-fetch + cache TMDB episode texts (title / synopsis / air date /
@@ -795,8 +802,8 @@ internal static class MediaEndpoints
         // GET with ?season=&episode= returns one episode's segments and lazily
         // detects them via the cheap providers (AniSkip) on a first-watch miss,
         // so the player gets times immediately. Without params it returns every
-        // segment already known for the item (no detection). AllowAnonymous to
-        // match the other playback endpoints the player calls directly.
+        // segment already known for the item (no detection). Cookie or session
+        // media token, like the other playback endpoints the player calls.
         app.MapGet(ApiRoutes.MediaSegments, async (
             Guid id,
             int? season,
@@ -805,10 +812,13 @@ internal static class MediaEndpoints
             MediaFileResolver resolver,
             SegmentDetectionService detector,
             IServiceScopeFactory scopeFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var item = await db.MediaItems.AsNoTracking().ApplyRoleFolderFilter(me?.Role)
+                .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
 
             if (season is int s && episode is int e)
@@ -904,7 +914,7 @@ internal static class MediaEndpoints
                 .ToArray();
             return Results.Ok(dtos);
         })
-        .AllowAnonymous();
+        .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         // Manual override — Source=Manual, never clobbered by detection. Null
         // start/end clears that kind's override.
@@ -958,15 +968,20 @@ internal static class MediaEndpoints
         // params). 204 when the background pass hasn't generated a sprite yet —
         // the player just shows no preview bubble. Never generates inline: a
         // sprite costs seconds of ffmpeg, far too slow for a player-start call.
-        // AllowAnonymous to match the other playback endpoints.
+        // Cookie or session media token, like the other playback endpoints;
+        // role folders apply (204 for a title the caller can't see). The sprite
+        // URL is relative — clients append their own ?mt= when they need one.
         app.MapGet(ApiRoutes.MediaTrickplay, async (
             Guid id,
             int? season,
             int? episode,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            if (!await db.MediaItems.IsVisibleAsync(me?.Role, id, ct)) return Results.NoContent();
             var q = db.TrickplayAssets.AsNoTracking().Where(a => a.MediaItemId == id);
             // Seasonless disk layouts store Season=null but the player asks with
             // season=1 — same ??1 convention as the segments endpoint.
@@ -982,7 +997,7 @@ internal static class MediaEndpoints
                 spriteUrl, row.IntervalSec, row.TileWidth, row.TileHeight,
                 row.Cols, row.Rows, row.Count));
         })
-        .AllowAnonymous();
+        .RequireAuthorization(MediaAuth.Policies.MediaSession);
 
         // Skip-intro/credits scan progress for the Settings indicator.
         app.MapGet(ApiRoutes.SegmentsStatus, async (
