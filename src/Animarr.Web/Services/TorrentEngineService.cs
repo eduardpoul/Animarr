@@ -1284,9 +1284,20 @@ public class TorrentEngineService : BackgroundService
     {
         if (mgr.Files.Count == 0) return;
         var destDir = SubfolderPath.Split(customRootFolderName).Aggregate(mgr.SavePath, Path.Combine);
+        // Same file name in two subfolders (RUS Sound/ep01.mka + RUS Sound
+        // (Studio2)/ep01.mka, Season 1/01.mkv + Season 2/01.mkv) would map both
+        // torrent files onto ONE path: MonoTorrent writes both into it and those
+        // pieces never verify. Leave colliding names in their subfolders.
+        var colliding = mgr.Files
+            .Where(f => f.Priority != Priority.DoNotDownload)
+            .GroupBy(f => Path.GetFileName(f.Path), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var file in mgr.Files)
         {
             if (file.Priority == Priority.DoNotDownload) continue;
+            if (colliding.Contains(Path.GetFileName(file.Path))) continue;
             var dest = Path.Combine(destDir, Path.GetFileName(file.Path));
             if (string.Equals(file.FullPath, dest, StringComparison.OrdinalIgnoreCase)) continue;
             try { await mgr.MoveFileAsync(file, dest); }
