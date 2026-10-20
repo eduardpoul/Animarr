@@ -53,6 +53,7 @@
     .md-layout {
         display: flex;
         flex-direction: column;
+        align-items: stretch;   /* the grid's `start` would shrink-wrap the cards */
         gap: 24px;
     }
     .md-main { display: contents; }

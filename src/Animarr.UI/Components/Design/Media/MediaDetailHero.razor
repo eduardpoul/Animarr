@@ -1,6 +1,8 @@
 @*
-    MediaDetail hero — full-bleed fanart, BACK + EDIT glass chips, poster +
-    title + meta strip. Pushes Item.FanartPath into the global backdrop on mount.
+    MediaDetail hero — full-bleed fanart, Back glass chip, poster + title +
+    meta strip, then ONE action row: primary Play / Continue, Watched toggle
+    (movies), Favorite and Edit. Pushes Item.FanartPath into the global
+    backdrop on mount.
 
     Layout: 68vh / min 580px hero, bottom row "260px poster | flex 1 title block".
 *@
@@ -32,27 +34,6 @@
        mobile. *@
     <div class="d-mdhero__backwrap">
         <PageBack Fallback="@BackHref" />
-    </div>
-
-    <div class="d-mdhero__top-actions">
-        <button type="button"
-                class="@($"d-mdhero__fav surface-glass tv-focus {(Item.IsFavorite ? "is-active" : "")}")"
-                @onclick="OnFavorite"
-                aria-label="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])"
-                title="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])">
-            @if (Item.IsFavorite)
-            {
-                <span class="d-mdhero__fav-star d-mdhero__fav-star--filled">★</span>
-            }
-            else
-            {
-                <span class="d-mdhero__fav-star">☆</span>
-            }
-        </button>
-        <button type="button" class="d-mdhero__edit surface-glass tv-focus" @onclick="OnEdit"
-                aria-label="@L["media_detail_hero.edit_metadata_tooltip"]" title="@L["media_detail_hero.edit_metadata_tooltip"]">
-            <DIcon Name="pencil" Size="16" />
-        </button>
     </div>
 
     <div class="d-mdhero__content">
@@ -103,25 +84,53 @@
                 }
             </div>
 
-            @* Primary CTA — label resolves per CHANGELOG §2 (7-state matrix).
-               Click is a no-op until the inline player is wired up; the label
-               carrying the right user state is the point of this iteration.
-
-               data-tv-autofocus pins the default-focus target on TV so the
-               remote lands here when MediaDetail mounts. When there's no
-               progress (Continue null), the hero CTA isn't rendered and
-               focus falls through to the first focusable in main — which
-               on a series is the Back chip, then Edit, then a first
-               episode card (also marked data-tv-autofocus). *@
-            @if (Continue is not null)
-            {
-                <div class="d-mdhero__cta">
+            @* Action row — Fluent command pattern: one primary button, then
+               secondary actions as glass buttons (icon + label, or icon-only
+               with a tooltip). Primary = the server-resolved Continue action
+               (7-state matrix), else the parent's fallback Play (movies with
+               no watch state yet). data-tv-autofocus parks the TV remote on
+               the primary; without one, focus falls through to Favorite. *@
+            <div class="d-mdhero__cta">
+                @if (Continue is not null)
+                {
                     <Btn Variant="primary" Size="lg" OnClick="OnContinue" data-tv-autofocus="true">
-                        <DIcon Name="@Continue.IconName" Size="14" />
+                        <DIcon Name="@Continue.IconName" Size="16" />
                         @ContinueLabel(Continue)
                     </Btn>
-                </div>
-            }
+                }
+                else if (!string.IsNullOrEmpty(PlayLabel) && OnPlayClick.HasDelegate)
+                {
+                    <Btn Variant="primary" Size="lg" OnClick="@(() => OnPlayClick.InvokeAsync())" data-tv-autofocus="true">
+                        <DIcon Name="@PlayIcon" Size="16" />
+                        @PlayLabel
+                    </Btn>
+                }
+
+                @if (Watched is bool watched)
+                {
+                    <button type="button" class="@($"d-mdhero__act tv-focus {(watched ? "is-on" : "")}")"
+                            aria-pressed="@(watched ? "true" : "false")"
+                            title="@(watched ? L["movie_file_card.tooltip_mark_unwatched"] : L["movie_file_card.tooltip_mark_watched"])"
+                            @onclick="@(() => OnToggleWatchedClick.InvokeAsync())">
+                        <DIcon Name="@(watched ? "check" : "eye")" Size="16" />
+                        <span>@(watched ? L["media_detail_hero.btn_watched"] : L["media_detail_hero.btn_mark_watched"])</span>
+                    </button>
+                }
+
+                <button type="button"
+                        class="@($"d-mdhero__act d-mdhero__act--icon tv-focus {(Item.IsFavorite ? "is-fav" : "")}")"
+                        aria-pressed="@(Item.IsFavorite ? "true" : "false")"
+                        aria-label="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])"
+                        title="@(Item.IsFavorite ? L["media_detail_hero.fav_remove"] : L["media_detail_hero.fav_add"])"
+                        @onclick="OnFavorite">
+                    <DIcon Name="@(Item.IsFavorite ? "bookmark-f" : "bookmark")" Size="20" />
+                </button>
+                <button type="button" class="d-mdhero__act d-mdhero__act--icon tv-focus" @onclick="OnEdit"
+                        aria-label="@L["media_detail_hero.edit_metadata_tooltip"]"
+                        title="@L["media_detail_hero.edit_metadata_tooltip"]">
+                    <DIcon Name="pencil" Size="20" />
+                </button>
+            </div>
         </div>
     </div>
 </section>
@@ -133,6 +142,15 @@
     /// <summary>Resolved per CHANGELOG §2. Null → no CTA row rendered.</summary>
     [Parameter] public ContinueAction? Continue { get; set; }
     [Parameter] public EventCallback<ContinueAction> OnContinueClick { get; set; }
+    /// <summary>Fallback primary when <see cref="Continue"/> is null (e.g. a
+    /// movie nobody has started) — label + icon + handler from the parent.</summary>
+    [Parameter] public string? PlayLabel { get; set; }
+    [Parameter] public string PlayIcon { get; set; } = "play";
+    [Parameter] public EventCallback OnPlayClick { get; set; }
+    /// <summary>Movie watched state; null hides the toggle (series track
+    /// watched per episode).</summary>
+    [Parameter] public bool? Watched { get; set; }
+    [Parameter] public EventCallback OnToggleWatchedClick { get; set; }
 
     /// <summary>Localised caption for the primary CTA, rebuilt from the
     /// server's Kind + episode hint so it reads in the UI language. Falls back
@@ -196,13 +214,13 @@
         return Continue is null ? Task.CompletedTask : OnContinueClick.InvokeAsync(Continue);
     }
 
-    private static string TypeLabel(MediaItemType t) => t switch
+    private string TypeLabel(MediaItemType t) => t switch
     {
-        MediaItemType.Anime       => "Anime",
-        MediaItemType.Movie       => "Movie",
-        MediaItemType.Series      => "Series",
-        MediaItemType.Multserials => "Multi",
-        _                         => "Media",
+        MediaItemType.Anime       => L["media_detail_hero.type_anime"],
+        MediaItemType.Movie       => L["media_detail_hero.type_movie"],
+        MediaItemType.Series      => L["media_detail_hero.type_series"],
+        MediaItemType.Multserials => L["media_detail_hero.type_multi"],
+        _                         => L["media_detail_hero.type_media"],
     };
 
     private static IEnumerable<string> TagPreview(MediaItemDto item)

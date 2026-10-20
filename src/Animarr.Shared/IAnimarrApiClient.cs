@@ -34,6 +34,9 @@ public interface IAnimarrApiClient
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
+    /// <summary>ffprobe summary of one library file (codecs, HDR, tracks) via
+    /// /api/probe; null when the file can't be probed.</summary>
+    Task<MediaProbeDto?> GetProbeAsync(string filePath, CancellationToken ct = default);
     /// <summary>Per-episode TMDB metadata (title/synopsis/air date/rating/runtime)
     /// for the detailed-list view. Lazy-fetched + cached server-side; empty for
     /// movies or titles without a TMDB id.</summary>

@@ -27,12 +27,11 @@
            AND into the status-bar overlay area. */
         margin: calc(-1 * (56px + var(--animarr-safe-top))) -16px var(--space-7);
     }
-    /* Push the inner content (back, favorite/edit, poster, title block)
-       down by the status-bar inset so they don't render under the
-       system clock / battery indicator. The .d-mdhero__bg layer keeps
-       filling the whole rect — only the foreground shifts. */
-    .d-mdhero__backwrap,
-    .d-mdhero__top-actions {
+    /* Push the inner content (back, poster, title block) down by the
+       status-bar inset so it doesn't render under the system clock /
+       battery indicator. The .d-mdhero__bg layer keeps filling the whole
+       rect — only the foreground shifts. */
+    .d-mdhero__backwrap {
         top: calc(var(--space-4) + var(--animarr-safe-top)) !important;
     }
     .d-mdhero__content {
@@ -77,30 +76,6 @@
     z-index: 1;
 }
 
-/* ── Back / Favorite / Edit — 40px glass buttons over the artwork ── */
-.d-mdhero__edit,
-.d-mdhero__fav {
-    appearance: none;
-    cursor: pointer;
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    border-radius: var(--radius-ctrl);
-    color: var(--text);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background var(--motion-fast), color var(--motion-fast);
-    z-index: 3;
-    /* .surface-glass supplies the fill + blur; re-tone it to Fluent's
-       acrylic-on-dark and lift it off bright fanart. */
-    background: rgba(32, 32, 32, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-    box-shadow: var(--shadow-8);
-}
-
 /* Wrapper that positions the shared <PageBack> button over the fanart. */
 .d-mdhero__backwrap {
     position: absolute;
@@ -112,8 +87,8 @@
     line-height: 0;
 }
 
-/* Give the shared <PageBack> the SAME glass treatment as Favorite / Edit so
-   all three hero controls read as one set. ::deep reaches PageBack's button. */
+/* Give the shared <PageBack> the same glass treatment as the hero's action
+   buttons. ::deep reaches PageBack's button. */
 .d-mdhero__backwrap ::deep .d-page-back {
     background: rgba(32, 32, 32, 0.55);
     -webkit-backdrop-filter: blur(20px);
@@ -129,21 +104,10 @@
     border-color: rgba(255, 255, 255, 0.16);
 }
 
-/* Favorite + Edit anchored top-right. */
-.d-mdhero__top-actions {
-    position: absolute;
-    top: 72px;
-    right: 24px;
-    z-index: 3;
-    display: inline-flex;
-    gap: 8px;
-}
-
-/* Web/desktop: pin the back + favorite/edit controls so they stay reachable
-   while scrolling the detail page — a secondary toolbar for the content
-   column. fixed = viewport-relative; z-index 40 keeps them above page
-   content yet below the drawers / player. Mobile keeps them absolute — there
-   the hero chrome scrolls with the fanart. */
+/* Web/desktop: pin Back so it stays reachable while scrolling the detail
+   page. fixed = viewport-relative; z-index 40 keeps it above page content
+   yet below the drawers / player. Mobile keeps it absolute — there the hero
+   chrome scrolls with the fanart. */
 @media (min-width: 960px) {
     /* Lift the WHOLE hero stacking context above the page content. The hero has
        `isolation: isolate`, which traps the fixed controls in its own context —
@@ -152,8 +116,7 @@
        Raising the hero itself to z-index:40 lifts the entire context (and the
        trapped controls with it) above that content. */
     .d-mdhero { z-index: 40; }
-    .d-mdhero__backwrap,
-    .d-mdhero__top-actions {
+    .d-mdhero__backwrap {
         position: fixed;
         z-index: 40;
         /* No top bar (Fluent NavPane on the left) — the toolbar sits 24px from
@@ -161,26 +124,7 @@
         top: 24px;
     }
     .d-mdhero__backwrap { left: calc(var(--nav-cur) + var(--main-pad-x)); }
-    .d-mdhero__top-actions { right: var(--main-pad-x); }
 }
-
-.d-mdhero__edit:hover,
-.d-mdhero__fav:hover {
-    background: rgba(48, 48, 48, 0.72);
-}
-.d-mdhero__edit:active,
-.d-mdhero__fav:active {
-    background: rgba(24, 24, 24, 0.72);
-}
-
-/* Favorited: the star carries the accent; the button keeps its glass. */
-.d-mdhero__fav.is-active { color: var(--accent-hi); }
-
-.d-mdhero__fav-star {
-    font-size: 20px;
-    line-height: 1;
-}
-.d-mdhero__fav-star--filled { color: var(--accent-hi); }
 
 /* ── Poster + title block ──────────────────────────────────── */
 .d-mdhero__content {
@@ -290,13 +234,45 @@
     font-weight: 600;
 }
 
-/* Primary CTA row — sits below the meta strip. */
+/* Action row — primary + glass secondaries, below the meta strip. */
 .d-mdhero__cta {
     display: flex;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 8px;
 }
+
+/* Secondary hero actions: Fluent "subtle on media" — acrylic-dark glass so
+   they hold up on bright fanart, 40px to line up with the lg primary. */
+.d-mdhero__act {
+    appearance: none;
+    cursor: pointer;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius-ctrl);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(32, 32, 32, 0.55);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
+}
+.d-mdhero__act:hover  { background: rgba(56, 56, 56, 0.72); }
+.d-mdhero__act:active { background: rgba(24, 24, 24, 0.72); }
+.d-mdhero__act--icon { width: 40px; padding: 0; }
+.d-mdhero__act.is-on { color: var(--success); border-color: color-mix(in oklch, var(--success) 45%, transparent); }
+.d-mdhero__act.is-fav { color: var(--accent-hi); }
 
 /* ── Mobile / tablet — shrink hero, tighten poster.
    NB: no margin/padding-top here — this block comes LATER in the file than
@@ -315,22 +291,27 @@
     .d-mdhero__poster { width: 150px; }
     .d-mdhero__title { font-size: 28px; line-height: 36px; }
     .d-mdhero__backwrap    { left:  var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); }
-    .d-mdhero__top-actions { right: var(--space-6); top: calc(var(--space-5) + var(--animarr-safe-top)); }
 }
 
 /* ── Phone — stack poster above title. */
 @media (max-width: 639px) {
     .d-mdhero {
         /* Match the home hero height. min-height (not fixed height) so a long
-           2-line title + poster never clips — it grows a touch instead. */
+           2-line title + poster + two action rows never clip — the content is
+           in flow here (not absolute), so the hero grows instead. */
         height: auto;
         min-height: clamp(420px, 54vh, 500px);
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
     }
     .d-mdhero__content {
+        position: relative;
+        inset: auto;
         flex-direction: column;
         align-items: flex-start;
-        /* Push the poster/title down clear of the absolutely-positioned Back +
-           favorite/edit buttons (safe-top + ~12px, 40px tall). */
+        /* Push the poster/title down clear of the absolutely-positioned Back
+           button (safe-top + ~12px, 40px tall). */
         padding: calc(var(--animarr-safe-top) + 64px) var(--space-5) var(--hero-fade);
         gap: 12px;
     }
@@ -343,5 +324,7 @@
         opacity: 0.7;
     }
     .d-mdhero__backwrap    { left:  var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); }
-    .d-mdhero__top-actions { right: var(--space-4); top: calc(var(--space-4) + var(--animarr-safe-top)); }
+    /* Phone: the primary takes the first row, secondaries share the next. */
+    .d-mdhero__cta ::deep .d-btn--primary { flex: 1 1 100%; }
+    .d-mdhero__act:not(.d-mdhero__act--icon) { flex: 1 1 auto; }
 }

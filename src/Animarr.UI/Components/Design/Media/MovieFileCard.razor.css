@@ -1,178 +1,42 @@
-/* MovieFileCard — Fluent 2 card. Thumbnail panel + info panel side by side;
-   wraps to a vertical stack when its container gets narrow (the card lives
-   in MediaDetail's main column, so a viewport query isn't enough). */
+/* Movie file card — Fluent 2 card: header row, progress, a spec grid and
+   the audio / subtitle track lists. */
 
-.d-mfc {
-    position: relative;
+.mfc {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px 20px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    overflow: hidden;
-    transition: opacity var(--motion-base), border-color var(--motion-fast);
 }
+.mfc--missing { border-style: dashed; }
 
-.d-mfc--miss {
-    border-style: dashed;
-    border-color: var(--border-strong);
-    opacity: 0.72;
-}
-
-/* Watched — the thumbnail recedes, the caption stays readable. */
-.d-mfc--watched .d-mfc__img {
-    opacity: 0.6;
-    filter: saturate(0.7);
-}
-.d-mfc--watched .d-mfc__title { color: var(--text-dim); }
-
-/* ── Thumbnail panel ──────────────────────────────────────── */
-/* ~360px beside the info panel; full width (16:9) once wrapped. The image is
-   absolutely positioned so the row height follows the info panel. Everything
-   on it sits on artwork → always-dark status colors in both themes. */
-.d-mfc__art {
-    --success: oklch(0.72 0.14 150);
-    --warn:    oklch(0.83 0.13 85);
-    position: relative;
-    flex: 1 1 360px;
-    min-width: 0;
-    max-width: 100%;
-    aspect-ratio: 16 / 9;
-    min-height: 180px;
-    background: var(--surface-3);
-    overflow: hidden;
-}
-.d-mfc__img {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    transition: opacity var(--motion-base), filter var(--motion-base);
-}
-.d-mfc--miss .d-mfc__img { filter: grayscale(1) brightness(0.6); }
-.d-mfc__placeholder {
-    position: absolute;
-    inset: 0;
+/* ── Header: icon · filename + folder · status ───────────── */
+.mfc__head {
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--text-faint);
+    gap: 12px;
+    min-width: 0;
 }
-
-/* ── Two-corner chips — 32×32 glass squares. */
-.d-mfc__chip {
-    position: absolute;
-    z-index: 2;
-    width: 32px;
-    height: 32px;
-    box-sizing: border-box;
-    border-radius: var(--radius-ctrl);
+.mfc__ic {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
     display: grid;
     place-items: center;
-    background: rgba(0, 0, 0, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    color: #fff;
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    border-radius: var(--radius-ctrl);
+    background: var(--ink-1);
+    color: var(--accent-hi);
 }
-.d-mfc__chip--ok,
-.d-mfc__chip--miss {
-    top: 12px;
-    right: 12px;
-}
-.d-mfc__chip--ok   { color: var(--success); }
-.d-mfc__chip--miss { color: var(--warn); }
-button.d-mfc__chip--eye {
-    bottom: 16px;          /* clear of the 4px progress bar */
-    right: 12px;
-    appearance: none;
-    padding: 0;
-    cursor: pointer;
-    transition: background var(--motion-fast);
-}
-button.d-mfc__chip--eye:hover { background: rgba(0, 0, 0, 0.75); }
-button.d-mfc__chip--eye:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: 1px;
-}
-.d-mfc__chip--eye-on { color: var(--success); }
-
-/* ── Progress bar — 4px on the movie card. */
-.d-mfc__pb {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 4px;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 2;
-    overflow: hidden;
-}
-.d-mfc__pb-fill { height: 100%; }
-.d-mfc__pb-fill--inprog { background: var(--accent-hi); }
-.d-mfc__pb-fill--done   { background: rgba(255, 255, 255, 0.6); }
-
-/* ── Info panel ───────────────────────────────────────────── */
-.d-mfc__info {
-    flex: 999 1 300px;
-    min-width: 0;            /* let the filename ellipsize */
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.d-mfc__overline {
-    font-size: 12px;
-    line-height: 16px;
-    color: var(--text-dim);
-}
-
-.d-mfc__title {
-    font-family: var(--font-ui);
-    font-size: 20px;
-    line-height: 28px;
-    font-weight: 600;
-    color: var(--text);
-    margin: 0;
-    overflow-wrap: anywhere;
-}
-
-.d-mfc__filename {
-    font-family: var(--font-code);
-    font-size: 12px;
-    line-height: 16px;
-    color: var(--text-dim);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Key/value cells — runtime / resolution / codec / size. */
-.d-mfc__cells {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    gap: 8px;
-    margin-top: 4px;
-}
-.d-mfc__cell {
+.mfc__head-text {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 8px 10px;
-    background: var(--ink-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-ctrl);
-    min-width: 0;
 }
-.d-mfc__cell-k {
-    font-size: 12px;
-    line-height: 16px;
-    color: var(--text-dim);
-}
-.d-mfc__cell-v {
+.mfc__name {
     font-size: 14px;
     line-height: 20px;
     font-weight: 600;
@@ -181,19 +45,152 @@ button.d-mfc__chip--eye:focus-visible {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.mfc__path {
+    font-family: var(--font-code);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;          /* clip the START of a long path, keep the leaf */
+    text-align: left;
+}
+.mfc__head .fs-status { flex-shrink: 0; }
 
-.d-mfc__actions {
+/* ── Watch progress ──────────────────────────────────────── */
+.mfc__progress {
     display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.mfc__bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ink-3);
+    overflow: hidden;
+}
+.mfc__fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent-hi);
+}
+.mfc__progress-text {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Spec grid ───────────────────────────────────────────── */
+.mfc__specs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 8px;
-    margin-top: 8px;
-    flex-wrap: wrap;
+    margin: 0;
+}
+.mfc__spec {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border-radius: var(--radius-ctrl);
+    background: var(--ink-1);
+    min-width: 0;
+}
+.mfc__spec dt {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+}
+.mfc__spec dd {
+    margin: 0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.mfc__note { color: var(--text-dim); }
+
+/* ── Tracks: audio | subtitles ───────────────────────────── */
+.mfc__tracks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.mfc__track-col { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.mfc__track-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--text);
+}
+.mfc__track-title ::deep svg { color: var(--text-dim); }
+.mfc__track-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-ctrl);
+    overflow: hidden;
+}
+.mfc__track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text);
+    min-width: 0;
+}
+.mfc__track:last-child { border-bottom: 0; }
+.mfc__lang {
+    flex-shrink: 0;
+    min-width: 28px;
+    padding: 0 6px;
+    border-radius: var(--radius-badge);
+    background: var(--ink-2);
+    font-size: 12px;
+    line-height: 20px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text);
+}
+.mfc__track-main { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.mfc__track-title-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mfc__badge {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: var(--radius-badge);
+    background: var(--accent-soft);
+    color: var(--accent-hi);
+    font-size: 12px;
+    line-height: 20px;
+    font-weight: 600;
 }
 
 @media (max-width: 639px) {
-    .d-mfc__info { padding: 12px; }
-    .d-mfc__title { font-size: 16px; line-height: 22px; }
-    .d-mfc__action-label {
-        /* Collapse to icon-only on narrow phones. */
-        display: none;
-    }
+    .mfc { padding: 14px; }
+    .mfc__tracks { grid-template-columns: minmax(0, 1fr); }
+    .mfc__specs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -1,142 +1,171 @@
 @*
-    Movie file card — per CHANGELOG_FOR_CLAUDE_CODE.md §3.
-    Sits after the body on MediaDetail when type == Movie.
+    Movie file card — the "what is actually on disk" panel of a movie (or a
+    flat-folder one-shot) title page. Play / Watched / Favorite / Edit live in
+    the hero's action row, so this card carries no actions and no duplicated
+    title or artwork — just the facts people check before pressing Play:
 
-    Layout (desktop):
-      ┌─────────────────────────────────────────────────────┐
-      │ 16:9 thumb (360px wide)  │  TITLE                   │
-      │  ┌─────────────────────┐ │  filename.mkv            │
-      │  │ 04 (etc)   [✓ chip] │ │  ┌──────┬──────┬───┬───┐ │
-      │  │                     │ │  │ RT   │ RES  │ C │ S │ │
-      │  │             [👁 chip]│ │  └──────┴──────┴───┴───┘ │
-      │  │ ── progress ────────│ │  [Continue · 38%] [👁 Toggle]
-      │  └─────────────────────┘ │                          │
-      └─────────────────────────────────────────────────────┘
+      ┌ [file] Movie.Name.2160p.mkv                         [● On disk] ┐
+      │        /media/movies/Movie (2015)                               │
+      │ ━━━━━━━━━━━━━━──────────  38% watched · 1 h 39 min left          │
+      │ Quality 2160p · HDR10   Video HEVC · 10-bit   Duration   Size    │
+      │ Audio · 3                       │ Subtitles · 2                  │
+      │  RU  AC3 5.1  Dub   [Default]   │  RU  SRT                       │
+      │  EN  TrueHD 7.1                 │  EN  PGS  [Forced]             │
+      └──────────────────────────────────────────────────────────────────┘
 
-    Visual language matches EpisodeCard (Fluent 2 card, 8px corners):
-      • 32×32 glass chips top-right (disk-status) and bottom-right (watched-eye)
-      • 4px progress bar at thumb bottom
-      • Watched dims the thumbnail; missing dims the card + dashes its stroke
-      • Key/value cells for runtime / resolution / codec / size
-
-    Narrow container: wraps to a vertical stack (thumb on top); on phones the
-    action buttons collapse to icon-only.
+    Stream info comes from /api/probe (ffprobe), loaded lazily per file.
 *@
 
-<div class="@CssClass">
-    <div class="d-mfc__art">
-        @if (!string.IsNullOrEmpty(ThumbUrl))
-        {
-            <img src="@ThumbUrl" alt="" loading="lazy" class="d-mfc__img" />
-        }
-        else
-        {
-            <div class="d-mfc__placeholder"><DIcon Name="video" Size="32" /></div>
-        }
+@inject IAnimarrApiClient Api
 
-        @* TOP-RIGHT — disk-status chip (32×32 on the movie card). *@
-        @if (Have)
-        {
-            <div class="d-mfc__chip d-mfc__chip--ok" title="@L["movie_file_card.tooltip_on_disk"]">
-                <DIcon Name="check" Size="16" />
-            </div>
-        }
-        else
-        {
-            <div class="d-mfc__chip d-mfc__chip--miss" title="Missing — not downloaded">
-                <DIcon Name="warn" Size="16" />
-            </div>
-        }
-
-        @* BOTTOM-RIGHT — watched-eye chip. Same 32×32 box. *@
-        @if (Have)
-        {
-            <button type="button"
-                    class="@EyeClass"
-                    title="@(IsWatched ? L["movie_file_card.tooltip_mark_unwatched"] : L["movie_file_card.tooltip_mark_watched"])"
-                    @onclick="OnEyeClick"
-                    @onclick:stopPropagation="true">
-                <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
-            </button>
-        }
-
-        @* Progress bar — 4px on movie card per CHANGELOG §4. *@
-        @if (Have && (IsWatched || ProgressPct > 0))
-        {
-            <div class="d-mfc__pb">
-                <div class="@ProgressFillClass" style="width: @(IsWatched ? 100 : ProgressPct)%"></div>
-            </div>
-        }
-    </div>
-
-    <div class="d-mfc__info">
-        <div class="d-mfc__overline">@L["movie_file_card.overline"]</div>
-        <div class="d-mfc__title">@Title</div>
-        @if (!string.IsNullOrEmpty(FileName))
-        {
-            <div class="d-mfc__filename" title="@FileName">@FileName</div>
-        }
-
-        @* Four key/value cells — runtime / resolution / codec / size. *@
-        <div class="d-mfc__cells">
-            <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">@L["movie_file_card.cell_runtime"]</span>
-                <span class="d-mfc__cell-v">@(Runtime ?? "—")</span>
-            </div>
-            <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">@L["movie_file_card.cell_res"]</span>
-                <span class="d-mfc__cell-v">@(Resolution ?? "—")</span>
-            </div>
-            <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">@L["movie_file_card.cell_codec"]</span>
-                <span class="d-mfc__cell-v">@(Codec ?? "—")</span>
-            </div>
-            <div class="d-mfc__cell">
-                <span class="d-mfc__cell-k">@L["movie_file_card.cell_size"]</span>
-                <span class="d-mfc__cell-v">@(Size ?? "—")</span>
-            </div>
-        </div>
-
-        <div class="d-mfc__actions">
-            @* Primary CTA — label matches the hero's "Continue / Play movie / Rewatch from start" CTA.
-               data-tv-autofocus pins the default-focus target on TV. For an
-               un-watched movie the hero has no Continue CTA, so without this
-               the remote would land on the Back chip up top. *@
-            <Btn Variant="primary" Size="md" OnClick="OnPlay" data-tv-autofocus="true">
-                <DIcon Name="@PlayIcon" Size="16" />
-                <span class="d-mfc__action-label">@PlayLabel</span>
-            </Btn>
-            @if (Have)
+<section class="@($"mfc {(Have ? "" : "mfc--missing")}")" aria-label="@L["movie_file_card.title"]">
+    <header class="mfc__head">
+        <span class="mfc__ic" aria-hidden="true"><DIcon Name="video" Size="20" /></span>
+        <div class="mfc__head-text">
+            <div class="mfc__name" title="@FileName">@(FileName ?? L["movie_file_card.title"])</div>
+            @if (!string.IsNullOrEmpty(Folder))
             {
-                <Btn Variant="solid" Size="md" OnClick="OnEyeClick">
-                    <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
-                    <span class="d-mfc__action-label">@(IsWatched ? L["movie_file_card.btn_mark_unwatched"] : L["movie_file_card.btn_mark_watched"])</span>
-                </Btn>
+                <div class="mfc__path" title="@Folder">@Folder</div>
             }
         </div>
-    </div>
-</div>
+        <span class="@($"fs-status {(Have ? "fs-status--ok" : "fs-status--warn")}")">
+            @(Have ? L["movie_file_card.tooltip_on_disk"] : L["episode_card.meta_missing"])
+        </span>
+    </header>
+
+    @if (!Have)
+    {
+        <div class="fs-msgbar fs-msgbar--warn">
+            <span class="fs-msgbar__ic"><DIcon Name="warn" Size="16" /></span>
+            <span>@L["movie_file_card.missing_hint"]</span>
+        </div>
+    }
+    else
+    {
+        @if (ProgressPct > 0 && !IsWatched)
+        {
+            <div class="mfc__progress">
+                <div class="mfc__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                     aria-valuenow="@ProgressPct"><div class="mfc__fill" style="width: @(ProgressPct)%"></div></div>
+                <span class="mfc__progress-text">@L.Get("movie_file_card.progress_fmt", ProgressPct, FormatDuration(RemainingSec))</span>
+            </div>
+        }
+
+        <dl class="mfc__specs">
+            @if (QualityLabel is { } q)
+            {
+                <div class="mfc__spec"><dt>@L["movie_file_card.spec_quality"]</dt><dd>@q</dd></div>
+            }
+            @if (VideoLabel is { } v)
+            {
+                <div class="mfc__spec"><dt>@L["movie_file_card.spec_video"]</dt><dd>@v</dd></div>
+            }
+            @if (DurationSec is > 0)
+            {
+                <div class="mfc__spec"><dt>@L["movie_file_card.cell_runtime"]</dt><dd>@FormatDuration(DurationSec.Value)</dd></div>
+            }
+            @if (SizeBytes is > 0)
+            {
+                <div class="mfc__spec"><dt>@L["movie_file_card.cell_size"]</dt><dd>@SizeLabel</dd></div>
+            }
+        </dl>
+
+        @if (_probing)
+        {
+            <div class="mfc__note"><InlineDots Label="@L["movie_file_card.probing"]" /></div>
+        }
+        else if (_probe is null && _probeTried)
+        {
+            <p class="fs-hint">@L["movie_file_card.probe_failed"]</p>
+        }
+        else if (_probe is not null)
+        {
+            <div class="mfc__tracks">
+                <div class="mfc__track-col">
+                    <div class="mfc__track-title">
+                        <DIcon Name="audio" Size="16" /> @L.Get("movie_file_card.audio_title_fmt", _probe.Audio.Length)
+                    </div>
+                    <ul class="mfc__track-list">
+                        @foreach (var a in _probe.Audio)
+                        {
+                            <li class="mfc__track">
+                                <span class="mfc__lang">@LangCode(a.Language)</span>
+                                <span class="mfc__track-main">@AudioLabel(a)</span>
+                                @if (!string.IsNullOrEmpty(a.Title))
+                                {
+                                    <span class="mfc__track-title-text" title="@a.Title">@a.Title</span>
+                                }
+                                @if (a.IsDefault && _probe.Audio.Length > 1)
+                                {
+                                    <span class="mfc__badge">@L["movie_file_card.track_default"]</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                </div>
+                <div class="mfc__track-col">
+                    <div class="mfc__track-title">
+                        <DIcon Name="cc" Size="16" /> @L.Get("movie_file_card.subs_title_fmt", _probe.Subtitles.Length)
+                    </div>
+                    @if (_probe.Subtitles.Length == 0)
+                    {
+                        <p class="fs-hint">@L["movie_file_card.no_subs"]</p>
+                    }
+                    else
+                    {
+                        <ul class="mfc__track-list">
+                            @foreach (var s in _probe.Subtitles)
+                            {
+                                <li class="mfc__track">
+                                    <span class="mfc__lang">@LangCode(s.Language)</span>
+                                    <span class="mfc__track-main">@SubCodec(s.Codec)</span>
+                                    @if (!string.IsNullOrEmpty(s.Title))
+                                    {
+                                        <span class="mfc__track-title-text" title="@s.Title">@s.Title</span>
+                                    }
+                                    @if (s.IsForced)
+                                    {
+                                        <span class="mfc__badge">@L["movie_file_card.track_forced"]</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        }
+    }
+</section>
 
 @code {
-    [Parameter, EditorRequired] public string Title    { get; set; } = "";
-    [Parameter] public string?  FileName   { get; set; }
-    [Parameter] public string?  ThumbUrl   { get; set; }
-    [Parameter] public string?  Runtime    { get; set; }
-    [Parameter] public string?  Resolution { get; set; }
-    [Parameter] public string?  Codec      { get; set; }
-    [Parameter] public string?  Size       { get; set; }
-    [Parameter] public bool     Have       { get; set; } = true;
-
+    [Parameter] public string?  FileName  { get; set; }
+    /// <summary>Server-side path — used for the folder line and /api/probe.</summary>
+    [Parameter] public string?  FilePath  { get; set; }
+    [Parameter] public long?    SizeBytes { get; set; }
+    [Parameter] public bool     Have      { get; set; } = true;
+    /// <summary>Metadata runtime, the fallback when ffprobe gives no duration.</summary>
+    [Parameter] public int?     RuntimeMinutes { get; set; }
     /// <summary>Per-movie WatchStateDto. Null = untouched.</summary>
     [Parameter] public WatchStateDto? WatchStateDto { get; set; }
 
-    /// <summary>Primary CTA label resolved by the parent via ContinueResolver
-    /// (keeps button text consistent with the hero).</summary>
-    [Parameter] public string PlayLabel { get; set; } = "Play movie";
-    [Parameter] public string PlayIcon  { get; set; } = "play";
+    private MediaProbeDto? _probe;
+    private bool _probing;
+    private bool _probeTried;
+    private string? _probedPath;
 
-    [Parameter] public EventCallback OnPlayClick      { get; set; }
-    [Parameter] public EventCallback OnToggleWatched  { get; set; }
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Have || string.IsNullOrEmpty(FilePath) || FilePath == _probedPath) return;
+        _probedPath = FilePath;
+        _probe = null;
+        _probing = true;
+        _probeTried = false;
+        StateHasChanged();
+        try { _probe = await Api.GetProbeAsync(FilePath); }
+        catch { _probe = null; }
+        _probing = false;
+        _probeTried = true;
+    }
 
     private bool IsWatched => WatchStateDto?.IsWatched == true;
 
@@ -145,32 +174,125 @@
         get
         {
             if (WatchStateDto is { ProgressMs: > 0, RuntimeMs: > 0 } w)
-            {
-                var pct = (int)Math.Round(100.0 * w.ProgressMs!.Value / w.RuntimeMs!.Value);
-                return Math.Clamp(pct, 1, 99);
-            }
+                return Math.Clamp((int)Math.Round(100.0 * w.ProgressMs!.Value / w.RuntimeMs!.Value), 1, 99);
             return 0;
         }
     }
 
-    private string CssClass
+    private double RemainingSec =>
+        WatchStateDto is { ProgressMs: > 0, RuntimeMs: > 0 } w
+            ? Math.Max(0, (w.RuntimeMs!.Value - w.ProgressMs!.Value) / 1000.0)
+            : 0;
+
+    private double? DurationSec =>
+        _probe?.DurationSec is > 0 ? _probe.DurationSec
+        : RuntimeMinutes is > 0 ? RuntimeMinutes * 60.0 : null;
+
+    private string? Folder
     {
         get
         {
-            var cls = Have ? "d-mfc d-mfc--have" : "d-mfc d-mfc--miss";
-            if (Have && IsWatched) cls += " d-mfc--watched";
-            return cls;
+            // Split by hand: the server path may be Windows (\\) or POSIX (/),
+            // and System.IO.Path in WASM only understands '/'.
+            if (string.IsNullOrEmpty(FilePath)) return null;
+            var cut = FilePath.LastIndexOfAny(new[] { '/', '\\' });
+            return cut > 0 ? FilePath[..cut] : null;
         }
     }
 
-    private string EyeClass => IsWatched
-        ? "d-mfc__chip d-mfc__chip--eye d-mfc__chip--eye-on"
-        : "d-mfc__chip d-mfc__chip--eye d-mfc__chip--eye-off";
+    // ── Labels ───────────────────────────────────────────────────────
+    private string? QualityLabel
+    {
+        get
+        {
+            if (_probe?.Video is not { Width: > 0 } v) return null;
+            // Classify by width first — scope/flat crops (1920×800) are still 1080p.
+            var tier = v.Width >= 3800 || v.Height >= 2100 ? "2160p (4K)"
+                     : v.Width >= 2500 || v.Height >= 1400 ? "1440p"
+                     : v.Width >= 1900 || v.Height >= 1000 ? "1080p"
+                     : v.Width >= 1260 || v.Height >= 700  ? "720p"
+                     : $"{v.Height}p";
+            return v.Hdr is { } hdr ? $"{tier} · {hdr}" : tier;
+        }
+    }
 
-    private string ProgressFillClass => IsWatched
-        ? "d-mfc__pb-fill d-mfc__pb-fill--done"
-        : "d-mfc__pb-fill d-mfc__pb-fill--inprog";
+    private string? VideoLabel
+    {
+        get
+        {
+            if (_probe?.Video is not { } v) return null;
+            var bits = new List<string> { VideoCodec(v.Codec) };
+            if (v.BitDepth >= 10) bits.Add(L.Get("movie_file_card.bit_depth_fmt", v.BitDepth));
+            if (v.Fps is > 0) bits.Add(L.Get("movie_file_card.fps_fmt",
+                v.Fps.Value.ToString(Math.Abs(v.Fps.Value - Math.Round(v.Fps.Value)) < 0.01 ? "0" : "0.###",
+                    System.Globalization.CultureInfo.InvariantCulture)));
+            return string.Join(" · ", bits);
+        }
+    }
 
-    private Task OnPlay()     => OnPlayClick.InvokeAsync();
-    private Task OnEyeClick() => OnToggleWatched.InvokeAsync();
+    private string SizeLabel
+    {
+        get
+        {
+            var b = SizeBytes ?? 0;
+            var size = b >= 1_073_741_824
+                ? L.Get("common.size_gb_fmt", (b / 1_073_741_824.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))
+                : L.Get("common.size_mb_fmt", (b / 1_048_576.0).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+            if (_probe?.BitRate is long br and > 0)
+                size += " · " + L.Get("movie_file_card.bitrate_fmt",
+                    (br / 1_000_000.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+            return size;
+        }
+    }
+
+    private string FormatDuration(double sec)
+    {
+        var total = (int)Math.Round(sec / 60.0);
+        var h = total / 60;
+        var m = total % 60;
+        return h > 0 ? L.Get("common.duration_hm_fmt", h, m) : L.Get("common.duration_m_fmt", Math.Max(m, 1));
+    }
+
+    private static string VideoCodec(string c) => c switch
+    {
+        "hevc" => "HEVC", "h264" => "H.264", "av1" => "AV1", "vp9" => "VP9", "vp8" => "VP8",
+        "mpeg4" => "MPEG-4", "mpeg2video" => "MPEG-2", "vc1" => "VC-1", "msmpeg4v3" => "DivX",
+        _ => c.ToUpperInvariant(),
+    };
+
+    private static string AudioLabel(ProbeAudioDto a)
+    {
+        var codec = a.Codec switch
+        {
+            "dts" when !string.IsNullOrEmpty(a.Profile) && a.Profile != "DTS" => a.Profile!,
+            "aac" => "AAC", "ac3" => "AC3", "eac3" => "E-AC3", "truehd" => "TrueHD", "dts" => "DTS",
+            "flac" => "FLAC", "opus" => "Opus", "mp3" => "MP3", "vorbis" => "Vorbis",
+            var c when c.StartsWith("pcm_") => "PCM",
+            var c => c.ToUpperInvariant(),
+        };
+        var ch = a.Channels switch
+        {
+            1 => "1.0", 2 => "2.0", 3 => "2.1", 6 => "5.1", 7 => "6.1", 8 => "7.1",
+            0 => null, var n => $"{n}ch",
+        };
+        return ch is null ? codec : $"{codec} {ch}";
+    }
+
+    private static string SubCodec(string c) => c switch
+    {
+        "subrip" => "SRT", "ass" => "ASS", "ssa" => "SSA", "hdmv_pgs_subtitle" => "PGS",
+        "dvd_subtitle" => "VobSub", "mov_text" => "TX3G", "webvtt" => "WebVTT",
+        _ => c.ToUpperInvariant(),
+    };
+
+    /// <summary>ISO 639-2 (ffprobe) → short uppercase tag; "—" when unknown.</summary>
+    private static string LangCode(string? lang) => (lang ?? "").ToLowerInvariant() switch
+    {
+        "" => "—",
+        "rus" or "ru" => "RU", "eng" or "en" => "EN", "jpn" or "ja" => "JA", "ukr" or "uk" => "UK",
+        "chi" or "zho" or "zh" => "ZH", "kor" or "ko" => "KO", "ger" or "deu" or "de" => "DE",
+        "fre" or "fra" or "fr" => "FR", "spa" or "es" => "ES", "ita" or "it" => "IT",
+        "por" or "pt" => "PT", "pol" or "pl" => "PL", "tur" or "tr" => "TR", "tha" or "th" => "TH",
+        var l => l.Length <= 3 ? l.ToUpperInvariant() : l,
+    };
 }

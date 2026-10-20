@@ -100,6 +100,15 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<MediaFileDto[]>(ApiRoutes.MediaFilesFor(mediaItemId), JsonOpts, ct)
             ?? Array.Empty<MediaFileDto>();
 
+    public async Task<MediaProbeDto?> GetProbeAsync(string filePath, CancellationToken ct = default)
+    {
+        using var resp = await _http.GetAsync($"{ApiRoutes.Probe}?path={Uri.EscapeDataString(filePath)}", ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        return MediaProbeDto.Parse(doc.RootElement);
+    }
+
     public async Task<EpisodeMetaDto[]> GetEpisodeMetadataAsync(Guid mediaItemId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<EpisodeMetaDto[]>(ApiRoutes.MediaEpisodesFor(mediaItemId), JsonOpts, ct)
             ?? Array.Empty<EpisodeMetaDto>();

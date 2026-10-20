@@ -88,12 +88,24 @@ else
         .ToArray();
     var showEpisodeGrid = hasSeasonMeta
                       || (isMultiEpisode && fileSeasons.Length > 0);
+    // Movie OR flat-folder anime (one-shot OVA) with no Seasons — one file,
+    // watched as a whole, so the hero carries Play + the Watched toggle.
+    var isMovieLike   = !showEpisodeGrid
+                     && (item.MediaType == MediaItemType.Movie || (item.Seasons.Length == 0 && _files.Length > 0));
+    var movieFile     = isMovieLike ? _files.FirstOrDefault() : null;
+    var movieWatchDto = isMovieLike ? _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null) : null;
 
-    @* Hero with full-bleed fanart, Back / Favorite / Edit, poster + title row. *@
+    @* Hero with full-bleed fanart, Back, poster + title, and the action row
+       (Play / Continue · Watched · Favorite · Edit). *@
     <MediaDetailHero Item="@item"
                      BackHref="/"
                      Continue="@_continueAction"
                      OnContinueClick="OnHeroContinue"
+                     PlayLabel="@(movieFile is not null ? MovieCtaLabel(movieWatchDto) : null)"
+                     PlayIcon="@(MovieCtaIcon(movieWatchDto))"
+                     OnPlayClick="OnMoviePlayClick"
+                     Watched="@(isMovieLike && movieFile is not null ? _movieWatched : (bool?)null)"
+                     OnToggleWatchedClick="OnMovieToggleWatched"
                      OnEditClick="OpenEditPanel"
                      OnFavoriteClick="ToggleFavoriteAsync" />
 
@@ -343,31 +355,16 @@ else
                     </div>
                 </section>
             }
-            else if (item.MediaType == MediaItemType.Movie
-                  || (item.Seasons.Length == 0 && _files.Length > 0))
+            else if (isMovieLike)
             {
-                @* Movie OR flat-folder anime (e.g. one-shot OVA) with no Seasons.
-                   Renders the same MovieFileCard recipe. *@
-                var movieFile     = _files.FirstOrDefault();
-                var movieWatchDto = _watchStates.FirstOrDefault(w => w.Season is null && w.Episode is null);
-                var thumbUrl      = !string.IsNullOrEmpty(item.FanartPath)
-                    ? Animarr.UI.Services.MediaUrl.Image(item.FanartPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
-                    : (!string.IsNullOrEmpty(item.PosterPath)
-                        ? Animarr.UI.Services.MediaUrl.Image(item.PosterPath!, item.LastMetadataRefreshedAt?.Ticks ?? 0)
-                        : null);
-                var runtimeLabel  = item.Runtime is > 0 ? $"{item.Runtime} min" : null;
-
+                @* What's on disk — file, quality, tracks. Actions live in the hero. *@
                 <section class="md-movie-section">
-                    <MovieFileCard Title="@item.Title"
-                                   FileName="@(movieFile?.FileName)"
-                                   ThumbUrl="@thumbUrl"
-                                   Runtime="@runtimeLabel"
+                    <MovieFileCard FileName="@(movieFile?.FileName)"
+                                   FilePath="@(movieFile?.FilePath)"
+                                   SizeBytes="@(movieFile?.SizeBytes)"
                                    Have="@(movieFile is not null)"
-                                   WatchStateDto="@movieWatchDto"
-                                   PlayLabel="@(MovieCtaLabel(movieWatchDto))"
-                                   PlayIcon="@(MovieCtaIcon(movieWatchDto))"
-                                   OnPlayClick="OnMoviePlayClick"
-                                   OnToggleWatched="OnMovieToggleWatched" />
+                                   RuntimeMinutes="@item.Runtime"
+                                   WatchStateDto="@movieWatchDto" />
                 </section>
             }
 
@@ -1434,7 +1431,7 @@ else
         _markPrevTargets = new();
     }
 
-    /// <summary>Primary-CTA label for the MovieFileCard.</summary>
+    /// <summary>Hero fallback-CTA label for a movie without a Continue action.</summary>
     private string MovieCtaLabel(WatchStateDto? w)
     {
         if (w is null) return L["continue.play_movie"];

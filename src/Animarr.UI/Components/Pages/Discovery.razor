@@ -77,7 +77,7 @@
                             <span class="d-discovery__server-name">@server.Name</span>
                             <span class="d-discovery__server-meta">
                                 <span class="d-discovery__server-dot"></span>
-                                @server.BaseUrl · @L.Get("discovery.title_count_fmt", server.TitleCount) · v@(server.Version)
+                                @server.BaseUrl · @L.Get("discovery.title_count_fmt", server.TitleCount) · v@(ShortVersion(server.Version))
                             </span>
                         </span>
                         <span class="d-discovery__server-right">@L["discovery.connect"]</span>
@@ -522,4 +522,14 @@
     /// platform-level mDNS daemon just resolved (cleartext policy, IPv6
     /// preference, etc.), so we'd silently drop a perfectly good server.</summary>
     private sealed record JsServer(string Name, string BaseUrl, string? ServerId = null, string? Version = null);
+
+    /// <summary>"1.0.0+03ddac7493e2…" → "1.0.0 (03ddac7)".</summary>
+    private static string ShortVersion(string? v)
+    {
+        if (string.IsNullOrEmpty(v)) return "?";
+        var plus = v.IndexOf('+');
+        if (plus < 0) return v;
+        var sha = v[(plus + 1)..];
+        return $"{v[..plus]} ({(sha.Length > 7 ? sha[..7] : sha)})";
+    }
 }
