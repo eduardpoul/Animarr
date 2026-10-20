@@ -32,7 +32,8 @@ public class WatchEvent
     /// <summary>Episode number within the season; NULL for movies.</summary>
     public int? Episode { get; set; }
 
-    /// <summary>UTC calendar day the activity belongs to (time part is 00:00).
+    /// <summary>Server-local (container TZ) calendar day the activity belongs
+    /// to (time part is 00:00); rows written before 2026-10 used the UTC day.
     /// Day granularity is deliberate: compact, and precise enough for
     /// heatmaps/streaks without logging exact viewing times.</summary>
     public DateTime Date { get; set; }

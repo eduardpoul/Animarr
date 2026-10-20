@@ -24,7 +24,11 @@ internal static class WatchEventRecorder
     {
         if (secondsWatched <= 0) return;
 
-        var day = nowUtc.Date;
+        // Bucket by the server's local calendar day (the container's TZ, see
+        // docker-compose) — the household's day. A UTC bucket filed a 01:00
+        // Moscow binge under yesterday, off by one against the stats page,
+        // which lays the heatmap out by the browser's local "today".
+        var day = nowUtc.ToLocalTime().Date;
         var row = await db.WatchEvents.FirstOrDefaultAsync(e =>
             e.UserId      == userId &&
             e.MediaItemId == mediaItemId &&
