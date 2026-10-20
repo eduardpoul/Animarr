@@ -130,9 +130,11 @@ public partial class NativeDetailPage : ContentPage
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            // Two core calls together.
+            // Two core calls together (+ the media token the image URLs need).
+            var tokenTask = TvMedia.EnsureTokenAsync();
             var itemTask  = _http.GetFromJsonAsync<DetailDto>($"/api/media/{_id}", Json);
             var filesTask = _http.GetFromJsonAsync<FileDto[]>($"/api/media/{_id}/files", Json);
+            await tokenTask;
             _item  = await itemTask;  LogT(sw, "item");
             _files = await filesTask ?? Array.Empty<FileDto>();  LogT(sw, "files");
             if (_item is null) return;
@@ -230,9 +232,9 @@ public partial class NativeDetailPage : ContentPage
         CjkLabel.Text = it.CjkTitle ?? "";
 
         if (!string.IsNullOrEmpty(it.FanartPath))
-            BackdropImage.Source = $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=1280";
+            BackdropImage.Source = TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=1280");
         if (!string.IsNullOrEmpty(it.PosterPath))
-            PosterImage.Source = $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.PosterPath)}&w=330";
+            PosterImage.Source = TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(it.PosterPath)}&w=330");
 
         var meta = new List<string>();
         if (it.Rating is > 0)              meta.Add($"★ {it.Rating:F1}");
@@ -346,7 +348,7 @@ public partial class NativeDetailPage : ContentPage
                 Number   = "▶",
                 Title    = TvL.T("media_detail.movie_play_default", "Смотреть фильм", "Watch movie"),
                 ThumbUrl = !string.IsNullOrEmpty(it.FanartPath)
-                    ? $"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640" : "",
+                    ? TvMedia.Url($"{ImageBase}/api/image?path={Uri.EscapeDataString(it.FanartPath)}&w=640") : "",
                 Have     = mf is not null,
                 FilePath = mf?.FilePath,
                 Season   = mf?.Season,

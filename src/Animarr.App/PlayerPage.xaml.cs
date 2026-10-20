@@ -318,6 +318,11 @@ public partial class PlayerPage : ContentPage
         try
         {
             _maxHeight = maxHeight;
+            // ExoPlayer fetches the stream with its own HTTP stack (no cookie):
+            // the media URL carries the session token. HLS segment URLs are
+            // relative to the playlist and authorised by the session id in
+            // their path.
+            await TvMedia.EnsureTokenAsync();
             var seekSec = resumeMs / 1000;
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
                       $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1";
@@ -343,6 +348,7 @@ public partial class PlayerPage : ContentPage
                 directPlay = true;   // raw-file fallback → absolute timeline
             }
             _isDirectStream = directStream;
+            mediaUrl = TvMedia.Url(mediaUrl);
 
             var prevToken = _hlsToken;
             _hlsToken = !directPlay && !directStream ? body?.Token : null;

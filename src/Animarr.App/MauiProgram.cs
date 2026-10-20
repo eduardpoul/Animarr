@@ -431,12 +431,11 @@ public static class MauiProgram
         var mediaProxy = app.Services.GetRequiredService<LocalMediaProxyService>();
         mediaProxy.Start();
         LocalMediaProxyService.RegisterStaticInstance(mediaProxy);
-        // Route cookie-gated episode thumbs through the loopback proxy — the
-        // hybrid WebView can't attach the auth cookie to cross-site <img>
-        // (SameSite), so the proxy signs those GETs. Static state is shared
-        // with the Blazor components (same process in the hybrid).
-        if (mediaProxy.Port > 0)
-            Animarr.UI.Services.MediaUrl.SetMediaProxyBase(mediaProxy.BaseUrl);
+        // Media auth: the hybrid WebView can't attach the auth cookie to a
+        // cross-site <img>/<video> (SameSite), so every media URL the Blazor
+        // side builds carries the session media token (MediaUrl / the player
+        // JS's apiUrl). The loopback proxy just forwards it — it holds no
+        // credentials itself.
 
         return app;
     }

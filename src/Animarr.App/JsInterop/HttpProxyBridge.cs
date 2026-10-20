@@ -26,9 +26,9 @@ namespace Animarr.App.JsInterop;
 public static class HttpProxyBridge
 {
     // Reused across calls; HttpClient is designed to be shared. No cookie
-    // container needed — the player endpoints are AllowAnonymous and the
-    // auth cookie rides on the Blazor-side IAnimarrApiClient, not these
-    // media fetches.
+    // container needed — the media URLs the player JS builds carry the
+    // session media token (?mt=); the auth cookie rides on the Blazor-side
+    // IAnimarrApiClient, not these media fetches.
     private static readonly System.Net.Http.HttpClient _http = new()
     {
         Timeout = System.TimeSpan.FromSeconds(60),  // HLS segments on slow LAN
