@@ -663,6 +663,11 @@ public sealed partial class HlsSessionService : IDisposable
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
             externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false);
         _sessions[token] = session;
+        // The caller gave up on this start (rapid Next/Prev, player closed
+        // mid-start — the endpoint passes RequestAborted): stop the session's
+        // ffmpeg right away instead of letting it encode on until the 5-min idle
+        // GC. Scoped to the startup wait; disposed when this method returns.
+        using var abandoned = ct.Register(() => Stop(token));
 
         // Drain stderr — visible at Warning level so genuine encoder issues
         // (codec param mismatch, broken inputs) surface in `docker logs`.

@@ -67,6 +67,7 @@ internal static class HlsEndpoints
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
             HlsSessionService hls,
+            HttpContext http,
             ILoggerFactory loggerFactory) =>
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
@@ -182,7 +183,10 @@ internal static class HlsEndpoints
                 maxHeight:        Math.Max(0, maxHeight ?? 0),
                 externalAudioPath: externalAudioFull,
                 clientHevc:       wantHevc,
-                maxBitrate:       Math.Max(0, maxBitrate ?? 0));
+                maxBitrate:       Math.Max(0, maxBitrate ?? 0),
+                // An abandoned start (rapid Next/Prev, player closed mid-start)
+                // stops its ffmpeg instead of encoding on for the 5-min idle GC.
+                ct:               http.RequestAborted);
             return Results.Ok(new
             {
                 token        = result.Token,
@@ -200,6 +204,10 @@ internal static class HlsEndpoints
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
                 output       = result.Output,
             });
+        }
+        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
+        {
+            return Results.Empty;   // client went away; StartAsync already stopped the session
         }
         catch (Exception ex)
         {
