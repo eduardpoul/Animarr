@@ -43,11 +43,11 @@ public partial class PlayerPage : ContentPage
     private string _filePath;
     private readonly long   _resumeMs;
 
-    // Playback timeline. A downscaled quality (maxHeight > 0) plays a server-side
-    // HLS transcode whose manifest is already seeked, so ExoPlayer position 0 maps
-    // to _streamBaseMs on the real runtime. Direct Play (original quality) has base
-    // 0 and ExoPlayer's own absolute position. _knownDurationMs is the full runtime
-    // from the start response (a shortened HLS playlist can't report it).
+    // Playback timeline. All three tiers expose ExoPlayer positions on the file's
+    // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
+    // fragment times, HLS via a full-length playlist — so _streamBaseMs is 0
+    // everywhere today; it stays as the hook for a relative stream.
+    // _knownDurationMs is the full runtime from the start response.
     private int  _maxHeight;
     private long _streamBaseMs;
     private long _knownDurationMs;
@@ -354,10 +354,14 @@ public partial class PlayerPage : ContentPage
             }
             else
             {
-                // The HLS manifest is already seeked server-side → don't re-seek;
-                // ExoPlayer position 0 == resumeMs on the real runtime.
-                _streamBaseMs = resumeMs;
-                NativePlayerService.Instance?.PlayAsync(mediaUrl, 0);
+                // The server's media playlist lists the FULL run from seg-0 (plus
+                // EXT-X-START at the seek point), so ExoPlayer's position is already
+                // absolute. The old base = resumeMs counted the resume twice — the
+                // HUD, saved progress, skip/Up-Next timing and quality/error
+                // restarts all ran at 2× the real position. Seek explicitly on that
+                // absolute timeline rather than relying on EXT-X-START handling.
+                _streamBaseMs = 0;
+                NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs);
             }
             _ = LoadSegmentsAsync();
         }
@@ -806,8 +810,9 @@ public partial class PlayerPage : ContentPage
             _ = StartStreamAsync(target, _maxHeight);
             return;
         }
-        // Back to the stream's own timeline: 0 for Direct Play; a seeked HLS
-        // transcode can't rewind before its base, so clamp there.
+        // Back to the stream's own timeline (absolute for Direct Play and HLS —
+        // the HLS playlist covers the whole run; the server seek-restarts ffmpeg
+        // for segments before the start point).
         long rel = target - _streamBaseMs;
         if (rel < 0) rel = 0;
         NativePlayerService.Instance?.SeekAsync(rel);
