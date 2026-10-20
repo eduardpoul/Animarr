@@ -324,13 +324,12 @@ public partial class MetadataService(
             //   ≥ autoApply           → Identified (use as-is, auto-rename)
             //   ≥ needsReview         → NeedsReview (poster shown, badge "needs review", top-3 in CandidatesJson)
             //   < needsReview         → Failed
-            // Auto-apply default raised from 0.85 → 0.95 after the user observed
-            // false-positives sneaking in around 85-90% confidence (LLM-normalised
-            // weak base scores were flooring at the review threshold). At 0.95
-            // only TMDB hits with 475+ votes or strong LLM+source agreement pass
-            // auto-apply; everything else lands in NeedsReview with top-3
-            // candidates for manual review via the design's NR modal.
-            var autoThreshold   = await appConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence, 0.95, ct);
+            // Auto-apply default: 0.85 — the user's choice (2026-10), and what
+            // the settings UI shows when the key is unset. It lets a sole search
+            // candidate (floored to exactly 0.85 in PickWinner) apply without a
+            // review; it was 0.95 for a while after false positives around
+            // 85-90%, so raise it in Settings → Metadata if those come back.
+            var autoThreshold   = await appConfig.GetAsync<double>(AppConfigKeys.AutoApplyConfidence, 0.85, ct);
             var reviewThreshold = await appConfig.GetAsync<double>(AppConfigKeys.NeedsReviewConfidence, 0.50, ct);
 
             if (winner.Score >= autoThreshold)

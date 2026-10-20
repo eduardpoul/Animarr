@@ -34,6 +34,24 @@ public static class SubfolderPath
         return parts.Length == 0 ? null : string.Join('/', parts);
     }
 
+    private static readonly string[] MediaExtensions =
+        { ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".m2ts", ".webm", ".wmv", ".flv" };
+
+    /// <summary>A safe single folder name derived from a torrent / file name
+    /// ("Dexter.S01.1080p" stays, "Movie.2015.mkv" → "Movie.2015", invalid
+    /// characters become spaces). Null when nothing usable is left.</summary>
+    public static string? FolderNameFrom(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var n = name.Trim();
+        foreach (var ext in MediaExtensions)
+            if (n.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) { n = n[..^ext.Length]; break; }
+        n = new string(n.Select(c => char.IsControl(c) || InvalidNameChars.Contains(c) ? ' ' : c).ToArray());
+        n = string.Join(' ', n.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().TrimEnd('.', ' ');
+        if (n.Length > 120) n = n[..120].TrimEnd('.', ' ');
+        return IsValidName(n) ? n : null;
+    }
+
     /// <summary>Whether <paramref name="name"/> is usable as a single new
     /// folder name (one segment — no separators).</summary>
     public static bool IsValidName(string? name)

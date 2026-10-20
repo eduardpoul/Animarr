@@ -909,6 +909,10 @@ public class TorrentEngineService : BackgroundService
         await using var ctx = await db.CreateDbContextAsync();
 
         var name = magnetLink.Name ?? infoHash[..Math.Min(8, infoHash.Length)];
+        // File count is unknown until metadata arrives — the name-folder rule
+        // applies to any flattened magnet.
+        customRootFolderName = await AutoRootFolderAsync(
+            ctx, folderWatcherId, customRootFolderName, flattenSubfolders, suppressRootFolder, magnetLink.Name, fileCount: null);
         var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == infoHash);
         if (record is null)
         {
@@ -979,6 +983,8 @@ public class TorrentEngineService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
 
+        customRootFolderName = await AutoRootFolderAsync(
+            ctx, folderWatcherId, customRootFolderName, flattenSubfolders, suppressRootFolder, torrent.Name, torrent.Files.Count);
         var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == infoHash);
         if (record is null)
         {
@@ -1317,6 +1323,27 @@ public class TorrentEngineService : BackgroundService
         TorrentState.Hashing  => TorrentRecordState.Hashing,
         _                     => TorrentRecordState.Downloading,
     };
+
+    /// <summary>
+    /// The subfolder a new torrent goes into. A subfolder the user picked wins.
+    /// Otherwise, when the files would land loose in the destination root —
+    /// flattened, or with the containing folder suppressed — they get a folder
+    /// named after the torrent: loose episodes in a section root are each
+    /// registered as their own title. Not for a single file (one file is one
+    /// title anyway) or a FlatSection destination (loose files by design).
+    /// </summary>
+    private static async Task<string?> AutoRootFolderAsync(
+        AppDbContext ctx, Guid? folderWatcherId, string? customRootFolderName,
+        bool flatten, bool suppressRoot, string? torrentName, int? fileCount)
+    {
+        if (SubfolderPath.Normalize(customRootFolderName) is { } chosen) return chosen;
+        if (!flatten && !suppressRoot) return null;
+        if (fileCount is 1) return null;
+        if (folderWatcherId is Guid fid
+            && await ctx.FolderWatchers.Where(f => f.Id == fid).Select(f => f.FlatSection).FirstOrDefaultAsync())
+            return null;
+        return SubfolderPath.FolderNameFrom(torrentName);
+    }
 
     // Flattens into the custom root folder when one is set — it used to dump
     // everything into SavePath, silently undoing the subfolder the user chose
