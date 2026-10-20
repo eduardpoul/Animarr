@@ -70,27 +70,14 @@ public class TorrentEngineService : BackgroundService
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                AccumulateUploads();
-                UpdateLiveStats();
-                FlushPendingDownloadedWrites();
-
-                // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
-                if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
+                try { Tick(); }
+                catch (Exception ex)
                 {
-                    _lastStatsPersistAt = DateTime.UtcNow;
-                    _ = Task.Run(async () =>
-                    {
-                        try { await PersistStatsAsync(); }
-                        catch (Exception ex) { _logger.LogWarning(ex, "Periodic PersistStats failed"); }
-                    }, stoppingToken);
-                }
-
-                // H-8: only invoke StateChanged if values actually changed
-                var newHash = ComputeStatsHash();
-                if (newHash != _lastStatsHash)
-                {
-                    _lastStatsHash = newHash;
-                    StateChanged?.Invoke();
+                    // One bad tick (a StateChanged subscriber throwing, a manager
+                    // mid-teardown) used to fall through to the outer catch, which
+                    // logged "crashed" and ShutdownAsync'd the engine: every torrent
+                    // stopped for the rest of the process while the app ran on.
+                    _logger.LogWarning(ex, "Torrent engine tick failed — continuing.");
                 }
             }
         }
@@ -102,6 +89,32 @@ public class TorrentEngineService : BackgroundService
         finally
         {
             await ShutdownAsync();
+        }
+
+        void Tick()
+        {
+            AccumulateUploads();
+            UpdateLiveStats();
+            FlushPendingDownloadedWrites();
+
+            // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
+            if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
+            {
+                _lastStatsPersistAt = DateTime.UtcNow;
+                _ = Task.Run(async () =>
+                {
+                    try { await PersistStatsAsync(); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Periodic PersistStats failed"); }
+                }, stoppingToken);
+            }
+
+            // H-8: only invoke StateChanged if values actually changed
+            var newHash = ComputeStatsHash();
+            if (newHash != _lastStatsHash)
+            {
+                _lastStatsHash = newHash;
+                StateChanged?.Invoke();
+            }
         }
     }
 
