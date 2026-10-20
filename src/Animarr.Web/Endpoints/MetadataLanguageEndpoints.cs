@@ -45,7 +45,13 @@ internal static class MetadataLanguageEndpoints
                     error = $"Unsupported metadata language '{req.Language}'. Use one of: {string.Join(", ", Allowed)}."
                 });
 
-            await svc.StartAsync(lang, ct);
+            // false = NOT saved: a pass is already running (or persisting failed).
+            // Answering 202 regardless let the Settings picker show the new
+            // language while the server kept the old one.
+            if (!await svc.StartAsync(lang, ct))
+                return svc.Status.Phase == "running"
+                    ? Results.Conflict(new { error = "A metadata language pass is already running." })
+                    : Results.Problem(svc.Status.Error ?? "Could not change the metadata language.");
             return Results.Accepted();
         }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
