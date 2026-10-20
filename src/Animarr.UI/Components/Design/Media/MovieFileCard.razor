@@ -37,7 +37,7 @@
         @* TOP-RIGHT — disk-status chip (32×32 on the movie card). *@
         @if (Have)
         {
-            <div class="d-mfc__chip d-mfc__chip--ok" title="On disk">
+            <div class="d-mfc__chip d-mfc__chip--ok" title="@L["movie_file_card.tooltip_on_disk"]">
                 <DIcon Name="check" Size="16" />
             </div>
         }
@@ -53,7 +53,7 @@
         {
             <button type="button"
                     class="@EyeClass"
-                    title="@(IsWatched ? "Mark as unwatched" : "Mark as watched")"
+                    title="@(IsWatched ? L["movie_file_card.tooltip_mark_unwatched"] : L["movie_file_card.tooltip_mark_watched"])"
                     @onclick="OnEyeClick"
                     @onclick:stopPropagation="true">
                 <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
@@ -110,7 +110,7 @@
             {
                 <Btn Variant="solid" Size="md" OnClick="OnEyeClick">
                     <DIcon Name="@(IsWatched ? "eye-off" : "eye")" Size="16" />
-                    <span class="d-mfc__action-label">@(IsWatched ? "Mark as unwatched" : "Mark as watched")</span>
+                    <span class="d-mfc__action-label">@(IsWatched ? L["movie_file_card.btn_mark_unwatched"] : L["movie_file_card.btn_mark_watched"])</span>
                 </Btn>
             }
         </div>

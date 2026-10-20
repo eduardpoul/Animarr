@@ -1435,12 +1435,12 @@ else
     }
 
     /// <summary>Primary-CTA label for the MovieFileCard.</summary>
-    private static string MovieCtaLabel(WatchStateDto? w)
+    private string MovieCtaLabel(WatchStateDto? w)
     {
-        if (w is null) return "Play movie";
-        if (w.IsWatched) return "Rewatch from start";
-        if (w.ProgressMs is > 0) return "Continue";
-        return "Play movie";
+        if (w is null) return L["continue.play_movie"];
+        if (w.IsWatched) return L["continue.rewatch_from_start"];
+        if (w.ProgressMs is > 0) return L["continue.resume"];
+        return L["continue.play_movie"];
     }
 
     private static string MovieCtaIcon(WatchStateDto? w)
