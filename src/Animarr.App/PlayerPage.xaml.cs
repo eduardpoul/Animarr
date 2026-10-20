@@ -54,6 +54,14 @@ public partial class PlayerPage : ContentPage
     private List<MediaFileDto>? _episodes;
 
     private IDispatcherTimer? _timer;
+
+    // Server HLS session of the current stream (null on Direct Play / Stream).
+    // The server reaps sessions idle for 5 min; ExoPlayer stops fetching while
+    // paused on a full buffer, so — like the web player — ping it, and delete
+    // it when the stream is replaced or the page closes (else the old transcode
+    // ran on for 5 minutes after every episode switch).
+    private string?  _hlsToken;
+    private DateTime _lastKeepaliveUtc;
     private IDispatcherTimer? _hudTimer;
     private int  _ticks;
     private long _durationMs;
@@ -336,6 +344,11 @@ public partial class PlayerPage : ContentPage
             }
             _isDirectStream = directStream;
 
+            var prevToken = _hlsToken;
+            _hlsToken = !directPlay && !directStream ? body?.Token : null;
+            _lastKeepaliveUtc = DateTime.UtcNow;
+            if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
+
             if (directPlay)
             {
                 // Range-seekable raw file — ExoPlayer owns an absolute timeline.
@@ -464,6 +477,12 @@ public partial class PlayerPage : ContentPage
             FlashInfo("Формат не пошёл — переключаюсь на транскод");
             _ = StartStreamAsync(absPos, _maxHeight);
             return;
+        }
+
+        if (_hlsToken is { } tok && (DateTime.UtcNow - _lastKeepaliveUtc).TotalSeconds >= 30)
+        {
+            _lastKeepaliveUtc = DateTime.UtcNow;
+            _ = KeepAliveAsync(tok);
         }
 
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
@@ -841,7 +860,20 @@ public partial class PlayerPage : ContentPage
             RecordProgress(_streamBaseMs + st.PositionMs,
                            _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
         _ = NativePlayerService.Instance?.DetachAsync();
+        if (_hlsToken is { } tok) { _hlsToken = null; StopHlsSession(tok); }
     }
+
+    private async Task KeepAliveAsync(string token)
+    {
+        try { using var _ = await _http.PostAsync($"/api/hls/keepalive?token={Uri.EscapeDataString(token)}", null); }
+        catch { /* transient — next tick retries */ }
+    }
+
+    private void StopHlsSession(string token) => _ = Task.Run(async () =>
+    {
+        try { using var _ = await _http.DeleteAsync($"/api/hls/{Uri.EscapeDataString(token)}"); }
+        catch { /* GC reaps it anyway */ }
+    });
 
     private static string Fmt(long ms)
     {
