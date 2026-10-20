@@ -182,7 +182,7 @@ public sealed partial class HlsSessionService
         // For the source's own audio, passthrough when the browser can decode
         // it inside MPEG-TS (AAC/MP3 only across all browsers; AC3/E-AC3 work
         // in Chrome but break Firefox/Safari, so those re-encode to AAC).
-        if (!ext && IsBrowserCompatibleAudioInTs(audioCodec))
+        if (TsAudioPassthrough(audioCodec, audioTrackIndex, ext))
         {
             args.AddRange(new[] { "-c:a", "copy" });
         }

@@ -164,6 +164,14 @@ public sealed partial class HlsSessionService
         _ => false,
     };
 
+    /// <summary>TS-path audio passthrough decision. The probe only records the
+    /// FIRST audio stream's codec, so passthrough is safe only when that stream
+    /// is the one mapped: picking track N (e.g. AC3/DTS/FLAC behind an AAC
+    /// track 0) used to stream-copy N on the strength of track 0's codec —
+    /// silence in the browser, or ffmpeg refusing FLAC-in-TS.</summary>
+    private static bool TsAudioPassthrough(string? firstAudioCodec, int audioTrackIndex, bool externalAudio)
+        => !externalAudio && audioTrackIndex == 0 && IsBrowserCompatibleAudioInTs(firstAudioCodec);
+
     private static string BuildMasterPlaylist(ProbeInfo p)
     {
         // BANDWIDTH is a rough estimate based on resolution. hls.js requires

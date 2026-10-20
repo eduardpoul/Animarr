@@ -20,6 +20,9 @@ public sealed partial class HlsSessionService
         public double  SeekSec    { get; }
         public int     SegmentCount { get; }
         public string? VideoCodec { get; }
+        // First audio stream's codec from the start probe — the seek-restart
+        // has no probe and needs it for the TS passthrough decision.
+        public string? AudioCodec { get; }
         public HlsPlan Plan       { get; }
         public double  AudioOffsetSec { get; }
         public double  TotalDurationSec { get; }
@@ -59,7 +62,8 @@ public sealed partial class HlsSessionService
 
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
-            int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0)
+            int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
+            string? audioCodec = null)
         {
             Token       = token;
             SourcePath  = source;
@@ -68,6 +72,7 @@ public sealed partial class HlsSessionService
             SeekSec     = seekSec;
             SegmentCount = segCount;
             VideoCodec  = videoCodec;
+            AudioCodec  = audioCodec;
             Plan        = plan;
             AudioOffsetSec = audioOffsetSec;
             TotalDurationSec = totalDurationSec;

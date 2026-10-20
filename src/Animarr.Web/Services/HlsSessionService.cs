@@ -541,7 +541,7 @@ public sealed partial class HlsSessionService : IDisposable
         {
             // MPEG-TS branch: declare the source-native CODECS so browsers know
             // what they're getting. Audio codec depends on passthrough decision.
-            var audioCodec = IsBrowserCompatibleAudioInTs(probe.AudioCodec)
+            var audioCodec = TsAudioPassthrough(probe.AudioCodec, audioTrackIndex, externalAudioPath is not null)
                 ? probe.AudioCodec switch
                 {
                     "ac3"   => "ac-3",
@@ -661,7 +661,7 @@ public sealed partial class HlsSessionService : IDisposable
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
-            externalAudioPath, maxBitrate: maxBitrate);
+            externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec);
         _sessions[token] = session;
 
         // Drain stderr — visible at Warning level so genuine encoder issues
@@ -926,7 +926,10 @@ public sealed partial class HlsSessionService : IDisposable
             // fixed for the session's lifetime and BuildFfmpegArgs only needs
             // the video codec hint (for the `-tag:v hvc1` on stream-copy HEVC).
             // Pass a minimal ProbeInfo carrying just that.
-            var miniProbe = new ProbeInfo(0, session.VideoCodec, null, 0, 0, null, false, false, null, 0, null);
+            // AudioCodec too: with null the TS plan's passthrough decision
+            // flipped to re-encode after the first scrub (5.1 → AAC stereo,
+            // and MP3 no longer matching the CODECS the playlist advertised).
+            var miniProbe = new ProbeInfo(0, session.VideoCodec, session.AudioCodec, 0, 0, null, false, false, null, 0, null);
             var args = BuildFfmpegArgs(session.SourcePath, sourceSeekSec, session.OutputDir,
                 Path.Combine(session.OutputDir, "_ffmpeg.m3u8"),
                 "_ffmpeg_master.m3u8",
