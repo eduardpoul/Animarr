@@ -45,11 +45,11 @@
                        hero to that folder's items. *@
                     @if (_heroItems.Length > 0)
                     {
-                        <CatalogContinueHero Items="@_heroItems" IntervalSec="@_heroInterval" />
+                        <CatalogContinueHero @key="_activeSection" Items="@_heroItems" IntervalSec="@_heroInterval" />
                     }
                     else if (_filteredFeatured.Count > 0)
                     {
-                        <CatalogHero Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
+                        <CatalogHero @key="_activeSection" Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
                     }
                     break;
 
@@ -61,7 +61,8 @@
                     break;
 
                 case "thisweek":
-                    <ThisWeekRail Items="@_thisWeek" />
+                    @* Follows the folder filter like the hero and the library block. *@
+                    <ThisWeekRail @key="_activeSection" Items="@_filteredThisWeek" />
                     break;
 
                 case "foryou":
@@ -69,7 +70,9 @@
                        against the user's watch-time genre profile, TMDB backfill
                        for the free slots (dashed cards with a Want button).
                        Dismiss ✕ persists per user. *@
-                    @if (_forYou.Length > 0)
+                    @* Library-wide by nature — only on the unfiltered Home, not
+                       inside a folder view. *@
+                    @if (_forYou.Length > 0 && !_activeSection.HasValue)
                     {
                         <RecRail Title="@L["home.for_you"]"
                                  Hint="@L["recs.foryou_hint"]"
@@ -128,7 +131,9 @@
 @code {
     private List<MediaItemDto>      _allItems   = new();
     private List<MediaItemDto>      _filtered   = new();
-    private List<MediaItemDto>      _featured   = new();
+    /// <summary>Every title with fanart, best-rated first — the Featured
+    /// hero picks its top slice per folder in <see cref="ApplyFilter"/>.</summary>
+    private List<MediaItemDto>      _featuredPool = new();
     private List<FolderWatcherDto>  _sections   = new();
     private ContinueWatchItemDto[]  _continueItems = Array.Empty<ContinueWatchItemDto>();
     /// <summary>Continue-watching slice after the section filter. Hero binds to
@@ -152,6 +157,7 @@
     private List<string> _homeSections = new();
     private RecCardDto[] _forYou = Array.Empty<RecCardDto>();
     private CalendarEventDto[] _thisWeek = Array.Empty<CalendarEventDto>();
+    private CalendarEventDto[] _filteredThisWeek = Array.Empty<CalendarEventDto>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -243,12 +249,13 @@
                 .Select(g => g.First())
                 .ToList();
 
-            // Featured hero: top 5 rated ≥ 8.0 with a fanart path.
-            _featured = _allItems
-                .Where(m => (m.Rating ?? 0) >= 8.0 && !string.IsNullOrEmpty(m.FanartPath))
+            // Featured hero pool: everything with fanart, best-rated first.
+            // The top-5 cut happens per folder in ApplyFilter — cutting here
+            // (library-wide) left most folder views without a hero.
+            _featuredPool = _allItems
+                .Where(m => !string.IsNullOrEmpty(m.FanartPath))
                 .OrderByDescending(m => m.Rating ?? 0)
                 .ThenByDescending(m => m.RatingCount ?? 0)
-                .Take(5)
                 .ToList();
 
             // Carousel cadence from server config.
@@ -333,22 +340,31 @@
             .ToList();
 
         // ── Hero slices follow the same section filter ────────────────────
+        IEnumerable<MediaItemDto> featuredPool = _featuredPool;
         if (_activeSection.HasValue && _childFolderIdsBySection.TryGetValue(_activeSection.Value, out var secChildIds))
         {
-            _filteredFeatured = _featured.Where(m => secChildIds.Contains(m.FolderId)).ToList();
+            featuredPool = _featuredPool.Where(m => secChildIds.Contains(m.FolderId));
 
             var folderByMediaId = _allItems.ToDictionary(m => m.Id, m => m.FolderId);
-            bool InSection(ContinueWatchItemDto c) =>
-                folderByMediaId.TryGetValue(c.MediaItemId, out var fid) && secChildIds.Contains(fid);
-            _filteredContinue = _continueItems.Where(InSection).ToArray();
-            _filteredNextUp   = _nextUpItems.Where(InSection).ToArray();
+            bool InSection(Guid mediaItemId) =>
+                folderByMediaId.TryGetValue(mediaItemId, out var fid) && secChildIds.Contains(fid);
+            _filteredContinue = _continueItems.Where(c => InSection(c.MediaItemId)).ToArray();
+            _filteredNextUp   = _nextUpItems.Where(c => InSection(c.MediaItemId)).ToArray();
+            _filteredThisWeek = _thisWeek.Where(e => InSection(e.MediaItemId)).ToArray();
         }
         else
         {
-            _filteredFeatured = _featured;
             _filteredContinue = _continueItems;
             _filteredNextUp   = _nextUpItems;
+            _filteredThisWeek = _thisWeek;
         }
+
+        // Featured = the folder's top 5 rated ≥ 8.0; a folder without such
+        // titles still gets its best five so every view has a hero.
+        var pool = featuredPool.ToList();
+        _filteredFeatured = pool.Where(m => (m.Rating ?? 0) >= 8.0).Take(5).ToList();
+        if (_filteredFeatured.Count == 0)
+            _filteredFeatured = pool.Take(5).ToList();
 
         // One merged feed drives BOTH the hero (rotates through it) and the
         // rail below (lists it) so the two always show the SAME titles in the
