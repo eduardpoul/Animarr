@@ -567,6 +567,14 @@ internal static class MediaEndpoints
                 .OrderBy(x => x.Season).ThenBy(x => x.Episode)
                 .ToList();
 
+            // Specials (season 0, a "Specials"/"OVA" folder) sort first but are
+            // not where a show starts: "first episode", the gap fallback and
+            // rewatch prefer the regular run and use S00 only when it's all
+            // there is.
+            var regularFirst = onDisk.Where(k => k.Season > 0)
+                .Concat(onDisk.Where(k => k.Season <= 0))
+                .ToList();
+
             (int Season, int Episode)? target = null;
             if (onDisk.Count > 0)
             {
@@ -579,7 +587,7 @@ internal static class MediaEndpoints
                         .Select(k => ((int Season, int Episode)?)k)
                         .FirstOrDefault();
                     // …else the earliest unwatched gap (skipped middle episodes).
-                    target ??= onDisk
+                    target ??= regularFirst
                         .Where(k => !watchedKeys.Contains(k))
                         .Select(k => ((int Season, int Episode)?)k)
                         .FirstOrDefault();
@@ -587,7 +595,7 @@ internal static class MediaEndpoints
                 else
                 {
                     // Nothing watched yet → first on-disk episode.
-                    target = onDisk[0];
+                    target = regularFirst[0];
                 }
             }
 
@@ -607,7 +615,19 @@ internal static class MediaEndpoints
             }
 
             // 3) No unwatched episode on disk: rewatch if anything was watched,
-            //    else a bare "play first" (no files resolved yet).
+            //    else a bare "play first" (no files resolved yet). A rewatch
+            //    names the run's first episode — with no coordinates the client
+            //    played whatever file sorted first (often a special) and logged
+            //    its progress under a series-level (null, null) row.
+            if (watchedAny && regularFirst.Count > 0)
+            {
+                var start = regularFirst[0];
+                var startFile = files.FirstOrDefault(f => (f.Season ?? 1) == start.Season && f.Episode == start.Episode);
+                return Results.Ok(new ContinueWatchDto(
+                    Kind: "rewatch", Label: "Play again from start", MediaItemId: id,
+                    Season: start.Season, Episode: start.Episode, FilePath: startFile?.FilePath,
+                    ProgressMs: null, RuntimeMs: null));
+            }
             return Results.Ok(new ContinueWatchDto(
                 Kind:       watchedAny ? "rewatch" : "first",
                 Label:      watchedAny ? "Play again from start" : "Play first episode",
