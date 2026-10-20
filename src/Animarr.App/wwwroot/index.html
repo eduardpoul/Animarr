@@ -112,14 +112,14 @@
     <!-- Same player vendor setup as the WASM host. The BlazorWebView's
          WebView shares the device network, so the CDN loads inside the
          native app just like in a browser. -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js" integrity="sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr" crossorigin="anonymous"></script>
     <!-- Pinned to 5.4.0 — floating artplayer@5 shipped a newer 5.x that
          tightened option validation (option.subtitle must be an object) and
          broke playback on media without subtitles. Pin to avoid CDN drift. -->
-    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js" integrity="sha384-w5IjjTXa5FVlGgCubBLyhTG2jrrNp7ktdnxNNUdVZuYwpQ5OqIab8c1gjKDD3+uO" crossorigin="anonymous"></script>
 
     <!-- v5 Phase 7: html5-qrcode for TV-pairing QR scan. Same CDN as WASM. -->
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
 
     <script>
         // ── http:// image proxy ───────────────────────────────────────
