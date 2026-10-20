@@ -48,8 +48,8 @@ public sealed class SeasonOffsetResolver(
         // Act ONLY on disks that are SPLIT into seasons (a "Season N>1" folder).
         // A normal single-season show — even a split-cour one TMDB keeps as one
         // season — has no season>1 on disk, so we leave it untouched; this also
-        // keeps us out of TMDB for the common case. The guard reads disk + a
-        // FRESH TMDB fetch only (never the stored SeasonsJson, which this method
+        // keeps us out of TMDB for the common case. The guards read disk + FRESH
+        // TMDB fetches only (never the stored SeasonsJson, which this method
         // overwrites), so re-derivation is idempotent.
         var files = await resolver.ResolveAsync(mediaItemId, ct);
         var diskSeasons = files
@@ -57,6 +57,24 @@ public sealed class SeasonOffsetResolver(
             .GroupBy(f => f.Season!.Value)
             .ToDictionary(g => g.Key, g => g.Count());
         if (diskSeasons.Count == 0) return null;
+
+        // Only a run TMDB lists as ONE regular season can be re-split. A show TMDB
+        // already splits (S1, S2, …) keeps TMDB's structure even when its season 1
+        // is a split-cour with a >90-day mid-season break (Spy x Family S1: 12+13
+        // episodes, 98 days apart) — re-splitting that overwrote the real seasons
+        // and pointed disk S2E1 at TMDB S1E13. Also drops offsets a previous run
+        // derived for such a show.
+        var show = await tmdb.GetTvDetailAsync(tmdbId, ct: ct);
+        if (show is null) return null;
+        if (show.Seasons.Count(s => s.SeasonNumber > 0) > 1)
+        {
+            if (item.SeasonOffsetsJson is not null)
+            {
+                item.SeasonOffsetsJson = null;
+                await db.SaveChangesAsync(ct);
+            }
+            return null;
+        }
 
         // TMDB season-1 episode list — ONLY aired episodes (real air_date). TMDB
         // pads ongoing runs with future/placeholder entries (null air_date) that
