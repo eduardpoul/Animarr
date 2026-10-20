@@ -69,13 +69,19 @@ public sealed class MediaPathValidator(
         if (includeImageCache)
             allowedRoots.Add(cachePaths.CacheRoot);
 
+        // Ignore case only where the filesystem does: on Linux "/media/Anime" and
+        // "/media/anime" are different directories, and an ignore-case prefix
+        // match would let the second ride on the first's registration.
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
         bool allowed = allowedRoots.Any(root =>
         {
             if (string.IsNullOrWhiteSpace(root)) return false;
             var normalRoot = Path.GetFullPath(root)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                 + Path.DirectorySeparatorChar;
-            return fullPath.StartsWith(normalRoot, StringComparison.OrdinalIgnoreCase);
+            return fullPath.StartsWith(normalRoot, comparison);
         });
 
         if (!allowed)
