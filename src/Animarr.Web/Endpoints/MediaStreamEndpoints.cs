@@ -162,7 +162,17 @@ internal static class MediaStreamEndpoints
             // delay_moov: required because AC3 audio packets don't expose their
             // codec frame size until the first frame is muxed; without this flag
             // ffmpeg refuses to emit the (empty) moov and the response is 0 bytes.
-            "-movflags", "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof",
+            // frag_discont (seek only): with delay_moov the muxer writes every
+            // fragment's tfdt from 0 and parks the -output_ts_offset in a 2-entry
+            // edit list (empty edit + media edit). libavformat (Chrome's progressive
+            // path) honours that, but Media3's FragmentedMp4Extractor only applies
+            // single-entry edit lists — so on the TV each ?seek=N reload restarted
+            // the position at ~0 ("+10 jumps back to the start") with A/V offset by
+            // the GOP pre-roll. frag_discont puts the absolute time into tfdt and
+            // leaves a single-entry edit; libavformat sees the same timestamps.
+            "-movflags", seekSec > 0
+                ? "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof+frag_discont"
+                : "+frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof",
             "pipe:1",
         });
 
