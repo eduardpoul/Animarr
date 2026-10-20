@@ -408,20 +408,39 @@ internal static class MediaStreamEndpoints
             "pipe:1",
         }) psi.ArgumentList.Add(a);
 
+        System.Diagnostics.Process? p = null;
         try
         {
-            using var p = System.Diagnostics.Process.Start(psi)!;
-            http.Response.ContentType = contentType;
+            p = System.Diagnostics.Process.Start(psi)!;
+            // Drain stderr alongside stdout (a full stderr pipe stalls ffmpeg),
+            // and buffer the output — a subtitle track is small — so a failed
+            // conversion can be answered as a failure. Streaming straight to the
+            // response committed a 200 + "public, max-age=3600" up front: a
+            // bitmap track (PGS/VobSub/DVB can't become text) or a broken stream
+            // came back as an EMPTY subtitle that browsers then cached for an hour.
+            var stderr = p.StandardError.ReadToEndAsync(http.RequestAborted);
+            using var buf = new MemoryStream();
+            await p.StandardOutput.BaseStream.CopyToAsync(buf, http.RequestAborted);
+            await p.WaitForExitAsync(http.RequestAborted);
+            var err = await stderr;
+            if (p.ExitCode != 0 || buf.Length == 0)
+            {
+                logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
+                    fullPath, track, p.ExitCode, err.Trim());
+                http.Response.Headers.CacheControl = "no-store";
+                return Results.Problem("This subtitle track can't be converted to text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
             http.Response.Headers.CacheControl = "public, max-age=3600";
-            await p.StandardOutput.BaseStream.CopyToAsync(http.Response.Body, http.RequestAborted);
-            await p.WaitForExitAsync();
-            return Results.Empty;
+            return Results.Bytes(buf.ToArray(), contentType);
         }
         catch (Exception ex)
         {
+            try { if (p is { HasExited: false }) p.Kill(true); } catch { }
             logger.LogError(ex, "ffmpeg subtitle extract failed for {Path} track {Track}", fullPath, track);
             return Results.StatusCode(500);
         }
+        finally { p?.Dispose(); }
     })
     .WithName("GetSubtitle")
     .AllowAnonymous();
