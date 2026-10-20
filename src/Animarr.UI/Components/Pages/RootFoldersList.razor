@@ -172,7 +172,7 @@ else
         var hubUri = ServerAddr.HubUri(Nav.Uri, ApiRoutes.HubIdentification);
         _hub = new HubConnectionBuilder()
             .WithUrl(hubUri)
-            .WithAutomaticReconnect()
+            .WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy())
             .Build();
         _hub.On<MediaItemStatusEnvelope>(
             IdentificationHubMethods.MediaItemChanged,

@@ -297,7 +297,7 @@
         if (string.IsNullOrEmpty(authority))
             authority = new Uri(Nav.Uri).GetLeftPart(UriPartial.Authority);
         var hubUri = new Uri(authority.TrimEnd('/') + ApiRoutes.HubTorrents);
-        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect().Build();
+        _hub = new HubConnectionBuilder().WithUrl(hubUri).WithAutomaticReconnect(new Animarr.UI.Services.HubRetryPolicy()).Build();
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env =>
         {
             var live = env.Items.FirstOrDefault(s =>
