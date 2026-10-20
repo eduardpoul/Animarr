@@ -1221,7 +1221,11 @@ else
         if (_item is null) return Task.FromResult<double?>(null);
         var match = _watchStates.FirstOrDefault(w =>
             w.Season == _playerSeason && w.Episode == _playerEpisode);
-        if (match?.ProgressMs is not > 0) return Task.FromResult<double?>(null);
+        // A watched row's progress sits at ≥90% (or is pinned to the runtime by
+        // mark-watched) — resuming there turned "Rewatch from start" / replaying
+        // a finished episode into a jump straight to the credits / end.
+        if (match is null || match.IsWatched || match.ProgressMs is not > 0)
+            return Task.FromResult<double?>(null);
         return Task.FromResult<double?>(match.ProgressMs.Value / 1000.0);
     }
 

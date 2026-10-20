@@ -351,7 +351,7 @@ public partial class NativeDetailPage : ContentPage
                 FilePath = mf?.FilePath,
                 Season   = mf?.Season,
                 EpisodeNum = mf?.Episode,
-                ResumeMs = ws?.ProgressMs ?? 0,
+                ResumeMs = ws is { IsWatched: false } ? ws.ProgressMs ?? 0 : 0,
                 IsWatched   = ws?.IsWatched ?? false,
                 WatchFraction = Frac(ws),
             };
@@ -380,7 +380,7 @@ public partial class NativeDetailPage : ContentPage
                 FilePath = f?.FilePath,
                 Season   = _activeSeason,
                 EpisodeNum = i,
-                ResumeMs = ws?.ProgressMs ?? 0,
+                ResumeMs = ws is { IsWatched: false } ? ws.ProgressMs ?? 0 : 0,
                 IsWatched   = ws?.IsWatched ?? false,
                 WatchFraction = Frac(ws),
             };
