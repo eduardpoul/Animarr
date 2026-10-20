@@ -216,7 +216,7 @@
             StateHasChanged();
             // Still kick off a background scan to surface NEW servers, but
             // don't block the UI on it.
-            if (_canScan) _ = StartScanAsync();
+            if (_canScan) _ = StartScanAsync(background: true);
             return;
         }
 
@@ -263,28 +263,36 @@
         return false;
     }
 
-    private async Task StartScanAsync()
+    /// <param name="background">Known servers are already on screen: scan
+    /// for NEW ones without switching to the Scanning state — that cleared
+    /// _found and hid the known servers for up to 15 s, contrary to the
+    /// "don't block the UI" intent of the caller.</param>
+    private async Task StartScanAsync(bool background = false)
     {
         _scanCts?.Cancel();
         _scanCts = new CancellationTokenSource();
         var ct = _scanCts.Token;
+        var scanned = new List<RegisteredServerDto>();
 
-        _state = State.Scanning;
-        _elapsedSec = 0;
-        _dots = "";
-        _found.Clear();
-        StateHasChanged();
-
-        // Animate the elapsed counter + dot loader every 250ms so the user
-        // sees the scan is actively doing something.
-        _scanTimer?.Dispose();
-        _scanTimer = new System.Threading.Timer(_ =>
+        if (!background)
         {
-            if (ct.IsCancellationRequested) return;
-            _elapsedSec++;
-            _dots = (_elapsedSec % 4) switch { 0 => "", 1 => ".", 2 => "..", _ => "..." };
-            InvokeAsync(StateHasChanged);
-        }, null, 1000, 1000);
+            _state = State.Scanning;
+            _elapsedSec = 0;
+            _dots = "";
+            _found.Clear();
+            StateHasChanged();
+
+            // Animate the elapsed counter + dot loader every 250ms so the user
+            // sees the scan is actively doing something.
+            _scanTimer?.Dispose();
+            _scanTimer = new System.Threading.Timer(_ =>
+            {
+                if (ct.IsCancellationRequested) return;
+                _elapsedSec++;
+                _dots = (_elapsedSec % 4) switch { 0 => "", 1 => ".", 2 => "..", _ => "..." };
+                InvokeAsync(StateHasChanged);
+            }, null, 1000, 1000);
+        }
 
         // Race mDNS + TCP subnet probe in parallel. mDNS is faster when the
         // network allows multicast across the wired/wireless boundary; subnet
@@ -307,7 +315,7 @@
             // Drain whichever path finishes first (and isn't empty). Subnet
             // probe always returns something when the server is reachable, so
             // mDNS is allowed to lose the race.
-            while (_found.Count == 0)
+            while (scanned.Count == 0)
             {
                 var winner = await Task.WhenAny(mdnsTask, probeTask, overallTimeout);
                 if (winner == overallTimeout) break;
@@ -324,9 +332,9 @@
                 {
                     var resolved = await Task.WhenAll(hits.Select(h => RegisterOrSurfaceAsync(h, ct)));
                     foreach (var r in resolved)
-                        if (r is not null && _found.All(f => f.ServerId != r.ServerId))
-                            _found.Add(r);
-                    if (_found.Count > 0) break;
+                        if (r is not null && scanned.All(f => f.ServerId != r.ServerId))
+                            scanned.Add(r);
+                    if (scanned.Count > 0) break;
                 }
 
                 // Both tasks completed empty → bail.
@@ -339,6 +347,10 @@
         _scanTimer?.Dispose();
         _scanTimer = null;
 
+        foreach (var r in scanned)
+            if (_found.All(f => f.ServerId != r.ServerId))
+                _found.Add(r);
+
         // Also surface any pre-existing registry entries — re-finding the
         // same server twice is fine, the dedupe on ServerId handles it.
         foreach (var s in ServerReg.Servers)
@@ -348,6 +360,7 @@
         _state = _found.Count > 0 ? State.Found : State.Empty;
         if (_state == State.Empty) _manualOpen = true;
         StateHasChanged();
+        if (background) return;   // don't yank focus off what the user is on
 
         // Scanning was the headline before; now Found (first server card)
         // or Empty (Add manually CTA) is. tv-nav.js's refocusAutofocus
