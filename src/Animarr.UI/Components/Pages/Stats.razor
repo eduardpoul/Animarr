@@ -11,14 +11,8 @@
     Fluent 2 layout: stat tiles, then two "wide | side" card rows
     (activity | by type, by month | genres + studios), then the top titles.
 *@
-<div class="st-page">
-    <div class="st-head">
-        <PageBack Fallback="/" />
-        <div class="st-head__text">
-            <h1 class="st-title">@L["stats.title"]</h1>
-            <div class="st-sub">@L["stats.sub"]</div>
-        </div>
-    </div>
+<div class="st-page d-page">
+    <PageHeader Title="@L["stats.title"]" Subtitle="@L["stats.sub"]" />
 
     @if (_loading)
     {

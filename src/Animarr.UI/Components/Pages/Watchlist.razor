@@ -9,11 +9,8 @@
     render with their TMDB snapshot and just sit here until acquired — the
     future torrent-search hookup starts from this list.
 *@
-<div class="wl-page">
-    <div class="wl-head">
-        <h1 class="wl-title">@L["watchlist.title"]</h1>
-        <span class="wl-count">@_items.Count</span>
-    </div>
+<div class="wl-page d-page">
+    <PageHeader Title="@L["watchlist.title"]" Count="@_items.Count" />
 
     @if (_loading)
     {

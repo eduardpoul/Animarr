@@ -9,12 +9,6 @@
     padding-bottom: 48px;
 }
 
-.library-head {
-    display: flex;
-    align-items: center;
-    margin-bottom: var(--space-6);
-}
-
 /* Filter chips (categories, or the folder strip before categories exist). */
 .catalog-folders {
     display: flex;

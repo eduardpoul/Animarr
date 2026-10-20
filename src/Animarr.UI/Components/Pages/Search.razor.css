@@ -4,7 +4,7 @@
 .search-page {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
     padding-bottom: 48px;
 }
 
@@ -14,8 +14,8 @@
     gap: var(--space-5);
 }
 
-/* NB: the back control is the shared <PageBack> (.d-page-back, 40×40); the
-   field below matches its height so both read as one row. */
+/* Title comes from the shared <PageHeader>; the gap spaces it. */
+.search-page ::deep .d-ph { margin-bottom: 0; }
 
 .search-page__input-wrap {
     flex: 1;

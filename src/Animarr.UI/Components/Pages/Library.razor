@@ -16,13 +16,9 @@
     uses (CategoryNavService / FolderJumpService), so a filter picked on
     either page follows to the other.
 *@
-<div class="catalog-page catalog-page--library">
+<div class="catalog-page catalog-page--library d-page">
 
-    <div class="library-head">
-        @* Unified back affordance — the same PageBack arrow as /search and
-           the detail hero (history.back with a "/" fallback). *@
-        <PageBack Fallback="/" />
-    </div>
+    <PageHeader Title="@L["nav.library"]" />
 
     @if (_categories.Count > 0)
     {

@@ -7,46 +7,14 @@
 /* Same measure as the other wide pages, centred. Fixed-position children
    (drawers, FAB) don't take part in the flex gap. */
 .tor-page {
-    max-width: 1480px;
-    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 20px;
 }
 
-/* ── Page header ─────────────────────────────────────────── */
-.tor-head {
-    display: flex;
-    align-items: flex-end;
-    gap: 16px;
-}
-/* PageBack is a child component — its button carries no scope attribute. */
-.tor-head ::deep .d-page-back {
-    align-self: flex-start;
-    margin-right: 0;
-}
-.tor-head__main { flex: 1; min-width: 0; }
-.tor-head__title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 36px;
-    font-weight: 600;
-    color: var(--text);
-}
-.tor-head__sub {
-    margin-top: 2px;
-    max-width: 720px;
-    font-size: 14px;
-    line-height: 20px;
-    color: var(--text-dim);
-}
-.tor-head__actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-}
+/* Page header is the shared <PageHeader> (.d-ph, Styles/components.css);
+   the flex gap below already spaces it, so drop its own bottom margin. */
+.tor-page ::deep .d-ph { margin-bottom: 0; }
 
 /* ── Stat tiles ──────────────────────────────────────────── */
 .tor-stats {
@@ -781,8 +749,7 @@
    Flex-wrap + order keeps the 6-cell markup untouched.
    ============================================================ */
 @media (max-width: 959px) {
-    .tor-head { align-items: flex-start; }
-    .tor-head__actions { display: none; }
+    .tor-page ::deep .d-ph__actions { display: none; }
 
     .tor-fab {
         position: fixed;

@@ -10,13 +10,9 @@
     in the library. One wide fetch (2 weeks back, 60 days ahead); week
     navigation filters client-side. Spec: design feat-calendar.jsx.
 *@
-<div class="cal-page">
-    <div class="cal-head">
-        <PageBack Fallback="/" />
-        <div class="cal-head__text">
-            <h1 class="cal-title">@L["calendar.title"]</h1>
-            <div class="cal-sub">@L["calendar.sub"]</div>
-        </div>
+<div class="cal-page d-page">
+    <PageHeader Title="@L["calendar.title"]" Subtitle="@L["calendar.sub"]">
+        <Actions>
         <div class="cal-nav">
             <span class="cal-range">@RangeLabel</span>
             <button type="button" class="cal-nav__btn cal-nav__btn--icon tv-focus" @onclick="@(() => ShiftWeek(-1))" aria-label="‹"><DIcon Name="chev-l" Size="16" /></button>
@@ -24,7 +20,8 @@
                     @onclick="@(() => { _weekOffset = 0; })">@L["calendar.today"]</button>
             <button type="button" class="cal-nav__btn cal-nav__btn--icon tv-focus" @onclick="@(() => ShiftWeek(1))" aria-label="›"><DIcon Name="chev-r" Size="16" /></button>
         </div>
-    </div>
+        </Actions>
+    </PageHeader>
 
     @if (_loading)
     {

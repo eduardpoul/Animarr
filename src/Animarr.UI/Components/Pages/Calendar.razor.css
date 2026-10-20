@@ -6,30 +6,8 @@
     padding-bottom: 48px;
 }
 
-.cal-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-5);
-    margin-bottom: 24px;
-    flex-wrap: wrap;
-}
-.cal-head__text { min-width: 0; }
-.cal-title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 36px;
-    font-weight: 600;
-}
-.cal-sub {
-    font-size: 14px;
-    line-height: 20px;
-    color: var(--text-dim);
-}
-
 /* Week navigation: range label · ‹ Today › (Fluent default buttons). */
 .cal-nav {
-    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -244,7 +222,6 @@
 }
 @media (max-width: 639px) {
     .cal-grid { grid-template-columns: 1fr; }
-    .cal-head { gap: var(--space-3); }
-    .cal-nav { margin-left: 0; width: 100%; }
+    .cal-nav { width: 100%; }
     .cal-range { margin-right: auto; }
 }

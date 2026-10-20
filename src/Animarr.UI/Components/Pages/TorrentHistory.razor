@@ -4,24 +4,19 @@
 
 <PageTitle>Animarr</PageTitle>
 
-<div class="th-page">
+<div class="th-page d-page">
 @* Header + Active | History pivot are 1:1 with the Downloads page
-   (Torrents.razor) so the two pages read as one surface. PageBack gives the
-   same back button every other page has; the right-side button (and the
-   pivot) jump to the active list. *@
-<header class="th-head">
-    <PageBack />
-    <div class="th-head__main">
-        <h1 class="th-head__title">@L["torrent_history.title"]</h1>
-        <div class="th-head__sub">@L["torrent_history.page_sub"]</div>
-    </div>
+   (Torrents.razor) so the two pages read as one surface. History is a nested
+   page, so its header carries Back (to /torrents); the right-side button
+   and the pivot jump to the active list too. *@
+<PageHeader Title="@L["torrent_history.title"]" Subtitle="@L["torrent_history.page_sub"]" BackFallback="/torrents">
     @* The back_link label already starts with "←", so no extra chevron. *@
-    <div class="th-head__actions">
+    <Actions>
         <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents"))">
             @L["torrent_history.back_link"]
         </Btn>
-    </div>
-</header>
+    </Actions>
+</PageHeader>
 
 <nav class="th-pivot" aria-label="@L["torrents.page_title"]">
     <a href="torrents" class="th-pivot__item tv-focus">@L["torrents.tab_active"]</a>

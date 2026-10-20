@@ -5,25 +5,6 @@
     z-index: 1;
     padding-bottom: 48px;
 }
-.wl-head {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    margin-bottom: 24px;
-}
-.wl-title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 36px;
-    font-weight: 600;
-}
-.wl-count {
-    font-size: 14px;
-    line-height: 20px;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-}
 
 .wl-grid {
     display: grid;

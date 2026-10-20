@@ -18,24 +18,19 @@
     → rate caps → post-processing toggles.
 *@
 
-<div class="tor-page">
-<header class="tor-head">
-    <PageBack />
-    <div class="tor-head__main">
-        <h1 class="tor-head__title">@L["torrents.page_title"]</h1>
-        <div class="tor-head__sub">@L["torrents.page_sub"]</div>
-    </div>
+<div class="tor-page d-page">
+<PageHeader Title="@L["torrents.page_title"]" Subtitle="@L["torrents.page_sub"]">
     @* Hidden below 960px — the Add action becomes the floating FAB there and
        History is reachable through the Active | History pivot. *@
-    <div class="tor-head__actions">
+    <Actions>
         <Btn Variant="solid" Size="md" OnClick="@(() => Nav.NavigateTo("/torrents/history"))">
             <DIcon Name="history" Size="16" /> @L["torrents.btn_history"]
         </Btn>
         <Btn Variant="primary" Size="md" OnClick="OpenAdd">
             <DIcon Name="plus" Size="16" /> @L["torrents.btn_add"]
         </Btn>
-    </div>
-</header>
+    </Actions>
+</PageHeader>
 
 @* Mobile-only floating action button — pinned bottom-right above the
    safe-area inset. Desktop and TV hide it via CSS in favour of the header

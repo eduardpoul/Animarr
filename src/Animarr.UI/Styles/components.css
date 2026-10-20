@@ -1295,3 +1295,66 @@ table.d-table tbody td code {
 .fs-icon-btn:hover  { background: var(--ink-2); }
 .fs-icon-btn:active { background: var(--ink-3); }
 .fs-icon-btn--danger { color: var(--danger); }
+
+/* ============================================================
+   Page shell — one content width and one title block for every
+   non-hero page (Home and a title's page bleed full width).
+   ============================================================ */
+:root { --page-max: 1480px; }
+.d-page {
+    width: 100%;
+    max-width: var(--page-max);
+    margin-inline: auto;
+}
+
+.d-ph {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    margin: 0 0 24px;
+}
+.d-ph > .d-page-back { align-self: center; margin-right: 0; }
+.d-ph__text {
+    flex: 1 1 260px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.d-ph__title {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
+    color: var(--text);
+}
+.d-ph__count {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+.d-ph__sub {
+    margin: 0;
+    max-width: 720px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-dim);
+}
+.d-ph__actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+@media (max-width: 639px) {
+    .d-ph { margin-bottom: 16px; }
+    .d-ph__title { font-size: 24px; line-height: 32px; }
+}

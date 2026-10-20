@@ -10,29 +10,11 @@
     --st-c3: var(--success);
     --st-c4: var(--warn);
 
-    max-width: 1480px;
-    margin: 0 auto;
     padding-bottom: 48px;
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
-
-/* ── header ────────────────────────────────────────────────────────── */
-.st-head {
-    display: flex;
-    align-items: center;
-    margin-bottom: 4px;
-}
-.st-head__text { display: flex; flex-direction: column; min-width: 0; }
-.st-title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 36px;
-    font-weight: 600;
-}
-.st-sub { font-size: 14px; line-height: 20px; color: var(--text-dim); }
 
 /* ── empty / loading ───────────────────────────────────────────────── */
 .st-empty {

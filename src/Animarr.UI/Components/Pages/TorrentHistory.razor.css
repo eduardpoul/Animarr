@@ -5,45 +5,13 @@
 
 /* Same measure as the Downloads page, centred. */
 .th-page {
-    max-width: 1480px;
-    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 20px;
 }
 
-/* ── Page header ─────────────────────────────────────────── */
-.th-head {
-    display: flex;
-    align-items: flex-end;
-    gap: 16px;
-}
-.th-head ::deep .d-page-back {
-    align-self: flex-start;
-    margin-right: 0;
-}
-.th-head__main { flex: 1; min-width: 0; }
-.th-head__title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 36px;
-    font-weight: 600;
-    color: var(--text);
-}
-.th-head__sub {
-    margin-top: 2px;
-    max-width: 720px;
-    font-size: 14px;
-    line-height: 20px;
-    color: var(--text-dim);
-}
-.th-head__actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-}
+/* Page header is the shared <PageHeader> (.d-ph); the flex gap spaces it. */
+.th-page ::deep .d-ph { margin-bottom: 0; }
 
 /* ── Active | History pivot (Fluent TabList) ─────────────── */
 .th-pivot {
@@ -241,9 +209,8 @@
    Flex-wrap + order keeps the 7-cell markup untouched.
    ============================================================ */
 @media (max-width: 959px) {
-    .th-head { align-items: flex-start; }
-    /* The pivot + PageBack cover "back to active" on small screens. */
-    .th-head__actions { display: none; }
+    /* The pivot + Back cover "back to active" on small screens. */
+    .th-page ::deep .d-ph__actions { display: none; }
 
     .th-table-wrap {
         background: transparent;

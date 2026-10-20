@@ -1,0 +1,48 @@
+@*
+    PageHeader — the one page title block every non-hero page uses
+    (Fluent 2 "Title" 28/36 + optional subtitle, count and right-side actions).
+
+    Back button rule (Fluent NavigationView): pages that are a destination in
+    the nav pane (Library, Calendar, Watchlist, Stats, Downloads, Search,
+    Settings) get NO back button — the pane is their navigation. Only nested
+    pages (torrent history, a title's page) pass BackFallback to show one.
+
+    Width: put the page inside `.d-page` (Styles/components.css) so every
+    page shares the same max content width.
+*@
+
+@namespace Animarr.UI.Components.Design.Layout
+
+<header class="d-ph">
+    @if (BackFallback is not null)
+    {
+        <PageBack Fallback="@BackFallback" />
+    }
+    <div class="d-ph__text">
+        <h1 class="d-ph__title">
+            @Title
+            @if (Count is not null)
+            {
+                <span class="d-ph__count">@Count</span>
+            }
+        </h1>
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <p class="d-ph__sub">@Subtitle</p>
+        }
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="d-ph__actions">@Actions</div>
+    }
+</header>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Subtitle { get; set; }
+    /// <summary>Item count next to the title (e.g. watchlist size).</summary>
+    [Parameter] public int? Count { get; set; }
+    /// <summary>Set only on nested pages — shows the back button with this fallback route.</summary>
+    [Parameter] public string? BackFallback { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}
