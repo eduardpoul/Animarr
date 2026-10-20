@@ -97,7 +97,12 @@ public sealed class EpisodeLlmResolver(
             var pairs = await llm.MapFilesToEpisodesAsync(names, episodes, ct);
             if (pairs is null || pairs.Count == 0) continue;
 
-            foreach (var (idx, ep) in pairs)
+            // One verdict per file: small models do repeat a file index, and the
+            // row lookup below reads the DB, not the change tracker — a second
+            // pair for the same file added a duplicate (item, path) row, the
+            // unique index failed SaveChanges and the whole run's placements
+            // were lost.
+            foreach (var (idx, ep) in pairs.DistinctBy(p => p.FileIndex))
             {
                 if (idx < 0 || idx >= groupFiles.Count) continue;
                 var file = groupFiles[idx];
