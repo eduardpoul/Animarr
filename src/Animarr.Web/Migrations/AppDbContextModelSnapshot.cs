@@ -15,7 +15,7 @@ namespace Animarr.Web.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
             modelBuilder.Entity("Animarr.Web.Data.Models.AppConfig", b =>
                 {
@@ -70,6 +70,62 @@ namespace Animarr.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("Categories");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.Device", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DefaultUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefaultUserId");
+
+                    b.ToTable("Devices");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.DevicePin", b =>
+                {
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastUsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PinHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PinSetAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DeviceId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("DevicePins");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>
@@ -1251,6 +1307,35 @@ namespace Animarr.Web.Migrations
                     b.HasIndex("UserId", "TmdbId");
 
                     b.ToTable("WatchlistItems");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.Device", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.User", "DefaultUser")
+                        .WithMany()
+                        .HasForeignKey("DefaultUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("DefaultUser");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.DevicePin", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.EpisodeFileMapping", b =>

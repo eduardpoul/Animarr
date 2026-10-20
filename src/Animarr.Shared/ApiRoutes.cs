@@ -201,10 +201,24 @@ public static class ApiRoutes
     public const string AuthLogout   = "/api/auth/logout";
     public const string AuthSetup    = "/api/auth/setup";
     public const string AuthStatus   = "/api/auth/status";
-    /// <summary>POST — swap the auth cookie to another local user. Requires
-    /// the target user's PIN when their <c>HasPin</c> is true. v5 per-user-
-    /// per-device fast switch.</summary>
+    /// <summary>POST <c>SwitchUserRequest</c> — sign in on this device as a
+    /// profile by its PIN for THIS device (always required, verified server-
+    /// side, 5 tries then a cooldown). Anonymous-callable: the device cookie,
+    /// not a session, scopes it. 200 UserDto · 401 wrong_pin · 429 locked ·
+    /// 403 pin_not_set · 404 unknown user.</summary>
     public const string AuthSwitchUser = "/api/auth/switch-user";
+    /// <summary>GET (anonymous) — the calling device's profiles, PIN flags and
+    /// "Sign in by default" choice (<c>DeviceStateDto</c>).</summary>
+    public const string AuthDevice     = "/api/auth/device";
+    /// <summary>POST <c>SetDevicePinRequest</c> — set (first time) or change
+    /// (needs the current PIN) the signed-in user's PIN on this device.</summary>
+    public const string AuthDevicePin  = "/api/auth/device/pin";
+    /// <summary>PUT <c>SetDeviceDefaultRequest</c> — make the signed-in user the
+    /// device's "Sign in by default" profile, or clear it.</summary>
+    public const string AuthDeviceDefault = "/api/auth/device/default";
+    /// <summary>POST (anonymous) — open as the device's default profile: no
+    /// picker, no PIN. 200 UserDto, 404 when the device has no default.</summary>
+    public const string AuthDeviceEnterDefault = "/api/auth/device/enter-default";
     /// <summary>GET — minimal roster (<c>RosterUserDto[]</c>) of every local
     /// user for the switch-user / "who's watching" picker. Readable by ANY
     /// authenticated user (that's how non-admins switch profiles); carries no
@@ -216,9 +230,6 @@ public static class ApiRoutes
     /// <summary>PATCH — current user edits their own Name / Email / AvatarHue
     /// without the ManageUsers permission. v5.</summary>
     public const string MeProfile    = "/api/me/profile";
-    /// <summary>POST sets/changes the current user's PIN, DELETE clears it.
-    /// Both require the current password as anti-CSRF. v5.</summary>
-    public const string MePin        = "/api/me/pin";
 
     /// <summary>POST adds, DELETE removes the user's favorite star for the
     /// given media item. v5 — was a global Set before.</summary>

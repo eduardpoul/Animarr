@@ -2,8 +2,11 @@ namespace Animarr.Shared.Requests;
 
 /// <summary>POST body for <c>/api/auth/login</c>. Username is case-insensitive
 /// (server normalises). Password is plaintext over HTTPS — server hashes
-/// with BCrypt before comparison; raw value never persists.</summary>
-public sealed record LoginRequest(string Username, string Password);
+/// with BCrypt before comparison; raw value never persists.
+/// <see cref="ResetDevicePin"/> is the "Forgot PIN" path: after the password
+/// verifies, the user's PIN on THIS device is cleared so the client's
+/// mandatory "Set a PIN" step asks for a new one. Older clients omit it.</summary>
+public sealed record LoginRequest(string Username, string Password, bool ResetDevicePin = false);
 
 /// <summary>POST body for <c>/api/auth/setup</c>. Only accepted while the
 /// <c>Users</c> table is empty (first-run). Creates the Master account and
@@ -15,20 +18,23 @@ public sealed record SetupRequest(
     string  Password,
     string  PasswordConfirm);
 
-// ─── PIN (v5 per-user-per-device fast switch) ───────────────────────────────
+// ─── Per-device PIN + profile picker ───────────────────────────────────────
 
-/// <summary>POST body for <c>/api/me/pin</c>. <see cref="CurrentPassword"/> is
-/// re-verified server-side as an anti-CSRF check on top of the auth cookie —
-/// matches the change-password contract.</summary>
-public sealed record SetPinRequest(string Pin, string CurrentPassword);
+/// <summary>POST body for <c>/api/auth/device/pin</c> — set or change the
+/// signed-in user's PIN on THIS device (4–6 digits). <see cref="CurrentPin"/>
+/// is required only when a PIN already exists here (a change); the first PIN
+/// after a sign-in needs none. A forgotten PIN is reset by signing in with the
+/// password (<see cref="LoginRequest.ResetDevicePin"/>), not here.</summary>
+public sealed record SetDevicePinRequest(string Pin, string? CurrentPin = null);
 
-/// <summary>DELETE body for <c>/api/me/pin</c>. Clears the user's PIN so future
-/// switch-user requests proceed without a keypad. Password challenge is the
-/// same anti-CSRF measure as <see cref="SetPinRequest"/>.</summary>
-public sealed record ClearPinRequest(string CurrentPassword);
+/// <summary>PUT body for <c>/api/auth/device/default</c>. <c>true</c> makes the
+/// signed-in user this device's "Sign in by default" profile (they must have a
+/// PIN here); <c>false</c> clears the device default, whoever it was.</summary>
+public sealed record SetDeviceDefaultRequest(bool Enabled);
 
-/// <summary>POST body for <c>/api/auth/switch-user</c>. The caller is already
-/// signed in as some user; this swaps the cookie to the target user. The
-/// server requires <see cref="Pin"/> iff the target user has <c>HasPin=true</c>.
-/// Pass null when the target user has no PIN configured.</summary>
+/// <summary>POST body for <c>/api/auth/switch-user</c>: sign in on this device
+/// as <see cref="UserId"/> by that profile's PIN for this device. Works with
+/// or without a current session (the "Who's watching" picker after the auth
+/// cookie expired). The PIN is always required and always verified on the
+/// server; 5 wrong tries start a cooldown.</summary>
 public sealed record SwitchUserRequest(Guid UserId, string? Pin);

@@ -75,7 +75,8 @@ internal static class PairEndpoints
                 DeviceName: string.IsNullOrWhiteSpace(req.DeviceName) ? "TV" : req.DeviceName.Trim(),
                 CreatedAt: DateTime.UtcNow,
                 Status: "pending",
-                UserId: null);
+                UserId: null,
+                ResetPin: req.ResetPin);
 
             var options = new MemoryCacheEntryOptions
             {
@@ -130,7 +131,13 @@ internal static class PairEndpoints
                     cache.Remove(key);
                     return Results.Ok(new PairPollDto(Status: "expired", UserId: null));
                 }
-                await auth.SignInCookieAsync(http, user);
+                // Registers the user as a profile of THIS TV (device cookie on
+                // the same response). ResetPin = the TV's "Forgot PIN": the
+                // phone-confirmed pairing stands in for the password, so the
+                // TV's PIN for this profile is cleared and the TV asks for a
+                // new one. Either way a profile without a PIN here gets the
+                // TV's blocking "Set a PIN" step next.
+                await auth.SignInCookieAsync(http, user, resetDevicePin: entry.ResetPin);
                 // Consume the entry so a stolen code can't sign in a second
                 // device. This is fine because the TV only polls until it
                 // gets "confirmed" once.
@@ -255,5 +262,6 @@ internal static class PairEndpoints
         string   DeviceName,
         DateTime CreatedAt,
         string   Status,
-        Guid?    UserId);
+        Guid?    UserId,
+        bool     ResetPin = false);
 }

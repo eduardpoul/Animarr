@@ -36,11 +36,9 @@ public class User
     /// bypass; raw passwords must never reach this column.</summary>
     public string PasswordHash { get; set; } = "";
 
-    /// <summary>Optional BCrypt hash (work factor 12) of a 4-digit numeric PIN.
-    /// Null = "no PIN — switching to this user from a signed-in device requires
-    /// a Master cookie but no extra entry". Non-null = "switching requires the
-    /// PIN keypad to verify before the new cookie is issued". v5 per-user-per-
-    /// device fast switch — see <c>AuthService.HashPin</c> / <c>VerifyPin</c>.</summary>
+    /// <summary>LEGACY account-level PIN hash (v5). No longer written or
+    /// checked — PINs are per user per device now (<see cref="DevicePin"/>).
+    /// The column stays so an older server build can still open the database.</summary>
     public string? PinHash { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

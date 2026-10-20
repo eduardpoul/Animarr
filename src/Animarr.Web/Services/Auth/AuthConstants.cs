@@ -45,4 +45,8 @@ public static class RateLimitPolicies
     /// <summary>Per-IP window for password login and first-run setup — the
     /// only anonymous endpoints that check a password.</summary>
     public const string Login = "login";
+
+    /// <summary>Per-IP window for the profile-PIN endpoints (switch, set PIN,
+    /// enter default). Backstop only — the per-device lockout is the real brake.</summary>
+    public const string Pin = "pin";
 }

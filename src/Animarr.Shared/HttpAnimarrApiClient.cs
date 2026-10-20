@@ -807,37 +807,92 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         return (await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct))!;
     }
 
-    // ─── PIN (v5 per-user-per-device fast switch) ─────────────────────────
+    // ─── Per-device profiles + PINs ───────────────────────────────────────
 
-    public async Task SetMyPinAsync(SetPinRequest request, CancellationToken ct = default)
-    {
-        using var resp = await _http.PostAsJsonAsync(ApiRoutes.MePin, request, JsonOpts, ct);
-        resp.EnsureSuccessStatusCode();
-    }
+    public async Task<DeviceStateDto> GetDeviceStateAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<DeviceStateDto>(ApiRoutes.AuthDevice, JsonOpts, ct))
+           ?? new DeviceStateDto(false, null, false, null, Array.Empty<DeviceProfileDto>());
 
-    public async Task ClearMyPinAsync(ClearPinRequest request, CancellationToken ct = default)
+    public async Task<PinAuthResult> SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default)
     {
-        // DELETE with body — HttpClient lets us attach JsonContent on a custom
-        // HttpRequestMessage. The server reads the payload to re-verify the
-        // current password before clearing the hash.
-        using var msg = new HttpRequestMessage(HttpMethod.Delete, ApiRoutes.MePin)
+        try
         {
-            Content = JsonContent.Create(request, options: JsonOpts),
-        };
-        using var resp = await _http.SendAsync(msg, ct);
-        resp.EnsureSuccessStatusCode();
+            using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthSwitchUser, request, JsonOpts, ct);
+            if (resp.IsSuccessStatusCode)
+                return new PinAuthResult(PinAuthStatus.Ok,
+                    await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct));
+            return await ReadPinFailureAsync(resp, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return new PinAuthResult(PinAuthStatus.Failed); }
     }
 
-    public async Task<UserDto?> SwitchUserAsync(SwitchUserRequest request, CancellationToken ct = default)
+    public async Task<PinAuthResult> SetDevicePinAsync(SetDevicePinRequest request, CancellationToken ct = default)
     {
-        using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthSwitchUser, request, JsonOpts, ct);
-        // 401 = "wrong PIN" — surface as null so the keypad UI shows its
-        // error state without try/catch. 404 = target user vanished
-        // (admin deleted them mid-flow) — same null treatment.
-        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
-            return null;
+        try
+        {
+            using var resp = await _http.PostAsJsonAsync(ApiRoutes.AuthDevicePin, request, JsonOpts, ct);
+            if (resp.IsSuccessStatusCode) return new PinAuthResult(PinAuthStatus.Ok);
+            return await ReadPinFailureAsync(resp, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return new PinAuthResult(PinAuthStatus.Failed); }
+    }
+
+    public async Task<DeviceStateDto?> SetDeviceDefaultAsync(SetDeviceDefaultRequest request, CancellationToken ct = default)
+    {
+        using var resp = await _http.PutAsJsonAsync(ApiRoutes.AuthDeviceDefault, request, JsonOpts, ct);
+        if (resp.StatusCode is HttpStatusCode.Conflict) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<DeviceStateDto>(JsonOpts, ct);
+    }
+
+    public async Task<UserDto?> EnterDeviceDefaultAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsync(ApiRoutes.AuthDeviceEnterDefault, content: null, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<UserDto>(JsonOpts, ct);
+    }
+
+    /// <summary>Map a non-2xx PIN response (status + <c>{ error, attemptsLeft,
+    /// retryAfterSeconds }</c>) onto a <see cref="PinAuthResult"/>.</summary>
+    private static async Task<PinAuthResult> ReadPinFailureAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        string? error = null;
+        int? attemptsLeft = null, retryAfter = null;
+        try
+        {
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(
+                await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var root = doc.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("error", out var e) && e.ValueKind == System.Text.Json.JsonValueKind.String)
+                    error = e.GetString();
+                if (root.TryGetProperty("attemptsLeft", out var a) && a.TryGetInt32(out var ai)) attemptsLeft = ai;
+                if (root.TryGetProperty("retryAfterSeconds", out var r) && r.TryGetInt32(out var ri)) retryAfter = ri;
+            }
+        }
+        catch { /* empty / non-JSON body (e.g. the per-IP limiter's bare 429) */ }
+
+        if (retryAfter is null && resp.Headers.RetryAfter?.Delta is TimeSpan d) retryAfter = (int)d.TotalSeconds;
+
+        var status = error switch
+        {
+            PinErrorCodes.WrongPin  => PinAuthStatus.WrongPin,
+            PinErrorCodes.Locked    => PinAuthStatus.Locked,
+            PinErrorCodes.PinNotSet => PinAuthStatus.PinNotSet,
+            PinErrorCodes.Invalid   => PinAuthStatus.Invalid,
+            _ => resp.StatusCode switch
+            {
+                HttpStatusCode.TooManyRequests => PinAuthStatus.Locked,
+                HttpStatusCode.NotFound        => PinAuthStatus.NotFound,
+                HttpStatusCode.Unauthorized    => PinAuthStatus.WrongPin,
+                _                              => PinAuthStatus.Failed,
+            },
+        };
+        return new PinAuthResult(status, null, attemptsLeft, retryAfter);
     }
 
     public async Task<RosterUserDto[]> GetRosterAsync(CancellationToken ct = default)

@@ -224,6 +224,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserContext, UserContext>();
 builder.Services.AddSingleton<DeviceTrust>();
+builder.Services.AddSingleton<DevicePinService>();
 builder.Services.AddSingleton<AuthService>();
 
 builder.Services
@@ -323,6 +324,18 @@ builder.Services.AddRateLimiter(options =>
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
+                Window      = TimeSpan.FromMinutes(1),
+                QueueLimit  = 0,
+            }));
+    // Profile PINs: the real brake is DevicePinService's per-(device, profile)
+    // lockout (5 tries, then a growing cooldown). This per-IP cap only stops a
+    // script from hammering many profiles / fresh device cookies at once.
+    options.AddPolicy(RateLimitPolicies.Pin, httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
                 Window      = TimeSpan.FromMinutes(1),
                 QueueLimit  = 0,
             }));
@@ -440,6 +453,7 @@ app.UseRateLimiter();
 // Each endpoint group backs one slice of the IAnimarrApiClient contract that
 // Animarr.UI / Animarr.Web.Client / Animarr.App all consume.
 app.MapAuthEndpoints();
+app.MapDeviceProfileEndpoints();
 app.MapPairEndpoints();
 app.MapUsersEndpoints();
 app.MapCategoryEndpoints();

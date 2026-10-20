@@ -33,6 +33,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RecDismissal> RecDismissals => Set<RecDismissal>();
     public DbSet<FranchiseNode> FranchiseNodes => Set<FranchiseNode>();
     public DbSet<FranchiseEdge> FranchiseEdges => Set<FranchiseEdge>();
+    /// <summary>Server-issued client devices (cookie <c>animarr_device</c>) +
+    /// their "sign in by default" profile.</summary>
+    public DbSet<Device> Devices => Set<Device>();
+    /// <summary>Profiles known per device, with the per-device PIN hash.</summary>
+    public DbSet<DevicePin> DevicePins => Set<DevicePin>();
 
     // ─── Categories ────────────────────────────────────────────────────────────
     public DbSet<Category> Categories => Set<Category>();
@@ -322,6 +327,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // indexes just make the lookups + per-user list cheap.
             e.HasIndex(x => new { x.UserId, x.MediaItemId });
             e.HasIndex(x => new { x.UserId, x.TmdbId });
+        });
+
+        // ─── Per-device profiles + PINs ─────────────────────────────────────
+        // A device row survives the auth cookie; its DevicePins rows are the
+        // profiles that signed in here, each with its own PIN for THIS device.
+        modelBuilder.Entity<Device>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // Deleting the default profile's user just drops the device back to
+            // the "Who's watching" picker.
+            e.HasOne(x => x.DefaultUser)
+             .WithMany()
+             .HasForeignKey(x => x.DefaultUserId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<DevicePin>(e =>
+        {
+            e.HasKey(x => new { x.DeviceId, x.UserId });
+            e.Property(x => x.PinHash).HasMaxLength(128);
+            e.HasOne(x => x.Device)
+             .WithMany()
+             .HasForeignKey(x => x.DeviceId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.UserId);
         });
 
         modelBuilder.Entity<RecDismissal>(e =>

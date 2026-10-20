@@ -78,14 +78,29 @@ internal static class AuthEndpoints
             var user = await auth.VerifyPasswordAsync(req.Username, req.Password, ct);
             if (user is null)
                 return Results.Unauthorized();
-            await auth.SignInCookieAsync(http, user);
+            // ResetDevicePin = "Forgot PIN": the password just proved the
+            // account, so drop its PIN on this device; the client's mandatory
+            // "Set a PIN" step then asks for a new one.
+            await auth.SignInCookieAsync(http, user, resetDevicePin: req.ResetDevicePin);
             return Results.Ok(AuthService.ToDto(user));
         }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.Login);
 
+        // Sign-out = sign out of THIS device: the session ends and the profile
+        // (with its PIN, and the device default if it was this profile) is
+        // removed from the device, so the "Who's watching" picker no longer
+        // offers it — coming back needs the password (or a TV pairing) again.
         app.MapPost(ApiRoutes.AuthLogout, async (
             AuthService auth,
-            HttpContext http) =>
+            DevicePinService pins,
+            IUserContext userCtx,
+            HttpContext http,
+            CancellationToken ct) =>
         {
+            if (userCtx.CurrentUserId is Guid uid)
+            {
+                try { await pins.ForgetAsync(http, uid, ct); }
+                catch { /* sign-out must never fail */ }
+            }
             await auth.SignOutCookieAsync(http);
             return Results.NoContent();
         }).AllowAnonymous();
@@ -255,126 +270,22 @@ internal static class AuthEndpoints
             return Results.NoContent();
         }).RequireAuthorization();
 
-        // ─── PIN (v5 per-user-per-device fast switch) ──────────────────
-        //
-        // POST   /api/me/pin             — set or change the PIN
-        // DELETE /api/me/pin             — clear the PIN
-        // POST   /api/auth/switch-user   — swap cookie to another user (PIN-gated)
-        //
-        // Anti-CSRF: both /api/me/pin mutations re-verify the password just like
-        // /api/me/password. The auth cookie alone is not sufficient — without
-        // re-verification a stolen cookie could pin-lock the account.
-
-        app.MapPost(ApiRoutes.MePin, async (
-            SetPinRequest req,
-            IUserContext userCtx,
-            IDbContextFactory<AppDbContext> dbFactory,
-            CancellationToken ct) =>
-        {
-            var uid = userCtx.CurrentUserId;
-            if (uid is null) return Results.Unauthorized();
-            try { AuthService.ValidatePinFormat(req.Pin); }
-            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
-
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var u = await db.Users.FirstOrDefaultAsync(x => x.Id == uid, ct);
-            if (u is null) return Results.Unauthorized();
-            bool ok;
-            try { ok = BCrypt.Net.BCrypt.Verify(req.CurrentPassword, u.PasswordHash); }
-            catch { ok = false; }
-            if (!ok) return Results.BadRequest(new { error = "Current password is incorrect" });
-
-            u.PinHash = AuthService.HashPin(req.Pin);
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
-        }).RequireAuthorization();
-
-        app.MapMethods(ApiRoutes.MePin, new[] { "DELETE" }, async (
-            [Microsoft.AspNetCore.Mvc.FromBody] ClearPinRequest req,
-            IUserContext userCtx,
-            IDbContextFactory<AppDbContext> dbFactory,
-            CancellationToken ct) =>
-        {
-            var uid = userCtx.CurrentUserId;
-            if (uid is null) return Results.Unauthorized();
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var u = await db.Users.FirstOrDefaultAsync(x => x.Id == uid, ct);
-            if (u is null) return Results.Unauthorized();
-            bool ok;
-            try { ok = BCrypt.Net.BCrypt.Verify(req.CurrentPassword, u.PasswordHash); }
-            catch { ok = false; }
-            if (!ok) return Results.BadRequest(new { error = "Current password is incorrect" });
-
-            u.PinHash = null;
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
-        }).RequireAuthorization();
-
-        // Switch-user. The caller must already be signed in; we sign them out
-        // of the current cookie, then sign in as the target.
-        app.MapPost(ApiRoutes.AuthSwitchUser, async (
-            SwitchUserRequest req,
-            AuthService auth,
-            DeviceTrust deviceTrust,
-            IUserContext userCtx,
-            HttpContext http,
-            IDbContextFactory<AppDbContext> dbFactory,
-            CancellationToken ct) =>
-        {
-            var caller = await userCtx.GetCurrentUserAsync(ct);
-            if (caller?.Role is null) return Results.Unauthorized();
-
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var target = await db.Users
-                .Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Id == req.UserId, ct);
-            if (target is null) return Results.NotFound(new { error = "User not found" });
-
-            // The device-local PIN (v5.1) is verified client-side — UX only; any
-            // signed-in user can call this endpoint directly. req.Pin is accepted
-            // for wire-compat but ignored. The real gate is DeviceTrust: a switch
-            // that would GAIN permissions (kid → Master) needs the target to have
-            // signed in on this device before; a downward/sideways switch is free.
-            // (target == current is a harmless no-op: the cookie is already that user.)
-            if (caller.Id == req.UserId)
-                return Results.Ok(AuthService.ToDto(target));
-
-            if (target.Role is null
-                || (!caller.Role.Covers(target.Role)
-                    && !deviceTrust.IsRemembered(http, target.Id)))
-                return Results.Json(
-                    new { error = "This profile hasn't signed in on this device. Sign in with its password once." },
-                    statusCode: StatusCodes.Status403Forbidden);
-
-            // The caller is authenticated right now, so remember them too — the
-            // device can switch back later even if its sign-in predates DeviceTrust.
-            deviceTrust.Remember(http, caller.Id);
-
-            // Reset LastSeenAt opportunistically so the strip's "last active"
-            // hint stays useful across switches.
-            try
-            {
-                target.LastSeenAt = DateTime.UtcNow;
-                db.Entry(target).Property(u => u.LastSeenAt).IsModified = true;
-                await db.SaveChangesAsync(ct);
-            }
-            catch { }
-
-            await auth.SignOutCookieAsync(http);
-            await auth.SignInCookieAsync(http, target);
-            return Results.Ok(AuthService.ToDto(target));
-        }).RequireAuthorization();
-
         // ─── Roster (any authenticated user) ─────────────────────────────
         // The switch-user picker + native "who's watching" gate need the list
         // of local profiles, and a NON-admin must be able to switch too — so
         // unlike GET /api/users (ManageUsers-only) this is readable by anyone
         // signed in. It returns a slim RosterUserDto with NO username/email —
         // just what the picker paints (name, role, avatar, PIN flag).
+        // HasPin = "has a PIN on the CALLING device" — the only profiles a PIN
+        // switch can reach from here. The device-scoped list the pickers use
+        // is GET /api/auth/device; this full roster stays for older TV builds.
         app.MapGet(ApiRoutes.AuthRoster, async (
             IDbContextFactory<AppDbContext> dbFactory,
+            DevicePinService pins,
+            HttpContext http,
             CancellationToken ct) =>
         {
+            var pinned = await pins.GetPinnedUserIdsAsync(http, ct);
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             // Materialise then project in memory (mirrors UsersEndpoints) so we
             // never lean on EF translating the role join / PIN flag.
@@ -389,7 +300,7 @@ internal static class AuthEndpoints
                 u.Role?.Name ?? "",
                 u.AvatarHue,
                 u.AvatarPath,
-                !string.IsNullOrEmpty(u.PinHash))).ToArray();
+                pinned.Contains(u.Id))).ToArray();
             return Results.Ok(roster);
         }).RequireAuthorization();
 
