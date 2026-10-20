@@ -12,6 +12,12 @@ namespace Animarr.Web.Endpoints;
 /// Admin-only CRUD for users + roles. Every endpoint requires the caller to
 /// have the <c>manageUsers</c> permission (enforced by the
 /// <c>ManageUsers</c> policy). Built-in roles cannot be edited or deleted.
+///
+/// ManageUsers is deliberately separate from SystemSettings ("family admin"),
+/// so it must not be a stepping stone to it: a caller can only create, edit,
+/// assign or delete roles/users whose rights their own role already covers
+/// (<see cref="Role.Covers"/>) — no handing out Master, no resetting the
+/// Master's password.
 /// </summary>
 internal static class UsersEndpoints
 {
@@ -34,8 +40,12 @@ internal static class UsersEndpoints
         app.MapPost(ApiRoutes.Users, async (
             CreateUserRequest req,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+
             if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password))
                 return Results.BadRequest(new { error = "Name, username and password are required" });
             if (req.Password.Length < 6)
@@ -44,6 +54,7 @@ internal static class UsersEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == req.RoleId, ct);
             if (role is null) return Results.BadRequest(new { error = "Role not found" });
+            if (!caller.Role.Covers(role)) return BeyondCallerRights();
 
             var normalised = AuthService.NormaliseUsername(req.Username);
             if (await db.Users.AnyAsync(u => u.Username == normalised, ct))
@@ -70,17 +81,25 @@ internal static class UsersEndpoints
             Guid id,
             UpdateUserRequest req,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == id, ct);
             if (user is null) return Results.NotFound();
+            // Editing (incl. resetting the password of) a more privileged account
+            // is a takeover of that account.
+            if (user.Role is null || !caller.Role.Covers(user.Role)) return BeyondCallerRights();
             if (req.Name is string n)   user.Name = n.Trim();
             if (req.Email is string e)  user.Email = string.IsNullOrWhiteSpace(e) ? null : e.Trim();
             if (req.RoleId is Guid rid)
             {
                 var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == rid, ct);
                 if (role is null) return Results.BadRequest(new { error = "Role not found" });
+                if (!caller.Role.Covers(role)) return BeyondCallerRights();
                 user.RoleId = rid;
                 user.Role = role;
             }
@@ -107,6 +126,9 @@ internal static class UsersEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == id, ct);
             if (user is null) return Results.NotFound();
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+            if (user.Role is null || !caller.Role.Covers(user.Role)) return BeyondCallerRights();
 
             // Don't allow deleting the last Master user — would lock everyone out.
             if (user.Role?.BuiltIn == true && user.Role.Name == "Master")
@@ -141,8 +163,12 @@ internal static class UsersEndpoints
         app.MapPost(ApiRoutes.Roles, async (
             CreateRoleRequest req,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+
             if (string.IsNullOrWhiteSpace(req.Name))
                 return Results.BadRequest(new { error = "Role name is required" });
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -162,6 +188,7 @@ internal static class UsersEndpoints
                     ? ""
                     : System.Text.Json.JsonSerializer.Serialize(req.FolderIds),
             };
+            if (!caller.Role.Covers(role)) return BeyondCallerRights();
             db.Roles.Add(role);
             await db.SaveChangesAsync(ct);
             return Results.Created($"{ApiRoutes.Roles}/{role.Id}", AuthService.ToDto(role, 0));
@@ -171,13 +198,18 @@ internal static class UsersEndpoints
             Guid id,
             UpdateRoleRequest req,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
             if (role is null) return Results.NotFound();
             if (role.BuiltIn)
                 return Results.Conflict(new { error = "Built-in roles cannot be modified" });
+            if (!caller.Role.Covers(role)) return BeyondCallerRights();
             if (req.Name is string n)        role.Name = n.Trim();
             if (req.Description is string d) role.Description = d.Trim();
             if (req.ViewContent is bool vc)    role.PermViewContent    = vc;
@@ -188,6 +220,9 @@ internal static class UsersEndpoints
                 role.FoldersJson = req.FolderIds.Length == 0
                     ? ""
                     : System.Text.Json.JsonSerializer.Serialize(req.FolderIds);
+            // Against the caller's role as loaded before this request's edits, so
+            // a custom admin role can't widen itself either.
+            if (!caller.Role.Covers(role)) return BeyondCallerRights();
             await db.SaveChangesAsync(ct);
             var count = await db.Users.CountAsync(u => u.RoleId == role.Id, ct);
             return Results.Ok(AuthService.ToDto(role, count));
@@ -196,13 +231,18 @@ internal static class UsersEndpoints
         app.MapDelete(ApiRoutes.RoleById, async (
             Guid id,
             IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
             CancellationToken ct) =>
         {
+            var caller = await userCtx.GetCurrentUserAsync(ct);
+            if (caller?.Role is null) return Results.Unauthorized();
+
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
             if (role is null) return Results.NotFound();
             if (role.BuiltIn)
                 return Results.Conflict(new { error = "Built-in roles cannot be deleted" });
+            if (!caller.Role.Covers(role)) return BeyondCallerRights();
             if (await db.Users.AnyAsync(u => u.RoleId == role.Id, ct))
                 return Results.Conflict(new { error = "Role is in use by one or more users" });
             db.Roles.Remove(role);
@@ -214,4 +254,8 @@ internal static class UsersEndpoints
     }
 
     private static int AbsHash(string s) => Math.Abs(s.GetHashCode());
+
+    private static IResult BeyondCallerRights() => Results.Json(
+        new { error = "That would grant or affect permissions your own role doesn't have" },
+        statusCode: StatusCodes.Status403Forbidden);
 }
