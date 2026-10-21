@@ -116,7 +116,7 @@ In **Server settings → Folders**, add a watched folder (use the **container‑
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `UTC` | Timezone for log timestamps, e.g. `Europe/Moscow`, `America/New_York`. |
-| `ANIMARR_LLM_VULKAN` | *(unset)* | Set to `1` to let the built‑in LLM use the GPU via Vulkan. On first boot the container installs the Vulkan userspace drivers (cached on the data volume). Pair with a `/dev/dri` device mount + `video` group (see compose comments). NVIDIA: use the nvidia‑container‑toolkit. |
+| `ANIMARR_LLM_VULKAN` | *(unset)* | Set to `1` to let the built‑in LLM use the GPU via Vulkan. The Vulkan userspace drivers ship in the image. Pair with a `/dev/dri` device mount + `video` group (see compose comments). NVIDIA: use the nvidia‑container‑toolkit. |
 | `AppSettings__WatcherDelayMs` | `2000` | Milliseconds the folder watcher waits after a file appears before processing it. |
 
 Any `AppSettings__*` key can be overridden via environment (standard ASP.NET configuration).

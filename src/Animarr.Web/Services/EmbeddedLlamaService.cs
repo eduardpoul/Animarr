@@ -32,7 +32,7 @@ public sealed record DownloadProgress(
 /// <see cref="CategoryClassifierService"/>.
 ///
 /// GPU (Vulkan) is opt-in via the <c>ANIMARR_LLM_VULKAN=1</c> env flag; the
-/// container entrypoint installs the Vulkan userspace at boot. If the flag is
+/// Vulkan userspace drivers are baked into the image. If the flag is
 /// unset, the device is absent, or the Vulkan binary can't load its libs, the
 /// service silently falls back to the CPU binary.
 /// </summary>
@@ -591,8 +591,8 @@ public sealed class EmbeddedLlamaService : IHostedService
             return;
         }
 
-        // Confirm the Vulkan binary can load its shared libs (libvulkan installed
-        // by the entrypoint). If not, fall back to CPU.
+        // Confirm the Vulkan binary can load its shared libs (libvulkan + mesa
+        // drivers ship in the image). If not, fall back to CPU.
         if (!RunProbe(VulkanBinary, "--version", 2500))
         {
             _error = "Vulkan requested but its userspace libraries are unavailable — running on CPU.";
