@@ -70,6 +70,11 @@ public class TorrentEngineService : BackgroundService
     /// resume or a magnet's stop/start around its folder remap doesn't tear the
     /// routing table down and re-bootstrap it.</summary>
     private static readonly TimeSpan DhtIdleGrace = TimeSpan.FromMinutes(2);
+    /// <summary>After a failed DHT switch (e.g. the UDP bind or a UPnP mapping
+    /// throws), wait this long before trying again instead of retrying — and
+    /// logging — on every 500 ms tick.</summary>
+    private static readonly TimeSpan DhtRetryBackoff = TimeSpan.FromMinutes(1);
+    private long _dhtRetryAfterTicks;   // Environment.TickCount64; 0 = no backoff
 
     public TorrentEngineService(
         IServiceScopeFactory scopeFactory,
@@ -654,12 +659,23 @@ public class TorrentEngineService : BackgroundService
             if (DateTime.UtcNow - _dhtIdleSince < DhtIdleGrace) return;
         }
         if (wanted == running) return;
+        if (Environment.TickCount64 < Volatile.Read(ref _dhtRetryAfterTicks)) return;
         if (Interlocked.CompareExchange(ref _dhtSwitching, 1, 0) != 0) return;
 
         _ = Task.Run(async () =>
         {
-            try { await SetDhtAsync(wanted); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Switching DHT {State} failed", wanted ? "on" : "off"); }
+            try
+            {
+                await SetDhtAsync(wanted);
+                Volatile.Write(ref _dhtRetryAfterTicks, 0);
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _dhtRetryAfterTicks,
+                    Environment.TickCount64 + (long)DhtRetryBackoff.TotalMilliseconds);
+                _logger.LogWarning(ex, "Switching DHT {State} failed; retrying in {Backoff}",
+                    wanted ? "on" : "off", DhtRetryBackoff);
+            }
             finally { Volatile.Write(ref _dhtSwitching, 0); }
         });
     }
