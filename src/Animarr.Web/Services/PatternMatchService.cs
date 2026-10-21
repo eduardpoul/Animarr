@@ -158,7 +158,10 @@ public partial class PatternMatchService(
     /// </summary>
     public int? DetectSeasonFromPath(string folderPath, string? rootPath = null, int maxDepth = 5)
     {
-        var dir = new DirectoryInfo(folderPath);
+        // Walks plain strings with DirectoryInfo's semantics (full path, then
+        // Name / Parent per level) instead of allocating a DirectoryInfo chain —
+        // this runs for every file a resolve can't read a season from.
+        string? dir = Path.GetFullPath(folderPath);
         string? normalRoot = null;
         if (!string.IsNullOrEmpty(rootPath))
         {
@@ -170,9 +173,9 @@ public partial class PatternMatchService(
             catch { /* invalid root — fall back to depth-only */ }
         }
 
-        for (int i = 0; i < maxDepth && dir != null; i++, dir = dir.Parent!)
+        for (int i = 0; i < maxDepth && dir != null; i++, dir = ParentDirectory(dir))
         {
-            var name = dir.Name;
+            var name = DirectoryName(dir);
 
             // Non-numbered specials/extras folder → season 0 (the "Specials"
             // bucket). Checked first so it wins over any stray season match.
@@ -190,7 +193,7 @@ public partial class PatternMatchService(
             // Stop once we reach the FolderWatcher root — don't leak into parents above it.
             if (normalRoot != null)
             {
-                var dirFull = dir.FullName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var dirFull = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 if (string.Equals(dirFull, normalRoot, StringComparison.OrdinalIgnoreCase))
                     break;
             }
@@ -198,4 +201,14 @@ public partial class PatternMatchService(
 
         return null;
     }
+
+    // DirectoryInfo.Name / .Parent on a full path, without the objects: a root
+    // names itself and has no parent; otherwise a trailing separator is ignored.
+    private static bool IsRootPath(string fullPath) => Path.GetPathRoot(fullPath.AsSpan()).Length == fullPath.Length;
+
+    private static string DirectoryName(string fullPath) =>
+        IsRootPath(fullPath) ? fullPath : Path.GetFileName(Path.TrimEndingDirectorySeparator(fullPath));
+
+    private static string? ParentDirectory(string fullPath) =>
+        Path.GetDirectoryName(IsRootPath(fullPath) ? fullPath : Path.TrimEndingDirectorySeparator(fullPath));
 }

@@ -114,6 +114,9 @@ public sealed class MediaFileResolver
 
         // ── Pass 1: deterministic (season, episode) per file ──────────────────
         var raw = new List<(string FilePath, string FileName, int? Season, int? Episode, long Size, bool SeasonFromPath)>();
+        // The path-season is a pure function of the directory, so it's computed
+        // once per directory rather than once per file.
+        var seasonByDir = new Dictionary<string, int?>(StringComparer.Ordinal);
         foreach (var filePath in Directory.EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories))
         {
             if (!VideoExts.Contains(Path.GetExtension(filePath))) continue;
@@ -128,9 +131,9 @@ public sealed class MediaFileResolver
             // below: conflating them let a single tagged weekly release switch off
             // the distribution for an entire flat library, collapsing it into S1.
             int? seasonFromName = parse.Season;
-            int? seasonFromPath = seasonFromName is null
-                ? _patterns.DetectSeasonFromPath(fileDir, folder.Path)
-                : null;
+            int? seasonFromPath = null;
+            if (seasonFromName is null && !seasonByDir.TryGetValue(fileDir, out seasonFromPath))
+                seasonByDir[fileDir] = seasonFromPath = _patterns.DetectSeasonFromPath(fileDir, folder.Path);
             int? season  = seasonFromName ?? seasonFromPath;
             int? episode = parse.IsMatched ? parse.Episode : null;
 
