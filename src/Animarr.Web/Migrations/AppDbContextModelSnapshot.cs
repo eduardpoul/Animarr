@@ -419,7 +419,11 @@ namespace Animarr.Web.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("QueuedAt");
+
                     b.HasIndex("FolderId", "Status");
+
+                    b.HasIndex("Status", "QueuedAt");
 
                     b.ToTable("IdentificationQueues");
                 });
@@ -1197,7 +1201,7 @@ namespace Animarr.Web.Migrations
 
                     b.HasIndex("MediaItemId");
 
-                    b.HasIndex("UserId", "Date");
+                    b.HasIndex("UserId", "Date", "SecondsWatched", "MediaItemId");
 
                     b.HasIndex("UserId", "MediaItemId", "Season", "Episode", "Date")
                         .IsUnique();
@@ -1254,6 +1258,10 @@ namespace Animarr.Web.Migrations
                     b.HasIndex("MediaItemId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "LastSeenAt")
+                        .HasDatabaseName("IX_WatchStates_UserId_LastSeenAt_Unwatched")
+                        .HasFilter("NOT \"IsWatched\"");
 
                     b.HasIndex("UserId", "MediaItemId", "Season", "Episode")
                         .IsUnique();
