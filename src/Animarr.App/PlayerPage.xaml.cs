@@ -157,7 +157,25 @@ public partial class PlayerPage : ContentPage
             }
         }
         if (_sheetMode == SheetMode.List)
-            return false;   // arrows move between rows, OK selects, Back → OnBack
+        {
+            // Arrows move between rows, OK selects, Back → OnBack. A key only
+            // gets here when no row took it, and Android's focus search would
+            // then carry focus out of the sheet onto the HUD buttons hidden
+            // under the overlay: ▲ on the first row closes the sheet (focus back
+            // on its HUD button), ▼ on the last row and ◀/▶ stay put.
+            int n = SheetItems.Children.Count;
+            switch (kc)
+            {
+                case Android.Views.Keycode.DpadUp when n == 0 || IsRowFocused(0):
+                    CloseSheet();
+                    return true;
+                case Android.Views.Keycode.DpadDown when n == 0 || IsRowFocused(n - 1):
+                case Android.Views.Keycode.DpadLeft:
+                case Android.Views.Keycode.DpadRight:
+                    return true;
+            }
+            return false;
+        }
 
         if (kc is Android.Views.Keycode.Back or Android.Views.Keycode.Escape)
             return false;   // let the activity handle Back
@@ -324,7 +342,23 @@ public partial class PlayerPage : ContentPage
     }
 #endif
 
-    private Task StartAsync() => StartStreamAsync(_resumeMs, 0);
+    private Task StartAsync() => StartStreamAsync(_resumeMs, 0, playWhenReady: true);
+
+    private enum StreamKind { None, DirectPlay, DirectStream, Hls }
+    /// <summary>Tier of the stream ExoPlayer is playing (None before the first
+    /// successful start).</summary>
+    private StreamKind _kind;
+    /// <summary>Starts are serialised: each one takes a generation number and a
+    /// newer start cancels the older one's request (the server stops an
+    /// abandoned start's ffmpeg) and discards its late response — rapid quality
+    /// / track / episode switches used to race, and the last RESPONSE (not the
+    /// last choice) won.</summary>
+    private int _startGen;
+    private CancellationTokenSource? _startCts;
+    private bool _closed;
+    /// <summary>A start failed with nothing (alive) left playing: OK / play
+    /// retries it.</summary>
+    private (long ResumeMs, int MaxHeight)? _retryStart;
 
     /// <summary>True while the current stream is the /api/video progressive
     /// remux — a non-seekable ffmpeg pipe. SeekTo on it snaps to 0, so SeekBy
@@ -350,12 +384,32 @@ public partial class PlayerPage : ContentPage
     /// capabilities (nativeCaps) so the server Direct Plays anything ExoPlayer
     /// handles itself (MKV/AVI/MPEG4/AC3 …) instead of transcoding "for a
     /// browser". maxHeight &gt; 0 forces the HLS transcode path with a cap.
+    /// <para>
+    /// The current stream is only replaced once the server answered with a
+    /// playable URL: a failed start (HTTP 500 from /api/hls/start, network) is
+    /// retried once, then either leaves the previous stream playing with the
+    /// previous settings (a quality / track switch is rolled back) or — when
+    /// nothing is left to play — shows the error and waits for OK to retry. It
+    /// never falls back to the raw /api/file silently: that played the original
+    /// under a "720p" label and dropped the selected tracks.
+    /// </para>
+    /// <paramref name="playWhenReady"/> null keeps the current play/pause state.
     /// </summary>
-    private async Task StartStreamAsync(long resumeMs, int maxHeight)
+    private async Task StartStreamAsync(long resumeMs, int maxHeight, bool? playWhenReady = null)
     {
+        int gen = ++_startGen;
+        _startCts?.Cancel();
+        var cts = _startCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        // A restart (quality / track switch, remux seek, fallback rung) keeps a
+        // pause: it used to force PlayWhenReady=true.
+        bool play = playWhenReady
+                    ?? (_kind == StreamKind.None || (NativePlayerService.Instance?.GetState()?.PlayWhenReady ?? true));
+        _retryStart = null;
+        string? failure = null;
+        StartResponse? body = null;
         try
         {
-            _maxHeight = maxHeight;
             // ExoPlayer fetches the stream with its own HTTP stack (no cookie):
             // the media URL carries the session token. HLS segment URLs are
             // relative to the playlist and authorised by the session id in
@@ -364,80 +418,147 @@ public partial class PlayerPage : ContentPage
             var seekSec = resumeMs / 1000;
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
                       $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1";
-            if (!_forceTranscode)
+            if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
                 if (!string.IsNullOrEmpty(caps))
                     url += $"&nativeCaps={Uri.EscapeDataString(caps)}";
             }
-            var resp = await _http.PostAsync(url, null);
-            StartResponse? body = null;
-            if (resp.IsSuccessStatusCode)
-                body = await resp.Content.ReadFromJsonAsync<StartResponse>(Json);
 
-            _knownDurationMs = (long)((body?.TotalDuration ?? 0) * 1000);
-            if (maxHeight == 0 && body?.Output?.Height > 0) _sourceHeight = body.Output.Height;
-
-            bool directPlay   = !string.IsNullOrEmpty(body?.DirectPlayUrl);
-            bool directStream = !string.IsNullOrEmpty(body?.DirectStreamUrl) && !directPlay;
-            var mediaUrl = Abs(body?.DirectPlayUrl ?? body?.DirectStreamUrl ?? body?.ManifestUrl);
-            if (string.IsNullOrEmpty(mediaUrl))
+            Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}");
+            // Two attempts, like the web player: a 5xx / network error is often
+            // transient (ffprobe racing a file still being written, a GC'd
+            // session dir). A 4xx is final.
+            for (int attempt = 0; attempt < 2 && !ct.IsCancellationRequested; attempt++)
             {
-                mediaUrl = $"{ImageBase}/api/file?path={Uri.EscapeDataString(_filePath)}";
-                directPlay = true;   // raw-file fallback → absolute timeline
+                try
+                {
+                    using var resp = await _http.PostAsync(url, null, ct);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        body = await resp.Content.ReadFromJsonAsync<StartResponse>(Json, ct);
+                        if (HasStreamUrl(body)) break;
+                        failure = "сервер не вернул поток";
+                    }
+                    else
+                    {
+                        failure = $"HTTP {(int)resp.StatusCode}";
+                        if ((int)resp.StatusCode < 500) break;
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+                catch (Exception ex) { failure = ex.Message; }
+                body = null;
+                if (attempt == 0) await Task.Delay(800, ct);
             }
-            _isDirectStream = directStream;
-            mediaUrl = TvMedia.Url(mediaUrl);
-
-            var prevToken = _hlsToken;
-            _hlsToken = !directPlay && !directStream ? body?.Token : null;
-            _lastKeepaliveUtc = DateTime.UtcNow;
-            if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
-
-            // Original bitstream bigger than any decoder on the device takes (4K
-            // HEVC on a 1080p projector SoC): ExoPlayer rejects it with
-            // NO_EXCEEDS_CAPABILITIES, and so would the no-caps retry (still a
-            // copy). Ask for a capped re-encode straight away; an HDR source is
-            // tone-mapped on the way. The next call stops this HLS session.
-            if (maxHeight == 0 && body?.Output is { } o && !(o.Plan ?? "").EndsWith("reencode", StringComparison.Ordinal)
-                && !Services.TvCodecCaps.CanDecodeSize(o.VideoCodec, o.Width, o.Height, o.BitDepth))
-            {
-                int cap = o.Height > 1080 ? 1080 : 720;
-                FlashInfo($"{o.Height}p не поддерживается устройством — {cap}p");
-                _ = StartStreamAsync(resumeMs, cap);
-                return;
-            }
-
-            if (directPlay)
-            {
-                // Range-seekable raw file — ExoPlayer owns an absolute timeline.
-                _streamBaseMs = 0;
-                NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs);
-            }
-            else if (directStream)
-            {
-                // Progressive remux pipe: NOT seekable — bake the offset into the
-                // request instead of SeekTo (which would snap to 0). The pipe's
-                // PTS carry the absolute offset, so no base correction needed.
-                if (seekSec > 0)
-                    mediaUrl += (mediaUrl.Contains('?') ? "&" : "?") + $"seek={seekSec}";
-                _streamBaseMs = 0;
-                NativePlayerService.Instance?.PlayAsync(mediaUrl, 0);
-            }
-            else
-            {
-                // The server's media playlist lists the FULL run from seg-0 (plus
-                // EXT-X-START at the seek point), so ExoPlayer's position is already
-                // absolute. The old base = resumeMs counted the resume twice — the
-                // HUD, saved progress, skip/Up-Next timing and quality/error
-                // restarts all ran at 2× the real position. Seek explicitly on that
-                // absolute timeline rather than relying on EXT-X-START handling.
-                _streamBaseMs = 0;
-                NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs);
-            }
-            _ = LoadSegmentsAsync();
         }
-        catch { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        catch (Exception ex) { failure ??= ex.Message; }
+
+        // Superseded by a newer start (or the page closed) while waiting: drop
+        // this answer and free the HLS session it created.
+        if (gen != _startGen || _closed)
+        {
+            Log($"start #{gen}: superseded");
+            if (body?.Token is { } stale) StopHlsSession(stale);
+            return;
+        }
+        if (!HasStreamUrl(body))
+        {
+            OnStartFailed(failure ?? "нет ответа", resumeMs, maxHeight);
+            return;
+        }
+
+        var b = body!;
+        _knownDurationMs = (long)((b.TotalDuration ?? 0) * 1000);
+        if (maxHeight == 0 && b.Output?.Height > 0) _sourceHeight = b.Output.Height;
+
+        bool directPlay   = !string.IsNullOrEmpty(b.DirectPlayUrl);
+        bool directStream = !directPlay && !string.IsNullOrEmpty(b.DirectStreamUrl);
+        var newToken = !directPlay && !directStream ? b.Token : null;
+
+        // Original bitstream bigger than any decoder on the device takes (4K
+        // HEVC on a 1080p projector SoC): ExoPlayer rejects it with
+        // NO_EXCEEDS_CAPABILITIES, and so would the no-caps retry (still a
+        // copy). Ask for a capped re-encode straight away; an HDR source is
+        // tone-mapped on the way. This answer's HLS session is not used.
+        if (maxHeight == 0 && b.Output is { } o && !(o.Plan ?? "").EndsWith("reencode", StringComparison.Ordinal)
+            && !Services.TvCodecCaps.CanDecodeSize(o.VideoCodec, o.Width, o.Height, o.BitDepth))
+        {
+            if (newToken is not null) StopHlsSession(newToken);
+            int cap = o.Height > 1080 ? 1080 : 720;
+            FlashInfo($"{o.Height}p не поддерживается устройством — {cap}p");
+            _ = StartStreamAsync(resumeMs, cap, play);
+            return;
+        }
+
+        // Success — only now does the new stream replace the old one.
+        _maxHeight = maxHeight;
+        _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
+        Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
+        _isDirectStream = directStream;
+        ClearError();
+
+        var prevToken = _hlsToken;
+        _hlsToken = newToken;
+        _lastKeepaliveUtc = DateTime.UtcNow;
+        if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
+
+        var mediaUrl = TvMedia.Url(Abs(b.DirectPlayUrl ?? b.DirectStreamUrl ?? b.ManifestUrl)!);
+        _streamBaseMs = 0;
+        if (directStream)
+        {
+            // Progressive remux pipe: NOT seekable — bake the offset into the
+            // request instead of SeekTo (which would snap to 0). The pipe's
+            // PTS carry the absolute offset, so no base correction needed.
+            var seekSec = resumeMs / 1000;
+            if (seekSec > 0)
+                mediaUrl += (mediaUrl.Contains('?') ? "&" : "?") + $"seek={seekSec}";
+            NativePlayerService.Instance?.PlayAsync(mediaUrl, 0, play);
+        }
+        else
+        {
+            // Direct Play: range-seekable raw file — ExoPlayer owns an absolute
+            // timeline. HLS: the server's media playlist lists the FULL run from
+            // seg-0 (plus EXT-X-START at the seek point), so ExoPlayer's position
+            // is already absolute. The old base = resumeMs counted the resume
+            // twice — the HUD, saved progress, skip/Up-Next timing and quality/
+            // error restarts all ran at 2× the real position. Seek explicitly on
+            // that absolute timeline rather than relying on EXT-X-START handling.
+            NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs, play);
+        }
+        _ = LoadSegmentsAsync();
+    }
+
+    /// <summary>logcat tag "Animarr.Player": start requests, outcomes, track
+    /// switches — the player-side half of the "Animarr.NativePlayer" trace.</summary>
+    private static void Log(string msg)
+    {
+#if ANDROID
+        global::Android.Util.Log.Info("Animarr.Player", msg);
+#endif
+    }
+
+    private static bool HasStreamUrl(StartResponse? b) =>
+        b is not null && (!string.IsNullOrEmpty(b.DirectPlayUrl) || !string.IsNullOrEmpty(b.DirectStreamUrl)
+                          || !string.IsNullOrEmpty(b.ManifestUrl));
+
+    /// <summary>/api/hls/start failed twice. If the previous stream still plays,
+    /// it stays (with the settings it was started with — the menus read those
+    /// back, so the switch is rolled back); otherwise the error stays on screen
+    /// and OK / play retries the same start.</summary>
+    private void OnStartFailed(string reason, long resumeMs, int maxHeight)
+    {
+        Log($"start failed: {reason} (maxHeight={maxHeight}, kind={_kind})");
+        var st = NativePlayerService.Instance?.GetState();
+        bool oldAlive = _kind != StreamKind.None && st is not null && string.IsNullOrEmpty(st.ErrorMessage);
+        if (oldAlive)
+        {
+            FlashInfo($"Не удалось переключить поток ({reason}) — остаётся текущий");
+            return;
+        }
+        _retryStart = (resumeMs, maxHeight);
+        ShowError($"Не удалось запустить воспроизведение ({reason}). OK — повторить");
     }
 
     // ── Episode navigation (⏮ / ⏭) ──────────────────────────────────────────
@@ -486,7 +607,7 @@ public partial class PlayerPage : ContentPage
             ? $"NOW PLAYING · S{_season ?? 1} · EP {_episode}"
             : "NOW PLAYING";
         FlashInfo(_episode is not null ? $"Серия {_episode}" : "Воспроизведение");
-        _ = StartStreamAsync(0, 0);
+        _ = StartStreamAsync(0, 0, playWhenReady: true);
     }
 
     private string? Abs(string? url)
@@ -552,6 +673,13 @@ public partial class PlayerPage : ContentPage
                 FlashInfo("Оригинал не воспроизводится — переключаюсь на 1080p");
                 _ = StartStreamAsync(absPos, 1080);
                 return;
+            }
+            // Every rung used up: say so (it used to sit silently at the
+            // failed frame) and let OK retry from here.
+            if (!_errorShown)
+            {
+                _retryStart = (absPos, _maxHeight);
+                ShowError("Не удалось воспроизвести файл. OK — повторить");
             }
         }
 
@@ -626,6 +754,16 @@ public partial class PlayerPage : ContentPage
 
     private void TogglePlay()
     {
+        if (_retryStart is { } retry)
+        {
+            ClearError();
+            // The failed player reports its old error until the new stream is
+            // prepared — don't let Tick read it as a failure of the retry.
+            _recoveringSinceUtc = DateTime.UtcNow;
+            FlashInfo("Повторный запуск…");
+            _ = StartStreamAsync(retry.ResumeMs, retry.MaxHeight, playWhenReady: true);
+            return;
+        }
         var st = NativePlayerService.Instance?.GetState();
         if (st is null) return;
         if (st.Playing) NativePlayerService.Instance?.PauseAsync();
@@ -648,7 +786,7 @@ public partial class PlayerPage : ContentPage
         _hudTimer?.Stop();
         SheetTitle.Text = "ГРОМКОСТЬ";
         VolumePanel.IsVisible = true;
-        SheetItems.IsVisible = false;
+        SheetScroll.IsVisible = false;
         UpdateVolumeUi();
         _sheetMode = SheetMode.Volume;
         SheetOverlay.IsVisible = true;
@@ -784,7 +922,8 @@ public partial class PlayerPage : ContentPage
         }
         focusRow ??= SheetItems.Children.Count > 0 ? SheetItems.Children[0] as View : null;
 
-        SheetItems.IsVisible = true;
+        // Focusing the row scrolls the ScrollView to it (native requestChildFocus).
+        SheetScroll.IsVisible = true;
         _sheetMode = SheetMode.List;
         SheetOverlay.IsVisible = true;
 
@@ -800,6 +939,8 @@ public partial class PlayerPage : ContentPage
             TextColor = r.Selected ? Color.FromArgb("#f49157") : Colors.White,
             FontFamily = "sans-serif",
             FontSize = 15,
+            MaxLines = 1,
+            LineBreakMode = LineBreakMode.TailTruncation,
             VerticalOptions = LayoutOptions.Center,
         };
         var border = new Border
@@ -830,6 +971,17 @@ public partial class PlayerPage : ContentPage
         if (origin is not null)
             Dispatcher.Dispatch(() => { try { origin.Focus(); } catch { } });
         ArmAutoHide();
+    }
+
+    private bool IsRowFocused(int index)
+    {
+#if ANDROID
+        return index >= 0 && index < SheetItems.Children.Count
+            && SheetItems.Children[index] is View v
+            && v.Handler?.PlatformView is Android.Views.View nv && nv.IsFocused;
+#else
+        return false;
+#endif
     }
 
     private static void FocusRow(View v)
@@ -878,8 +1030,30 @@ public partial class PlayerPage : ContentPage
     }
 
     private IDispatcherTimer? _infoTimer;
+    private bool _errorShown;
+
+    /// <summary>A sticky message (start failure): stays up with the HUD until
+    /// the next successful start or a retry.</summary>
+    private void ShowError(string text)
+    {
+        _infoTimer?.Stop();
+        _errorShown = true;
+        InfoLine.Text = text;
+        InfoLine.IsVisible = true;
+        RevealHud();
+    }
+
+    private void ClearError()
+    {
+        _retryStart = null;
+        if (!_errorShown) return;
+        _errorShown = false;
+        InfoLine.IsVisible = false;
+    }
+
     private void FlashInfo(string text)
     {
+        if (_errorShown) return;   // don't let a transient line replace the error
         InfoLine.Text = text;
         InfoLine.IsVisible = true;
         _infoTimer?.Stop();
@@ -952,6 +1126,10 @@ public partial class PlayerPage : ContentPage
     {
         base.OnDisappearing();
         if (Current == this) Current = null;
+        // A start still in flight must not begin playback after the page left.
+        _closed = true;
+        _startGen++;
+        _startCts?.Cancel();
         _timer?.Stop();
         _hudTimer?.Stop();
         var st = NativePlayerService.Instance?.GetState();

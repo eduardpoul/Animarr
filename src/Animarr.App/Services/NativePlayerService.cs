@@ -65,7 +65,7 @@ public sealed class NativePlayerService : IDisposable
     // Surface is created (race between MainActivity.OnCreate inserting the view
     // and the surface being allocated once it goes Visible). When the surface
     // arrives (SurfaceCreated) we drain this and complete the attach.
-    private (string Url, long ResumeMs)? _pendingPlay;
+    private (string Url, long ResumeMs, bool PlayWhenReady)? _pendingPlay;
     private bool _surfaceReady;
 
     // Diagnostic one-shot guards (logcat tag "Animarr.NativePlayer"). Used to
@@ -207,7 +207,7 @@ public sealed class NativePlayerService : IDisposable
         {
             _pendingPlay = null;
             // Direct attach — don't recurse into PlayAsync (would re-queue).
-            DoPlay(pending.Value.Url, pending.Value.ResumeMs);
+            DoPlay(pending.Value.Url, pending.Value.ResumeMs, pending.Value.PlayWhenReady);
         }
         else if (_player is not null && (s_textureView is not null || s_surfaceView is not null))
         {
@@ -284,8 +284,10 @@ public sealed class NativePlayerService : IDisposable
     /// <summary>
     /// Start playback of <paramref name="url"/> (either a Direct Play
     /// <c>/api/file</c> URL or an HLS manifest URL — ExoPlayer auto-detects).
+    /// <paramref name="playWhenReady"/> false prepares the stream paused — a
+    /// restart (quality / track switch, remux seek) keeps the user's pause.
     /// </summary>
-    public Task PlayAsync(string url, long resumeMs = 0)
+    public Task PlayAsync(string url, long resumeMs = 0, bool playWhenReady = true)
     {
 #if ANDROID
         try
@@ -294,7 +296,7 @@ public sealed class NativePlayerService : IDisposable
             // we know the TextureView's SurfaceTexture is allocated. Without
             // this we'd race the surface-allocation event and silently
             // attach to a null surface (audio plays, video is black).
-            _pendingPlay = (url, resumeMs);
+            _pendingPlay = (url, resumeMs, playWhenReady);
             _logger.LogInformation("NativePlayer: PlayAsync url={Url} resume={ResumeMs}ms (queued, awaiting surface)",
                 url, resumeMs);
 
@@ -348,7 +350,7 @@ public sealed class NativePlayerService : IDisposable
     /// first cold-start play. Idempotent against rapid re-entries because
     /// we drain <c>_pendingPlay</c> before doing the work.
     /// </summary>
-    private void DoPlay(string url, long resumeMs)
+    private void DoPlay(string url, long resumeMs, bool playWhenReady)
     {
         var ctx = Microsoft.Maui.ApplicationModel.Platform.AppContext;
         if (ctx is null)
@@ -370,7 +372,7 @@ public sealed class NativePlayerService : IDisposable
                 _player.SetMediaItem(item);
                 _player.Prepare();
                 if (resumeMs > 0) _player.SeekTo(resumeMs);
-                _player.PlayWhenReady = true;
+                _player.PlayWhenReady = playWhenReady;
                 // Reset diag + aspect guards so GetState re-logs format/error
                 // and re-sizes the SurfaceView for this play.
                 _diagFmtLogged = false; _diagErrLogged = false; _diagPolls = 0;
@@ -378,7 +380,7 @@ public sealed class NativePlayerService : IDisposable
                 _logger.LogInformation("NativePlayer.DoPlay: attached + prepared {Url} resume={ResumeMs}ms",
                     url, resumeMs);
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"DoPlay prepared, PlayWhenReady=true");
+                    $"DoPlay prepared, PlayWhenReady={playWhenReady}");
             }
             ApplyAspectMatrix();  // re-apply user's aspect (or default fit) now that video size is incoming
         }
@@ -892,7 +894,8 @@ public sealed class NativePlayerService : IDisposable
                 }
 
                 return new NativePlayerState(pos, dur, playing, ended, buffering,
-                    error, actualCodec, actualBitDepth, actualWidth, actualHeight);
+                    error, actualCodec, actualBitDepth, actualWidth, actualHeight,
+                    _player.PlayWhenReady);
             }
         }
         catch { return NativePlayerState.Empty; }
@@ -1196,7 +1199,10 @@ public sealed record NativePlayerState(
     string  ActualCodec,     // post-decode codec slug ("h264" / "hevc" / "av1" / "")
     int     ActualBitDepth,  // 8 / 10 based on the decoder's ColorInfo
     int     ActualWidth,
-    int     ActualHeight)
+    int     ActualHeight,
+    // The play/pause intent (ExoPlayer PlayWhenReady) — true while buffering
+    // too, unlike Playing. A stream restart re-applies it.
+    bool    PlayWhenReady = false)
 {
     public static NativePlayerState Empty { get; } =
         new(0, 0, false, false, false, null, string.Empty, 0, 0, 0);

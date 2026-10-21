@@ -189,8 +189,13 @@
                                FontFamily="sans-serif" FontSize="11" HorizontalOptions="Center" />
                     </VerticalStackLayout>
 
-                    <!-- audio / subtitles / quality: option rows built in code-behind -->
-                    <VerticalStackLayout x:Name="SheetItems" IsVisible="False" Spacing="4" MinimumWidthRequest="360" />
+                    <!-- audio / subtitles / quality: option rows built in code-behind.
+                         Scrolls (the focused row is kept in view) so a file with
+                         10+ subtitle tracks stays reachable. -->
+                    <ScrollView x:Name="SheetScroll" IsVisible="False" Orientation="Vertical"
+                                WidthRequest="460" MaximumHeightRequest="380" VerticalScrollBarVisibility="Never">
+                        <VerticalStackLayout x:Name="SheetItems" Spacing="4" MinimumWidthRequest="360" />
+                    </ScrollView>
                 </VerticalStackLayout>
             </Border>
         </Grid>
