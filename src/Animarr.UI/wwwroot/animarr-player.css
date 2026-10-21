@@ -48,6 +48,15 @@ body[data-animarr-native="1"] .vp-backdrop * {
     visibility: visible !important;
 }
 
+/* ── Page behind the player ───────────────────────────────────────── */
+/* The document itself is the page scroller, so while the full-viewport
+   player overlay is up its scrollbar was drawn OVER the video (and the wheel
+   kept scrolling the hidden page underneath). Lock the root scroller for as
+   long as the overlay exists — :has() releases it the moment the overlay is
+   gone, whatever path closed it. Chrome keeps the scroll offset across the
+   toggle, so the detail page comes back where it was. */
+html:has(.vp-backdrop) { overflow: hidden; }
+
 /* ── Hide Artplayer's built-in chrome ─────────────────────────────── */
 .vp-art .art-bottom,
 .vp-art .art-progress,
@@ -58,6 +67,16 @@ body[data-animarr-native="1"] .vp-backdrop * {
 /* Keep the loading spinner + subtitle overlay visible. */
 .vp-art .art-loading,
 .vp-art .art-subtitle { display: block; }
+
+/* Subtitles ride above OUR control rows while the HUD is up, instead of being
+   painted over the scrubber and buttons. --vp-sub-lift is set on the player
+   root by attachHud (bottom bar height minus its transparent scrim padding;
+   0 while the HUD is hidden). This also replaces Artplayer's own
+   art-control-show lift, which follows its hidden built-in control bar rather
+   than ours — so cues no longer hop around on unrelated mouse moves. */
+.vp-art .art-video-player .art-subtitle {
+    bottom: calc(var(--vp-sub-lift, 0px) + var(--art-subtitle-bottom)) !important;
+}
 
 /* ── HUD root ─────────────────────────────────────────────────────── */
 .vp-hud {

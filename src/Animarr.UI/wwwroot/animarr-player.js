@@ -1518,6 +1518,7 @@
             hud.setAttribute('data-visible', 'true');
             root.style.cursor = '';
             applyFloatingVisibility();
+            syncSubtitleLift();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
             // Arm the hide timer unless the user is actively interacting. We do
             // NOT gate arming on adapter.playing: play() is async, so right
@@ -1539,7 +1540,29 @@
             hud.setAttribute('data-visible', 'false');
             root.style.cursor = 'none';
             applyFloatingVisibility();
+            syncSubtitleLift();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        }
+        // Lift the subtitle overlay above the bottom control rows while the HUD
+        // is visible (CSS: .art-subtitle bottom uses --vp-sub-lift). The bar's
+        // padding-top is the transparent top of its scrim, so cues may sit over
+        // that part — only the progress + button rows are cleared. Measured on
+        // every show/hide because the bar's height depends on the layout (one
+        // row on desktop, two in portrait, the slim touch bar). show() runs on
+        // every mouse move, so only write when the value actually changes.
+        let subLiftPx = -1;
+        function syncSubtitleLift() {
+            let lift = 0;
+            if (hud.getAttribute('data-visible') === 'true') {
+                const bar = hud.querySelector('.vp-hud__bottom');
+                if (bar) {
+                    const padTop = parseFloat(getComputedStyle(bar).paddingTop) || 0;
+                    lift = Math.max(0, Math.round(bar.offsetHeight - padTop));
+                }
+            }
+            if (lift === subLiftPx) return;
+            subLiftPx = lift;
+            root.style.setProperty('--vp-sub-lift', lift + 'px');
         }
         // Skip-intro pill and the Up-Next card float above the HUD's control
         // bars. Each has two phases once its own logic (intro/credits time
@@ -2091,6 +2114,7 @@
             hud.setAttribute('data-visible', 'true');
             root.style.cursor = '';
             applyFloatingVisibility();
+            syncSubtitleLift();
             if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         });
 
