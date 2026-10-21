@@ -393,6 +393,7 @@ internal static class MediaStreamEndpoints
             string path,
             MediaPathValidator pathValidator,
             MediaCachePaths cachePaths,
+            MediaProbeCache probeCache,
             int track,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
@@ -418,16 +419,23 @@ internal static class MediaStreamEndpoints
             // front, and a bitmap track (PGS/VobSub/DVB can't become text) or a
             // broken stream came back as an EMPTY subtitle browsers then cached
             // for an hour. Failures are never written to the cache either.
+            // Text that isn't UTF-8 (cp1251 SRT …) is re-encoded first — see
+            // SubtitleCharset. The codec lookup (cached ffprobe JSON) is only
+            // used when an EMBEDDED track turns out not to be UTF-8.
             var r = await SubtitleCache.GetOrExtractAsync(fullPath!, track, outFormat,
-                cachePaths.CacheRoot, http.RequestAborted);
+                cachePaths.CacheRoot, http.RequestAborted,
+                codecLookup: c => SubtitleCodecAsync(probeCache, fullPath!, track, c));
             if (r.Path is null)
             {
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
-                    fullPath, track, r.ExitCode, r.Error.Trim());
+                    fullPath, track, r.ExitCode, LastLines(r.Error, 5));
                 http.Response.Headers.CacheControl = "no-store";
                 return Results.Problem("This subtitle track can't be converted to text.",
                     statusCode: StatusCodes.Status422UnprocessableEntity);
             }
+            if (r.Charset is not null)
+                logger.LogInformation("Subtitle {Path} track {Track}: converted from {Charset} to UTF-8",
+                    fullPath, track, r.Charset);
             http.Response.Headers.CacheControl = "private, max-age=3600";
             return Results.File(r.Path, contentType);
         }
@@ -445,6 +453,37 @@ internal static class MediaStreamEndpoints
     .RequireAuthorization(MediaAuth.Policies.Media);
 
         return app;
+    }
+
+    /// <summary>ffprobe <c>codec_name</c> of the <paramref name="track"/>-th
+    /// subtitle stream (= ffmpeg's <c>0:s:N</c>), from the cached probe JSON.</summary>
+    private static async Task<string?> SubtitleCodecAsync(MediaProbeCache probeCache, string fullPath, int track,
+        CancellationToken ct)
+    {
+        try
+        {
+            var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
+            if (json is null) return null;
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return null;
+            int n = 0;
+            foreach (var s in streams.EnumerateArray())
+            {
+                if (!s.TryGetProperty("codec_type", out var type) || type.GetString() != "subtitle") continue;
+                if (n++ == track) return s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
+            }
+            return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return null; }
+    }
+
+    /// <summary>The last <paramref name="count"/> lines of an ffmpeg stderr dump —
+    /// a non-UTF-8 track repeats the same error once per cue.</summary>
+    private static string LastLines(string text, int count)
+    {
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return string.Join(" | ", lines.Skip(Math.Max(0, lines.Length - count)));
     }
 
     /// <summary>First video stream's codec + Dolby-Vision presence so /api/video
