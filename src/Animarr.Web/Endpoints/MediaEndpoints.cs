@@ -819,7 +819,10 @@ internal static class MediaEndpoints
             var lang = (await config.GetAsync(Animarr.Shared.AppConfigKeys.MetadataLanguage, ct) ?? "en")
                 .Trim().ToLowerInvariant();
 
+            // Untracked: the common path only reads. A stale refresh below still
+            // works — RemoveRange attaches the detached rows as Deleted.
             var cached = await db.EpisodeMetadata
+                .AsNoTracking()
                 .Where(e => e.MediaItemId == id)
                 .ToListAsync(ct);
 

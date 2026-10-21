@@ -28,6 +28,7 @@ internal static class FolderEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.FolderWatchers
+                .AsNoTracking()
                 .OrderBy(f => f.Label)
                 .ToListAsync(ct);
             return Results.Ok(rows.Where(r => me?.Role.AllowsFolder(r) ?? true).Select(r => r.ToDto()).ToArray());

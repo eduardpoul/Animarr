@@ -33,6 +33,7 @@ internal static class WatchStateEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var rows = await db.WatchStates
+                .AsNoTracking()
                 .Where(w => w.MediaItemId == mediaItemId && w.UserId == uid)
                 .OrderByDescending(w => w.LastSeenAt)
                 .ToListAsync(ct);
