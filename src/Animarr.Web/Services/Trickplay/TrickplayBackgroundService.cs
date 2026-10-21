@@ -79,7 +79,7 @@ public sealed class TrickplayBackgroundService(
         {
             using var scope = scopeFactory.CreateScope();
             var svc = scope.ServiceProvider.GetRequiredService<TrickplayService>();
-            await svc.GenerateForItemAsync(itemId, ct);
+            await svc.GenerateForItemAsync(itemId, ct, playback.WaitForIdleAsync);
         }
         finally
         {
