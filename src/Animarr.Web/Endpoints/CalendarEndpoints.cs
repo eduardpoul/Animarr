@@ -37,6 +37,29 @@ internal static class CalendarEndpoints
                          || (m.LastAiredAtUtc != null && m.LastAiredAtUtc >= from && m.LastAiredAtUtc <= to))
                 .ToListAsync(ct);
 
+            // The file check resolves an item's files; load the resolver's DB
+            // inputs for every item that may need one in a single batch, and
+            // resolve each item at most once (the aired and the "next" row used
+            // to resolve the same title twice).
+            var mayCheck = items
+                .Where(m => (m.LastAiredAtUtc is DateTime a && a >= from && a <= to && m.LastAiredEpisode is not null)
+                         || (m.NextAirAtUtc is DateTime n && n >= from && n <= now && m.NextEpisodeNumber is not null))
+                .Select(m => m.Id)
+                .ToList();
+            IReadOnlyDictionary<Guid, MediaFileResolver.Inputs> inputs = new Dictionary<Guid, MediaFileResolver.Inputs>();
+            if (mayCheck.Count > 0)
+            {
+                try { inputs = await resolver.LoadInputsAsync(db, mayCheck, ct); }
+                catch { /* no file info → every check reads "aired-waiting", as a failed resolve did */ }
+            }
+            var filesById = new Dictionary<Guid, MediaFileDto[]?>();
+            bool EpisodeOnDisk(Guid id, int episode)
+            {
+                if (!filesById.TryGetValue(id, out var files))
+                    filesById[id] = files = ResolveFiles(resolver, inputs, id);
+                return files is not null && files.Any(f => f.AbsoluteEpisode == episode || f.Episode == episode);
+            }
+
             var events = new List<CalendarEventDto>();
             foreach (var m in items)
             {
@@ -46,7 +69,7 @@ internal static class CalendarEndpoints
                 int? airedEpEmitted = null;
                 if (m.LastAiredAtUtc is DateTime aired && aired >= from && aired <= to && m.LastAiredEpisode is int airedEp)
                 {
-                    var status = await EpisodeOnDiskAsync(resolver, m.Id, airedEp, ct) ? "in-library" : "aired-waiting";
+                    var status = EpisodeOnDisk(m.Id, airedEp) ? "in-library" : "aired-waiting";
                     events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, airedEp, aired, status));
                     airedEpEmitted = airedEp;
                 }
@@ -59,7 +82,7 @@ internal static class CalendarEndpoints
                     // Announced but the refresh pass hasn't rolled it yet —
                     // treat a passed timestamp as freshly aired.
                     var status = next > now ? "upcoming"
-                        : await EpisodeOnDiskAsync(resolver, m.Id, nextEp, ct) ? "in-library" : "aired-waiting";
+                        : EpisodeOnDisk(m.Id, nextEp) ? "in-library" : "aired-waiting";
                     events.Add(new CalendarEventDto(m.Id, MediaTitles.DisplayTitle(m), poster, backdrop, nextEp, next, status));
                 }
             }
@@ -70,17 +93,19 @@ internal static class CalendarEndpoints
         return app;
     }
 
-    /// <summary>Is the (absolute) episode already on disk? Resolves the item's
-    /// files through the standard 3-tier resolver and matches either the raw
-    /// or the season-offset-mapped absolute number.</summary>
-    private static async Task<bool> EpisodeOnDiskAsync(
-        MediaFileResolver resolver, Guid mediaItemId, int episode, CancellationToken ct)
+    /// <summary>The item's files through the standard 3-tier resolver, for the
+    /// "is the (absolute) episode already on disk?" check — matched against
+    /// either the raw or the season-offset-mapped absolute number. Null when
+    /// the resolve fails (the check then reads "not on disk").</summary>
+    private static MediaFileDto[]? ResolveFiles(
+        MediaFileResolver resolver, IReadOnlyDictionary<Guid, MediaFileResolver.Inputs> inputs, Guid mediaItemId)
     {
         try
         {
-            var files = await resolver.ResolveAsync(mediaItemId, ct);
-            return files.Any(f => f.AbsoluteEpisode == episode || f.Episode == episode);
+            return inputs.TryGetValue(mediaItemId, out var input)
+                ? resolver.Resolve(input)
+                : Array.Empty<MediaFileDto>();
         }
-        catch { return false; }
+        catch { return null; }
     }
 }

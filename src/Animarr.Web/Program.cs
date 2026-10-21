@@ -183,6 +183,7 @@ builder.Services.AddSingleton<DlnaService>();
 // Settings UI can show what's actually usable on this host.
 builder.Services.AddSingleton<HardwareInfoService>();
 builder.Services.AddScoped<MediaFileResolver>();
+builder.Services.AddSingleton<MediaFileResolveCache>();
 builder.Services.AddScoped<EpisodeLlmResolver>();
 builder.Services.AddScoped<SeasonOffsetResolver>();
 builder.Services.AddScoped<ExternalTrackService>();
