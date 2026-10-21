@@ -35,26 +35,26 @@
     <link href="Animarr.Web.Client.styles.css" rel="stylesheet" />
     <!-- Custom HUD overlay for animarr-player.js. Not scoped-CSS because the
          HUD DOM is injected by JS and wouldn't match [b-xxx] selectors.
-         Cache-busted with a per-load token: the player JS/CSS iterate often and
-         the static `_content/Animarr.UI/` URLs were getting pinned in the
-         browser cache across deploys (Cache-Control:no-cache wasn't enough on
-         the WASM SPA). document.write during initial parse keeps load order
-         identical to a plain tag while making the URL unique each full load, so
-         a deploy is always picked up on the next page load — no hard-refresh /
-         cache-clear needed. ~60 KB re-fetch on a LAN is negligible. -->
-    <script>document.write('<link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css?v=' + Date.now() + '">');</script>
+         Plain URL, like every other _content/ asset. This (and the player JS
+         at the bottom) used to be a per-load `?v=Date.now()` document.write so
+         a deploy could never be pinned stale — but the pinning came from a
+         leftover PWA service worker (service-worker.js now removes it), and
+         the unique URL re-downloaded AND re-compiled the ~185 KB player on
+         every load (a new URL also defeats the browser's compiled-code cache).
+         MapStaticAssets serves these no-cache + ETag: each load revalidates
+         (a 304 when unchanged), so a deploy still lands on the next load.
+         NOT build-time fingerprint placeholders: they are only expanded when
+         Animarr.Web.Client itself is built/published — the hosted
+         `dotnet publish src/Animarr.Web` (the Docker image) ships this file
+         raw, so a placeholder URL would 404 in production. -->
+    <link rel="stylesheet" href="_content/Animarr.UI/animarr-player.css" />
 
-    <!-- Artplayer + hls.js. -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js" integrity="sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr" crossorigin="anonymous"></script>
-    <!-- Pinned to 5.4.0 (the version Animarr was built/tested against). The
-         floating `artplayer@5` tag silently shipped a newer 5.x that tightened
-         option validation (option.subtitle must be an object) and broke
-         playback on media without subtitles — pin to avoid surprise CDN drift. -->
-    <script src="https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js" integrity="sha384-w5IjjTXa5FVlGgCubBLyhTG2jrrNp7ktdnxNNUdVZuYwpQ5OqIab8c1gjKDD3+uO" crossorigin="anonymous"></script>
-
-    <!-- v5 Phase 7: html5-qrcode for the Login → "Scan QR from TV" modal.
-         Loaded on every page so the Pair flow works in either WASM or MAUI. -->
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
+    <!-- hls.js + Artplayer (player) and html5-qrcode (Login / Pair QR scan)
+         are NOT loaded here any more: as parser-blocking <head> scripts from
+         the CDN they held the boot splash and the whole WASM boot hostage to
+         jsDelivr on every load (and forever on a LAN-only install). They load
+         on first use instead — animarr-player.js (attach / preload) and
+         qr-scan.js own the pinned, SRI-checked URLs. -->
 
     <script>
         // Accent-hue setter — every oklch(L C var(--accent-hue)) rule reads it.
@@ -210,7 +210,8 @@
 
     <script src="_content/Animarr.UI/backdrop.js"></script>
     <script src="_content/Animarr.UI/animarr-calibrate.js"></script>
-    <script>document.write('<script src="_content/Animarr.UI/animarr-player.js?v=' + Date.now() + '"><\/script>');</script>
+    <!-- Plain, revalidated URL — see the animarr-player.css note in <head>. -->
+    <script src="_content/Animarr.UI/animarr-player.js"></script>
     <script src="_content/Animarr.UI/tv-nav.js"></script>
     <script src="_content/Animarr.UI/app-shell.js"></script>
     <script src="_content/Animarr.UI/qr-scan.js"></script>

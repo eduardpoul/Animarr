@@ -938,6 +938,12 @@ else
             // we re-assert it here — the reliable moment, post-render.
             try { await JS.InvokeVoidAsync("animarrTvNav.scrollToTop"); }
             catch { /* host without tv-nav.js — no-op */ }
+
+            // Warm the player's vendor libraries (hls.js + Artplayer) in the
+            // background — they're no longer loaded with the page, and a
+            // title page is where Play gets pressed. Fire-and-forget.
+            try { await JS.InvokeVoidAsync("animarrPlayer.preload"); }
+            catch { /* older player script — attach() loads them itself */ }
         }
 
         // Honour the Home "Up next" rail's auto-play query params (?s=&e= /
