@@ -619,7 +619,10 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
 
     private async Task<T?> GetOrNullAsync<T>(string url, CancellationToken ct) where T : class
     {
-        using var resp = await _http.GetAsync(url, ct);
+        // ResponseHeadersRead: deserialize straight off the response stream
+        // instead of first buffering the whole body (GetAsync's default) —
+        // one copy less of every item / franchise / stats payload.
+        using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.NoContent) return null;
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<T>(JsonOpts, ct);
@@ -635,9 +638,14 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
 
     // ─── Server identity (v5 multi-server) ───────────────────────────────
 
-    /// <summary>Probe an arbitrary server URL for its ServerInfoDto. Builds a
-    /// throwaway <see cref="HttpClient"/> bound to <paramref name="baseUrl"/>
-    /// because the registry probes *other* servers, not this client's bound one.
+    /// <summary>Shared by every server probe — the registry probes *other*
+    /// servers, not this client's bound one, so it can't use <c>_http</c>. One
+    /// static client instead of a throwaway HttpClient (+ handler + sockets)
+    /// per probed URL; requests are absolute and the timeout is per request.</summary>
+    private static readonly HttpClient ProbeClient = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
+
+    /// <summary>Probe an arbitrary server URL for its ServerInfoDto.
     /// 4-second timeout — a non-responding server should fall out of the
     /// discovery list quickly, not block the UI.
     /// Returns null on any failure (timeout / 4xx / non-JSON response) so the
@@ -646,17 +654,15 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     {
         if (string.IsNullOrWhiteSpace(baseUrl)) return null;
         Uri uri;
-        try { uri = new Uri(baseUrl, UriKind.Absolute); }
+        // Same resolution HttpClient.BaseAddress + relative route did before.
+        try { uri = new Uri(new Uri(baseUrl, UriKind.Absolute), ApiRoutes.ServerInfo); }
         catch { return null; }
 
-        using var probeClient = new HttpClient
-        {
-            BaseAddress = uri,
-            Timeout     = TimeSpan.FromSeconds(4),
-        };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ProbeTimeout);
         try
         {
-            return await probeClient.GetFromJsonAsync<ServerInfoDto>(ApiRoutes.ServerInfo, JsonOpts, ct);
+            return await ProbeClient.GetFromJsonAsync<ServerInfoDto>(uri, JsonOpts, timeout.Token);
         }
         catch
         {
