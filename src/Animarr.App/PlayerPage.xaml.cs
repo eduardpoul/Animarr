@@ -462,9 +462,11 @@ public partial class PlayerPage : ContentPage
             }
 
             Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}");
-            // Two attempts, like the web player: a 5xx / network error is often
-            // transient (ffprobe racing a file still being written, a GC'd
-            // session dir). A 4xx is final.
+            // Two attempts, like the web player, but only where a second try
+            // can help: a network error or a 5xx such as start_failed /
+            // too_many_sessions (a start racing the cleanup of the previous
+            // session). Never a 4xx, a 504 ffmpeg_timeout (the server already
+            // waited 60 s) or ffmpeg_exited (the same plan fails the same way).
             for (int attempt = 0; attempt < 2 && !ct.IsCancellationRequested; attempt++)
             {
                 try
@@ -478,8 +480,16 @@ public partial class PlayerPage : ContentPage
                     }
                     else
                     {
-                        failure = $"HTTP {(int)resp.StatusCode}";
-                        if ((int)resp.StatusCode < 500) break;
+                        // RFC 7807 problem+json: `detail` is the server's one-line
+                        // reason, the `code` extension says which failure it was.
+                        int status = (int)resp.StatusCode;
+                        StartProblem? pd = null;
+                        try { pd = await resp.Content.ReadFromJsonAsync<StartProblem>(Json, ct); } catch { }
+                        failure = $"{pd?.Detail ?? pd?.Title ?? "ошибка сервера"} (HTTP {status})";
+                        Log($"start #{gen}: HTTP {status} code={pd?.Code} {pd?.Detail}");
+                        bool retryable = status >= 500 && status != 504
+                                         && pd?.Code is not ("ffmpeg_exited" or "ffmpeg_timeout");
+                        if (!retryable) break;
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
@@ -528,16 +538,18 @@ public partial class PlayerPage : ContentPage
             return;
         }
 
-        // A file's first start waits briefly for its track catalog, so the
-        // default subtitle goes out with the stream (no second prepare).
+        // A file's first start waits briefly for its track catalog, and any
+        // start for the check of a subtitle it must side-load, so the subtitle
+        // goes out with the stream instead of a second prepare right after.
         if (!catalog.IsCompleted)
-        {
             await Task.WhenAny(catalog, Task.Delay(2000));
-            if (gen != _startGen || _closed)
-            {
-                if (newToken is not null) StopHlsSession(newToken);
-                return;
-            }
+        DecideSubIfNeeded();
+        if (SideloadToCheck(directPlay) is { } check)
+            await Task.WhenAny(CheckSubtitleAsync(check), Task.Delay(1500));
+        if (gen != _startGen || _closed)
+        {
+            if (newToken is not null) StopHlsSession(newToken);
+            return;
         }
 
         // Success — only now does the new stream replace the old one.
@@ -818,9 +830,31 @@ public partial class PlayerPage : ContentPage
         return (new SideloadSubtitle(TvMedia.Url(Abs(rel)!), SubLang(s), SubLabel(s)), true);
     }
 
-    private async Task<bool> CheckSubtitleAsync(string rel)
+    private readonly Dictionary<string, Task<bool>> _subChecks = new(StringComparer.Ordinal);
+
+    /// <summary>One check per URL at a time (a start and a background reload
+    /// may both ask); a failed check can be retried later.</summary>
+    private Task<bool> CheckSubtitleAsync(string rel)
     {
-        if (_goodSubs.Contains(rel)) return true;
+        if (_goodSubs.Contains(rel)) return Task.FromResult(true);
+        if (_subChecks.TryGetValue(rel, out var running)) return running;
+        var t = DoCheckSubtitleAsync(rel);
+        _subChecks[rel] = t;
+        _ = t.ContinueWith(_ => _subChecks.Remove(rel), TaskScheduler.FromCurrentSynchronizationContext());
+        return t;
+    }
+
+    /// <summary>The /api/subtitle URL the next stream (Direct Play or not) will
+    /// side-load but that isn't known to convert yet; null if none.</summary>
+    private string? SideloadToCheck(bool directPlay)
+    {
+        if (_sub is not { IsOff: false } s) return null;
+        if (directPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)) return null;
+        return SubtitleRelUrl(s) is { } rel && !_goodSubs.Contains(rel) ? rel : null;
+    }
+
+    private async Task<bool> DoCheckSubtitleAsync(string rel)
+    {
         try
         {
             // The first request converts the track into the server's cache (a
@@ -1600,4 +1634,7 @@ public partial class PlayerPage : ContentPage
         double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output);
 
     private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height);
+
+    /// <summary>/api/hls/start error body (ProblemDetails + `code`).</summary>
+    private sealed record StartProblem(string? Title, string? Detail, int? Status, string? Code);
 }
