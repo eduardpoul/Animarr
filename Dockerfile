@@ -59,8 +59,15 @@ RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 #   • Animarr.Web.dll (API + Razor + WASM static-file host)
 #   • wwwroot/_framework/* (WASM bundle from Animarr.Web.Client)
 #   • wwwroot/_content/Animarr.UI/* (RCL static web assets)
+# `-r linux-x64 --self-contained false`: still framework-dependent (runs on the
+# aspnet base), but NuGet native assets are resolved for this image's platform
+# only — libe_sqlite3.so etc. land next to the DLLs instead of a runtimes/ tree
+# for ~25 RIDs (win/osx/musl/arm/…, ~32 MB). Only Animarr.Web gets the RID; the
+# WASM client keeps browser-wasm. (Don't add -r to the `dotnet restore` above:
+# a restore-time RID does flow into the WASM client and fails.)
 FROM build AS publish
-RUN dotnet publish "Animarr.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Animarr.Web.csproj" -c Release -r linux-x64 --self-contained false \
+        -o /app/publish /p:UseAppHost=false
 
 # llama.cpp server binaries for the built-in ("embedded") LLM provider. We copy
 # just the llama-server executable from the official images:
