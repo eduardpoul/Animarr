@@ -392,6 +392,7 @@ internal static class MediaStreamEndpoints
     app.MapGet("/api/subtitle", async (
             string path,
             MediaPathValidator pathValidator,
+            MediaCachePaths cachePaths,
             int track,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
@@ -407,56 +408,38 @@ internal static class MediaStreamEndpoints
         };
 
         var logger = loggerFactory.CreateLogger("ApiSubtitle");
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName               = "ffmpeg",
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-        };
-        foreach (var a in new[]
-        {
-            "-hide_banner", "-loglevel", "warning",
-            "-i", fullPath!,
-            "-map", $"0:s:{track}",
-            "-f", outFormat,
-            "pipe:1",
-        }) psi.ArgumentList.Add(a);
-
-        System.Diagnostics.Process? p = null;
         try
         {
-            p = System.Diagnostics.Process.Start(psi)!;
-            // Drain stderr alongside stdout (a full stderr pipe stalls ffmpeg),
-            // and buffer the output — a subtitle track is small — so a failed
-            // conversion can be answered as a failure. Streaming straight to the
-            // response committed a 200 + "public, max-age=3600" up front: a
-            // bitmap track (PGS/VobSub/DVB can't become text) or a broken stream
-            // came back as an EMPTY subtitle that browsers then cached for an hour.
-            var stderr = p.StandardError.ReadToEndAsync(http.RequestAborted);
-            using var buf = new MemoryStream();
-            await p.StandardOutput.BaseStream.CopyToAsync(buf, http.RequestAborted);
-            await p.WaitForExitAsync(http.RequestAborted);
-            var err = await stderr;
-            if (p.ExitCode != 0 || buf.Length == 0)
+            // Served from the disk cache when this track was converted before;
+            // otherwise ffmpeg converts it into the cache (a full read of the
+            // container — see SubtitleCache). The conversion completes before
+            // any byte is sent, so a failure is answered as a failure: streaming
+            // straight to the response used to commit a 200 + "max-age=3600" up
+            // front, and a bitmap track (PGS/VobSub/DVB can't become text) or a
+            // broken stream came back as an EMPTY subtitle browsers then cached
+            // for an hour. Failures are never written to the cache either.
+            var r = await SubtitleCache.GetOrExtractAsync(fullPath!, track, outFormat,
+                cachePaths.CacheRoot, http.RequestAborted);
+            if (r.Path is null)
             {
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
-                    fullPath, track, p.ExitCode, err.Trim());
+                    fullPath, track, r.ExitCode, r.Error.Trim());
                 http.Response.Headers.CacheControl = "no-store";
                 return Results.Problem("This subtitle track can't be converted to text.",
                     statusCode: StatusCodes.Status422UnprocessableEntity);
             }
             http.Response.Headers.CacheControl = "private, max-age=3600";
-            return Results.Bytes(buf.ToArray(), contentType);
+            return Results.File(r.Path, contentType);
+        }
+        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
+        {
+            return Results.Empty;   // client went away; the extract was killed
         }
         catch (Exception ex)
         {
-            try { if (p is { HasExited: false }) p.Kill(true); } catch { }
             logger.LogError(ex, "ffmpeg subtitle extract failed for {Path} track {Track}", fullPath, track);
             return Results.StatusCode(500);
         }
-        finally { p?.Dispose(); }
     })
     .WithName("GetSubtitle")
     .RequireAuthorization(MediaAuth.Policies.Media);
