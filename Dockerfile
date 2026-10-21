@@ -34,14 +34,21 @@ COPY ["src/Animarr.Web.Client/Animarr.Web.Client.csproj","src/Animarr.Web.Client
 COPY ["src/Animarr.Web/Animarr.Web.csproj",             "src/Animarr.Web/"]
 RUN dotnet restore "src/Animarr.Web/Animarr.Web.csproj"
 
-COPY . .
-
 # Install node deps for Animarr.UI (the Tailwind build target lives there
 # since Phase 5 hard cutover stripped Razor + Tailwind from Animarr.Web).
 # Platform-specific optional packages (@tailwindcss/oxide-linux-x64-gnu)
 # are resolved by running `npm install` from inside the Linux container.
+# Only package*.json are copied first, so this layer stays cached until the
+# npm dependencies change instead of re-running on every source edit.
+# (.dockerignore keeps the host's node_modules out of the COPY . . below.)
+COPY ["src/Animarr.UI/package.json", "src/Animarr.UI/package-lock.json", "src/Animarr.UI/"]
 WORKDIR "/src/src/Animarr.UI"
 RUN npm install
+
+WORKDIR /src
+COPY . .
+
+WORKDIR "/src/src/Animarr.UI"
 # Explicitly recompile Tailwind. The MSBuild BuildTailwindCSS target has
 # Inputs="Styles/*.css" Outputs="wwwroot/app.css" — when COPY brings both
 # Styles/ source and an already-tracked wwwroot/app.css output into the
@@ -52,8 +59,9 @@ RUN npm install
 # CSS regardless of what wwwroot/app.css the dev committed (or didn't).
 RUN npm run css:build
 
+# No separate `dotnet build` step: its -o /app/build output was never used,
+# and `dotnet publish` below builds anyway (it was compiling everything twice).
 WORKDIR "/src/src/Animarr.Web"
-RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 
 # Publish stage — produces the final layout including:
 #   • Animarr.Web.dll (API + Razor + WASM static-file host)
