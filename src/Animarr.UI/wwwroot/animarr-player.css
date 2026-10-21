@@ -335,12 +335,15 @@ body[data-animarr-native="1"] .vp-backdrop * {
 
 /* Back button — almost transparent ghost over the gradient. The gradient
    on .vp-hud__top already provides enough contrast for the icon to read,
-   so the chip just needs a faint affordance on hover. */
+   so the chip just needs a faint affordance on hover.
+   No backdrop-filter anywhere in the player: Chromium refuses to promote a
+   <video> to a DirectComposition overlay while ANY backdrop-filter (even one
+   inside an opacity:0 element) overlaps it (DC_LAYER_FAILED_BACKDROP_FILTERS),
+   and without the overlay there is no NVIDIA RTX Video Super Resolution /
+   RTX Video HDR — the video processor that applies them is skipped. */
 .vp-btn--back {
-    background: rgba(15,17,21,0.18);
+    background: rgba(15,17,21,0.28);
     border-color: rgba(255,255,255,0.08);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
 }
 .vp-btn--back:hover {
     background: rgba(15,17,21,0.45);
@@ -383,7 +386,6 @@ body[data-animarr-native="1"] .vp-backdrop * {
 }
 .vp-hud[data-style="icons"] .vp-btn--back {
     background: transparent;
-    backdrop-filter: none;
 }
 .vp-hud[data-style="icons"] .vp-btn--back:hover {
     background: rgba(255,255,255,0.12);
@@ -572,8 +574,8 @@ body[data-animarr-native="1"] .vp-backdrop * {
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 14px;
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    /* No backdrop-filter (see .vp-btn--back): this card stays in the DOM at
+       opacity:0 the whole time, and its blur alone kept RTX VSR / HDR off. */
     color: #e8eaed;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     transition: opacity 200ms ease, transform 200ms ease;
@@ -690,9 +692,7 @@ body[data-animarr-native="1"] .vp-backdrop * {
     border-radius: 50%;
     cursor: pointer;
     color: #fff;
-    background: rgba(8, 10, 13, 0.42);
-    -webkit-backdrop-filter: blur(2px);
-    backdrop-filter: blur(2px);
+    background: rgba(8, 10, 13, 0.5);
     transition: transform 120ms ease, background 140ms ease;
 }
 .vp-hud[data-touch="1"] .vp-hud__cplay:active { transform: scale(0.94); }
