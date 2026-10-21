@@ -32,7 +32,12 @@
            UserPreferences.HomeSectionsJson via the shared HomeSections
            schema. Keys the schema knows but the app hasn't shipped yet
            (thisweek / foryou / discover) are skipped silently — they'll
-           light up here when those features land. *@
+           light up here when those features land.
+           Sections that follow the folder filter are keyed by (section,
+           folder) so a folder switch re-creates them. The section name keeps
+           the keys unique: keyed by the folder alone, the hero and the
+           this-week rail were two siblings with the same key, and Blazor threw
+           ("more than one sibling … same key") as soon as a folder was picked. *@
         @foreach (var section in _homeSections)
         {
             @switch (section)
@@ -45,11 +50,11 @@
                        hero to that folder's items. *@
                     @if (_heroItems.Length > 0)
                     {
-                        <CatalogContinueHero @key="_activeSection" Items="@_heroItems" IntervalSec="@_heroInterval" />
+                        <CatalogContinueHero @key="(section, _activeSection)" Items="@_heroItems" IntervalSec="@_heroInterval" />
                     }
                     else if (_filteredFeatured.Count > 0)
                     {
-                        <CatalogHero @key="_activeSection" Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
+                        <CatalogHero @key="(section, _activeSection)" Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
                     }
                     break;
 
@@ -62,7 +67,7 @@
 
                 case "thisweek":
                     @* Follows the folder filter like the hero and the library block. *@
-                    <ThisWeekRail @key="_activeSection" Items="@_filteredThisWeek" />
+                    <ThisWeekRail @key="(section, _activeSection)" Items="@_filteredThisWeek" />
                     break;
 
                 case "foryou":
