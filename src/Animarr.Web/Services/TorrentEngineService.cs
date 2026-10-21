@@ -58,6 +58,19 @@ public class TorrentEngineService : BackgroundService
     /// <summary>Fires every 500 ms (only if values changed) and on any torrent state change.</summary>
     public event Action? StateChanged;
 
+    /// <summary>Serializes ClientEngine.UpdateSettingsAsync calls — the DHT toggle
+    /// and the Settings page build their new settings from _engine.Settings, so
+    /// two in flight would drop one's change.</summary>
+    private readonly SemaphoreSlim _engineSettingsGate = new(1, 1);
+    /// <summary>1 while a DHT on/off switch is running.</summary>
+    private int _dhtSwitching;
+    /// <summary>When DHT became unneeded (no active torrent); MinValue while needed.</summary>
+    private DateTime _dhtIdleSince = DateTime.MinValue;
+    /// <summary>DHT stays up this long after the last torrent goes idle, so a pause →
+    /// resume or a magnet's stop/start around its folder remap doesn't tear the
+    /// routing table down and re-bootstrap it.</summary>
+    private static readonly TimeSpan DhtIdleGrace = TimeSpan.FromMinutes(2);
+
     public TorrentEngineService(
         IServiceScopeFactory scopeFactory,
         ILogger<TorrentEngineService> logger)
@@ -108,6 +121,7 @@ public class TorrentEngineService : BackgroundService
             AccumulateUploads();
             UpdateLiveStats();
             FlushPendingDownloadedWrites();
+            UpdateDhtState();
 
             // C-2: periodic persistence so SIGKILL/OOM doesn't lose Downloaded/Uploaded counters.
             if ((DateTime.UtcNow - _lastStatsPersistAt).TotalSeconds >= 30)
@@ -233,7 +247,13 @@ public class TorrentEngineService : BackgroundService
             MaximumConnections      = cfg.MaxConnections,
             AllowPortForwarding     = cfg.EnableUPnP,
             AllowLocalPeerDiscovery = cfg.EnableLSD,
-            DhtEndPoint             = cfg.EnableDHT ? new IPEndPoint(IPAddress.Any, 0) : null,
+            // Always start without DHT: MonoTorrent 3.0.2's DHT engine arms a 5 ms
+            // MessageLoop timer the moment it exists, torrents or not — that was
+            // nearly all of the app's idle CPU (A9-1: 2.07 s vs 0.10 s CPU per 30 s
+            // in the container). UpdateDhtState switches it on (if the user has
+            // DHT enabled) as soon as a torrent is active, and off again after
+            // the last one has been idle for DhtIdleGrace.
+            DhtEndPoint             = null,
         };
         builder.ListenEndPoints["ipv4"] = new IPEndPoint(IPAddress.Any, cfg.ListenPort);
 
@@ -612,6 +632,62 @@ public class TorrentEngineService : BackgroundService
         foreach (var (hash, _) in _liveStats)
             if (!_managers.ContainsKey(hash))
                 _liveStats.TryRemove(hash, out _);
+    }
+
+    /// <summary>Run MonoTorrent's DHT only while it's useful: the user has it on
+    /// AND some torrent is fetching metadata, hashing, downloading or seeding.
+    /// Called from the timer loop; the actual switch (ClientEngine
+    /// .UpdateSettingsAsync with a DhtEndPoint / null — it stops and disposes
+    /// the old DHT engine, which ends its timer) runs off-thread, one at a time.</summary>
+    private void UpdateDhtState()
+    {
+        var enabled = _cachedConfig.EnableDHT;
+        var wanted  = enabled && AnyTorrentActive();
+        var running = _engine.Settings.DhtEndPoint is not null;
+
+        if (wanted)
+            _dhtIdleSince = DateTime.MinValue;
+        else if (running && enabled)
+        {
+            // Only idle torrents left: keep DHT through short gaps.
+            if (_dhtIdleSince == DateTime.MinValue) _dhtIdleSince = DateTime.UtcNow;
+            if (DateTime.UtcNow - _dhtIdleSince < DhtIdleGrace) return;
+        }
+        if (wanted == running) return;
+        if (Interlocked.CompareExchange(ref _dhtSwitching, 1, 0) != 0) return;
+
+        _ = Task.Run(async () =>
+        {
+            try { await SetDhtAsync(wanted); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Switching DHT {State} failed", wanted ? "on" : "off"); }
+            finally { Volatile.Write(ref _dhtSwitching, 0); }
+        });
+    }
+
+    private bool AnyTorrentActive()
+    {
+        foreach (var (_, mgr) in _managers)
+            if (mgr.State is not (TorrentState.Stopped or TorrentState.Stopping or TorrentState.Paused
+                                  or TorrentState.HashingPaused or TorrentState.Error))
+                return true;
+        return false;
+    }
+
+    private async Task SetDhtAsync(bool on)
+    {
+        await _engineSettingsGate.WaitAsync();
+        try
+        {
+            if ((_engine.Settings.DhtEndPoint is not null) == on) return;
+            await _engine.UpdateSettingsAsync(new EngineSettingsBuilder(_engine.Settings)
+            {
+                DhtEndPoint = on ? new IPEndPoint(IPAddress.Any, 0) : null,
+            }.ToSettings());
+            _logger.LogInformation(on
+                ? "DHT started — a torrent is active."
+                : "DHT stopped — no active torrents.");
+        }
+        finally { _engineSettingsGate.Release(); }
     }
 
     /// <summary>Fold each manager's session send counter into
@@ -1268,17 +1344,23 @@ public class TorrentEngineService : BackgroundService
         }
         await ctx.SaveChangesAsync();
 
-        var builder = new EngineSettingsBuilder(_engine.Settings)
+        await _engineSettingsGate.WaitAsync();
+        try
         {
-            MaximumDownloadRate     = cfg.GlobalDownloadLimit,
-            MaximumUploadRate       = cfg.GlobalUploadLimit,
-            MaximumConnections      = cfg.MaxConnections,
-            AllowPortForwarding     = cfg.EnableUPnP,
-            AllowLocalPeerDiscovery = cfg.EnableLSD,
-        };
-        await _engine.UpdateSettingsAsync(builder.ToSettings());
+            var builder = new EngineSettingsBuilder(_engine.Settings)
+            {
+                MaximumDownloadRate     = cfg.GlobalDownloadLimit,
+                MaximumUploadRate       = cfg.GlobalUploadLimit,
+                MaximumConnections      = cfg.MaxConnections,
+                AllowPortForwarding     = cfg.EnableUPnP,
+                AllowLocalPeerDiscovery = cfg.EnableLSD,
+            };
+            await _engine.UpdateSettingsAsync(builder.ToSettings());
+        }
+        finally { _engineSettingsGate.Release(); }
 
-        // M-12: keep cached snapshot in sync.
+        // M-12: keep cached snapshot in sync. (EnableDHT now applies live: the
+        // next tick's UpdateDhtState switches DHT to match.)
         _cachedConfig = cfg;
         // The global seed ratio may have changed — re-check every torrent.
         _persisted.Clear();
