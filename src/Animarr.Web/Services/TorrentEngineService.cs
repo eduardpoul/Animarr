@@ -21,8 +21,14 @@ public class TorrentEngineService : BackgroundService
     private readonly ConcurrentDictionary<string, string> _names = new();
     /// <summary>FolderWatcherId per torrent (populated on add, available in stats).</summary>
     private readonly ConcurrentDictionary<string, Guid?> _folderWatchers = new();
-    /// <summary>Tracks ("hash:relPath") keys already marked IsDownloaded in DB to avoid redundant writes.</summary>
-    private readonly ConcurrentDictionary<string, byte> _markedDownloaded = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Per torrent: relative paths already marked IsDownloaded in DB, to avoid
+    /// redundant writes. Keyed by hash then path (both case-insensitive, as the old
+    /// combined "hash:relPath" key was) so the per-tick check needs no string building.</summary>
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _markedDownloaded = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>mgr.Progress at the last completed-file scan per torrent. A file can
+    /// only complete when a piece lands (Progress moves) or its priority changes
+    /// (the setters drop the entry) — so seeding/stopped torrents skip the scan.</summary>
+    private readonly ConcurrentDictionary<string, double> _filesScannedAtProgress = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Per-torrent lock that serializes MetadataReceived and StateChanged handlers (avoids concurrent SaveChanges on the same record).</summary>
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _torrentLocks = new();
 
@@ -125,7 +131,7 @@ public class TorrentEngineService : BackgroundService
         unchecked
         {
             long h = 17;
-            foreach (var s in _liveStats.Values)
+            foreach (var (_, s) in _liveStats)   // lock-free, no snapshot copy (.Values locks + copies)
             {
                 h = h * 31 + s.InfoHash.GetHashCode();
                 h = h * 31 + (long)s.State;
@@ -274,8 +280,9 @@ public class TorrentEngineService : BackgroundService
                 await ApplyFileSelectionsAsync(mgr, record.FileSelections);
 
                 // Pre-populate so UpdateLiveStats doesn't re-mark already-downloaded files
+                var marked = MarkedFor(record.InfoHash);
                 foreach (var sel in record.FileSelections.Where(s => s.IsDownloaded))
-                    _markedDownloaded.TryAdd($"{record.InfoHash}:{sel.FilePath}", 0);
+                    marked.TryAdd(sel.FilePath, 0);
 
                 SubscribeEvents(mgr, record.InfoHash);
                 _managers[record.InfoHash] = mgr;
@@ -530,22 +537,35 @@ public class TorrentEngineService : BackgroundService
     // Live stats
     // -------------------------------------------------------------------------
 
+    private static ConcurrentDictionary<string, byte> NewPathSet(string _) => new(StringComparer.OrdinalIgnoreCase);
+
+    private ConcurrentDictionary<string, byte> MarkedFor(string hash) => _markedDownloaded.GetOrAdd(hash, NewPathSet);
+
     private void UpdateLiveStats()
     {
         foreach (var (hash, mgr) in _managers)
         {
-            // Detect newly-completed files and persist IsDownloaded flag
-            if (mgr.Torrent is not null)
+            var progressPct = mgr.Progress;
+
+            // Detect newly-completed files and persist IsDownloaded flag. This ran
+            // over every completed file of every torrent (seeding/stopped included)
+            // building a "hash:path" key each time — 2x per second, forever. Now
+            // only while pieces can land, and the check allocates nothing.
+            if (mgr.Torrent is not null
+                && (mgr.State is TorrentState.Downloading or TorrentState.Hashing
+                    || !_filesScannedAtProgress.TryGetValue(hash, out var scannedAt)
+                    || scannedAt != progressPct))
             {
+                var marked = MarkedFor(hash);
                 foreach (var file in mgr.Files)
                 {
                     if (file.Priority == Priority.DoNotDownload) continue;
                     if (file.BitField.Length == 0 || file.BitField.TrueCount < file.BitField.Length) continue;
 
-                    var key = $"{hash}:{file.Path}";
-                    if (_markedDownloaded.TryAdd(key, 0))
-                        _pendingDownloadedWrites.TryAdd(key, 0);
+                    if (marked.TryAdd(file.Path, 0))
+                        _pendingDownloadedWrites.TryAdd($"{hash}:{file.Path}", 0);
                 }
+                _filesScannedAtProgress[hash] = progressPct;
             }
 
             // Bytes verified on disk = progress × size. NOT mgr.Monitor
@@ -555,14 +575,15 @@ public class TorrentEngineService : BackgroundService
             // progress×size survives restarts because mgr.Progress is rebuilt
             // from the on-disk bitfield by the startup hash-check.
             var totalSize   = mgr.Torrent?.Size ?? 0;
-            var onDiskBytes = (long)Math.Round(totalSize * (mgr.Progress / 100.0));
+            var onDiskBytes = (long)Math.Round(totalSize * (progressPct / 100.0));
 
             _liveStats[hash] = new TorrentLiveStats(
                 InfoHash:         hash,
-                Name:             mgr.Torrent?.Name ?? _names.GetValueOrDefault(hash, hash[..Math.Min(8, hash.Length)]),
+                Name:             mgr.Torrent?.Name
+                                  ?? (_names.TryGetValue(hash, out var cachedName) ? cachedName : hash[..Math.Min(8, hash.Length)]),
                 SavePath:         mgr.SavePath,
                 State:            mgr.State,
-                Progress:         mgr.Progress / 100.0,   // MonoTorrent reports 0–100; the UI wants a 0–1 fraction
+                Progress:         progressPct / 100.0,   // MonoTorrent reports 0–100; the UI wants a 0–1 fraction
                 DownloadRate:     mgr.Monitor.DownloadRate,
                 UploadRate:       mgr.Monitor.UploadRate,
                 Downloaded:       onDiskBytes,
@@ -577,8 +598,11 @@ public class TorrentEngineService : BackgroundService
             );
         }
 
-        foreach (var hash in _liveStats.Keys.Except(_managers.Keys).ToList())
-            _liveStats.TryRemove(hash, out _);
+        // Enumerating a ConcurrentDictionary is lock-free and tolerates removal;
+        // .Keys would take every lock and copy (twice, plus Except + ToList).
+        foreach (var (hash, _) in _liveStats)
+            if (!_managers.ContainsKey(hash))
+                _liveStats.TryRemove(hash, out _);
     }
 
     /// <summary>Fold each manager's session send counter into
@@ -776,10 +800,9 @@ public class TorrentEngineService : BackgroundService
                 : Path.GetFileName(absNewPath);
 
             // Update TorrentFileSelection.FilePath and keep _markedDownloaded in sync
-            var oldKey = $"{hash}:{oldRelPath}";
-            var newKey = $"{hash}:{newRelPath}";
-            if (_markedDownloaded.TryRemove(oldKey, out _))
-                _markedDownloaded.TryAdd(newKey, 0);
+            if (_markedDownloaded.TryGetValue(hash, out var marked) && marked.TryRemove(oldRelPath, out _))
+                marked.TryAdd(newRelPath, 0);
+            _filesScannedAtProgress.TryRemove(hash, out _);
 
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -862,6 +885,8 @@ public class TorrentEngineService : BackgroundService
             if (file is not null)
                 await mgr.SetFilePriorityAsync(file, (Priority)prio);
         }
+        // A file switched back on may already be complete — rescan next tick.
+        _filesScannedAtProgress.TryRemove(infoHash, out _);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
@@ -1130,9 +1155,8 @@ public class TorrentEngineService : BackgroundService
             sem.Dispose();
 
         // M-1: purge _markedDownloaded entries for this torrent.
-        var prefix = infoHash + ":";
-        foreach (var k in _markedDownloaded.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
-            _markedDownloaded.TryRemove(k, out _);
+        _markedDownloaded.TryRemove(infoHash, out _);
+        _filesScannedAtProgress.TryRemove(infoHash, out _);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -1149,6 +1173,8 @@ public class TorrentEngineService : BackgroundService
         var file = mgr.Files.FirstOrDefault(f => f.Path == filePath);
         if (file is null) return;
         await mgr.SetFilePriorityAsync(file, (Priority)priority);
+        // A file switched back on may already be complete — rescan next tick.
+        _filesScannedAtProgress.TryRemove(infoHash, out _);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
