@@ -207,12 +207,9 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
             // Use a plain client (no auth) — TMDB image CDN doesn't accept bearer tokens
             using var http = httpFactory.CreateClient();
             // 25 MB: an "original" TMDB backdrop is a few MB; the cap only stops a
-            // hostile or broken URL from streaming an unbounded body into memory.
-            var bytes = await BoundedDownload.GetBytesAsync(http, imageUrl, 25L * 1024 * 1024, ct);
-            var dir = Path.GetDirectoryName(localPath);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-            await File.WriteAllBytesAsync(localPath, bytes, ct);
+            // hostile or broken URL from streaming an unbounded body to disk.
+            // Streamed via a .part file + move: no LOH buffer, never a half-written poster.
+            await BoundedDownload.DownloadToFileAsync(http, imageUrl, localPath, 25L * 1024 * 1024, ct);
             return true;
         }
         catch (Exception ex)

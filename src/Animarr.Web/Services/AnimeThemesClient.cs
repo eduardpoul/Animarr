@@ -71,10 +71,8 @@ public class AnimeThemesClient(IHttpClientFactory httpFactory, ILogger<AnimeThem
             var http = httpFactory.CreateClient(ClientName);
             // Theme audio (OP/ED .ogg) is a few MB; 60 MB leaves room for long
             // manual uploads while bounding what a pasted URL can pull in.
-            var bytes = await BoundedDownload.GetBytesAsync(http, url, 60L * 1024 * 1024, ct);
-            var dir = Path.GetDirectoryName(destPath);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            await File.WriteAllBytesAsync(destPath, bytes, ct);
+            // Streamed via a .part file + move: no LOH buffer, never a half-written theme.
+            await BoundedDownload.DownloadToFileAsync(http, url, destPath, 60L * 1024 * 1024, ct);
             return true;
         }
         catch (Exception ex)
