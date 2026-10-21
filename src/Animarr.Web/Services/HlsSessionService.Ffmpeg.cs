@@ -109,7 +109,7 @@ public sealed partial class HlsSessionService
             // so "seg-N exists" means "seg-N is finished" — the segment endpoint,
             // the produced-top walk and the pruner all rely on that.
             "-hls_flags", "temp_file",
-            "-hls_segment_filename", Path.Combine(sessionDir, $"seg-%05d.{segExt}"),
+            "-hls_segment_filename", FfmpegOutputPath(Path.Combine(sessionDir, $"seg-%05d.{segExt}")),
         });
         // fMP4 needs an init segment carrying decoder config; MPEG-TS is
         // self-bootstrapping (PAT/PMT/SPS in every segment).
@@ -120,15 +120,138 @@ public sealed partial class HlsSessionService
             // disappears (temp_file rename) and any concurrent fetch sees a
             // 0-byte response. Use a per-run sentinel filename to avoid
             // stomping the working init.
+            // The name stays RELATIVE: hlsenc joins it onto the directory of the
+            // media playlist path below (an absolute init name would be appended
+            // to that directory verbatim).
             var initName = reuseInit ? "_init_restart.mp4" : "init.mp4";
             args.AddRange(new[] { "-hls_fmp4_init_filename", initName });
         }
         args.AddRange(new[]
         {
             "-master_pl_name", masterPlaylistName,
-            mediaPlaylist,
+            FfmpegOutputPath(mediaPlaylist),
         });
         return args;
+    }
+
+    /// <summary>
+    /// An output path in the form ffmpeg's HLS muxer can split. hlsenc finds
+    /// the directory the init segment goes into with <c>strrchr(path, '/')</c>
+    /// — forward slash only — so on Windows a <c>C:\…\_ffmpeg.m3u8</c> had "no
+    /// directory", <c>init.mp4</c> landed in the server's working directory,
+    /// and every fMP4 plan failed to start. Windows ffmpeg takes '/' as a
+    /// separator everywhere, so outputs are normalised to it. Linux is left
+    /// alone: there '\' is a legal file-name character, not a separator.
+    /// </summary>
+    private static string FfmpegOutputPath(string path)
+        => OperatingSystem.IsWindows() ? path.Replace('\\', '/') : path;
+
+    /// <summary>argv as one copy-pasteable line for the Debug log.</summary>
+    private static string FormatArgv(IEnumerable<string> args)
+        => "ffmpeg " + string.Join(' ', args.Select(a =>
+            a.Length > 0 && a.IndexOfAny([' ', '"', '\'', '(', ')', ',', ';']) < 0
+                ? a
+                : "\"" + a.Replace("\"", "\\\"") + "\""));
+
+    /// <summary>The last lines ffmpeg wrote to stderr (it runs with
+    /// <c>-loglevel warning</c>, so this is the warnings/errors). Kept per run
+    /// so a run that dies before its first segment can be explained in the log
+    /// and in the start error instead of a bare exit code.</summary>
+    private sealed class StderrTail(int capacity = 30)
+    {
+        private readonly Queue<string> _lines = new();
+
+        public void Add(string line)
+        {
+            lock (_lines)
+            {
+                if (_lines.Count == capacity) _lines.Dequeue();
+                _lines.Enqueue(line);
+            }
+        }
+
+        public string Text { get { lock (_lines) return string.Join('\n', _lines); } }
+
+        /// <summary>Last non-blank line, trimmed to a size fit for an error message.</summary>
+        public string? LastLine
+        {
+            get
+            {
+                string? last;
+                lock (_lines) last = _lines.LastOrDefault(l => !string.IsNullOrWhiteSpace(l));
+                if (last is null) return null;
+                last = last.Trim();
+                return last.Length <= 300 ? last : last[..300] + "…";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Start one ffmpeg run for a session and drain its stderr (at Warning, so
+    /// encoder problems show up in <c>docker logs</c>; an undrained pipe would
+    /// block ffmpeg). Returns the process and the drain task, which completes
+    /// once ffmpeg closed stderr — i.e. after its last line was read.
+    ///
+    /// stdout is not redirected: nobody reads it, and redirecting stdout
+    /// without draining it fills the 64 KB pipe and BLOCKS ffmpeg mid-segment
+    /// once anything prints there (some libavformat versions put a banner on
+    /// stdout even with -hide_banner).
+    ///
+    /// WorkingDirectory = the session dir: every output path we pass is
+    /// absolute, so this only matters for anything ffmpeg derives relative to
+    /// its CWD — which then stays inside the session dir (deleted with the
+    /// session) instead of littering the server's content root, as init.mp4 did
+    /// on Windows. Removing that dir while ffmpeg runs would fail on Windows
+    /// (a process's CWD is locked), but every teardown path kills ffmpeg and
+    /// waits for it before deleting.
+    /// </summary>
+    private (Process Proc, Task Drain) LaunchFfmpeg(List<string> args, string sessionDir, string token,
+        int? restartSegment, StderrTail? tail)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName               = "ffmpeg",
+            RedirectStandardOutput = false,
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+            CreateNoWindow         = true,
+            WorkingDirectory       = sessionDir,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("HLS {Token}{Run}: {Argv}", token,
+                restartSegment is int r ? $" +seg{r}" : "", FormatArgv(args));
+
+        var proc = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg did not start");
+        var drain = Task.Run(async () =>
+        {
+            try
+            {
+                string? line;
+                while ((line = await proc.StandardError.ReadLineAsync()) is not null)
+                {
+                    tail?.Add(line);
+                    if (restartSegment is int seg)
+                        _logger.LogWarning("[hls {Token} +seg{Seg}] {Line}", token, seg, line);
+                    else
+                        _logger.LogWarning("[hls {Token}] {Line}", token, line);
+                }
+            }
+            catch { /* process exited */ }
+            try { await proc.WaitForExitAsync(); } catch { }
+            if (restartSegment is null)
+                _logger.LogInformation("HLS session {Token} ffmpeg exited (code {Code})", token,
+                    SafeExitCode(proc));
+        });
+        return (proc, drain);
+    }
+
+    /// <summary>Exit code, or -1 when the process is gone/disposed (a session
+    /// stopped meanwhile disposes its Process).</summary>
+    private static int SafeExitCode(Process proc)
+    {
+        try { return proc.HasExited ? proc.ExitCode : -1; }
+        catch { return -1; }
     }
 
     /// <summary>MPEG-TS HLS with stream-copy video and audio passthrough where

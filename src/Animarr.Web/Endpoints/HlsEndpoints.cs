@@ -221,11 +221,21 @@ internal static class HlsEndpoints
         {
             return Results.Empty;   // client went away; StartAsync already stopped the session
         }
+        catch (HlsSessionService.StartFailedException ex)
+        {
+            // A known failure with a reason (ffmpeg died / never produced the
+            // first segment). StartAsync already logged the ffmpeg stderr tail
+            // and removed the session. The client gets the reason + a stable
+            // code so it can fall back instead of waiting on a dead manifest.
+            loggerFactory.CreateLogger("ApiHls").LogWarning("HLS start failed for {Path}: {Code} — {Reason}",
+                fullPath, ex.Code, ex.Message);
+            return StartProblem(ex.StatusCode, ex.Code, ex.Message);
+        }
         catch (Exception ex)
         {
             var logger = loggerFactory.CreateLogger("ApiHls");
             logger.LogError(ex, "HLS start failed for {Path}", fullPath);
-            return Results.Problem("Failed to start HLS session.", statusCode: 500);
+            return StartProblem(StatusCodes.Status500InternalServerError, "start_failed", "Failed to start HLS session.");
         }
     })
     .WithName("StartHls")
@@ -342,4 +352,15 @@ internal static class HlsEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// Error shape of <c>/api/hls/start</c>: RFC 7807 problem details with a
+    /// machine-readable <c>code</c> extension (e.g. <c>ffmpeg_exited</c>,
+    /// <c>ffmpeg_timeout</c>, <c>start_failed</c>) next to the human-readable
+    /// <c>detail</c>.
+    /// </summary>
+    private static IResult StartProblem(int statusCode, string code, string detail)
+        => Results.Problem(detail: detail, statusCode: statusCode,
+            title: statusCode < 500 ? "Invalid playback request" : "Playback could not be started",
+            extensions: new Dictionary<string, object?> { ["code"] = code });
 }

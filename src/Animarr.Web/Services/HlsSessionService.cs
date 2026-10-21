@@ -131,6 +131,30 @@ public sealed partial class HlsSessionService : IDisposable
     public sealed record StartResult(string Token, string ManifestRelativeUrl, double TotalDurationSec,
         PlayerOutputInfo Output);
 
+    /// <summary>How long <see cref="StartAsync"/> waits for ffmpeg's first
+    /// segment (+ init for fMP4). Generous on purpose: a cold-cache seek into a
+    /// huge UHD MKV can take 10–30 s before the first flush.</summary>
+    public static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// <see cref="StartAsync"/> could not produce a playable session. Carries a
+    /// stable machine-readable <see cref="Code"/> and the HTTP status the
+    /// endpoint should answer with, so a client can tell "fix the request"
+    /// (4xx) from "this plan failed on the server" (5xx) and recover — fall back
+    /// to the previous stream or another plan — instead of waiting on a
+    /// manifest that never fills.
+    /// </summary>
+    public sealed class StartFailedException(string code, int statusCode, string message) : Exception(message)
+    {
+        /// <summary>ffmpeg exited before writing the first segment (500).</summary>
+        public const string FfmpegExited = "ffmpeg_exited";
+        /// <summary>ffmpeg still running but no first segment within <see cref="StartupTimeout"/> (504).</summary>
+        public const string FfmpegTimeout = "ffmpeg_timeout";
+
+        public string Code { get; } = code;
+        public int StatusCode { get; } = statusCode;
+    }
+
     /// <summary>
     /// Returned from <see cref="ChoosePlaybackAsync"/>. Two native paths and an
     /// HLS fallback:
@@ -681,24 +705,11 @@ public sealed partial class HlsSessionService : IDisposable
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
             externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper);
-        var psi = new ProcessStartInfo
-        {
-            FileName               = "ffmpeg",
-            // Don't redirect stdout — ffmpeg's stderr carries all the logs.
-            // Redirecting stdout without draining it fills the 64KB pipe
-            // buffer and BLOCKS ffmpeg mid-segment-write once any process
-            // pollutes stdout (some libavformat versions print a banner
-            // there even with -hide_banner). Just let stdout go to the
-            // container's /dev/null so ffmpeg never blocks.
-            RedirectStandardOutput = false,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-        };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-
+        // Stderr drain (Warning-level log) + the tail an early exit is explained with.
+        var stderrTail = new StderrTail();
         Process proc;
-        try { proc = Process.Start(psi)!; }
+        Task stderrDrain;
+        try { (proc, stderrDrain) = LaunchFfmpeg(args, dir, token, restartSegment: null, stderrTail); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "ffmpeg launch failed for HLS session {Token} ({Path})", token, fullPath);
@@ -716,21 +727,6 @@ public sealed partial class HlsSessionService : IDisposable
         // ffmpeg right away instead of letting it encode on until the 5-min idle
         // GC. Scoped to the startup wait; disposed when this method returns.
         using var abandoned = ct.Register(() => Stop(token));
-
-        // Drain stderr — visible at Warning level so genuine encoder issues
-        // (codec param mismatch, broken inputs) surface in `docker logs`.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                string? line;
-                while ((line = await proc.StandardError.ReadLineAsync()) is not null)
-                    _logger.LogWarning("[hls {Token}] {Line}", token, line);
-            }
-            catch { /* process exited */ }
-            try { await proc.WaitForExitAsync(); } catch { }
-            _logger.LogInformation("HLS session {Token} ffmpeg exited (code {Code})", token, proc.HasExited ? proc.ExitCode : -1);
-        });
 
         // 4. Wait for ffmpeg's initial output before returning the manifest URL.
         //    Two-phase wait:
@@ -753,15 +749,18 @@ public sealed partial class HlsSessionService : IDisposable
         //        grace period elapses with 2+ segments ready in 1-2s,
         //        so there's no visible startup delay.
         //
-        //    (C) Same exit conditions both phases: if ffmpeg dies, throw.
-        var hardDeadline = DateTime.UtcNow.AddSeconds(60);
+        //    (C) If ffmpeg dies before (A) is met, or (A) isn't met by the
+        //        deadline, the start FAILS (StartFailedException → a 5xx with a
+        //        reason) — returning a manifest whose first segment never comes
+        //        just moved the hang into the player.
+        var hardDeadline = DateTime.UtcNow + StartupTimeout;
         var segExt = SegmentExtension(plan);
         var initPath = Path.Combine(dir, "init.mp4");
         var firstSegPath = Path.Combine(dir, $"seg-{startSegment:D5}.{segExt}");
         var masterPath = Path.Combine(dir, "master.m3u8");
         bool needsInit = plan != HlsPlan.TsStreamCopy;
         // Phase A — wait for first segment.
-        while (DateTime.UtcNow < hardDeadline)
+        while (true)
         {
             var ready = (!needsInit || File.Exists(initPath))
                      && File.Exists(firstSegPath)
@@ -769,10 +768,32 @@ public sealed partial class HlsSessionService : IDisposable
             if (ready) break;
             if (proc.HasExited)
             {
+                // Killed because the caller gave up (the RequestAborted → Stop
+                // registration above) — that's a cancellation, not a failure.
+                ct.ThrowIfCancellationRequested();
+                var code = SafeExitCode(proc);
+                // The reader may still be on ffmpeg's last lines — the ones that
+                // say why. Give it a moment before reporting the tail.
+                try { await stderrDrain.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None); } catch { }
                 if (_sessions.TryRemove(token, out var dead))
                     try { dead.RestartLock.Dispose(); } catch { }
                 TryRemoveDir(dir);
-                throw new InvalidOperationException($"ffmpeg exited before producing init/first segment (code {proc.ExitCode}).");
+                _logger.LogWarning(
+                    "HLS {Token}: ffmpeg exited (code {Code}) before producing the first segment — plan={Plan}, source={Path}. stderr tail:\n{Tail}",
+                    token, code, plan, fullPath, stderrTail.Text is { Length: > 0 } t ? t : "(empty)");
+                var why = stderrTail.LastLine;
+                throw new StartFailedException(StartFailedException.FfmpegExited, StatusCodes.Status500InternalServerError,
+                    $"ffmpeg exited (code {code}) before producing the first segment" + (why is null ? "." : $": {why}"));
+            }
+            if (DateTime.UtcNow >= hardDeadline)
+            {
+                _logger.LogWarning(
+                    "HLS {Token}: no first segment after {Sec}s (init={Init}, seg-{Seg}={First}) — giving up; plan={Plan}, source={Path}. stderr tail:\n{Tail}",
+                    token, (int)StartupTimeout.TotalSeconds, !needsInit || File.Exists(initPath), startSegment,
+                    File.Exists(firstSegPath), plan, fullPath, stderrTail.Text is { Length: > 0 } t ? t : "(empty)");
+                Stop(token);
+                throw new StartFailedException(StartFailedException.FfmpegTimeout, StatusCodes.Status504GatewayTimeout,
+                    $"ffmpeg produced no playable segment within {(int)StartupTimeout.TotalSeconds} s.");
             }
             await Task.Delay(150, ct);
         }
@@ -987,26 +1008,14 @@ public sealed partial class HlsSessionService : IDisposable
                 maxBitrate: session.MaxBitrate,
                 toneMapper: session.ToneMapper);
 
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffmpeg",
-                // Not redirected — nobody reads it, and an undrained 64 KB pipe
-                // blocks ffmpeg mid-segment (see the same psi in StartAsync).
-                RedirectStandardOutput = false,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in args) psi.ArgumentList.Add(a);
-
-            Process? proc;
-            try { proc = Process.Start(psi); }
+            // Same launcher as StartAsync (stderr drained + logged per line).
+            Process proc;
+            try { (proc, _) = LaunchFfmpeg(args, session.OutputDir, session.Token, targetSegment, tail: null); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "HLS: ffmpeg restart failed for {Token}", session.Token);
                 return;
             }
-            if (proc is null) return;
 
             session.SwapProcess(proc, targetSegment);
 
@@ -1016,19 +1025,6 @@ public sealed partial class HlsSessionService : IDisposable
             // produces the ~300ms audio-ahead glitch after every scrub.
             session.AddRestartBoundary(targetSegment);
             RegenerateMediaPlaylist(session, session.TotalDurationSec);
-
-            // Drain stderr so the pipe doesn't fill + block ffmpeg.
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    string? line;
-                    while ((line = await proc.StandardError.ReadLineAsync()) is not null)
-                        _logger.LogWarning("[hls {Token} +seg{Seg}] {Line}", session.Token, targetSegment, line);
-                }
-                catch { }
-                try { await proc.WaitForExitAsync(); } catch { }
-            });
         }
         finally
         {
