@@ -207,7 +207,7 @@
             ? OrDefault(() => Api.GetCalendarAsync(back: 1, ahead: 7), Array.Empty<CalendarEventDto>())
             : null;
         var sectionsTask = OrDefault(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>());
-        var foldersTask  = OrDefault<FolderWatcherDto[]?>(() => Api.GetFoldersAsync(), null);
+        var foldersTask  = OrDefault<FolderWatcherDto[]?>(async () => await Api.GetFoldersAsync(), null);
         var intervalTask = OrDefault(() => Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec), null);
 
         // "For you" — heuristic recommendations (skipped entirely when the

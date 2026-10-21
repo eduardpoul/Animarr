@@ -114,7 +114,7 @@
         // call no longer blanks the grid.
         var categoriesTask = OrDefault(() => Api.GetCategoriesAsync(), Array.Empty<CategoryDto>());
         var sectionsTask   = OrDefault(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>());
-        var foldersTask    = OrDefault<FolderWatcherDto[]?>(() => Api.GetFoldersAsync(), null);
+        var foldersTask    = OrDefault<FolderWatcherDto[]?>(async () => await Api.GetFoldersAsync(), null);
 
         try
         {
