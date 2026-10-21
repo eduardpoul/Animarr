@@ -1514,6 +1514,15 @@
         }
     }
 
+    // Aspect picker presets; entry.currentAspect is an index into this.
+    const ASPECT_VALUES = ['default', '21:9', '16:9', '4:3', '2.35:1'];
+
+    /** Sidecar subtitle file → /api/subtitle converts it to WebVTT on the fly
+     *  (a standalone .srt/.ass exposes its single subtitle stream as 0:s:0). */
+    function externalSubUrl(path) {
+        return apiUrl('/api/subtitle?path=' + encodeURIComponent(path) + '&track=0&format=webvtt');
+    }
+
     /** Map a measured inner-content aspect ratio onto our preset aspect
      *  list. Returns the index into the aspect popup's items array, or
      *  null if no preset is a good fit. */
@@ -1530,6 +1539,9 @@
     function autoCropIfUltrawide(adapter, entry) {
         const aspect = entry.currentAspect;
         if (aspect != null && aspect !== 0) return;  // user already picked
+        // An explicit "Default" pick (kept across stream restarts) is a choice
+        // too — don't crop over it.
+        if (entry.aspectPicked) return;
         const screenRatio = window.innerWidth / Math.max(1, window.innerHeight);
         if (screenRatio < 2.15) return;  // not ultrawide → don't crop 16:9
 
@@ -1538,8 +1550,7 @@
         const idx = bestAspectIdxFor(sample.innerRatio);
         if (idx == null) return;
 
-        const values = ['default', '21:9', '16:9', '4:3', '2.35:1'];
-        const target = values[idx];
+        const target = ASPECT_VALUES[idx];
         entry.currentAspect = idx;
         adapter.setAspectRatio(target);
         console.info('animarr: auto-aspect →', target, {
@@ -2595,6 +2606,9 @@
      *                                          restartStream before tearing the
      *                                          old stream down — no second start.
      * @param {object} [opts.toast]            { title, detail } to show once up.
+     * @param {object} [opts.restore]          captureState() of the stream being
+     *                                          replaced: subtitles, aspect, pause
+     *                                          and mute carry over.
      * @param {number} op                      beginOp() token of this attempt.
      */
     async function attachStream(elementId, dotnetRef, mediaPath, opts, op) {
@@ -2892,6 +2906,13 @@
         // Initial embedded subtitle track (-1 = none) — Artplayer path only;
         // the native path starts without subtitles.
         let initialSubIdx = -1;
+        // A restart carries the replaced stream's state over (captureState):
+        // its subtitle choice instead of the account default, and no
+        // autoplay / unmute behind the user's back.
+        const restore = (opts && opts.restore) || null;
+        const startPaused = !!(restore && restore.paused);
+        const restoredExtSub = (restore && restore.sub && restore.sub.ext)
+            ? (externalSubList.find(s => s.path === restore.sub.ext) || null) : null;
 
         // Codec capability gate: ask Android's MediaCodecList whether the
         // device can decode whatever the server's output describes. If not,
@@ -2955,7 +2976,9 @@
             // forced only / language → default → first; pickDefaultSubtitle).
             // Pure client-side overlay — never influences the video/audio
             // pipeline.
-            initialSubIdx = pickDefaultSubtitle(subtitleList);
+            initialSubIdx = !(restore && restore.sub) ? pickDefaultSubtitle(subtitleList)
+                : (restore.sub.idx != null && restore.sub.idx < subtitleList.length) ? restore.sub.idx
+                : -1;   // was Off, or an external track (switched to below)
             const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
             art = new window.Artplayer({
             container: el,
@@ -3007,6 +3030,7 @@
                     // blocked it, in which case the visible play button is the
                     // fallback (nothing more we can do without a user gesture).
                     hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                        if (startPaused) return;   // restart of a paused stream
                         const p = video.play();
                         if (p && typeof p.catch === 'function') p.catch(() => {});
                     });
@@ -3018,11 +3042,13 @@
                 },
             } : {},
             title: mediaPath.split(/[\/\\]/).pop(),
-            autoplay: true,
+            autoplay: !startPaused,
             playsInline: true,
             // Restore the user's last-set volume across sessions. Saved by the
             // volume popup; defaults to 1.0 on first run.
             volume: readVolumePref(),
+            // Mute survives a restart (it isn't persisted across opens).
+            muted: !!(restore && restore.muted),
             setting: false,
             playbackRate: false,
             aspectRatio: false,
@@ -3099,6 +3125,34 @@
         // menu showed "Track 1" while another track — or none — was on screen.
         entry.currentSubIdx = initialSubIdx >= 0 ? initialSubIdx : null;
 
+        // ── Restart: put the replaced stream's choices back ───────────
+        if (restore) {
+            // A sideload subtitle (embedded ones went in via the initial
+            // track above; Off simply loads none).
+            if (restoredExtSub) {
+                adapter.setSubtitle({ url: externalSubUrl(restoredExtSub.path), name: restoredExtSub.label, type: 'vtt' });
+                entry.currentSubIdx = null;
+                entry.currentExtSubPath = restoredExtSub.path;
+            }
+            // Aspect preset — applied once the frame size is known.
+            if (restore.aspect != null) {
+                entry.currentAspect = restore.aspect;
+                entry.aspectPicked  = restore.aspectPicked;
+                const value = ASPECT_VALUES[restore.aspect];
+                if (value && value !== 'default') {
+                    const v = adapter.rawVideoElement && adapter.rawVideoElement();
+                    if (v && v.readyState >= 1) adapter.setAspectRatio(value);
+                    else adapter.once('loadedmetadata', () => adapter.setAspectRatio(value));
+                }
+            }
+            // Artplayer took `muted` / `autoplay` as options; the native
+            // adapter needs telling.
+            if (!art) {
+                if (restore.muted) adapter.muted = true;
+                if (startPaused) adapter.pause();
+            }
+        }
+
         // ── Preferred audio language — HLS transcode path ONLY ──────────────
         // Direct Play / Direct Stream serve the raw container and the browser
         // plays its default audio track; switching to a non-default track there
@@ -3128,10 +3182,11 @@
         // Artplayer's autoplay can lose the race against media readiness, so we
         // also kick play() on the first `canplay` of the underlying <video>.
         // One-shot; harmless if playback already started. Rejections (autoplay
-        // policy) are swallowed — the play button is the fallback.
+        // policy) are swallowed — the play button is the fallback. Skipped
+        // when restarting a stream the user had paused.
         try {
             const vEl = adapter.rawVideoElement && adapter.rawVideoElement();
-            if (vEl && !vEl.__animarrAutostart) {
+            if (vEl && !vEl.__animarrAutostart && !startPaused) {
                 vEl.__animarrAutostart = true;
                 const kick = () => {
                     const p = vEl.play();
@@ -3157,11 +3212,11 @@
             }),
             aspect: () => {
                 const items   = ['Default', '21:9 (ultrawide)', '16:9', '4:3', '2.35:1 (cinema)'];
-                const values  = ['default',  '21:9',             '16:9', '4:3', '2.35:1'];
                 const cur     = entry.currentAspect ?? 0;
                 openPickerPopup(hudRoot, 'aspect', 'Aspect ratio', items, cur, (i) => {
                     entry.currentAspect = i;
-                    adapter.setAspectRatio(values[i]);
+                    entry.aspectPicked  = true;   // even "Default": no auto-crop over it
+                    adapter.setAspectRatio(ASPECT_VALUES[i]);
                 });
             },
             offset: () => {
@@ -3218,13 +3273,8 @@
                         entry.currentSubIdx = idx;
                         entry.currentExtSubPath = null;
                     } else {
-                        // Sidecar subtitle file → /api/subtitle converts it to
-                        // WebVTT on the fly (a standalone .srt/.ass exposes its
-                        // single subtitle stream as 0:s:0).
                         const s = ext[idx - emb.length];
-                        const url = apiUrl('/api/subtitle?path=' + encodeURIComponent(s.path)
-                            + '&track=0&format=webvtt');
-                        adapter.setSubtitle({ url, name: s.label, type: 'vtt' });
+                        adapter.setSubtitle({ url: externalSubUrl(s.path), name: s.label, type: 'vtt' });
                         entry.currentSubIdx = null;
                         entry.currentExtSubPath = s.path;
                     }
@@ -3555,7 +3605,10 @@
         };
     }
 
-    /** Player state to carry onto the restarted stream. */
+    /** Player state to carry onto the restarted stream (attachStream applies
+     *  it as opts.restore). Without it a restart reset the subtitles — an
+     *  external track always, an embedded one to the account default — the
+     *  aspect, pause and mute. */
     function captureState(entry) {
         const a = entry.adapter;
         const v = a.rawVideoElement && a.rawVideoElement();
@@ -3564,6 +3617,12 @@
             // The element's own flag: adapter.playing is false while merely
             // buffering, which isn't a pause the user asked for.
             paused: v ? v.paused : !a.playing,
+            muted:  !!a.muted,
+            sub:    entry.currentExtSubPath ? { ext: entry.currentExtSubPath }
+                  : entry.currentSubIdx != null ? { idx: entry.currentSubIdx }
+                  : { off: true },
+            aspect:       entry.currentAspect ?? null,
+            aspectPicked: !!entry.aspectPicked,
         };
     }
 
@@ -3633,7 +3692,7 @@
 
         if (started) {
             await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
-                Object.assign({}, plan, { forceResumeSec: snap.pos, prestarted: started }), op);
+                Object.assign({}, plan, { forceResumeSec: snap.pos, prestarted: started, restore: snap }), op);
             return;
         }
 
@@ -3649,7 +3708,7 @@
             return;
         }
         await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
-            Object.assign({}, prev, { forceResumeSec: snap.pos, toast: { title, detail } }), op);
+            Object.assign({}, prev, { forceResumeSec: snap.pos, toast: { title, detail }, restore: snap }), op);
     }
 
     /**
