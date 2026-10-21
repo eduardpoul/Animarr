@@ -42,7 +42,7 @@ public partial class TvBootstrapPage : ContentPage
         var saved = Preferences.Get(TvRoot.ServerKey, "");
         if (string.IsNullOrWhiteSpace(saved))
         {
-            TvRoot.Go(new ServerPickerPage());
+            TvRoot.Go(TvRoot.ServerPicker());
             return;
         }
 
@@ -74,7 +74,7 @@ public partial class TvBootstrapPage : ContentPage
         catch
         {
             // Saved server moved / offline — let the user re-pick.
-            TvRoot.Go(new ServerPickerPage());
+            TvRoot.Go(TvRoot.ServerPicker());
         }
     }
 }

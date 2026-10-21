@@ -29,6 +29,14 @@ public static class TvRoot
         => new CatalogNativePage();
 #endif
 
+    /// <summary>The TV start screen (server discovery + pick).</summary>
+    public static Page ServerPicker()
+#if ANDROID
+        => new Tv.TvServerPickerPage();
+#else
+        => new ServerPickerPage();
+#endif
+
     public static void Go(Page page)
     {
         var win = Application.Current?.Windows.FirstOrDefault();

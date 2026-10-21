@@ -45,7 +45,7 @@ public partial class ProfilePanelPage : ContentPage
         _http = services.GetRequiredService<HttpClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
 
-        ChangeServerCommand = new Command(() => TvRoot.Go(new ServerPickerPage()));
+        ChangeServerCommand = new Command(() => TvRoot.Go(TvRoot.ServerPicker()));
         LogoutCommand       = new Command(async () => await LogoutAsync());
         // D-pad OK via the behavior (set here) — a gesture Command bound through
         // {x:Reference Root} resolves to null on TV.
