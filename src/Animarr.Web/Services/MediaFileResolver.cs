@@ -1,3 +1,4 @@
+using System.IO.Enumeration;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Animarr.Shared.Models;
@@ -23,6 +24,19 @@ public sealed class MediaFileResolver
     private static readonly HashSet<string> VideoExts = new(StringComparer.OrdinalIgnoreCase)
     {
         ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".m2ts",
+    };
+    private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> VideoExtsBySpan =
+        VideoExts.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    /// <summary>Exactly the traversal <c>Directory.EnumerateFiles(path, "*",
+    /// SearchOption.AllDirectories)</c> performs (hidden/system entries
+    /// included, an inaccessible sub-directory throws).</summary>
+    private static readonly EnumerationOptions TreeWalk = new()
+    {
+        RecurseSubdirectories = true,
+        MatchType             = MatchType.Win32,
+        AttributesToSkip      = 0,
+        IgnoreInaccessible    = false,
     };
 
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
@@ -117,9 +131,20 @@ public sealed class MediaFileResolver
         // The path-season is a pure function of the directory, so it's computed
         // once per directory rather than once per file.
         var seasonByDir = new Dictionary<string, int?>(StringComparer.Ordinal);
-        foreach (var filePath in Directory.EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories))
+        // Same walk as Directory.EnumerateFiles, but the size comes from the
+        // enumeration entry instead of a second stat per file (on Windows the
+        // directory listing already carries it), and non-video entries are
+        // dropped before a path string is even built.
+        var walk = new FileSystemEnumerable<(string Path, long Size)>(
+            folder.Path,
+            static (ref FileSystemEntry e) => (e.ToSpecifiedFullPath(), e.Length),
+            TreeWalk)
         {
-            if (!VideoExts.Contains(Path.GetExtension(filePath))) continue;
+            ShouldIncludePredicate = static (ref FileSystemEntry e) =>
+                !e.IsDirectory && VideoExtsBySpan.Contains(Path.GetExtension(e.FileName)),
+        };
+        foreach (var (filePath, size) in walk)
+        {
             var fileName = Path.GetFileName(filePath);
             var parse    = _patterns.ParseFileName(fileName, effectivePatterns);
             var fileDir  = Path.GetDirectoryName(filePath) ?? folder.Path;
@@ -148,8 +173,6 @@ public sealed class MediaFileResolver
             // Movies have no season/episode bucket — leave both null.
             if (isMovie) { season = null; episode = null; }
 
-            long size;
-            try { size = new FileInfo(filePath).Length; } catch { continue; }
             // Season 0 (Specials) never counted as a numbered season folder, and
             // still doesn't — matching the old `Season is null or 0` test.
             raw.Add((filePath, fileName, season, episode, size, seasonFromPath is > 0));
