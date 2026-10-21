@@ -323,6 +323,14 @@ public class MainActivity : MauiAppCompatActivity
     // play/pause and ◀/▶ seek — a TV player drives off the remote, not focused
     // on-screen buttons. Handled keys are swallowed so they don't also move
     // focus in the (hidden) HUD underneath.
+    // Every key passes here first: the native TV screens need to know whether a
+    // focus change came from an arrow press ("select on focus" tabs / pills).
+    public override bool DispatchKeyEvent(Android.Views.KeyEvent? e)
+    {
+        if (e is not null) Tv.TvInput.OnKey(e);
+        return base.DispatchKeyEvent(e);
+    }
+
     public override bool OnKeyDown(Android.Views.Keycode keyCode, Android.Views.KeyEvent? e)
     {
         if (PlayerPage.HandleGlobalKey((int)keyCode)) return true;

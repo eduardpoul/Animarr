@@ -34,6 +34,8 @@ public sealed class TvDetailPage : ContentPage
         return base.OnBackButtonPressed();
     }
 
+    protected override void OnDisappearing() { base.OnDisappearing(); _view?.Freeze(); }
+
     protected override void OnAppearing()
     {
         base.OnAppearing();
@@ -136,6 +138,8 @@ internal sealed class TvDetailView : FrameLayout
         }
         catch (Exception ex) { Android.Util.Log.Warn("AnimarrTv", $"detail load: {ex.Message}"); }
     }
+
+    public void Freeze() => _focus.Freeze();
 
     public void RefreshWatch()
     {

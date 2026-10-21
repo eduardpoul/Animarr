@@ -74,7 +74,7 @@ internal sealed class TvTopBar
         View.AddView(search, TabLp(ctx, 8));
         View.AddView(new AView(ctx), new LinearLayout.LayoutParams(0, 1, 1f));
         View.AddView(Tab(ctx, TvL.T("profile.title", "Профиль", "Profile"), false,
-            () => _ = page.Navigation.PushAsync(new ProfilePanelPage()), solid: true), TabLp(ctx, 0));
+            () => _ = page.Navigation.PushAsync(new TvProfilePage()), solid: true), TabLp(ctx, 0));
 
         Active = active switch { TvTab.Library => lib, TvTab.Search => search, _ => home };
         ((BarLayout)View).Preferred = Active;
@@ -97,7 +97,6 @@ internal sealed class TvTopBar
 
     private static TextView Tab(Context ctx, string text, bool selected, Action click, bool solid = false, Action? onFocus = null)
     {
-        int focusSeq = 0;
         var t = TvUi.Text_(ctx, 15, selected ? TvUi.Text : TvUi.TextDim, TvUi.Medium, 1, text);
         t.Gravity = GravityFlags.Center;
         int hp = TvUi.Dp(ctx, 18);
@@ -110,12 +109,11 @@ internal sealed class TvTopBar
         {
             t.Background = e.HasFocus ? focus : normal;
             t.SetTextColor(e.HasFocus ? AColor.ParseColor("#1a1a1a") : (selected || solid ? TvUi.Text : TvUi.TextDim));
-            // Google-TV style: resting on a tab opens it (after a short pause, so
-            // walking across the menu doesn't open every page on the way).
-            var seq = ++focusSeq;
-            if (e.HasFocus && !selected && onFocus is not null)
-                t.PostDelayed(() => { if (seq == focusSeq && t.HasFocus) onFocus(); }, 350);
         };
+        // Google-TV style: resting on a tab after an ARROW press opens it (short
+        // pause, so walking across the menu doesn't open every page on the way;
+        // a restored / default focus never opens anything).
+        if (!selected && onFocus is not null) TvInput.SelectOnFocus(t, () => true, onFocus);
         t.Click += (_, _) => click();
         return t;
     }

@@ -199,9 +199,16 @@ internal sealed class FocusKeeper : Java.Lang.Object, ViewTreeObserver.IOnGlobal
         root.ViewDetachedFromWindow += (_, _) => root.ViewTreeObserver?.RemoveOnGlobalFocusChangeListener(this);
     }
 
+    private bool _frozen;
+
+    /// <summary>Call when the page goes away: the focus Android hands out while
+    /// it is hidden / coming back (often the first menu tab) must not overwrite
+    /// the remembered card.</summary>
+    public void Freeze() => _frozen = true;
+
     public void OnGlobalFocusChanged(AView? oldFocus, AView? newFocus)
     {
-        if (newFocus is null) return;
+        if (newFocus is null || _frozen) return;
         for (var p = newFocus.Parent; p is not null; p = p.Parent)
             if (ReferenceEquals(p, _root)) { _last = new WeakReference<AView>(newFocus); return; }
     }
@@ -211,8 +218,11 @@ internal sealed class FocusKeeper : Java.Lang.Object, ViewTreeObserver.IOnGlobal
     /// <summary>Re-focus the remembered view (if still attached), else <paramref name="fallback"/>.</summary>
     public void Restore(Action? fallback = null) => _root.PostDelayed(() =>
     {
-        if (_root.HasFocus) return;
-        if (_last is not null && _last.TryGetTarget(out var v) && v.IsAttachedToWindow && v.RequestFocus()) return;
+        _frozen = false;
+        if (_last is not null && _last.TryGetTarget(out var v) && v.IsAttachedToWindow)
+        {
+            if (v.HasFocus || v.RequestFocus()) return;
+        }
         fallback?.Invoke();
     }, 120);
 }

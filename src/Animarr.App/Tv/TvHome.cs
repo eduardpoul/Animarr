@@ -55,6 +55,7 @@ public sealed class TvHomePage : ContentPage
     {
         base.OnDisappearing();
         if (TvBack.Handler is not null) TvBack.Handler = null;
+        _view?.Freeze();
         _view?.PauseCarousel();
     }
 }
@@ -131,7 +132,7 @@ internal sealed class TvHomeView : FrameLayout
             var secs = await secT; var fols = await folT;
             _sections.Clear(); _sectionFolders.Clear();
             if (secs is not null)
-                foreach (var s in secs.OrderBy(s => s.Label))
+                foreach (var s in TvPrefs.Ordered(secs.Select(x => (x.Id, (string)x.Label))).Select(o => secs.First(x => x.Id == o.Id)))
                 {
                     _sections.Add((s.Id, s.Label));
                     var ids = fols?.Where(f => f.ParentSectionId == s.Id).Select(f => f.Id).ToHashSet() ?? new();
@@ -161,8 +162,21 @@ internal sealed class TvHomeView : FrameLayout
     }
 
     /// <summary>Back from detail / player: refresh the resume feed (progress moved).</summary>
+    /// <summary>Set by the profile page when the folder order changed.</summary>
+    public static bool SectionsChanged;
+
+    public void Freeze() => _focus.Freeze();
+
     public void OnReturn()
     {
+        if (SectionsChanged)
+        {
+            SectionsChanged = false;
+            var ordered = TvPrefs.Ordered(_sections);
+            _sections.Clear(); _sections.AddRange(ordered);
+            _ = RebuildAsync();
+            return;
+        }
         // A menu tab opens its page on focus — never restore onto one (that would
         // bounce straight back into Library / Search); land on Главная instead.
         if (_focus.Last is { } last && _hero is not null && _hero.IsInBar(last)) FocusTabsSoon();
@@ -170,6 +184,13 @@ internal sealed class TvHomeView : FrameLayout
         if ((DateTime.UtcNow - _lastRefresh).TotalSeconds < 5) return;
         _lastRefresh = DateTime.UtcNow;
         _ = RefreshFeedAsync();
+    }
+
+    private async Task RebuildAsync()
+    {
+        var week = await _data.Get<TvData.CalendarEvent[]>("/api/calendar?back=1&ahead=7");
+        BuildRows(week ?? Array.Empty<TvData.CalendarEvent>());
+        Post(() => _hero?.FocusPrimary());
     }
 
     private async Task RefreshFeedAsync()
