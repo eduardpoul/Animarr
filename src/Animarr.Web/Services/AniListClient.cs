@@ -14,6 +14,49 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
 {
     private const string ClientName = "anilist";
 
+    // AniList rate-limits per IP (~30 req/min while degraded) and the budget
+    // is shared by the franchise walk, MAL-id bridging and the airing refresh.
+    // After a 429 the relations walk and title resolves hold off until the
+    // server's Retry-After instead of spending more requests into the wall.
+    // Static: the client itself is scoped.
+    private static readonly TimeSpan DefaultRetryAfter = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan MaxRetryAfter     = TimeSpan.FromMinutes(15);
+    private static long _rateLimitedUntilTicks;
+
+    /// <summary>What is left of the Retry-After window of the last 429
+    /// (zero when AniList may be called).</summary>
+    public static TimeSpan RateLimitRemaining
+    {
+        get
+        {
+            var left = Interlocked.Read(ref _rateLimitedUntilTicks) - DateTime.UtcNow.Ticks;
+            return left > 0 ? TimeSpan.FromTicks(left) : TimeSpan.Zero;
+        }
+    }
+
+    /// <summary>Record a 429's Retry-After (default 60 s, capped at 15 min;
+    /// a later deadline already in place wins). Returns the wait.</summary>
+    private TimeSpan NoteRateLimited(HttpResponseMessage resp)
+    {
+        var ra = resp.Headers.RetryAfter;
+        var wait = ra?.Delta
+                   ?? (ra?.Date is DateTimeOffset at ? at - DateTimeOffset.UtcNow : DefaultRetryAfter);
+        if (wait < TimeSpan.FromSeconds(1)) wait = TimeSpan.FromSeconds(1);
+        if (wait > MaxRetryAfter) wait = MaxRetryAfter;
+
+        var until = DateTime.UtcNow.Add(wait).Ticks;
+        long cur;
+        do
+        {
+            cur = Interlocked.Read(ref _rateLimitedUntilTicks);
+            if (cur >= until) break;
+        }
+        while (Interlocked.CompareExchange(ref _rateLimitedUntilTicks, until, cur) != cur);
+
+        logger.LogWarning("[AniList] 429 rate limit — holding off for {Seconds}s", (int)wait.TotalSeconds);
+        return wait;
+    }
+
     private static readonly JsonSerializerOptions _json = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -50,6 +93,9 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
     public async Task<(AniListMatch? Match, bool Definitive)> TryResolveAsync(string title, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title)) return (null, true);
+        // Inside a 429's Retry-After window: the same transient answer a 429
+        // gives, without spending a request.
+        if (RateLimitRemaining > TimeSpan.Zero) return (null, false);
         try
         {
             var http = httpFactory.CreateClient(ClientName);
@@ -57,6 +103,11 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             var payload = new { query, variables = new { search = title } };
 
             using var resp = await http.PostAsJsonAsync("/", payload, _json, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                NoteRateLimited(resp);
+                return (null, false);
+            }
             // AniList answers a search miss with 404 "Not Found."
             if (!resp.IsSuccessStatusCode) return (null, resp.StatusCode == System.Net.HttpStatusCode.NotFound);
 
@@ -74,10 +125,15 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
 
     /// <summary>Fetch one media node with its typed relations (one franchise
     /// BFS step). Query by AniList id, or by MAL id when that's all we have.
-    /// Non-anime related nodes (manga adaptations etc.) are filtered out.</summary>
+    /// Non-anime related nodes (manga adaptations etc.) are filtered out.
+    /// Null = no answer for this node (unknown id, other HTTP error, network).
+    /// A 429 — or a call inside its Retry-After window — throws
+    /// <see cref="AniListRateLimitedException"/> instead: "out of budget" is
+    /// not "no relations", and the walk must not be recorded as complete.</summary>
     public async Task<AniListRelations?> GetRelationsAsync(int? aniListId, int? malId, CancellationToken ct = default)
     {
         if (aniListId is null && malId is null) return null;
+        if (RateLimitRemaining is { Ticks: > 0 } wait) throw new AniListRateLimitedException(wait);
         try
         {
             var http = httpFactory.CreateClient(ClientName);
@@ -92,6 +148,8 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             var payload = new { query, variables = new { id = aniListId, malId = aniListId is null ? malId : null } };
 
             using var resp = await http.PostAsJsonAsync("/", payload, _json, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                throw new AniListRateLimitedException(NoteRateLimited(resp));
             if (!resp.IsSuccessStatusCode) return null;
 
             var data = await resp.Content.ReadFromJsonAsync<AniListRelationsEnvelope>(_json, ct);
@@ -107,7 +165,7 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             }
             return new AniListRelations(ToNode(m), edges);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not AniListRateLimitedException)
         {
             logger.LogWarning(ex, "[AniList] relations fetch failed for id={Id}/mal={Mal}", aniListId, malId);
             return null;
@@ -153,6 +211,9 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             using var resp = await http.PostAsJsonAsync("/", payload, _json, ct);
             if (!resp.IsSuccessStatusCode)
             {
+                // Record a 429 so the relations walk / resolves back off too;
+                // the batch itself keeps its old shape (empty answer).
+                if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests) NoteRateLimited(resp);
                 logger.LogWarning("[AniList] airing batch returned {Status}", resp.StatusCode);
                 return result;
             }
@@ -173,6 +234,14 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             return result;
         }
     }
+}
+
+/// <summary>AniList answered 429 (or the client is still inside that
+/// answer's Retry-After window): a transient "no answer", never "no data".</summary>
+public sealed class AniListRateLimitedException(TimeSpan retryAfter)
+    : Exception($"AniList rate limit — retry in {(int)Math.Ceiling(retryAfter.TotalSeconds)}s")
+{
+    public TimeSpan RetryAfter { get; } = retryAfter;
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
