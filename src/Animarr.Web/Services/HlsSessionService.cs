@@ -201,6 +201,9 @@ public sealed partial class HlsSessionService : IDisposable
         public const string FfmpegTimeout = "ffmpeg_timeout";
         /// <summary>At the session cap and every session is another client's live playback (503).</summary>
         public const string TooManySessions = "too_many_sessions";
+        /// <summary>A newer start for the same file from the same client became
+        /// playable first and replaced this still-starting one (409).</summary>
+        public const string Superseded = "superseded";
         /// <summary>audioTrackIndex negative or past the last audio track (400).</summary>
         public const string InvalidAudioTrack = "invalid_audio_track";
         /// <summary>maxHeight negative or outside <see cref="MinMaxHeight"/>..<see cref="MaxMaxHeight"/> (400).</summary>
@@ -611,50 +614,46 @@ public sealed partial class HlsSessionService : IDisposable
         // TS passthrough, CODECS, the Info block and the restart agree with it.
         probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
 
-        // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
-        // 1) Kill this CLIENT's existing sessions for the same source file — a
-        //    second Play on the same movie from the same player (another
-        //    audio track / quality, a reload) means it wants the new one. The
-        //    key is (user, device, path), not the path alone: the path-only
-        //    dedup tore down the TV's stream when a browser opened the same
-        //    episode, or one profile's when another started it. We exempt
-        //    very recently created sessions (<3s) because they're still in
-        //    their startup wait loop, and tearing them down mid-startup is
-        //    what caused "first attempt doesn't start, retry works" — the
-        //    very-fresh session got its dir nuked while still racing to emit
-        //    init.mp4, then this new request kicks off the same encoding
-        //    again from scratch.
-        var dedupCutoff = DateTime.UtcNow - TimeSpan.FromSeconds(3);
-        var stalePathSessions = _sessions
+        // ─── Pre-flight: what this start replaces, then the cap ─────────────
+        // 1) This CLIENT's existing sessions for the same source file — a
+        //    second Play on the same movie from the same player (another audio
+        //    track / quality, a reload) means it wants the new one. The key is
+        //    (user, device, path), not the path alone: the path-only dedup tore
+        //    down the TV's stream when a browser opened the same episode, or one
+        //    profile's when another started it.
+        //    They are stopped only once THIS session has produced its first
+        //    segment (end of the startup wait below), not up front: stopping
+        //    them first meant a start that then failed (ffmpeg error, a 4xx/5xx)
+        //    left the player with no stream at all, while the old one could
+        //    have kept playing as the fallback. The same rule covers a start
+        //    that is still in its own startup wait — it is superseded only by a
+        //    newer start that actually works (and then answers 409 superseded).
+        var replacing = _sessions
             .Where(kv => kv.Value.Owner == who
-                      && string.Equals(kv.Value.SourcePath, fullPath, StringComparison.OrdinalIgnoreCase)
-                      && kv.Value.CreatedAt < dedupCutoff)
+                      && string.Equals(kv.Value.SourcePath, fullPath, StringComparison.OrdinalIgnoreCase))
             .Select(kv => kv.Key)
-            .ToList();
-        foreach (var t in stalePathSessions)
-        {
-            _logger.LogInformation("HLS: reaping prior session {Token} for same source ({Owner})", t, who);
-            Stop(t);
-        }
+            .ToHashSet();
 
-        // 2) Enforce the global cap. If we're at the limit AFTER the dedup
-        //    step, evict — in this order — the caller's own oldest session
-        //    (leaked tabs on other files), then the least recently used IDLE
-        //    session of anyone (no segment fetch / keepalive for
-        //    ActiveSessionGrace: a closed tab or a crashed client). Other
-        //    clients' live sessions are never evicted: when every slot is
-        //    one, this start fails with 503 instead of cutting off someone's
-        //    playback.
-        while (_sessions.Count >= MaxConcurrentSessions)
+        // 2) Enforce the global cap. The sessions being replaced don't count —
+        //    they are on their way out, and must survive as the fallback until
+        //    then — so while both exist the host briefly runs up to
+        //    MaxConcurrentSessions + replacing.Count. Otherwise evict, in this
+        //    order, the caller's own oldest session (leaked tabs on other
+        //    files), then the least recently used IDLE session of anyone (no
+        //    segment fetch / keepalive for ActiveSessionGrace: a closed tab or
+        //    a crashed client). Other clients' live sessions are never evicted:
+        //    when every slot is one, this start fails with 503 instead of
+        //    cutting off someone's playback.
+        while (_sessions.Count - _sessions.Keys.Count(replacing.Contains) >= MaxConcurrentSessions)
         {
             var idleCutoff = DateTime.UtcNow - ActiveSessionGrace;
             var victim = _sessions
-                .Where(kv => kv.Value.Owner == who)
+                .Where(kv => kv.Value.Owner == who && !replacing.Contains(kv.Key))
                 .OrderBy(kv => kv.Value.LastActive)
                 .Select(kv => kv.Key)
                 .FirstOrDefault()
                 ?? _sessions
-                .Where(kv => kv.Value.LastActive < idleCutoff)
+                .Where(kv => kv.Value.LastActive < idleCutoff && !replacing.Contains(kv.Key))
                 .OrderBy(kv => kv.Value.LastActive)
                 .Select(kv => kv.Key)
                 .FirstOrDefault();
@@ -883,6 +882,15 @@ public sealed partial class HlsSessionService : IDisposable
                      && File.Exists(firstSegPath)
                      && File.Exists(masterPath);
             if (ready) break;
+            if (!_sessions.ContainsKey(token))
+            {
+                // Stopped from outside while still starting: the caller gave up
+                // (cancellation), or a newer start from the same client for the
+                // same file got its first segment first and replaced this one.
+                ct.ThrowIfCancellationRequested();
+                throw new StartFailedException(StartFailedException.Superseded, StatusCodes.Status409Conflict,
+                    "A newer start for the same file from this player replaced this one.");
+            }
             if (proc.HasExited)
             {
                 // Killed because the caller gave up (the RequestAborted → Stop
@@ -914,6 +922,17 @@ public sealed partial class HlsSessionService : IDisposable
             }
             await Task.Delay(150, ct);
         }
+
+        // The new stream is playable — only now retire what it replaces (see
+        // the pre-flight step): until here they were the fallback.
+        foreach (var old in replacing)
+        {
+            if (!_sessions.ContainsKey(old)) continue;
+            _logger.LogInformation("HLS: {Token} replaces prior session {Old} for the same source ({Owner})",
+                token, old, who);
+            Stop(old);
+        }
+
         // Phase B — short grace period for ONE more segment so the player has a
         // little buffer beyond seg-0. Cut from 5s/2-segments to 2s/1-segment:
         // with the loopback proxy + hls.js's generous forward buffer, returning
