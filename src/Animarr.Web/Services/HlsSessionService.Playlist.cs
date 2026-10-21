@@ -245,19 +245,53 @@ public sealed partial class HlsSessionService
         bool emitDiscontinuityEverywhere = plan != HlsPlan.TsStreamCopy;
 
         var ext = SegmentExtension(plan);
-        var remaining = totalDuration;
         for (int i = 0; i < segCount; i++)
         {
             bool emitMarker = i > 0 && (emitDiscontinuityEverywhere
                                      || (boundarySet?.Contains(i) ?? false));
             if (emitMarker) sb.Append("#EXT-X-DISCONTINUITY\n");
-            var dur = Math.Min(SegmentDurationSec, remaining);
+            var dur = SegmentLayout.Duration(i, segCount, totalDuration, SegmentDurationSec);
             sb.Append($"#EXTINF:{dur.ToString("F3", CultureInfo.InvariantCulture)},\n");
             sb.Append($"seg-{i:D5}.{ext}\n");
-            remaining -= SegmentDurationSec;
         }
         sb.Append("#EXT-X-ENDLIST\n");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Segment layout of the synthetic VOD playlist: fixed-length segments with
+    /// the remainder in the last one — except that a remainder shorter than
+    /// <see cref="MinTailSec"/> is folded into the previous segment instead of
+    /// being announced on its own.
+    ///
+    /// Why: the format duration is usually a hair longer than the video (audio
+    /// runs on for a few ms), e.g. 180.023 s → a 46th segment of 0.023 s. ffmpeg
+    /// starts a segment only at a key frame past the boundary, so with no frame
+    /// left after 180.0 it never writes seg-45: the player got 503 for it, kept
+    /// retrying, and the retries turned into seek-jump restarts. Folded, seg-44
+    /// is announced as 4.023 s — what ffmpeg really writes there (everything up
+    /// to EOF). If ffmpeg does cut a tiny last segment after all (a key frame
+    /// right at the boundary), only those &lt;0.5 s at the very end go unplayed.
+    /// TARGETDURATION (segment length + 1) still covers the longer last EXTINF.
+    /// </summary>
+    public static class SegmentLayout
+    {
+        public const double MinTailSec = 0.5;
+
+        /// <summary>Number of segments the playlist announces (0 = unknown duration).</summary>
+        public static int Count(double totalDurationSec, double segmentSec)
+        {
+            if (totalDurationSec <= 0 || segmentSec <= 0) return 0;
+            var n = (int)Math.Ceiling(totalDurationSec / segmentSec);
+            if (n > 1 && totalDurationSec - (n - 1) * segmentSec < MinTailSec) n--;
+            return Math.Max(n, 1);
+        }
+
+        /// <summary>EXTINF of segment <paramref name="index"/> of <paramref name="count"/>.</summary>
+        public static double Duration(int index, int count, double totalDurationSec, double segmentSec)
+            => index < count - 1
+                ? segmentSec
+                : Math.Max(totalDurationSec - (count - 1) * segmentSec, 0);
     }
 
     /// <summary>Atomically rewrite media.m3u8 with the current set of restart

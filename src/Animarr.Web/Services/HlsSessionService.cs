@@ -674,17 +674,19 @@ public sealed partial class HlsSessionService : IDisposable
                 : "mp4a.40.2";
             probeForPlaylist = probe with { CodecsAttribute = $"avc1.640028,{audioCodec}" };
         }
-        var segCount = totalDuration > 0
-            ? (int)Math.Ceiling(totalDuration / SegmentDurationSec)
-            : 0;
+        // A tail shorter than 0.5 s is folded into the previous segment — see
+        // SegmentLayout for the 503 loop a 0.023 s last segment caused.
+        var segCount = SegmentLayout.Count(totalDuration, SegmentDurationSec);
         // ffmpeg starts encoding at the resume point, so the first segment
         // it produces is seg-K where K = floor(seekSec / segDur). Earlier
         // segments don't exist on disk; the player learns to skip past them
         // via #EXT-X-START + the WaitForFileAsync seek-restart logic on
-        // backward scrubs.
+        // backward scrubs. Clamped to the last announced segment: a resume
+        // point inside a folded tail belongs to it.
         var startSegment = seekSec > 0
             ? (int)Math.Floor(seekSec / SegmentDurationSec)
             : 0;
+        if (segCount > 0) startSegment = Math.Min(startSegment, segCount - 1);
 
         // 2. Write synthetic master + media playlists. If we couldn't probe
         //    duration, skip this and let ffmpeg's HLS muxer write them
