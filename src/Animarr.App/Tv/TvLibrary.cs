@@ -272,6 +272,8 @@ internal sealed class TvSearchView : LinearLayout
     private readonly CardAdapter _adapter = new(new());
     private readonly EditText _box;
     private readonly TextView _status;
+    private readonly VerticalGridView _grid;
+    private bool _pending, _focusResults;
     private CancellationTokenSource? _cts;
     public TvTopBar Bar { get; }
     private readonly FocusKeeper _focus;
@@ -310,7 +312,40 @@ internal sealed class TvSearchView : LinearLayout
         _status = TvUi.Text_(ctx, 14, TvUi.TextFaint);
         AddView(_status, TvUi.Lp(-2, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 10)));
 
-        AddView(TvGrid.Posters(ctx, _adapter), new LinearLayout.LayoutParams(-1, 0, 1f));
+        _grid = TvGrid.Posters(ctx, _adapter);
+        AddView(_grid, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        // D-pad path menu tab ↔ box ↔ results, spelled out: the geometric search
+        // skipped the box both ways, and the empty results grid (invisible)
+        // must not take focus at all.
+        Bar.Active.Id = GenerateViewId(); _box.Id = GenerateViewId(); _grid.Id = GenerateViewId();
+        Bar.Active.NextFocusDownId = _box.Id;
+        _box.NextFocusUpId = Bar.Active.Id;
+        _box.NextFocusDownId = _grid.Id;
+        _grid.NextFocusUpId = _box.Id;
+        _grid.Focusable = false;
+        // EditText spends an UP / DOWN on moving the cursor to the text's start /
+        // end first — on a remote that reads as a dead press, so leave at once.
+        _box.KeyPress += (_, e) =>
+        {
+            e.Handled = false;
+            if (e.Event?.Action != KeyEventActions.Down) return;
+            if (e.KeyCode == Keycode.DpadUp) e.Handled = Bar.Active.RequestFocus();
+            else if (e.KeyCode == Keycode.DpadDown && _adapter.ItemCount > 0) { FocusResults(); e.Handled = true; }
+        };
+        // the keyboard's Search key (or Enter): close the keyboard and land on the first result
+        _box.EditorAction += (_, e) =>
+        {
+            bool enter = e.ActionId == Android.Views.InputMethods.ImeAction.ImeNull
+                         && e.Event?.KeyCode is Keycode.Enter or Keycode.NumpadEnter;
+            if (e.ActionId != Android.Views.InputMethods.ImeAction.Search && !enter) { e.Handled = false; return; }
+            e.Handled = true;
+            if (enter && e.Event!.Action != KeyEventActions.Up) return;
+            (ctx.GetSystemService(Context.InputMethodService) as Android.Views.InputMethods.InputMethodManager)?
+                .HideSoftInputFromWindow(_box.WindowToken, 0);
+            if (_pending) _focusResults = true;   // still searching → focus the results when they land
+            else if (_adapter.ItemCount > 0) FocusResults();
+        };
         _focus = new FocusKeeper(this);
         if (TvTopBar.TakePending(TvTab.Search)) Bar.Active.Post(() => Bar.Active.RequestFocus());
         else _box.Post(() => _box.RequestFocus());
@@ -322,10 +357,15 @@ internal sealed class TvSearchView : LinearLayout
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         var q = _box.Text?.Trim() ?? "";
+        _pending = true;
         _ = Task.Run(async () =>
         {
             try { await Task.Delay(350, ct); } catch { return; }
-            if (q.Length < 2) { Post(() => { _adapter.Replace(new()); _status.Text = ""; }); return; }
+            if (q.Length < 2)
+            {
+                Post(() => { _pending = _focusResults = false; _adapter.Replace(new()); _grid.Focusable = false; _status.Text = ""; });
+                return;
+            }
             await TvMedia.EnsureTokenAsync();
             var items = await _data.Get<TvData.MediaItem[]>($"/api/media?search={Uri.EscapeDataString(q)}&take=120{TvData.CardView}", ct);
             if (ct.IsCancellationRequested) return;
@@ -341,10 +381,16 @@ internal sealed class TvSearchView : LinearLayout
             }).ToList();
             Post(() =>
             {
+                if (ct.IsCancellationRequested) return;
+                _pending = false;
                 _adapter.Replace(cards);
+                _grid.Focusable = cards.Count > 0;
                 _status.Text = cards.Count == 0 ? TvL.T("search.no_results", "Ничего не найдено", "Nothing found") : $"{cards.Count}";
+                if (_focusResults) { _focusResults = false; if (cards.Count > 0) FocusResults(); }
             });
         });
     }
+
+    private void FocusResults() => _grid.Post(() => { _grid.SelectedPosition = 0; _grid.RequestFocus(); });
 }
 #endif
