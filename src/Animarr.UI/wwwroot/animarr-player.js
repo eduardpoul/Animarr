@@ -2326,28 +2326,285 @@
     }
 
     // ─────────────────────────────────────────────────────────────────
+    //  stream start + recovery helpers
+    // ─────────────────────────────────────────────────────────────────
+
+    // Start generations. Every attach / stream restart takes a token and the
+    // newest one per element wins; detach() drops it. A start still in flight
+    // when the player closes or the user moves on (Back / Next pressed while a
+    // switch is warming up) sees it is stale on its next await and backs out —
+    // stopping the session it started — instead of building a "ghost" player
+    // inside a dead element (HLS session + keepalive living on, arrow keys
+    // still hijacked by player-open).
+    let OP_SEQ = 0;
+    const LIVE_OP = new Map();   // elementId → newest token
+    function beginOp(elementId) { const t = ++OP_SEQ; LIVE_OP.set(elementId, t); return t; }
+    function isLiveOp(elementId, t) { return LIVE_OP.get(elementId) === t; }
+
+    function stopSession(token) {
+        if (!token) return;
+        try {
+            fetch(apiUrl('/api/hls/' + encodeURIComponent(token)),
+                { method: 'DELETE', keepalive: true }).catch(() => {});
+        } catch {}
+    }
+
+    // Player strings that need translating. MediaDetail passes the localized
+    // set with the first attach (opts.labels, kept in KEEP for restarts).
+    const LABEL_DEFAULTS = {
+        errQuality: "Couldn't switch quality, staying on the previous one",
+        errAudio:   "Couldn't switch the audio track, staying on the previous one",
+        errStart:   "Playback couldn't start",
+        retry:      'Retry',
+        back:       'Back',
+    };
+    function label(elementId, key) {
+        const l = (KEEP.get(elementId) || {}).labels;
+        return (l && l[key]) || LABEL_DEFAULTS[key];
+    }
+
+    // HEVC decode capability — tell the server it can ship HEVC as a
+    // stream-copy (Direct Stream, original quality) rather than re-encoding it
+    // to H.264. Constant per browser → memoize on window. hls.js gates on
+    // MediaSource.isTypeSupported; Safari/native HLS via canPlayType.
+    function ensureHevcCaps() {
+        if (window.__animarrHevcOk !== undefined) return;
+        let ok = false, ok10 = false;
+        try {
+            const t   = 'video/mp4; codecs="hvc1.1.6.L93.B0"';   // HEVC Main (8-bit)
+            const t10 = 'video/mp4; codecs="hvc1.2.4.L153.B0"';  // HEVC Main10 (HDR10)
+            const v = document.createElement('video');
+            const can = (s) =>
+                   (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(s))
+                || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(s))
+                || v.canPlayType(s) !== '';
+            ok   = can(t);
+            ok10 = can(t10);
+        } catch (e) { ok = false; ok10 = false; }
+        window.__animarrHevcOk   = ok;
+        window.__animarrHevc10Ok = ok10;
+    }
+
+    // Audio-sync offsets sent with every start.
+    // Auto-calibration disabled 2026-05-27 — the WebAudio analyser-based
+    // measure() is producing nonsense values (0 or 40ms when reality is
+    // 400ms+) so it makes audio sync WORSE than the static default. The
+    // helper module stays around for getCached/setManual used by the Sync
+    // popup; only the calibrate() call is bypassed.
+    // Defaults: HW 70ms (empirical baseline for VAAPI/NVENC re-encode),
+    // SW 0ms (HEVC 10-bit stream-copy has no sensible default — user must
+    // dial in via Sync slider).
+    function readAudioOffsets() {
+        let hw = 70, sw = 0;
+        if (window.animarrCalibrate) {
+            const h = window.animarrCalibrate.getCached('hw');
+            if (h !== null) hw = h;
+            const s = window.animarrCalibrate.getCached('sw');
+            if (s !== null) sw = s;
+        }
+        return { hw, sw };
+    }
+
+    function abortError() {
+        try { return new DOMException('aborted', 'AbortError'); }
+        catch { const e = new Error('aborted'); e.name = 'AbortError'; return e; }
+    }
+
+    /**
+     * POST /api/hls/start for one playback plan. Resolves to
+     *   { totalDuration, resumeSec, output, directPlayUrl, directStreamUrl,
+     *     sessionToken, manifestUrl }
+     * or throws an Error with `.status` (HTTP status, 0 = network) and a short
+     * `.reason` for the user. One retry on 5xx / network (a start racing the
+     * server's cleanup of the previous session often succeeds a beat later).
+     * Aborting `signal` cancels the request — the server then stops the ffmpeg
+     * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
+     */
+    async function startStream(mediaPath, p, signal) {
+        ensureHevcCaps();
+        const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
+            + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
+            + '&audioOffsetHwMs=' + p.offsets.hw
+            + '&audioOffsetSwMs=' + p.offsets.sw
+            + (p.audioTrackIndex > 0 ? '&audioTrackIndex=' + p.audioTrackIndex : '')
+            + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
+            + (p.maxBitrate > 0 ? '&maxBitrate=' + p.maxBitrate : '')
+            + (window.__animarrHevcOk ? '&clientHevc=1' : '')
+            + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '')
+            + (p.externalAudioPath ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath) : ''));
+        let lastErr = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, 500));
+                if (signal && signal.aborted) throw abortError();
+            }
+            let res;
+            try {
+                res = await fetch(url, { method: 'POST', signal });
+            } catch (err) {
+                if (err && err.name === 'AbortError') throw err;
+                lastErr = Object.assign(new Error('start: network error'), { status: 0, reason: 'Network error' });
+                continue;
+            }
+            if (!res.ok) {
+                // ProblemDetails ({ title, detail }) from Results.Problem — the
+                // detail is the server's own one-line reason.
+                let why = '';
+                try {
+                    const pd = await res.json();
+                    why = (pd && (pd.detail || pd.title)) || '';
+                } catch {}
+                lastErr = Object.assign(new Error('start ' + res.status), {
+                    status: res.status,
+                    reason: (why ? why + ' ' : '') + '(HTTP ' + res.status + ')',
+                });
+                if (res.status >= 500) continue;
+                throw lastErr;
+            }
+            const data = await res.json();
+            return {
+                totalDuration:   data.totalDuration || 0,
+                resumeSec:       data.resumeSec     || 0,
+                // Server-authoritative output info (Phase 0) — describes what
+                // the player ACTUALLY receives, including post-transcode
+                // codec/HDR state. Drives the Info popup so re-encoded streams
+                // correctly report e.g. "H.264 SDR" even when the source was
+                // HEVC HDR.
+                output:          data.output || null,
+                directPlayUrl:   data.directPlayUrl || null,
+                // Progressive remux (MKV → native fMP4). No HLS session.
+                directStreamUrl: (!data.directPlayUrl && data.directStreamUrl) || null,
+                sessionToken:    (!data.directPlayUrl && !data.directStreamUrl && data.token) || null,
+                manifestUrl:     (!data.directPlayUrl && !data.directStreamUrl && data.manifestUrl) || null,
+            };
+        }
+        throw lastErr;
+    }
+
+    /** Transient notice over the player (top centre, ~6 s). Text only. */
+    function showToast(root, title, detail) {
+        if (!root) return;
+        root.querySelectorAll(':scope > .vp-toast').forEach(t => t.remove());
+        const t = document.createElement('div');
+        t.className = 'vp-toast';
+        t.setAttribute('role', 'status');
+        const a = document.createElement('div');
+        a.className = 'vp-toast__title';
+        a.textContent = title || '';
+        t.appendChild(a);
+        if (detail) {
+            const b = document.createElement('div');
+            b.className = 'vp-toast__detail';
+            b.textContent = detail;
+            t.appendChild(b);
+        }
+        root.appendChild(t);
+        setTimeout(() => {
+            t.classList.add('vp-toast--out');
+            setTimeout(() => { try { t.remove(); } catch {} }, 400);
+        }, 6000);
+    }
+
+    /** No stream could be started at all (first open, or a failed switch whose
+     *  previous plan wouldn't come back either). Replaces the black, HUD-less
+     *  overlay that used to be left behind — with no way out but a reload —
+     *  by a reason + Retry + Back. Lives in the player element; teardown()
+     *  removes it (entry.errorCleanup). */
+    function showStartError(elementId, el, entry, err, retry) {
+        if (entry.errorCleanup) { try { entry.errorCleanup(); } catch {} }
+        const panel = document.createElement('div');
+        panel.className = 'vp-error';
+        panel.setAttribute('role', 'alert');
+        const title = document.createElement('div');
+        title.className = 'vp-error__title';
+        title.textContent = label(elementId, 'errStart');
+        panel.appendChild(title);
+        if (err && err.reason) {
+            const d = document.createElement('div');
+            d.className = 'vp-error__detail';
+            d.textContent = err.reason;
+            panel.appendChild(d);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'vp-error__actions';
+        const mk = (cls, text, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'vp-error__btn ' + cls + ' tv-focus';
+            b.textContent = text;
+            b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+            actions.appendChild(b);
+            return b;
+        };
+        const back = () => entry.refRef.current?.invokeMethodAsync('ClosePlayerFromJs').catch(() => {});
+        const retryBtn = mk('vp-error__btn--primary', label(elementId, 'retry'), retry);
+        const backBtn  = mk('', label(elementId, 'back'), back);
+        panel.appendChild(actions);
+        el.appendChild(panel);
+        // The HUD (and its key handler) never came up: Esc / remote Back
+        // close, ←/→ move between the two buttons, Enter clicks natively.
+        const onKey = (e) => {
+            switch (e.key) {
+                case 'Escape': case 'BrowserBack': case 'GoBack': case 'MediaStop':
+                    e.preventDefault(); e.stopPropagation(); back(); break;
+                case 'ArrowLeft': case 'ArrowRight':
+                    e.preventDefault(); e.stopPropagation();
+                    (document.activeElement === retryBtn ? backBtn : retryBtn).focus();
+                    break;
+            }
+        };
+        document.addEventListener('keydown', onKey, true);
+        entry.errorCleanup = () => {
+            document.removeEventListener('keydown', onKey, true);
+            try { panel.remove(); } catch {}
+            entry.errorCleanup = null;
+        };
+        try { retryBtn.focus(); } catch {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     //  attach
     // ─────────────────────────────────────────────────────────────────
     /**
+     * Open the player for `mediaPath` in the element `elementId` (Blazor).
      * @param {string} elementId
      * @param {object} dotnetRef
      * @param {string} mediaPath
      * @param {object} [opts]
-     * @param {number} [opts.audioTrackIndex]  Index of audio stream in the source
-     *                                          (0=first). Used by switchAudio to
-     *                                          restart the session with a
-     *                                          different audio map.
-     * @param {number} [opts.forceResumeSec]   Override .NET-supplied resume
-     *                                          position. Set by switchAudio so
-     *                                          the new session resumes exactly
-     *                                          where the old one stopped.
+     * @param {boolean} [opts.autoAudio]       Apply the preferred audio language
+     *                                          (HLS only), see below.
+     * @param {object} [opts.labels]           Localized player strings
+     *                                          (LABEL_DEFAULTS keys).
      */
     async function attach(elementId, dotnetRef, mediaPath, opts) {
+        return attachStream(elementId, dotnetRef, mediaPath, opts, beginOp(elementId));
+    }
+
+    /**
+     * Build a stream + player in `elementId`. Also the restart path (audio /
+     * quality switch, native fallback), which tears the current stream down
+     * first and passes the plan to keep:
+     * @param {number} [opts.audioTrackIndex]  Index of audio stream in the source
+     *                                          (0=first).
+     * @param {string} [opts.externalAudioPath] Sideload dub to mux instead.
+     * @param {number} [opts.maxHeight] / [opts.maxBitrate]  Quality caps.
+     * @param {number} [opts.forceResumeSec]   Override .NET-supplied resume
+     *                                          position (a restart resumes
+     *                                          exactly where the old stream was).
+     * @param {object} [opts.prestarted]       startStream() result obtained by
+     *                                          restartStream before tearing the
+     *                                          old stream down — no second start.
+     * @param {object} [opts.toast]            { title, detail } to show once up.
+     * @param {number} op                      beginOp() token of this attempt.
+     */
+    async function attachStream(elementId, dotnetRef, mediaPath, opts, op) {
         const el = document.getElementById(elementId);
         if (!el) {
             console.warn('animarrPlayer.attach: container not found', elementId);
             return;
         }
+        if (!isLiveOp(elementId, op)) return;
+        if (opts && opts.labels) keepFor(elementId).labels = opts.labels;
         if (WIRED.has(elementId)) {
             // A restart (switchAudio / switchQuality / native fallback) lands
             // here on purpose; anything else is a missed detach. Either way
@@ -2376,12 +2633,9 @@
             // MediaDetail's preload(), else this is the first-use fetch.
             try { await loadPlayerLibs(); }
             catch (e) { console.error(e && e.message || e); }
-            // The overlay may have closed (detach) while the libraries loaded.
-            if (!el.isConnected || WIRED.has(elementId)) return;
-        }
-        if (typeof window.Artplayer !== 'function') {
-            console.error('animarrPlayer: Artplayer not loaded from CDN');
-            return;
+            // The overlay may have closed (detach) or another attach may have
+            // taken over while the libraries loaded.
+            if (!el.isConnected || !isLiveOp(elementId, op) || WIRED.has(elementId)) return;
         }
 
         // Tell tv-nav.js to suspend its spatial-nav handler while we own the
@@ -2408,6 +2662,22 @@
             mediaPath, dotnetRef,
         };
         WIRED.set(elementId, entry);
+        // Superseded (newer attach on this element) or closed (detach) — both
+        // tear this entry down, which aborts `abort`; the op check also covers
+        // the moments before any fetch is in flight.
+        const stale = () => abort.signal.aborted || !isLiveOp(elementId, op);
+        // Same plan again, fresh token — the error panel's Retry.
+        const retryOpts = (resumeAt) => ({
+            audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
+            forceResumeSec: resumeAt,
+        });
+
+        if (typeof window.Artplayer !== 'function') {
+            console.error('animarrPlayer: Artplayer not loaded from CDN');
+            showStartError(elementId, el, entry, { reason: 'Player library failed to load' },
+                () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(forceResumeSec), beginOp(elementId)));
+            return;
+        }
 
         // ── 1) Resume position ────────────────────────────────────────
         // When the caller forced a resume position (switchAudio carries over
@@ -2421,62 +2691,12 @@
                 if (typeof sec === 'number' && sec > 5) resumeSec = sec;
             } catch (e) { /* no resume info */ }
         }
-        if (abort.signal.aborted) return;
+        if (stale()) return;
 
-        // ── 2) Audio-sync offsets ─────────────────────────────────────
-        // Auto-calibration disabled 2026-05-27 — the WebAudio analyser-based
-        // measure() is producing nonsense values (0 or 40ms when reality is
-        // 400ms+) so it makes audio sync WORSE than the static default. The
-        // helper module stays around for getCached/setManual used by the Sync
-        // popup; only the calibrate() call is bypassed.
-        // Defaults: HW 70ms (empirical baseline for VAAPI/NVENC re-encode),
-        // SW 0ms (HEVC 10-bit stream-copy has no sensible default — user must
-        // dial in via Sync slider).
-        let audioOffsetMsHw = 70;
-        let audioOffsetMsSw = 0;
-        if (window.animarrCalibrate) {
-            const hw = window.animarrCalibrate.getCached('hw');
-            if (hw !== null) audioOffsetMsHw = hw;
-            const sw = window.animarrCalibrate.getCached('sw');
-            if (sw !== null) audioOffsetMsSw = sw;
-        }
-        if (abort.signal.aborted) return;
+        // ── 2) Audio-sync offsets (see readAudioOffsets) ──────────────
+        const offsets = readAudioOffsets();
 
         // ── 3) Start session ──────────────────────────────────────────
-        let manifestUrl = null;
-        let directPlayUrl = null;
-        let directStreamUrl = null;
-        // HEVC decode capability — tell the server it can ship HEVC as a
-        // stream-copy (Direct Stream, original quality) rather than re-encoding
-        // it to H.264. Constant per browser → memoize on window. hls.js gates on
-        // MediaSource.isTypeSupported; Safari/native HLS via canPlayType.
-        if (window.__animarrHevcOk === undefined) {
-            let ok = false, ok10 = false;
-            try {
-                const t   = 'video/mp4; codecs="hvc1.1.6.L93.B0"';   // HEVC Main (8-bit)
-                const t10 = 'video/mp4; codecs="hvc1.2.4.L153.B0"';  // HEVC Main10 (HDR10)
-                const v = document.createElement('video');
-                const can = (s) =>
-                       (!!window.MediaSource && !!window.MediaSource.isTypeSupported && window.MediaSource.isTypeSupported(s))
-                    || (!!window.ManagedMediaSource && !!window.ManagedMediaSource.isTypeSupported && window.ManagedMediaSource.isTypeSupported(s))
-                    || v.canPlayType(s) !== '';
-                ok   = can(t);
-                ok10 = can(t10);
-            } catch (e) { ok = false; ok10 = false; }
-            window.__animarrHevcOk   = ok;
-            window.__animarrHevc10Ok = ok10;
-        }
-        const startUrl = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
-            + (resumeSec > 0 ? '&seek=' + resumeSec.toFixed(2) : '')
-            + '&audioOffsetHwMs=' + audioOffsetMsHw
-            + '&audioOffsetSwMs=' + audioOffsetMsSw
-            + (audioTrackIndex > 0 ? '&audioTrackIndex=' + audioTrackIndex : '')
-            + (maxHeight > 0 ? '&maxHeight=' + maxHeight : '')
-            + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
-            + (window.__animarrHevcOk ? '&clientHevc=1' : '')
-            + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '')
-            + (externalAudioPath ? '&externalAudio=' + encodeURIComponent(externalAudioPath) : ''));
-
         // Kick the probe off IN PARALLEL with /api/hls/start. The probe is a
         // second ffprobe on the source and is NOT needed to start playback —
         // only to populate the audio-track / subtitle menus — so overlapping it
@@ -2486,46 +2706,45 @@
                 .then(r => (r.ok ? r.json() : null)).catch(() => null)
             : Promise.resolve(null);
 
-        for (let attempt = 0; attempt < 2; attempt++) {
+        let started = (opts && opts.prestarted) || null;
+        if (!started) {
             try {
-                const res = await fetch(startUrl, { method: 'POST', signal: abort.signal });
-                if (!res.ok) {
-                    if (attempt === 0 && res.status >= 500) {
-                        await new Promise(r => setTimeout(r, 500));
-                        continue;
-                    }
-                    throw new Error('start ' + res.status);
-                }
-                const data = await res.json();
-                entry.totalDuration = data.totalDuration || 0;
-                entry.resumeOffset  = data.resumeSec    || 0;
-                // Server-authoritative output info (Phase 0) — describes what
-                // the player ACTUALLY receives, including post-transcode
-                // codec/HDR state. Drives the right-side meta plashka so
-                // re-encoded streams correctly report e.g. "H.264 SDR" even
-                // when the source was HEVC HDR.
-                entry.output = data.output || null;
-                if (data.directPlayUrl) {
-                    directPlayUrl = data.directPlayUrl;
-                } else if (data.directStreamUrl) {
-                    // Progressive remux (MKV → native fMP4). No HLS session.
-                    directStreamUrl = data.directStreamUrl;
-                } else {
-                    entry.sessionToken = data.token;
-                    manifestUrl = data.manifestUrl;
-                }
-                break;
+                started = await startStream(mediaPath, {
+                    resumeSec, offsets, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath,
+                }, abort.signal);
             } catch (err) {
-                if (err.name === 'AbortError') return;
-                if (attempt === 1) {
-                    console.error('animarrPlayer: failed to start session', err);
-                    return;
-                }
-                await new Promise(r => setTimeout(r, 500));
+                if ((err && err.name === 'AbortError') || stale()) return;
+                console.error('animarrPlayer: failed to start session', err);
+                // No player came up — show why, with Retry + Back, instead of a
+                // black overlay that only a page reload got rid of.
+                showStartError(elementId, el, entry, err,
+                    () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(resumeSec), beginOp(elementId)));
+                return;
+            }
+            if (stale()) {
+                // Closed / superseded while the start was answering: teardown
+                // already ran without this token, so stop the session here.
+                stopSession(started.sessionToken);
+                return;
             }
         }
-        if (!manifestUrl && !directPlayUrl && !directStreamUrl) return;
-        if (abort.signal.aborted) return;
+        entry.sessionToken  = started.sessionToken;
+        entry.totalDuration = started.totalDuration;
+        entry.resumeOffset  = started.resumeSec;
+        entry.output        = started.output;
+        const manifestUrl     = started.manifestUrl;
+        const directPlayUrl   = started.directPlayUrl;
+        const directStreamUrl = started.directStreamUrl;
+        if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
+            showStartError(elementId, el, entry, { reason: 'Empty start response' },
+                () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(resumeSec), beginOp(elementId)));
+            return;
+        }
+        if (stale()) {
+            // Already torn down without knowing this token → stop it here.
+            if (WIRED.get(elementId) !== entry) stopSession(entry.sessionToken);
+            return;
+        }
 
         // ── 4) Probe ──────────────────────────────────────────────────
         let subtitleList = [];
@@ -2715,12 +2934,18 @@
             native.on('error', () => {
                 const pos = native.currentTime;
                 console.warn('animarr: native error — re-attaching as web at', pos, 's');
+                // Token taken now: a detach during the 200 ms gap makes it
+                // stale, so the timer can't resurrect a closed player.
+                const fallbackOp = beginOp(elementId);
                 teardown(elementId);
-                setTimeout(() => attach(elementId, dotnetRef, mediaPath, {
-                    audioTrackIndex: audioTrackIndex,
-                    forceResumeSec:  pos,
-                    forceWebPlayer:  true,
-                }), 200);
+                setTimeout(() => {
+                    if (!isLiveOp(elementId, fallbackOp)) return;
+                    attachStream(elementId, dotnetRef, mediaPath, {
+                        audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
+                        forceResumeSec:  pos,
+                        forceWebPlayer:  true,
+                    }, fallbackOp);
+                }, 200);
             });
             await native._start(playUrl, resumeSec);
             adapter = native;
@@ -2861,6 +3086,12 @@
             if (isDirectStream) adapter.enableDirectStream(directStreamBase, entry.totalDuration);
         }
 
+        if (stale()) {
+            // Closed while the native bridge was awaited: teardown ran before
+            // this adapter existed, so it never got destroyed.
+            if (WIRED.get(elementId) !== entry) { try { adapter.destroy(); } catch {} }
+            return;
+        }
         entry.art = art;
         entry.adapter = adapter;
         // What the CC menu marks active. null = "Off" — this used to fall back
@@ -2886,7 +3117,7 @@
                 // audio isn't the preferred language, so the extra warm-up is
                 // rare; guard against the user navigating away meanwhile.
                 setTimeout(() => {
-                    if (WIRED.has(elementId)) {
+                    if (WIRED.get(elementId) === entry) {
                         try { switchAudioTrack(elementId, want); } catch {}
                     }
                 }, 600);
@@ -3033,6 +3264,7 @@
             fullscreen: () => toggleFullscreen(adapter),
         });
         entry.hud = hudCtl;
+        entry.hudRoot = hudRoot;
 
         // Hide buttons that don't apply to current playback.
         hudCtl.setOffsetEnabled(!!offsetChannel);
@@ -3167,6 +3399,8 @@
         // and won't again — re-apply what it sent (no-op on a first attach,
         // where KEEP holds nothing yet and Blazor's call follows).
         applyMediaSession(elementId);
+        // restartStream's failure path re-opened the previous plan: say why.
+        if (opts && opts.toast) showToast(hudRoot, opts.toast.title, opts.toast.detail);
 
         try {
             const video = adapter.rawVideoElement();
@@ -3256,6 +3490,8 @@
     /** Player closed (or Blazor moving on to another episode): drop the
      *  stream AND everything kept for restarts of this element. */
     function detach(elementId) {
+        // Any start still in flight for this element is now stale (B27).
+        LIVE_OP.delete(elementId);
         teardown(elementId);
         KEEP.delete(elementId);
     }
@@ -3267,6 +3503,10 @@
         const entry = WIRED.get(elementId);
         if (!entry) return;
         entry.refRef.current = null;
+        // A switch still warming up its new stream: abort that start (the
+        // server then stops the ffmpeg it was spawning).
+        if (entry.pendingSwitch) { try { entry.pendingSwitch.abort(); } catch {} entry.pendingSwitch = null; }
+        if (entry.errorCleanup) { try { entry.errorCleanup(); } catch {} }
         if (entry.keepaliveTimer) { clearInterval(entry.keepaliveTimer); entry.keepaliveTimer = null; }
         if (entry.clockTimer)     { clearInterval(entry.clockTimer);     entry.clockTimer     = null; }
         if (entry.hud && entry.hud.cleanup) { try { entry.hud.cleanup(); } catch {} }
@@ -3304,42 +3544,124 @@
         WIRED.delete(elementId);
     }
 
+    /** The plan the current stream was started with — what a switch changes
+     *  one part of, and what a failed switch falls back to. */
+    function currentPlan(entry) {
+        return {
+            audioTrackIndex:   entry.currentAudIdx || 0,
+            externalAudioPath: entry.currentExternalAudioPath || null,
+            maxHeight:         entry.currentMaxHeight || 0,
+            maxBitrate:        entry.currentMaxBitrate || 0,
+        };
+    }
+
+    /** Player state to carry onto the restarted stream. */
+    function captureState(entry) {
+        const a = entry.adapter;
+        const v = a.rawVideoElement && a.rawVideoElement();
+        return {
+            pos:    a.currentTime || 0,
+            // The element's own flag: adapter.playing is false while merely
+            // buffering, which isn't a pause the user asked for.
+            paused: v ? v.paused : !a.playing,
+        };
+    }
+
+    /** Is the stream we froze for a switch still servable? Direct Play /
+     *  Direct Stream hold no server session, so yes. An HLS session usually
+     *  isn't: StartAsync reaps a path's older sessions as soon as a new start
+     *  for it arrives — even one that then fails — so ask (keepalive → 404). */
+    async function previousStreamAlive(entry) {
+        if (!entry.sessionToken) return true;
+        try {
+            const r = await fetch(apiUrl('/api/hls/keepalive?token=' + encodeURIComponent(entry.sessionToken)),
+                { method: 'POST' });
+            return r.ok;
+        } catch { return false; }
+    }
+
     /**
-     * Switch to a different audio track in the source. Tears down the current
-     * HLS session and starts a fresh one with the new `audioTrackIndex` baked
-     * into ffmpeg's -map. The current playback position is carried over as
-     * the resume point so playback continues from the same instant — albeit
-     * with a 1-3s gap while the new session warms up.
+     * Restart the stream with part of the plan changed (audio track / dub,
+     * quality caps). There's no live track switching in our single-stream
+     * transcode, so a new /api/hls/start is needed — but it's made BEFORE the
+     * current player is touched: that one just pauses on its frame (with
+     * Artplayer's spinner) while the new stream warms up, and is swapped out
+     * only once the start succeeded. If it fails (500 from a broken plan,
+     * 4xx, network), the user gets a toast with the reason and keeps the
+     * previous stream — resumed in place when still servable, else re-opened
+     * on the previous plan at the same position — and the menus still show
+     * the previous selection, since entry state only changes on success.
+     * (It used to tear the player down first and start blind; a failed start
+     * then left a black overlay with no HUD that survived SPA navigation.)
      *
-     * For Direct Play sessions (no sessionToken) the same dance applies — the
-     * URL doesn't change but the HUD's currentAudIdx state and any future
-     * audio-track-based logic should reflect the new selection.
+     * Each call takes a start token (beginOp): a newer switch aborts this
+     * one's start, and Back / Next / close (detach) make it stale, so a late
+     * answer stops its own session instead of resurrecting a player.
+     *
+     * @param {'audio'|'quality'} kind  Picks the failure message.
+     */
+    async function restartStream(elementId, changes, kind) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.adapter || !entry.dotnetRef || !entry.mediaPath) return;
+        const op = beginOp(elementId);
+        // A switch still warming up is superseded: abort its start.
+        if (entry.pendingSwitch) { try { entry.pendingSwitch.abort(); } catch {} }
+        const ctl = new AbortController();
+        entry.pendingSwitch = ctl;
+        // State as of the user's first click — a superseded switch already
+        // froze the player, so reuse its snapshot rather than read "paused".
+        const snap = entry.switchSnap || captureState(entry);
+        entry.switchSnap = snap;
+        const prev = currentPlan(entry);
+        const plan = Object.assign({}, prev, changes);
+
+        entry.adapter.pause();
+        if (entry.art) { try { entry.art.loading.show = true; } catch {} }
+
+        let started = null, failure = null;
+        try {
+            started = await startStream(entry.mediaPath,
+                Object.assign({ resumeSec: snap.pos, offsets: readAudioOffsets() }, plan), ctl.signal);
+        } catch (err) { failure = err; }
+        if (entry.pendingSwitch === ctl) entry.pendingSwitch = null;
+        if (!isLiveOp(elementId, op)) {
+            // Closed, next episode, or a newer switch took over meanwhile.
+            if (started) stopSession(started.sessionToken);
+            return;
+        }
+        entry.switchSnap = null;
+
+        if (started) {
+            await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
+                Object.assign({}, plan, { forceResumeSec: snap.pos, prestarted: started }), op);
+            return;
+        }
+
+        console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
+        const title  = label(elementId, kind === 'audio' ? 'errAudio' : 'errQuality');
+        const detail = (failure && failure.reason) || '';
+        const alive  = await previousStreamAlive(entry);
+        if (!isLiveOp(elementId, op) || WIRED.get(elementId) !== entry) return;
+        if (alive) {
+            if (entry.art) { try { entry.art.loading.show = false; } catch {} }
+            if (!snap.paused) entry.adapter.play();
+            showToast(entry.hudRoot, title, detail);
+            return;
+        }
+        await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
+            Object.assign({}, prev, { forceResumeSec: snap.pos, toast: { title, detail } }), op);
+    }
+
+    /**
+     * Switch to a different audio track in the source (`-map 0:a:N`), or to
+     * an external dub file (`-map 1:a:0`). Restarts the stream at the current
+     * position, keeping the quality caps — see restartStream.
      */
     async function switchAudio(elementId, sel) {
-        const entry = WIRED.get(elementId);
-        if (!entry || !entry.adapter) return;
-        const pos       = entry.adapter.currentTime || 0;
-        const dotnetRef = entry.dotnetRef;
-        const mediaPath = entry.mediaPath;
-        if (!dotnetRef || !mediaPath) return;
-        // Preserve the current quality cap across an audio switch (the old
-        // by-index helper dropped it, reverting to source resolution).
-        const maxHeight = entry.currentMaxHeight || 0;
-        const maxBitrate = entry.currentMaxBitrate || 0;
-        // Tear down the old session synchronously — teardown() handles HLS
-        // DELETE + Artplayer destroy + WIRED cleanup (KEEP survives).
-        teardown(elementId);
-        // Brief delay so the server has a tick to clean up the old ffmpeg
-        // process / tmp dir before we ask for a new one (avoids racing the
-        // dedup-by-source-path step inside StartAsync).
-        await new Promise(r => setTimeout(r, 100));
-        await attach(elementId, dotnetRef, mediaPath, {
-            audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? sel.audioTrackIndex : 0,
+        return restartStream(elementId, {
+            audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? Math.max(0, sel.audioTrackIndex) : 0,
             externalAudioPath: (sel && sel.externalAudioPath) || null,
-            maxHeight,
-            maxBitrate,
-            forceResumeSec:    pos,
-        });
+        }, 'audio');
     }
 
     // Back-compat thin wrapper: switch to an in-file audio stream by index
@@ -3349,29 +3671,16 @@
     }
 
     /**
-     * Switch output quality (max height cap). Tears down + restarts the HLS
-     * session with a new `maxHeight` (server downscales/re-encodes below the
-     * source height), carrying current position + audio track over. 0 = original.
-     * Same teardown+resume dance as switchAudioTrack (1-3s warm-up gap).
+     * Switch output quality: max height cap (server downscales / re-encodes
+     * below the source height) and/or bitrate cap, 0 = original. Restarts the
+     * stream at the current position, keeping the audio track and any
+     * external dub — see restartStream.
      */
     async function switchQuality(elementId, maxHeight, maxBitrate) {
-        const entry = WIRED.get(elementId);
-        if (!entry || !entry.adapter) return;
-        const pos       = entry.adapter.currentTime || 0;
-        const dotnetRef = entry.dotnetRef;
-        const mediaPath = entry.mediaPath;
-        const audioTrackIndex = entry.currentAudIdx || 0;
-        if (!dotnetRef || !mediaPath) return;
-        teardown(elementId);
-        await new Promise(r => setTimeout(r, 100));
-        await attach(elementId, dotnetRef, mediaPath, {
-            audioTrackIndex,
-            // Keep the active external dub across a quality change.
-            externalAudioPath: entry.currentExternalAudioPath || null,
-            maxHeight,
-            maxBitrate: maxBitrate || 0,
-            forceResumeSec: pos,
-        });
+        return restartStream(elementId, {
+            maxHeight:  Math.max(0, maxHeight || 0),
+            maxBitrate: Math.max(0, maxBitrate || 0),
+        }, 'quality');
     }
 
     /** Session metadata from Blazor (title, skip segments, up-next, trickplay,

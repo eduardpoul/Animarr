@@ -1165,9 +1165,22 @@ else
                     });
                 }
 
+                // labels: the player's own error / toast strings (a failed
+                // start, or a quality / audio switch that fell back).
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath,
-                    new { autoAudio = true });
+                    new
+                    {
+                        autoAudio = true,
+                        labels = new
+                        {
+                            errQuality = L["player.error_quality"],
+                            errAudio   = L["player.error_audio"],
+                            errStart   = L["player.error_start"],
+                            retry      = L["player.error_retry"],
+                            back       = L["media_detail.btn_back"],
+                        },
+                    });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title
