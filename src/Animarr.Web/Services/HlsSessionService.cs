@@ -730,7 +730,7 @@ public sealed partial class HlsSessionService : IDisposable
         // B-frames via -bf 0; TS carries PCR timing) — which is why the packet
         // probe runs only here instead of on every probe.
         var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy && probe is not null
-            ? Math.Clamp(await MeasureReorderDelayAsync(fullPath, ct) ?? probe.ReorderDelaySec, 0.0, 1.0)
+            ? Math.Clamp(await MeasureReorderDelayAsync(fullPath, probe.VideoStreamIndex, ct) ?? probe.ReorderDelaySec, 0.0, 1.0)
             : 0.0;
         var audioOffsetSec = reorderDelaySec + (externalAudioPath is not null
             // External dub sync is a different problem from the source's own A/V
@@ -776,7 +776,10 @@ public sealed partial class HlsSessionService : IDisposable
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
             externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false,
-            startSegment: startSegment, toneMapper: toneMapper, owner: who);
+            startSegment: startSegment, toneMapper: toneMapper, owner: who)
+        {
+            VideoStreamIndex = probe?.VideoStreamIndex ?? -1,
+        };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
         // mid-start — the endpoint passes RequestAborted): stop the session's
@@ -1049,7 +1052,10 @@ public sealed partial class HlsSessionService : IDisposable
             // AudioCodec too: with null the TS plan's passthrough decision
             // flipped to re-encode after the first scrub (5.1 → AAC stereo,
             // and MP3 no longer matching the CODECS the playlist advertised).
-            var miniProbe = new ProbeInfo(0, session.VideoCodec, session.AudioCodec, 0, 0, null, false, session.Is10Bit, null, 0, null);
+            var miniProbe = new ProbeInfo(0, session.VideoCodec, session.AudioCodec, 0, 0, null, false, session.Is10Bit, null, 0, null)
+            {
+                VideoStreamIndex = session.VideoStreamIndex,
+            };
             var args = BuildFfmpegArgs(session.SourcePath, sourceSeekSec, session.OutputDir,
                 Path.Combine(session.OutputDir, "_ffmpeg.m3u8"),
                 "_ffmpeg_master.m3u8",

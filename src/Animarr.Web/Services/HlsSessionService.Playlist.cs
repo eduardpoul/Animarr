@@ -20,7 +20,18 @@ public sealed partial class HlsSessionService
         // Estimated B-frame reorder delay (seconds) = has_b_frames / fps — used
         // as the default audio -itsoffset on the fMP4 stream-copy path so the
         // composition delay (audio-ahead) is corrected without re-encoding.
-        double ReorderDelaySec = 0);
+        double ReorderDelaySec = 0)
+    {
+        /// <summary>Absolute index of the main video stream (PickMainVideo) —
+        /// mapped as <c>0:N</c>. -1 = unknown → <c>0:V:0?</c>.</summary>
+        public int VideoStreamIndex { get; init; } = -1;
+
+        /// <summary>The ffmpeg <c>-map</c> for the video: the exact stream the
+        /// probe analysed, so a cover picture in front of it is never encoded.</summary>
+        public string VideoMap => VideoStreamIndex >= 0
+            ? "0:" + VideoStreamIndex.ToString(CultureInfo.InvariantCulture)
+            : "0:V:0?";
+    }
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once

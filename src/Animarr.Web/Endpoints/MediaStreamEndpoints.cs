@@ -132,7 +132,7 @@ internal static class MediaStreamEndpoints
         //    hevc_metadata bitstream filter so the player sees plain HDR10.
         // Cached per file (MediaProbeCache) — every ?seek= reload lands here,
         // and the playback start already probed the same file.
-        var (videoCodec, hasDolbyVision) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
+        var (videoCodec, hasDolbyVision, videoMap) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
         if (http.RequestAborted.IsCancellationRequested) return Results.Empty;   // seeked away mid-probe
 
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
@@ -155,7 +155,7 @@ internal static class MediaStreamEndpoints
         }
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",            // first video stream if present
+            "-map", videoMap,            // the main video (never a cover picture in front of it)
             "-map", "0:a:0?",            // first audio stream only — multi-audio
                                          // selection in fMP4 isn't browser-friendly
             "-c:v", "copy",              // video stream-copy
@@ -489,35 +489,42 @@ internal static class MediaStreamEndpoints
     /// <summary>First video stream's codec + Dolby-Vision presence so /api/video
     /// can branch on them. Returns ("hevc", true) for HDR10-compatible DV
     /// profile 8 files. Read from the cached <c>-show_streams</c> JSON (the
-    /// first <c>codec_type=video</c> stream = ffprobe's <c>v:0</c>) instead of a
-    /// dedicated ffprobe per request.</summary>
-    private static async Task<(string? codec, bool hasDolbyVision)> PeekVideoCodecAsync(
+    /// first <c>codec_type=video</c> stream that isn't cover art = ffmpeg's
+    /// <c>V:0</c>, the stream the remux maps) instead of a dedicated ffprobe per
+    /// request.</summary>
+    private static async Task<(string? codec, bool hasDolbyVision, string videoMap)> PeekVideoCodecAsync(
         MediaProbeCache probeCache, string fullPath, CancellationToken ct)
     {
         try
         {
             var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
-            if (json is null) return (null, false);
+            if (json is null) return (null, false, DefaultVideoMap);
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, false);
-            foreach (var s in streams.EnumerateArray())
-            {
-                if (!s.TryGetProperty("codec_type", out var type) || type.GetString() != "video") continue;
-                var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
-                bool dv = false;
-                if (s.TryGetProperty("side_data_list", out var sd) && sd.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    foreach (var el in sd.EnumerateArray())
-                        if (el.TryGetProperty("side_data_type", out var sdt)
-                            && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
-                            dv = true;
-                return (codec, dv);
-            }
-            return (null, false);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, false, DefaultVideoMap);
+            // Same pick as the HLS probe: never a cover picture in front of the video.
+            var pos = HlsSessionService.PickMainVideo(streams);
+            if (pos < 0) return (null, false, DefaultVideoMap);
+            var s = streams[pos];
+            var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
+            bool dv = false;
+            if (s.TryGetProperty("side_data_list", out var sd) && sd.ValueKind == System.Text.Json.JsonValueKind.Array)
+                foreach (var el in sd.EnumerateArray())
+                    if (el.TryGetProperty("side_data_type", out var sdt)
+                        && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
+                        dv = true;
+            var map = s.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var index)
+                ? "0:" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : DefaultVideoMap;
+            return (codec, dv, map);
         }
         catch
         {
-            return (null, false);
+            return (null, false, DefaultVideoMap);
         }
     }
+
+    /// <summary>Video mapping without a probe: the first video stream that
+    /// isn't an attached picture.</summary>
+    private const string DefaultVideoMap = "0:V:0?";
 }

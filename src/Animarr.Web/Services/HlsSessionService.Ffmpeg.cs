@@ -47,6 +47,9 @@ public sealed partial class HlsSessionService
         var hwDecodeCodec = probe?.Is10Bit == true
             && string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase)
             ? null : videoCodec;
+        // The exact stream the probe picked as the video (never a cover
+        // picture in front of it); "0:V:0?" when there was no probe.
+        var videoMap = probe?.VideoMap ?? "0:V:0?";
 
         // PTS positioning rules (applies to fMP4 paths; TS doesn't need
         // -copyts because PCR carries absolute time inside each segment):
@@ -61,23 +64,23 @@ public sealed partial class HlsSessionService
         {
             case HlsPlan.TsStreamCopy:
                 BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex,
-                    externalAudioPath, audioOffsetSec);
+                    externalAudioPath, audioOffsetSec, videoMap);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper);
+                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper, videoMap);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper);
+                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper, videoMap);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
-                    externalAudioPath);
+                    externalAudioPath, videoMap);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath, maxBitrate, toneMapper);
+                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath, maxBitrate, toneMapper, videoMap);
                 break;
         }
 
@@ -262,7 +265,7 @@ public sealed partial class HlsSessionService
     /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
     private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
         string? audioCodec, int startNumber, int audioTrackIndex,
-        string? externalAudioPath = null, double audioOffsetSec = 0.0)
+        string? externalAudioPath = null, double audioOffsetSec = 0.0, string videoMap = "0:V:0?")
     {
         bool ext = externalAudioPath is not null;
 
@@ -304,7 +307,7 @@ public sealed partial class HlsSessionService
         }
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",
+            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
@@ -329,7 +332,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None)
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -429,7 +432,7 @@ public sealed partial class HlsSessionService
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",
+            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
             "-c:v", "h264_vaapi",
@@ -453,7 +456,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None)
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -511,7 +514,7 @@ public sealed partial class HlsSessionService
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",
+            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
             "-c:v", "h264_nvenc",
@@ -539,7 +542,8 @@ public sealed partial class HlsSessionService
     /// downscaled rung on a small screen.</summary>
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, HdrToneMapper toneMapper = HdrToneMapper.None)
+        string? externalAudioPath = null, int maxBitrate = 0, HdrToneMapper toneMapper = HdrToneMapper.None,
+        string videoMap = "0:V:0?")
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -572,7 +576,7 @@ public sealed partial class HlsSessionService
         if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",
+            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
             "-c:v", "libx264",
@@ -598,7 +602,7 @@ public sealed partial class HlsSessionService
     /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
         int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
-        string? externalAudioPath = null)
+        string? externalAudioPath = null, string videoMap = "0:V:0?")
     {
         // A second input is needed either to shift the source's own audio
         // (-itsoffset) OR to pull audio from an external dub file. The external
@@ -634,7 +638,7 @@ public sealed partial class HlsSessionService
         }
         args.AddRange(new[]
         {
-            "-map", "0:v:0?",
+            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",

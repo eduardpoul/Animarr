@@ -30,9 +30,10 @@ public sealed class MediaProbeCache
         ["-v", "error", "-print_format", "json", "-show_format", "-show_streams"];
 
     // First ~48 video packets (a handful of GOPs) from the file start — enough
-    // to see the steady-state B-pyramid depth, cheap to read.
-    private static readonly string[] ReorderPacketsArgs =
-        ["-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#48",
+    // to see the steady-state B-pyramid depth, cheap to read. Selects the main
+    // video stream the HLS plans map (by index), never a cover picture.
+    private static string[] ReorderPacketsArgs(string streamSelector) =>
+        ["-v", "error", "-select_streams", streamSelector, "-read_intervals", "%+#48",
          "-show_entries", "packet=pts_time,dts_time", "-of", "csv=p=0"];
 
     private readonly ILogger<MediaProbeCache> _logger;
@@ -57,9 +58,16 @@ public sealed class MediaProbeCache
         => GetAsync("streams", StreamsArgs, fullPath, ct);
 
     /// <summary>pts,dts CSV of the first video packets — input for the fMP4
-    /// stream-copy plan's reorder-delay measurement. null when ffprobe failed.</summary>
-    public Task<string?> GetReorderPacketsCsvAsync(string fullPath, CancellationToken ct = default)
-        => GetAsync("reorder", ReorderPacketsArgs, fullPath, ct);
+    /// stream-copy plan's reorder-delay measurement. null when ffprobe failed.
+    /// <paramref name="videoStreamIndex"/> = absolute index of the main video
+    /// (-1 = "V:0", the first video that isn't an attached picture).</summary>
+    public Task<string?> GetReorderPacketsCsvAsync(string fullPath, int videoStreamIndex = -1, CancellationToken ct = default)
+    {
+        var selector = videoStreamIndex >= 0
+            ? videoStreamIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "V:0";
+        return GetAsync("reorder:" + selector, ReorderPacketsArgs(selector), fullPath, ct);
+    }
 
     private Task<string?> GetAsync(string kind, string[] args, string fullPath, CancellationToken ct)
     {

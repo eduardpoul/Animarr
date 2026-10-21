@@ -25,6 +25,9 @@ public sealed partial class HlsSessionService
         public string? AudioCodec { get; }
         // Source bit depth, likewise for the restart (Hi10P must not hw-decode).
         public bool    Is10Bit    { get; }
+        // Absolute index of the probed main video stream (-1 = unknown) — the
+        // restart maps the same stream, never a cover picture in front of it.
+        public int     VideoStreamIndex { get; init; } = -1;
         public HlsPlan Plan       { get; }
         public double  AudioOffsetSec { get; }
         public double  TotalDurationSec { get; }

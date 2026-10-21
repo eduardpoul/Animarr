@@ -40,15 +40,23 @@ public sealed partial class HlsSessionService
             string? videoCodecsAttr = null;
             string? audioCodecsAttr = null;
             double reorderDelaySec = 0;   // B-frame reorder delay → audio itsoffset for stream-copy
+            int videoStreamIndex = -1;    // absolute stream index of the main video (the `-map 0:N`)
 
             if (root.TryGetProperty("streams", out var streams))
             {
+                // The main video is picked up front, not "the first video
+                // stream": cover art often comes first and picking it sent the
+                // plan to a re-encode of one still image (see PickMainVideo).
+                var mainVideo = PickMainVideo(streams);
+                int pos = -1;
                 foreach (var s in streams.EnumerateArray())
                 {
+                    pos++;
                     if (!s.TryGetProperty("codec_type", out var ct2)) continue;
                     var type = ct2.GetString();
-                    if (type == "video" && vCodec is null)
+                    if (type == "video" && pos == mainVideo)
                     {
+                        videoStreamIndex = s.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var ixv) ? ixv : -1;
                         if (s.TryGetProperty("codec_name", out var cn)) vCodec = cn.GetString();
                         if (s.TryGetProperty("width",  out var w) && w.TryGetInt32(out var wi)) width  = wi;
                         if (s.TryGetProperty("height", out var h) && h.TryGetInt32(out var hi)) height = hi;
@@ -137,7 +145,10 @@ public sealed partial class HlsSessionService
             // second ffprobe only the fMP4 stream-copy plan needs, so StartAsync
             // runs it for that plan alone instead of on every probe.
             return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
-                colorTransfer, audioChannels, audioLanguage, reorderDelaySec);
+                colorTransfer, audioChannels, audioLanguage, reorderDelaySec)
+            {
+                VideoStreamIndex = videoStreamIndex,
+            };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -151,6 +162,55 @@ public sealed partial class HlsSessionService
             return null;
         }
     }
+
+    /// <summary>
+    /// Position (in ffprobe's <c>streams</c> array) of the stream to play as THE
+    /// video, or -1 when there is none.
+    ///
+    /// Not simply the first video stream: a cover picture can come first. As
+    /// an <c>attached_pic</c> (MP4 covr, Matroska image attachment) it is
+    /// skipped outright; muxed as a real one-frame video track (a PNG/MJPEG
+    /// track in an MKV — the case ffmpeg's <c>V</c> specifier can't see, as
+    /// the disposition is 0) a non-still-image codec wins over it. A file whose
+    /// only video is MJPEG (old camcorder AVIs) still gets it.
+    /// </summary>
+    internal static int PickMainVideo(JsonElement streams)
+    {
+        if (streams.ValueKind != JsonValueKind.Array) return -1;
+        int pos = -1, firstStill = -1;
+        foreach (var s in streams.EnumerateArray())
+        {
+            pos++;
+            if (!s.TryGetProperty("codec_type", out var t) || t.GetString() != "video") continue;
+            if (IsAttachedPicture(s)) continue;
+            var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
+            if (!IsStillImageCodec(codec)) return pos;
+            if (firstStill < 0) firstStill = pos;
+        }
+        return firstStill;
+    }
+
+    /// <summary>The main video's absolute stream index (<c>-map 0:N</c>), or -1.</summary>
+    internal static int MainVideoStreamIndex(JsonElement streams)
+    {
+        var pos = PickMainVideo(streams);
+        if (pos < 0) return -1;
+        var s = streams[pos];
+        return s.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var v) ? v : -1;
+    }
+
+    /// <summary>ffprobe <c>disposition.attached_pic</c> = 1: an embedded cover
+    /// picture, not a video track.</summary>
+    internal static bool IsAttachedPicture(JsonElement stream)
+        => stream.TryGetProperty("disposition", out var disp)
+           && disp.ValueKind == JsonValueKind.Object
+           && disp.TryGetProperty("attached_pic", out var ap)
+           && ap.ValueKind == JsonValueKind.Number && ap.TryGetInt32(out var v) && v != 0;
+
+    /// <summary>Codecs that carry pictures rather than movies (as a "video"
+    /// stream they're a cover / thumbnail track).</summary>
+    private static bool IsStillImageCodec(string? codec) => (codec ?? "").ToLowerInvariant() is
+        "mjpeg" or "png" or "apng" or "bmp" or "gif" or "webp" or "tiff" or "jpegls" or "jpeg2000" or "qoi";
 
     /// <summary>Parse an ffprobe frame-rate string ("24000/1001", "25", "0/0")
     /// into fps. Returns 0 when unknown/zero so callers can skip it.</summary>
@@ -173,12 +233,13 @@ public sealed partial class HlsSessionService
     /// ahead — and unlike has_b_frames it captures deep, irregular pyramids
     /// (UHD remuxes). Returns the delay in seconds, or null on probe failure
     /// (caller keeps the has_b_frames estimate). 0 = no reorder (no B-frames).</summary>
-    private async Task<double?> MeasureReorderDelayAsync(string fullPath, CancellationToken ct)
+    private async Task<double?> MeasureReorderDelayAsync(string fullPath, int videoStreamIndex, CancellationToken ct)
     {
         try
         {
-            // First ~48 packets' pts,dts (MediaProbeCache, cached per file).
-            var outp = await _probeCache.GetReorderPacketsCsvAsync(fullPath, ct);
+            // First ~48 packets' pts,dts of the main video stream
+            // (MediaProbeCache, cached per file).
+            var outp = await _probeCache.GetReorderPacketsCsvAsync(fullPath, videoStreamIndex, ct);
             if (outp is null) return null;
 
             double max = 0;
