@@ -671,10 +671,12 @@ internal static class MediaEndpoints
         // image-cache, so a 200-episode donghua stops repeating one season poster.
         app.MapGet(ApiRoutes.MediaEpisodeThumb, async (
             Guid id, int season, int episode,
+            HttpContext http,
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
             TmdbClient tmdb,
             MediaCachePaths cachePaths,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache memCache,
             IUserContext userCtx,
             CancellationToken ct) =>
         {
@@ -684,41 +686,67 @@ internal static class MediaEndpoints
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
 
+            // A found thumb never changes for its URL (the cache file is keyed by
+            // season/episode and kept), but the URL carries no version stamp — so
+            // a day, not immutable. private: role folders make it per-user.
+            IResult Thumb(string path)
+            {
+                http.Response.Headers.CacheControl = "private, max-age=86400";
+                return Results.File(path, "image/jpeg", enableRangeProcessing: true);
+            }
+
             static bool Ok(string p) => File.Exists(p) && new FileInfo(p).Length > 0;
             var cache = Path.Combine(cachePaths.ForFolder(item.FolderId), $"ep-s{season}e{episode}.jpg");
             if (Ok(cache))
-                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+                return Thumb(cache);
 
+            // Per-item cached: a season grid's first open no longer re-walks and
+            // re-parses the whole folder for every card.
             var files = await resolver.ResolveAsync(id, ct);
             var f = files.FirstOrDefault(x => (x.Season ?? 1) == season && x.Episode == episode);
 
-            // 1) TMDB episode still. For donghua absolute/re-split layouts the
-            //    matching TMDB episode is the absolute one (single TMDB season).
-            if (item.TmdbId is int tmdbId && tmdbId > 0)
+            // This card fell back to the show's art recently for the same file
+            // (no still, no frame) — skip straight to that instead of repeating
+            // the TMDB lookup and the ffmpeg spawn on every view.
+            if (!EpisodeThumbMisses.IsKnown(memCache, id, season, episode, f?.FilePath))
             {
-                var tmdbSeason = f?.AbsoluteEpisode is not null ? 1 : season;
-                var tmdbEp     = f?.AbsoluteEpisode ?? episode;
-                try
+                // 1) TMDB episode still. For donghua absolute/re-split layouts the
+                //    matching TMDB episode is the absolute one (single TMDB season).
+                //    One (cached) season lookup serves every card of the grid.
+                if (item.TmdbId is int tmdbId && tmdbId > 0)
                 {
-                    var detail = await tmdb.GetSeasonDetailAsync(tmdbId, tmdbSeason, ct: ct);
-                    var still  = detail?.Episodes?.FirstOrDefault(e => e.EpisodeNumber == tmdbEp)?.StillPath;
-                    if (!string.IsNullOrEmpty(still)
-                        && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
-                        && Ok(cache))
-                        return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+                    var tmdbSeason = f?.AbsoluteEpisode is not null ? 1 : season;
+                    var tmdbEp     = f?.AbsoluteEpisode ?? episode;
+                    try
+                    {
+                        var stills = await TmdbSeasonStills.GetAsync(memCache, tmdb, tmdbId, tmdbSeason, ct);
+                        string? still = null;
+                        stills?.TryGetValue(tmdbEp, out still);
+                        if (!string.IsNullOrEmpty(still)
+                            && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
+                            && Ok(cache))
+                            return Thumb(cache);
+                    }
+                    catch { /* network/TMDB hiccup — fall through to ffmpeg */ }
                 }
-                catch { /* network/TMDB hiccup — fall through to ffmpeg */ }
+
+                // 2) ffmpeg frame from the on-disk video.
+                if (f?.FilePath is string fp && File.Exists(fp)
+                    && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
+                    return Thumb(cache);
             }
 
-            // 2) ffmpeg frame from the on-disk video.
-            if (f?.FilePath is string fp && File.Exists(fp)
-                && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
-                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
-
             // 3) Last resort: the show's own art, so the card is never broken.
+            //    Not written as this episode's thumb (a still or a frame may turn
+            //    up later): remembered for a while instead, and served with
+            //    no-cache so the client picks up the real thumb once there is one.
             var fallback = item.FanartPath ?? item.PosterPath;
             if (!string.IsNullOrEmpty(fallback) && File.Exists(fallback))
+            {
+                EpisodeThumbMisses.Remember(memCache, id, season, episode, f?.FilePath);
+                http.Response.Headers.CacheControl = "private, no-cache";
                 return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
+            }
 
             return Results.NotFound();
         })
