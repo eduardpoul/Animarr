@@ -6,7 +6,12 @@
 // or straight after the last poster when the library runs out.
 
 export function initLibGrid(grid) {
-    if (!grid || grid.__libRo) return;
+    if (!grid) return;
+    // Already wired → just re-trim. Home calls this after every render, and
+    // the posters are @key'ed: on a filter change Blazor MOVES the existing
+    // poster nodes, so an inline display:none set for a node's old position
+    // would travel with it (a gap in row 1, an extra card past the tile).
+    if (grid.__libRo) { grid.__libResize(); return; }
 
     const apply = () => {
         const style = getComputedStyle(grid);

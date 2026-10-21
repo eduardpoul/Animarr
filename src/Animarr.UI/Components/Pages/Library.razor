@@ -74,10 +74,13 @@
     else
     {
         <div class="catalog-grid">
-            @* Cap rendered items so the catalog stays snappy at 1000+ entries. *@
+            @* Cap rendered items so the catalog stays snappy at 1000+ entries.
+               @key (Ids are unique — _allItems is de-duplicated by Id): a chip
+               change moves the existing cards instead of feeding every grid
+               position a new Item (re-render + <img> src swap / re-request). *@
             @foreach (var item in _filtered.Take(240))
             {
-                <Poster Item="@item" />
+                <Poster @key="item.Id" Item="@item" />
             }
         </div>
         @if (_filtered.Count > 240)
