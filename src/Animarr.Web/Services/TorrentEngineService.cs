@@ -1022,7 +1022,11 @@ public class TorrentEngineService : BackgroundService
         {
             var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == path);
             if (sel is null)
-                record.FileSelections.Add(new TorrentFileSelection { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = path, Priority = prio });
+                // Through the DbSet, not record.FileSelections: a new row with
+                // its Guid key already set, found via the navigation, is taken
+                // for an existing one (Id is ValueGeneratedOnAdd) → an UPDATE of
+                // 0 rows → DbUpdateConcurrencyException, and the whole Save 500s.
+                ctx.TorrentFileSelections.Add(new TorrentFileSelection { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = path, Priority = prio });
             else
                 sel.Priority = prio;
         }
@@ -1314,7 +1318,8 @@ public class TorrentEngineService : BackgroundService
         if (record is null) return;
         var sel = record.FileSelections.FirstOrDefault(s => s.FilePath == filePath);
         if (sel is null)
-            record.FileSelections.Add(new TorrentFileSelection { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = filePath, Priority = priority });
+            // Through the DbSet — see SetFilePrioritiesBatchAsync.
+            ctx.TorrentFileSelections.Add(new TorrentFileSelection { Id = Guid.NewGuid(), TorrentId = record.Id, FilePath = filePath, Priority = priority });
         else
             sel.Priority = priority;
         await ctx.SaveChangesAsync();

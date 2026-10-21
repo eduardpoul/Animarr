@@ -115,6 +115,7 @@
   "torrent_edit.toast_saved": "Збережено.",
   "torrent_edit.toast_priorities_saved": "Пріоритети збережено.",
   "torrent_edit.toast_limits_updated": "Ліміти оновлено.",
+  "torrent_edit.toast_save_failed_fmt": "Не вдалося зберегти: {0}",
   "torrent_history.title": "Історія торентів",
   "torrent_history.back_link": "Активні торенти",
   "torrent_history.empty": "Історія порожня — завершені торенти з’являться тут.",

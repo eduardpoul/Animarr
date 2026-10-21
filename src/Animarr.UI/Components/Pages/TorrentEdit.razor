@@ -18,6 +18,7 @@
 
 @implements IAsyncDisposable
 @inject IAnimarrApiClient Api
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 
@@ -190,6 +191,9 @@
     private int _dlLimit;
     private int _ulLimit;
     private Dictionary<string, int> _priorities = new();
+    /// <summary>Priorities as loaded — the tree editor mutates
+    /// <see cref="_priorities"/> in place, so Save diffs against this copy.</summary>
+    private Dictionary<string, int> _loadedPriorities = new();
     private List<TorrentFileNodeDto> _files = new();
     private List<TorrentFileTreeEditor.FileItem> _fileItems = new();
     private Dictionary<string, double> _fileProgress = new();
@@ -265,6 +269,7 @@
                 }
                 catch { _files = new(); }
                 _priorities   = _files.ToDictionary(f => f.Path, f => f.Priority);
+                _loadedPriorities = new(_priorities);
                 _fileItems    = _files.Select(f => new TorrentFileTreeEditor.FileItem(f.Path, f.Size)).ToList();
                 _fileProgress = _files.ToDictionary(f => f.Path, f => f.Progress);
             }
@@ -366,11 +371,9 @@
         StateHasChanged();
         try
         {
-            var updates = _priorities
-                .Select(kv => new TorrentFileSelectionUpdate(kv.Key, kv.Value))
-                .ToArray();
-            await Api.UpdateTorrentFileSelectionsAsync(_record.Id, new UpdateFileSelectionsRequest(updates));
-
+            // Limits + options first: they don't depend on the file list, so a
+            // failed priority write can't take them down with it (it used to go
+            // first and its error was swallowed — Save silently did nothing).
             await Api.UpdateTorrentAsync(_record.Id, new UpdateTorrentRequest(
                 FolderWatcherId:        _record.FolderWatcherId,
                 StopAfterDownload:      _stopAfterDownload,
@@ -380,9 +383,19 @@
                 SkipSubfolderStructure: _skipSubfolderStructure,
                 SuppressRootFolder:     _record.SuppressRootFolder,
                 CustomRootFolderName:   _record.CustomRootFolderName));
+
+            // Only the files whose priority the user actually changed.
+            var updates = _priorities
+                .Where(kv => !_loadedPriorities.TryGetValue(kv.Key, out var p) || p != kv.Value)
+                .Select(kv => new TorrentFileSelectionUpdate(kv.Key, kv.Value))
+                .ToArray();
+            if (updates.Length > 0)
+                await Api.UpdateTorrentFileSelectionsAsync(_record.Id, new UpdateFileSelectionsRequest(updates));
+
             await LoadAsync();
+            Toasts.ShowSuccess(L["torrent_edit.toast_saved"]);
         }
-        catch { /* swallow */ }
+        catch (Exception ex) { Toasts.ShowError(L.Get("torrent_edit.toast_save_failed_fmt", ex.Message)); }
         finally { _saving = false; StateHasChanged(); }
     }
 

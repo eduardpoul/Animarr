@@ -115,6 +115,7 @@
   "torrent_edit.toast_saved": "Gespeichert.",
   "torrent_edit.toast_priorities_saved": "Prioritäten gespeichert.",
   "torrent_edit.toast_limits_updated": "Limits aktualisiert.",
+  "torrent_edit.toast_save_failed_fmt": "Speichern fehlgeschlagen: {0}",
   "torrent_history.title": "Torrent-Verlauf",
   "torrent_history.back_link": "Aktive Torrents",
   "torrent_history.empty": "Verlauf ist leer — abgeschlossene Torrents erscheinen hier.",

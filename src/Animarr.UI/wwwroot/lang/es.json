@@ -115,6 +115,7 @@
   "torrent_edit.toast_saved": "Guardado.",
   "torrent_edit.toast_priorities_saved": "Prioridades guardadas.",
   "torrent_edit.toast_limits_updated": "Límites actualizados.",
+  "torrent_edit.toast_save_failed_fmt": "No se pudo guardar: {0}",
   "torrent_history.title": "Historial de torrents",
   "torrent_history.back_link": "Torrents activos",
   "torrent_history.empty": "El historial está vacío — los torrents completados aparecerán aquí.",
