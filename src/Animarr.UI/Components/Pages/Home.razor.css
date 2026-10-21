@@ -156,3 +156,11 @@
         column-gap: var(--space-5);
     }
 }
+
+/* Folder view: every title of the folder — no row clamp (the JS skips its
+   trim for this class too). */
+.home-lib__grid.home-lib__grid--all {
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    overflow: visible;
+}

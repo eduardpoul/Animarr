@@ -116,21 +116,28 @@
                         }
                         else
                         {
-                            @* Render with headroom (41 covers ~21 columns × 2
-                               rows); the collocated JS trims to the exact slot
-                               count for the current width. @key keeps a card
-                               with its title across filter changes (Ids are
-                               unique — de-duplicated by Id). *@
-                            <div class="home-lib__grid" @ref="_libGridRef">
-                                @foreach (var item in _filtered.Take(41))
+                            @* Whole library (no folder picked): render with
+                               headroom (41 covers ~21 columns × 2 rows); the
+                               collocated JS trims to the exact slot count for
+                               the current width and the "view all" tile closes
+                               the grid. A folder view is the folder — every
+                               title, no cap, no tile. @key keeps a card with
+                               its title across filter changes (Ids are unique
+                               — de-duplicated by Id). *@
+                            var showAll = _activeSection.HasValue;
+                            <div class="home-lib__grid @(showAll ? "home-lib__grid--all" : "")" @ref="_libGridRef">
+                                @foreach (var item in showAll ? _filtered : _filtered.Take(41))
                                 {
                                     <Poster @key="item.Id" Item="@item" />
                                 }
-                                <a class="home-lib__more tv-focus" href="/library" aria-label="@L["home.view_all"]">
-                                    <span class="home-lib__more-icon"><DIcon Name="grid" Size="26" /></span>
-                                    <span class="home-lib__more-label">@L["home.view_all"]</span>
-                                    <span class="home-lib__more-count">@_filtered.Count</span>
-                                </a>
+                                @if (!showAll)
+                                {
+                                    <a class="home-lib__more tv-focus" href="/library" aria-label="@L["home.view_all"]">
+                                        <span class="home-lib__more-icon"><DIcon Name="grid" Size="26" /></span>
+                                        <span class="home-lib__more-label">@L["home.view_all"]</span>
+                                        <span class="home-lib__more-count">@_filtered.Count</span>
+                                    </a>
+                                }
                             </div>
                         }
                     </section>

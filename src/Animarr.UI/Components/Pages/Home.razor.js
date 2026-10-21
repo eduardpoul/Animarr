@@ -14,6 +14,12 @@ export function initLibGrid(grid) {
     if (grid.__libRo) { grid.__libResize(); return; }
 
     const apply = () => {
+        // Folder view shows every title: undo any trim from the capped view
+        // (the same grid element switches between the two).
+        if (grid.classList.contains('home-lib__grid--all')) {
+            for (const k of grid.children) k.style.display = '';
+            return;
+        }
         const style = getComputedStyle(grid);
         // Resolved template lists the actual tracks ("210px 210px …") for
         // both auto-fill and the phone's repeat(2, 1fr).
