@@ -49,16 +49,17 @@ public class FolderWatcherService(
         logger.LogInformation("FolderWatcherService starting.");
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var enabledFolders = await db.FolderWatchers
-            .Where(f => f.WatchEnabled)
+        // Only sections carry live watchers (see StartWatcherInternal).
+        var enabledSections = await db.FolderWatchers
+            .Where(f => f.WatchEnabled && f.IsSection)
             .ToListAsync(cancellationToken);
 
-        foreach (var folder in enabledFolders)
+        foreach (var folder in enabledSections)
         {
             StartWatcherInternal(folder.Id, folder.Path, folder.IsSection, folder.FlatSection);
         }
 
-        logger.LogInformation("Started {Count} folder watchers.", _watchers.Count);
+        logger.LogInformation("Started {Count} section watchers.", _watchers.Count);
 
         // Startup reconcile: drop FolderWatcher rows whose folder/file vanished
         // from disk while we were down. Per-section + skips unreachable roots, so
@@ -116,8 +117,8 @@ public class FolderWatcherService(
             var folder = await db.FolderWatchers.FindAsync(folderId);
             if (folder is null) return;
 
-            StartWatcherInternal(folderId, folder.Path, folder.IsSection, folder.FlatSection);
-            logger.LogInformation("Watcher started for folder {Id} ({Path})", folderId, folder.Path);
+            if (StartWatcherInternal(folderId, folder.Path, folder.IsSection, folder.FlatSection))
+                logger.LogInformation("Watcher started for folder {Id} ({Path})", folderId, folder.Path);
         }
         finally
         {
@@ -142,8 +143,6 @@ public class FolderWatcherService(
         }
     }
 
-    public bool IsWatching(Guid folderId) => _watchers.ContainsKey(folderId);
-
     private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v",
@@ -152,75 +151,75 @@ public class FolderWatcherService(
 
     // ─── Internal watcher creation ────────────────────────────────────────────
 
-    private void StartWatcherInternal(Guid folderId, string path, bool isSection = false, bool flatSection = false)
+    /// <summary>Starts the live watchers for a section. Returns false when nothing
+    /// was started.
+    ///
+    /// Only sections are watched. Every folder used to also get a recursive
+    /// FileSystemWatcher whose sole handler was <c>Error</c> (renaming was
+    /// removed long ago) — one per title plus one over each whole section. Each
+    /// cost a dedicated thread and an inotify instance on Linux (stock kernels
+    /// allow 128 per UID, so watcher creation started failing past ~125 titles)
+    /// and doubled the event traffic for every file touched inside a title.
+    /// Nothing consumed those events, so they are gone; the section-level
+    /// dir/file watchers below do the actual work, and the periodic discovery
+    /// pass backfills anything they miss.</summary>
+    private bool StartWatcherInternal(Guid folderId, string path, bool isSection = false, bool flatSection = false)
     {
+        if (!isSection) return false;
+
         if (!Directory.Exists(path))
         {
             logger.LogWarning("Cannot start watcher — directory not found: {Path}", path);
-            return;
+            return false;
         }
 
-        FileSystemWatcher? watcher = null;
         FileSystemWatcher? dirWatcher = null;
         FileSystemWatcher? fileWatcher = null;
         try
         {
-            watcher = new FileSystemWatcher(path)
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName,
-                EnableRaisingEvents = true,
-            };
-
-            // Renaming was removed — the per-folder watcher now only surfaces errors.
-            // Section-level dir/file watchers (below) still drive auto-registration.
-            watcher.Error += (_, e) => logger.LogError(e.GetException(), "FileSystemWatcher error for {Path}", path);
-
             // Sections always get both watchers: directories (for new subfolder per-title
             // entries) AND files (for standalone movies dropped right in the section root).
             // The previous "either/or" controlled by flatSection meant a Movies section
             // with mixed content (one Title-subfolder + loose .mkv files) only picked up
             // one mode. flatSection is kept as the toggle that turns OFF the dir-watcher
             // — useful for sections that should never auto-register subfolders.
-            if (isSection)
+            if (!flatSection)
             {
-                if (!flatSection)
-                {
-                    dirWatcher = new FileSystemWatcher(path)
-                    {
-                        IncludeSubdirectories = false,
-                        NotifyFilter = NotifyFilters.DirectoryName,
-                        EnableRaisingEvents = true,
-                    };
-                    dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
-                    dirWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: false);
-                    dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
-                }
-
-                // Standalone video files in the section root → always register a SingleFilePath
-                // entry per file. Filtering happens inside OnVideoFileCreated.
-                fileWatcher = new FileSystemWatcher(path)
+                dirWatcher = new FileSystemWatcher(path)
                 {
                     IncludeSubdirectories = false,
-                    NotifyFilter = NotifyFilters.FileName,
+                    NotifyFilter = NotifyFilters.DirectoryName,
                     EnableRaisingEvents = true,
                 };
-                fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
-                fileWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: true);
-                fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
+                dirWatcher.Created += (_, e) => OnDirectoryCreated(e.FullPath, folderId);
+                dirWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: false);
+                dirWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "DirWatcher error for {Path}", path);
             }
 
-            _watchers[folderId] = new FolderWatcherEntry(watcher, dirWatcher, fileWatcher);
+            // Standalone video files in the section root → always register a SingleFilePath
+            // entry per file. Filtering happens inside OnVideoFileCreated.
+            fileWatcher = new FileSystemWatcher(path)
+            {
+                IncludeSubdirectories = false,
+                NotifyFilter = NotifyFilters.FileName,
+                EnableRaisingEvents = true,
+            };
+            fileWatcher.Created += (_, e) => OnVideoFileCreated(e.FullPath, folderId);
+            fileWatcher.Renamed += (_, e) => OnChildRenamed(e.OldFullPath, e.FullPath, folderId, isFile: true);
+            fileWatcher.Error   += (_, e) => logger.LogError(e.GetException(), "FileWatcher error for {Path}", path);
+
+            _watchers[folderId] = new FolderWatcherEntry(dirWatcher, fileWatcher);
+            return true;
         }
         catch (Exception ex)
         {
             // One unwatchable folder (inotify instance/watch limit, EACCES…) must
             // not abort the caller — from StartAsync that takes the whole host
             // down at boot. Release whatever was already opened.
-            watcher?.Dispose();
             dirWatcher?.Dispose();
             fileWatcher?.Dispose();
             logger.LogError(ex, "Cannot start watcher for {Path}", path);
+            return false;
         }
     }
 
@@ -283,8 +282,7 @@ public class FolderWatcherService(
 
                 logger.LogInformation("Auto-registered subfolder: {Path}", dirPath);
 
-                // Start file watcher for the new subfolder
-                await StartWatcherAsync(newFolder.Id);
+                // (No watcher of its own — titles are covered by the section's.)
 
                 // Try to auto-link a torrent whose SavePath matches this folder
                 await torrentEngine.TryLinkTorrentAsync(dirPath, newFolder.Id);
@@ -453,16 +451,11 @@ public class FolderWatcherService(
                 return;
             }
 
-            if (movedId is Guid id)
+            if (movedId is not null)
             {
                 logger.LogInformation("Registered {Kind} renamed: {Old} → {New}",
                     isFile ? "file" : "folder", oldPath, newPath);
-                if (!isFile)
-                {
-                    // Re-root the title's own watcher on the new path.
-                    try { await StopWatcherAsync(id); await StartWatcherAsync(id); }
-                    catch (Exception ex) { logger.LogWarning(ex, "Watcher restart failed for {Path}", newPath); }
-                }
+                // Titles have no watcher of their own to re-root.
                 return;
             }
 
@@ -682,15 +675,13 @@ public class FolderWatcherService(
         db.FolderWatchers.AddRange(toAdd);
         await db.SaveChangesAsync();
 
-        // Start file watchers (for subfolders only — SingleFilePath entries don't
-        // need their own watcher, the section root watcher handles them) and
-        // best-effort torrent linking. Done outside the DB transaction so a
-        // single bad path doesn't block the rest.
+        // Best-effort torrent linking for new subfolders (titles need no watcher
+        // of their own — the section's covers them). Done outside the DB
+        // transaction so a single bad path doesn't block the rest.
         foreach (var f in toAdd)
         {
             if (f.SingleFilePath is null)
             {
-                try { await StartWatcherAsync(f.Id); } catch (Exception ex) { logger.LogWarning(ex, "Watcher start failed for {Path}", f.Path); }
                 try { await torrentEngine.TryLinkTorrentAsync(f.Path, f.Id); } catch { /* best-effort */ }
             }
             SubfolderCreated?.Invoke(sectionId, f.Id);
@@ -867,14 +858,11 @@ public class FolderWatcherService(
     // ─── Entry wrapper ────────────────────────────────────────────────────────
 
     private sealed class FolderWatcherEntry(
-        FileSystemWatcher watcher,
-        FileSystemWatcher? dirWatcher = null,
-        FileSystemWatcher? fileWatcher = null) : IDisposable
+        FileSystemWatcher? dirWatcher,
+        FileSystemWatcher? fileWatcher) : IDisposable
     {
         public void Dispose()
         {
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
             if (dirWatcher is not null)
             {
                 dirWatcher.EnableRaisingEvents = false;
