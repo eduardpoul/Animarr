@@ -41,90 +41,242 @@ public sealed class MediaFileResolver
 
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IPatternMatchService _patterns;
+    private readonly MediaFileResolveCache _cache;
 
-    public MediaFileResolver(IDbContextFactory<AppDbContext> dbFactory, IPatternMatchService patterns)
+    public MediaFileResolver(
+        IDbContextFactory<AppDbContext> dbFactory, IPatternMatchService patterns, MediaFileResolveCache cache)
     {
         _dbFactory = dbFactory;
         _patterns  = patterns;
+        _cache     = cache;
     }
 
     public async Task<MediaFileDto[]> ResolveAsync(Guid mediaItemId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems
-            .Include(m => m.Folder)
-            .FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
-        if (item is null) return Array.Empty<MediaFileDto>();
+        var inputs = await LoadInputsAsync(db, [mediaItemId], ct);
+        return inputs.TryGetValue(mediaItemId, out var input) ? Resolve(input) : Array.Empty<MediaFileDto>();
+    }
 
-        var folder = item.Folder;
-        if (folder is null) return Array.Empty<MediaFileDto>();
+    /// <summary>
+    /// Everything a resolve reads from the database, for any number of items in
+    /// four queries (items + folders, global patterns, folder-local patterns,
+    /// overrides) instead of four per item. Callers resolving a batch — Home's
+    /// next-up, the calendar — load once and call <see cref="Resolve"/> per item.
+    /// Unknown ids are simply absent. Read-only (no tracking), so it can share
+    /// the caller's context.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, Inputs>> LoadInputsAsync(
+        AppDbContext db, IReadOnlyCollection<Guid> mediaItemIds, CancellationToken ct = default)
+    {
+        var result = new Dictionary<Guid, Inputs>();
+        if (mediaItemIds.Count == 0) return result;
+        var ids = mediaItemIds.Distinct().ToList();
 
-        // Flat-section single-file rows store one absolute path directly.
-        if (!string.IsNullOrEmpty(folder.SingleFilePath))
+        var items = await db.MediaItems.AsNoTracking()
+            .Where(m => ids.Contains(m.Id))
+            .Select(m => new
+            {
+                m.Id, m.MediaType, m.SeasonsJson, m.SeasonOffsetsJson,
+                m.FolderId, FolderPath = m.Folder.Path, m.Folder.SingleFilePath,
+            })
+            .ToListAsync(ct);
+
+        // Flat-section single-file rows need nothing else; folder-backed items
+        // get their pattern set and (non-movies) their stored overrides.
+        var dirItems = items.Where(i => string.IsNullOrEmpty(i.SingleFilePath)).ToList();
+        List<RenamePattern> globalPatterns = [];
+        ILookup<Guid, RenamePattern> localPatterns = Enumerable.Empty<RenamePattern>().ToLookup(p => p.FolderId!.Value);
+        ILookup<Guid, EpisodeFileMapping> mappings = Enumerable.Empty<EpisodeFileMapping>().ToLookup(m => m.MediaItemId);
+        if (dirItems.Count > 0)
         {
-            if (!File.Exists(folder.SingleFilePath)) return Array.Empty<MediaFileDto>();
-            var fi = new FileInfo(folder.SingleFilePath);
+            globalPatterns = await db.RenamePatterns.AsNoTracking()
+                .Where(p => p.Scope == PatternScope.Global)
+                .ToListAsync(ct);
+
+            var folderIds = dirItems.Select(i => i.FolderId).Distinct().ToList();
+            localPatterns = (await db.RenamePatterns.AsNoTracking()
+                    .Where(p => p.FolderId != null && folderIds.Contains(p.FolderId.Value))
+                    .ToListAsync(ct))
+                .ToLookup(p => p.FolderId!.Value);
+
+            // Movies never bucket by episode, so they skip the overrides.
+            var seriesIds = dirItems.Where(i => i.MediaType != MediaItemType.Movie).Select(i => i.Id).ToList();
+            if (seriesIds.Count > 0)
+                mappings = (await db.EpisodeFileMappings.AsNoTracking()
+                        .Where(m => seriesIds.Contains(m.MediaItemId))
+                        .ToListAsync(ct))
+                    .ToLookup(m => m.MediaItemId);
+        }
+
+        foreach (var i in items)
+        {
+            // Trust the MediaItem's classification (set by TMDB/LLM at identify
+            // time) over the folder's FolderType. Older installs have a bunch of
+            // Series-typed MediaItems sitting in FolderType=Movie folders because
+            // the auto-classifier guessed wrong from filenames like "7.mkv" —
+            // Death's Game in the user's library is the canonical example. The
+            // old code took FolderType as ground truth and force-nulled
+            // season/episode for those, hiding all episodes from MediaDetail.
+            bool isMovie = i.MediaType == MediaItemType.Movie;
+
+            if (!string.IsNullOrEmpty(i.SingleFilePath))
+            {
+                result[i.Id] = new Inputs(i.Id, i.FolderPath, i.SingleFilePath, isMovie,
+                    i.SeasonsJson, i.SeasonOffsetsJson, [], NoOverrides);
+                continue;
+            }
+
+            // Effective pattern set: globals minus folder-excluded + folder-local.
+            var folderPatterns = localPatterns[i.FolderId];
+            var excludedIds = folderPatterns
+                .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
+                .Select(p => p.GlobalPatternId!.Value)
+                .ToHashSet();
+
+            var effectivePatterns = globalPatterns
+                .Where(p => !excludedIds.Contains(p.Id))
+                .Concat(folderPatterns.Where(p => !p.IsExcluded))
+                .Where(p => p.ApplicableTo is null ||
+                           (isMovie ? p.ApplicableTo == FolderType.Movie : p.ApplicableTo != FolderType.Movie))
+                .OrderBy(p => p.Priority)
+                .ToList();
+
+            // Overlay: stored overrides (manual corrections + LLM verdicts) for
+            // this item, keyed by absolute path — see EpisodeFileMapping.
+            var overrides = isMovie
+                ? NoOverrides
+                : mappings[i.Id].ToDictionary(m => m.FilePath);
+
+            result[i.Id] = new Inputs(i.Id, i.FolderPath, null, isMovie,
+                i.SeasonsJson, i.SeasonOffsetsJson, effectivePatterns, overrides);
+        }
+        return result;
+    }
+
+    private static readonly IReadOnlyDictionary<string, EpisodeFileMapping> NoOverrides =
+        new Dictionary<string, EpisodeFileMapping>();
+
+    /// <summary>
+    /// What one resolve reads from the database. Doubles as the cache key's
+    /// content: a cached result is reused only while every field here still
+    /// compares equal, so any write to the item, its folder, the patterns or
+    /// the overrides — from whatever code path — shows up on the next read.
+    /// </summary>
+    public sealed class Inputs
+    {
+        internal Inputs(Guid mediaItemId, string folderPath, string? singleFilePath, bool isMovie,
+            string? seasonsJson, string? seasonOffsetsJson,
+            IReadOnlyList<RenamePattern> patterns, IReadOnlyDictionary<string, EpisodeFileMapping> overrides)
+        {
+            MediaItemId       = mediaItemId;
+            FolderPath        = folderPath;
+            SingleFilePath    = singleFilePath;
+            IsMovie           = isMovie;
+            SeasonsJson       = seasonsJson;
+            SeasonOffsetsJson = seasonOffsetsJson;
+            Patterns          = patterns;
+            Overrides         = overrides;
+        }
+
+        internal Guid MediaItemId { get; }
+        internal string FolderPath { get; }
+        internal string? SingleFilePath { get; }
+        internal bool IsMovie { get; }
+        internal string? SeasonsJson { get; }
+        internal string? SeasonOffsetsJson { get; }
+        /// <summary>Effective rename patterns, Priority-ordered.</summary>
+        internal IReadOnlyList<RenamePattern> Patterns { get; }
+        internal IReadOnlyDictionary<string, EpisodeFileMapping> Overrides { get; }
+
+        /// <summary>True when a resolve of <paramref name="other"/> must produce
+        /// the same result as one of this (given an unchanged disk).</summary>
+        internal bool SameAs(Inputs other)
+        {
+            if (MediaItemId != other.MediaItemId || IsMovie != other.IsMovie
+                || !string.Equals(FolderPath, other.FolderPath, StringComparison.Ordinal)
+                || !string.Equals(SingleFilePath, other.SingleFilePath, StringComparison.Ordinal)
+                || !string.Equals(SeasonsJson, other.SeasonsJson, StringComparison.Ordinal)
+                || !string.Equals(SeasonOffsetsJson, other.SeasonOffsetsJson, StringComparison.Ordinal)
+                || Patterns.Count != other.Patterns.Count
+                || Overrides.Count != other.Overrides.Count)
+                return false;
+
+            // Parsing reads only the pattern text, in this order.
+            for (int i = 0; i < Patterns.Count; i++)
+                if (!string.Equals(Patterns[i].Pattern, other.Patterns[i].Pattern, StringComparison.Ordinal)
+                    || Patterns[i].Priority != other.Patterns[i].Priority)
+                    return false;
+
+            foreach (var (path, ov) in Overrides)
+                if (!other.Overrides.TryGetValue(path, out var o)
+                    || ov.Season != o.Season || ov.Episode != o.Episode
+                    || !string.Equals(ov.Source, o.Source, StringComparison.Ordinal))
+                    return false;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Resolve one item from loaded <see cref="Inputs"/>: walk its folder and
+    /// parse every video. The result is cached per item (see
+    /// <see cref="MediaFileResolveCache"/>) and reused while the inputs and the
+    /// folder tree are unchanged — MediaDetail, next-up, the calendar and every
+    /// episode thumbnail used to repeat the full walk + parse. Throws whatever
+    /// the directory walk throws.
+    /// </summary>
+    public MediaFileDto[] Resolve(Inputs input)
+    {
+        // Flat-section single-file rows store one absolute path directly.
+        if (!string.IsNullOrEmpty(input.SingleFilePath))
+        {
+            if (!File.Exists(input.SingleFilePath)) return Array.Empty<MediaFileDto>();
+            var fi = new FileInfo(input.SingleFilePath);
             return new[] { new MediaFileDto(fi.FullName, fi.Name, null, null, fi.Length) };
         }
 
-        if (string.IsNullOrEmpty(folder.Path) || !Directory.Exists(folder.Path))
+        if (_cache.TryGet(input, out var cached)) return cached;
+
+        if (string.IsNullOrEmpty(input.FolderPath) || !Directory.Exists(input.FolderPath))
             return Array.Empty<MediaFileDto>();
 
-        // Effective pattern set: globals minus folder-excluded + folder-local.
-        var globalPatterns = await db.RenamePatterns
-            .Where(p => p.Scope == PatternScope.Global)
-            .ToListAsync(ct);
-        var folderWithPatterns = await db.FolderWatchers
-            .Include(f => f.Patterns)
-            .FirstAsync(f => f.Id == folder.Id, ct);
+        var (files, directories) = ResolveFromDisk(input);
+        _cache.Store(input, files, directories);
+        // Callers get their own array; the cached one is never handed out.
+        return (MediaFileDto[])files.Clone();
+    }
 
-        var excludedIds = folderWithPatterns.Patterns
-            .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
-            .Select(p => p.GlobalPatternId!.Value)
-            .ToHashSet();
-
-        // Trust the MediaItem's classification (set by TMDB/LLM at identify
-        // time) over the folder's FolderType. Older installs have a bunch of
-        // Series-typed MediaItems sitting in FolderType=Movie folders because
-        // the auto-classifier guessed wrong from filenames like "7.mkv" —
-        // Death's Game in the user's library is the canonical example. The
-        // old code took FolderType as ground truth and force-nulled
-        // season/episode for those, hiding all episodes from MediaDetail.
-        bool isMovie = item.MediaType == MediaItemType.Movie;
-
-        var effectivePatterns = globalPatterns
-            .Where(p => !excludedIds.Contains(p.Id))
-            .Concat(folderWithPatterns.Patterns.Where(p => !p.IsExcluded))
-            .Where(p => p.ApplicableTo is null ||
-                       (isMovie ? p.ApplicableTo == FolderType.Movie : p.ApplicableTo != FolderType.Movie))
-            .OrderBy(p => p.Priority)
-            .ToList();
+    private (MediaFileDto[] Files, List<(string Path, DateTime LastWriteUtc)> Directories) ResolveFromDisk(Inputs input)
+    {
+        var folderPath        = input.FolderPath;
+        bool isMovie          = input.IsMovie;
+        var effectivePatterns = input.Patterns;
+        var overrides         = input.Overrides;
 
         // For Series with ≤ 1 declared season, fall back to season=1 when
         // patterns extract an episode but no season. Typical k-drama /
         // single-cour release layout: title-named parent folder + bare
         // numeric filenames, no "Season 1" anywhere on disk.
-        int declaredSeasons = CountSeasonsInJson(item.SeasonsJson);
+        int declaredSeasons = CountSeasonsInJson(input.SeasonsJson);
         bool defaultToSeasonOne = !isMovie && declaredSeasons <= 1;
-
-        // Overlay: stored overrides (manual corrections + LLM verdicts) for this
-        // item, keyed by absolute path. Applied on top of the deterministic parse
-        // in the loop below — see EpisodeFileMapping. Movies never bucket by
-        // episode, so we skip the query for them.
-        var overrides = isMovie
-            ? new Dictionary<string, EpisodeFileMapping>()
-            : await db.EpisodeFileMappings
-                .Where(m => m.MediaItemId == item.Id)
-                .ToDictionaryAsync(m => m.FilePath, ct);
 
         // Per-season absolute offsets (donghua: TMDB one season, disk multi).
         // diskSeason → offset, so AbsoluteEpisode = offset + episode. Empty when
         // not applicable. See SeasonOffsetResolver / MediaItem.SeasonOffsetsJson.
-        var seasonOffsets = ParseSeasonOffsets(item.SeasonOffsetsJson);
+        var seasonOffsets = ParseSeasonOffsets(input.SeasonOffsetsJson);
 
         // TMDB season structure (number → episode count), for distributing a
         // flat absolute-numbered disk into seasons. See AbsoluteToSeasonEpisode.
-        var seasonStructure = ParseSeasonList(item.SeasonsJson);
+        var seasonStructure = ParseSeasonList(input.SeasonsJson);
+
+        // Every directory of the tree with its last-write time, each read BEFORE
+        // that directory is listed — the cache's proof that the listing it holds
+        // is still current (adding/removing/renaming an entry bumps the mtime of
+        // the directory containing it).
+        var directories = new List<(string Path, DateTime LastWriteUtc)>
+        {
+            (folderPath, Directory.GetLastWriteTimeUtc(folderPath)),
+        };
 
         // ── Pass 1: deterministic (season, episode) per file ──────────────────
         var raw = new List<(string FilePath, string FileName, int? Season, int? Episode, long Size, bool SeasonFromPath)>();
@@ -134,20 +286,28 @@ public sealed class MediaFileResolver
         // Same walk as Directory.EnumerateFiles, but the size comes from the
         // enumeration entry instead of a second stat per file (on Windows the
         // directory listing already carries it), and non-video entries are
-        // dropped before a path string is even built.
-        var walk = new FileSystemEnumerable<(string Path, long Size)>(
-            folder.Path,
-            static (ref FileSystemEntry e) => (e.ToSpecifiedFullPath(), e.Length),
+        // dropped before a path string is even built. Directories are yielded
+        // too (for the stamps above); a directory entry comes out of its
+        // parent's listing, before the walk descends into it.
+        var walk = new FileSystemEnumerable<(string Path, bool IsDirectory, long Size)>(
+            folderPath,
+            static (ref FileSystemEntry e) => (e.ToSpecifiedFullPath(), e.IsDirectory, e.IsDirectory ? 0 : e.Length),
             TreeWalk)
         {
             ShouldIncludePredicate = static (ref FileSystemEntry e) =>
-                !e.IsDirectory && VideoExtsBySpan.Contains(Path.GetExtension(e.FileName)),
+                e.IsDirectory || VideoExtsBySpan.Contains(Path.GetExtension(e.FileName)),
         };
-        foreach (var (filePath, size) in walk)
+        foreach (var (filePath, isDirectory, size) in walk)
         {
+            if (isDirectory)
+            {
+                directories.Add((filePath, Directory.GetLastWriteTimeUtc(filePath)));
+                continue;
+            }
+
             var fileName = Path.GetFileName(filePath);
             var parse    = _patterns.ParseFileName(fileName, effectivePatterns);
-            var fileDir  = Path.GetDirectoryName(filePath) ?? folder.Path;
+            var fileDir  = Path.GetDirectoryName(filePath) ?? folderPath;
 
             // Two different claims, deliberately kept apart. A season baked into
             // the FILE NAME by a release tag ("[TV-4] - 01") labels that one file.
@@ -158,7 +318,7 @@ public sealed class MediaFileResolver
             int? seasonFromName = parse.Season;
             int? seasonFromPath = null;
             if (seasonFromName is null && !seasonByDir.TryGetValue(fileDir, out seasonFromPath))
-                seasonByDir[fileDir] = seasonFromPath = _patterns.DetectSeasonFromPath(fileDir, folder.Path);
+                seasonByDir[fileDir] = seasonFromPath = _patterns.DetectSeasonFromPath(fileDir, folderPath);
             int? season  = seasonFromName ?? seasonFromPath;
             int? episode = parse.IsMatched ? parse.Episode : null;
 
@@ -249,11 +409,12 @@ public sealed class MediaFileResolver
 
         // Sort: by season → episode → filename so the catalog renders in a
         // predictable order regardless of how the OS returned directory entries.
-        return results
+        var sorted = results
             .OrderBy(f => f.Season ?? int.MaxValue)
             .ThenBy(f => f.Episode ?? int.MaxValue)
             .ThenBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        return (sorted, directories);
     }
 
     /// <summary>Counts top-level entries in MediaItem.SeasonsJson (a JSON array
