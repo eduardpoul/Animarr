@@ -1165,22 +1165,13 @@ else
                     });
                 }
 
-                // labels: the player's own error / toast strings (a failed
-                // start, or a quality / audio switch that fell back).
+                // labels: every "player.*" string (keyed without the prefix)
+                // for the HUD, its menus, toasts and error panel.
+                var playerLabels = L.WithPrefix("player.");
+                playerLabels["back"] = L["media_detail.btn_back"];
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath,
-                    new
-                    {
-                        autoAudio = true,
-                        labels = new
-                        {
-                            errQuality = L["player.error_quality"],
-                            errAudio   = L["player.error_audio"],
-                            errStart   = L["player.error_start"],
-                            retry      = L["player.error_retry"],
-                            back       = L["media_detail.btn_back"],
-                        },
-                    });
+                    new { autoAudio = true, labels = playerLabels });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title

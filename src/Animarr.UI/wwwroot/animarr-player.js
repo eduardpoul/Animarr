@@ -2363,18 +2363,22 @@
         } catch {}
     }
 
-    // Player strings that need translating. MediaDetail passes the localized
-    // set with the first attach (opts.labels, kept in KEEP for restarts).
+    // Player strings. MediaDetail passes the localized "player.*" pack (keys
+    // without the prefix) with every attach; these English defaults cover a
+    // host that doesn't (and keys a stale pack lacks).
+    let LABELS = {};
     const LABEL_DEFAULTS = {
-        errQuality: "Couldn't switch quality, staying on the previous one",
-        errAudio:   "Couldn't switch the audio track, staying on the previous one",
-        errStart:   "Playback couldn't start",
-        retry:      'Retry',
-        back:       'Back',
+        error_quality:      "Couldn't switch quality, staying on the previous one",
+        error_audio:        "Couldn't switch the audio track, staying on the previous one",
+        error_start:        "Playback couldn't start",
+        error_playback:     'Playback failed',
+        error_retry:        'Retry',
+        back:               'Back',
+        fallback_switched:  'Playback problem — switched to a more compatible stream',
+        fallback_restarted: 'Connection lost — the stream was restarted',
     };
-    function label(elementId, key) {
-        const l = (KEEP.get(elementId) || {}).labels;
-        return (l && l[key]) || LABEL_DEFAULTS[key];
+    function t(key) {
+        return LABELS[key] || LABEL_DEFAULTS[key] || key;
     }
 
     // ── Client capabilities (plan §6.1, task 1.2) ─────────────────────
@@ -2513,6 +2517,29 @@
             + (caps.source === 'mediaCapabilities' ? '' : ' · (canPlayType)');
     }
 
+    // Fallback ladder (task 1.7): Direct Play → Direct Stream → HLS copy →
+    // full transcode. A stream's rung comes from output.plan; a failure moves
+    // one rung down, never up (the floor is kept per player element).
+    const FALLBACK_DIRECT    = 0;
+    const FALLBACK_REMUX     = 1;
+    const FALLBACK_COPY      = 2;
+    const FALLBACK_TRANSCODE = 3;
+    function tierOfPlan(output, started) {
+        switch (output && output.plan) {
+            case 'directplay':   return FALLBACK_DIRECT;
+            case 'directstream': return FALLBACK_REMUX;
+            case 'ts-copy':
+            case 'fmp4-copy':    return FALLBACK_COPY;
+            case undefined:
+            case null:
+            case '':
+                // No output block (older server): judge by the URL kind.
+                return started && started.directPlayUrl ? FALLBACK_DIRECT
+                     : started && started.directStreamUrl ? FALLBACK_REMUX : FALLBACK_COPY;
+            default:             return FALLBACK_TRANSCODE;   // *-reencode
+        }
+    }
+
     // ── Server contract for the caps — the ONE place to adjust ────────
     // nativeCaps is the TV's token list (the server already bases Direct
     // Play / Direct Stream on it). The audio side is still being designed on
@@ -2520,13 +2547,34 @@
     // display / DV abilities as the `hdr` / `dv` tokens — rename them here
     // when that contract lands. clientHevc / clientHevc10 (MSE-based, used
     // for the HLS plan choice) stay as they were.
-    function capsQuery(caps) {
+    //
+    // `tier` is the fallback step (task 1.7, see FALLBACK_*): each one strips
+    // what the failed stream relied on, so the server's existing decision
+    // lands one rung lower without a new parameter:
+    //   1 no Direct Play  — container tokens dropped → the server remuxes
+    //                       (Direct Stream) when it can still copy the video
+    //   2 no native video — video tokens dropped → HLS, stream-copied where
+    //                       the plan allows (clientHevc still applies)
+    //   3 transcode       — startStream adds a bitrate cap, which always
+    //                       re-encodes
+    function capsQuery(caps, tier) {
         ensureHevcCaps();
         let q = (window.__animarrHevcOk ? '&clientHevc=1' : '')
               + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '');
-        if (caps && caps.tokens.length) {
-            q += '&nativeCaps=' + encodeURIComponent(caps.tokens.join(','))
-               + '&maxAudioChannels=' + caps.channels;
+        let tokens = caps ? caps.tokens.slice() : [];
+        if (tier >= 1) {
+            if (!caps) tokens = ['h264', 'aac'];   // detection failed: the safe minimum
+            const drop = new Set(['mp4', 'm4v', 'mov', 'webm']);
+            if (tier >= 2) {
+                CAPS_VIDEO.forEach(v => drop.add(v[0]));
+                drop.add('dv');
+            }
+            tokens = tokens.filter(tk => !drop.has(tk));
+            if (!tokens.length) tokens = ['aac'];  // keep the list non-empty: it selects the caps path
+        }
+        if (tokens.length) {
+            q += '&nativeCaps=' + encodeURIComponent(tokens.join(','))
+               + '&maxAudioChannels=' + (caps ? caps.channels : 2);
         }
         return q;
     }
@@ -2595,14 +2643,19 @@
      * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
      */
     async function startStream(mediaPath, p, signal) {
+        const tier = p.tier || 0;
+        // Fallback tier 3: nothing that copies worked — a bitrate cap forces
+        // the re-encode (unless a quality cap already does).
+        const maxBitrate = (tier >= FALLBACK_TRANSCODE && !(p.maxBitrate > 0) && !(p.maxHeight > 0))
+            ? (p.fallbackMbps || 8) : (p.maxBitrate || 0);
         const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + p.offsets.hw
             + '&audioOffsetSwMs=' + p.offsets.sw
             + (p.audioTrackIndex > 0 ? '&audioTrackIndex=' + p.audioTrackIndex : '')
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
-            + (p.maxBitrate > 0 ? '&maxBitrate=' + p.maxBitrate : '')
-            + capsQuery(p.caps)
+            + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
+            + capsQuery(p.caps, tier)
             + (p.externalAudioPath ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath) : ''));
         let lastErr = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -2685,15 +2738,16 @@
      *  previous plan wouldn't come back either). Replaces the black, HUD-less
      *  overlay that used to be left behind — with no way out but a reload —
      *  by a reason + Retry + Back. Lives in the player element; teardown()
-     *  removes it (entry.errorCleanup). */
-    function showStartError(elementId, el, entry, err, retry) {
+     *  removes it (entry.errorCleanup). Also the end of the fallback chain
+     *  (titleKey 'error_playback': a stream that died mid-play). */
+    function showStartError(elementId, el, entry, err, retry, titleKey) {
         if (entry.errorCleanup) { try { entry.errorCleanup(); } catch {} }
         const panel = document.createElement('div');
         panel.className = 'vp-error';
         panel.setAttribute('role', 'alert');
         const title = document.createElement('div');
         title.className = 'vp-error__title';
-        title.textContent = label(elementId, 'errStart');
+        title.textContent = t(titleKey || 'error_start');
         panel.appendChild(title);
         if (err && err.reason) {
             const d = document.createElement('div');
@@ -2713,8 +2767,8 @@
             return b;
         };
         const back = () => entry.refRef.current?.invokeMethodAsync('ClosePlayerFromJs').catch(() => {});
-        const retryBtn = mk('vp-error__btn--primary', label(elementId, 'retry'), retry);
-        const backBtn  = mk('', label(elementId, 'back'), back);
+        const retryBtn = mk('vp-error__btn--primary', t('error_retry'), retry);
+        const backBtn  = mk('', t('back'), back);
         panel.appendChild(actions);
         el.appendChild(panel);
         // The HUD (and its key handler) never came up: Esc / remote Back
@@ -2783,7 +2837,7 @@
             return;
         }
         if (!isLiveOp(elementId, op)) return;
-        if (opts && opts.labels) keepFor(elementId).labels = opts.labels;
+        if (opts && opts.labels) LABELS = opts.labels;
         if (WIRED.has(elementId)) {
             // A restart (switchAudio / switchQuality / native fallback) lands
             // here on purpose; anything else is a missed detach. Either way
@@ -2895,6 +2949,9 @@
             try {
                 started = await startStream(mediaPath, {
                     resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath,
+                    // Fallback floor reached earlier on this player (1.7).
+                    tier: (KEEP.get(elementId) || {}).tierFloor || 0,
+                    fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
                 }, abort.signal);
             } catch (err) {
                 if ((err && err.name === 'AbortError') || stale()) return;
@@ -2916,6 +2973,7 @@
         entry.totalDuration = started.totalDuration;
         entry.resumeOffset  = started.resumeSec;
         entry.output        = started.output;
+        entry.tier          = tierOfPlan(started.output, started);   // fallback rung (1.7)
         const manifestUrl     = started.manifestUrl;
         const directPlayUrl   = started.directPlayUrl;
         const directStreamUrl = started.directStreamUrl;
@@ -3204,10 +3262,24 @@
                         const p = video.play();
                         if (p && typeof p.catch === 'function') p.catch(() => {});
                     });
+                    // Fatal hls.js errors used to be logged and left as a
+                    // frozen / black player. A media (decode / MSE) error
+                    // gets hls.js's own recovery once; then — or for any
+                    // other fatal error — the fallback chain takes over
+                    // (handleStreamFailure: network → same rung again,
+                    // anything else → one rung down).
+                    let mediaRecoveryUsed = false;
                     hls.on(window.Hls.Events.ERROR, (evt, data) => {
-                        if (data.fatal) {
-                            console.error('animarr hls fatal:', data.type, data.details);
+                        if (!data.fatal) return;
+                        console.error('animarr hls fatal:', data.type, data.details);
+                        const T = window.Hls.ErrorTypes || {};
+                        if (data.type === T.MEDIA_ERROR && !mediaRecoveryUsed) {
+                            mediaRecoveryUsed = true;
+                            try { hls.recoverMediaError(); return; } catch {}
                         }
+                        handleStreamFailure(elementId, entry,
+                            data.type === T.NETWORK_ERROR ? 'network' : 'decode',
+                            'hls.js: ' + (data.details || data.type));
                     });
                 },
             } : {},
@@ -3290,6 +3362,34 @@
         }
         entry.art = art;
         entry.adapter = adapter;
+
+        // ── Stream health → fallback chain (task 1.7) ─────────────────
+        // hls.js fatal errors report from the customType hook above; the
+        // <video> element covers Direct Play / Direct Stream (and MSE errors
+        // hls.js didn't see first). MEDIA_ERR_ABORTED is ours (a src swap).
+        adapter.on('play',  () => { entry.userPaused = false; });
+        adapter.on('pause', () => { entry.userPaused = true; });
+        const vHealth = adapter.rawVideoElement && adapter.rawVideoElement();
+        if (vHealth) {
+            vHealth.addEventListener('error', () => {
+                const err = vHealth.error;
+                if (!err || err.code === 1) return;
+                handleStreamFailure(elementId, entry, err.code === 2 ? 'network' : 'decode',
+                    'MediaError ' + err.code + (err.message ? ': ' + err.message : ''));
+            });
+            // A file whose video codec the browser can't decode often plays its
+            // audio over a black frame without any error: catch videoWidth 0.
+            const expectVideo = !!(entry.output && entry.output.videoCodec);
+            if (expectVideo) {
+                vHealth.addEventListener('loadeddata', () => {
+                    setTimeout(() => {
+                        if (vHealth.videoWidth === 0 && vHealth.readyState >= 2)
+                            handleStreamFailure(elementId, entry, 'decode', 'video track did not decode');
+                    }, 1500);
+                }, { once: true });
+            }
+        }
+
         // What the CC menu marks active. null = "Off" — this used to fall back
         // to track 0 (and the block-scoped pick was never visible here), so the
         // menu showed "Track 1" while another track — or none — was on screen.
@@ -3766,6 +3866,61 @@
         WIRED.delete(elementId);
     }
 
+    /**
+     * A stream that was playing died (task 1.7): the <video> raised a
+     * MediaError, hls.js hit a fatal error it couldn't recover, or the video
+     * track never decoded (videoWidth stays 0 — Chrome plays the audio of a
+     * file whose video codec it can't decode and raises nothing).
+     *   • 'network' — restart the same rung at the same spot (the session was
+     *     likely reaped / the server restarted); at most twice per player.
+     *   • 'decode'  — step one rung down the fallback ladder (Direct Play →
+     *     Direct Stream → HLS copy → transcode); the floor only ever rises, so
+     *     it can't loop. Below transcode there is nothing left: the error
+     *     panel (Retry / Back).
+     * Position, pause, mute, subtitles and aspect carry over (captureState).
+     */
+    function handleStreamFailure(elementId, entry, kind, detail) {
+        if (entry.failed || entry.abort.signal.aborted || WIRED.get(elementId) !== entry || !entry.adapter) return;
+        entry.failed = true;
+        const kept = keepFor(elementId);
+        const rung = Math.max(entry.tier || 0, kept.tierFloor || 0);
+        console.warn('animarrPlayer: stream failed (' + kind + ', rung ' + rung + '): ' + (detail || ''));
+        let toastKey;
+        if (kind === 'network' && (kept.netRestarts || 0) < 2) {
+            kept.netRestarts = (kept.netRestarts || 0) + 1;
+            toastKey = 'fallback_restarted';
+        } else if (rung < FALLBACK_TRANSCODE) {
+            kept.tierFloor = rung + 1;
+            const h = (entry.mediaInfo && entry.mediaInfo.height) || (entry.output && entry.output.height) || 1080;
+            kept.fallbackMbps = Math.max(2, Math.round(autoMbpsFor(h)));   // the server takes whole Mbps
+            toastKey = 'fallback_switched';
+        } else {
+            try { entry.adapter.pause(); } catch {}
+            const el = document.getElementById(elementId);
+            if (el) showStartError(elementId, el, entry, { reason: detail || '' },
+                () => attachStream(elementId, entry.dotnetRef, entry.mediaPath,
+                    Object.assign({}, currentPlan(entry), { forceResumeSec: entry.adapter ? entry.adapter.currentTime : 0 }),
+                    beginOp(elementId)),
+                'error_playback');
+            return;
+        }
+        const snap = captureState(entry);
+        // Paused only if the USER paused — a stalled / errored element's own
+        // state says nothing about what they wanted.
+        snap.paused = !!entry.userPaused;
+        attachStream(elementId, entry.dotnetRef, entry.mediaPath,
+            Object.assign({}, currentPlan(entry), {
+                forceResumeSec: snap.pos, restore: snap,
+                toast: { title: t(toastKey), detail: detail || '' },
+            }), beginOp(elementId));
+    }
+
+    /** "~N Mbps" the server's auto bitrate uses for an output height (mirrors
+     *  the quality menu's labels). */
+    function autoMbpsFor(h) {
+        return h <= 480 ? 2.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+    }
+
     /** The plan the current stream was started with — what a switch changes
      *  one part of, and what a failed switch falls back to. */
     function currentPlan(entry) {
@@ -3852,7 +4007,11 @@
         let started = null, failure = null;
         try {
             started = await startStream(entry.mediaPath,
-                Object.assign({ resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS }, plan), ctl.signal);
+                Object.assign({
+                    resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS,
+                    tier: (KEEP.get(elementId) || {}).tierFloor || 0,
+                    fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
+                }, plan), ctl.signal);
         } catch (err) { failure = err; }
         if (entry.pendingSwitch === ctl) entry.pendingSwitch = null;
         if (!isLiveOp(elementId, op)) {
@@ -3869,7 +4028,7 @@
         }
 
         console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
-        const title  = label(elementId, kind === 'audio' ? 'errAudio' : 'errQuality');
+        const title  = t(kind === 'audio' ? 'error_audio' : 'error_quality');
         const detail = (failure && failure.reason) || '';
         const alive  = await previousStreamAlive(entry);
         if (!isLiveOp(elementId, op) || WIRED.get(elementId) !== entry) return;

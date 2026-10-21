@@ -122,4 +122,11 @@ public class LocalizationService
         try { return string.Format(template, args); }
         catch { return template; }
     }
+
+    /// <summary>Every loaded string whose key starts with <paramref name="prefix"/>,
+    /// keyed without it — e.g. all "player." strings handed to animarr-player.js
+    /// in one go, so the JS HUD needs no per-string plumbing.</summary>
+    public Dictionary<string, string> WithPrefix(string prefix) =>
+        _strings.Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))
+                .ToDictionary(kv => kv.Key[prefix.Length..], kv => kv.Value);
 }
