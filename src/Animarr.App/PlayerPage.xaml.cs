@@ -49,6 +49,11 @@ public partial class PlayerPage : ContentPage
     // everywhere today; it stays as the hook for a relative stream.
     // _knownDurationMs is the full runtime from the start response.
     private int  _maxHeight;
+    // Source height from an uncapped start response (a downscaled re-encode
+    // reports its OUTPUT size there). The quality sheet labels "Оригинал" with
+    // it: the decoded height is 0 when the decoder refused the source (4K on a
+    // 1080p-only device) and the capped height after a quality switch.
+    private int  _sourceHeight;
     private long _streamBaseMs;
     private long _knownDurationMs;
     private List<MediaFileDto>? _episodes;
@@ -329,6 +334,15 @@ public partial class PlayerPage : ContentPage
     /// <summary>Set after a decoder failure — retry without nativeCaps so the
     /// server falls back to its transcode pipeline.</summary>
     private bool _forceTranscode;
+    /// <summary>Last rung after <see cref="_forceTranscode"/>: the no-caps retry
+    /// still copies the original bitstream, which fails the same way when the
+    /// decoder can't take its size/level — so cap to a 1080p H.264 re-encode.</summary>
+    private bool _capFallback;
+    /// <summary>A recovery restart is in flight: the failed player keeps
+    /// reporting its error until the posted DoPlay re-prepares it, and that
+    /// stale error must not trigger the next rung. Cleared on the first clean
+    /// state, or after 8 s in case the new stream failed between two ticks.</summary>
+    private DateTime? _recoveringSinceUtc;
 
     /// <summary>
     /// (Re)start the current file at <paramref name="resumeMs"/> (absolute time on
@@ -362,6 +376,7 @@ public partial class PlayerPage : ContentPage
                 body = await resp.Content.ReadFromJsonAsync<StartResponse>(Json);
 
             _knownDurationMs = (long)((body?.TotalDuration ?? 0) * 1000);
+            if (maxHeight == 0 && body?.Output?.Height > 0) _sourceHeight = body.Output.Height;
 
             bool directPlay   = !string.IsNullOrEmpty(body?.DirectPlayUrl);
             bool directStream = !string.IsNullOrEmpty(body?.DirectStreamUrl) && !directPlay;
@@ -378,6 +393,20 @@ public partial class PlayerPage : ContentPage
             _hlsToken = !directPlay && !directStream ? body?.Token : null;
             _lastKeepaliveUtc = DateTime.UtcNow;
             if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
+
+            // Original bitstream bigger than any decoder on the device takes (4K
+            // HEVC on a 1080p projector SoC): ExoPlayer rejects it with
+            // NO_EXCEEDS_CAPABILITIES, and so would the no-caps retry (still a
+            // copy). Ask for a capped re-encode straight away; an HDR source is
+            // tone-mapped on the way. The next call stops this HLS session.
+            if (maxHeight == 0 && body?.Output is { } o && !(o.Plan ?? "").EndsWith("reencode", StringComparison.Ordinal)
+                && !Services.TvCodecCaps.CanDecodeSize(o.VideoCodec, o.Width, o.Height, o.BitDepth))
+            {
+                int cap = o.Height > 1080 ? 1080 : 720;
+                FlashInfo($"{o.Height}p не поддерживается устройством — {cap}p");
+                _ = StartStreamAsync(resumeMs, cap);
+                return;
+            }
 
             if (directPlay)
             {
@@ -448,8 +477,9 @@ public partial class PlayerPage : ContentPage
         _filePath = f.FilePath;
         // Fresh episode → back to original quality + absolute timeline, drop stale
         // skip segments (they're re-fetched for the new episode).
-        _maxHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
-        _isDirectStream = false; _forceTranscode = false;   // per-file decisions
+        _maxHeight = 0; _sourceHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
+        _isDirectStream = false; _forceTranscode = false; _capFallback = false;   // per-file decisions
+        _recoveringSinceUtc = null;
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
         EyebrowLabel.Text = _episode is not null
@@ -499,14 +529,30 @@ public partial class PlayerPage : ContentPage
         _durationMs = dur;
 
         // Capability negotiation safety net: the device ADVERTISED a decoder
-        // but it failed at runtime (rare vendor quirks) → retry once with
-        // nativeCaps off, which sends the server down its transcode pipeline.
-        if (!string.IsNullOrEmpty(st.ErrorMessage) && !_forceTranscode)
+        // but it failed at runtime (vendor quirks, a level the SoC can't take)
+        // → retry with nativeCaps off, which sends the server down its HLS
+        // pipeline; if that copy fails too, a 1080p H.264 re-encode.
+        if (string.IsNullOrEmpty(st.ErrorMessage)
+            || DateTime.UtcNow - _recoveringSinceUtc > TimeSpan.FromSeconds(8))
+            _recoveringSinceUtc = null;
+        if (!string.IsNullOrEmpty(st.ErrorMessage) && _recoveringSinceUtc is null)
         {
-            _forceTranscode = true;
-            FlashInfo("Формат не пошёл — переключаюсь на транскод");
-            _ = StartStreamAsync(absPos, _maxHeight);
-            return;
+            if (!_forceTranscode)
+            {
+                _forceTranscode = true;
+                _recoveringSinceUtc = DateTime.UtcNow;
+                FlashInfo("Формат не пошёл — переключаюсь на транскод");
+                _ = StartStreamAsync(absPos, _maxHeight);
+                return;
+            }
+            if (!_capFallback && _maxHeight is 0 or > 1080)
+            {
+                _capFallback = true;
+                _recoveringSinceUtc = DateTime.UtcNow;
+                FlashInfo("Оригинал не воспроизводится — переключаюсь на 1080p");
+                _ = StartStreamAsync(absPos, 1080);
+                return;
+            }
         }
 
         if (_hlsToken is { } tok && (DateTime.UtcNow - _lastKeepaliveUtc).TotalSeconds >= 30)
@@ -675,6 +721,7 @@ public partial class PlayerPage : ContentPage
             new("Авто (вписать)",        _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
             new("Растянуть на экран",    _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
             new("Заполнить (обрезать)",  _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
+            new("21:9",                  _aspect == "21:9",          () => ApplyAspect("21:9", "21:9")),
             new("16:9",                  _aspect == "16:9",          () => ApplyAspect("16:9", "16:9")),
             new("4:3",                   _aspect == "4:3",           () => ApplyAspect("4:3", "4:3")),
         };
@@ -695,9 +742,8 @@ public partial class PlayerPage : ContentPage
         // (maxHeight) so the server transcodes/downscales. The source is a single
         // video track, so there's nothing to pick from ExoPlayer directly — the
         // choices are downscale targets below the source resolution.
-        var st = NativePlayerService.Instance?.GetState();
-        int srcH = st?.ActualHeight ?? 0;
-        if (srcH <= 0) srcH = 1080;
+        int srcH = _sourceHeight > 0 ? _sourceHeight : NativePlayerService.Instance?.GetState()?.ActualHeight ?? 0;
+        int limit = srcH > 0 ? srcH : 1081;   // unknown source → offer 1080p and below
 
         var rows = new List<SheetRow>
         {
@@ -705,7 +751,7 @@ public partial class PlayerPage : ContentPage
         };
         foreach (var h in new[] { 1440, 1080, 720, 480 })
         {
-            if (h >= srcH) continue;   // only offer caps below the source
+            if (h >= limit) continue;   // only offer caps below the source
             int cap = h;
             rows.Add(new SheetRow($"{h}p", _maxHeight == h, () => ApplyQuality(cap)));
         }
@@ -938,5 +984,7 @@ public partial class PlayerPage : ContentPage
 
     private sealed record StartResponse(
         string? DirectPlayUrl, string? DirectStreamUrl, string? ManifestUrl,
-        double? TotalDuration, double? ResumeSec, string? Token);
+        double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output);
+
+    private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height);
 }
