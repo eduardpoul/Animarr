@@ -85,6 +85,9 @@ internal static class TvPrefs
 {
     private const string SectionOrderKey = "animarr_tv_section_order";
 
+    /// <summary>Bumped on every save, so open screens notice a new order.</summary>
+    public static int OrderVersion { get; private set; }
+
     /// <summary>User-chosen order of library sections on Home / Library.</summary>
     public static List<Guid> SectionOrder
     {
@@ -102,6 +105,7 @@ internal static class TvPrefs
         set
         {
             try { Preferences.Set(SectionOrderKey, string.Join(',', value)); } catch { }
+            OrderVersion++;
         }
     }
 

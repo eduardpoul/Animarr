@@ -39,7 +39,9 @@ public sealed class TvHomePage : ContentPage
         TvBack.Handler = () => _view?.BackToTop() ?? false;
         if (_shown)
         {
+            var reordered = _view?.ApplyOrderIfChanged() == true;
             if (TvTopBar.TakePending(TvTab.Home)) _view?.FocusTabsSoon();
+            else if (reordered) _view?.FocusTabsSoon();
             else _view?.OnReturn();
         }
         _shown = true;
@@ -162,21 +164,24 @@ internal sealed class TvHomeView : FrameLayout
     }
 
     /// <summary>Back from detail / player: refresh the resume feed (progress moved).</summary>
-    /// <summary>Set by the profile page when the folder order changed.</summary>
-    public static bool SectionsChanged;
-
     public void Freeze() => _focus.Freeze();
+
+    private int _orderVersion;
+    private TvData.CalendarEvent[] _week = Array.Empty<TvData.CalendarEvent>();
+
+    /// <summary>The folder order was changed in the profile (from any page):
+    /// re-sort the section rails now. True when it rebuilt.</summary>
+    public bool ApplyOrderIfChanged()
+    {
+        if (_orderVersion == TvPrefs.OrderVersion) return false;
+        var ordered = TvPrefs.Ordered(_sections);
+        _sections.Clear(); _sections.AddRange(ordered);
+        BuildRows(_week);
+        return true;
+    }
 
     public void OnReturn()
     {
-        if (SectionsChanged)
-        {
-            SectionsChanged = false;
-            var ordered = TvPrefs.Ordered(_sections);
-            _sections.Clear(); _sections.AddRange(ordered);
-            _ = RebuildAsync();
-            return;
-        }
         // A menu tab opens its page on focus — never restore onto one (that would
         // bounce straight back into Library / Search); land on Главная instead.
         if (_focus.Last is { } last && _hero is not null && _hero.IsInBar(last)) FocusTabsSoon();
@@ -184,13 +189,6 @@ internal sealed class TvHomeView : FrameLayout
         if ((DateTime.UtcNow - _lastRefresh).TotalSeconds < 5) return;
         _lastRefresh = DateTime.UtcNow;
         _ = RefreshFeedAsync();
-    }
-
-    private async Task RebuildAsync()
-    {
-        var week = await _data.Get<TvData.CalendarEvent[]>("/api/calendar?back=1&ahead=7");
-        BuildRows(week ?? Array.Empty<TvData.CalendarEvent>());
-        Post(() => _hero?.FocusPrimary());
     }
 
     private async Task RefreshFeedAsync()
@@ -211,6 +209,8 @@ internal sealed class TvHomeView : FrameLayout
     // ── Rows ─────────────────────────────────────────────────────────────────
     private void BuildRows(TvData.CalendarEvent[] week)
     {
+        _week = week;
+        _orderVersion = TvPrefs.OrderVersion;
         _rowModels.Clear();
         _rowModels.Add(HeroRowMarker.Instance);
 
@@ -218,7 +218,8 @@ internal sealed class TvHomeView : FrameLayout
         if (cont.Count > 0) _rowModels.Add(new RailRow("continue", TvL.T("home.next_up", "Смотреть дальше", "Next up"), CardKind.Wide, cont));
 
         var weekCards = WeekCards(week);
-        if (weekCards.Count > 0) _rowModels.Add(new RailRow("week", TvL.T("home.this_week", "На этой неделе", "This week"), CardKind.Wide, weekCards));
+        // empty calendar → no "this week" row at all
+        if (weekCards.Count > 0) _rowModels.Add(new RailRow("week", TvL.T("home.this_week", "На этой неделе", "This week"), CardKind.WideSmall, weekCards));
 
         if (_sections.Count > 0)
             foreach (var (id, label) in _sections)
@@ -276,7 +277,7 @@ internal sealed class TvHomeView : FrameLayout
             var id = e.MediaItemId; var title = e.Title;
             list.Add(new CardItem
             {
-                Kind = CardKind.Wide,
+                Kind = CardKind.WideSmall,
                 Title = e.Title ?? "",
                 Meta = $"{TvL.F("detail.episode_fmt", "Эпизод {0}", "Episode {0}", e.Episode)} · {status}",
                 ImageUrl = string.IsNullOrEmpty(art) ? null : TvMedia.Url($"{_data.Base}{art}&w=640"),

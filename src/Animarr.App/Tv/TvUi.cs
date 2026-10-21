@@ -29,6 +29,7 @@ internal static class TvUi
     public const int PosterW = 124, PosterH = 186;     // 2-column span → 6 per row
     public const int WideW = 268, WideH = 151;         // 4-column span → 3 per row (+ peek)
     public const int EpW = 196, EpH = 110;             // 3-column span → 4 per row
+    public const int WideSmallW = 188, WideSmallH = 106; // "this week" — 70 % of Wide, 4.5 per row
 
     // ── Type scale (sp) — nothing under 12 sp at 10 feet. ────────────────────
     public const float TDisplay = 34, THeadline = 24, TSection = 20, TTitle = 16,

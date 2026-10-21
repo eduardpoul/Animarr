@@ -10,7 +10,7 @@ using AView = Android.Views.View;
 
 namespace Animarr.App.Tv;
 
-internal enum CardKind { Poster, Wide, SeeAll, Episode }
+internal enum CardKind { Poster, Wide, SeeAll, Episode, WideSmall }
 
 /// <summary>One card on any TV rail / grid.</summary>
 internal sealed class CardItem
@@ -73,6 +73,7 @@ internal sealed class CardHolder : RecyclerView.ViewHolder
     public static (int W, int H) ArtSize(CardKind k) => k switch
     {
         CardKind.Wide => (TvUi.WideW, TvUi.WideH),
+        CardKind.WideSmall => (TvUi.WideSmallW, TvUi.WideSmallH),
         CardKind.Episode => (TvUi.EpW, TvUi.EpH),
         _ => (TvUi.PosterW, TvUi.PosterH),
     };

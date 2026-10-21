@@ -346,7 +346,6 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
             if (_folders.GetChildAt(i)?.Tag?.ToString() is { } t && Guid.TryParse(t, out var g)) ids.Add(g);
         TvPrefs.SectionOrder = ids;
         _status.Text = TvL.T("tv.order_saved", "Порядок папок сохранён — он уже на главной.", "Folder order saved — Home uses it now.");
-        TvHomeView.SectionsChanged = true;
     }
 
     // ── interface ────────────────────────────────────────────────────────────

@@ -142,7 +142,19 @@ internal sealed class TvLibraryView : LinearLayout
     }
 
     /// <summary>Back from a title: focus returns to the card it was opened from.</summary>
-    public void OnReturn() => _focus.Restore(() => _grid.RequestFocus());
+    public void OnReturn()
+    {
+        if (_orderVersion != TvPrefs.OrderVersion && _sections.Count > 0)
+        {
+            _sections = TvPrefs.Ordered(_sections);
+            BuildPills();
+            var i = _pillViews.FindIndex(p => p.Id == _active);
+            _pills.GetChildAt(Math.Max(0, i))?.Post(() => _pills.GetChildAt(Math.Max(0, i))?.RequestFocus());
+            return;
+        }
+        _focus.Restore(() => _grid.RequestFocus());
+    }
+    private int _orderVersion = TvPrefs.OrderVersion;
     public void Freeze() => _focus.Freeze();
 
     private async Task LoadAsync()
@@ -175,6 +187,7 @@ internal sealed class TvLibraryView : LinearLayout
     private void BuildPills()
     {
         var ctx = Context!;
+        _orderVersion = TvPrefs.OrderVersion;
         _pills.RemoveAllViews();
         _pillViews.Clear();
         if (_sections.Count == 0) return;
