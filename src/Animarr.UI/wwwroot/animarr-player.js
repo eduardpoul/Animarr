@@ -20,6 +20,21 @@
 (function () {
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
+    // elementId → what must outlive a stream restart on the same player element
+    // (audio / quality switch, native → web fallback). A restart tears the WIRED
+    // entry down and builds a fresh one, so anything that lived only there —
+    // all of setMediaSession's data: HUD title, skip intro/credits segments,
+    // up-next + autoplay, trickplay previews, lock-screen metadata, prev/next —
+    // was silently lost on every switch. Only the public detach() (player
+    // closed, or Blazor moving on to another episode) clears it.
+    //   session   — { meta, handlers } as last passed to setMediaSession
+    //   watchNext — setWatchNextMeta's payload
+    const KEEP = new Map();
+    function keepFor(elementId) {
+        let k = KEEP.get(elementId);
+        if (!k) { k = {}; KEEP.set(elementId, k); }
+        return k;
+    }
 
     // ── Vendor libraries, loaded on demand ──────────────────────────────────
     // hls.js + Artplayer used to be parser-blocking <head> scripts in both
@@ -2334,8 +2349,10 @@
             return;
         }
         if (WIRED.has(elementId)) {
-            console.warn('animarrPlayer: re-attaching without detach, cleaning up first');
-            detach(elementId);
+            // A restart (switchAudio / switchQuality / native fallback) lands
+            // here on purpose; anything else is a missed detach. Either way
+            // only the stream goes — KEEP (session metadata) stays.
+            teardown(elementId);
         }
         const audioTrackIndex = (opts && Number.isFinite(opts.audioTrackIndex))
             ? Math.max(0, opts.audioTrackIndex) : 0;
@@ -2698,7 +2715,7 @@
             native.on('error', () => {
                 const pos = native.currentTime;
                 console.warn('animarr: native error — re-attaching as web at', pos, 's');
-                detach(elementId);
+                teardown(elementId);
                 setTimeout(() => attach(elementId, dotnetRef, mediaPath, {
                     audioTrackIndex: audioTrackIndex,
                     forceResumeSec:  pos,
@@ -3145,6 +3162,12 @@
             }
         } catch (e) { console.warn('mediaSession wire-up failed', e); }
 
+        // A restart of an already-open player (audio / quality switch, native
+        // fallback): Blazor pushed setMediaSession once, after the FIRST attach,
+        // and won't again — re-apply what it sent (no-op on a first attach,
+        // where KEEP holds nothing yet and Blazor's call follows).
+        applyMediaSession(elementId);
+
         try {
             const video = adapter.rawVideoElement();
             if (video && document.pictureInPictureEnabled && !video.disablePictureInPicture) {
@@ -3197,7 +3220,7 @@
             lastPosForDelta = pos;
             r.invokeMethodAsync('OnPlayerProgress', pos, dur, delta).catch(() => {});
 
-            const wn = entry.watchNext;
+            const wn = (KEEP.get(elementId) || {}).watchNext;
             if (wn && typeof window.animarrWatchNextUpsert === 'function') {
                 const posMs = Math.round(pos * 1000);
                 const durMs = Math.round(dur * 1000);
@@ -3230,7 +3253,17 @@
         entry.adapter.pause();
     }
 
+    /** Player closed (or Blazor moving on to another episode): drop the
+     *  stream AND everything kept for restarts of this element. */
     function detach(elementId) {
+        teardown(elementId);
+        KEEP.delete(elementId);
+    }
+
+    /** Stop the current stream on this element — HLS session DELETE, timers,
+     *  HUD, Artplayer / native adapter — but keep KEEP's session metadata so a
+     *  restart on the same element (attach again) can re-apply it. */
+    function teardown(elementId) {
         const entry = WIRED.get(elementId);
         if (!entry) return;
         entry.refRef.current = null;
@@ -3293,9 +3326,9 @@
         // by-index helper dropped it, reverting to source resolution).
         const maxHeight = entry.currentMaxHeight || 0;
         const maxBitrate = entry.currentMaxBitrate || 0;
-        // Tear down the old session synchronously — detach() handles HLS
-        // DELETE + Artplayer destroy + WIRED cleanup.
-        detach(elementId);
+        // Tear down the old session synchronously — teardown() handles HLS
+        // DELETE + Artplayer destroy + WIRED cleanup (KEEP survives).
+        teardown(elementId);
         // Brief delay so the server has a tick to clean up the old ffmpeg
         // process / tmp dir before we ask for a new one (avoids racing the
         // dedup-by-source-path step inside StartAsync).
@@ -3329,7 +3362,7 @@
         const mediaPath = entry.mediaPath;
         const audioTrackIndex = entry.currentAudIdx || 0;
         if (!dotnetRef || !mediaPath) return;
-        detach(elementId);
+        teardown(elementId);
         await new Promise(r => setTimeout(r, 100));
         await attach(elementId, dotnetRef, mediaPath, {
             audioTrackIndex,
@@ -3341,17 +3374,30 @@
         });
     }
 
+    /** Session metadata from Blazor (title, skip segments, up-next, trickplay,
+     *  lock screen, prev/next). Kept per element so every restart of the
+     *  stream re-applies it (attach → applyMediaSession). */
     function setMediaSession(elementId, meta, handlers) {
+        // Only for a player that's actually open (attach may still be starting
+        // or have failed — it's applied once a stream is up).
+        if (!WIRED.has(elementId)) return;
+        keepFor(elementId).session = { meta: meta || null, handlers: handlers || null };
+        applyMediaSession(elementId);
+    }
+
+    function applyMediaSession(elementId) {
         const entry = WIRED.get(elementId);
-        if (!entry || !entry.adapter) return;
+        const kept  = KEEP.get(elementId);
+        if (!entry || !entry.adapter || !kept || !kept.session) return;
+        const { meta, handlers } = kept.session;
         if (entry.hud) {
             const kicker = meta?.hudKicker || '';
             const name   = meta?.hudName   || meta?.title || '';
             entry.hud.setTitle(kicker, name);
         }
         // Up-next overlay data (end-of-episode autoplay card). Read live by the
-        // HUD's updateUpNext on each timeupdate; stored on the entry so it
-        // survives until the next setMediaSession call (i.e. the next episode).
+        // HUD's updateUpNext on each timeupdate; copied onto each new entry
+        // from KEEP, so it lasts until the player closes / the next episode.
         entry.nextAvailable = !!(meta && meta.nextAvailable);
         if (entry.hud && entry.hud.setNav) {
             entry.hud.setNav(!!(meta && meta.prevAvailable), !!(meta && meta.nextAvailable));
@@ -3414,10 +3460,10 @@
     }
 
     function setWatchNextMeta(elementId, meta) {
-        const entry = WIRED.get(elementId);
-        if (!entry) return;
+        if (!WIRED.has(elementId)) return;
         if (!meta || !meta.mediaId || !meta.title) return;
-        entry.watchNext = {
+        // In KEEP (read by sendProgress) so a stream restart doesn't drop it.
+        keepFor(elementId).watchNext = {
             mediaId:   String(meta.mediaId),
             title:     String(meta.title),
             posterUrl: meta.posterUrl ? String(meta.posterUrl) : '',
