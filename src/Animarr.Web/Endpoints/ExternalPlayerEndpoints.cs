@@ -52,30 +52,38 @@ internal static class ExternalPlayerEndpoints
         //   • Movie (SingleFilePath set): match path EXACTLY
         //   • Series / per-title folder: file lives under folder.Path
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var items = await db.MediaItems.Include(m => m.Folder).ToListAsync(ct);
+        // Pinged every ~5 s per mpv viewer: read only the five columns the
+        // match needs (Id/MediaType + the folder's paths), untracked — not the
+        // whole catalog's wide rows.
+        var items = await db.MediaItems
+            .AsNoTracking()
+            .Select(m => new
+            {
+                m.Id,
+                m.MediaType,
+                FolderPath   = m.Folder.Path,
+                m.Folder.SingleFilePath,
+                m.Folder.IsSection,
+            })
+            .ToListAsync(ct);
 
-        MediaItem? owner = null;
-        foreach (var m in items)
+        var owner = items.FirstOrDefault(m =>
         {
-            if (m.Folder is null) continue;
             // Compare canonical forms — fullPath is Path.GetFullPath'd by the
             // validator, stored folder paths may use the other separator.
-            if (!string.IsNullOrEmpty(m.Folder.SingleFilePath)
-                && string.Equals(Path.GetFullPath(m.Folder.SingleFilePath), fullPath, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(m.SingleFilePath)
+                && string.Equals(Path.GetFullPath(m.SingleFilePath), fullPath, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (!string.IsNullOrEmpty(m.FolderPath) && !m.IsSection)
             {
-                owner = m; break;
-            }
-            if (!string.IsNullOrEmpty(m.Folder.Path) && !m.Folder.IsSection)
-            {
-                var folderRoot = Path.GetFullPath(m.Folder.Path)
+                var folderRoot = Path.GetFullPath(m.FolderPath)
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     + Path.DirectorySeparatorChar;
                 if (fullPath!.StartsWith(folderRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    owner = m; break;
-                }
+                    return true;
             }
-        }
+            return false;
+        });
         if (owner is null)
         {
             logger.LogDebug("No MediaItem matches external play path {Path}", fullPath);
@@ -88,6 +96,7 @@ internal static class ExternalPlayerEndpoints
             // Parse season/episode from filename using the same pattern engine
             // that drives rename suggestions — fileNameWithoutExt → (season, ep).
             var rules = await db.RenamePatterns
+                .AsNoTracking()
                 .Where(p => p.Scope == PatternScope.Global)
                 .ToListAsync(ct);
             var parsed = patternMatch.ParseFileName(Path.GetFileName(fullPath!), rules);
@@ -95,7 +104,7 @@ internal static class ExternalPlayerEndpoints
             {
                 // Season comes from filename or falls back to folder-path detection.
                 season  = parsed.Season ?? patternMatch.DetectSeasonFromPath(
-                    Path.GetDirectoryName(fullPath!) ?? "", owner.Folder?.Path) ?? 1;
+                    Path.GetDirectoryName(fullPath!) ?? "", owner.FolderPath) ?? 1;
                 episode = parsed.Episode;
             }
         }

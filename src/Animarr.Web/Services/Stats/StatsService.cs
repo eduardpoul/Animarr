@@ -23,29 +23,41 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        // ── "what" — watched WatchStates joined to their items ──────────────
-        var watched = await (
-            from w in db.WatchStates.AsNoTracking()
-            join m in db.MediaItems.AsNoTracking() on w.MediaItemId equals m.Id
-            where w.UserId == userId && w.IsWatched
-            select new WatchRow(
-                m.Id, m.MediaType, m.Runtime, w.RuntimeMs, m.Studio,
-                m.GenresLocalizedJson, m.GenresJson, m.Title, m.EnglishTitle,
-                m.OriginalTitle, m.CjkTitle, m.PosterPath))
+        // ── "what" — the user's watched episodes, then their titles ─────────
+        // Two narrow reads instead of one row per watched episode joined to
+        // the wide MediaItems row (whose late-added columns sit in overflow
+        // pages): (title, played runtime) per watched episode — same filter,
+        // so the same rows in the same order as before — then each title's
+        // display columns once.
+        var watched = await db.WatchStates.AsNoTracking()
+            .Where(w => w.UserId == userId && w.IsWatched)
+            .Select(w => new { w.MediaItemId, w.RuntimeMs })
             .ToListAsync(ct);
 
-        // Per-title rollup: episodes watched + estimated minutes.
+        var titleIds = watched.Select(w => w.MediaItemId).Distinct().ToList();
+        var titles = await db.MediaItems.AsNoTracking()
+            .Where(m => titleIds.Contains(m.Id))
+            .Select(m => new TitleRow(
+                m.Id, m.MediaType, m.Runtime, m.Studio,
+                m.GenresLocalizedJson, m.GenresJson, m.Title, m.EnglishTitle,
+                m.OriginalTitle, m.CjkTitle, m.PosterPath))
+            .ToDictionaryAsync(m => m.Id, ct);
+
+        // Per-title rollup: episodes watched + estimated minutes. First-seen
+        // order is kept — the rankings below are stable sorts, so it decides
+        // ties exactly as before.
         var byTitle = watched
-            .GroupBy(r => r.Id)
+            .Where(w => titles.ContainsKey(w.MediaItemId))
+            .GroupBy(w => w.MediaItemId)
             .Select(g =>
             {
-                var r0 = g.First();
+                var row = titles[g.Key];
                 return new TitleAgg(
-                    r0, Episodes: g.Count(), Minutes: g.Sum(MinutesOf));
+                    row, Episodes: g.Count(), Minutes: g.Sum(w => MinutesOf(w.RuntimeMs, row)));
             })
             .ToList();
 
-        var summaryEpisodes = watched.Count;
+        var summaryEpisodes = byTitle.Sum(t => t.Episodes);
         var summaryTitles   = byTitle.Count;
         var totalMinutes    = byTitle.Sum(t => t.Minutes);
 
@@ -91,25 +103,30 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
             .ToList();
 
         // ── "when" — WatchEvents journal ────────────────────────────────────
-        var events = await db.WatchEvents.AsNoTracking()
+        // Summed per stored day bucket in SQL, straight off the covering
+        // (UserId, Date, SecondsWatched, …) index — the journal has one row
+        // per episode per day and grows without bound. Days/months are then
+        // rolled up from those sums exactly as from the raw rows.
+        var days = await db.WatchEvents.AsNoTracking()
             .Where(e => e.UserId == userId)
-            .Select(e => new { e.Date, e.SecondsWatched })
+            .GroupBy(e => e.Date)
+            .Select(g => new { Date = g.Key, Seconds = g.Sum(e => e.SecondsWatched), Events = g.Count() })
             .ToListAsync(ct);
 
-        var perDay = events
-            .GroupBy(e => e.Date.Date)
-            .ToDictionary(g => g.Key, g => g.Sum(e => e.SecondsWatched) / 60);
+        var perDay = days
+            .GroupBy(d => d.Date.Date)
+            .ToDictionary(g => g.Key, g => g.Sum(d => d.Seconds) / 60);
 
         var heatmap = perDay
             .OrderBy(kv => kv.Key)
             .Select(kv => new HeatCell(kv.Key.ToString("yyyy-MM-dd"), kv.Value))
             .ToList();
 
-        var byMonth = events
-            .GroupBy(e => new DateTime(e.Date.Year, e.Date.Month, 1))
+        var byMonth = days
+            .GroupBy(d => new DateTime(d.Date.Year, d.Date.Month, 1))
             .OrderBy(g => g.Key)
             .Select(g => new MonthStat(
-                g.Key.ToString("yyyy-MM"), g.Sum(e => e.SecondsWatched) / 60, g.Count()))
+                g.Key.ToString("yyyy-MM"), g.Sum(d => d.Seconds) / 60, g.Sum(d => d.Events)))
             .ToList();
 
         var today = RequestTimeZone.LocalDay(DateTime.UtcNow, viewerTz ?? TimeZoneInfo.Local);
@@ -127,12 +144,12 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
     /// <summary>Estimated minutes for one watched episode: the actually-played
     /// runtime where playback recorded it, else the title's metadata runtime,
     /// else a per-type default so id-poor donghua still count.</summary>
-    private static long MinutesOf(WatchRow r) =>
-        r.RuntimeMs is > 0 ? r.RuntimeMs.Value / 60000
-        : r.Runtime  is > 0 ? r.Runtime.Value
+    private static long MinutesOf(long? runtimeMs, TitleRow r) =>
+        runtimeMs is > 0 ? runtimeMs.Value / 60000
+        : r.Runtime is > 0 ? r.Runtime.Value
         : r.MediaType == MediaItemType.Movie ? 100 : 24;
 
-    private static IEnumerable<string> Genres(WatchRow r)
+    private static IEnumerable<string> Genres(TitleRow r)
     {
         var json = !string.IsNullOrWhiteSpace(r.GenresLocalizedJson) ? r.GenresLocalizedJson : r.GenresJson;
         if (string.IsNullOrWhiteSpace(json)) return [];
@@ -151,7 +168,7 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
     /// <summary>Display title — the human-readable name, avoiding a raw CJK
     /// original when a Latin title exists (mirrors MediaTitles.DisplayTitle
     /// without pulling the whole entity).</summary>
-    private static string DisplayTitle(WatchRow r)
+    private static string DisplayTitle(TitleRow r)
     {
         if (!string.IsNullOrWhiteSpace(r.Title) && !IsMostlyCjk(r.Title)) return r.Title;
         if (!string.IsNullOrWhiteSpace(r.EnglishTitle)) return r.EnglishTitle!;
@@ -201,10 +218,10 @@ public sealed class StatsService(IDbContextFactory<AppDbContext> dbFactory)
         return (current, longest);
     }
 
-    private sealed record WatchRow(
-        Guid Id, MediaItemType MediaType, int? Runtime, long? RuntimeMs, string? Studio,
+    private sealed record TitleRow(
+        Guid Id, MediaItemType MediaType, int? Runtime, string? Studio,
         string? GenresLocalizedJson, string? GenresJson,
         string Title, string? EnglishTitle, string? OriginalTitle, string? CjkTitle, string? PosterPath);
 
-    private sealed record TitleAgg(WatchRow Row, int Episodes, long Minutes);
+    private sealed record TitleAgg(TitleRow Row, int Episodes, long Minutes);
 }
