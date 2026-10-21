@@ -742,13 +742,23 @@ else
         _loading = true;
         try
         {
-            _item     = await Api.GetMediaItemAsync(Id);
-            _continue = await Api.GetContinueAsync(Id);
+            // The four fetches are independent — issue them together (they
+            // were four serial round trips; the files one walks the title's
+            // folder on disk). Same all-or-nothing handling as before: any
+            // failure shows "not found".
+            var itemTask     = Api.GetMediaItemAsync(Id);
+            var continueTask = Api.GetContinueAsync(Id);
+            var statesTask   = Api.GetWatchStatesAsync(Id);
+            var filesTask    = Api.GetMediaFilesAsync(Id);
+            await Task.WhenAll(itemTask, continueTask, statesTask, filesTask);
+
+            _item     = await itemTask;
+            _continue = await continueTask;
             _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
-            var states = await Api.GetWatchStatesAsync(Id);
+            var states = await statesTask;
             _watchStates = states.ToList();
             _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
-            _files = await Api.GetMediaFilesAsync(Id);
+            _files = await filesTask;
 
             // Mirror the render's gate: only seed the active season from the
             // stored Seasons list when a real source (TMDB/MAL) backs it —

@@ -180,63 +180,39 @@
         // to call from any page that fetches at boot.
         try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup — fall through */ }
 
+        // Every fetch below is independent — they all go out at once and are
+        // awaited after the catalog (they used to run one after another, eight
+        // round trips behind the spinner). Each keeps its own fallback, as
+        // before; a failed catalog no longer blanks the other sections.
+        //
+        // Continue Watching — v5 hero source of truth. Returns at most 5
+        // in-progress titles for the current user; empty array if the
+        // user hasn't started anything (Home falls back to Featured).
+        var continueTask = OrDefault(() => Api.GetContinueWatchingAsync(take: 5),
+                                     Array.Empty<ContinueWatchItemDto>());
+        // Next Up — next episode per engaged series. Folds "new episode"
+        // items into the hero and fills the rail under it.
+        var nextUpTask   = OrDefault(() => Api.GetNextUpAsync(take: 12),
+                                     Array.Empty<ContinueWatchItemDto>());
+        // "This week" — airing events for the current week (rail collapses
+        // when the week is empty).
+        var thisWeekTask = _homeSections.Contains("thisweek")
+            ? OrDefault(() => Api.GetCalendarAsync(back: 1, ahead: 7), Array.Empty<CalendarEventDto>())
+            : null;
+        var sectionsTask = OrDefault(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>());
+        var foldersTask  = OrDefault<FolderWatcherDto[]?>(() => Api.GetFoldersAsync(), null);
+        var intervalTask = OrDefault(() => Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec), null);
+
+        // "For you" — heuristic recommendations (skipped entirely when the
+        // user hid the section, so no wasted TMDB round-trips). NOT awaited
+        // with the rest: on a cold cache the server backfills from TMDB, which
+        // used to hold the whole page behind the spinner — the rail renders
+        // when it lands.
+        if (_homeSections.Contains("foryou")) _ = LoadForYouAsync();
+
         try
         {
-            // Continue Watching — v5 hero source of truth. Returns at most 5
-            // in-progress titles for the current user; empty array if the
-            // user hasn't started anything (Home falls back to Featured).
-            try { _continueItems = await Api.GetContinueWatchingAsync(take: 5); }
-            catch { _continueItems = Array.Empty<ContinueWatchItemDto>(); }
-
-            // Next Up — next episode per engaged series. Folds "new episode"
-            // items into the hero and fills the rail under it.
-            try { _nextUpItems = await Api.GetNextUpAsync(take: 12); }
-            catch { _nextUpItems = Array.Empty<ContinueWatchItemDto>(); }
-
-            // "For you" — heuristic recommendations (skipped entirely when the
-            // user hid the section, so no wasted TMDB round-trips).
-            if (_homeSections.Contains("foryou"))
-            {
-                try { _forYou = await Api.GetForYouAsync(); }
-                catch { _forYou = Array.Empty<RecCardDto>(); }
-            }
-
-            // "This week" — airing events for the current week (rail collapses
-            // when the week is empty).
-            if (_homeSections.Contains("thisweek"))
-            {
-                try
-                {
-                    var events = await Api.GetCalendarAsync(back: 1, ahead: 7);
-                    var weekEnd = DateTime.Now.Date.AddDays(7);
-                    _thisWeek = events
-                        .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
-                        .OrderBy(e => e.AiringAtUtc)
-                        .ToArray();
-                }
-                catch { _thisWeek = Array.Empty<CalendarEventDto>(); }
-            }
-
-            var sections = await Api.GetSectionFoldersAsync();
-            _sections = sections.OrderBy(f => f.Label).ToList();
-
-            // Build the section → child-folder-id map HERE, right after _sections
-            // loads — NOT in OnAfterRenderAsync (see git history: lifecycle race
-            // left the map empty forever and folder pills filtered to zero).
-            try
-            {
-                var allFolders = await Api.GetFoldersAsync();
-                foreach (var sec in _sections)
-                {
-                    var ids = allFolders
-                        .Where(f => f.ParentSectionId == sec.Id)
-                        .Select(f => f.Id)
-                        .ToHashSet();
-                    ids.Add(sec.Id);
-                    _childFolderIdsBySection[sec.Id] = ids;
-                }
-            }
-            catch { /* section filter degrades to no-op */ }
+            // The catalog — everything above is already in flight meanwhile.
 
             var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
             // De-duplication: collapse by Id first (defensive), then by
@@ -259,10 +235,44 @@
                 .ToList();
 
             // Carousel cadence from server config.
-            var intStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
+            var intStr = await intervalTask;
             if (int.TryParse(intStr?.Value, out var iv)) _heroInterval = iv;
         }
-        catch { /* offline — empty sections */ }
+        catch { /* offline — empty catalog */ }
+
+        // The rest already ran alongside the catalog fetch above; the wrappers
+        // never throw.
+        _continueItems = await continueTask;
+        _nextUpItems   = await nextUpTask;
+        if (thisWeekTask is not null)
+        {
+            var events  = await thisWeekTask;
+            var weekEnd = DateTime.Now.Date.AddDays(7);
+            _thisWeek = events
+                .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
+                .OrderBy(e => e.AiringAtUtc)
+                .ToArray();
+        }
+
+        var sections = await sectionsTask;
+        _sections = sections.OrderBy(f => f.Label).ToList();
+
+        // Build the section → child-folder-id map HERE, right after _sections
+        // loads — NOT in OnAfterRenderAsync (see git history: lifecycle race
+        // left the map empty forever and folder pills filtered to zero).
+        // A failed folder fetch degrades the section filter to a no-op.
+        if (await foldersTask is { } allFolders)
+        {
+            foreach (var sec in _sections)
+            {
+                var ids = allFolders
+                    .Where(f => f.ParentSectionId == sec.Id)
+                    .Select(f => f.Id)
+                    .ToHashSet();
+                ids.Add(sec.Id);
+                _childFolderIdsBySection[sec.Id] = ids;
+            }
+        }
 
         // A NavPane folder picked on another page (SetActiveFolder, then
         // navigate here) or while this load ran fired OnChange before
@@ -271,6 +281,24 @@
         _activeSection = ResolveActiveSection();
         _loading = false;
         ApplyFilter();
+    }
+
+    /// <summary>Start <paramref name="call"/> now; await it later. Any failure
+    /// resolves to <paramref name="fallback"/> — the per-section fallbacks the
+    /// serial loads had — so the parallel loads never throw.</summary>
+    private static async Task<T> OrDefault<T>(Func<Task<T>> call, T fallback)
+    {
+        try { return await call(); }
+        catch { return fallback; }
+    }
+
+    /// <summary>"For you" rail — loaded on its own so a cold TMDB backfill
+    /// doesn't hold the rest of Home; renders when it arrives.</summary>
+    private async Task LoadForYouAsync()
+    {
+        try { _forYou = await Api.GetForYouAsync(); }
+        catch { _forYou = Array.Empty<RecCardDto>(); return; }
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>Recompute the render stack from the stored preference —
