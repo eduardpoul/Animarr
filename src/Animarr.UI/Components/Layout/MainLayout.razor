@@ -539,9 +539,43 @@
         _identHub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
         {
-            InvokeAsync(RefreshIdentificationStatusAsync);
+            InvokeAsync(QueueIdentificationRefresh);
         });
         try { await _identHub.StartAsync(); } catch { }
+    }
+
+    /// <summary>Trailing window that folds a burst of QueueChanged pings into
+    /// one refetch (a job raises several; older servers sent up to 20 per event).</summary>
+    private const int IdentRefreshDebounceMs = 400;
+    private bool _identRefreshQueued;   // a refresh is waiting or in flight
+    private bool _identRefreshDirty;    // another ping landed meanwhile
+
+    /// <summary>Debounced, single-flight <see cref="RefreshIdentificationStatusAsync"/>
+    /// for hub pings: each refresh is a 200-row queue fetch + status fetch, and
+    /// they used to run once per ping, overlapping. Runs on the renderer's
+    /// context (InvokeAsync), so the flags need no locking.</summary>
+    private void QueueIdentificationRefresh()
+    {
+        if (_identRefreshQueued) { _identRefreshDirty = true; return; }
+        _identRefreshQueued = true;
+        _ = RunIdentificationRefreshAsync();
+    }
+
+    private async Task RunIdentificationRefreshAsync()
+    {
+        try
+        {
+            do
+            {
+                await Task.Delay(IdentRefreshDebounceMs);
+                // Everything up to here is covered by this fetch; a ping that
+                // arrives while it runs earns exactly one more.
+                _identRefreshDirty = false;
+                await RefreshIdentificationStatusAsync();
+            }
+            while (_identRefreshDirty);
+        }
+        finally { _identRefreshQueued = false; }
     }
 
     /// <summary>Push the active server's authority into MediaUrl + JS shim so
