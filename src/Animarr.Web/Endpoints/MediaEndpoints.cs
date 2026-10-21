@@ -858,29 +858,23 @@ internal static class MediaEndpoints
                             // chromaprint provider can still detect it (e.g. donghua,
                             // which aren't on AniList, or an episode chromaprint simply
                             // missed on its last pass), but it decodes minutes of audio
-                            // — too slow to run inline. The batch pass would do it,
-                            // except it skips already-scanned titles (LastSegmentScanAt),
-                            // so a newly-added episode — or a stubborn miss — never gets
-                            // another shot. Run chromaprint for THIS episode in the
-                            // background, debounced once per process so repeat opens of
-                            // a genuinely segment-less episode don't re-decode it; it'll
-                            // be ready on a later open.
+                            // — too slow to run inline, and far too heavy to start the
+                            // moment Play is pressed (up to 8 ffmpeg decodes, GBs of
+                            // reads racing the player's first segments). The batch pass
+                            // would do it, except it skips already-scanned titles
+                            // (LastSegmentScanAt), so a newly-added episode — or a
+                            // stubborn miss — never gets another shot. Queue THIS
+                            // episode for the background pass, which runs it at low
+                            // priority once nobody is watching; debounced once per
+                            // process so repeat opens of a genuinely segment-less
+                            // episode don't re-decode it; it'll be ready on a later open.
                             if ((missingIntro || missingCredits) && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
                             {
                                 var peers = files
                                     .Where(f => (f.Season ?? 1) == s && f.Episode != null && !string.IsNullOrEmpty(f.FilePath))
                                     .Select(f => (f.Episode!.Value, f.FilePath!)).Distinct().ToList();
-                                var fpBg = fp!;
-                                _ = Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        using var scope = scopeFactory.CreateScope();
-                                        var bg = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
-                                        await bg.DetectForEpisodeAsync(item, s, e, fpBg, peers, cheapOnly: false, CancellationToken.None);
-                                    }
-                                    catch { /* best-effort background detection */ }
-                                });
+                                if (!SegmentDetectionQueue.TryEnqueue(new SegmentDetectionQueue.Request(item, s, e, fp!, peers)))
+                                    _lazyHeavyTried.TryRemove($"{id}|{s}|{e}", out _);   // queue full — a later open retries
                             }
                         }
                     }

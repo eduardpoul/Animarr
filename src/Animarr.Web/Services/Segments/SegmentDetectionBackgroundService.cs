@@ -21,6 +21,10 @@ namespace Animarr.Web.Services.Segments;
 /// once, then only re-scanned after <see cref="RescanAfter"/>. The work itself
 /// is idempotent (already-covered episodes are skipped), so a missed/restarted
 /// run just resumes on the next tick.
+///
+/// Episodes the player opened without segments arrive through
+/// <see cref="SegmentDetectionQueue"/> and are drained ahead of the title pass
+/// (the viewer is likely to open them again), under the same politeness.
 /// </summary>
 public sealed class SegmentDetectionBackgroundService(
     IDbContextFactory<AppDbContext> dbFactory,
@@ -48,15 +52,70 @@ public sealed class SegmentDetectionBackgroundService(
             {
                 // Nobody's watching → go; otherwise park here (cheap 15s poll).
                 await playback.WaitForIdleAsync(stoppingToken);
-                didWork = await ProcessOneAsync(stoppingToken);
+                didWork = await ProcessQueuedAsync(stoppingToken)
+                       || await ProcessOneAsync(stoppingToken);
             }
-            catch (OperationCanceledException) { break; }
+            // Only shutdown ends the loop — a stray cancellation from a provider
+            // (HTTP timeout) is just a failed pass.
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogWarning(ex, "[Segments] background pass failed"); }
 
-            // Drain the backlog fast (initial fill), then settle into a slow poll.
-            try { await Task.Delay(didWork ? BusyDelay : IdleDelay, stoppingToken); }
+            // Drain the backlog fast (initial fill), then settle into a slow poll
+            // that a player-queued episode cuts short.
+            try
+            {
+                if (didWork) await Task.Delay(BusyDelay, stoppingToken);
+                else await IdleAsync(stoppingToken);
+            }
             catch (OperationCanceledException) { break; }
         }
+    }
+
+    /// <summary>Wait out <see cref="IdleDelay"/>, or less if the player queues
+    /// an episode meanwhile.</summary>
+    private static async Task IdleAsync(CancellationToken ct)
+    {
+        using var wake = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var delay  = Task.Delay(IdleDelay, wake.Token);
+        var queued = SegmentDetectionQueue.Reader.WaitToReadAsync(wake.Token).AsTask();
+        await Task.WhenAny(delay, queued);
+        wake.Cancel();   // retire the loser
+        ct.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>Run one player-queued episode (heavy cascade, low priority).
+    /// Returns false when the queue is empty.</summary>
+    private async Task<bool> ProcessQueuedAsync(CancellationToken ct)
+    {
+        if (!SegmentDetectionQueue.Reader.TryRead(out var req)) return false;
+
+        // The title pass may have covered it since it was queued.
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
+        {
+            var kinds = await db.EpisodeSegments
+                .Where(x => x.MediaItemId == req.Item.Id && x.Season == req.Season && x.Episode == req.Episode &&
+                            (x.Kind == SegmentKind.Intro || x.Kind == SegmentKind.Credits))
+                .Select(x => x.Kind)
+                .Distinct()
+                .CountAsync(ct);
+            if (kinds == 2) return true;
+        }
+
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var detector = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
+            if (await detector.DetectForEpisodeAsync(req.Item, req.Season, req.Episode, req.FilePath,
+                    req.SeasonFiles, cheapOnly: false, ct, playback.WaitForIdleAsync))
+                logger.LogInformation("[Segments] player-queued detection wrote segments for {Title} S{Season}E{Episode}",
+                    req.Item.Title, req.Season, req.Episode);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[Segments] player-queued detection failed for {File}", req.FilePath);
+        }
+        return true;
     }
 
     /// <summary>Process one title. Returns true when a title was picked up (so the
