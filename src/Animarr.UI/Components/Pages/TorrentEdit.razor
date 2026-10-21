@@ -325,15 +325,18 @@
         // A snapshot carries every torrent — when another one moved, this one
         // is unchanged and the drawer needn't re-render.
         var prev = _live;
-        if (prev == live) return;
-        _live = live;
-        StateHasChanged();
+        if (prev != live)
+        {
+            _live = live;
+            StateHasChanged();
+        }
 
         // Live per-file progress while downloading. Updates ONLY the progress
         // map (not _priorities/_fileItems) so unsaved priority edits survive the
         // tick. It's a whole file-tree REST call, so only when the torrent
-        // actually moved and at most every few seconds — it used to fire on every
-        // snapshot (2 Hz).
+        // actually moved since the last pull and at most every few seconds — it
+        // used to fire on every snapshot (2 Hz). Checked on unchanged snapshots
+        // too (heartbeat), so a move the throttle skipped is still picked up.
         if (live.State is "Downloading" or "Metadata")
         {
             if (live.Progress != _fileProgressFor
