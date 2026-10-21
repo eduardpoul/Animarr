@@ -874,7 +874,6 @@ internal static class MediaEndpoints
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
             SegmentDetectionService detector,
-            IServiceScopeFactory scopeFactory,
             IUserContext userCtx,
             CancellationToken ct) =>
         {
