@@ -40,6 +40,9 @@ namespace Animarr.Web.Services;
 /// edge. With our pre-written VOD playlist + ENDLIST the player allows
 /// arbitrary seeking; segments past ffmpeg's current encoding point wait,
 /// stream-copy being disk-IO-bound at ~10× realtime even for 4K HEVC.
+/// ffmpeg is paused once it is far enough ahead of the player, and segments
+/// well behind the player are deleted (HlsSessionService.Throttle.cs), so a
+/// session dir holds a bounded window, not the whole file.
 ///
 /// Why MPEG-TS for H.264: Plex/Jellyfin/Emby all use TS as the workhorse
 /// because (1) PCR-based sync sidesteps fMP4's TFDT-PTS interaction
@@ -75,6 +78,7 @@ public sealed partial class HlsSessionService : IDisposable
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
     private readonly Timer _gcTimer;
+    private readonly Timer _throttleTimer;
 
     /// <summary>Live HLS transcode sessions right now (idle-but-not-yet-reaped
     /// included). Background jobs (trickplay) poll this to yield the CPU to
@@ -103,6 +107,9 @@ public sealed partial class HlsSessionService : IDisposable
         // before the player gives up retrying segments (hls.js typically
         // backs off after a few 503s).
         _gcTimer = new Timer(_ => GarbageCollect(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        // Look-ahead throttle + pruning of played segments — see
+        // HlsSessionService.Throttle.cs for why the session dir needs both.
+        _throttleTimer = new Timer(_ => ThrottleTick(), null, ThrottleInterval, ThrottleInterval);
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
@@ -661,7 +668,8 @@ public sealed partial class HlsSessionService : IDisposable
 
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
-            externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false);
+            externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false,
+            startSegment: startSegment);
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
         // mid-start — the endpoint passes RequestAborted): stop the session's
@@ -798,32 +806,37 @@ public sealed partial class HlsSessionService : IDisposable
     {
         if (!_sessions.TryGetValue(token, out var session)) return null;
         var full = Path.Combine(session.OutputDir, fileName);
+
+        // Every segment request moves the play frontier the pruning and the
+        // look-ahead throttle key off — and un-pauses ffmpeg when the player is
+        // closing in on (or asking past) what's been produced.
+        var targetSeg = ParseSegmentNumber(fileName);
+        if (targetSeg >= 0) NotePlayerRequest(session, targetSeg);
+
         if (File.Exists(full)) return full;
 
         // If the request is for a segment (seg-NNNNN.{m4s|ts}) and it's not
         // on disk yet, decide whether to wait or to skip ffmpeg ahead.
-        var targetSeg = ParseSegmentNumber(fileName);
         if (targetSeg >= 0)
         {
-            var producedTop = HighestProducedSegment(session.OutputDir);
+            // Current run only (see HlsSession.ProducedTop): RunStartSegment-1
+            // until ffmpeg flushes its first segment.
+            var producedTop = CurrentProducedTop(session);
             var gap = targetSeg - producedTop;
             // Three cases:
             //   • forward, small gap (1..threshold): ffmpeg will reach it
-            //     shortly, cheaper to wait than to restart.
+            //     shortly, cheaper to wait than to restart. This also covers
+            //     "nothing produced yet, target = the run's first segment" —
+            //     gap 1, wait, don't thrash.
             //   • forward, big gap (>threshold): restart at target so we
             //     don't make the user wait minutes for sequential encode.
             //   • backward/at-or-below (target <= producedTop) and the file
-            //     still isn't there: either the user scrubbed before the
-            //     resume point's start_number, or a segment got skipped/
-            //     deleted. Restart at target to produce it.
+            //     still isn't there: the user scrubbed back past the pruned
+            //     window, or before this run's start (the resume point's
+            //     start_number, an earlier restart). Restart at target to
+            //     produce it.
             const int restartThreshold = 12;
-            bool needsRestart = gap > restartThreshold
-                            || (targetSeg <= producedTop && producedTop >= 0);
-            // Edge case: producedTop = -1 (no segments produced yet) and
-            // target = startSegment. ffmpeg just hasn't flushed its first
-            // segment yet — wait, don't thrash.
-            if (producedTop < 0 && Math.Abs(gap) > restartThreshold)
-                needsRestart = true;
+            bool needsRestart = gap > restartThreshold || targetSeg <= producedTop;
             if (needsRestart)
             {
                 _logger.LogInformation("HLS {Token}: seek-jump from seg-{From} to seg-{To}, restarting ffmpeg",
@@ -855,24 +868,6 @@ public sealed partial class HlsSessionService : IDisposable
         if (ext != "m4s" && ext != "ts") return -1;
         var numStr = fileName[4..dot];
         return int.TryParse(numStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : -1;
-    }
-
-    private static int HighestProducedSegment(string dir)
-    {
-        // Scan the session dir for the highest seg-NNNNN.{m4s|ts} file ffmpeg
-        // has finished writing (we use +temp_file so partials are *.tmp).
-        int max = -1;
-        try
-        {
-            foreach (var path in Directory.EnumerateFiles(dir, "seg-*.*"))
-            {
-                var name = Path.GetFileName(path);
-                var n = ParseSegmentNumber(name);
-                if (n > max) max = n;
-            }
-        }
-        catch { /* ignore — dir might be torn down */ }
-        return max;
     }
 
     /// <summary>Segment file extension for a given plan. MPEG-TS uses .ts,
@@ -918,6 +913,10 @@ public sealed partial class HlsSessionService : IDisposable
                     File.Delete(t);
             }
             catch { }
+            // …and the previous runs' segments from the target onward: the new
+            // run re-creates them in order, and leftovers ahead of it would be
+            // served as if they were its output.
+            DeleteSegmentsFrom(session.OutputDir, targetSegment);
 
             // The playlist now spans the full file duration, so playlist time
             // for seg-K is exactly K*segDur — meaning ffmpeg should seek to
@@ -967,7 +966,7 @@ public sealed partial class HlsSessionService : IDisposable
             }
             if (proc is null) return;
 
-            session.SwapProcess(proc);
+            session.SwapProcess(proc, targetSegment);
 
             // Tell the playlist that segments from `targetSegment` onward come
             // from a fresh encoder context — without this marker hls.js tries
