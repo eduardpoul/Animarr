@@ -1006,11 +1006,32 @@ public sealed partial class HlsSessionService : IDisposable
     public void Stop(string token)
     {
         if (!_sessions.TryRemove(token, out var s)) return;
-        try { if (!s.Process.HasExited) s.Process.Kill(true); } catch { }
-        try { s.Process.Dispose(); } catch { }
+        var proc = s.Process;
+        try { if (!proc.HasExited) proc.Kill(true); } catch { }
         try { s.RestartLock.Dispose(); } catch { }
-        TryRemoveDir(s.OutputDir);
         _logger.LogInformation("HLS session {Token} stopped (by client / GC).", token);
+
+        // The recursive delete runs off the caller's path: Stop is called from
+        // StartAsync's dedupe/cap step (i.e. BEFORE the next session can start),
+        // from DELETE /api/hls and from the RequestAborted callback. Wait for the
+        // killed ffmpeg first so it can't drop one more file into a dir being
+        // deleted; anything that still fails is picked up by the GC's orphan
+        // sweep (the token is no longer active).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var exited = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await proc.WaitForExitAsync(exited.Token);
+            }
+            catch { /* gone already, or didn't die in time — delete anyway */ }
+            try { proc.Dispose(); } catch { }
+            try { if (Directory.Exists(s.OutputDir)) Directory.Delete(s.OutputDir, recursive: true); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "HLS: removing session dir {Dir} failed — the GC sweep will retry", s.OutputDir);
+            }
+        });
     }
 
 }
