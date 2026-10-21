@@ -2425,9 +2425,15 @@
      * POST /api/hls/start for one playback plan. Resolves to
      *   { totalDuration, resumeSec, output, directPlayUrl, directStreamUrl,
      *     sessionToken, manifestUrl }
-     * or throws an Error with `.status` (HTTP status, 0 = network) and a short
-     * `.reason` for the user. One retry on 5xx / network (a start racing the
-     * server's cleanup of the previous session often succeeds a beat later).
+     * or throws an Error with `.status` (HTTP status, 0 = network), `.code`
+     * (the problem+json `code` extension: invalid_audio_track,
+     * invalid_max_height, invalid_max_bitrate, ffmpeg_exited, start_failed,
+     * too_many_sessions, ffmpeg_timeout) and a short `.reason` for the user
+     * (the problem's `detail`). One retry on a network error or a 5xx that a
+     * second try can fix (a start racing the server's cleanup of the previous
+     * session often succeeds a beat later) — never on 504 ffmpeg_timeout (the
+     * server already waited 60 s; a retry just doubles that) or ffmpeg_exited
+     * (the same plan fails the same way). 4xx are never retried.
      * Aborting `signal` cancels the request — the server then stops the ffmpeg
      * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
      */
@@ -2458,18 +2464,22 @@
                 continue;
             }
             if (!res.ok) {
-                // ProblemDetails ({ title, detail }) from Results.Problem — the
-                // detail is the server's own one-line reason.
-                let why = '';
+                // RFC 7807 problem+json: `detail` is the server's own one-line
+                // reason, `code` says which failure it was.
+                let why = '', code = '';
                 try {
                     const pd = await res.json();
-                    why = (pd && (pd.detail || pd.title)) || '';
+                    why  = (pd && (pd.detail || pd.title)) || '';
+                    code = (pd && typeof pd.code === 'string') ? pd.code : '';
                 } catch {}
-                lastErr = Object.assign(new Error('start ' + res.status), {
+                lastErr = Object.assign(new Error('start ' + res.status + (code ? ' ' + code : '')), {
                     status: res.status,
+                    code,
                     reason: (why ? why + ' ' : '') + '(HTTP ' + res.status + ')',
                 });
-                if (res.status >= 500) continue;
+                const retryable = res.status >= 500 && res.status !== 504
+                    && code !== 'ffmpeg_exited' && code !== 'ffmpeg_timeout';
+                if (retryable) continue;
                 throw lastErr;
             }
             const data = await res.json();
