@@ -32,7 +32,7 @@ namespace Animarr.Web.Services;
 /// optional LLM pass would slot in later. This service stays deterministic,
 /// offline-safe, and cheap so it can run on every player open.
 /// </summary>
-public sealed class ExternalTrackService
+public sealed partial class ExternalTrackService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IPatternMatchService _patterns;
@@ -80,15 +80,24 @@ public sealed class ExternalTrackService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
         // ── Locate the owning FolderWatcher (most-specific matching root) ──────
-        var folders = await db.FolderWatchers
-            .Include(f => f.Patterns)
+        // Runs on every player open: read only the columns the choice needs,
+        // untracked (it used to load every folder with all its patterns), and
+        // load patterns for the chosen folder alone below. Ordered by Id as the
+        // old Include query was, so equal candidates still resolve the same way.
+        var folders = await db.FolderWatchers.AsNoTracking()
             .Where(f => f.Path != null && f.Path != "")
+            .OrderBy(f => f.Id)
+            .Select(f => new OwnerCandidate(f.Id, f.Path, f.IsSection, f.SingleFilePath))
             .ToListAsync(ct);
 
-        FolderWatcher? folder = folders
-            .Where(f => PathIsUnder(videoFullPath, f.Path!))
+        string? videoFull;
+        try { videoFull = Path.GetFullPath(videoFullPath); }
+        catch { videoFull = null; }
+
+        OwnerCandidate? folder = videoFull is null ? null : folders
+            .Where(f => PathIsUnder(videoFull, f.Path))
             .OrderBy(f => f.IsSection ? 1 : 0)        // prefer a real media folder over a section
-            .ThenByDescending(f => f.Path!.Length)    // then the deepest matching root
+            .ThenByDescending(f => f.Path.Length)     // then the deepest matching root
             .FirstOrDefault();
 
         // Decide how wide to sweep. The hard constraint is NOT to cross into a
@@ -108,28 +117,35 @@ public sealed class ExternalTrackService
         }
         else if (folder.IsSection)
         {
-            var seriesRoot = ImmediateChildUnder(folder.Path!, videoFullPath);
+            var seriesRoot = ImmediateChildUnder(folder.Path, videoFullPath);
             searchRoot   = seriesRoot ?? videoDir;
             searchOption = seriesRoot is not null ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         }
         else
         {
-            searchRoot   = folder.Path!;
+            searchRoot   = folder.Path;
             searchOption = SearchOption.AllDirectories;
         }
 
         var mediaItem = folder is null
             ? null
-            : await db.MediaItems.FirstOrDefaultAsync(m => m.FolderId == folder.Id, ct);
+            : await db.MediaItems.AsNoTracking()
+                .Where(m => m.FolderId == folder.Id)
+                .Select(m => new { m.MediaType, m.SeasonsJson })
+                .FirstOrDefaultAsync(ct);
         bool isMovie = mediaItem?.MediaType == MediaItemType.Movie;
         int declaredSeasons = CountSeasonsInJson(mediaItem?.SeasonsJson);
         bool defaultToSeasonOne = !isMovie && declaredSeasons <= 1;
 
-        var patterns = await BuildEffectivePatternsAsync(db, folder, isMovie, ct);
+        var patterns = await BuildEffectivePatternsAsync(db, folder?.Id, isMovie, ct);
+
+        // The path-season of a file depends only on its directory (the root is
+        // fixed for this sweep) — ask once per directory, not once per file.
+        var seasonByDir = new Dictionary<string, int?>(StringComparer.Ordinal);
 
         // ── Resolve the video's own (season, episode) ─────────────────────────
         var (videoSeason, videoEpisode) = ResolveEpisode(
-            videoFullPath, patterns, searchRoot, defaultToSeasonOne, isMovie);
+            videoFullPath, patterns, searchRoot, defaultToSeasonOne, isMovie, seasonByDir);
 
         // ── Sweep candidate audio / subtitle files ────────────────────────────
         var seen    = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -170,7 +186,7 @@ public sealed class ExternalTrackService
             else if (videoEpisode is not null)
             {
                 var (cSeason, cEpisode) = ResolveEpisode(
-                    path, patterns, searchRoot, defaultToSeasonOne, isMovie: false);
+                    path, patterns, searchRoot, defaultToSeasonOne, isMovie: false, seasonByDir);
                 if (cEpisode == videoEpisode && SeasonMatches(cSeason, videoSeason, defaultToSeasonOne))
                     tier = "episode";
             }
@@ -204,7 +220,7 @@ public sealed class ExternalTrackService
 
     private (int? season, int? episode) ResolveEpisode(
         string filePath, IReadOnlyList<RenamePattern> patterns, string root,
-        bool defaultToSeasonOne, bool isMovie)
+        bool defaultToSeasonOne, bool isMovie, Dictionary<string, int?> seasonByDir)
     {
         if (isMovie) return (null, null);
 
@@ -212,7 +228,9 @@ public sealed class ExternalTrackService
         var fileDir  = Path.GetDirectoryName(filePath) ?? root;
         var parse    = _patterns.ParseFileName(fileName, patterns);
 
-        int? season  = parse.Season ?? _patterns.DetectSeasonFromPath(fileDir, root);
+        int? season = parse.Season;
+        if (season is null && !seasonByDir.TryGetValue(fileDir, out season))
+            seasonByDir[fileDir] = season = _patterns.DetectSeasonFromPath(fileDir, root);
         int? episode = parse.IsMatched ? parse.Episode : TryParseBareNumericEpisode(fileName);
 
         if (episode is not null && season is null && defaultToSeasonOne)
@@ -256,13 +274,15 @@ public sealed class ExternalTrackService
     }
 
     private async Task<List<RenamePattern>> BuildEffectivePatternsAsync(
-        AppDbContext db, FolderWatcher? folder, bool isMovie, CancellationToken ct)
+        AppDbContext db, Guid? folderId, bool isMovie, CancellationToken ct)
     {
-        var globalPatterns = await db.RenamePatterns
+        var globalPatterns = await db.RenamePatterns.AsNoTracking()
             .Where(p => p.Scope == PatternScope.Global)
             .ToListAsync(ct);
 
-        var folderPatterns = folder?.Patterns ?? new List<RenamePattern>();
+        var folderPatterns = folderId is Guid fid
+            ? await db.RenamePatterns.AsNoTracking().Where(p => p.FolderId == fid).ToListAsync(ct)
+            : new List<RenamePattern>();
         var excludedIds = folderPatterns
             .Where(p => p.IsExcluded && p.GlobalPatternId.HasValue)
             .Select(p => p.GlobalPatternId!.Value)
@@ -300,7 +320,7 @@ public sealed class ExternalTrackService
         foreach (var src in sources)
         {
             if (string.IsNullOrWhiteSpace(src)) continue;
-            foreach (var token in Regex.Split(src.ToLowerInvariant(), @"[^\p{L}]+"))
+            foreach (var token in NonLetterRunRegex().Split(src.ToLowerInvariant()))
             {
                 if (token.Length == 0) continue;
                 if (LangMap.TryGetValue(token, out var v)) return v;
@@ -341,17 +361,26 @@ public sealed class ExternalTrackService
     {
         if (string.IsNullOrWhiteSpace(s)) return "";
         s = s.Replace('.', ' ').Replace('_', ' ');
-        s = Regex.Replace(s, @"\s+", " ").Trim();
+        s = WhitespaceRunRegex().Replace(s, " ").Trim();
         return s.Trim('[', ']', '(', ')', '-', ' ');
     }
 
+    [GeneratedRegex(@"[^\p{L}]+")]
+    private static partial Regex NonLetterRunRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRunRegex();
+
     // ─── Shared small helpers (kept local to avoid touching MediaFileResolver) ─
+
+    [GeneratedRegex(@"^(?:ep?)?(\d{1,4})$", RegexOptions.IgnoreCase)]
+    private static partial Regex BareNumericEpisodeRegex();
 
     private static int? TryParseBareNumericEpisode(string fileName)
     {
         var stem = Path.GetFileNameWithoutExtension(fileName);
-        var m = Regex.Match(stem, @"^(?:ep?)?(\d{1,4})$", RegexOptions.IgnoreCase);
-        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+        var m = BareNumericEpisodeRegex().Match(stem);
+        return m.Success && int.TryParse(m.Groups[1].ValueSpan, out var n) ? n : null;
     }
 
     private static int CountSeasonsInJson(string? json)
@@ -367,18 +396,21 @@ public sealed class ExternalTrackService
         return 0;
     }
 
-    private static bool PathIsUnder(string fullPath, string root)
+    /// <summary><paramref name="normalizedPath"/> must already be
+    /// <c>Path.GetFullPath</c>'d (done once per call, not once per folder).</summary>
+    private static bool PathIsUnder(string normalizedPath, string root)
     {
         try
         {
             var normalRoot = Path.GetFullPath(root)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                 + Path.DirectorySeparatorChar;
-            return Path.GetFullPath(fullPath)
-                .StartsWith(normalRoot, StringComparison.OrdinalIgnoreCase);
+            return normalizedPath.StartsWith(normalRoot, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
+
+    private sealed record OwnerCandidate(Guid Id, string Path, bool IsSection, string? SingleFilePath);
 
     /// <summary>The directory that is the IMMEDIATE child of <paramref name="ancestor"/>
     /// on the path down to <paramref name="descendantFile"/> — i.e. the series
