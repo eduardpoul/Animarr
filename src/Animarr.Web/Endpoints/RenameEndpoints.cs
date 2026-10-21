@@ -99,12 +99,14 @@ internal static class RenameEndpoints
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // Without LogDetails (see RenameMappings.ToListEntryDto) — clients
+            // refetch this list on every queue change.
             var rows = await db.IdentificationQueues
-                .Include(q => q.Folder)
                 .OrderByDescending(q => q.QueuedAt)
                 .Take(200)
-                .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+                .Select(RenameMappings.ToListEntryDto)
+                .ToArrayAsync(ct);
+            return Results.Ok(rows);
         });
 
         app.MapPost(ApiRoutes.IdentificationEnqueue, async (
@@ -128,7 +130,8 @@ internal static class RenameEndpoints
             db.IdentificationQueues.Add(entity);
             await db.SaveChangesAsync(ct);
 
-            // The processor polls every few seconds; no manual nudge needed.
+            // The processor sleeps while the queue is empty — nudge it.
+            IdentificationQueueProcessorService.Wake();
             return Results.Created($"{ApiRoutes.IdentificationQueue}/{entity.Id}", entity.ToDto());
         }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
@@ -144,6 +147,7 @@ internal static class RenameEndpoints
                 return Results.Conflict("Already processing — wait for completion.");
             db.IdentificationQueues.Remove(entity);
             await db.SaveChangesAsync(ct);
+            IdentificationQueueProcessorService.Wake();   // re-count depth → AI popup
             return Results.NoContent();
         }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 

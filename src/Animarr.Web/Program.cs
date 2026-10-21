@@ -119,6 +119,13 @@ builder.Services.AddSingleton<FolderWatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderWatcherService>());
 builder.Services.AddSingleton<TorrentEngineService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentEngineService>());
+// Hosted services stop in reverse registration order, so the torrent engine
+// (registered early) stops late — and its stop is where it persists counters
+// and lets MonoTorrent write fast-resume (else: full re-hash on next boot).
+// Pin the whole-host stop budget at 30 s (the .NET default, made explicit so
+// nobody lowers it); `docker stop` must allow more than this
+// (stop_grace_period), or SIGKILL lands first.
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(30));
 
 // HTTP clients
 builder.Services.AddScoped<TmdbAuthHandler>();

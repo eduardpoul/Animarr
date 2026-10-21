@@ -295,6 +295,7 @@ internal static class MediaEndpoints
                 QueuedAt     = DateTime.UtcNow,
             });
             await db.SaveChangesAsync(ct);
+            IdentificationQueueProcessorService.Wake();
             return Results.Accepted();
         }).RequireAuthorization(CuratePolicy);
 
