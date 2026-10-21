@@ -49,11 +49,18 @@ if (!string.IsNullOrEmpty(dbDir))
 // Pooled: every service/endpoint opens its own short-lived context (2–4 per
 // request, 30+ for next-up), and a pooled lease skips the ~150 µs of
 // per-instance setup. Safe because AppDbContext carries no per-instance state
-// (options-only ctor, no OnConfiguring) and the interceptors are stateless
-// singletons. Call sites keep injecting IDbContextFactory<AppDbContext>.
-builder.Services.AddPooledDbContextFactory<AppDbContext>(options =>
+// (options-only ctor, no OnConfiguring) and the interceptors are singletons
+// that keep nothing per context between saves. Call sites keep injecting
+// IDbContextFactory<AppDbContext>.
+// LibraryAccessChangeInterceptor bumps LibraryAccessVersion after any write to
+// FolderWatchers/Users/Roles — MediaPathValidator's cached access snapshot.
+builder.Services.AddSingleton<LibraryAccessVersion>();
+builder.Services.AddSingleton<LibraryAccessChangeInterceptor>();
+builder.Services.AddPooledDbContextFactory<AppDbContext>((sp, options) =>
     options.UseSqlite(connectionString)
-           .AddInterceptors(new SqliteWalInterceptor()));
+           .AddInterceptors(
+               new SqliteWalInterceptor(),
+               sp.GetRequiredService<LibraryAccessChangeInterceptor>()));
 
 // H-10: DataProtection so we can encrypt API keys in AppConfig.
 // Keys are persisted under /app/data so they survive container restarts.
