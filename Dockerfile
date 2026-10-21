@@ -274,6 +274,11 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 EXPOSE 8080
 
 ENV ASPNETCORE_URLS=http://+:8080
+# NVIDIA hosts (`--gpus all`): the container toolkit mounts only the compute +
+# utility driver libs by default — without `video` there is no libnvcuvid /
+# libnvidia-encode, so NVDEC + NVENC (and tonemap_cuda) fail inside the
+# container. Ignored on hosts without an NVIDIA GPU.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 ENTRYPOINT ["/entrypoint.sh"]
 
