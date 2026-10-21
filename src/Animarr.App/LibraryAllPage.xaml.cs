@@ -41,6 +41,9 @@ public partial class LibraryAllPage : ContentPage
         // D-pad OK via the behavior (programmatic — the reliable path).
         BackFocus.Command = new Command(async () => await Navigation.PopAsync());
 
+#if ANDROID
+        Bench.BenchLog.Mark("lib-ctor");
+#endif
         _ = LoadAsync();
     }
 
@@ -75,8 +78,14 @@ public partial class LibraryAllPage : ContentPage
             if (_activeSection is Guid pre && _sections.All(s => s.Id != pre))
                 _activeSection = null;
 
+#if ANDROID
+            Bench.BenchLog.Mark($"lib-data n={_items.Length}");
+#endif
             BuildSections();
             BuildGrid();
+#if ANDROID
+            Bench.BenchLog.MarkWithFrames($"lib-built cards={GridHost.Children.Count}");
+#endif
         }
         catch
         {

@@ -92,6 +92,55 @@ public sealed class NativePlayerService : IDisposable
     /// calls that land before that point go onto a pending queue, drained once
     /// the surface is ready (SurfaceCreated).
     /// </summary>
+    // BENCH (tv-ui-analysis): SurfaceView variant — video on its own HWC layer.
+    private static SurfaceView? s_surfaceView;
+    public static void RegisterSurfaceView(SurfaceView sv)
+    {
+        s_surfaceView = sv;
+        sv.Holder!.AddCallback(new SvCallback());
+    }
+    private sealed class SvCallback : Java.Lang.Object, ISurfaceHolderCallback
+    {
+        public void SurfaceCreated(ISurfaceHolder holder) => Instance?.OnSurfaceReady();
+        public void SurfaceChanged(ISurfaceHolder holder, global::Android.Graphics.Format format, int width, int height) { }
+        public void SurfaceDestroyed(ISurfaceHolder holder) { if (Instance is { } s) s._surfaceReady = false; }
+    }
+
+    /// <summary>SurfaceView aspect: size + centre the view itself (fit = letterbox,
+    /// zoom = cover, stretch = full, "16:9"-style = forced), parent clips.</summary>
+    private void ApplySurfaceAspect(SurfaceView sv)
+    {
+        try
+        {
+            if (sv.Parent is not global::Android.Views.View parent) return;
+            int W = parent.Width, H = parent.Height;
+            if (W <= 0 || H <= 0) return;
+            float videoAspect = _vidH > 0 && _vidW > 0 ? _vidW * _vidPar / _vidH : 0f;
+            float target = _aspectValue switch
+            {
+                "stretch" => 0f,
+                "zoom" or null or "" or "default" => videoAspect,
+                _ => ParseAspect(_aspectValue),
+            };
+            int w = W, h = H;
+            if (target > 0f)
+            {
+                float view = (float)W / H;
+                bool cover = _aspectValue == "zoom";
+                if ((target >= view) ^ cover) { w = W; h = (int)Math.Round(W / target); }
+                else { h = H; w = (int)Math.Round(H * target); }
+            }
+            int l = (W - w) / 2, t = (H - h) / 2;
+            sv.Measure(global::Android.Views.View.MeasureSpec.MakeMeasureSpec(w, MeasureSpecMode.Exactly),
+                       global::Android.Views.View.MeasureSpec.MakeMeasureSpec(h, MeasureSpecMode.Exactly));
+            sv.Layout(l, t, l + w, t + h);
+        }
+        catch (System.Exception ex)
+        {
+            global::Android.Util.Log.Warn("Animarr.NativePlayer", $"ApplySurfaceAspect: {ex.Message}");
+        }
+    }
+
     public static void RegisterTextureView(TextureView textureView)
     {
         s_textureView = textureView;
@@ -160,7 +209,7 @@ public sealed class NativePlayerService : IDisposable
             // Direct attach — don't recurse into PlayAsync (would re-queue).
             DoPlay(pending.Value.Url, pending.Value.ResumeMs);
         }
-        else if (_player is not null && s_textureView is not null)
+        else if (_player is not null && (s_textureView is not null || s_surfaceView is not null))
         {
             // Re-attach surface to existing player (e.g. after lifecycle
             // bounce destroyed + recreated the surface).
@@ -177,6 +226,7 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void AttachSurface()
     {
+        if (_player is not null && s_surfaceView is not null) { _player.SetVideoSurfaceView(s_surfaceView); return; }
         if (_player is null || s_textureView is null) return;
         try
         {
@@ -253,7 +303,15 @@ public sealed class NativePlayerService : IDisposable
             // only creates the Surface for a VISIBLE SurfaceView — so we flip
             // to Visible BEFORE the surface can become ready. If the surface is
             // ALREADY valid (a previous play left it hot), drain immediately.
-            if (s_textureView is not null)
+            if (s_surfaceView is not null)
+            {
+                s_surfaceView.Post(new Java.Lang.Runnable(() =>
+                {
+                    s_surfaceView.KeepScreenOn = true;
+                    if (s_surfaceView.Holder?.Surface?.IsValid == true) OnSurfaceReady();
+                }));
+            }
+            else if (s_textureView is not null)
             {
                 s_textureView.Post(new Java.Lang.Runnable(() =>
                 {
@@ -481,6 +539,7 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     internal void ApplyAspectMatrix()
     {
+        if (s_surfaceView is { } sv) { sv.Post(() => ApplySurfaceAspect(sv)); return; }
         try
         {
             var tv = s_textureView;
@@ -692,8 +751,17 @@ public sealed class NativePlayerService : IDisposable
             .SetUsage(global::AndroidX.Media3.Common.C.UsageMedia)
             .SetContentType(global::AndroidX.Media3.Common.C.AudioContentTypeMovie)
             .Build();
+        // Default LoadControl targets ~131 MB for a video track (2000 × 64 KB) —
+        // on a 3 GB TV that is the single biggest Java-heap consumer during
+        // high-bitrate Direct Play. 64 MB still holds ~50 s of a 10 Mbit/s file
+        // (the 50 s time cap wins) and ~6 s of an 80 Mbit/s remux on the LAN.
+        var load = new global::AndroidX.Media3.ExoPlayer.DefaultLoadControl.Builder()
+            .SetTargetBufferBytes(64 * 1024 * 1024)!
+            .SetPrioritizeTimeOverSizeThresholds(false)!
+            .Build();
         var builder = new ExoPlayerBuilder(ctx)
-            .SetAudioAttributes(attrs, handleAudioFocus: true);
+            .SetAudioAttributes(attrs, handleAudioFocus: true)!
+            .SetLoadControl(load)!;
         return (IExoPlayer)builder.Build()!;
     }
 #endif

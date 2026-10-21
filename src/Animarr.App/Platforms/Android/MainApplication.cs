@@ -35,6 +35,7 @@ public class MainApplication : MauiApplication
         // instead. The system re-pushes the pristine configuration when the
         // activity spins up, so MainActivity.OnCreate and OnConfigurationChanged
         // re-apply the same mutation.
+        Bench.BenchLog.Mark("app-oncreate-start");
         MainActivity.ApplyTvUiScaleToAppResources();
         AcquireMulticastLock();
         base.OnCreate();
@@ -69,5 +70,11 @@ public class MainApplication : MauiApplication
         }
     }
 
-    protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+    protected override MauiApp CreateMauiApp()
+    {
+        Bench.BenchLog.Mark("createmauiapp-start");
+        var app = MauiProgram.CreateMauiApp();
+        Bench.BenchLog.Mark("createmauiapp-end");
+        return app;
+    }
 }

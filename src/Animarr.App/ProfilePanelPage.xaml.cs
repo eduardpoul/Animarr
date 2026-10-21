@@ -45,7 +45,7 @@ public partial class ProfilePanelPage : ContentPage
         _http = services.GetRequiredService<HttpClient>();
         _addr = services.GetRequiredService<ServerAddressProvider>();
 
-        ChangeServerCommand = new Command(() => TvRoot.Go(new ServerPickerPage()));
+        ChangeServerCommand = new Command(() => TvRoot.Go(TvRoot.ServerPicker()));
         LogoutCommand       = new Command(async () => await LogoutAsync());
         // D-pad OK via the behavior (set here) — a gesture Command bound through
         // {x:Reference Root} resolves to null on TV.
@@ -87,7 +87,7 @@ public partial class ProfilePanelPage : ContentPage
         if (_device is null) return;
         var def = _device.DefaultUserId is Guid id ? _device.Profiles.FirstOrDefault(p => p.Id == id) : null;
         DefaultValue.Text      = def is not null ? TvL.T("common.on", "Вкл.", "On") : TvL.T("common.off", "Выкл.", "Off");
-        DefaultValue.TextColor = def is not null ? Color.FromArgb("#e8772e") : Color.FromArgb("#7b8290");
+        DefaultValue.TextColor = def is not null ? Color.FromArgb("#bb5000") : Color.FromArgb("#9a9a9a");
         DefaultHint.Text = def is null
             ? TvL.T("profile.default_desc_off", "Выключено — при запуске Animarr спрашивает, кто смотрит.",
                 "Off — Animarr asks who's watching when it opens.")
@@ -180,13 +180,13 @@ public partial class ProfilePanelPage : ContentPage
             WidthRequest = 84, HeightRequest = 84,
             // Active profile: accent ring around the disc (web topbar chip style).
             StrokeThickness = current ? 3 : 0,
-            Stroke = current ? Color.FromArgb("#e8772e") : null,
+            Stroke = current ? Color.FromArgb("#bb5000") : null,
             BackgroundColor = Color.FromHsla(u.AvatarHue / 360.0, 0.5, 0.5),
             StrokeShape = new RoundRectangle { CornerRadius = 42 },
             HorizontalOptions = LayoutOptions.Center,
             Content = new Label
             {
-                Text = initial, TextColor = Colors.White, FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold,
+                Text = initial, TextColor = Colors.White, FontFamily = "sans-serif-medium", FontAttributes = FontAttributes.Bold,
                 FontSize = 32, HorizontalOptions = LayoutOptions.Center,
                 VerticalOptions = LayoutOptions.Center,
             },
@@ -205,8 +205,8 @@ public partial class ProfilePanelPage : ContentPage
                     new Label
                     {
                         Text = u.Name,
-                        TextColor = current ? Color.FromArgb("#e8772e") : Color.FromArgb("#cfd3da"),
-                        FontFamily = "Geist", FontSize = 14,
+                        TextColor = current ? Color.FromArgb("#bb5000") : Color.FromArgb("#d6d6d6"),
+                        FontFamily = "sans-serif", FontSize = 14,
                         FontAttributes = current ? FontAttributes.Bold : FontAttributes.None,
                         HorizontalOptions = LayoutOptions.Center,
                         HorizontalTextAlignment = TextAlignment.Center,
@@ -319,7 +319,7 @@ public partial class ProfilePanelPage : ContentPage
     private async Task LegacySwitchAsync(RosterUserDto u)
     {
         var res = await _api.SwitchUserAsync(new SwitchUserRequest(u.Id, null));
-        if (res.Ok) TvRoot.Go(new CatalogNativePage());
+        if (res.Ok) TvRoot.Go(TvRoot.Home());
         else StatusLabel.Text = TvL.T("profile.err_switch_failed", "Не удалось переключиться — попробуйте снова.",
             "Couldn't switch — try again.");
     }
@@ -338,7 +338,7 @@ public partial class ProfilePanelPage : ContentPage
             // Pull the new pack, then rebuild the whole shell so every page picks
             // up the language (pages bake their strings at construction time).
             await TvL.LoadAsync(_http, code);
-            TvRoot.Go(new CatalogNativePage());
+            TvRoot.Go(TvRoot.Home());
         }
         catch
         {

@@ -1,4 +1,4 @@
-﻿using Android.App;
+using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
@@ -170,6 +170,7 @@ public class MainActivity : MauiAppCompatActivity
         // activity — re-apply the TV scale BEFORE MAUI initializes and reads
         // density for its dp→px conversions.
         ApplyTvUiScaleToAppResources();
+        Bench.BenchLog.Mark("activity-oncreate-start");
 
         // MulticastLock is acquired earlier in MainApplication.OnCreate so it's
         // already held by the time MauiProgram.CreateMauiApp resolves
@@ -271,6 +272,8 @@ public class MainActivity : MauiAppCompatActivity
         catch { /* insets unavailable — resource dimens above already applied */ }
 
         CaptureDeepLink(Intent);
+        Bench.BenchLog.Mode = Intent?.GetStringExtra("bench");
+        Bench.BenchLog.Mark($"activity-oncreate-end mode={Bench.BenchLog.Mode}");
 
         // Back-gesture handling temporarily disabled. The earlier
         // OnBackPressedDispatcher.AddCallback intercept appeared to
@@ -327,6 +330,14 @@ public class MainActivity : MauiAppCompatActivity
     // play/pause and ◀/▶ seek — a TV player drives off the remote, not focused
     // on-screen buttons. Handled keys are swallowed so they don't also move
     // focus in the (hidden) HUD underneath.
+    // Every key passes here first: the native TV screens need to know whether a
+    // focus change came from an arrow press ("select on focus" tabs / pills).
+    public override bool DispatchKeyEvent(Android.Views.KeyEvent? e)
+    {
+        if (e is not null) Tv.TvInput.OnKey(e);
+        return base.DispatchKeyEvent(e);
+    }
+
     public override bool OnKeyDown(Android.Views.Keycode keyCode, Android.Views.KeyEvent? e)
     {
         if (PlayerPage.HandleGlobalKey((int)keyCode)) return true;
@@ -360,6 +371,8 @@ public class MainActivity : MauiAppCompatActivity
     {
         // Player HUD open → Back closes the HUD, not the page.
         if (PlayerPage.HandleGlobalBack()) return true;
+        // New native TV screens: Back first returns focus to the top menu.
+        if (Tv.TvBack.Handler?.Invoke() == true) return true;
 
         // Native TV flow (no WebView on these pages): pop the MAUI navigation
         // stack — player → detail → catalog — before anything else, so BACK

@@ -26,6 +26,9 @@ public partial class TvBootstrapPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+#if ANDROID
+        Bench.BenchLog.Mark("bootstrap-appearing");
+#endif
         await RouteAsync();
     }
 
@@ -39,7 +42,7 @@ public partial class TvBootstrapPage : ContentPage
         var saved = Preferences.Get(TvRoot.ServerKey, "");
         if (string.IsNullOrWhiteSpace(saved))
         {
-            TvRoot.Go(new ServerPickerPage());
+            TvRoot.Go(TvRoot.ServerPicker());
             return;
         }
 
@@ -48,7 +51,22 @@ public partial class TvBootstrapPage : ContentPage
         try
         {
             // Probe first: an unreachable saved server falls back to the picker.
-            await api.GetAuthStatusAsync();
+            using (var probe = new CancellationTokenSource(TimeSpan.FromSeconds(6)))
+                await api.GetAuthStatusAsync(probe.Token);
+#if ANDROID
+            Bench.BenchLog.Mark("bootstrap-authstatus");
+            switch (Bench.BenchLog.Base)
+            {
+                case "rv" or "rvflat":  await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Bench.NativeLibraryBenchPage()); return;
+                case "lib": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new LibraryAllPage()); return;
+                case { } m when m.StartsWith("detail:"): await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new NativeDetailPage(m[7..], "BENCH", null)); return;
+                case "nlib": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Tv.TvLibraryPage()); return;
+                case "ndetail": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Tv.TvDetailPage(Bench.BenchLog.Mode!.Split(':')[1], "BENCH", null)); return;
+                case "oldhome": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new CatalogNativePage()); return;
+                case "play": TvRoot.Go(new PlayerPage(Guid.Parse("00000000-0000-0000-0000-000000002716"), 1, 3, "/lib/x/e3.mkv", "BENCH", 0)); return;
+                case "detail": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new NativeDetailPage(Bench.BenchLog.Mode!.Split(':')[1], "BENCH", null)); return;
+            }
+#endif
             // Device gates: default profile → straight in; ≥2 profiles → "Who's
             // watching"; missing PIN → "Set a PIN"; else catalog / pairing.
             await TvAuthFlow.RouteOnOpenAsync();
@@ -56,7 +74,7 @@ public partial class TvBootstrapPage : ContentPage
         catch
         {
             // Saved server moved / offline — let the user re-pick.
-            TvRoot.Go(new ServerPickerPage());
+            TvRoot.Go(TvRoot.ServerPicker());
         }
     }
 }

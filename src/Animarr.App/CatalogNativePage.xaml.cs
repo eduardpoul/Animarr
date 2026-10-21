@@ -70,6 +70,9 @@ public partial class CatalogNativePage : ContentPage
         HeroPrevFocus.Command = new Command(() => StepHero(-1));
         HeroNextFocus.Command = new Command(() => StepHero(+1));
 
+#if ANDROID
+        Bench.BenchLog.Mark("catalog-ctor");
+#endif
         _ = LoadAsync();
     }
 
@@ -155,10 +158,16 @@ public partial class CatalogNativePage : ContentPage
             foreach (var n in next) if (seen.Add(n.MediaItemId)) feed.Add(n);
             var feedArr = feed.Take(12).ToArray();
 
+#if ANDROID
+            Bench.BenchLog.Mark($"catalog-data n={items.Length}");
+#endif
             BuildHero(items, feedArr);
             BuildContinue(feedArr);
             BuildWeek(await weekTask ?? Array.Empty<CalendarEventApi>());
             BuildLibrary(FilteredLibrary());
+#if ANDROID
+            Bench.BenchLog.MarkWithFrames("catalog-built");
+#endif
         }
         catch { /* leave the page empty on a hard failure */ }
     }

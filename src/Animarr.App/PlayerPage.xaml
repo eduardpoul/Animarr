@@ -32,10 +32,10 @@
                     <Label Text="‹" TextColor="White" FontSize="24" HorizontalOptions="Center" VerticalOptions="Center" />
                 </Border>
                 <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Start" Margin="0,28,0,0" Spacing="2">
-                    <Label x:Name="EyebrowLabel" Text="NOW PLAYING" TextColor="#e8a33d"
-                           FontFamily="GeistMono" FontSize="10" CharacterSpacing="2"
+                    <Label x:Name="EyebrowLabel" Text="NOW PLAYING" TextColor="#f49157"
+                           FontFamily="sans-serif" FontSize="10" CharacterSpacing="2"
                            HorizontalOptions="Center" />
-                    <Label x:Name="TitleLabel" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold"
+                    <Label x:Name="TitleLabel" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold"
                            FontSize="18" MaxLines="1" LineBreakMode="TailTruncation"
                            HorizontalOptions="Center" />
                 </VerticalStackLayout>
@@ -43,12 +43,12 @@
 
             <!-- buffering -->
             <ActivityIndicator x:Name="BufferSpinner" IsRunning="True" IsVisible="False"
-                               Color="#e8772e" WidthRequest="64" HeightRequest="64"
+                               Color="#bb5000" WidthRequest="64" HeightRequest="64"
                                HorizontalOptions="Center" VerticalOptions="Center" />
 
             <!-- transient info line (kodек / audio / subs / quality feedback) -->
             <Label x:Name="InfoLine" IsVisible="False" Text="" TextColor="White"
-                   FontFamily="GeistMono" FontSize="13" HorizontalOptions="Center"
+                   FontFamily="sans-serif" FontSize="13" HorizontalOptions="Center"
                    VerticalOptions="End" Margin="0,0,0,200" BackgroundColor="#B3000000"
                    Padding="16,8" />
 
@@ -65,11 +65,11 @@
                 <VerticalStackLayout VerticalOptions="End" Padding="40,0,40,28" Spacing="14">
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
                         <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="White"
-                               FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
+                               FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
                         <ProgressBar Grid.Column="1" x:Name="Scrubber" Progress="0"
-                                     ProgressColor="#e8772e" VerticalOptions="Center" />
-                        <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#cfd3da"
-                               FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
+                                     ProgressColor="#bb5000" VerticalOptions="Center" />
+                        <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#d6d6d6"
+                               FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
                     </Grid>
 
                     <Grid ColumnDefinitions="*,Auto">
@@ -78,7 +78,7 @@
                             <Border x:Name="SeekBackButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SeekBackFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="-10" TextColor="White" FontFamily="GeistMono" FontSize="12"
+                                <Label Text="-10" TextColor="White" FontFamily="sans-serif" FontSize="12"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="PrevButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
@@ -102,13 +102,13 @@
                             <Border x:Name="SeekFwdButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="+10" TextColor="White" FontFamily="GeistMono" FontSize="12"
+                                <Label Text="+10" TextColor="White" FontFamily="sans-serif" FontSize="12"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="SkipButton" IsVisible="False" HeightRequest="36" StrokeThickness="0"
-                                    StrokeShape="RoundRectangle 8" BackgroundColor="#E6e8772e" Padding="14,0" Margin="8,0,0,0">
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="#E6bb5000" Padding="14,0" Margin="8,0,0,0">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SkipFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White" FontFamily="Geist"
+                                <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White" FontFamily="sans-serif"
                                        FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                         </HorizontalStackLayout>
@@ -118,32 +118,32 @@
                             <Border x:Name="VolumeButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="VolumeFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="VOL" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                <Label Text="VOL" TextColor="White" FontFamily="sans-serif" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="AudioButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="AudioFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="AT" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                <Label Text="AT" TextColor="White" FontFamily="sans-serif" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="SubsButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SubsFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="CC" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                <Label Text="CC" TextColor="White" FontFamily="sans-serif" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="QualityButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="QualityFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="HD" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                <Label Text="HD" TextColor="White" FontFamily="sans-serif" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <!-- aspect ratio (fit / stretch / zoom / forced) -->
                             <Border x:Name="AspectButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="AspectFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="AR" TextColor="White" FontFamily="GeistMono" FontSize="11"
+                                <Label Text="AR" TextColor="White" FontFamily="sans-serif" FontSize="11"
                                        HorizontalOptions="Center" VerticalOptions="Center" />
                             </Border>
                             <Border x:Name="InfoButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
@@ -163,11 +163,11 @@
         <Grid x:Name="SheetOverlay" IsVisible="False">
             <BoxView Color="#B3000000" />
             <Border HorizontalOptions="Center" VerticalOptions="Center"
-                    BackgroundColor="#F2161821" StrokeThickness="0"
+                    BackgroundColor="#F22b2b2b" StrokeThickness="0"
                     StrokeShape="RoundRectangle 16" Padding="26,22" MinimumWidthRequest="380">
                 <VerticalStackLayout Spacing="16">
                     <Label x:Name="SheetTitle" Text="" TextColor="White"
-                           FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="15" CharacterSpacing="1" />
+                           FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="15" CharacterSpacing="1" />
 
                     <!-- volume: focusable slider row (◀/▶ adjust, OK closes) -->
                     <VerticalStackLayout x:Name="VolumePanel" IsVisible="False" Spacing="10" WidthRequest="400">
@@ -177,16 +177,16 @@
                                 <local:TvFocusBehavior x:Name="VolumeSliderFocus" Radius="8" FillOnFocus="True" />
                             </Border.Behaviors>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-                                <Label Grid.Column="0" Text="VOL" TextColor="#9aa0aa"
-                                       FontFamily="GeistMono" FontSize="12" VerticalOptions="Center" />
+                                <Label Grid.Column="0" Text="VOL" TextColor="#b3b3b3"
+                                       FontFamily="sans-serif" FontSize="12" VerticalOptions="Center" />
                                 <ProgressBar Grid.Column="1" x:Name="VolumeBar" Progress="1"
-                                             ProgressColor="#e8772e" VerticalOptions="Center" />
+                                             ProgressColor="#bb5000" VerticalOptions="Center" />
                                 <Label Grid.Column="2" x:Name="VolumeValue" Text="100%" TextColor="White"
-                                       FontFamily="GeistMono" FontSize="13" VerticalOptions="Center" />
+                                       FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
                             </Grid>
                         </Border>
-                        <Label Text="◀ / ▶ — тише / громче · OK — готово" TextColor="#7f8894"
-                               FontFamily="Geist" FontSize="11" HorizontalOptions="Center" />
+                        <Label Text="◀ / ▶ — тише / громче · OK — готово" TextColor="#9a9a9a"
+                               FontFamily="sans-serif" FontSize="11" HorizontalOptions="Center" />
                     </VerticalStackLayout>
 
                     <!-- audio / subtitles / quality: option rows built in code-behind -->

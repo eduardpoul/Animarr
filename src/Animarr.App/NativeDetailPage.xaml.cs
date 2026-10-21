@@ -143,6 +143,9 @@ public partial class NativeDetailPage : ContentPage
             ApplyBody();
             BuildSeasonTabs();
             Loader.IsVisible = false;
+#if ANDROID
+            Bench.BenchLog.MarkWithFrames("detail-core");
+#endif
             LogT(sw, "core-ui");
 
             // Personalised bits — run in parallel, don't serialize them.
@@ -167,6 +170,9 @@ public partial class NativeDetailPage : ContentPage
             await Task.Yield();
             BuildEpisodes();
             LogT(sw, "episodes");
+#if ANDROID
+            Bench.BenchLog.MarkWithFrames($"detail-episodes cards={EpisodesHost.Children.Count}");
+#endif
         }
         catch { /* leave partial UI on failure */ }
         finally { Loader.IsVisible = false; }

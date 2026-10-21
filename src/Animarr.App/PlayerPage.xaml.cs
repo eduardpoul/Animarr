@@ -168,6 +168,17 @@ public partial class PlayerPage : ContentPage
     }
 
     public static bool HandleGlobalBack() => Current?.OnBack() ?? false;
+
+    // Android 13+ delivers Back through MAUI, not Activity.OnBackPressed:
+    // close the submenu / HUD first, only then leave the player.
+    private bool _leaving;
+    protected override bool OnBackButtonPressed()
+    {
+        if (_leaving) return true;            // 2nd Back during the pop animation
+        if (OnBack()) return true;
+        _leaving = true;
+        return base.OnBackButtonPressed();
+    }
     private bool OnBack()
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }
@@ -260,6 +271,19 @@ public partial class PlayerPage : ContentPage
             var m = vg.Resources?.DisplayMetrics;
             int w = m?.WidthPixels  ?? 1920;
             int h = m?.HeightPixels ?? 1080;
+            // SurfaceView by default: video on its own compositor layer (no UI
+            // redraw per video frame, 4K plane, HDR/DV, frame-rate switching).
+            // The old TextureView path stays behind the bench flag "+texture".
+            if (!Bench.BenchLog.Has("texture"))
+            {
+                var sv = new Android.Views.SurfaceView(vg.Context!) { LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h) };
+                vg.AddView(sv, 0);
+                LayoutNative(sv, w, h);
+                NativePlayerService.RegisterSurfaceView(sv);
+                RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspectMatrix();
+                _attached = true;
+                return;
+            }
             var tv = new Android.Views.TextureView(vg.Context!)
             {
                 LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h),
@@ -494,7 +518,7 @@ public partial class PlayerPage : ContentPage
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
-        if (dur > 0)
+        if (dur > 0 && _pendingSeekMs is null)
         {
             Scrubber.Progress = Math.Clamp((double)absPos / dur, 0, 1);
             PositionLabel.Text = Fmt(absPos);
@@ -727,8 +751,8 @@ public partial class PlayerPage : ContentPage
         var label = new Label
         {
             Text = (r.Selected ? "●  " : "      ") + r.Label,
-            TextColor = r.Selected ? Color.FromArgb("#e8a33d") : Colors.White,
-            FontFamily = "Geist",
+            TextColor = r.Selected ? Color.FromArgb("#f49157") : Colors.White,
+            FontFamily = "sans-serif",
             FontSize = 15,
             VerticalOptions = LayoutOptions.Center,
         };
@@ -820,6 +844,16 @@ public partial class PlayerPage : ContentPage
         _infoTimer.Start();
     }
 
+    private long? _pendingSeekMs;
+    private IDispatcherTimer? _seekTimer;
+
+    private void OnSeekSettled(object? sender, EventArgs e)
+    {
+        if (_pendingSeekMs is not long t) return;
+        _pendingSeekMs = null;
+        _ = StartStreamAsync(t, _maxHeight);
+    }
+
     private void SeekBy(long deltaMs)
     {
         var st = NativePlayerService.Instance?.GetState();
@@ -832,7 +866,20 @@ public partial class PlayerPage : ContentPage
         // the target instead; PTS stay absolute via -output_ts_offset.
         if (_isDirectStream)
         {
-            _ = StartStreamAsync(target, _maxHeight);
+            // Every restart of the remux pipe costs the server ffprobe + ffmpeg:
+            // accumulate held / repeated presses and restart once, 450 ms after
+            // the last one; show the target meanwhile.
+            target = Math.Clamp((_pendingSeekMs ?? absPos) + deltaMs, 0, dur > 0 ? dur : long.MaxValue);
+            _pendingSeekMs = target;
+            PositionLabel.Text = Fmt(target);
+            if (dur > 0) Scrubber.Progress = Math.Clamp((double)target / dur, 0, 1);
+            _seekTimer ??= Dispatcher.CreateTimer();
+            _seekTimer.Stop();
+            _seekTimer.Interval = TimeSpan.FromMilliseconds(450);
+            _seekTimer.IsRepeating = false;
+            _seekTimer.Tick -= OnSeekSettled;
+            _seekTimer.Tick += OnSeekSettled;
+            _seekTimer.Start();
             return;
         }
         // Back to the stream's own timeline (absolute for Direct Play and HLS —

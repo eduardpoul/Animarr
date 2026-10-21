@@ -65,27 +65,21 @@ public static class TvFocus
                 // view's own drawing to its rounded outline (clipToOutline), so
                 // an outside-the-bounds ring vanishes — instead the 3dp accent
                 // ring hugs the edge with a 5dp soft glow bleeding inward.
+                // Fluent/Google-TV focus: one 3 dp white ring (no glow layer).
                 var ring = new Android.Graphics.Drawables.GradientDrawable();
                 ring.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
                 ring.SetCornerRadius(cornerDp * d);
-                ring.SetStroke((int)(3 * d), Android.Graphics.Color.ParseColor("#f5934f"));
-                var glow = new Android.Graphics.Drawables.GradientDrawable();
-                glow.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
-                glow.SetCornerRadius((cornerDp - 2) * d);
-                glow.SetStroke((int)(5 * d), Android.Graphics.Color.ParseColor("#40e8772e"));
-                var layers = new Android.Graphics.Drawables.LayerDrawable(
-                    new Android.Graphics.Drawables.Drawable[] { glow, ring });
-                int glowIn = (int)(2 * d);
-                layers.SetLayerInset(0, glowIn, glowIn, glowIn, glowIn);
-                v.Foreground = layers;
+                ring.SetStroke((int)(3 * d), Android.Graphics.Color.White);
+                v.Foreground = ring;
             }
-            v.Elevation = 12 * d;
-            v.BringToFront();
+            // Draw above neighbours via Z — no elevation shadow (GPU) and no
+            // BringToFront (that requestLayout()s the whole parent).
+            v.TranslationZ = 1f;
         }
         else
         {
             v.Foreground = null;
-            v.Elevation = 0;
+            v.TranslationZ = 0f;
         }
     }
 
@@ -209,9 +203,24 @@ public sealed class TvFocusBehavior : Behavior<View>
         _native = null;
     }
 
+    /// <summary>Button style of the native TV screens: on focus the control
+    /// fills white and its labels turn dark (no ring).</summary>
+    public bool InvertOnFocus { get; set; }
+    private Color? _restBg;
+
     private void OnFocus(object? sender, AView.FocusChangeEventArgs e)
     {
-        if (sender is AView v) TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius, FillOnFocus);
+        if (sender is not AView v) return;
+        if (InvertOnFocus && _view is VisualElement ve)
+        {
+            _restBg ??= ve.BackgroundColor;
+            ve.BackgroundColor = e.HasFocus ? Colors.White : _restBg;
+            foreach (var l in ((IVisualTreeElement)_view).GetVisualTreeDescendants().OfType<Label>())
+                l.TextColor = e.HasFocus ? Color.FromArgb("#1a1a1a") : Colors.White;
+            v.Animate()?.ScaleX(e.HasFocus ? 1.05f : 1f)?.ScaleY(e.HasFocus ? 1.05f : 1f)?.SetDuration(160)?.Start();
+            return;
+        }
+        TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius, FillOnFocus);
     }
 
     // D-pad OK / Enter on a focused clickable view lands here as a Click.
@@ -263,6 +272,7 @@ public sealed class TvFocusBehavior : Behavior<View>
 {
     public float Radius { get; set; } = 12f;
     public bool FillOnFocus { get; set; }
+    public bool InvertOnFocus { get; set; }
 
     public static readonly BindableProperty CommandProperty =
         BindableProperty.Create(nameof(Command), typeof(System.Windows.Input.ICommand), typeof(TvFocusBehavior));
