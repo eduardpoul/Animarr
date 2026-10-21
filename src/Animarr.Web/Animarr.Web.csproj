@@ -6,10 +6,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- The WebAssembly.Server package copies the 12 MB BlazorDebugProxy/ tool into
+       every output. It only serves app.UseWebAssemblyDebugging(), which Program.cs
+       never calls, so keep it out of Release builds and the published image. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <BlazorWebAssemblyOmitDebugProxyOutput>true</BlazorWebAssemblyOmitDebugProxyOutput>
+  </PropertyGroup>
+
   <!-- L-12: pinned versions (resolved via `dotnet list package` 2026-05-12).
        Bump deliberately rather than letting `*` drift. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13" />
+    <!-- Design-time only (dotnet ef migrations / database update). PrivateAssets
+         keeps it — and the Roslyn / MSBuild / Humanizer graph it drags in, ~25 MB
+         incl. 13 satellite-language dirs — out of the publish output and the
+         Docker image; the dotnet-ef tool still loads it from the build output. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />

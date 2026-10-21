@@ -1,3 +1,8 @@
+# The image builds only src/Animarr.Web (+ Shared, UI, Web.Client) and
+# docker/entrypoint.sh. Everything else here would only bloat the build
+# context and invalidate the `COPY . .` layer (npm + full .NET publish) on
+# unrelated changes.
+
 # Build outputs
 **/bin/
 **/obj/
@@ -5,12 +10,54 @@
 # Node modules (platform-specific native bindings must be installed fresh inside the container)
 **/node_modules/
 
+# Git: keep HEAD / refs / packed-refs / config — SourceLink reads them to stamp
+# the commit SHA into InformationalVersion (About panel "v1.0.0 (abc1234)") —
+# but not the object store (~110 MB of packs) or other bulky / volatile state
+# it doesn't need.
+.git/objects/
+.git/lfs/
+.git/logs/
+.git/index
+.git/worktrees/
+.git/hooks/
+
+# Claude Code worktrees / session state (full source copies of the repo)
+.claude/
+
 # IDE files
 .vs/
+**/.vs/
+.vscode/
+.idea/
 *.user
+**/*.user
+
+# Not part of the server build
+src/Animarr.App/
+design_v2/
+docs/
+plans/
+artifacts/
+dist/
+*.md
+LICENSE
+
+# Docker build/run files (BuildKit reads the Dockerfile and .dockerignore on
+# its own; entrypoint.sh under docker/ IS needed)
+Dockerfile
+.dockerignore
+docker-compose*.yml
 
 # Deploy scripts (not needed in image)
 deploy/
+
+# Local data volume / scratch
+data/
+.tmp/
+*.crt
+
+# Blazor Data Protection keys from local runs — never bake into a build layer
+**/dp-keys/
 
 # NuGet
 **/.nuget/
