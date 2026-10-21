@@ -46,7 +46,12 @@ var dbDir = Path.GetDirectoryName(dbPath);
 if (!string.IsNullOrEmpty(dbDir))
     Directory.CreateDirectory(dbDir);
 
-builder.Services.AddDbContextFactory<AppDbContext>(options =>
+// Pooled: every service/endpoint opens its own short-lived context (2–4 per
+// request, 30+ for next-up), and a pooled lease skips the ~150 µs of
+// per-instance setup. Safe because AppDbContext carries no per-instance state
+// (options-only ctor, no OnConfiguring) and the interceptors are stateless
+// singletons. Call sites keep injecting IDbContextFactory<AppDbContext>.
+builder.Services.AddPooledDbContextFactory<AppDbContext>(options =>
     options.UseSqlite(connectionString)
            .AddInterceptors(new SqliteWalInterceptor()));
 
