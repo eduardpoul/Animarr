@@ -507,9 +507,12 @@ html:has(.vp-backdrop) { overflow: hidden; }
     font-size: 13px;
     font-weight: 500;
     color: #e8eaed;
-    white-space: nowrap;
+    /* Long rows (transcode reason, client caps) wrap inside the popup instead
+       of running past its edge. */
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
-.vp-hud-popup--info { min-width: 220px; }
+.vp-hud-popup--info { min-width: 220px; max-width: min(520px, calc(100% - 32px)); }
 
 /* Slider variant (audio-offset). Used by the .vp-hud-popup--slider class. */
 .vp-hud-popup--slider {

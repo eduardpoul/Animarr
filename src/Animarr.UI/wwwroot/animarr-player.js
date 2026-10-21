@@ -76,9 +76,12 @@
         if (typeof window.Artplayer === 'function' && window.Hls) return Promise.resolve();
         return Promise.all(PLAYER_LIBS.map(([src, sri]) => loadScriptOnce(src, sri)));
     }
-    // Fire-and-forget warm-up (MediaDetail calls it once the page has loaded).
+    // Fire-and-forget warm-up (MediaDetail calls it once the page has loaded):
+    // the vendor libraries and the client-capability probe, so Play waits on
+    // neither.
     function preload() {
         loadPlayerLibs().catch(() => { /* attach() retries and reports */ });
+        clientCaps();
     }
 
     // ── User audio/subtitle preferences ─────────────────────────────────────
@@ -2374,6 +2377,160 @@
         return (l && l[key]) || LABEL_DEFAULTS[key];
     }
 
+    // ── Client capabilities (plan §6.1, task 1.2) ─────────────────────
+    // What THIS browser plays without the server touching the stream,
+    // measured once per page session and sent with every start as the same
+    // `nativeCaps` token list the TV app sends (TvCodecCaps.cs), so the
+    // server's Direct Play / copy decision rests on facts instead of the two
+    // HEVC booleans alone (AV1 / VP9 / VP8 / WebM were always transcoded).
+    //   containers  mp4 m4v mov webm — only what <video src> really opens
+    //   video       h264 hevc hevc10 av1 vp9 vp8 — MediaCapabilities says
+    //               supported AND smooth at 1080p (a codec this machine only
+    //               decodes choppily is better left to the server); the
+    //               largest smooth height per codec (2160 / 1080) is kept for
+    //               the Info line and a future server parameter
+    //   audio       aac mp3 opus vorbis flac ac3 eac3
+    //   hdr         the display is HDR (matchMedia dynamic-range: high)
+    //   dv          the browser decodes Dolby Vision itself (Safari dvh1)
+    //   channels    AudioContext().destination.maxChannelCount
+    // Without MediaCapabilities: canPlayType / MediaSource.isTypeSupported.
+    const CAPS_VIDEO = [
+        // token    1080p contentType                        2160p contentType
+        ['h264',   'video/mp4; codecs="avc1.640028"',        'video/mp4; codecs="avc1.640033"'],
+        ['hevc',   'video/mp4; codecs="hvc1.1.6.L120.B0"',   'video/mp4; codecs="hvc1.1.6.L153.B0"'],
+        ['hevc10', 'video/mp4; codecs="hvc1.2.4.L120.B0"',   'video/mp4; codecs="hvc1.2.4.L153.B0"'],
+        ['av1',    'video/mp4; codecs="av01.0.08M.08"',      'video/mp4; codecs="av01.0.12M.08"'],
+        ['vp9',    'video/webm; codecs="vp09.00.40.08"',     'video/webm; codecs="vp09.00.51.08"'],
+        ['vp8',    'video/webm; codecs="vp8"',               null],
+    ];
+    const CAPS_AUDIO = [
+        ['aac',    'audio/mp4; codecs="mp4a.40.2"'],
+        ['mp3',    'audio/mpeg'],
+        ['opus',   'audio/webm; codecs="opus"'],
+        ['vorbis', 'audio/webm; codecs="vorbis"'],
+        ['flac',   'audio/mp4; codecs="flac"'],
+        ['ac3',    'audio/mp4; codecs="ac-3"'],
+        ['eac3',   'audio/mp4; codecs="ec-3"'],
+    ];
+    let CAPS = null;            // resolved ClientCaps (this page session)
+    let CAPS_PROMISE = null;
+
+    function canPlayAny(ct) {
+        try {
+            if (document.createElement('video').canPlayType(ct) !== '') return true;
+            if (window.MediaSource && MediaSource.isTypeSupported && MediaSource.isTypeSupported(ct)) return true;
+        } catch {}
+        return false;
+    }
+    function withTimeout(p, ms, fallback) {
+        return Promise.race([p, new Promise(r => setTimeout(() => r(fallback), ms))]);
+    }
+    /** MediaCapabilities.decodingInfo for a `file` (<video src>) source →
+     *  { supported, smooth, powerEfficient }, or null when unavailable. */
+    async function decodeInfo(kind, ct, w, h) {
+        const mc = navigator.mediaCapabilities;
+        if (!mc || typeof mc.decodingInfo !== 'function' || !ct) return null;
+        const cfg = kind === 'video'
+            ? { type: 'file', video: { contentType: ct, width: w, height: h, bitrate: h >= 2160 ? 25e6 : 8e6, framerate: 30 } }
+            : { type: 'file', audio: { contentType: ct, channels: '2', bitrate: 192000, samplerate: 48000 } };
+        try {
+            const r = await withTimeout(mc.decodingInfo(cfg), 1500, null);
+            return r ? { supported: !!r.supported, smooth: !!r.smooth, powerEfficient: !!r.powerEfficient } : null;
+        } catch { return null; }
+    }
+    function maxAudioChannels() {
+        try {
+            const C = window.AudioContext || window.webkitAudioContext;
+            if (!C) return 2;
+            const ctx = new C();
+            const n = (ctx.destination && ctx.destination.maxChannelCount) || 2;
+            try { ctx.close(); } catch {}
+            return Math.max(1, n);
+        } catch { return 2; }
+    }
+    async function detectClientCaps() {
+        const caps = { containers: [], video: {}, audio: {}, tokens: [], hdr: false, dv: false, channels: 2, source: 'canPlayType' };
+        if (canPlayAny('video/mp4')) caps.containers.push('mp4', 'm4v', 'mov');
+        if (canPlayAny('video/webm')) caps.containers.push('webm');
+        await Promise.all(CAPS_VIDEO.map(async ([tok, ct1080, ct2160]) => {
+            const at1080 = await decodeInfo('video', ct1080, 1920, 1080);
+            let info;
+            if (at1080) {
+                caps.source = 'mediaCapabilities';
+                const at2160 = (at1080.supported && at1080.smooth && ct2160)
+                    ? await decodeInfo('video', ct2160, 3840, 2160) : null;
+                info = {
+                    supported: at1080.supported && at1080.smooth,
+                    powerEfficient: at1080.powerEfficient,
+                    maxHeight: !at1080.supported || !at1080.smooth ? 0
+                             : (at2160 && at2160.supported && at2160.smooth) ? 2160 : 1080,
+                };
+            } else {
+                const ok = canPlayAny(ct1080);
+                info = { supported: ok, powerEfficient: false, maxHeight: ok ? 1080 : 0 };
+            }
+            caps.video[tok] = info;
+        }));
+        await Promise.all(CAPS_AUDIO.map(async ([tok, ct]) => {
+            const r = await decodeInfo('audio', ct);
+            caps.audio[tok] = { supported: r ? r.supported : canPlayAny(ct) };
+        }));
+        try { caps.hdr = !!(window.matchMedia && matchMedia('(dynamic-range: high)').matches); } catch {}
+        caps.dv = canPlayAny('video/mp4; codecs="dvh1.05.06"');
+        caps.channels = maxAudioChannels();
+        caps.tokens = [
+            ...caps.containers,
+            ...CAPS_VIDEO.map(v => v[0]).filter(t => caps.video[t].supported),
+            ...CAPS_AUDIO.map(a => a[0]).filter(t => caps.audio[t].supported),
+            ...(caps.hdr ? ['hdr'] : []),
+            ...(caps.dv ? ['dv'] : []),
+        ];
+        return caps;
+    }
+    /** ClientCaps for this page session (detected once, then cached). */
+    function clientCaps() {
+        if (!CAPS_PROMISE) {
+            CAPS_PROMISE = detectClientCaps()
+                .then(c => (CAPS = c))
+                .catch(e => { console.warn('animarrPlayer: caps detection failed', e); CAPS_PROMISE = null; return null; });
+        }
+        return CAPS_PROMISE;
+    }
+    /** For a start that shouldn't wait long: the cached caps, else the
+     *  detection result if it lands within `ms`, else null (the server then
+     *  uses its browser defaults, exactly as before). */
+    async function clientCapsWithin(ms) {
+        if (CAPS) return CAPS;
+        return withTimeout(clientCaps(), ms, null);
+    }
+    /** One-line summary for the Info popup. */
+    function describeCaps(caps) {
+        if (!caps) return 'Client caps: (not detected)';
+        const uhd = Object.keys(caps.video).filter(t => caps.video[t].maxHeight >= 2160);
+        return 'Client caps: ' + caps.tokens.join(' ')
+            + (uhd.length ? ' · 4K: ' + uhd.join(',') : '')
+            + ' · ' + caps.channels + 'ch'
+            + (caps.source === 'mediaCapabilities' ? '' : ' · (canPlayType)');
+    }
+
+    // ── Server contract for the caps — the ONE place to adjust ────────
+    // nativeCaps is the TV's token list (the server already bases Direct
+    // Play / Direct Stream on it). The audio side is still being designed on
+    // the server: the channel count travels as `maxAudioChannels` and the
+    // display / DV abilities as the `hdr` / `dv` tokens — rename them here
+    // when that contract lands. clientHevc / clientHevc10 (MSE-based, used
+    // for the HLS plan choice) stay as they were.
+    function capsQuery(caps) {
+        ensureHevcCaps();
+        let q = (window.__animarrHevcOk ? '&clientHevc=1' : '')
+              + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '');
+        if (caps && caps.tokens.length) {
+            q += '&nativeCaps=' + encodeURIComponent(caps.tokens.join(','))
+               + '&maxAudioChannels=' + caps.channels;
+        }
+        return q;
+    }
+
     // HEVC decode capability — tell the server it can ship HEVC as a
     // stream-copy (Direct Stream, original quality) rather than re-encoding it
     // to H.264. Constant per browser → memoize on window. hls.js gates on
@@ -2438,7 +2595,6 @@
      * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
      */
     async function startStream(mediaPath, p, signal) {
-        ensureHevcCaps();
         const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + p.offsets.hw
@@ -2446,8 +2602,7 @@
             + (p.audioTrackIndex > 0 ? '&audioTrackIndex=' + p.audioTrackIndex : '')
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (p.maxBitrate > 0 ? '&maxBitrate=' + p.maxBitrate : '')
-            + (window.__animarrHevcOk ? '&clientHevc=1' : '')
-            + (window.__animarrHevc10Ok ? '&clientHevc10=1' : '')
+            + capsQuery(p.caps)
             + (p.externalAudioPath ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath) : ''));
         let lastErr = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -2717,8 +2872,13 @@
         }
         if (stale()) return;
 
-        // ── 2) Audio-sync offsets (see readAudioOffsets) ──────────────
+        // ── 2) Audio-sync offsets (see readAudioOffsets) + client caps ─
         const offsets = readAudioOffsets();
+        // Usually cached already (preload / an earlier attach); a first-ever
+        // probe gets a short budget, after which the start goes without.
+        const caps = await clientCapsWithin(1200);
+        entry.caps = caps;
+        if (stale()) return;
 
         // ── 3) Start session ──────────────────────────────────────────
         // Kick the probe off IN PARALLEL with /api/hls/start. The probe is a
@@ -2734,7 +2894,7 @@
         if (!started) {
             try {
                 started = await startStream(mediaPath, {
-                    resumeSec, offsets, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath,
+                    resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath,
                 }, abort.signal);
             } catch (err) {
                 if ((err && err.name === 'AbortError') || stale()) return;
@@ -3405,6 +3565,8 @@
                 lines.push('Playback: ' + planTag);
                 if (o.transcoded && o.transcodeReason) lines.push('Reason: ' + o.transcodeReason);
             }
+            // What this browser reported (debugging Direct Play decisions).
+            lines.push(describeCaps(entry.caps));
             entry.infoLines = lines;
             // If the Info popup is open, refresh its rows live (the 30s clock
             // tick also re-runs this).
@@ -3690,7 +3852,7 @@
         let started = null, failure = null;
         try {
             started = await startStream(entry.mediaPath,
-                Object.assign({ resumeSec: snap.pos, offsets: readAudioOffsets() }, plan), ctl.signal);
+                Object.assign({ resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS }, plan), ctl.signal);
         } catch (err) { failure = err; }
         if (entry.pendingSwitch === ctl) entry.pendingSwitch = null;
         if (!isLiveOp(elementId, op)) {
