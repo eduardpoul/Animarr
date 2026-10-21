@@ -743,7 +743,13 @@ internal static class MediaEndpoints
             // This card fell back to the show's art recently for the same file
             // (no still, no frame) — skip straight to that instead of repeating
             // the TMDB lookup and the ffmpeg spawn on every view.
-            if (!EpisodeThumbMisses.IsKnown(memCache, id, season, episode, f?.FilePath))
+            // A miss is only remembered when this pass actually established it:
+            // not on a TMDB hiccup, not when the client went away mid-grab, and
+            // not again on a known miss (re-Remembering would slide the TTL on
+            // every view and pin the fallback for as long as someone browses).
+            var knownMiss  = EpisodeThumbMisses.IsKnown(memCache, id, season, episode, f?.FilePath);
+            var definitive = true;
+            if (!knownMiss)
             {
                 // 1) TMDB episode still. For donghua absolute/re-split layouts the
                 //    matching TMDB episode is the absolute one (single TMDB season).
@@ -762,13 +768,14 @@ internal static class MediaEndpoints
                             && Ok(cache))
                             return Thumb(cache);
                     }
-                    catch { /* network/TMDB hiccup — fall through to ffmpeg */ }
+                    catch { definitive = false; /* network/TMDB hiccup — fall through to ffmpeg */ }
                 }
 
                 // 2) ffmpeg frame from the on-disk video.
                 if (f?.FilePath is string fp && File.Exists(fp)
                     && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
                     return Thumb(cache);
+                ct.ThrowIfCancellationRequested();
             }
 
             // 3) Last resort: the show's own art, so the card is never broken.
@@ -778,7 +785,8 @@ internal static class MediaEndpoints
             var fallback = item.FanartPath ?? item.PosterPath;
             if (!string.IsNullOrEmpty(fallback) && File.Exists(fallback))
             {
-                EpisodeThumbMisses.Remember(memCache, id, season, episode, f?.FilePath);
+                if (!knownMiss && definitive)
+                    EpisodeThumbMisses.Remember(memCache, id, season, episode, f?.FilePath);
                 http.Response.Headers.CacheControl = "private, no-cache";
                 return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
             }
