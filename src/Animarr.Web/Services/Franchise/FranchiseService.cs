@@ -163,8 +163,12 @@ public sealed class FranchiseService(
                 }
 
                 var fromIds = edges.Select(e => e.From).Distinct().ToList();
+                // Read-only lookup set — untracked, so SaveChanges below doesn't
+                // diff every existing edge of the franchise.
                 var existingEdges = (await db.FranchiseEdges
+                        .AsNoTracking()
                         .Where(e => fromIds.Contains(e.FromAniListId))
+                        .Select(e => new { e.FromAniListId, e.ToAniListId, e.RelationType })
                         .ToListAsync(ct))
                     .Select(e => (e.FromAniListId, e.ToAniListId, e.RelationType))
                     .ToHashSet();
