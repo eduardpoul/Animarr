@@ -99,12 +99,14 @@ internal static class RenameEndpoints
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // Without LogDetails (see RenameMappings.ToListEntryDto) — clients
+            // refetch this list on every queue change.
             var rows = await db.IdentificationQueues
-                .Include(q => q.Folder)
                 .OrderByDescending(q => q.QueuedAt)
                 .Take(200)
-                .ToListAsync(ct);
-            return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+                .Select(RenameMappings.ToListEntryDto)
+                .ToArrayAsync(ct);
+            return Results.Ok(rows);
         });
 
         app.MapPost(ApiRoutes.IdentificationEnqueue, async (
