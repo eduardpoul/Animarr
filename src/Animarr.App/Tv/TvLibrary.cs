@@ -53,6 +53,17 @@ internal static class TvGrid
         g.WindowAlignmentOffsetPercent = BaseGridView.WindowAlignOffsetPercentDisabled;
         g.ItemAlignmentOffsetPercent = 0;
         g.SetItemAnimator(null);
+        // Leanback grids keep focus inside by default - UP from the first row
+        // must reach the section pills and the top menu.
+        // In leanback-grid 1.0 the switch lives on its GridLayoutManager (not on
+        // the view) — reach it through Java reflection.
+        try
+        {
+            var lm = g.GetLayoutManager()!;
+            lm.Class.GetMethod("setFocusOutAllowed", Java.Lang.Boolean.Type, Java.Lang.Boolean.Type)?
+                .Invoke(lm, Java.Lang.Boolean.True, Java.Lang.Boolean.False);
+        }
+        catch (Exception ex) { Android.Util.Log.Warn("AnimarrTv", $"focusOut: {ex.Message}"); }
         g.SetRecycledViewPool(Rails.SharedPool);
         g.HasFixedSize = true;
         g.SetAdapter(adapter);
@@ -92,6 +103,7 @@ internal sealed class TvLibraryView : LinearLayout
     private readonly Dictionary<Guid, HashSet<Guid>> _sectionFolders = new();
     private Guid? _active;
     public TvTopBar Bar { get; }
+    private readonly bool _focusTab;
 
     public TvLibraryView(Context ctx, ContentPage page, Guid? section) : base(ctx)
     {
@@ -117,6 +129,8 @@ internal sealed class TvLibraryView : LinearLayout
 
         _grid = TvGrid.Posters(ctx, _adapter);
         AddView(_grid, new LinearLayout.LayoutParams(-1, 0, 1f));
+        _focusTab = TvTopBar.TakePending(TvTab.Library);
+        if (_focusTab) Bar.Active.Post(() => Bar.Active.RequestFocus());
         _ = LoadAsync();
     }
 
@@ -171,7 +185,7 @@ internal sealed class TvLibraryView : LinearLayout
         }).ToList();
         _count.Text = cards.Count.ToString();
         _adapter.Replace(cards);
-        if (focusGrid) _grid.Post(() => { _grid.SelectedPosition = 0; _grid.RequestFocus(); });
+        if (focusGrid && !_focusTab) _grid.Post(() => { _grid.SelectedPosition = 0; _grid.RequestFocus(); });
     }
 
     private void Switch(Guid? id)
@@ -250,7 +264,8 @@ internal sealed class TvSearchView : LinearLayout
         AddView(_status, TvUi.Lp(-2, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 10)));
 
         AddView(TvGrid.Posters(ctx, _adapter), new LinearLayout.LayoutParams(-1, 0, 1f));
-        _box.Post(() => _box.RequestFocus());
+        if (TvTopBar.TakePending(TvTab.Search)) Bar.Active.Post(() => Bar.Active.RequestFocus());
+        else _box.Post(() => _box.RequestFocus());
     }
 
     private void Debounce()

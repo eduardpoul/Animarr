@@ -203,9 +203,24 @@ public sealed class TvFocusBehavior : Behavior<View>
         _native = null;
     }
 
+    /// <summary>Button style of the native TV screens: on focus the control
+    /// fills white and its labels turn dark (no ring).</summary>
+    public bool InvertOnFocus { get; set; }
+    private Color? _restBg;
+
     private void OnFocus(object? sender, AView.FocusChangeEventArgs e)
     {
-        if (sender is AView v) TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius, FillOnFocus);
+        if (sender is not AView v) return;
+        if (InvertOnFocus && _view is VisualElement ve)
+        {
+            _restBg ??= ve.BackgroundColor;
+            ve.BackgroundColor = e.HasFocus ? Colors.White : _restBg;
+            foreach (var l in ((IVisualTreeElement)_view).GetVisualTreeDescendants().OfType<Label>())
+                l.TextColor = e.HasFocus ? Color.FromArgb("#1a1a1a") : Colors.White;
+            v.Animate()?.ScaleX(e.HasFocus ? 1.05f : 1f)?.ScaleY(e.HasFocus ? 1.05f : 1f)?.SetDuration(160)?.Start();
+            return;
+        }
+        TvFocus.ApplyFocusVisual(v, e.HasFocus, Radius, FillOnFocus);
     }
 
     // D-pad OK / Enter on a focused clickable view lands here as a Click.
@@ -257,6 +272,7 @@ public sealed class TvFocusBehavior : Behavior<View>
 {
     public float Radius { get; set; } = 12f;
     public bool FillOnFocus { get; set; }
+    public bool InvertOnFocus { get; set; }
 
     public static readonly BindableProperty CommandProperty =
         BindableProperty.Create(nameof(Command), typeof(System.Windows.Input.ICommand), typeof(TvFocusBehavior));

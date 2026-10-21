@@ -206,6 +206,8 @@ internal sealed class FocusKeeper : Java.Lang.Object, ViewTreeObserver.IOnGlobal
             if (ReferenceEquals(p, _root)) { _last = new WeakReference<AView>(newFocus); return; }
     }
 
+    public AView? Last => _last is not null && _last.TryGetTarget(out var v) ? v : null;
+
     /// <summary>Re-focus the remembered view (if still attached), else <paramref name="fallback"/>.</summary>
     public void Restore(Action? fallback = null) => _root.PostDelayed(() =>
     {

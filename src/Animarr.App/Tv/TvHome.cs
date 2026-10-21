@@ -37,7 +37,11 @@ public sealed class TvHomePage : ContentPage
     {
         base.OnAppearing();
         TvBack.Handler = () => _view?.BackToTop() ?? false;
-        if (_shown) _view?.OnReturn();
+        if (_shown)
+        {
+            if (TvTopBar.TakePending(TvTab.Home)) _view?.FocusTabsSoon();
+            else _view?.OnReturn();
+        }
         _shown = true;
         _view?.ResumeCarousel();
     }
@@ -159,7 +163,10 @@ internal sealed class TvHomeView : FrameLayout
     /// <summary>Back from detail / player: refresh the resume feed (progress moved).</summary>
     public void OnReturn()
     {
-        _focus.Restore(() => _hero?.FocusPrimary());
+        // A menu tab opens its page on focus — never restore onto one (that would
+        // bounce straight back into Library / Search); land on Главная instead.
+        if (_focus.Last is { } last && _hero is not null && _hero.IsInBar(last)) FocusTabsSoon();
+        else _focus.Restore(() => _hero?.FocusPrimary());
         if ((DateTime.UtcNow - _lastRefresh).TotalSeconds < 5) return;
         _lastRefresh = DateTime.UtcNow;
         _ = RefreshFeedAsync();
@@ -368,6 +375,12 @@ internal sealed class TvHomeView : FrameLayout
         else OpenDetail(id, title, fanart);
     }
 
+    public void FocusTabsSoon()
+    {
+        _rows.SelectedPosition = 0;
+        Post(() => _hero?.FocusTabs());
+    }
+
     /// <summary>Back → scroll to the top and focus the hero; true when it moved.</summary>
     public bool BackToTop()
     {
@@ -454,6 +467,11 @@ internal sealed class TvHomeView : FrameLayout
 
         public bool HasFocusInside => ((ViewGroup)ItemView).HasFocus;
         public bool TabsFocused => _bar.HasFocus;
+        public bool IsInBar(AView v)
+        {
+            for (var p = v.Parent; p is not null; p = p.Parent) if (ReferenceEquals(p, _bar)) return true;
+            return false;
+        }
         private readonly LinearLayout _bar;
 
         public HeroHolder(Context ctx, TvHomeView home) : base(new FrameLayout(ctx))
