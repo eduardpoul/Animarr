@@ -37,8 +37,35 @@ internal sealed class TvData
         try { return await t; } catch { return default; }
     }
 
+    /// <summary>Catalog lists ask for the lighter card view (24 fields); older
+    /// servers ignore the param and send the full DTO.</summary>
+    public const string CardView = "&view=card";
+
+    // artwork path → LastMetadataRefreshedAt ticks, from every catalog / detail
+    // response. Img() puts it on the URL as t= wherever that path is shown (the
+    // server then caches it immutably, Glide gets a new key when art changes).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> s_ver = new();
+
+    public static void Remember(string? poster, string? fanart, DateTime? refreshedAt)
+    {
+        if (refreshedAt is not { } at) return;
+        if (!string.IsNullOrEmpty(poster)) s_ver[poster] = at.Ticks;
+        if (!string.IsNullOrEmpty(fanart)) s_ver[fanart] = at.Ticks;
+    }
+
+    public static MediaItem[] Remember(MediaItem[]? items)
+    {
+        items ??= Array.Empty<MediaItem>();
+        foreach (var i in items) Remember(i.PosterPath, i.FanartPath, i.LastMetadataRefreshedAt);
+        return items;
+    }
+
     public string Img(string? path, int w)
-        => string.IsNullOrEmpty(path) ? "" : TvMedia.Url($"{Base}/api/image?path={Uri.EscapeDataString(path)}&w={w}");
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        var t = s_ver.TryGetValue(path, out var v) ? $"&t={v}" : "";
+        return TvMedia.Url($"{Base}/api/image?path={Uri.EscapeDataString(path)}{t}&w={w}");
+    }
 
     public string EpisodeThumb(string mediaId, int season, int episode)
         => TvMedia.Url($"{Base}/api/media/{mediaId}/episode-thumb?season={season}&episode={episode}");
@@ -46,7 +73,8 @@ internal sealed class TvData
     // ── DTO shapes (only the fields the TV uses) ─────────────────────────────
     public sealed record MediaItem(
         string? Id, string? Title, string? PosterPath, string? FanartPath,
-        int? Year, string? MediaType, double? Rating, int? EpisodeCount, string? FolderId);
+        int? Year, string? MediaType, double? Rating, int? EpisodeCount, string? FolderId,
+        DateTime? LastMetadataRefreshedAt);
 
     public sealed record ContinueItem(
         string MediaItemId, string? Title, string? PosterPath, string? FanartPath,
@@ -64,7 +92,7 @@ internal sealed class TvData
         string? Studio, string? Language, int? Runtime, int? EpisodeCount, string? SeasonLabel,
         string? Status, string? ContentRating, string? Description, string[]? Genres, string[]? Tags,
         int? TmdbId, int? MalId, string? ImdbId, string? MediaType,
-        string? PosterPath, string? FanartPath, Season[]? Seasons);
+        string? PosterPath, string? FanartPath, Season[]? Seasons, DateTime? LastMetadataRefreshedAt);
 
     public sealed record Season(int Number, int EpisodeCount, string? PosterPath, string? Overview);
     public sealed record FileRow(int? Season, int? Episode, int? AbsoluteEpisode, string? FilePath);

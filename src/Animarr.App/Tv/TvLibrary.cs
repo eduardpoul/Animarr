@@ -160,11 +160,11 @@ internal sealed class TvLibraryView : LinearLayout
     private async Task LoadAsync()
     {
         var token = TvMedia.EnsureTokenAsync();
-        var itemsT = _data.Get<TvData.MediaItem[]>("/api/media?take=1000");
+        var itemsT = _data.Get<TvData.MediaItem[]>("/api/media?take=1000" + TvData.CardView);
         var secT = TvData.Safe(_data.Api.GetSectionFoldersAsync());
         var folT = TvData.Safe(_data.Api.GetFoldersAsync());
         await token;
-        _items = (await itemsT ?? Array.Empty<TvData.MediaItem>())
+        _items = TvData.Remember(await itemsT)
             .Where(i => !string.IsNullOrEmpty(i.PosterPath ?? i.FanartPath))
             .OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToArray();
         var secs = await secT; var fols = await folT;
@@ -327,9 +327,9 @@ internal sealed class TvSearchView : LinearLayout
             try { await Task.Delay(350, ct); } catch { return; }
             if (q.Length < 2) { Post(() => { _adapter.Replace(new()); _status.Text = ""; }); return; }
             await TvMedia.EnsureTokenAsync();
-            var items = await _data.Get<TvData.MediaItem[]>($"/api/media?search={Uri.EscapeDataString(q)}&take=120", ct);
+            var items = await _data.Get<TvData.MediaItem[]>($"/api/media?search={Uri.EscapeDataString(q)}&take=120{TvData.CardView}", ct);
             if (ct.IsCancellationRequested) return;
-            var cards = (items ?? Array.Empty<TvData.MediaItem>()).Select(i =>
+            var cards = TvData.Remember(items).Select(i =>
             {
                 var id = i.Id ?? ""; var title = i.Title; var fan = i.FanartPath;
                 return new CardItem

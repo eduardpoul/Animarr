@@ -114,7 +114,7 @@ internal sealed class TvHomeView : FrameLayout
         {
             var token = TvMedia.EnsureTokenAsync();
             _ = Task.Run(() => Services.TvCodecCaps.Get());   // ~17×codecs JNI calls, not on the first Play
-            var libT = _data.Get<TvData.MediaItem[]>("/api/media?take=500");
+            var libT = _data.Get<TvData.MediaItem[]>("/api/media?take=500" + TvData.CardView);
             var contT = _data.Get<TvData.ContinueItem[]>("/api/me/continue?take=12");
             var nextT = _data.Get<TvData.ContinueItem[]>("/api/me/next-up?take=12");
             var weekT = _data.Get<TvData.CalendarEvent[]>("/api/calendar?back=1&ahead=7");
@@ -128,7 +128,7 @@ internal sealed class TvHomeView : FrameLayout
             await TvL.LoadAsync(_data.Http, prefs?.Language);
             await token;
 
-            _library = await libT ?? Array.Empty<TvData.MediaItem>();
+            _library = TvData.Remember(await libT);
             if (int.TryParse((await cadT)?.Value, out var iv) && iv > 0) _heroIntervalSec = iv;
 
             var secs = await secT; var fols = await folT;

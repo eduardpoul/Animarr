@@ -122,6 +122,7 @@ internal sealed class TvDetailView : FrameLayout
             _item = await itemT;
             _files = await filesT ?? Array.Empty<TvData.FileRow>();
             if (_item is null) return;
+            TvData.Remember(_item.PosterPath, _item.FanartPath, _item.LastMetadataRefreshedAt);
             _continue = await contT;
             _watch = await watchT ?? Array.Empty<WatchStateDto>();
             _isFav = (await favT)?.Contains(_guid) ?? false;
