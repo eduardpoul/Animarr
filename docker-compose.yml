@@ -6,9 +6,10 @@
     restart: unless-stopped
     # On stop the torrent engine announces "stopped" to trackers and writes
     # fast-resume data; Docker's default 10 s before SIGKILL can cut that short
-    # (→ a full hash re-check of every torrent on the next start). 30 s matches
-    # the app's own graceful-shutdown timeout.
-    stop_grace_period: 30s
+    # (→ a full hash re-check of every torrent on the next start). The app's
+    # own graceful-shutdown budget is 30 s (HostOptions.ShutdownTimeout), so
+    # give Docker a margin above it before SIGKILL.
+    stop_grace_period: 45s
     # Cap the container's console log. Docker's default json-file driver does
     # not rotate unless the daemon is configured to, so the log would grow for
     # as long as the container exists.
