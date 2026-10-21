@@ -309,4 +309,33 @@ else
         : "d-ep__pb-fill d-ep__pb-fill--inprog";
 
     private Task OnEyeClick() => OnToggleWatched.InvokeAsync();
+
+    // ── Render gate ───────────────────────────────────────────────────────
+    // MediaDetail re-renders 4–5× while a title opens (load, episode meta,
+    // similar, franchise, prefs) and on every watched toggle, and the record
+    // WatchStateDto + the OnToggleWatched callback make Blazor's parameter
+    // diff treat every card as changed — a 1 000-episode season re-rendered
+    // 1 000 cards each time. Re-render only when something the card SHOWS
+    // changed. (OnToggleWatched is read when clicked, so a newer callback
+    // needs no render; ShouldRender isn't consulted for the first render.)
+    private readonly record struct RenderInputs(
+        string Layout, string? Overview, string? AirDate, double? Rating, string? Resolution,
+        string? Lang, int Number, string Title, string? ThumbUrl, string Meta, bool Have,
+        string? Flag, string? FlagLabel, bool IsWatched, int ProgressPct, string UiLanguage);
+
+    private RenderInputs _rendered;
+
+    private RenderInputs CurrentInputs() => new(
+        Layout, Overview, AirDate, Rating, Resolution, Lang, Number, Title, ThumbUrl, Meta, Have,
+        Flag, FlagLabel, IsWatched, ProgressPct, L.CurrentLanguage);
+
+    protected override void OnInitialized() => _rendered = CurrentInputs();
+
+    protected override bool ShouldRender()
+    {
+        var now = CurrentInputs();
+        if (now == _rendered) return false;
+        _rendered = now;
+        return true;
+    }
 }

@@ -80,12 +80,10 @@ else
     // files with a null season fell through every branch — no grid (fileSeasons
     // was empty) and the "Unmatched files" section only catches null-EPISODE
     // files — so they rendered nowhere.
-    var fileSeasons    = _files
-        .Where(f => f.Season is not null || f.Episode is not null)
-        .Select(f => f.Season ?? 1)
-        .Distinct()
-        .OrderBy(n => n)
-        .ToArray();
+    // Episode-grid lookups (file / watch-state / filler maps) — rebuilt only
+    // when their source data changed, see EnsureEpisodeLookups.
+    EnsureEpisodeLookups();
+    var fileSeasons    = _fileSeasons;
     var showEpisodeGrid = hasSeasonMeta
                       || (isMultiEpisode && fileSeasons.Length > 0);
     // Movie OR flat-folder anime (one-shot OVA) with no Seasons — one file,
@@ -140,8 +138,7 @@ else
                                 // TMDB's count lags for an airing season (often 0
                                 // in our snapshot) — never show fewer than the
                                 // episodes actually on disk for it.
-                                var onDisk = _files.Where(f => (f.Season ?? 1) == n && f.Episode is not null)
-                                                   .Select(f => f.Episode).Distinct().Count();
+                                var onDisk = _episodesOnDiskBySeason.GetValueOrDefault(n);
                                 <button type="button"
                                         class="@($"md-season-tab tv-focus {(_activeSeason == n ? "md-season-tab--active" : "")}")"
                                         @onclick="@(() => _activeSeason = n)">
@@ -153,7 +150,7 @@ else
                             @foreach (var n in fileSeasons.Where(fs => !item.Seasons.Any(s => s.Number == fs)))
                             {
                                 var nn = n;
-                                var epCount = _files.Count(f => (f.Season ?? 1) == nn);
+                                var epCount = _fileCountBySeason.GetValueOrDefault(nn);
                                 <button type="button"
                                         class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
                                         @onclick="@(() => _activeSeason = nn)">
@@ -166,7 +163,7 @@ else
                             @foreach (var n in fileSeasons)
                             {
                                 var nn = n;
-                                var epCount = _files.Count(f => (f.Season ?? 1) == nn);
+                                var epCount = _fileCountBySeason.GetValueOrDefault(nn);
                                 <button type="button"
                                         class="@($"md-season-tab tv-focus {(_activeSeason == nn ? "md-season-tab--active" : "")}")"
                                         @onclick="@(() => _activeSeason = nn)">
@@ -183,8 +180,7 @@ else
                         // on-disk file episode for this season) so cards aren't lost
                         // when TMDB underreports the season length (common for ongoing
                         // donghua / continuing series).
-                        var maxFileEp = _files.Where(f => (f.Season ?? 1) == _activeSeason)
-                                               .Max(f => (int?)f.Episode) ?? 0;
+                        var maxFileEp = _maxEpisodeBySeason.TryGetValue(_activeSeason, out var maxEp) ? maxEp : 0;
                         var loopEpCount = Math.Max(active?.EpisodeCount ?? 0, maxFileEp);
                         if (loopEpCount == 0) loopEpCount = 1;
                         // Per-season poster URL (used as the per-episode thumb fallback
@@ -202,8 +198,8 @@ else
                         var epsOnDisk  = 0;
                         for (int si = 1; si <= loopEpCount; si++)
                         {
-                            if (_files.Any(f => (f.Season ?? 1) == _activeSeason && f.Episode == si)) epsOnDisk++;
-                            if (_watchStates.Any(w => w.Season == _activeSeason && w.Episode == si && w.IsWatched)) epsWatched++;
+                            if (_fileByEpisode.ContainsKey((_activeSeason, si))) epsOnDisk++;
+                            if (_watchedEpisodes.Contains((_activeSeason, si))) epsWatched++;
                         }
                     }
                     @if (active is not null && !string.IsNullOrEmpty(active.Overview))
@@ -270,9 +266,9 @@ else
                         @for (int i = 1; i <= loopEpCount; i++)
                         {
                             var ep        = i;
-                            var epFile    = _files.FirstOrDefault(f => (f.Season ?? 1) == _activeSeason && f.Episode == ep);
+                            var epFile    = _fileByEpisode.GetValueOrDefault((_activeSeason, ep));
                             var hasFile   = epFile is not null;
-                            var watchDto  = _watchStates.FirstOrDefault(w => w.Season == _activeSeason && w.Episode == ep);
+                            var watchDto  = _watchByEpisode.GetValueOrDefault((_activeSeason, ep));
                             // Stage B: per-episode TMDB metadata. Disk → TMDB key mirrors
                             // the thumb endpoint — an absolute-numbered donghua file maps
                             // to TMDB season 1 / its absolute episode; everything else maps
@@ -312,12 +308,12 @@ else
                             // offset donghua — else by the plain episode number, but
                             // only on season 1 (a per-season MAL entry's "ep 5" must
                             // not tag S2E5).
-                            var isFiller = item.FillerEpisodes.Length > 0
-                                && (absEpNum is int fAbs ? item.FillerEpisodes.Contains(fAbs)
-                                                         : _activeSeason <= 1 && item.FillerEpisodes.Contains(ep));
-                            var isRecap  = !isFiller && item.RecapEpisodes.Length > 0
-                                && (absEpNum is int rAbs ? item.RecapEpisodes.Contains(rAbs)
-                                                         : _activeSeason <= 1 && item.RecapEpisodes.Contains(ep));
+                            var isFiller = _fillerSet.Count > 0
+                                && (absEpNum is int fAbs ? _fillerSet.Contains(fAbs)
+                                                         : _activeSeason <= 1 && _fillerSet.Contains(ep));
+                            var isRecap  = !isFiller && _recapSet.Count > 0
+                                && (absEpNum is int rAbs ? _recapSet.Contains(rAbs)
+                                                         : _activeSeason <= 1 && _recapSet.Contains(ep));
                             var epFlag   = isFiller ? "filler" : isRecap ? "recap" : null;
                             // Canon-only marathon mode: flagged episodes drop out of the
                             // grid entirely while the toggle is on.
@@ -333,21 +329,22 @@ else
                                (Enter) activates. Disabled episodes (file missing)
                                still render but tabindex=-1 so the remote skips over
                                them — matches the visual --miss dim. *@
+                            var epHandlers = HandlersFor(_activeSeason, ep);
                             <div class="md-episode-card tv-focus"
                                  tabindex="@(hasFile ? "0" : "-1")"
                                  role="button"
                                  aria-label="@($"Play episode {ep}")"
                                  aria-disabled="@(hasFile ? "false" : "true")"
                                  data-tv-autofocus="@(markEpAutofocus ? "true" : null)"
-                                 @onclick="@(() => hasFile ? PlayEpisodeAsync(_activeSeason, ep) : Task.CompletedTask)"
-                                 @onkeydown="@(async (KeyboardEventArgs e) => { if (hasFile && (e.Key == "Enter" || e.Key == " ")) await PlayEpisodeAsync(_activeSeason, ep); })">
+                                 @onclick="@epHandlers.Play"
+                                 @onkeydown="@epHandlers.Key">
                                 <EpisodeCard Number="ep"
                                              Layout="@(_episodeView == "list" ? "list" : "card")"
                                              Title="@epTitle"
                                              Overview="@epDto?.Overview"
                                              AirDate="@epDto?.AirDate"
                                              Rating="@epDto?.Rating"
-                                             Resolution="@(hasFile ? ResolutionFromName(epFile?.FileName) : null)"
+                                             Resolution="@(hasFile ? ResolutionFor(epFile?.FileName) : null)"
                                              Lang="@(UserCtx.Preferences?.Language)"
                                              ThumbUrl="@(hasFile ? Animarr.UI.Services.MediaUrl.EpisodeThumb(Id, _activeSeason, ep) : seasonThumb)"
                                              Meta="@epMeta"
@@ -355,7 +352,7 @@ else
                                              Flag="@epFlag"
                                              FlagLabel="@(epFlag == "filler" ? L["episode.filler"] : epFlag == "recap" ? L["episode.recap"] : null)"
                                              WatchStateDto="@watchDto"
-                                             OnToggleWatched="@(() => ToggleEpisodeWatched(_activeSeason, ep, !(watchDto?.IsWatched == true)))" />
+                                             OnToggleWatched="@epHandlers.ToggleWatched" />
                             </div>
                         }
                     </div>
@@ -756,7 +753,7 @@ else
             _continue = await continueTask;
             _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
             var states = await statesTask;
-            _watchStates = states.ToList();
+            SetWatchStates(states);
             _movieWatched = states.Any(w => w.Season is null && w.Episode is null && w.IsWatched);
             _files = await filesTask;
 
@@ -861,12 +858,174 @@ else
     private static string? ResolutionFromName(string? fileName)
     {
         if (string.IsNullOrEmpty(fileName)) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(
-            fileName, @"\b(2160p|1080p|720p|480p|4k|uhd)\b",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var m = ResolutionToken.Match(fileName);
         if (!m.Success) return null;
         var tok = m.Value.ToLowerInvariant();
         return tok is "4k" or "uhd" ? "4K" : tok;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex ResolutionToken = new(
+        @"\b(2160p|1080p|720p|480p|4k|uhd)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary><see cref="ResolutionFromName"/> memoised per file name — it
+    /// ran a (interpreted, on WASM) regex per episode card on every render.</summary>
+    private string? ResolutionFor(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return null;
+        if (!_resolutionByName.TryGetValue(fileName, out var res))
+            _resolutionByName[fileName] = res = ResolutionFromName(fileName);
+        return res;
+    }
+    private readonly Dictionary<string, string?> _resolutionByName = new();
+
+    // ─── Episode-grid lookups ─────────────────────────────────────────────
+    // The grid used to scan ALL of the title's files and watch states for
+    // every episode of the active season — twice per render (season counters +
+    // cards) — plus array scans for filler/recap, and the page renders 4–5×
+    // while a title opens. On a 1 000-episode long-runner that was millions of
+    // predicate calls per render (seconds on a phone). These maps are rebuilt
+    // only when their source changes: files by array instance, watch states
+    // through SetWatchStates / ReplaceWatchState (the only writers), filler
+    // sets by the item's arrays.
+
+    private MediaFileDto[]? _fileLookupSource;
+    /// <summary>(effective season, episode) → first matching file, in _files
+    /// order — what the old FirstOrDefault scans returned. A null season counts
+    /// as season 1, like everywhere in the grid.</summary>
+    private Dictionary<(int Season, int Episode), MediaFileDto> _fileByEpisode = new();
+    /// <summary>Per effective season: every file (incl. unparsed-episode ones —
+    /// the disk-only tab counts), distinct parsed episodes, highest episode.</summary>
+    private Dictionary<int, int> _fileCountBySeason = new();
+    private Dictionary<int, int> _episodesOnDiskBySeason = new();
+    private Dictionary<int, int> _maxEpisodeBySeason = new();
+    /// <summary>Effective seasons of files with a season or episode, ascending.</summary>
+    private int[] _fileSeasons = Array.Empty<int>();
+
+    private bool _watchLookupDirty = true;
+    /// <summary>(season, episode) → first matching watch row (FirstOrDefault
+    /// order); rows without both numbers never matched the grid.</summary>
+    private Dictionary<(int Season, int Episode), WatchStateDto> _watchByEpisode = new();
+    /// <summary>Episodes with ANY watched row (the old season counter's Any).</summary>
+    private HashSet<(int Season, int Episode)> _watchedEpisodes = new();
+
+    private int[]? _fillerSource;
+    private int[]? _recapSource;
+    private HashSet<int> _fillerSet = new();
+    private HashSet<int> _recapSet  = new();
+
+    private void EnsureEpisodeLookups()
+    {
+        if (!ReferenceEquals(_fileLookupSource, _files))
+        {
+            _fileLookupSource = _files;
+            var byEp    = new Dictionary<(int, int), MediaFileDto>();
+            var count   = new Dictionary<int, int>();
+            var maxEp   = new Dictionary<int, int>();
+            var seasons = new SortedSet<int>();
+            foreach (var f in _files)
+            {
+                var s = f.Season ?? 1;
+                count[s] = count.GetValueOrDefault(s) + 1;
+                if (f.Season is not null || f.Episode is not null) seasons.Add(s);
+                if (f.Episode is int e)
+                {
+                    byEp.TryAdd((s, e), f);
+                    maxEp[s] = maxEp.TryGetValue(s, out var m) ? Math.Max(m, e) : e;
+                }
+            }
+            var onDisk = new Dictionary<int, int>();
+            foreach (var (s, _) in byEp.Keys) onDisk[s] = onDisk.GetValueOrDefault(s) + 1;
+
+            _fileByEpisode          = byEp;
+            _fileCountBySeason      = count;
+            _maxEpisodeBySeason     = maxEp;
+            _episodesOnDiskBySeason = onDisk;
+            _fileSeasons            = seasons.ToArray();
+            _resolutionByName.Clear();
+        }
+
+        if (_watchLookupDirty)
+        {
+            _watchLookupDirty = false;
+            var byEp    = new Dictionary<(int, int), WatchStateDto>();
+            var watched = new HashSet<(int, int)>();
+            foreach (var w in _watchStates)
+            {
+                if (w.Season is not int s || w.Episode is not int e) continue;
+                byEp.TryAdd((s, e), w);
+                if (w.IsWatched) watched.Add((s, e));
+            }
+            _watchByEpisode  = byEp;
+            _watchedEpisodes = watched;
+        }
+
+        if (_item is not null)
+        {
+            if (!ReferenceEquals(_fillerSource, _item.FillerEpisodes))
+            {
+                _fillerSource = _item.FillerEpisodes;
+                _fillerSet    = new HashSet<int>(_item.FillerEpisodes);
+            }
+            if (!ReferenceEquals(_recapSource, _item.RecapEpisodes))
+            {
+                _recapSource = _item.RecapEpisodes;
+                _recapSet    = new HashSet<int>(_item.RecapEpisodes);
+            }
+        }
+    }
+
+    /// <summary>Replace the watch-state list (fresh load) and invalidate its lookups.</summary>
+    private void SetWatchStates(IEnumerable<WatchStateDto> states)
+    {
+        _watchStates = states.ToList();
+        _watchLookupDirty = true;
+    }
+
+    /// <summary>Swap the rows <paramref name="match"/> selects for
+    /// <paramref name="updated"/> and invalidate the lookups.</summary>
+    private void ReplaceWatchState(Predicate<WatchStateDto> match, WatchStateDto updated)
+    {
+        _watchStates.RemoveAll(match);
+        _watchStates.Add(updated);
+        _watchLookupDirty = true;
+    }
+
+    /// <summary>Per-(season, episode) handlers, created once and reused on every
+    /// render. Fresh lambdas each render gave all ~E cards' @onclick/@onkeydown
+    /// new event-handler ids (an attribute edit per card per render) and the
+    /// cards a new callback. They read the current files / watch state when
+    /// invoked, so they never go stale.</summary>
+    private readonly Dictionary<(int Season, int Episode), EpisodeHandlers> _episodeHandlers = new();
+
+    private sealed record EpisodeHandlers(
+        Func<Task> Play, Func<KeyboardEventArgs, Task> Key, Func<Task> ToggleWatched);
+
+    private EpisodeHandlers HandlersFor(int season, int episode)
+    {
+        if (_episodeHandlers.TryGetValue((season, episode), out var h)) return h;
+        h = new EpisodeHandlers(
+            Play: () => HasFileFor(season, episode)
+                ? PlayEpisodeAsync(season, episode)
+                : Task.CompletedTask,
+            Key: async e =>
+            {
+                if (HasFileFor(season, episode) && (e.Key == "Enter" || e.Key == " "))
+                    await PlayEpisodeAsync(season, episode);
+            },
+            ToggleWatched: () =>
+            {
+                EnsureEpisodeLookups();
+                return ToggleEpisodeWatched(season, episode,
+                    !(_watchByEpisode.GetValueOrDefault((season, episode))?.IsWatched == true));
+            });
+        _episodeHandlers[(season, episode)] = h;
+        return h;
+    }
+
+    private bool HasFileFor(int season, int episode)
+    {
+        EnsureEpisodeLookups();
+        return _fileByEpisode.ContainsKey((season, episode));
     }
 
     private Task OnHeroContinue(ContinueAction action) => HandleContinueClick();
@@ -1235,7 +1394,7 @@ else
         // Playback may have auto-marked an episode watched (≥90%) or moved the
         // resume point — refresh so the episode grid eyes + hero Continue CTA
         // reflect it without a full page reload.
-        try { _watchStates = (await Api.GetWatchStatesAsync(Id)).ToList(); } catch { }
+        try { SetWatchStates(await Api.GetWatchStatesAsync(Id)); } catch { }
         try
         {
             _continue       = await Api.GetContinueAsync(Id);
@@ -1363,9 +1522,12 @@ else
     {
         if (_item is null) return false;
         if (_item.FillerEpisodes.Length == 0 && _item.RecapEpisodes.Length == 0) return false;
-        var abs = _files.FirstOrDefault(f => (f.Season ?? 1) == season && f.Episode == episode)?.AbsoluteEpisode;
-        bool Hit(int[] arr) => abs is int a ? arr.Contains(a) : season <= 1 && arr.Contains(episode);
-        return Hit(_item.FillerEpisodes) || Hit(_item.RecapEpisodes);
+        // Called per on-disk file by NextEpisodeOnDisk — O(1) lookups, not a
+        // scan of every file + array per call.
+        EnsureEpisodeLookups();
+        var abs = _fileByEpisode.GetValueOrDefault((season, episode))?.AbsoluteEpisode;
+        bool Hit(HashSet<int> set) => abs is int a ? set.Contains(a) : season <= 1 && set.Contains(episode);
+        return Hit(_fillerSet) || Hit(_recapSet);
     }
 
     /// <summary>Hero ★ Favorite button — optimistic flip + server PATCH.
@@ -1403,8 +1565,7 @@ else
                 Episode:     episode,
                 FilePath:    null,
                 IsWatched:   watched));
-            _watchStates.RemoveAll(w => w.Season == season && w.Episode == episode);
-            _watchStates.Add(updated);
+            ReplaceWatchState(w => w.Season == season && w.Episode == episode, updated);
 
             // Marking an episode watched while earlier on-disk episodes are still
             // unwatched is almost always "I watched up to here" — offer to mark
@@ -1458,8 +1619,7 @@ else
                 IsWatched:   true));
             foreach (var u in updated)
             {
-                _watchStates.RemoveAll(w => w.Season == u.Season && w.Episode == u.Episode);
-                _watchStates.Add(u);
+                ReplaceWatchState(w => w.Season == u.Season && w.Episode == u.Episode, u);
             }
         }
         catch { }
@@ -1501,8 +1661,7 @@ else
             // reflect the new state immediately. The card binds to the row from
             // _watchStates (movieWatchDto), NOT _movieWatched — updating only the
             // latter left the button visually inert ("doesn't click").
-            _watchStates.RemoveAll(w => w.Season is null && w.Episode is null);
-            _watchStates.Add(updated);
+            ReplaceWatchState(w => w.Season is null && w.Episode is null, updated);
             _movieWatched = watched;
         }
         catch { }
