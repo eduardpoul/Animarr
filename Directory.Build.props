@@ -1,0 +1,13 @@
+<Project>
+  <!-- The one product version — the server (/api/server/info → Settings ›
+       About), the web client and the app all report it. Bump it with each
+       release tag (vX.Y.Z), together with ApplicationVersion (the Android
+       versionCode) in Animarr.App.csproj. Without it every assembly said
+       1.0.0, the SDK default.
+
+       The commit is appended as "+<sha>" (InformationalVersion): locally by
+       the SDK's SourceLink, in Docker via the ANIMARR_COMMIT build argument. -->
+  <PropertyGroup>
+    <Version>0.7.0</Version>
+  </PropertyGroup>
+</Project>

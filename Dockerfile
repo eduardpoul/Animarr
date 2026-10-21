@@ -79,8 +79,12 @@ WORKDIR "/src/src/Animarr.Web"
 # WASM client keeps browser-wasm. (Don't add -r to the `dotnet restore` above:
 # a restore-time RID does flow into the WASM client and fails.)
 FROM build AS publish
+# The commit the image is built from, appended to the version ("0.7.0+4a0e701",
+# shown in Settings › About). The build context has no usable .git (worktrees),
+# so pass it: docker build --build-arg ANIMARR_COMMIT=$(git rev-parse --short HEAD)
+ARG ANIMARR_COMMIT=
 RUN dotnet publish "Animarr.Web.csproj" -c Release -r linux-x64 --self-contained false \
-        -o /app/publish /p:UseAppHost=false
+        -o /app/publish /p:UseAppHost=false /p:SourceRevisionId=${ANIMARR_COMMIT}
 
 # llama.cpp server binaries for the built-in ("embedded") LLM provider. We copy
 # just the llama-server executable from the official images:

@@ -1,9 +1,10 @@
 @*
     Settings → About (Fluent 2, Windows 11 "System › About" layout).
 
-    Version / Build / Mode come from /api/server/info on the bound server,
-    not from hardcoded constants — admins moving between builds shouldn't
-    have to grep the source to know what's running.
+    Version (with the build's commit) and the server's name come from
+    /api/server/info on the bound server, not from hardcoded constants —
+    admins moving between builds shouldn't have to grep the source to know
+    what's running.
 *@
 
 @inject IAnimarrApiClient Api
@@ -112,10 +113,9 @@
     {
         <dl class="ab-kv">
             <dt>@L["about.key_version"]</dt> <dd>@VersionLabel</dd>
-            <dt>@L["about.key_build"]</dt>   <dd>@BuildLabel</dd>
+            <dt>@L["about.key_server"]</dt>  <dd>@ServerLabel</dd>
             <dt>@L["about.key_runtime"]</dt> <dd>@RuntimeLabel</dd>
-            <dt>@L["about.key_mode"]</dt>    <dd>@ModeLabel</dd>
-            <dt>@L["about.key_license"]</dt> <dd>MIT</dd>
+            <dt>@L["about.key_license"]</dt> <dd>Apache-2.0</dd>
         </dl>
     };
 
@@ -136,11 +136,10 @@
         return $"{v[..plus]} ({(sha.Length > 7 ? sha[..7] : sha)})";
     }
 
-    /// <summary>Build label. We don't ship a separate build-date field over
-    /// the wire; surface the bound server's display name + ServerId prefix
-    /// instead so admins managing several servers can tell which one this
-    /// panel is talking to.</summary>
-    private string BuildLabel
+    /// <summary>The bound server's display name + ServerId prefix, so admins
+    /// managing several servers can tell which one this panel is talking to.
+    /// (It was labelled "Build"; the build's commit is in the version now.)</summary>
+    private string ServerLabel
     {
         get
         {
@@ -159,8 +158,6 @@
     /// label the actual host.</summary>
     private static string RuntimeLabel =>
         OperatingSystem.IsBrowser() ? ".NET 10 · WASM" : ".NET 10 · Native";
-
-    private string ModeLabel => _info?.Mode is { Length: > 0 } m ? m : "—";
 
     protected override async Task OnInitializedAsync()
     {
