@@ -1347,6 +1347,7 @@
   "profile.sign_out": "Cerrar sesión",
   "profile.subtitle_lang_label": "Idioma de subtítulos",
   "profile.subtitle_off": "Desactivados",
+  "profile.subtitle_forced_only": "Solo forzados (carteles)",
   "profile.subtitle_size_label": "Tamaño de subtítulos",
   "profile.tab_appearance": "Apariencia",
   "profile.tab_identity": "Identidad",

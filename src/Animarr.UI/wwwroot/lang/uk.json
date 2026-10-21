@@ -1347,6 +1347,7 @@
   "profile.sign_out": "Вийти",
   "profile.subtitle_lang_label": "Мова субтитрів",
   "profile.subtitle_off": "Вимк.",
+  "profile.subtitle_forced_only": "Лише форсовані (написи)",
   "profile.subtitle_size_label": "Розмір субтитрів",
   "profile.tab_appearance": "Вигляд",
   "profile.tab_identity": "Обліковий запис",

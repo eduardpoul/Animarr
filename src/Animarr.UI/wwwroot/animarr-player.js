@@ -70,19 +70,45 @@
     // Pushed once from MediaDetail via animarrPlayer.setPrefs(...) when the
     // account prefs load. audioLang/subLang are ISO-639-1 codes ('ja','ru') or
     // null; subSize is a pixel size or 0 (= leave Artplayer's default).
+    //   • subMode  → 'auto' (pick a track, below), 'off' (start with no
+    //                subtitles) or 'forced' (only a forced / signs track, else
+    //                none). "Off" used to arrive as subLang=null and fell
+    //                through to "enable the first track".
     //   • subLang  → picks the initial subtitle track by language (client-side
     //                overlay only — never touches the video/audio pipeline).
     //   • subSize  → Artplayer cue font-size.
     //   • audioLang→ auto-selects the matching audio track ONLY on a transcoding
     //                HLS session (see attach). Direct Play is never disturbed:
     //                we never force a transcode just to switch audio language.
-    let PREFS = { audioLang: null, subLang: null, subSize: 0 };
+    let PREFS = { audioLang: null, subLang: null, subSize: 0, subMode: 'auto' };
     function setPrefs(p) {
+        const mode = (p && p.subMode) ? String(p.subMode).toLowerCase() : 'auto';
         PREFS = {
             audioLang: (p && p.audioLang) ? String(p.audioLang).toLowerCase() : null,
             subLang:   (p && p.subLang)   ? String(p.subLang).toLowerCase()   : null,
             subSize:   (p && Number.isFinite(p.subSize)) ? Math.max(0, p.subSize) : 0,
+            subMode:   (mode === 'off' || mode === 'forced') ? mode : 'auto',
         };
+    }
+    /** Initial subtitle track for a fresh open, per the account's subtitle
+     *  mode: index into `subs` (the probed embedded tracks) or -1 = none.
+     *  auto: preferred language (its full track before a forced / signs one),
+     *  then the container's default-disposition track, then the first. */
+    function pickDefaultSubtitle(subs) {
+        if (PREFS.subMode === 'off') return -1;
+        if (PREFS.subMode === 'forced') return subs.findIndex(s => s.forced);
+        if (PREFS.subLang) {
+            let fallback = -1;
+            for (let i = 0; i < subs.length; i++) {
+                if (normLang(subs[i].lang) !== PREFS.subLang) continue;
+                if (!subs[i].forced) return i;
+                if (fallback < 0) fallback = i;
+            }
+            if (fallback >= 0) return fallback;
+        }
+        const d = subs.findIndex(s => s.default);
+        if (d >= 0) return d;
+        return subs.length > 0 ? 0 : -1;
     }
     // Normalise any track language tag (ISO-639-2/B or /T, ISO-639-1, or a full
     // English name) to a 639-1 2-letter code so preference matching is tolerant
@@ -2501,7 +2527,8 @@
                     const subs = streams.filter(s => s.codec_type === 'subtitle');
                     subtitleList = subs.map((s, idx) => {
                         const lang  = (s.tags && (s.tags.language || s.tags.LANGUAGE)) || 'und';
-                        const label = (s.tags && (s.tags.title    || s.tags.TITLE))    || `Track ${idx + 1}`;
+                        const title = (s.tags && (s.tags.title    || s.tags.TITLE))    || '';
+                        const label = title || `Track ${idx + 1}`;
                         return {
                             name: label + (lang !== 'und' ? ` (${lang})` : ''),
                             lang,
@@ -2509,6 +2536,10 @@
                                 + '&track=' + idx + '&format=webvtt',
                             default: !!(s.disposition && s.disposition.default)
                                   || (subs.length === 1 && idx === 0),
+                            // Forced flag, or a "Signs" / "Надписи" track that
+                            // many releases ship without setting the flag.
+                            forced: !!(s.disposition && s.disposition.forced)
+                                 || /\bforced\b|\bsigns?\b|надпис|написи/i.test(title),
                         };
                     });
 
@@ -2622,6 +2653,9 @@
 
         let art = null;
         let adapter;
+        // Initial embedded subtitle track (-1 = none) — Artplayer path only;
+        // the native path starts without subtitles.
+        let initialSubIdx = -1;
 
         // Codec capability gate: ask Android's MediaCodecList whether the
         // device can decode whatever the server's output describes. If not,
@@ -2675,18 +2709,12 @@
             adapter = native;
         } else {
             // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
-            // Initial subtitle track: prefer the user's subtitle language, then
-            // the container's `default`-disposition track, then the first. Pure
-            // client-side overlay — never influences the video/audio pipeline.
-            const prefSubIdx = (() => {
-                if (PREFS.subLang) {
-                    const i = subtitleList.findIndex(s => normLang(s.lang) === PREFS.subLang);
-                    if (i >= 0) return i;
-                }
-                const d = subtitleList.findIndex(s => s.default);
-                if (d >= 0) return d;
-                return subtitleList.length > 0 ? 0 : -1;
-            })();
+            // Initial subtitle track per the account's subtitle mode (Off /
+            // forced only / language → default → first; pickDefaultSubtitle).
+            // Pure client-side overlay — never influences the video/audio
+            // pipeline.
+            initialSubIdx = pickDefaultSubtitle(subtitleList);
+            const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
             art = new window.Artplayer({
             container: el,
             url: playUrl,
@@ -2774,23 +2802,27 @@
             moreVideoAttr: { crossorigin: 'anonymous' },
             // MUST be an object — newer Artplayer 5.x validates `option.subtitle`
             // and throws "require 'object' type, but got 'undefined'" when it's
-            // undefined (i.e. media with NO subtitle tracks). Use {} for the
-            // no-subtitle case instead of undefined.
-            subtitle: subtitleList.length > 0 ? {
-                url: subtitleList[prefSubIdx >= 0 ? prefSubIdx : 0].url,
-                // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
-                // a recognised value and silently dropped on the loader path
-                // — fix landed 2026-05-27 after subtitle.switch() reported
-                // no-op effect on every track change.
-                type: 'vtt',
-                encoding: 'utf-8',
+            // undefined (i.e. media with NO subtitle tracks). Without an initial
+            // track (none in the file, or subtitles Off) it carries no url, so
+            // nothing loads until the CC menu picks one; escape + style stay so
+            // that later switch() (which merges this object) inherits them.
+            subtitle: {
+                ...(initialSub ? {
+                    url: initialSub.url,
+                    // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
+                    // a recognised value and silently dropped on the loader
+                    // path — fix landed 2026-05-27 after subtitle.switch()
+                    // reported no-op effect on every track change.
+                    type: 'vtt',
+                    encoding: 'utf-8',
+                } : {}),
                 // Artplayer paints cues with innerHTML: escape:true keeps file
                 // text inert, and the 'subtitleAfterUpdate' hook below repaints
                 // them through renderCuesSafely so <b>/<i>/<u> still render.
                 escape: true,
                 // User's subtitle size (px). Omitted (Artplayer default) when 0.
                 ...(PREFS.subSize > 0 ? { style: { fontSize: PREFS.subSize + 'px' } } : {}),
-            } : {},
+            },
             layers: [{
                 name: 'animarr-hud',
                 html: buildHudHtml(stylePref),
@@ -2814,9 +2846,10 @@
 
         entry.art = art;
         entry.adapter = adapter;
-        entry.currentSubIdx = (typeof prefSubIdx === 'number') ? prefSubIdx
-            : (subtitleList.findIndex(s => s.default));
-        if (entry.currentSubIdx < 0 && subtitleList.length > 0) entry.currentSubIdx = 0;
+        // What the CC menu marks active. null = "Off" — this used to fall back
+        // to track 0 (and the block-scoped pick was never visible here), so the
+        // menu showed "Track 1" while another track — or none — was on screen.
+        entry.currentSubIdx = initialSubIdx >= 0 ? initialSubIdx : null;
 
         // ── Preferred audio language — HLS transcode path ONLY ──────────────
         // Direct Play / Direct Stream serve the raw container and the browser

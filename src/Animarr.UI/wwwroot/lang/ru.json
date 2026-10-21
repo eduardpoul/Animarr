@@ -1347,6 +1347,7 @@
   "profile.sign_out": "Выйти",
   "profile.subtitle_lang_label": "Язык субтитров",
   "profile.subtitle_off": "Выкл",
+  "profile.subtitle_forced_only": "Только форсированные (надписи)",
   "profile.subtitle_size_label": "Размер субтитров",
   "profile.tab_appearance": "Оформление",
   "profile.tab_identity": "Учётная запись",

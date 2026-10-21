@@ -1553,6 +1553,7 @@
   "profile.audio_preferred_label": "Preferred audio",
   "profile.subtitle_lang_label": "Subtitle language",
   "profile.subtitle_off": "Off",
+  "profile.subtitle_forced_only": "Forced only (signs)",
   "profile.subtitle_size_label": "Subtitle size",
   "profile.theme_music_title": "Theme music",
   "profile.theme_music_hint": "Play a title's opening theme when you open it (anime only).",
