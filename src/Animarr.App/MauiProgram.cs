@@ -317,6 +317,15 @@ public static class MauiProgram
             {
                 UseCookies      = true,
                 CookieContainer = cookieJar,
+                // Opt in to compressed responses. The default (None) makes
+                // Android's AndroidMessageHandler send `Accept-Encoding:
+                // identity`, so the catalog / home JSON always came back
+                // uncompressed even from a compressing server or proxy.
+                // AndroidMessageHandler decodes all three (BrotliStream ships
+                // in the Android runtime).
+                AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                                       | System.Net.DecompressionMethods.Deflate
+                                       | System.Net.DecompressionMethods.Brotli,
             };
             var persist  = new CookiePersistHandler(cookieJar) { InnerHandler = inner };
             var pipeline = new ServerAddressHandler(addr)      { InnerHandler = persist };
