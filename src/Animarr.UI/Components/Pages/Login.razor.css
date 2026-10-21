@@ -13,33 +13,6 @@
     box-sizing: border-box;
 }
 
-/* Back — Fluent subtle button, top-left. */
-.d-login__back {
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 32px;
-    padding: 5px 12px 5px 8px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-ctrl);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    color: var(--text);
-    font-family: var(--font-ui);
-    font-size: 14px;
-    line-height: 20px;
-    font-weight: 400;
-    cursor: pointer;
-    transition: background var(--motion-fast);
-}
-.d-login__back:hover  { background: var(--ink-2); color: var(--text); }
-.d-login__back:active { background: var(--ink-3); }
-
 /* Card — 8px radius, surface fill, elevation 16. */
 .d-login__card {
     width: 440px;

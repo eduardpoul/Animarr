@@ -23,9 +23,7 @@
 <PageTitle>Animarr</PageTitle>
 
 <div class="d-pair">
-    <button type="button" class="d-pair__back tv-focus" @onclick="@(() => Nav.NavigateTo("/login"))">
-        <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
-    </button>
+    <PageBack Href="/login" Class="d-page-back--float" />
 
     <div class="d-pair__card" role="dialog" aria-label="@L["pair.aria_dialog"]">
         <header class="d-pair__brand">

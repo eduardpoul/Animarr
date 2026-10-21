@@ -181,20 +181,7 @@
     .fs-page[data-mobile-detail="true"]  .fs-page__nav     { display: none; }
 
     .fs-page__head { margin: 0 0 16px; }
-    .fs-page__back {
-        appearance: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 40px;
-        height: 40px;
-        margin-left: -8px;
-        background: transparent;
-        border: 0;
-        border-radius: var(--radius-ctrl);
-        color: var(--text);
-        cursor: pointer;
-    }
-    .fs-page__back:hover { background: var(--ink-2); }
+    .fs-page__back { display: inline-flex; }
+    .fs-page__back ::deep .d-page-back { margin-right: 0; }
     .fs-page__title { font-size: 20px; line-height: 28px; }
 }

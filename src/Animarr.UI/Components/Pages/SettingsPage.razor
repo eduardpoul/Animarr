@@ -87,11 +87,9 @@
 
     <section class="fs-page__content" aria-labelledby="fs-section-title">
         <header class="fs-page__head">
-            <button type="button" class="fs-page__back tv-focus"
-                    @onclick="@(() => _mobileDetail = false)"
-                    aria-label="@L["common.back"]">
-                <DIcon Name="arrow-l" Size="20" />
-            </button>
+            <div class="fs-page__back">
+                <PageBack OnClick="@(() => _mobileDetail = false)" />
+            </div>
             <div class="fs-page__crumb">
                 <span class="fs-page__crumb-root">@L["settings.page_title"]</span>
                 <DIcon Name="chev-r" Size="16" />

@@ -24,10 +24,7 @@
 <PageTitle>Animarr</PageTitle>
 
 <div class="d-pair-confirm">
-    <button type="button" class="d-pair-confirm__back tv-focus"
-            @onclick="@(() => Nav.NavigateTo("/"))">
-        <DIcon Name="arrow-l" Size="16" /> @L["pair.confirm.back"]
-    </button>
+    <PageBack Href="/" Class="d-page-back--float" />
 
     <div class="d-pair-confirm__card" role="dialog" aria-label="@L["pair.confirm.aria_pair_tv"]">
         <header class="d-pair-confirm__brand">

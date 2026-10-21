@@ -710,7 +710,7 @@ html.animarr-tv-host .catalog-grid {
     margin-right: 14px;
     width: 40px;
     height: 40px;
-    border-radius: var(--radius-card);
+    border-radius: var(--radius-ctrl);
     align-items: center;
     justify-content: center;
     background: var(--ink-1);
@@ -722,6 +722,16 @@ html.animarr-tv-host .catalog-grid {
     background: var(--ink-3);
     border-color: var(--border-strong);
     color: var(--text);
+}
+/* Sign-in flow pages (Welcome → Discovery → Login → Pair …): the same
+   button, floated top-left of the page and clear of the status bar in the
+   app (--animarr-safe-top). */
+.d-page-back.d-page-back--float {
+    position: absolute;
+    top: calc(16px + var(--animarr-safe-top));
+    left: 16px;
+    margin: 0;
+    z-index: 3;
 }
 /* On ServerSettings the mobile drilldown shows its own "BACK to list" pill in
    detail mode — suppress this page-level back there so we don't stack two. */
@@ -822,29 +832,6 @@ table.d-table tbody td code {
     place-items: center;
     padding: 60px 22px;
 }
-
-.d-login__back,
-.d-setup__back {
-    position: absolute;
-    top: 22px; left: 22px;
-    appearance: none;
-    background: var(--ink-1);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 7px 14px;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    letter-spacing: 0;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-.d-login__back:hover,
-.d-setup__back:hover { color: var(--text); }
 
 .d-login__card,
 .d-setup__card {

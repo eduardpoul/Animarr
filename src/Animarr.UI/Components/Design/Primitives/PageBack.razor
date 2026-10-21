@@ -1,28 +1,43 @@
 @*
-    PageBack — arrow-only "back" affordance for full pages that don't already
-    ship one (Downloads / Server settings). Placed at the start of the page
-    header so on the desktop/web layout it sits just under the TopBar logo,
-    top-left. Hidden below 960px (the mobile shell has its own nav / drilldown
-    back). /search has its own equivalent (.search-page__back).
+    PageBack — the one "back" button of the app: a 40px square with the
+    Fluent back arrow. Every page-level / drill-down back uses it, so they
+    all look and sit the same:
+      • nested pages — PageHeader puts it before the title;
+      • the title page hero — glass variant over the artwork (MediaDetailHero);
+      • the sign-in flow (Welcome → Discovery → Login → Pair …) — floated
+        top-left with Class="d-page-back--float", clear of the status bar;
+      • in-page drill-downs (Settings section → list, metadata editor
+        section → list) — OnClick instead of navigation.
 
-    Click → real browser-history back so the user returns wherever they came
-    from; falls back to the catalog root on a cold/deep-link load with no
-    history to pop.
+    Default click → real browser-history back, so the user returns wherever
+    they came from; Fallback on a cold / deep-link load with nothing to pop.
 *@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-<button type="button" class="d-page-back tv-focus" @onclick="GoBackAsync"
+<button type="button" class="d-page-back tv-focus @Class" @onclick="GoBackAsync"
         aria-label="@L["media_detail_hero.btn_back"]" title="@L["media_detail_hero.btn_back"]">
-    <DIcon Name="chev-l" Size="18" />
+    <DIcon Name="arrow-l" Size="18" />
 </button>
 
 @code {
     /// <summary>Where to land when there's no history to pop (direct load).</summary>
     [Parameter] public string Fallback { get; set; } = "/";
 
+    /// <summary>A fixed parent step instead of history — the sign-in flow
+    /// pages always go back to the step before them.</summary>
+    [Parameter] public string? Href { get; set; }
+
+    /// <summary>In-page back (drill-down → list); replaces navigation.</summary>
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    /// <summary>Extra classes (placement: d-page-back--float, …).</summary>
+    [Parameter] public string? Class { get; set; }
+
     private async Task GoBackAsync()
     {
+        if (OnClick.HasDelegate) { await OnClick.InvokeAsync(); return; }
+        if (!string.IsNullOrEmpty(Href)) { Nav.NavigateTo(Href); return; }
         try
         {
             var len = await JS.InvokeAsync<int>("eval", "history.length");

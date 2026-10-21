@@ -29,11 +29,9 @@
         <header class="emd__header">
             @if (_mobileShowingDetail)
             {
-                <button type="button" class="fs-icon-btn emd__back tv-focus"
-                        @onclick="@(() => _mobileShowingDetail = false)"
-                        aria-label="@L["edit_metadata.aria_back_sections"]">
-                    <DIcon Name="chev-l" Size="18" />
-                </button>
+                <div class="emd__back">
+                    <PageBack OnClick="@(() => _mobileShowingDetail = false)" />
+                </div>
             }
             else
             {

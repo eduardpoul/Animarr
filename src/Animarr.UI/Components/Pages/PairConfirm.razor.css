@@ -13,31 +13,6 @@
     box-sizing: border-box;
 }
 
-/* Back — Fluent subtle button, top-left. */
-.d-pair-confirm__back {
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    z-index: 3;
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 32px;
-    padding: 5px 12px 5px 8px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-ctrl);
-    color: var(--text);
-    font-family: var(--font-ui);
-    font-size: 14px;
-    line-height: 20px;
-    cursor: pointer;
-    transition: background var(--motion-fast);
-}
-.d-pair-confirm__back:hover  { background: var(--ink-2); }
-.d-pair-confirm__back:active { background: var(--ink-3); }
-
 .d-pair-confirm__card {
     width: 440px;
     max-width: 100%;

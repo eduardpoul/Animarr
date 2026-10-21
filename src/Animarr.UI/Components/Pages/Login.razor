@@ -22,9 +22,7 @@
 <div class="d-login">
     @* "Forgot PIN" arrives here with ?forgot=1 — back then returns to the
        app root, whose gates route on (picker / home). *@
-    <button type="button" class="d-login__back tv-focus" @onclick="@(() => Nav.NavigateTo(Forgot ? "/" : "/welcome"))">
-        <DIcon Name="arrow-l" Size="16" /> @L["login.back"]
-    </button>
+    <PageBack Href="@(Forgot ? "/" : "/welcome")" Class="d-page-back--float" />
 
     <div class="d-login__card" role="dialog" aria-label="@L["login.aria_sign_in"]">
         <header class="d-login__brand">

@@ -16,9 +16,7 @@
 <PageTitle>Animarr</PageTitle>
 
 <div class="d-setup">
-    <button type="button" class="d-setup__back tv-focus" @onclick="@(() => Nav.NavigateTo("/welcome"))">
-        <DIcon Name="arrow-l" Size="16" /> @L["setup.back"]
-    </button>
+    <PageBack Href="/welcome" Class="d-page-back--float" />
 
     <div class="d-setup__card" role="dialog" aria-label="@L["setup.aria_first_run"]">
         <header class="d-setup__brand">
