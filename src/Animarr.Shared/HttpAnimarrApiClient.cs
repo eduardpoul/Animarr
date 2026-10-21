@@ -612,6 +612,7 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         if (q.Skip is not null)                args.Add($"skip={q.Skip}");
         if (q.Take is not null)                args.Add($"take={q.Take}");
         if (!string.IsNullOrEmpty(q.Sort))     args.Add($"sort={Uri.EscapeDataString(q.Sort)}");
+        if (!string.IsNullOrEmpty(q.View))     args.Add($"view={Uri.EscapeDataString(q.View)}");
         return args.Count == 0
             ? ApiRoutes.Media
             : $"{ApiRoutes.Media}?{string.Join('&', args)}";

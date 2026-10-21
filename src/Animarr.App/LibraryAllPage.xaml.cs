@@ -49,7 +49,7 @@ public partial class LibraryAllPage : ContentPage
         try
         {
             var tokenTask    = TvMedia.EnsureTokenAsync();   // poster URLs need it
-            var itemsTask    = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=1000", Json);
+            var itemsTask    = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=1000&view=card", Json);
             var sectionsTask = SafeAsync(_api.GetSectionFoldersAsync());
             var foldersTask  = SafeAsync(_api.GetFoldersAsync());
 

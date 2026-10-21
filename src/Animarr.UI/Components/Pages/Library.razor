@@ -136,7 +136,7 @@
             // adopt it so the grid matches the pill highlight.
             SyncSectionFromFolderJump();
 
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView });
             _allItems = items
                 .GroupBy(m => m.Id)
                 .Select(g => g.First())

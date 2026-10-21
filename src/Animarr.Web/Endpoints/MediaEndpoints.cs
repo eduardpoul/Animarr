@@ -52,15 +52,15 @@ internal static class MediaEndpoints
             int? skip,
             int? take,
             string? sort,
+            string? view,
             IDbContextFactory<AppDbContext> dbFactory,
             Animarr.Web.Services.Auth.IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var q = db.MediaItems
-                .Include(m => m.Tags)
-                .Include(m => m.Categories).ThenInclude(c => c.Category)
-                .AsQueryable();
+            // Read-only: rows are mapped to DTOs and dropped, so skip change
+            // tracking (and its identity-map bookkeeping) for the whole library.
+            var q = db.MediaItems.AsNoTracking();
 
             // v4 per-user filter — if the caller's role has a folder allowlist,
             // hide every MediaItem whose FolderId isn't in it. Built-in roles
@@ -111,7 +111,6 @@ internal static class MediaEndpoints
             if (skip is not null) q = q.Skip(skip.Value);
             if (take is not null) q = q.Take(take.Value);
 
-            var rows = await q.ToListAsync(ct);
             // Per-user IsFavorite — one query for the whole list, then
             // O(1) HashSet lookups during projection.
             HashSet<Guid>? favIds = null;
@@ -122,6 +121,24 @@ internal static class MediaEndpoints
                     .Select(f => f.MediaItemId)
                     .ToListAsync(ct)).ToHashSet();
             }
+
+            // ?view=card — the slim shape the list screens ask for (see
+            // MediaListQuery.View / MediaMappings.CardRow). Projected in SQL,
+            // so the heavy JSON/text columns are never read.
+            if (string.Equals(view, MediaListQuery.CardView, StringComparison.OrdinalIgnoreCase))
+            {
+                var cards = await q.Select(MediaMappings.CardRow).AsSplitQuery().ToListAsync(ct);
+                return Results.Ok(cards.Select(c => c.ToCardDto(favIds)).ToArray());
+            }
+
+            // Default: the full DTO — what every client before ?view= gets.
+            // Split query: both collection Includes in one statement made
+            // SQLite join tags × categories onto the wide MediaItems rows.
+            var rows = await q
+                .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
+                .AsSplitQuery()
+                .ToListAsync(ct);
             return Results.Ok(rows.Select(r => r.ToDto(favIds)).ToArray());
         });
 

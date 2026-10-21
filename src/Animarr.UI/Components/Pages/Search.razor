@@ -112,7 +112,7 @@
     {
         try
         {
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView });
             // Same de-dup ladder as Home — by Id first, then by (title, year)
             // so a duplicate folder doesn't render twice in the result list.
             _allItems = items
