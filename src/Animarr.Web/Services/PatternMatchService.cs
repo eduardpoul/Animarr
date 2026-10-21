@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Text.RegularExpressions;
 using Animarr.Web.Configuration;
 using Animarr.Web.Data.Models;
@@ -11,7 +12,7 @@ public partial class PatternMatchService(
     IOptions<AppSettings> appOptions,
     ILogger<PatternMatchService> logger) : IPatternMatchService
 {
-    private readonly AppSettings _settings = appOptions.Value;
+    private readonly FrozenDictionary<string, FileKind> _fileKinds = BuildFileKinds(appOptions.Value);
 
     // ─── Regex for detecting season from folder name ─────────────────────────
 
@@ -33,13 +34,22 @@ public partial class PatternMatchService(
     // ─── FileKind ─────────────────────────────────────────────────────────────
 
     public FileKind DetermineFileKind(string extension)
+        => _fileKinds.TryGetValue(extension.ToLowerInvariant(), out var kind) ? kind : FileKind.Unknown;
+
+    /// <summary>Extension → kind in one frozen lookup instead of four linear
+    /// scans per call (it runs per file of the external-track sweep). Same
+    /// semantics as before: the configured strings are the keys, compared
+    /// ordinally against the lower-cased input, and when a list overlaps
+    /// another the old check order wins (video, subtitle, audio, image).</summary>
+    private static FrozenDictionary<string, FileKind> BuildFileKinds(AppSettings s)
     {
-        var ext = extension.ToLowerInvariant();
-        if (_settings.VideoExtensions.Contains(ext)) return FileKind.Video;
-        if (_settings.SubtitleExtensions.Contains(ext)) return FileKind.Subtitle;
-        if (_settings.AudioExtensions.Contains(ext)) return FileKind.Audio;
-        if (_settings.ImageExtensions.Contains(ext)) return FileKind.Image;
-        return FileKind.Unknown;
+        var map = new Dictionary<string, FileKind>(StringComparer.Ordinal);
+        // Lowest precedence first — later lists overwrite earlier ones.
+        foreach (var e in s.ImageExtensions)    if (e is not null) map[e] = FileKind.Image;
+        foreach (var e in s.AudioExtensions)    if (e is not null) map[e] = FileKind.Audio;
+        foreach (var e in s.SubtitleExtensions) if (e is not null) map[e] = FileKind.Subtitle;
+        foreach (var e in s.VideoExtensions)    if (e is not null) map[e] = FileKind.Video;
+        return map.ToFrozenDictionary(StringComparer.Ordinal);
     }
 
     // ─── Parse filename ───────────────────────────────────────────────────────

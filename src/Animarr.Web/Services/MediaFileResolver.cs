@@ -19,7 +19,7 @@ namespace Animarr.Web.Services;
 /// page until the API surface grows. Pattern-based extraction covers the
 /// 95% case.
 /// </summary>
-public sealed class MediaFileResolver
+public sealed partial class MediaFileResolver
 {
     private static readonly HashSet<string> VideoExts = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -511,7 +511,10 @@ public sealed class MediaFileResolver
     private static int? TryParseBareNumericEpisode(string fileName)
     {
         var stem = Path.GetFileNameWithoutExtension(fileName);
-        var m = Regex.Match(stem, @"^(?:ep?)?(\d{1,4})$", RegexOptions.IgnoreCase);
-        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+        var m = BareNumericEpisodeRegex().Match(stem);
+        return m.Success && int.TryParse(m.Groups[1].ValueSpan, out var n) ? n : null;
     }
+
+    [GeneratedRegex(@"^(?:ep?)?(\d{1,4})$", RegexOptions.IgnoreCase)]
+    private static partial Regex BareNumericEpisodeRegex();
 }
