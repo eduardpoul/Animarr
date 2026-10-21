@@ -1,3 +1,8 @@
+# Requires BuildKit with Dockerfile syntax 1.4+ (the default since Docker 23):
+# the final stage uses `COPY --link` / `COPY --chmod`, which the legacy builder
+# rejects with "unknown flag". On an older Docker, build with
+# DOCKER_BUILDKIT=1 and add `# syntax=docker/dockerfile:1.7` as the first line.
+#
 # .NET images pinned to an exact patch + distro. The floating `10.0` tags
 # meant a deploy reused whatever 10.0.x the build host had cached (no
 # --pull), silently missing runtime security patches, and would jump to a
