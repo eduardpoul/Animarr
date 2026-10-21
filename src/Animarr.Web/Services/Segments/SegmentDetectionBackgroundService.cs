@@ -18,7 +18,8 @@ namespace Animarr.Web.Services.Segments;
 /// / idle I/O with a 2-thread cap.
 ///
 /// <see cref="MediaItem.LastSegmentScanAt"/> gates the queue: a title is scanned
-/// once, then only re-scanned after <see cref="RescanAfter"/>. The work itself
+/// once, then only re-scanned after <see cref="RescanAfter"/> (or
+/// <see cref="FinishedRescanAfter"/> once it has finished airing). The work itself
 /// is idempotent (already-covered episodes are skipped), so a missed/restarted
 /// run just resumes on the next tick.
 ///
@@ -38,6 +39,14 @@ public sealed class SegmentDetectionBackgroundService(
     private static readonly TimeSpan BusyDelay    = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan IdleDelay    = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RescanAfter  = TimeSpan.FromDays(30);
+    /// <summary>A finished show gets no new episodes, and re-fingerprinting the
+    /// same files gives the same answer — yet every episode the cascade found
+    /// nothing for (cold opens, finales, many western series) was fully
+    /// re-decoded each month, with its peers. Back those titles off to ~6
+    /// months. Nothing is lost: torrent completion clears the gate for a title
+    /// that gains files, and an episode opened without segments still gets
+    /// the cheap lookup inline plus a queued heavy attempt.</summary>
+    private static readonly TimeSpan FinishedRescanAfter = TimeSpan.FromDays(180);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -125,13 +134,17 @@ public sealed class SegmentDetectionBackgroundService(
         Guid itemId;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
-            var cutoff = DateTime.UtcNow - RescanAfter;
+            var cutoff         = DateTime.UtcNow - RescanAfter;
+            var finishedCutoff = DateTime.UtcNow - FinishedRescanAfter;
             // Never-scanned first (SQLite orders NULLs before values), then the
             // oldest scan past the TTL.
             var next = await db.MediaItems
                 .Where(m => (m.IdentificationStatus == IdentificationStatus.Identified ||
                              m.IdentificationStatus == IdentificationStatus.Manual) &&
-                            (m.LastSegmentScanAt == null || m.LastSegmentScanAt < cutoff))
+                            (m.LastSegmentScanAt == null ||
+                             (m.AiringStatus == "FINISHED"
+                                 ? m.LastSegmentScanAt < finishedCutoff
+                                 : m.LastSegmentScanAt < cutoff)))
                 .OrderBy(m => m.LastSegmentScanAt)
                 .Select(m => (Guid?)m.Id)
                 .FirstOrDefaultAsync(ct);
