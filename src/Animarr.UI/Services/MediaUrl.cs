@@ -171,6 +171,15 @@ public static class MediaUrl
 
     private static string Tokenize(string url) => NeedsToken ? WithToken(url) : url;
 
+    // ─── Image widths (/api/image ?w=) ────────────────────────────────────
+
+    /// <summary>Width for the full-screen backdrop layer behind
+    /// <c>filter: blur(12–14px) brightness(38–50%)</c> (backdrop.js). Blurred
+    /// that hard, 480 px is indistinguishable from the original fanart while
+    /// decoding ~7–16× less texture memory (w1280 / 1920 sources) and
+    /// transferring ~10× fewer bytes.</summary>
+    public const int BlurredBackdropWidth = 480;
+
     // ─── URL builders ────────────────────────────────────────────────────
 
     /// <summary>Build an <c>/api/image</c> URL for the given absolute server

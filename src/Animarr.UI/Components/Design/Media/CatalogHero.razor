@@ -218,12 +218,22 @@
         if (dx < 0) await NextManual(); else await PrevManual();
     }
 
+    /// <summary>URL last handed to backdrop.js. OnAfterRenderAsync runs on EVERY
+    /// render (Home re-renders, pager clicks, prefs changes) and each push made
+    /// backdrop.js reset both layers and re-rasterise the full-screen blur —
+    /// so only push when the image actually changes.</summary>
+    private string? _pushedBackdropUrl;
+
     private async Task PushBackdropAsync(string path)
     {
         // Tick suffix forces the browser to fetch the new file after a rescan.
         var v = _active?.LastMetadataRefreshedAt?.Ticks ?? 0;
-        var url = Animarr.UI.Services.MediaUrl.Image(path, v);
-        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
+        // Width-capped: the layer sits under blur(12px) brightness(50%).
+        var url = Animarr.UI.Services.MediaUrl.Image(path, v, Animarr.UI.Services.MediaUrl.BlurredBackdropWidth);
+        if (url == _pushedBackdropUrl) return;
+        _pushedBackdropUrl = url;
+        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); }
+        catch { _pushedBackdropUrl = null; /* not pushed — retry on the next render */ }
     }
 
     private string TypeLabel(MediaItemType t) => t switch

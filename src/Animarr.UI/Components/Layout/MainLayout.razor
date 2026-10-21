@@ -515,8 +515,14 @@
                 // user's chosen server authority. Raw "/api/image?…" URLs
                 // resolve against the WebView2 virtual host on MAUI Windows
                 // (https://0.0.0.1) and 404.
+                // Under the default 14 px blur a 480 px-wide variant looks the
+                // same as full-size fanart but decodes ~8× less (a 1920×1080
+                // fanart is a ~8 MB texture, re-rasterised under the blur) and
+                // transfers ~20 KB instead of ~300 KB per slide. A near-sharp
+                // user setting keeps the original.
+                int? bgWidth = blur >= 10 ? Animarr.UI.Services.MediaUrl.BlurredBackdropWidth : null;
                 var urls = paths
-                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p))
+                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p, width: bgWidth))
                     .ToArray();
                 _everywhereBackdropStarted = true;
                 await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
