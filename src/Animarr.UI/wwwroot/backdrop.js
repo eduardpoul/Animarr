@@ -14,17 +14,24 @@ let _globalIntervalSec = 30;
 let _globalBlurPx = 2;
 let _globalBrightness = 60;
 
+// A page (hero) has pushed its own backdrop. MainLayout's global rotation loads
+// in parallel with the first page at boot and can land AFTER the hero's push;
+// the heroes only re-push when their image changes, so letting the late global
+// init win would leave the page showing the rotation instead of its hero.
+let _pageOverrideActive = false;
+
 window.initGlobalBackdrop = function (urls, intervalSec, blurPx, brightness) {
     _globalUrls = urls ? [...urls] : [];
     _globalIntervalSec = intervalSec;
     _globalBlurPx = blurPx;
     _globalBrightness = brightness;
-    window.initBackdrop(urls, intervalSec, blurPx, brightness);
+    if (!_pageOverrideActive) _applyBackdrop(urls, intervalSec, blurPx, brightness);
 };
 
 window.restoreGlobalBackdrop = function () {
+    _pageOverrideActive = false;
     if (_globalUrls && _globalUrls.length > 0) {
-        window.initBackdrop(_globalUrls, _globalIntervalSec, _globalBlurPx, _globalBrightness);
+        _applyBackdrop(_globalUrls, _globalIntervalSec, _globalBlurPx, _globalBrightness);
     } else {
         window.stopBackdrop();
     }
@@ -51,7 +58,12 @@ async function _resolveBgUrl(url) {
     return url;
 }
 
-window.initBackdrop = async function (urls, intervalSec, blurPx, brightness) {
+window.initBackdrop = function (urls, intervalSec, blurPx, brightness) {
+    _pageOverrideActive = true;
+    return _applyBackdrop(urls, intervalSec, blurPx, brightness);
+};
+
+async function _applyBackdrop(urls, intervalSec, blurPx, brightness) {
     stopBackdrop();
     if (!urls || urls.length === 0) return;
 
@@ -94,7 +106,7 @@ window.initBackdrop = async function (urls, intervalSec, blurPx, brightness) {
         }
         useA = !useA;
     }, intervalSec * 1000);
-};
+}
 
 window.stopBackdrop = function () {
     document.body.classList.remove('has-backdrop');
