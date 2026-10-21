@@ -84,14 +84,14 @@ public sealed partial class HlsSessionService
             "-f", "hls",
             "-hls_time", SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture),
             "-hls_segment_type", plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
-            // Sliding window: keep the last 50 segments physically on disk
-            // (= ~5 min of content). Old ones get deleted via the
-            // delete_segments flag below. WITHOUT this every UHD HEVC
-            // session would fill the 8GB tmpfs in ~7 min and choke ffmpeg.
-            // Scrub-back past the deleted window triggers our seek-restart
-            // (RestartFfmpegAtSegmentAsync), which re-produces the needed
-            // range from source.
-            "-hls_list_size", "50",
+            // ffmpeg's own playlist is a scratch file we ignore, except in the
+            // probe-less fallback where the player reads it — keep it VOD-typed
+            // there. NB: vod forces hls_list_size to 0, so ffmpeg never deletes
+            // segments (the old `-hls_list_size 50` + `delete_segments` pair was
+            // inert — measured: every segment stayed on disk). Disk usage is
+            // bounded app-side instead: played segments are pruned and ffmpeg
+            // is paused while far enough ahead (HlsSessionService.Throttle.cs);
+            // a scrub back past the pruned window goes through the seek-restart.
             "-hls_playlist_type", "vod",
         });
         if (startNumber > 0)
@@ -102,12 +102,10 @@ public sealed partial class HlsSessionService
         var segExt = SegmentExtension(plan);
         args.AddRange(new[]
         {
-            // delete_segments: physically remove segment files that fall off
-            // the sliding window. Without this `-hls_list_size 50` only
-            // trims the m3u8 (which we ignore — we have our own playlist),
-            // leaving disk usage unbounded. WITH it, ffmpeg actively reclaims
-            // tmpfs as it goes.
-            "-hls_flags", "temp_file+delete_segments",
+            // temp_file: segments are written as *.tmp and renamed when complete,
+            // so "seg-N exists" means "seg-N is finished" — the segment endpoint,
+            // the produced-top walk and the pruner all rely on that.
+            "-hls_flags", "temp_file",
             "-hls_segment_filename", Path.Combine(sessionDir, $"seg-%05d.{segExt}"),
         });
         // fMP4 needs an init segment carrying decoder config; MPEG-TS is

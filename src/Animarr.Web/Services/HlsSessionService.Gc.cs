@@ -48,7 +48,7 @@ public sealed partial class HlsSessionService
             if (session.Process.HasExited && session.Process.ExitCode == 0
                 && session.SegmentCount > 0)
             {
-                var produced = HighestProducedSegment(session.OutputDir) + 1;
+                var produced = CurrentProducedTop(session) + 1;
                 if (produced < session.SegmentCount)
                 {
                     _logger.LogDebug("HLS {Token}: ffmpeg done at seg-{Produced}/{Total} — partial encoding",
@@ -89,7 +89,7 @@ public sealed partial class HlsSessionService
         return _sessions.Select(kv =>
         {
             var s = kv.Value;
-            var produced = HighestProducedSegment(s.OutputDir) + 1;
+            var produced = CurrentProducedTop(s) + 1;
             var exited   = s.Process.HasExited;
             return new HlsSessionStatus(
                 Token:           kv.Key,
@@ -118,6 +118,7 @@ public sealed partial class HlsSessionService
     public void Dispose()
     {
         _gcTimer.Dispose();
+        _throttleTimer.Dispose();
         foreach (var token in _sessions.Keys.ToList())
             Stop(token);
     }

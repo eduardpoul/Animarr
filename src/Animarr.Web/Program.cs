@@ -121,6 +121,8 @@ builder.Services.AddScoped<MetadataService>();
 // Background "metadata language changed → re-fetch the library" pass + its progress.
 builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
+// One cached ffprobe per file version for HLS start, /api/probe and /api/video.
+builder.Services.AddSingleton<MediaProbeCache>();
 builder.Services.AddSingleton<HlsSessionService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.

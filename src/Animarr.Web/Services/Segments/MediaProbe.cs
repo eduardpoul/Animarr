@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -6,12 +5,15 @@ namespace Animarr.Web.Services.Segments;
 
 /// <summary>Tiny ffprobe helper for the segment pipeline — only the bits the
 /// detection cascade needs. ffprobe is resolved from PATH, matching the rest of
-/// the app's ffmpeg/ffprobe usage (HlsSessionService, /api/probe).</summary>
+/// the app's ffmpeg/ffprobe usage (HlsSessionService, /api/probe). Runs through
+/// <see cref="FfprobeRunner"/>: stderr drained, killed after
+/// <see cref="ProbeTimeout"/> — the token is the app lifetime, so a dead mount
+/// used to park a background pass forever.</summary>
 public static class MediaProbe
 {
     /// <summary>ffprobe only reads container headers; anything slower than this
     /// is a dead mount or a pathological file — kill it rather than wedge the
-    /// segment queue (or a player request) forever.</summary>
+    /// segment queue forever.</summary>
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>File duration in seconds, or 0 when ffprobe is unavailable / the
@@ -20,54 +22,18 @@ public static class MediaProbe
     {
         try
         {
-            var stdout = await RunFfprobeAsync(new[]
-            {
+            var r = await FfprobeRunner.RunAsync(
+            [
                 "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 filePath,
-            }, ct);
-            if (stdout is null) return 0;
-            return double.TryParse(stdout.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0;
+            ], ProbeTimeout, ct);
+            return double.TryParse(r.StdOut.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0;
         }
         catch
         {
             return 0;
-        }
-    }
-
-    /// <summary>Run ffprobe and return its stdout, or null when it can't start or
-    /// times out. stderr is drained concurrently (a corrupt file can make even
-    /// <c>-v error</c> print past the pipe buffer, which used to block ffprobe
-    /// forever since nobody read it), and a timeout/cancel kills the process.</summary>
-    private static async Task<string?> RunFfprobeAsync(string[] args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName               = "ffprobe",
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-        };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-
-        using var p = Process.Start(psi);
-        if (p is null) return null;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(ProbeTimeout);
-        try
-        {
-            var stderr = p.StandardError.ReadToEndAsync(timeout.Token);
-            var stdout = await p.StandardOutput.ReadToEndAsync(timeout.Token);
-            await stderr;
-            await p.WaitForExitAsync(timeout.Token);
-            return stdout;
-        }
-        catch (OperationCanceledException)
-        {
-            try { p.Kill(entireProcessTree: true); } catch { }
-            throw;
         }
     }
 
@@ -80,8 +46,9 @@ public static class MediaProbe
     {
         try
         {
-            var stdout = await RunFfprobeAsync(
-                new[] { "-v", "error", "-print_format", "json", "-show_chapters", filePath }, ct);
+            var r = await FfprobeRunner.RunAsync(
+                ["-v", "error", "-print_format", "json", "-show_chapters", filePath], ProbeTimeout, ct);
+            var stdout = r.StdOut;
             if (string.IsNullOrWhiteSpace(stdout)) return Array.Empty<Chapter>();
 
             using var doc = JsonDocument.Parse(stdout);
