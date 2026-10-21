@@ -120,7 +120,7 @@ else
             // by FolderId — cheaper than one query per section like the server
             // version did (we trade an extra DB round-trip on the client for
             // one extra ms of CPU instead of N round-trips).
-            var allItems = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000 });
+            var allItems = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, View = MediaListQuery.CardView });
             var statusByFolder = allItems
                 .GroupBy(m => m.FolderId)
                 .ToDictionary(g => g.Key, g => g.Select(m => m.IdentificationStatus).ToList());
@@ -173,13 +173,45 @@ else
         _hub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         _hub.On<MediaItemStatusEnvelope>(
             IdentificationHubMethods.MediaItemChanged,
-            _ => InvokeAsync(LoadAsync));
+            _ => InvokeAsync(QueueReload));
         try { await _hub.StartAsync(); }
         catch { /* hub unavailable — list still loads on initial render */ }
     }
 
+    // A library scan identifies titles back-to-back and the hub sends one
+    // MediaItemChanged per title; reloading on each one re-downloaded the
+    // folder list + the whole catalog per title. Coalesce: the first event
+    // schedules one reload ReloadDelay later and every event until it runs
+    // rides along, so a scan costs at most one reload per ReloadDelay and the
+    // counts are never more than that behind.
+    private static readonly TimeSpan ReloadDelay = TimeSpan.FromSeconds(2);
+    private bool _reloadQueued;
+    private readonly CancellationTokenSource _disposed = new();
+
+    // Runs on the renderer's dispatcher (InvokeAsync), so no locking.
+    private void QueueReload()
+    {
+        if (_reloadQueued) return;
+        _reloadQueued = true;
+        _ = ReloadAfterDelayAsync();
+    }
+
+    private async Task ReloadAfterDelayAsync()
+    {
+        try { await Task.Delay(ReloadDelay, _disposed.Token); }
+        catch (OperationCanceledException) { return; }
+        await InvokeAsync(async () =>
+        {
+            // Cleared before the fetch: an event that lands while it runs
+            // queues the next reload rather than being lost.
+            _reloadQueued = false;
+            await LoadAsync();
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _disposed.Cancel();
         if (_hub is not null) await _hub.DisposeAsync();
     }
 }
