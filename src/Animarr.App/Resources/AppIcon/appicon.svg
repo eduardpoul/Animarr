@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Animarr app icon — background. Dark charcoal matching the v5 Quietude
-     surface tone (#181c24). The accent gradient is painted by appiconfg.svg
-     so this layer just establishes the contrast field. -->
+<!-- Animarr app icon — background. Neutral near-black (#0b0d10), the same
+     as the splash and the boot screen; the older #181c24 read as navy around
+     the orange A. The mark is painted by appiconfg.svg. -->
 <svg width="456" height="456" viewBox="0 0 456 456" xmlns="http://www.w3.org/2000/svg">
-    <rect width="456" height="456" fill="#181c24"/>
+    <rect width="456" height="456" fill="#0b0d10"/>
 </svg>

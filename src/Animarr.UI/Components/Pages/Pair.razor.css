@@ -8,6 +8,10 @@
     z-index: 2;
     min-height: 100dvh;
     display: grid;
+    /* One column the width of the viewport: an `auto` track grew to the
+       card's 720px and its max-width:100% resolved against that, so on a
+       phone the card ran off the right edge. */
+    grid-template-columns: minmax(0, 1fr);
     place-items: center;
     /* Tight vertical budget: a 1080p TV WebView is ~960×540 CSS px. */
     padding: 24px 16px;

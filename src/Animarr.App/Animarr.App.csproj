@@ -117,9 +117,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- App Icon — background fill matches Quietude surface (#181c24);
-             foreground SVG paints the teal-gradient brand tile + 'a' glyph. -->
-        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#181c24" />
+        <!-- App Icon — neutral near-black background (#0b0d10, as the splash);
+             the foreground SVG paints the dark tile + the orange A mark. -->
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#0b0d10" />
 
         <!-- Splash Screen — same charcoal background as the icon so the
              hand-off into the WASM boot-splash feels continuous. -->

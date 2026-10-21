@@ -17,6 +17,7 @@
 @inject NavigationManager Nav
 @inject Animarr.UI.Services.ServerAddressProvider ServerAddr
 @inject DeviceProfilesState DeviceProfiles
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Animarr</PageTitle>
@@ -31,7 +32,7 @@
             <BrandMark Size="40" ExtraClass="d-pair__brand-mark" />
             <div>
                 <div class="d-pair__brand-name">Animarr</div>
-                <div class="d-pair__brand-sub">@L["pair.title"]</div>
+                <div class="d-pair__brand-sub">@(_isTv ? L["pair.title"] : L["pair.title_qr"])</div>
             </div>
         </header>
 
@@ -100,6 +101,9 @@
     private bool _expired;
     private CancellationTokenSource? _pollCts;
     private string _deviceName = "TV";
+    /// <summary>The same page signs in a TV and a phone ("Sign in via phone
+    /// QR" on the login form) — only the title and device label differ.</summary>
+    private bool _isTv = true;
     /// <summary>Absolute URL for the QR image. Under MAUI the BlazorWebView
     /// hosts at <c>https://0.0.0.0/</c> (Android) or <c>https://0.0.0.1/</c>
     /// (Windows) — those virtual hosts don't proxy <c>/api/...</c> to the
@@ -135,6 +139,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        try
+        {
+            _isTv = await JS.InvokeAsync<bool>(
+                "eval", "document.documentElement.classList.contains('tv-mode')");
+        }
+        catch { /* keep the TV wording */ }
         _deviceName = GuessDeviceName();
         await StartPairAsync();
     }
@@ -257,11 +267,11 @@
         _pollCts = null;
     }
 
-    /// <summary>Best-effort device label without a JS round-trip. Picks a
-    /// generic "TV" label for now; future work can read navigator.userAgent
-    /// via JSInterop and infer brand/model. The server only uses this for
-    /// display in any future "active sessions" panel.</summary>
-    private string GuessDeviceName() => "TV";
+    /// <summary>Best-effort device label: TV, the phone app, or a browser.
+    /// The server only uses it for display in any future "active sessions"
+    /// panel.</summary>
+    private string GuessDeviceName() =>
+        _isTv ? "TV" : OperatingSystem.IsBrowser() ? "Browser" : "Phone";
 
     public void Dispose() => StopPoll();
 }

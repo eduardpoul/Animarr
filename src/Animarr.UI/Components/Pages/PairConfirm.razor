@@ -150,14 +150,14 @@
             _selfRef ??= DotNetObjectReference.Create(this);
             try
             {
-                // Ask the MAUI host (if present) to grant CAMERA before we hit
-                // getUserMedia. Without this, the WebView's onPermissionRequest
-                // fires before the user has granted the OS-level CAMERA
-                // permission and the JS side gets NotAllowedError. WASM in a
-                // browser has no bridge — animarr_requestCameraPermission is
-                // shimmed to "always granted" and the browser's native prompt
-                // takes over.
-                var granted = await JS.InvokeAsync<bool>("animarr_requestCameraPermission");
+                // Ask the MAUI host to grant CAMERA before we hit getUserMedia.
+                // Without this, the WebView's onPermissionRequest fires before
+                // the user has granted the OS-level CAMERA permission and the
+                // JS side gets NotAllowedError. A browser has no such bridge
+                // (the shim only exists in the app's index.html) — its own
+                // permission prompt takes over.
+                var granted = OperatingSystem.IsBrowser()
+                    || await JS.InvokeAsync<bool>("animarr_requestCameraPermission");
                 if (!granted)
                 {
                     _status = L["pair.confirm.camera_denied"];
@@ -168,7 +168,11 @@
             }
             catch (Exception ex)
             {
-                _status = L.Get("pair.confirm.camera_unavailable_fmt", ex.Message);
+                // JSException messages carry the whole JS stack — show the
+                // first line only.
+                var reason = ex.Message.Split('\n', 2)[0].Trim();
+                if (reason.Length > 140) reason = reason[..140] + "…";
+                _status = L.Get("pair.confirm.camera_unavailable_fmt", reason);
                 StateHasChanged();
             }
         }

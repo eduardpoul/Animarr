@@ -135,11 +135,30 @@
 }
 
 .d-pair-confirm__scanner {
+    position: relative;
     width: 100%;
     aspect-ratio: 1 / 1;
     background: #000;   /* camera viewport — always dark */
     border-radius: var(--radius-ctrl);
     overflow: hidden;
+}
+
+/* Square viewfinder over the cropped-square video: a clear window, the
+   rest dimmed (the huge spread shadow), a thin light frame. qr-scan.js
+   doesn't ask html5-qrcode for its own (it came out rectangular). */
+.d-pair-confirm__scanner::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 64%;
+    aspect-ratio: 1 / 1;
+    transform: translate(-50%, -50%);
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    z-index: 2;
 }
 
 /* html5-qrcode injects an <video> inside #animarr-qr-viewer — make it fill. */

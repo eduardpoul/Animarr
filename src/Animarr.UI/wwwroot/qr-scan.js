@@ -39,9 +39,14 @@
         const onError = (_msg) => { /* per-frame; ignore */ };
 
         try {
+            // No qrbox: html5-qrcode draws its shaded viewfinder for the
+            // video's own aspect, but the page crops the video to a square
+            // (object-fit: cover), so the clear window came out a flat
+            // rectangle. PairConfirm draws a square one in CSS instead, and
+            // the whole frame is decoded.
             await _scanner.start(
                 { facingMode: "environment" },  // prefer rear camera on phones
-                { fps: 10, qrbox: { width: 240, height: 240 } },
+                { fps: 10 },
                 onSuccess,
                 onError);
         } catch (e) {
