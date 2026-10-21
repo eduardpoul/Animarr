@@ -72,9 +72,9 @@ RUN dotnet publish "Animarr.Web.csproj" -c Release -r linux-x64 --self-contained
 # llama.cpp server binaries for the built-in ("embedded") LLM provider. We copy
 # just the llama-server executable from the official images:
 #   • CPU build — no Vulkan link, so it always runs (default, lean).
-#   • Vulkan build — only invoked after the entrypoint installs libvulkan1 at
-#     runtime (ANIMARR_LLM_VULKAN=1). The binaries cost only tens of MB; the
-#     heavy Vulkan userspace (mesa) is NOT baked in — it's installed on demand.
+#   • Vulkan build — only used when ANIMARR_LLM_VULKAN=1 and a /dev/dri render
+#     node is passed in. Its userspace (libvulkan1 + mesa-vulkan-drivers) is
+#     baked into the runtime stage below.
 # Both pinned to llama.cpp b11669 (= release v0.7.0): the CPU image by tag +
 # digest, the Vulkan source checkout by the same tag, so the two builds match
 # and a deploy can't silently pick up whatever upstream pushed that day.
@@ -197,6 +197,15 @@ WORKDIR /app
 # pinned static BtbN stage above (CVE-2026-8461 fix; see the COPY below). apt
 # here installs only the hwaccel userspace those static binaries dlopen at runtime,
 # plus tzdata so the viewer's X-Time-Zone (IANA id) resolves for the stats.
+#
+# Vulkan for the embedded LLM (ANIMARR_LLM_VULKAN=1): libvulkan1 + the Mesa
+# Vulkan ICDs (radv / anv / lavapipe). These used to be apt-installed by the
+# entrypoint at every new container's boot (~9 s from the network, 99 MB
+# written to the container layer, offline boots relied on a .deb cache on the
+# data volume). The heavy part (libllvm + mesa-libgallium) is already here via
+# mesa-va-drivers, so baking them in costs only ~17 MB compressed. Being
+# installed changes nothing unless the flag is set: the app still picks the
+# Vulkan llama-server only with ANIMARR_LLM_VULKAN=1 and a /dev/dri render node.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         mesa-va-drivers \
@@ -205,6 +214,7 @@ RUN apt-get update && \
         libva-drm2 libva2 \
         libgomp1 \
         libvulkan1 \
+        mesa-vulkan-drivers \
         tzdata \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -231,14 +241,14 @@ COPY --from=publish /app/publish .
 # The official llama-server is a thin launcher that dynamically loads sibling
 # .so files in /app (libllama, libggml-*, libllama-server-impl, …), so we copy
 # the WHOLE /app dir, not just the binary. CPU build always runs; the Vulkan
-# build is only invoked after the entrypoint installs libvulkan1 at boot
-# (ANIMARR_LLM_VULKAN=1). The app sets LD_LIBRARY_PATH to these dirs at launch.
+# build is only used with ANIMARR_LLM_VULKAN=1 (its Vulkan userspace is in the
+# apt layer above). The app sets LD_LIBRARY_PATH to these dirs at launch.
 COPY --from=llama-cpu    /app/     /opt/llama/cpu/
 COPY --from=llama-vulkan /opt/out/ /opt/llama/vulkan/
 RUN chmod +x /opt/llama/cpu/llama-server /opt/llama/vulkan/llama-server
 
-# Entrypoint wrapper: optionally installs the Vulkan userspace at boot, then
-# execs the app as PID 1 so SIGTERM reaches it (clean llama-server shutdown).
+# Entrypoint wrapper: execs the app as PID 1 so SIGTERM reaches it (clean
+# llama-server and torrent shutdown).
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

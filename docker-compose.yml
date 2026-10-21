@@ -11,8 +11,8 @@
     environment:
       - TZ=UTC        # e.g. America/New_York, Europe/London, Asia/Tokyo
       # ── Built-in LLM on GPU (optional) ───────────────────────────────────
-      # Let the embedded llama.cpp provider use the GPU via Vulkan. On first
-      # boot the container installs Vulkan drivers (cached on the data volume).
+      # Let the embedded llama.cpp provider use the GPU via Vulkan (the Vulkan
+      # drivers ship in the image; falls back to CPU if the GPU isn't usable).
       # Also uncomment the `devices:` + `group_add:` block below.
       # - ANIMARR_LLM_VULKAN=1
     volumes:
