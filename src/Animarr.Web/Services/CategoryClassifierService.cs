@@ -39,11 +39,18 @@ public sealed class CategoryClassifierService(
     /// Failures are logged and yield an empty result — never thrown — so the
     /// identification pipeline isn't blocked by classifier outages.
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> ClassifyAsync(Guid mediaItemId, CancellationToken ct = default)
+    public Task<IReadOnlyList<Guid>> ClassifyAsync(Guid mediaItemId, CancellationToken ct = default)
+        => ClassifyAsync(mediaItemId, pass: null, ct);
+
+    /// <summary>What a rescan pass reads once instead of once per item: the
+    /// enabled categories and the LLM switch.</summary>
+    private sealed record PassSettings(List<Category> Categories, bool LlmEnabled);
+
+    private async Task<IReadOnlyList<Guid>> ClassifyAsync(Guid mediaItemId, PassSettings? pass, CancellationToken ct)
     {
         try
         {
-            return await ClassifyCoreAsync(mediaItemId, ct);
+            return await ClassifyCoreAsync(mediaItemId, pass, ct);
         }
         catch (Exception ex)
         {
@@ -52,7 +59,7 @@ public sealed class CategoryClassifierService(
         }
     }
 
-    private async Task<IReadOnlyList<Guid>> ClassifyCoreAsync(Guid mediaItemId, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>> ClassifyCoreAsync(Guid mediaItemId, PassSettings? pass, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
@@ -65,10 +72,7 @@ public sealed class CategoryClassifierService(
             return Array.Empty<Guid>();
         }
 
-        var categories = await db.Categories
-            .Where(c => c.Enabled)
-            .OrderBy(c => c.SortOrder)
-            .ToListAsync(ct);
+        var categories = pass?.Categories ?? await LoadEnabledCategoriesAsync(db, ct);
         if (categories.Count == 0)
         {
             logger.LogDebug("Classify: no enabled categories.");
@@ -79,17 +83,7 @@ public sealed class CategoryClassifierService(
         List<Guid>? picked = null;
         string source = "heuristic";
 
-        bool llmEnabled = false;
-        try
-        {
-            using var scope = scopeFactory.CreateScope();
-            var appCfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
-            llmEnabled = await appCfg.GetAsync<bool>(AppConfigKeys.LlmEnabled, false, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Classify: app config read failed, treating LLM as disabled.");
-        }
+        bool llmEnabled = pass?.LlmEnabled ?? await ReadLlmEnabledAsync(ct);
 
         if (llmEnabled)
         {
@@ -150,6 +144,27 @@ public sealed class CategoryClassifierService(
             string.Join(", ", categories.Where(c => assigned.Contains(c.Id)).Select(c => c.Name)),
             source);
         return assigned;
+    }
+
+    private static Task<List<Category>> LoadEnabledCategoriesAsync(AppDbContext db, CancellationToken ct)
+        => db.Categories
+            .Where(c => c.Enabled)
+            .OrderBy(c => c.SortOrder)
+            .ToListAsync(ct);
+
+    private async Task<bool> ReadLlmEnabledAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var appCfg = scope.ServiceProvider.GetRequiredService<IAppConfigService>();
+            return await appCfg.GetAsync<bool>(AppConfigKeys.LlmEnabled, false, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Classify: app config read failed, treating LLM as disabled.");
+            return false;
+        }
     }
 
     // ─── LLM path ─────────────────────────────────────────────────────────────
@@ -380,11 +395,17 @@ public sealed class CategoryClassifierService(
         var ids = await db.MediaItems.Select(m => m.Id).ToListAsync(ct);
         logger.LogInformation("Category rescan starting — {Count} item(s).", ids.Count);
 
+        // Categories and the LLM switch are read once for the pass — they used
+        // to be re-read (plus a DI scope) for every item.
+        var pass = new PassSettings(
+            await db.Categories.AsNoTracking().Where(c => c.Enabled).OrderBy(c => c.SortOrder).ToListAsync(ct),
+            await ReadLlmEnabledAsync(ct));
+
         int done = 0;
         foreach (var id in ids)
         {
             if (ct.IsCancellationRequested) break;
-            await ClassifyAsync(id, ct);
+            await ClassifyAsync(id, pass, ct);
             done++;
             if (done % 50 == 0)
                 logger.LogInformation("Category rescan progress: {Done}/{Total}", done, ids.Count);

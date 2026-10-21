@@ -32,6 +32,10 @@ public interface IAnimarrApiClient
     Task<ImageCandidateDto[]> GetBackdropAlternativesAsync(Guid id, CancellationToken ct = default);
     Task<string[]>            GetBackdropRotationAsync(CancellationToken ct = default);
     Task<MediaItemDto[]>  GetNeedsReviewAsync(CancellationToken ct = default);
+    /// <summary>Number of NeedsReview titles the caller can see, without the
+    /// DTOs. Against a server that predates the count endpoint it falls back
+    /// to counting <see cref="GetNeedsReviewAsync"/>.</summary>
+    Task<int>             GetNeedsReviewCountAsync(CancellationToken ct = default);
     Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default);
     Task<MediaFileDto[]> GetMediaFilesAsync(Guid mediaItemId, CancellationToken ct = default);
     /// <summary>ffprobe summary of one library file (codecs, HDR, tracks) via

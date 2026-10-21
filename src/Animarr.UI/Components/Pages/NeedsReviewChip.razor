@@ -46,8 +46,8 @@
     {
         try
         {
-            var items = await Api.GetNeedsReviewAsync();
-            _count = items.Length;
+            // Count only — the dialog loads the items (with candidates) itself.
+            _count = await Api.GetNeedsReviewCountAsync();
         }
         catch { /* network blip — keep last value */ }
     }
@@ -61,6 +61,9 @@
             IdentificationHubMethods.NeedsReviewCountChanged,
             env => InvokeAsync(() =>
             {
+                // Pushed after every queue event, mostly with the same count —
+                // re-render only when it moved.
+                if (env.Count == _count) return Task.CompletedTask;
                 _count = env.Count;
                 StateHasChanged();
                 return Task.CompletedTask;

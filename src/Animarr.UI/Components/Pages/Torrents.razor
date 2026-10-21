@@ -426,7 +426,7 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var t in _records.OrderByDescending(r => r.AddedAt))
+                @foreach (var t in SortedRecords())
                 {
                     _live.TryGetValue(t.InfoHash, out var live);
                     var progressRaw = live?.Progress ?? (t.TotalSize > 0 ? (double)t.Downloaded / t.TotalSize : 0);
@@ -438,7 +438,7 @@ else
                     var stateKey = state.ToLowerInvariant();
                     var paused = t.State == TorrentRecordState.Paused;
                     var folderName = LastSegment(t.SavePath);
-                    <tr class="@($"tor-row tor-st--{stateKey}")">
+                    <tr @key="t.InfoHash" class="@($"tor-row tor-st--{stateKey}")">
                         <td class="tor-name">
                             <button type="button" class="tor-name__text"
                                     @onclick="@(() => OpenEdit(t.InfoHash))">@t.Name</button>
@@ -648,6 +648,40 @@ else
         await LoadAsync();
     }
 
+    // Rows in display order (newest first), sorted once per loaded list
+    // instead of on every live-stats render.
+    private TorrentRecordDto[]? _sortedFrom;
+    private TorrentRecordDto[] _sorted = Array.Empty<TorrentRecordDto>();
+
+    private TorrentRecordDto[] SortedRecords()
+    {
+        if (!ReferenceEquals(_sortedFrom, _records))
+        {
+            _sorted = _records?.OrderByDescending(r => r.AddedAt).ToArray() ?? Array.Empty<TorrentRecordDto>();
+            _sortedFrom = _records;
+        }
+        return _sorted;
+    }
+
+    /// <summary>True when the snapshot changes anything the rows or the stat
+    /// tiles render: the torrent set, state, progress at the 0.1 % the label
+    /// shows, rates or peers.</summary>
+    private bool LiveVisiblyChanged(TorrentLiveStatsDto[] items)
+    {
+        if (items.Length != _live.Count) return true;
+        foreach (var s in items)
+        {
+            if (!_live.TryGetValue(s.InfoHash, out var old)) return true;
+            if (old.State != s.State
+                || old.DownloadRate != s.DownloadRate
+                || old.UploadRate != s.UploadRate
+                || old.Peers != s.Peers
+                || Math.Round(old.Progress * 1000) != Math.Round(s.Progress * 1000))
+                return true;
+        }
+        return false;
+    }
+
     private bool CanAdd => _addSource switch
     {
         "magnet" => !string.IsNullOrWhiteSpace(_addMagnet),
@@ -676,6 +710,9 @@ else
         // pool thread while the render loop enumerates _live.
         _hub.On<TorrentSnapshotEnvelope>(TorrentHubMethods.LiveSnapshot, env => InvokeAsync(() =>
         {
+            // The snapshot also arrives as a heartbeat and when a field this
+            // page doesn't show moved — skip the whole-page re-render then.
+            if (!LiveVisiblyChanged(env.Items)) return;
             _live.Clear();
             foreach (var s in env.Items) _live[s.InfoHash] = s;
             StateHasChanged();
@@ -697,7 +734,7 @@ else
             try
             {
                 var movies = await Api.GetMediaItemsAsync(
-                    new MediaListQuery { Type = MediaItemType.Movie, Take = 10000 });
+                    new MediaListQuery { Type = MediaItemType.Movie, Take = 10000, View = MediaListQuery.CardView });
                 _movieFolderIds = movies.Select(m => m.FolderId).ToHashSet();
             }
             catch { _movieFolderIds = new HashSet<Guid>(); }

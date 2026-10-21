@@ -44,7 +44,12 @@ public sealed class TrickplayService(
     /// <summary>Generate (or refresh) sprites for every resolved on-disk file
     /// of the item. Skips files whose sprite is current (same source mtime).
     /// Returns the number of sprites actually generated.</summary>
-    public async Task<int> GenerateForItemAsync(Guid mediaItemId, CancellationToken ct = default)
+    /// <param name="waitForIdle">Background pass: awaited before each file's
+    /// ffmpeg run so a long title (hundreds of episodes, each read end to end)
+    /// parks as soon as someone starts watching instead of only re-checking
+    /// between titles. Null = never wait.</param>
+    public async Task<int> GenerateForItemAsync(
+        Guid mediaItemId, CancellationToken ct = default, Func<CancellationToken, Task>? waitForIdle = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
@@ -86,6 +91,7 @@ public sealed class TrickplayService(
                 continue;
             }
 
+            if (waitForIdle is not null) await waitForIdle(ct);
             var fresh = await GenerateSpriteAsync(mediaItemId, folder, file, writeTime, ct);
             if (fresh is null) continue;
 
@@ -160,6 +166,10 @@ public sealed class TrickplayService(
         foreach (var a in new[]
         {
             "-nostdin", "-v", "error",
+            // Cap decoder threads: auto (= cores) gives every thread its own
+            // frame pool — ~200-400 MB RSS for a 4K HEVC 10-bit source — for
+            // a keyframe-only pass that gains little from parallelism.
+            "-threads", "2",
             "-skip_frame", "nokey",
             "-i", file.FilePath,
             "-an", "-sn", "-dn",
@@ -172,10 +182,11 @@ public sealed class TrickplayService(
         try
         {
             var sw = Stopwatch.StartNew();
-            using var p = Process.Start(psi);
+            // Never fight playback/transcode for CPU or disk: nice 10 + idle I/O
+            // from launch on Linux (setting PriorityClass after Start raced the
+            // decoder threads), BelowNormal elsewhere.
+            using var p = LowPriorityProcess.Start(psi);
             if (p is null) return null;
-            // Never fight playback/transcode for CPU.
-            try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { /* platform-dependent */ }
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(FfmpegTimeout);

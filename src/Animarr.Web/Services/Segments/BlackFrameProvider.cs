@@ -19,6 +19,11 @@ public sealed partial class BlackFrameProvider(ILogger<BlackFrameProvider> logge
     public int Order => 30;
     public bool Cheap => false;   // decodes video — background pass only, and opt-in
 
+    /// <summary>A stuck ffmpeg (dead mount, corrupt file) is killed after this.
+    /// Generous: a 7-min 4K HEVC tail decoded on 2 threads at nice 10 can take
+    /// several minutes on a NAS CPU.</summary>
+    private static readonly TimeSpan FfmpegTimeout = TimeSpan.FromMinutes(10);
+
     public bool CanRun(SegmentEpisodeContext ctx) => ctx.DurationSec > 60 && File.Exists(ctx.FilePath);
 
     public async Task<IReadOnlyList<DetectedSegment>> DetectAsync(SegmentEpisodeContext ctx, CancellationToken ct)
@@ -27,6 +32,8 @@ public sealed partial class BlackFrameProvider(ILogger<BlackFrameProvider> logge
         var tailWindow = Math.Min(420, ctx.DurationSec * 0.4);   // last ~7 min / 40%
         var tailStart  = ctx.DurationSec - tailWindow;
 
+        // Background pass: don't start a video decode while someone is watching.
+        if (ctx.WaitForIdleAsync is { } waitForIdle) await waitForIdle(ct);
         var blacks = await DetectBlackAsync(ctx.FilePath, tailStart, tailWindow, ct);
         if (blacks.Count == 0) return Array.Empty<DetectedSegment>();
 
@@ -40,7 +47,9 @@ public sealed partial class BlackFrameProvider(ILogger<BlackFrameProvider> logge
     }
 
     /// <summary>Absolute (file-relative) start times of black segments found in
-    /// the window via ffmpeg's blackdetect filter. Empty on any failure.</summary>
+    /// the window via ffmpeg's blackdetect filter. Empty on any failure. Runs
+    /// deprioritised (nice 10 + idle I/O on Linux, BelowNormal elsewhere) with a
+    /// 2-thread decoder cap, like the other background decodes.</summary>
     private async Task<List<double>> DetectBlackAsync(string file, double ssSec, double durSec, CancellationToken ct)
     {
         var inv = CultureInfo.InvariantCulture;
@@ -57,7 +66,10 @@ public sealed partial class BlackFrameProvider(ILogger<BlackFrameProvider> logge
             };
             foreach (var a in new[]
             {
-                "-nostdin",
+                // -nostats: no per-frame progress spam in the drained stderr
+                // (blackdetect's own lines are info-level and unaffected).
+                "-nostdin", "-hide_banner", "-nostats",
+                "-threads", "2",
                 "-ss", ssSec.ToString("0.###", inv),
                 "-i", file,
                 "-t", durSec.ToString("0.###", inv),
@@ -66,12 +78,27 @@ public sealed partial class BlackFrameProvider(ILogger<BlackFrameProvider> logge
                 "-f", "null", "-",
             }) psi.ArgumentList.Add(a);
 
-            using var p = Process.Start(psi);
+            using var p = LowPriorityProcess.Start(psi);
             if (p is null) return starts;
             // blackdetect reports on stderr; input-seek makes its timestamps
             // window-relative, so add ssSec back to get a file-relative time.
-            var stderr = await p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(FfmpegTimeout);
+            string stderr;
+            try
+            {
+                var stdoutTask = p.StandardOutput.ReadToEndAsync(timeout.Token);   // "-f null" writes nothing, but keep the pipe drained
+                stderr = await p.StandardError.ReadToEndAsync(timeout.Token);
+                await stdoutTask;
+                await p.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                if (ct.IsCancellationRequested) throw;
+                logger.LogWarning("[BlackFrame] ffmpeg timed out on {File}", Path.GetFileName(file));
+                return starts;
+            }
 
             foreach (Match m in BlackStartRegex().Matches(stderr))
                 if (double.TryParse(m.Groups[1].Value, NumberStyles.Float, inv, out var rel))

@@ -28,6 +28,7 @@ internal static class FolderEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var me = await userCtx.GetCurrentUserAsync(ct);
             var rows = await db.FolderWatchers
+                .AsNoTracking()
                 .OrderBy(f => f.Label)
                 .ToListAsync(ct);
             return Results.Ok(rows.Where(r => me?.Role.AllowsFolder(r) ?? true).Select(r => r.ToDto()).ToArray());
@@ -206,6 +207,7 @@ internal static class FolderEndpoints
                                 QueuedAt = DateTime.UtcNow,
                             });
                         if (toQueue.Count > 0) await qdb.SaveChangesAsync();
+                        IdentificationQueueProcessorService.Wake();
                         log.LogInformation(
                             "Rescan of section {Id}: {New} new folder(s) discovered, {Queued} queued for identification.",
                             id, newIds.Count, toQueue.Count);

@@ -50,12 +50,17 @@ public class Role
 
     /// <summary>Convenience: returns <c>null</c> for "all folders" or the parsed
     /// GUID array. Helper for <c>RoleFolderFilter</c>.</summary>
-    public IReadOnlyList<Guid>? GetAllowedFolderIds()
+    public IReadOnlyList<Guid>? GetAllowedFolderIds() => ParseAllowedFolderIds(FoldersJson);
+
+    /// <summary><see cref="GetAllowedFolderIds"/> for a bare column value —
+    /// lets the media-path access cache parse a projected FoldersJson without
+    /// materialising the entity.</summary>
+    public static IReadOnlyList<Guid>? ParseAllowedFolderIds(string? foldersJson)
     {
-        if (string.IsNullOrEmpty(FoldersJson)) return null;
+        if (string.IsNullOrEmpty(foldersJson)) return null;
         try
         {
-            var arr = System.Text.Json.JsonSerializer.Deserialize<Guid[]>(FoldersJson);
+            var arr = System.Text.Json.JsonSerializer.Deserialize<Guid[]>(foldersJson);
             return arr is null || arr.Length == 0 ? null : arr;
         }
         catch

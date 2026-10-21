@@ -103,7 +103,7 @@ public partial class CatalogNativePage : ContentPage
         {
             // Media token first: every poster / backdrop URL built below needs it.
             var tokenTask    = TvMedia.EnsureTokenAsync();
-            var libraryTask  = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500", Json);
+            var libraryTask  = _http.GetFromJsonAsync<ApiItem[]>("/api/media?take=500&view=card", Json);
             var continueTask = SafeGetAsync<ContinueApi[]>("/api/me/continue?take=12");
             var nextUpTask   = SafeGetAsync<ContinueApi[]>("/api/me/next-up?take=12");
             // "На этой неделе" — same window the web Home requests.

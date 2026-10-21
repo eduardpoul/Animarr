@@ -46,7 +46,7 @@
         </div>
 
         <div class="search-page__count">
-            @if (!string.IsNullOrWhiteSpace(_query))
+            @if (!string.IsNullOrWhiteSpace(_appliedQuery))
             {
                 @_filtered.Count<span class="search-page__count-sep">/</span>@_allItems.Count
             }
@@ -75,20 +75,22 @@
             <div class="catalog-empty__text">@L["search.empty_library"]</div>
         </div>
     }
-    else if (_filtered.Count == 0 && !string.IsNullOrWhiteSpace(_query))
+    else if (_filtered.Count == 0 && !string.IsNullOrWhiteSpace(_appliedQuery))
     {
         <div class="catalog-empty">
             <DIcon Name="search" Size="48" />
-            <div class="catalog-empty__text">@L.Get("search.no_matches", _query)</div>
+            <div class="catalog-empty__text">@L.Get("search.no_matches", _appliedQuery)</div>
         </div>
     }
     else
     {
         <div class="catalog-grid">
-            @* Cap to 240 like Home — typing narrows it well before the cap. *@
+            @* Cap to 240 like Home — typing narrows it well before the cap.
+               @key (Ids unique — _allItems is de-duplicated by Id) so a narrowed
+               result keeps its cards instead of re-feeding every position. *@
             @foreach (var item in _filtered.Take(240))
             {
-                <Poster Item="@item" />
+                <Poster @key="item.Id" Item="@item" />
             }
         </div>
         @if (_filtered.Count > 240)
@@ -105,6 +107,12 @@
     private List<MediaItemDto> _filtered = new();
     private bool _loading = true;
     private string _query = "";
+    /// <summary>The query <see cref="_filtered"/> (and the count / "no
+    /// matches" line) reflects — trails <see cref="_query"/> by the debounce
+    /// while the user types.</summary>
+    private string _appliedQuery = "";
+    private CancellationTokenSource? _debounce;
+    private const int DebounceMs = 250;
     private ElementReference _inputRef;
     private bool _inputFocused;
 
@@ -112,7 +120,7 @@
     {
         try
         {
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView });
             // Same de-dup ladder as Home — by Id first, then by (title, year)
             // so a duplicate folder doesn't render twice in the result list.
             _allItems = items
@@ -160,14 +168,34 @@
         }
     }
 
+    /// <summary>Keystrokes are debounced: each one used to refilter the whole
+    /// library and re-render up to 240 cards. The typed text is kept in
+    /// <see cref="_query"/> immediately — so the post-load Refilter (input is
+    /// live while the catalog loads) and any re-render never drop it — and
+    /// the grid follows once typing pauses for <see cref="DebounceMs"/>.</summary>
     private void OnQueryInput(ChangeEventArgs e)
     {
         _query = e.Value?.ToString() ?? "";
-        Refilter();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        _ = RefilterAfterPauseAsync(_debounce.Token);
+    }
+
+    private async Task RefilterAfterPauseAsync(CancellationToken ct)
+    {
+        try { await Task.Delay(DebounceMs, ct); }
+        catch (OperationCanceledException) { return; }
+        await InvokeAsync(() =>
+        {
+            Refilter();   // reads the latest _query, whatever was typed meanwhile
+            StateHasChanged();
+        });
     }
 
     private void ClearQuery()
     {
+        _debounce?.Cancel();
         _query = "";
         Refilter();
         InvokeAsync(async () =>
@@ -178,6 +206,7 @@
 
     private void Refilter()
     {
+        _appliedQuery = _query;
         if (string.IsNullOrWhiteSpace(_query))
         {
             _filtered = _allItems;
@@ -193,5 +222,10 @@
             .ToList();
     }
 
-    public void Dispose() { /* no subscriptions */ }
+    public void Dispose()
+    {
+        // No subscriptions — just a pending debounced refilter to drop.
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
 }

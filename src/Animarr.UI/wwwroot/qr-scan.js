@@ -1,6 +1,8 @@
 // v5 Phase 7 — TV pairing QR scanner.
 //
-// Thin wrapper around html5-qrcode (loaded via <script> tag in index.html).
+// Thin wrapper around html5-qrcode, loaded on first scan (below) — it used to
+// be a parser-blocking CDN <script> in both index.html hosts, paid for on every
+// page load although only the Login / Pair QR modal needs it.
 // Exposes two globals the Login.razor page calls via JSInterop:
 //
 //   animarr_startQrScan(elementId, dotnetRef)
@@ -20,11 +22,38 @@
     let _scanner = null;
     let _active  = false;
 
+    // Pinned version + SRI, same as the old index.html tag.
+    const LIB_SRC = "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js";
+    const LIB_SRI = "sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+";
+    let _libLoad = null;   // in-flight / finished load; reset on failure so a retry refetches
+
+    function loadLib() {
+        if (typeof Html5Qrcode !== "undefined") return Promise.resolve();
+        if (_libLoad) return _libLoad;
+        _libLoad = new Promise(function (resolve, reject) {
+            const s = document.createElement("script");
+            s.src = LIB_SRC;
+            s.integrity = LIB_SRI;
+            s.crossOrigin = "anonymous";
+            s.onload = function () { resolve(); };
+            s.onerror = function () {
+                _libLoad = null;
+                s.remove();
+                reject(new Error("html5-qrcode failed to load"));
+            };
+            document.head.appendChild(s);
+        });
+        return _libLoad;
+    }
+
     window.animarr_startQrScan = async function (elementId, dotnetRef) {
+        try { await loadLib(); } catch (e) { console.warn("[animarr_startQrScan]", e); }
         if (typeof Html5Qrcode === "undefined") {
-            console.warn("[animarr_startQrScan] html5-qrcode not loaded — check <script> tag in index.html");
+            console.warn("[animarr_startQrScan] html5-qrcode not loaded (CDN unreachable?)");
             return;
         }
+        // The modal may have closed while the library loaded.
+        if (!document.getElementById(elementId)) return;
         await window.animarr_stopQrScan();
         _scanner = new Html5Qrcode(elementId, { verbose: false });
         _active  = true;

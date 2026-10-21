@@ -204,7 +204,11 @@
     {
         if (firstRender && !string.IsNullOrEmpty(Item.FanartPath))
         {
-            var url = Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0);
+            // Width-capped: the layer sits under blur(12px) brightness(50%), so
+            // a 480 px variant looks the same as the full fanart the sharp hero
+            // <img> above shows, at a fraction of the decode.
+            var url = Animarr.UI.Services.MediaUrl.Image(Item.FanartPath, Item.LastMetadataRefreshedAt?.Ticks ?? 0,
+                Animarr.UI.Services.MediaUrl.BlurredBackdropWidth);
             try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 12, 50); } catch { }
         }
     }

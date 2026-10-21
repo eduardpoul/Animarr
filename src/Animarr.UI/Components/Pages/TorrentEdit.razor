@@ -194,6 +194,12 @@
     private List<TorrentFileTreeEditor.FileItem> _fileItems = new();
     private Dictionary<string, double> _fileProgress = new();
     private bool _refreshingProgress;
+    /// <summary>Torrent progress the per-file progress was last pulled at, and
+    /// when — the file tree is re-fetched only when the torrent moved, and at
+    /// most every <see cref="FileProgressMinInterval"/>.</summary>
+    private double _fileProgressFor = -1;
+    private DateTime _fileProgressAt = DateTime.MinValue;
+    private static readonly TimeSpan FileProgressMinInterval = TimeSpan.FromSeconds(3);
     private HubConnection? _hub;
     private string? _loadedHash;
 
@@ -218,6 +224,8 @@
             _loadedHash = Hash;
             _record = null;
             _live = null;
+            _fileProgressFor = -1;
+            _fileProgressAt = DateTime.MinValue;
             _loading = true;
             StateHasChanged();
             await LoadAsync();
@@ -269,10 +277,12 @@
     /// <summary>Re-pull just the per-file progress while a torrent downloads.
     /// Touches ONLY <see cref="_fileProgress"/> so the user's unsaved priority
     /// edits in the tree survive each live tick. Guarded against overlap.</summary>
-    private async Task RefreshFileProgressAsync()
+    private async Task RefreshFileProgressAsync(double forProgress)
     {
         if (_refreshingProgress || _record is null) return;
         _refreshingProgress = true;
+        _fileProgressFor = forProgress;
+        _fileProgressAt  = DateTime.UtcNow;
         try
         {
             var tree = await Api.GetTorrentFileTreeAsync(_record.Id);
@@ -302,18 +312,43 @@
         {
             var live = env.Items.FirstOrDefault(s =>
                 string.Equals(s.InfoHash, Hash, StringComparison.OrdinalIgnoreCase));
+            // Mutate on the renderer's context: under MAUI hub callbacks arrive
+            // on a pool thread.
             if (live is not null)
-            {
-                _live = live;
-                InvokeAsync(StateHasChanged);
-                // Live per-file progress while downloading. Updates ONLY the
-                // progress map (not _priorities/_fileItems) so unsaved priority
-                // edits survive the tick.
-                if (live.State is "Downloading" or "Metadata")
-                    _ = RefreshFileProgressAsync();
-            }
+                InvokeAsync(() => OnLiveStats(live));
         });
         try { await _hub.StartAsync(); } catch { /* hub unavailable */ }
+    }
+
+    private void OnLiveStats(TorrentLiveStatsDto live)
+    {
+        // A snapshot carries every torrent — when another one moved, this one
+        // is unchanged and the drawer needn't re-render.
+        var prev = _live;
+        if (prev != live)
+        {
+            _live = live;
+            StateHasChanged();
+        }
+
+        // Live per-file progress while downloading. Updates ONLY the progress
+        // map (not _priorities/_fileItems) so unsaved priority edits survive the
+        // tick. It's a whole file-tree REST call, so only when the torrent
+        // actually moved since the last pull and at most every few seconds — it
+        // used to fire on every snapshot (2 Hz). Checked on unchanged snapshots
+        // too (heartbeat), so a move the throttle skipped is still picked up.
+        if (live.State is "Downloading" or "Metadata")
+        {
+            if (live.Progress != _fileProgressFor
+                && DateTime.UtcNow - _fileProgressAt >= FileProgressMinInterval)
+                _ = RefreshFileProgressAsync(live.Progress);
+        }
+        else if (prev?.State is "Downloading" or "Metadata")
+        {
+            // Just finished / paused: one last pull so the per-file bars settle
+            // on their final values instead of where the throttle last left them.
+            _ = RefreshFileProgressAsync(live.Progress);
+        }
     }
 
     public async ValueTask DisposeAsync()

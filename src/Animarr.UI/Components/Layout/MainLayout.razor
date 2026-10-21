@@ -221,24 +221,82 @@
         }
         catch { }
 
-        // 2. Boot auth probe — /api/auth/status (anonymous-safe) then /api/me
-        //    if the cookie is valid.
+        // 2. Boot auth probe — /api/auth/status (anonymous-safe), /api/me and
+        //    preferences (UserContextState fires them together). The device
+        //    state the gates below need is cookie-scoped server-side and
+        //    independent of the client-side auth state, so fetch it in the
+        //    same round trip instead of after.
+        var deviceStateTask = DeviceProfiles.RefreshAsync();
         await UserCtx.LoadAsync();
 
         // 2-pre. Device gates (default profile / "Who's watching" picker /
         //    mandatory PIN). May sign in as the device default, or leave for
         //    an AuthLayout page — then nothing below runs for this layout.
-        if (!await RunDeviceGatesAsync()) return;
+        if (!await RunDeviceGatesAsync(deviceStateTask)) return;
+
         // 2-. Media token: in the MAUI WebView every <img>/<video> loads the
         //     remote server cross-origin, where the auth cookie isn't sent —
         //     fetch the session token BEFORE the hubs / backdrop start, and keep
         //     it fresh (tokens live 6–12 h; the server returns the same value
         //     within a 6 h window, so this is cheap and URLs stay cache-stable).
-        await RefreshMediaTokenAsync();
+        //     The language pack (2a) and the appearance reconcile (2b/2c) don't
+        //     depend on it — they run alongside; all three are awaited before
+        //     the route guard, as before.
+        var tokenTask      = RefreshMediaTokenAsync();
+        var languageTask   = ApplyLanguageAsync();
+        var appearanceTask = ApplyAppearancePrefsAsync();
+        await Task.WhenAll(tokenTask, languageTask, appearanceTask);
         _mediaTokenTimer ??= new System.Threading.Timer(
             _ => InvokeAsync(RefreshMediaTokenAsync), null,
             TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
 
+        // 3. Route guard. Pages with @layout AuthLayout (Welcome / Login /
+        //    Setup) skip this whole block — they're rendered by the router
+        //    against AuthLayout, not MainLayout. Anyone hitting an
+        //    auth-required route while anonymous gets bounced to /welcome,
+        //    which acts as the public landing page. Welcome itself routes
+        //    the user onward to /setup (first-run) or /login (returning) via
+        //    its START button — we don't short-circuit straight to /setup
+        //    here so the marketing copy is always shown at least once.
+        if (!UserCtx.IsAuthenticated)
+        {
+            Nav.NavigateTo("/welcome", replace: true);
+            return;
+        }
+
+        if (UserCtx.IsAuthenticated)
+        {
+            // Independent of each other (each owns its error handling) —
+            // start them together instead of six serial round trips.
+            var tasks = new List<Task>
+            {
+                ApplyAccentHueToDomAsync(),
+                StartBackdropAsync(),
+                LoadFolderNamesAsync(),
+                StartIdentificationHubAsync(),
+                RefreshIdentificationStatusAsync(),
+            };
+            // The torrent hub carries the torrent REST gate (UploadContent) —
+            // don't knock on it without the permission.
+            if (UserCtx.Can(p => p.UploadContent))
+                tasks.Add(StartTorrentHubAsync());
+            await Task.WhenAll(tasks);
+            StateHasChanged();
+        }
+
+        // First render of MainLayout — Blazor's router doesn't push the
+        // initial URL, so tv-nav.js's history-API hook never sees it.
+        // Dispatch the synthetic nav event so the page's
+        // [data-tv-autofocus] target gets focused without the user
+        // having to press an arrow first.
+        try { await JS.InvokeVoidAsync("eval",
+            "window.dispatchEvent(new Event('Animarr:navigated'));"); }
+        catch { }
+    }
+
+    /// <summary>Boot step 2a — apply the user's interface language.</summary>
+    private async Task ApplyLanguageAsync()
+    {
         // 2a. Apply user's saved interface language. Web.Client preloads "en"
         //     at boot in its own Program.cs; Animarr.App (MAUI) does NOT,
         //     so on MAUI the dict is empty for the first render and any
@@ -259,7 +317,12 @@
             try { await Loc.LoadAsync(wantLang); } catch { /* keys-as-values fallback */ }
         }
         try { await JS.InvokeVoidAsync("localStorage.setItem", "animarr-lang", Loc.CurrentLanguage); } catch { }
+    }
 
+    /// <summary>Boot steps 2b/2c — reconcile theme, accent hue and tv-mode
+    /// with the server-stored preferences.</summary>
+    private async Task ApplyAppearancePrefsAsync()
+    {
         // 2b. Apply user's chosen personality theme. index.html paints a
         //     bootstrap data-theme from localStorage so first paint matches
         //     last session; this call reconciles with the server-stored
@@ -299,43 +362,6 @@
             }
             catch { }
         }
-
-        // 3. Route guard. Pages with @layout AuthLayout (Welcome / Login /
-        //    Setup) skip this whole block — they're rendered by the router
-        //    against AuthLayout, not MainLayout. Anyone hitting an
-        //    auth-required route while anonymous gets bounced to /welcome,
-        //    which acts as the public landing page. Welcome itself routes
-        //    the user onward to /setup (first-run) or /login (returning) via
-        //    its START button — we don't short-circuit straight to /setup
-        //    here so the marketing copy is always shown at least once.
-        if (!UserCtx.IsAuthenticated)
-        {
-            Nav.NavigateTo("/welcome", replace: true);
-            return;
-        }
-
-        if (UserCtx.IsAuthenticated)
-        {
-            await ApplyAccentHueToDomAsync();
-            await StartBackdropAsync();
-            await LoadFolderNamesAsync();
-            // The torrent hub carries the torrent REST gate (UploadContent) —
-            // don't knock on it without the permission.
-            if (UserCtx.Can(p => p.UploadContent))
-                await StartTorrentHubAsync();
-            await StartIdentificationHubAsync();
-            await RefreshIdentificationStatusAsync();
-            StateHasChanged();
-        }
-
-        // First render of MainLayout — Blazor's router doesn't push the
-        // initial URL, so tv-nav.js's history-API hook never sees it.
-        // Dispatch the synthetic nav event so the page's
-        // [data-tv-autofocus] target gets focused without the user
-        // having to press an arrow first.
-        try { await JS.InvokeVoidAsync("eval",
-            "window.dispatchEvent(new Event('Animarr:navigated'));"); }
-        catch { }
     }
 
     /// <summary>
@@ -354,9 +380,9 @@
     /// layout). An older server without /api/auth/device skips the device
     /// gates entirely and keeps the plain signed-in/anonymous routing.
     /// </summary>
-    private async Task<bool> RunDeviceGatesAsync()
+    private async Task<bool> RunDeviceGatesAsync(Task<DeviceStateDto?> deviceState)
     {
-        var state = await DeviceProfiles.RefreshAsync();
+        var state = await deviceState;   // DeviceProfiles.RefreshAsync, started with the auth probe
         if (state is null) return true;
 
         var gatePassed = await DeviceProfiles.IsGatePassedAsync();
@@ -488,8 +514,14 @@
                 // user's chosen server authority. Raw "/api/image?…" URLs
                 // resolve against the WebView2 virtual host on MAUI Windows
                 // (https://0.0.0.1) and 404.
+                // Under the default 14 px blur a 480 px-wide variant looks the
+                // same as full-size fanart but decodes ~8× less (a 1920×1080
+                // fanart is a ~8 MB texture, re-rasterised under the blur) and
+                // transfers ~20 KB instead of ~300 KB per slide. A near-sharp
+                // user setting keeps the original.
+                int? bgWidth = blur >= 10 ? Animarr.UI.Services.MediaUrl.BlurredBackdropWidth : null;
                 var urls = paths
-                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p))
+                    .Select(p => Animarr.UI.Services.MediaUrl.Image(p, width: bgWidth))
                     .ToArray();
                 _everywhereBackdropStarted = true;
                 await JS.InvokeVoidAsync("initGlobalBackdrop", (object)urls, interval, blur, brightness);
@@ -538,9 +570,43 @@
         _identHub = Animarr.UI.Services.AnimarrHub.Build(hubUri);
         _identHub.On<IdentificationProgressEnvelope>(IdentificationHubMethods.QueueChanged, _ =>
         {
-            InvokeAsync(RefreshIdentificationStatusAsync);
+            InvokeAsync(QueueIdentificationRefresh);
         });
         try { await _identHub.StartAsync(); } catch { }
+    }
+
+    /// <summary>Trailing window that folds a burst of QueueChanged pings into
+    /// one refetch (a job raises several; older servers sent up to 20 per event).</summary>
+    private const int IdentRefreshDebounceMs = 400;
+    private bool _identRefreshQueued;   // a refresh is waiting or in flight
+    private bool _identRefreshDirty;    // another ping landed meanwhile
+
+    /// <summary>Debounced, single-flight <see cref="RefreshIdentificationStatusAsync"/>
+    /// for hub pings: each refresh is a 200-row queue fetch + status fetch, and
+    /// they used to run once per ping, overlapping. Runs on the renderer's
+    /// context (InvokeAsync), so the flags need no locking.</summary>
+    private void QueueIdentificationRefresh()
+    {
+        if (_identRefreshQueued) { _identRefreshDirty = true; return; }
+        _identRefreshQueued = true;
+        _ = RunIdentificationRefreshAsync();
+    }
+
+    private async Task RunIdentificationRefreshAsync()
+    {
+        try
+        {
+            do
+            {
+                await Task.Delay(IdentRefreshDebounceMs);
+                // Everything up to here is covered by this fetch; a ping that
+                // arrives while it runs earns exactly one more.
+                _identRefreshDirty = false;
+                await RefreshIdentificationStatusAsync();
+            }
+            while (_identRefreshDirty);
+        }
+        finally { _identRefreshQueued = false; }
     }
 
     /// <summary>Push the active server's authority into MediaUrl + JS shim so

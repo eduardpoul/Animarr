@@ -148,6 +148,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.FolderId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.FolderId, x.Status });
+            // The processor polls every 2 s: depth = Status IN (Queued,
+            // Processing), next job = oldest Queued. Done/Failed history (with
+            // multi-KB logs) piles up behind them, so seek instead of scanning.
+            e.HasIndex(x => new { x.Status, x.QueuedAt });
+            // Queue list: newest 200 by QueuedAt.
+            e.HasIndex(x => x.QueuedAt);
         });
 
         modelBuilder.Entity<WatchState>(e =>
@@ -174,6 +180,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.MediaItemId);
             e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.LastSeenAt);
+            // me/continue: a user's unfinished rows, newest first. Partial so
+            // it stays small (watched rows are most of the table) and serves
+            // the ORDER BY without sorting all of the user's history; the
+            // filter text must match EF's `NOT ("w"."IsWatched")` predicate.
+            e.HasIndex(x => new { x.UserId, x.LastSeenAt })
+             .HasFilter("NOT \"IsWatched\"")
+             .HasDatabaseName("IX_WatchStates_UserId_LastSeenAt_Unwatched");
         });
 
         modelBuilder.Entity<WatchEvent>(e =>
@@ -194,8 +207,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // but the recorder always SELECTs before INSERT so the anonymous
             // (UserId=null) external-player rows don't duplicate either.
             e.HasIndex(x => new { x.UserId, x.MediaItemId, x.Season, x.Episode, x.Date }).IsUnique();
-            // Stats queries scan a user's date range.
-            e.HasIndex(x => new { x.UserId, x.Date });
+            // Stats queries scan a user's date range. Covering: the stats day
+            // rollup (Date, SecondsWatched) and the For-you journal read
+            // (+ MediaItemId) are answered from the index alone, in Date
+            // order, without a table lookup per event.
+            e.HasIndex(x => new { x.UserId, x.Date, x.SecondsWatched, x.MediaItemId });
         });
 
         modelBuilder.Entity<EpisodeFileMapping>(e =>

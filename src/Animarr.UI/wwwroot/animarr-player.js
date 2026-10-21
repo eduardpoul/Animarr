@@ -21,6 +21,51 @@
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
 
+    // ── Vendor libraries, loaded on demand ──────────────────────────────────
+    // hls.js + Artplayer used to be parser-blocking <head> scripts in both
+    // index.html hosts — every page load (and every phone launch) waited on
+    // the CDN and compiled ~1 MB of JS before the boot splash could paint,
+    // though only the player needs them. Now attach() loads them on first use
+    // and MediaDetail warms them via preload() once a title page is open, so
+    // pressing Play doesn't wait. Same pinned versions + SRI as before.
+    // artplayer pinned to 5.4.0: the floating `artplayer@5` tag shipped a newer
+    // 5.x that tightened option validation (option.subtitle must be an object)
+    // and broke playback on media without subtitles.
+    const PLAYER_LIBS = [
+        ['https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js',
+         'sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr'],
+        ['https://cdn.jsdelivr.net/npm/artplayer@5.4.0/dist/artplayer.js',
+         'sha384-w5IjjTXa5FVlGgCubBLyhTG2jrrNp7ktdnxNNUdVZuYwpQ5OqIab8c1gjKDD3+uO'],
+    ];
+    const SCRIPT_LOADS = new Map();   // src → Promise; a failed load is forgotten so the next call retries
+    function loadScriptOnce(src, integrity) {
+        let p = SCRIPT_LOADS.get(src);
+        if (p) return p;
+        p = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.integrity = integrity;
+            s.crossOrigin = 'anonymous';
+            s.onload = () => resolve();
+            s.onerror = () => {
+                SCRIPT_LOADS.delete(src);
+                s.remove();
+                reject(new Error('animarrPlayer: failed to load ' + src));
+            };
+            document.head.appendChild(s);
+        });
+        SCRIPT_LOADS.set(src, p);
+        return p;
+    }
+    function loadPlayerLibs() {
+        if (typeof window.Artplayer === 'function' && window.Hls) return Promise.resolve();
+        return Promise.all(PLAYER_LIBS.map(([src, sri]) => loadScriptOnce(src, sri)));
+    }
+    // Fire-and-forget warm-up (MediaDetail calls it once the page has loaded).
+    function preload() {
+        loadPlayerLibs().catch(() => { /* attach() retries and reports */ });
+    }
+
     // ── User audio/subtitle preferences ─────────────────────────────────────
     // Pushed once from MediaDetail via animarrPlayer.setPrefs(...) when the
     // account prefs load. audioLang/subLang are ISO-639-1 codes ('ja','ru') or
@@ -2155,6 +2200,14 @@
         // switchQuality so changing quality doesn't silently drop the dub.
         const externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
             ? opts.externalAudioPath : null;
+        if (typeof window.Artplayer !== 'function' || !window.Hls) {
+            // Loaded on demand (see PLAYER_LIBS) — usually already warm from
+            // MediaDetail's preload(), else this is the first-use fetch.
+            try { await loadPlayerLibs(); }
+            catch (e) { console.error(e && e.message || e); }
+            // The overlay may have closed (detach) while the libraries loaded.
+            if (!el.isConnected || WIRED.has(elementId)) return;
+        }
         if (typeof window.Artplayer !== 'function') {
             console.error('animarrPlayer: Artplayer not loaded from CDN');
             return;
@@ -3237,7 +3290,7 @@
     window.animarrPlayer = {
         attach, flush, detach,
         setMediaSession, setWatchNextMeta, togglePictureInPicture,
-        setStyle, switchAudioTrack, switchAudio, setPrefs,
+        setStyle, switchAudioTrack, switchAudio, setPrefs, preload,
     };
 })();
 

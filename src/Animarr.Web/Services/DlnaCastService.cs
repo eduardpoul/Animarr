@@ -33,6 +33,16 @@ namespace Animarr.Web.Services;
 ///
 /// Description fetch (LOCATION URL → device.xml) is done lazily, and the
 /// extracted control URL is cached so subsequent Plays skip the HTTP roundtrip.
+///
+/// The passive channel sees every SSDP NOTIFY on the LAN (routers, NAS,
+/// printers, speakers re-announce every few minutes, several NTs per burst),
+/// whether or not anyone ever casts. So: only MediaRenderer/AVTransport
+/// announcements are considered (a renderer always announces its device type
+/// too, so the old catch-all <c>rootdevice</c> arm only added non-renderers),
+/// each LOCATION's outcome is cached (renderer → just bump LastSeen for an
+/// hour; not-a-renderer / unreachable → skip for a while on the passive path),
+/// duplicate in-flight fetches of one LOCATION are dropped, and at most
+/// <see cref="MaxConcurrentFetches"/> description fetches run at once.
 /// </summary>
 public sealed class DlnaCastService : IDisposable
 {
@@ -59,8 +69,28 @@ public sealed class DlnaCastService : IDisposable
     private const int    SsdpPort = 1900;
     private const string AvTransportType = "urn:schemas-upnp-org:service:AVTransport:1";
 
+    /// <summary>A known renderer's LOCATION isn't re-fetched for this long —
+    /// its re-announces just bump LastSeen.</summary>
+    private static readonly TimeSpan RendererRecheck   = TimeSpan.FromHours(1);
+    /// <summary>A description that isn't a renderer (no AVTransport) is skipped
+    /// this long on the passive path.</summary>
+    private static readonly TimeSpan NotRendererTtl    = TimeSpan.FromHours(24);
+    /// <summary>An unreachable/broken LOCATION (other subnet, device still
+    /// booting) is skipped this long on the passive path; an active scan
+    /// (user opened the Cast menu) always retries it.</summary>
+    private static readonly TimeSpan FetchFailedTtl    = TimeSpan.FromMinutes(10);
+    private const int MaxConcurrentFetches = 4;
+    private const int MaxLocations         = 256;
+
+    /// <summary>What a LOCATION's description told us: the renderer UDN, or null
+    /// for not-a-renderer / failed, valid until <c>Until</c>.</summary>
+    private sealed record LocationEntry(string? Udn, DateTime Until);
+
     private readonly ILogger<DlnaCastService> _logger;
     private readonly ConcurrentDictionary<string, RendererInfo> _renderers = new();
+    private readonly ConcurrentDictionary<string, LocationEntry> _locations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _inflight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _fetchGate = new(MaxConcurrentFetches, MaxConcurrentFetches);
     private readonly HttpClient _http;
     private DateTime _lastScan = DateTime.MinValue;
     private readonly SemaphoreSlim _scanLock = new(1, 1);
@@ -146,18 +176,22 @@ public sealed class DlnaCastService : IDisposable
             return;
         }
 
-        var deadline = DateTime.UtcNow.AddSeconds(3);
-        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        // One outstanding receive at a time, cancelled by the 3 s window. (The
+        // old loop started a fresh ReceiveAsync every 300 ms without cancelling
+        // the previous one, so a datagram could land in an abandoned receive and
+        // that renderer's reply was lost.)
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        window.CancelAfter(TimeSpan.FromSeconds(3));
+        while (!window.IsCancellationRequested)
         {
             try
             {
-                var recvTask = udp.ReceiveAsync();
-                var winner = await Task.WhenAny(recvTask, Task.Delay(300, ct));
-                if (winner != recvTask) continue;
-                var res = await recvTask;
-                _ = HandleSearchResponseAsync(Encoding.ASCII.GetString(res.Buffer), ct);
+                var res = await udp.ReceiveAsync(window.Token);
+                _ = HandleSearchResponseAsync(Encoding.ASCII.GetString(res.Buffer), activeScan: true, ct);
             }
-            catch { /* timeout / cancellation — let the deadline govern */ }
+            catch (OperationCanceledException) { break; }
+            catch (SocketException) { /* e.g. ICMP port-unreachable reset on Windows — keep listening */ }
+            catch (ObjectDisposedException) { break; }
         }
     }
 
@@ -167,16 +201,17 @@ public sealed class DlnaCastService : IDisposable
     /// between active scans show up in the cache without waiting.
     /// </summary>
     public Task IngestNotifyAsync(string packet, CancellationToken ct = default)
-        => HandleSearchResponseAsync(packet, ct);
+        => HandleSearchResponseAsync(packet, activeScan: false, ct);
 
     // ─── Description fetch ──────────────────────────────────────────────────
 
-    private async Task HandleSearchResponseAsync(string text, CancellationToken ct)
+    private async Task HandleSearchResponseAsync(string text, bool activeScan, CancellationToken ct)
     {
         // Parse out LOCATION and ST/NT header. We only care if it's something
         // that *could* be a MediaRenderer.
         string? location = null;
         string? typeHdr  = null;
+        string? nts      = null;
         foreach (var raw in text.Split('\n'))
         {
             var l = raw.TrimEnd('\r');
@@ -186,40 +221,91 @@ public sealed class DlnaCastService : IDisposable
                 typeHdr = l[3..].Trim();
             else if (l.StartsWith("NT:", StringComparison.OrdinalIgnoreCase))
                 typeHdr = l[3..].Trim();
+            else if (l.StartsWith("NTS:", StringComparison.OrdinalIgnoreCase))
+                nts = l[4..].Trim();
         }
+        // A device going away has nothing to fetch.
+        if (nts is not null && nts.Contains("byebye", StringComparison.OrdinalIgnoreCase)) return;
         if (location is null || !Uri.TryCreate(location, UriKind.Absolute, out var locUri)) return;
 
-        // Type hint speeds up filtering; otherwise we'll still try to parse
-        // the description and reject if it's not a MediaRenderer.
+        // Renderers announce their device type (MediaRenderer) and services
+        // (AVTransport) alongside rootdevice, so those two NTs are enough — the
+        // rootdevice arm only ever added routers/NAS/printers to fetch.
         if (typeHdr is not null &&
             !typeHdr.Contains("MediaRenderer", StringComparison.OrdinalIgnoreCase) &&
-            !typeHdr.Contains("AVTransport",   StringComparison.OrdinalIgnoreCase) &&
-            !typeHdr.Contains("rootdevice",    StringComparison.OrdinalIgnoreCase))
+            !typeHdr.Contains("AVTransport",   StringComparison.OrdinalIgnoreCase))
             return;
 
+        var now = DateTime.UtcNow;
+        if (_locations.TryGetValue(location, out var known) && known.Until > now)
+        {
+            // Known renderer: the announce only proves it's still online.
+            if (known.Udn is not null && _renderers.TryGetValue(known.Udn, out var seen))
+            {
+                seen.LastSeen = now;
+                return;
+            }
+            // Not a renderer / recently unreachable — skip on the passive path;
+            // an explicit scan retries (a TV that just booted may have answered
+            // NOTIFY before its HTTP server was up).
+            if (known.Udn is null && !activeScan) return;
+        }
+
+        // One fetch per LOCATION at a time — an announce burst is 2-6 frames.
+        if (!_inflight.TryAdd(location, 0)) return;
         try
         {
-            var desc = await _http.GetStringAsync(locUri, ct);
-            var info = ParseRenderer(desc, locUri);
-            if (info is null) return;
-            // If we already had this renderer, just bump LastSeen so it
-            // survives the TTL eviction. New entries get the default LastSeen
-            // from the record initializer.
-            if (_renderers.TryGetValue(info.Udn, out var existing))
+            await _fetchGate.WaitAsync(ct);
+            try
             {
-                existing.LastSeen = DateTime.UtcNow;
+                var desc = await _http.GetStringAsync(locUri, ct);
+                var info = ParseRenderer(desc, locUri);
+                if (info is null)
+                {
+                    RememberLocation(location, new LocationEntry(null, DateTime.UtcNow + NotRendererTtl));
+                    return;
+                }
+                RememberLocation(location, new LocationEntry(info.Udn, DateTime.UtcNow + RendererRecheck));
+                // If we already had this renderer, just bump LastSeen so it
+                // survives the TTL eviction. New entries get the default LastSeen
+                // from the record initializer.
+                if (_renderers.TryGetValue(info.Udn, out var existing))
+                {
+                    existing.LastSeen = DateTime.UtcNow;
+                }
+                else
+                {
+                    _renderers[info.Udn] = info;
+                    _logger.LogInformation("DLNA-Cast: discovered renderer {Name} ({Mfg}) at {Url}",
+                        info.FriendlyName, info.Manufacturer, info.AvTransportControlUrl);
+                }
             }
-            else
-            {
-                _renderers[info.Udn] = info;
-                _logger.LogInformation("DLNA-Cast: discovered renderer {Name} ({Mfg}) at {Url}",
-                    info.FriendlyName, info.Manufacturer, info.AvTransportControlUrl);
-            }
+            finally { _fetchGate.Release(); }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { /* shutting down */ }
         catch (Exception ex)
         {
+            RememberLocation(location, new LocationEntry(null, DateTime.UtcNow + FetchFailedTtl));
             _logger.LogDebug(ex, "DLNA-Cast: failed to fetch description {Url}", locUri);
         }
+        finally
+        {
+            _inflight.TryRemove(location, out _);
+        }
+    }
+
+    /// <summary>Record a LOCATION outcome; the map is bounded (expired entries
+    /// pruned first, then reset) so a chatty or hostile LAN can't grow it.</summary>
+    private void RememberLocation(string location, LocationEntry entry)
+    {
+        if (_locations.Count >= MaxLocations && !_locations.ContainsKey(location))
+        {
+            var now = DateTime.UtcNow;
+            foreach (var (k, v) in _locations)
+                if (v.Until <= now) _locations.TryRemove(k, out _);
+            if (_locations.Count >= MaxLocations) _locations.Clear();
+        }
+        _locations[location] = entry;
     }
 
     private static RendererInfo? ParseRenderer(string xml, Uri location)
@@ -354,5 +440,5 @@ public sealed class DlnaCastService : IDisposable
 
     private static string Xml(string s) => System.Security.SecurityElement.Escape(s) ?? s;
 
-    public void Dispose() { _scanLock.Dispose(); }
+    public void Dispose() { _scanLock.Dispose(); _fetchGate.Dispose(); }
 }

@@ -29,6 +29,12 @@ public sealed class FranchiseService(
     private const int MaxDepth = 6;
     private const int MaxNodes = 30;
 
+    /// <summary>How long a node's stored relations stand in for an AniList
+    /// fetch. Members of one franchise are refreshed one by one (45 s apart);
+    /// within this window the second, third … walk reuses what the first
+    /// fetched instead of re-spending the shared AniList budget on every node.</summary>
+    private static readonly TimeSpan ReuseFetchedFor = TimeSpan.FromDays(7);
+
     // TMDB collections change rarely; a short process cache spares a movie its
     // detail+collection round-trip on every rail open. (movie tmdbId → collId,
     // collId → collection). No eviction needed — bounded by library size.
@@ -57,19 +63,29 @@ public sealed class FranchiseService(
         var item = await db.MediaItems.FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
         if (item is null) return 0;
 
+        // Hit AniList's rate limit: keep what was learned, but leave the title
+        // unstamped so the queue retries it once the window has passed instead
+        // of filing a truncated graph as done for 30 days.
+        var rateLimited = false;
         try
         {
             // Id-less title (fresh import, beyond the airing resolver's quota):
             // bridge by title now — the resolver fills item ids in place and
             // persists them. A miss still stamps below, so the 30-day rescan is
-            // the retry cadence, not every page open.
+            // the retry cadence, not every page open — unless the miss was the
+            // rate limit talking.
             if (item.AniListId is null && item.MalId is null)
                 await malResolver.ResolveAsync(item, ct);
-            if (item.AniListId is null && item.MalId is null) return 0;
+            if (item.AniListId is null && item.MalId is null)
+            {
+                rateLimited = AniListClient.RateLimitRemaining > TimeSpan.Zero;
+                return 0;
+            }
 
             var visited = new Dictionary<int, AniListClient.AniListNode>();
             var edges   = new HashSet<(int From, int To, string Type)>();
             var queue   = new Queue<(int? AniId, int? MalId, int Depth)>();
+            var fetched = new HashSet<int>();   // relations taken from AniList (not storage) this walk
             queue.Enqueue((item.AniListId, item.MalId, 0));
 
             while (queue.Count > 0 && visited.Count < MaxNodes)
@@ -78,8 +94,18 @@ public sealed class FranchiseService(
                 var (aniId, malId, depth) = queue.Dequeue();
                 if (aniId is int known && visited.ContainsKey(known)) continue;
 
-                var rel = await aniList.GetRelationsAsync(aniId, malId, ct);
-                if (rel is null) continue;
+                var rel = aniId is int storedId ? await StoredRelationsAsync(db, storedId, ct) : null;
+                if (rel is null)
+                {
+                    try { rel = await aniList.GetRelationsAsync(aniId, malId, ct); }
+                    catch (AniListRateLimitedException)
+                    {
+                        rateLimited = true;
+                        break;
+                    }
+                    if (rel is null) continue;
+                    fetched.Add(rel.Node.AniListId);
+                }
                 if (visited.ContainsKey(rel.Node.AniListId)) continue;
                 visited[rel.Node.AniListId] = rel.Node;
 
@@ -118,7 +144,11 @@ public sealed class FranchiseService(
                         row.MalId = n.IdMal;  row.Title = n.Title;   row.Format = n.Format;
                         row.Year  = n.Year;   row.Episodes = n.Episodes;
                         row.CoverUrl = n.CoverUrl; row.Status = n.Status;
-                        row.FetchedAtUtc = DateTime.UtcNow;
+                        // FetchedAtUtc = when this node's OWN relations last came
+                        // from AniList — what StoredRelationsAsync trusts. A
+                        // snapshot refreshed from a neighbour's payload (leaf)
+                        // or replayed from storage doesn't renew it.
+                        if (fetched.Contains(id)) row.FetchedAtUtc = DateTime.UtcNow;
                     }
                     else
                     {
@@ -133,8 +163,12 @@ public sealed class FranchiseService(
                 }
 
                 var fromIds = edges.Select(e => e.From).Distinct().ToList();
+                // Read-only lookup set — untracked, so SaveChanges below doesn't
+                // diff every existing edge of the franchise.
                 var existingEdges = (await db.FranchiseEdges
+                        .AsNoTracking()
                         .Where(e => fromIds.Contains(e.FromAniListId))
+                        .Select(e => new { e.FromAniListId, e.ToAniListId, e.RelationType })
                         .ToListAsync(ct))
                     .Select(e => (e.FromAniListId, e.ToAniListId, e.RelationType))
                     .ToHashSet();
@@ -146,16 +180,53 @@ public sealed class FranchiseService(
                     });
             }
 
-            if (visited.Count > 1)
-                logger.LogInformation("[Franchise] {Title}: graph of {Nodes} node(s)", item.Title, visited.Count);
+            if (rateLimited)
+                logger.LogInformation("[Franchise] {Title}: AniList rate limit after {Nodes} node(s) — kept, will retry",
+                    item.Title, visited.Count);
+            else if (visited.Count > 1)
+                logger.LogInformation("[Franchise] {Title}: graph of {Nodes} node(s) ({Fetched} fetched, rest reused)",
+                    item.Title, visited.Count, fetched.Count);
             return visited.Count;
         }
         finally
         {
-            // Stamp even on failure so one broken title can't wedge the queue.
-            item.LastRelationsCheckAt = DateTime.UtcNow;
+            // Stamp even on failure so one broken title can't wedge the queue
+            // — but not on a rate limit, which says nothing about the title.
+            if (!rateLimited) item.LastRelationsCheckAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    /// <summary>One BFS step replayed from storage: the node's relations as
+    /// a previous walk fetched them, when that fetch is recent
+    /// (<see cref="ReuseFetchedFor"/>). Null → ask AniList: no fresh row, the
+    /// node was only ever seen as a neighbour (no outgoing edges stored — a
+    /// fetch stores every kept relation), or a neighbour snapshot is missing.</summary>
+    private static async Task<AniListClient.AniListRelations?> StoredRelationsAsync(
+        AppDbContext db, int aniListId, CancellationToken ct)
+    {
+        var node = await db.FranchiseNodes.AsNoTracking()
+            .FirstOrDefaultAsync(n => n.AniListId == aniListId, ct);
+        if (node is null || DateTime.UtcNow - node.FetchedAtUtc > ReuseFetchedFor) return null;
+
+        var stored = await db.FranchiseEdges.AsNoTracking()
+            .Where(e => e.FromAniListId == aniListId)
+            .Select(e => new { e.ToAniListId, e.RelationType })
+            .ToListAsync(ct);
+        if (stored.Count == 0) return null;
+
+        var targetIds = stored.Select(e => e.ToAniListId).Distinct().ToList();
+        var targets = await db.FranchiseNodes.AsNoTracking()
+            .Where(n => targetIds.Contains(n.AniListId))
+            .ToDictionaryAsync(n => n.AniListId, ct);
+        if (targets.Count != targetIds.Count) return null;
+
+        return new AniListClient.AniListRelations(
+            Snapshot(node),
+            stored.Select(e => (e.RelationType, Snapshot(targets[e.ToAniListId]))).ToList());
+
+        static AniListClient.AniListNode Snapshot(FranchiseNode n) => new(
+            n.AniListId, n.MalId, n.Title, n.Format, n.Year, n.Episodes, n.CoverUrl, n.Status);
     }
 
     // ── read ─────────────────────────────────────────────────────────────────
@@ -196,18 +267,26 @@ public sealed class FranchiseService(
     {
         if (item.AniListId is not int rootId) return new();
 
-        // Connected component around the root (undirected reachability).
+        // Connected component around the root (undirected reachability). Each
+        // hop asks only about the nodes the previous hop found — edges of the
+        // earlier ones are already in — so the layers (and the cap) come out
+        // exactly as when every hop re-queried the whole component.
         var component = new HashSet<int> { rootId };
-        while (true)
+        var frontier  = new List<int> { rootId };
+        while (frontier.Count > 0)
         {
-            var frontier = component.ToList();
+            var hop = frontier;
             var grown = await db.FranchiseEdges.AsNoTracking()
-                .Where(e => frontier.Contains(e.FromAniListId) || frontier.Contains(e.ToAniListId))
+                .Where(e => hop.Contains(e.FromAniListId) || hop.Contains(e.ToAniListId))
                 .Select(e => new { e.FromAniListId, e.ToAniListId })
                 .ToListAsync(ct);
-            var before = component.Count;
-            foreach (var e in grown) { component.Add(e.FromAniListId); component.Add(e.ToAniListId); }
-            if (component.Count == before || component.Count > MaxNodes * 2) break;
+            frontier = new List<int>();
+            foreach (var e in grown)
+            {
+                if (component.Add(e.FromAniListId)) frontier.Add(e.FromAniListId);
+                if (component.Add(e.ToAniListId))   frontier.Add(e.ToAniListId);
+            }
+            if (component.Count > MaxNodes * 2) break;
         }
         if (component.Count <= 1) return new();
 

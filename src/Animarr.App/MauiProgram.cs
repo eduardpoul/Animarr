@@ -76,24 +76,24 @@ public static class MauiProgram
                 {
                     webView.Settings.MixedContentMode = global::Android.Webkit.MixedContentHandling.AlwaysAllow;
 
-                    // Disable the WebView HTTP cache. Our bundle (index.html,
-                    // animarr-player.js, CSS) is served LOCALLY from the APK via
-                    // BlazorWebView's WebViewAssetLoader, so caching buys almost
-                    // nothing — but it actively hurts: after an app update the
-                    // WebView kept serving the *previous* index.html from cache
-                    // while the JS sub-resources refreshed, so gate changes in
-                    // index.html (e.g. the native-player gate) silently never
-                    // took effect and we chased phantom bugs. LoadNoCache forces
-                    // every request through the asset loader, guaranteeing the
-                    // shipped assets are what actually run.
-                    webView.Settings.CacheMode = global::Android.Webkit.CacheModes.NoCache;
+                    // HTTP cache stays ON (default LOAD_DEFAULT). It used to be
+                    // NoCache because after an app update the WebView kept
+                    // serving the *previous* index.html from cache while the JS
+                    // sub-resources refreshed, so gate changes in index.html
+                    // (e.g. the native-player gate) silently never took effect.
+                    // The once-per-build ClearCache(true) below now fixes exactly
+                    // that (it runs before the first navigation of a new build),
+                    // while NoCache also stopped the WebView from caching
+                    // everything REMOTE: the player/QR vendor scripts and Google
+                    // Fonts were re-downloaded and re-compiled on every launch,
+                    // and https images re-fetched on every page view.
 
                     Android.Util.Log.Info("Animarr.WebView",
                         $"Configured: MixedContentMode={webView.Settings.MixedContentMode}, CacheMode={webView.Settings.CacheMode}, chromeClient=AnimarrWebChromeClient");
                 }
 
-                // CacheMode=NoCache stops NEW caching, but it does NOT evict
-                // what's already on disk. The WebViewAssetLoader sub-resources
+                // The WebView's disk cache survives app updates. The
+                // WebViewAssetLoader sub-resources
                 // (the content-hashed scoped-CSS bundle + app.css, pulled via
                 // @import from the unhashed Animarr.App.styles.css) were cached
                 // by a PRIOR app version and kept being served stale: the main
@@ -317,6 +317,15 @@ public static class MauiProgram
             {
                 UseCookies      = true,
                 CookieContainer = cookieJar,
+                // Opt in to compressed responses. The default (None) makes
+                // Android's AndroidMessageHandler send `Accept-Encoding:
+                // identity`, so the catalog / home JSON always came back
+                // uncompressed even from a compressing server or proxy.
+                // AndroidMessageHandler decodes all three (BrotliStream ships
+                // in the Android runtime).
+                AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                                       | System.Net.DecompressionMethods.Deflate
+                                       | System.Net.DecompressionMethods.Brotli,
             };
             var persist  = new CookiePersistHandler(cookieJar) { InnerHandler = inner };
             var pipeline = new ServerAddressHandler(addr)      { InnerHandler = persist };

@@ -28,6 +28,38 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+// Compress dynamic text responses (API JSON, the SPA shell, HLS playlists).
+// Nothing did before — Caddy's site block has no `encode` and the direct :8080
+// path is bare Kestrel — so e.g. the full catalog list went out as ~1.4 MB of
+// identity JSON (≈0.25 MB as Brotli).
+// Levels: the JSON writer flushes the response every few KB, and every flush
+// ends a Brotli block — at Brotli's Fastest level (quality 1) that collapsed
+// the catalog to only 2.2× (worse than gzip). Optimal is quality 4 since
+// .NET 7 (not 11) and holds ~6× through the flushes at ~7 ms per MB; gzip
+// shrugs off flushes, so it stays at Fastest (4×, ~1.3 ms per MB).
+// Media bytes are never touched: video/*, audio/*, image/* and
+// application/octet-stream aren't in the MIME list, and the middleware skips
+// any response that carries Content-Range (Range requests) or already has a
+// Content-Encoding (MapStaticAssets' precompressed .br/.gz files).
+// XML is left out on purpose: its only producer is the DLNA MediaServer
+// (desc.xml + SOAP), and renderer HTTP stacks are too uneven to risk it.
+// EnableForHttps: the same JSON goes out behind Caddy's TLS; BREACH needs an
+// attacker who can both inject text into a response and watch its encrypted
+// length, which is out of scope for a household server.
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true;
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+    o.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes
+        .Concat(["application/vnd.apple.mpegurl"]);
+    o.ExcludedMimeTypes = ["text/xml", "application/xml"];
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(o =>
+    o.Level = System.IO.Compression.CompressionLevel.Optimal);
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(o =>
+    o.Level = System.IO.Compression.CompressionLevel.Fastest);
+
 // Bind AppSettings
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("AppSettings"));
@@ -46,9 +78,21 @@ var dbDir = Path.GetDirectoryName(dbPath);
 if (!string.IsNullOrEmpty(dbDir))
     Directory.CreateDirectory(dbDir);
 
-builder.Services.AddDbContextFactory<AppDbContext>(options =>
+// Pooled: every service/endpoint opens its own short-lived context (2–4 per
+// request, 30+ for next-up), and a pooled lease skips the ~150 µs of
+// per-instance setup. Safe because AppDbContext carries no per-instance state
+// (options-only ctor, no OnConfiguring) and the interceptors are singletons
+// that keep nothing per context between saves. Call sites keep injecting
+// IDbContextFactory<AppDbContext>.
+// LibraryAccessChangeInterceptor bumps LibraryAccessVersion after any write to
+// FolderWatchers/Users/Roles — MediaPathValidator's cached access snapshot.
+builder.Services.AddSingleton<LibraryAccessVersion>();
+builder.Services.AddSingleton<LibraryAccessChangeInterceptor>();
+builder.Services.AddPooledDbContextFactory<AppDbContext>((sp, options) =>
     options.UseSqlite(connectionString)
-           .AddInterceptors(new SqliteWalInterceptor()));
+           .AddInterceptors(
+               new SqliteWalInterceptor(),
+               sp.GetRequiredService<LibraryAccessChangeInterceptor>()));
 
 // H-10: DataProtection so we can encrypt API keys in AppConfig.
 // Keys are persisted under /app/data so they survive container restarts.
@@ -75,6 +119,13 @@ builder.Services.AddSingleton<FolderWatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderWatcherService>());
 builder.Services.AddSingleton<TorrentEngineService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TorrentEngineService>());
+// Hosted services stop in reverse registration order, so the torrent engine
+// (registered early) stops late — and its stop is where it persists counters
+// and lets MonoTorrent write fast-resume (else: full re-hash on next boot).
+// Pin the whole-host stop budget at 30 s (the .NET default, made explicit so
+// nobody lowers it); `docker stop` must allow more than this
+// (stop_grace_period), or SIGKILL lands first.
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(30));
 
 // HTTP clients
 builder.Services.AddScoped<TmdbAuthHandler>();
@@ -121,12 +172,18 @@ builder.Services.AddScoped<MetadataService>();
 // Background "metadata language changed → re-fetch the library" pass + its progress.
 builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
+// One cached ffprobe per file version for HLS start, /api/probe and /api/video.
+builder.Services.AddSingleton<MediaProbeCache>();
 builder.Services.AddSingleton<HlsSessionService>();
+// "Someone is watching" (HLS sessions + player progress pings) — background
+// full-file jobs (trickplay, chromaprint) park while it's true.
+builder.Services.AddSingleton<PlaybackActivity>();
 builder.Services.AddSingleton<DlnaService>();
 // Probes /dev/dri, vainfo, nvidia-smi, ffmpeg -hwaccels at startup so the
 // Settings UI can show what's actually usable on this host.
 builder.Services.AddSingleton<HardwareInfoService>();
 builder.Services.AddScoped<MediaFileResolver>();
+builder.Services.AddSingleton<MediaFileResolveCache>();
 builder.Services.AddScoped<EpisodeLlmResolver>();
 builder.Services.AddScoped<SeasonOffsetResolver>();
 builder.Services.AddScoped<ExternalTrackService>();
@@ -459,6 +516,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
+
+// Ahead of everything that writes a body (static files, the SPA fallback,
+// every endpoint) so they all go through it — see AddResponseCompression.
+app.UseResponseCompression();
 
 // Map modern font MIME types — Kestrel's default for .ttf is the obsolete
 // `application/x-font-ttf` which some browsers refuse to apply. font/ttf is

@@ -37,7 +37,12 @@
            UserPreferences.HomeSectionsJson via the shared HomeSections
            schema. Keys the schema knows but the app hasn't shipped yet
            (thisweek / foryou / discover) are skipped silently — they'll
-           light up here when those features land. *@
+           light up here when those features land.
+           Sections that follow the folder filter are keyed by (section,
+           folder) so a folder switch re-creates them. The section name keeps
+           the keys unique: keyed by the folder alone, the hero and the
+           this-week rail were two siblings with the same key, and Blazor threw
+           ("more than one sibling … same key") as soon as a folder was picked. *@
         @foreach (var section in _homeSections)
         {
             @switch (section)
@@ -50,11 +55,11 @@
                        hero to that folder's items. *@
                     @if (_heroItems.Length > 0)
                     {
-                        <CatalogContinueHero @key="_activeSection" Items="@_heroItems" IntervalSec="@_heroInterval" />
+                        <CatalogContinueHero @key="(section, _activeSection)" Items="@_heroItems" IntervalSec="@_heroInterval" />
                     }
                     else if (_filteredFeatured.Count > 0)
                     {
-                        <CatalogHero @key="_activeSection" Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
+                        <CatalogHero @key="(section, _activeSection)" Items="@_filteredFeatured" IntervalSec="@_heroInterval" />
                     }
                     break;
 
@@ -67,7 +72,7 @@
 
                 case "thisweek":
                     @* Follows the folder filter like the hero and the library block. *@
-                    <ThisWeekRail @key="_activeSection" Items="@_filteredThisWeek" />
+                    <ThisWeekRail @key="(section, _activeSection)" Items="@_filteredThisWeek" />
                     break;
 
                 case "foryou":
@@ -113,11 +118,13 @@
                         {
                             @* Render with headroom (41 covers ~21 columns × 2
                                rows); the collocated JS trims to the exact slot
-                               count for the current width. *@
+                               count for the current width. @key keeps a card
+                               with its title across filter changes (Ids are
+                               unique — de-duplicated by Id). *@
                             <div class="home-lib__grid" @ref="_libGridRef">
                                 @foreach (var item in _filtered.Take(41))
                                 {
-                                    <Poster Item="@item" />
+                                    <Poster @key="item.Id" Item="@item" />
                                 }
                                 <a class="home-lib__more tv-focus" href="/library" aria-label="@L["home.view_all"]">
                                     <span class="home-lib__more-icon"><DIcon Name="grid" Size="26" /></span>
@@ -193,12 +200,26 @@
         {
             ApplySnapshot(cached);
             _ = RefreshAsync();
+            if (_homeSections.Contains("foryou")) _ = LoadForYouAsync();
             return;
         }
 
         var snapshot = await FetchAsync();
         FeedCache.Store(snapshot);
         ApplySnapshot(snapshot);
+        if (_homeSections.Contains("foryou")) _ = LoadForYouAsync();
+    }
+
+    /// <summary>"For you" rail — loaded on its own so a cold TMDB backfill
+    /// doesn't hold the rest of Home; renders when it arrives, and the cached
+    /// feed keeps it for the next visit.</summary>
+    private async Task LoadForYouAsync()
+    {
+        try { _forYou = await Api.GetForYouAsync(); }
+        catch { return; }
+        if (_cts.IsCancellationRequested) return;
+        if (_snapshot is not null) FeedCache.Store(_snapshot = _snapshot with { ForYou = _forYou });
+        await InvokeAsync(StateHasChanged);
     }
 
     private readonly CancellationTokenSource _cts = new();
@@ -222,11 +243,17 @@
         catch { /* keep the cached feed */ }
     }
 
+    /// <summary>The feed on screen — "For you" lands into it later.</summary>
+    private HomeFeedSnapshot? _snapshot;
+
     private void ApplySnapshot(HomeFeedSnapshot s)
     {
+        _snapshot = s;
         _continueItems = s.Continue;
         _nextUpItems   = s.NextUp;
-        _forYou        = s.ForYou;
+        // "For you" loads on its own (LoadForYouAsync); a feed fetched before
+        // it landed mustn't put the older list back.
+        if (_forYou.Length == 0) _forYou = s.ForYou;
         _thisWeek      = s.ThisWeek;
         _sections      = s.Sections;
         _childFolderIdsBySection.Clear();
@@ -268,11 +295,6 @@
         // Next Up — next episode per engaged series. Folds "new episode"
         // items into the hero and fills the rail under it.
         var nextUpTask = Safe(() => Api.GetNextUpAsync(take: 12), Array.Empty<ContinueWatchItemDto>());
-        // "For you" — heuristic recommendations (skipped entirely when the
-        // user hid the section, so no wasted TMDB round-trips).
-        var forYouTask = _homeSections.Contains("foryou")
-            ? Safe(() => Api.GetForYouAsync(), Array.Empty<RecCardDto>())
-            : Task.FromResult(Array.Empty<RecCardDto>());
         // "This week" — airing events for the current week (rail collapses
         // when the week is empty).
         var calendarTask = _homeSections.Contains("thisweek")
@@ -280,12 +302,12 @@
             : Task.FromResult(Array.Empty<CalendarEventDto>());
         var sectionsTask = Safe(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>(), required: true);
         var foldersTask  = Safe(() => Api.GetFoldersAsync(), Array.Empty<FolderWatcherDto>());
-        var itemsTask    = Safe(() => Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" }),
+        var itemsTask    = Safe(() => Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView }),
                                 Array.Empty<MediaItemDto>(), required: true);
         // Carousel cadence from server config.
         var intervalTask = Safe(() => Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec), (AppConfigEntryDto?)null);
 
-        await Task.WhenAll(continueTask, nextUpTask, forYouTask, calendarTask,
+        await Task.WhenAll(continueTask, nextUpTask, calendarTask,
                            sectionsTask, foldersTask, itemsTask, intervalTask);
 
         var weekEnd  = DateTime.Now.Date.AddDays(7);
@@ -340,7 +362,7 @@
 
         return new HomeFeedSnapshot(
             userId, Animarr.UI.Services.MediaUrl.Base, complete,
-            continueTask.Result, nextUpTask.Result, forYouTask.Result, thisWeek,
+            continueTask.Result, nextUpTask.Result, _forYou, thisWeek,
             sections, childIds, allItems, featuredPool, heroInterval);
     }
 
@@ -470,9 +492,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Init is idempotent (the JS guards on a per-element flag), and the
-        // grid element can be re-created by a section re-order — so re-run it
-        // on every render while the grid exists.
+        // Init is idempotent (the JS guards on a per-element flag; a repeat
+        // call just re-trims), and the grid element can be re-created by a
+        // section re-order or its @key'ed posters re-ordered by a filter
+        // change — so re-run it on every render while the grid exists.
         if (_loading || _libGridRef.Id is null) return;
         try
         {

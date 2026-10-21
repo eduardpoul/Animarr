@@ -3,8 +3,9 @@ using Animarr.Shared.Models;
 namespace Animarr.Shared.Realtime;
 
 /// <summary>
-/// Methods the torrent hub sends to clients. The server pushes these every
-/// ~500 ms while at least one client is connected.
+/// Methods the torrent hub sends to clients. The server pushes a snapshot when
+/// a torrent's stats change (at most ~1 Hz), every ~15 s as a resync while
+/// torrents exist, and once to each new connection.
 /// </summary>
 public static class TorrentHubMethods
 {

@@ -4,6 +4,20 @@
     # build: .
     container_name: animarr
     restart: unless-stopped
+    # On stop the torrent engine announces "stopped" to trackers and writes
+    # fast-resume data; Docker's default 10 s before SIGKILL can cut that short
+    # (→ a full hash re-check of every torrent on the next start). The app's
+    # own graceful-shutdown budget is 30 s (HostOptions.ShutdownTimeout), so
+    # give Docker a margin above it before SIGKILL.
+    stop_grace_period: 45s
+    # Cap the container's console log. Docker's default json-file driver does
+    # not rotate unless the daemon is configured to, so the log would grow for
+    # as long as the container exists.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "8450:8080"   # Web UI
       - "6881:6881"   # Torrent (TCP) — required for incoming connections
@@ -11,8 +25,8 @@
     environment:
       - TZ=UTC        # e.g. America/New_York, Europe/London, Asia/Tokyo
       # ── Built-in LLM on GPU (optional) ───────────────────────────────────
-      # Let the embedded llama.cpp provider use the GPU via Vulkan. On first
-      # boot the container installs Vulkan drivers (cached on the data volume).
+      # Let the embedded llama.cpp provider use the GPU via Vulkan (the Vulkan
+      # drivers ship in the image; falls back to CPU if the GPU isn't usable).
       # Also uncomment the `devices:` + `group_add:` block below.
       # - ANIMARR_LLM_VULKAN=1
     volumes:
@@ -23,6 +37,17 @@
       # Use the same right-side path when configuring a folder in Animarr.
       - /your/media/path:/media:rw
       # - /another/path:/media2:rw
+
+    # ── HLS transcode scratch in RAM (optional) ──────────────────────────────
+    # Live transcodes / remuxes write short-lived HLS segments to
+    # /tmp/animarr-hls. Without a tmpfs they land in the container's writable
+    # layer (on Unraid: docker.img), i.e. constant disk writes while watching.
+    # A tmpfs keeps them in RAM, and that RAM counts toward the container's
+    # memory. Each stream keeps only a rolling window of segments, so 2g is
+    # enough for several concurrent streams (raise it if you often run many
+    # 4K remuxes at once). If the tmpfs fills up, the stream fails.
+    # tmpfs:
+    #   - /tmp:size=2g
 
     # ── GPU passthrough for the embedded LLM (AMD/Intel via Vulkan) ──────────
     # Uncomment together with ANIMARR_LLM_VULKAN=1 above. NVIDIA users instead

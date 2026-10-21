@@ -62,11 +62,46 @@ public sealed partial class HlsSessionService
             lock (_boundaryLock) { return _restartBoundaries.ToArray(); }
         }
 
+        // ── Look-ahead throttle + segment pruning (HlsSessionService.Throttle.cs) ──
+        // All of these are read and written under ThrottleLock: segment requests,
+        // the throttle tick and the seek-restart all touch them concurrently.
+
+        /// <summary>Guards the throttle/prune fields below and the Process swap.</summary>
+        public object ThrottleLock { get; } = new();
+
+        /// <summary>First segment the CURRENT ffmpeg run writes: the start
+        /// segment, or the target of the latest seek-restart. Segment numbers
+        /// below it on disk belong to an earlier run.</summary>
+        public int RunStartSegment;
+
+        /// <summary>Highest segment of the current run known to be complete on
+        /// disk, found by walking forward from <see cref="RunStartSegment"/>
+        /// (<c>RunStartSegment - 1</c> = nothing yet). Contiguous on purpose: a
+        /// plain "highest seg-N in the dir" also saw files a previous run left
+        /// further ahead, so after a backward restart every not-yet-written
+        /// segment looked "behind ffmpeg" and triggered another restart.</summary>
+        public int ProducedTop;
+
+        /// <summary>Furthest segment the player has requested since the current
+        /// run began. Pruning keeps a window behind it; the throttle measures
+        /// ffmpeg's lead against it.</summary>
+        public int PlayFrontier;
+
+        /// <summary>True while ffmpeg is SIGSTOPped by the throttle.</summary>
+        public bool Paused;
+
+        /// <summary>The prune floor of the last completed sweep, so the tick only
+        /// lists the dir when the floor moved. Reset by a restart.</summary>
+        public int LastPruneFloor = int.MinValue;
+
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
             int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
-            string? audioCodec = null, bool is10Bit = false)
+            string? audioCodec = null, bool is10Bit = false, int startSegment = 0)
         {
+            RunStartSegment = startSegment;
+            ProducedTop     = startSegment - 1;
+            PlayFrontier    = startSegment;
             Token       = token;
             SourcePath  = source;
             OutputDir   = dir;
@@ -95,11 +130,24 @@ public sealed partial class HlsSessionService
         public void Touch() => LastActive = DateTime.UtcNow;
 
         /// <summary>Replace the ffmpeg process after a seek-restart. The old
-        /// process must already be terminated; we dispose it here.</summary>
-        public void SwapProcess(Process newProc)
+        /// process must already be terminated; we dispose it here. The throttle
+        /// state restarts with the new run (fresh process = not paused, nothing
+        /// produced yet, player positioned at the restart target) — swapped under
+        /// ThrottleLock so the throttle tick never pairs the new process with the
+        /// old run's numbers.</summary>
+        public void SwapProcess(Process newProc, int runStartSegment)
         {
-            var old = Process;
-            Process = newProc;
+            Process old;
+            lock (ThrottleLock)
+            {
+                old = Process;
+                Process         = newProc;
+                RunStartSegment = runStartSegment;
+                ProducedTop     = runStartSegment - 1;
+                PlayFrontier    = runStartSegment;
+                Paused          = false;
+                LastPruneFloor  = int.MinValue;
+            }
             try { old.Dispose(); } catch { }
         }
     }

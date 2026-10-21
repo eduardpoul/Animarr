@@ -52,15 +52,15 @@ internal static class MediaEndpoints
             int? skip,
             int? take,
             string? sort,
+            string? view,
             IDbContextFactory<AppDbContext> dbFactory,
             Animarr.Web.Services.Auth.IUserContext userCtx,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var q = db.MediaItems
-                .Include(m => m.Tags)
-                .Include(m => m.Categories).ThenInclude(c => c.Category)
-                .AsQueryable();
+            // Read-only: rows are mapped to DTOs and dropped, so skip change
+            // tracking (and its identity-map bookkeeping) for the whole library.
+            var q = db.MediaItems.AsNoTracking();
 
             // v4 per-user filter — if the caller's role has a folder allowlist,
             // hide every MediaItem whose FolderId isn't in it. Built-in roles
@@ -111,7 +111,6 @@ internal static class MediaEndpoints
             if (skip is not null) q = q.Skip(skip.Value);
             if (take is not null) q = q.Take(take.Value);
 
-            var rows = await q.ToListAsync(ct);
             // Per-user IsFavorite — one query for the whole list, then
             // O(1) HashSet lookups during projection.
             HashSet<Guid>? favIds = null;
@@ -122,6 +121,24 @@ internal static class MediaEndpoints
                     .Select(f => f.MediaItemId)
                     .ToListAsync(ct)).ToHashSet();
             }
+
+            // ?view=card — the slim shape the list screens ask for (see
+            // MediaListQuery.View / MediaMappings.CardRow). Projected in SQL,
+            // so the heavy JSON/text columns are never read.
+            if (string.Equals(view, MediaListQuery.CardView, StringComparison.OrdinalIgnoreCase))
+            {
+                var cards = await q.Select(MediaMappings.CardRow).AsSplitQuery().ToListAsync(ct);
+                return Results.Ok(cards.Select(c => c.ToCardDto(favIds)).ToArray());
+            }
+
+            // Default: the full DTO — what every client before ?view= gets.
+            // Split query: both collection Includes in one statement made
+            // SQLite join tags × categories onto the wide MediaItems rows.
+            var rows = await q
+                .Include(m => m.Tags)
+                .Include(m => m.Categories).ThenInclude(c => c.Category)
+                .AsSplitQuery()
+                .ToListAsync(ct);
             return Results.Ok(rows.Select(r => r.ToDto(favIds)).ToArray());
         });
 
@@ -278,6 +295,7 @@ internal static class MediaEndpoints
                 QueuedAt     = DateTime.UtcNow,
             });
             await db.SaveChangesAsync(ct);
+            IdentificationQueueProcessorService.Wake();
             return Results.Accepted();
         }).RequireAuthorization(CuratePolicy);
 
@@ -442,6 +460,23 @@ internal static class MediaEndpoints
                 .OrderByDescending(m => m.CreatedAt)
                 .ToListAsync(ct);
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
+        });
+
+        // Count-only twin of the list above for the NavPane chip, which used
+        // to download every NeedsReview DTO (candidates included) just to read
+        // .Length. Same role folder filter + predicate, so it always matches
+        // the list (and the hub's NeedsReviewCountChanged push).
+        app.MapGet(ApiRoutes.MediaNeedsReviewCount, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var count = await db.MediaItems
+                .ApplyRoleFolderFilter(me?.Role)
+                .CountAsync(m => (int)m.IdentificationStatus == (int)SharedEnums.IdentificationStatus.NeedsReview, ct);
+            return Results.Ok(count);
         });
 
         // File enumeration — surfaces the (season, episode) → file mapping the
@@ -671,10 +706,12 @@ internal static class MediaEndpoints
         // image-cache, so a 200-episode donghua stops repeating one season poster.
         app.MapGet(ApiRoutes.MediaEpisodeThumb, async (
             Guid id, int season, int episode,
+            HttpContext http,
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
             TmdbClient tmdb,
             MediaCachePaths cachePaths,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache memCache,
             IUserContext userCtx,
             CancellationToken ct) =>
         {
@@ -684,41 +721,75 @@ internal static class MediaEndpoints
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (item is null) return Results.NotFound();
 
+            // A found thumb never changes for its URL (the cache file is keyed by
+            // season/episode and kept), but the URL carries no version stamp — so
+            // a day, not immutable. private: role folders make it per-user.
+            IResult Thumb(string path)
+            {
+                http.Response.Headers.CacheControl = "private, max-age=86400";
+                return Results.File(path, "image/jpeg", enableRangeProcessing: true);
+            }
+
             static bool Ok(string p) => File.Exists(p) && new FileInfo(p).Length > 0;
             var cache = Path.Combine(cachePaths.ForFolder(item.FolderId), $"ep-s{season}e{episode}.jpg");
             if (Ok(cache))
-                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+                return Thumb(cache);
 
+            // Per-item cached: a season grid's first open no longer re-walks and
+            // re-parses the whole folder for every card.
             var files = await resolver.ResolveAsync(id, ct);
             var f = files.FirstOrDefault(x => (x.Season ?? 1) == season && x.Episode == episode);
 
-            // 1) TMDB episode still. For donghua absolute/re-split layouts the
-            //    matching TMDB episode is the absolute one (single TMDB season).
-            if (item.TmdbId is int tmdbId && tmdbId > 0)
+            // This card fell back to the show's art recently for the same file
+            // (no still, no frame) — skip straight to that instead of repeating
+            // the TMDB lookup and the ffmpeg spawn on every view.
+            // A miss is only remembered when this pass actually established it:
+            // not on a TMDB hiccup, not when the client went away mid-grab, and
+            // not again on a known miss (re-Remembering would slide the TTL on
+            // every view and pin the fallback for as long as someone browses).
+            var knownMiss  = EpisodeThumbMisses.IsKnown(memCache, id, season, episode, f?.FilePath);
+            var definitive = true;
+            if (!knownMiss)
             {
-                var tmdbSeason = f?.AbsoluteEpisode is not null ? 1 : season;
-                var tmdbEp     = f?.AbsoluteEpisode ?? episode;
-                try
+                // 1) TMDB episode still. For donghua absolute/re-split layouts the
+                //    matching TMDB episode is the absolute one (single TMDB season).
+                //    One (cached) season lookup serves every card of the grid.
+                if (item.TmdbId is int tmdbId && tmdbId > 0)
                 {
-                    var detail = await tmdb.GetSeasonDetailAsync(tmdbId, tmdbSeason, ct: ct);
-                    var still  = detail?.Episodes?.FirstOrDefault(e => e.EpisodeNumber == tmdbEp)?.StillPath;
-                    if (!string.IsNullOrEmpty(still)
-                        && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
-                        && Ok(cache))
-                        return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
+                    var tmdbSeason = f?.AbsoluteEpisode is not null ? 1 : season;
+                    var tmdbEp     = f?.AbsoluteEpisode ?? episode;
+                    try
+                    {
+                        var stills = await TmdbSeasonStills.GetAsync(memCache, tmdb, tmdbId, tmdbSeason, ct);
+                        string? still = null;
+                        stills?.TryGetValue(tmdbEp, out still);
+                        if (!string.IsNullOrEmpty(still)
+                            && await tmdb.DownloadImageAsync(TmdbClient.StillUrl(still!), cache, ct)
+                            && Ok(cache))
+                            return Thumb(cache);
+                    }
+                    catch { definitive = false; /* network/TMDB hiccup — fall through to ffmpeg */ }
                 }
-                catch { /* network/TMDB hiccup — fall through to ffmpeg */ }
+
+                // 2) ffmpeg frame from the on-disk video.
+                if (f?.FilePath is string fp && File.Exists(fp)
+                    && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
+                    return Thumb(cache);
+                ct.ThrowIfCancellationRequested();
             }
 
-            // 2) ffmpeg frame from the on-disk video.
-            if (f?.FilePath is string fp && File.Exists(fp)
-                && await GrabVideoFrameAsync(fp, cache, ct) && Ok(cache))
-                return Results.File(cache, "image/jpeg", enableRangeProcessing: true);
-
             // 3) Last resort: the show's own art, so the card is never broken.
+            //    Not written as this episode's thumb (a still or a frame may turn
+            //    up later): remembered for a while instead, and served with
+            //    no-cache so the client picks up the real thumb once there is one.
             var fallback = item.FanartPath ?? item.PosterPath;
             if (!string.IsNullOrEmpty(fallback) && File.Exists(fallback))
+            {
+                if (!knownMiss && definitive)
+                    EpisodeThumbMisses.Remember(memCache, id, season, episode, f?.FilePath);
+                http.Response.Headers.CacheControl = "private, no-cache";
                 return Results.File(fallback, "image/jpeg", enableRangeProcessing: true);
+            }
 
             return Results.NotFound();
         })
@@ -756,7 +827,10 @@ internal static class MediaEndpoints
             var lang = (await config.GetAsync(Animarr.Shared.AppConfigKeys.MetadataLanguage, ct) ?? "en")
                 .Trim().ToLowerInvariant();
 
+            // Untracked: the common path only reads. A stale refresh below still
+            // works — RemoveRange attaches the detached rows as Deleted.
             var cached = await db.EpisodeMetadata
+                .AsNoTracking()
                 .Where(e => e.MediaItemId == id)
                 .ToListAsync(ct);
 
@@ -811,7 +885,6 @@ internal static class MediaEndpoints
             IDbContextFactory<AppDbContext> dbFactory,
             MediaFileResolver resolver,
             SegmentDetectionService detector,
-            IServiceScopeFactory scopeFactory,
             IUserContext userCtx,
             CancellationToken ct) =>
         {
@@ -858,29 +931,23 @@ internal static class MediaEndpoints
                             // chromaprint provider can still detect it (e.g. donghua,
                             // which aren't on AniList, or an episode chromaprint simply
                             // missed on its last pass), but it decodes minutes of audio
-                            // — too slow to run inline. The batch pass would do it,
-                            // except it skips already-scanned titles (LastSegmentScanAt),
-                            // so a newly-added episode — or a stubborn miss — never gets
-                            // another shot. Run chromaprint for THIS episode in the
-                            // background, debounced once per process so repeat opens of
-                            // a genuinely segment-less episode don't re-decode it; it'll
-                            // be ready on a later open.
+                            // — too slow to run inline, and far too heavy to start the
+                            // moment Play is pressed (up to 8 ffmpeg decodes, GBs of
+                            // reads racing the player's first segments). The batch pass
+                            // would do it, except it skips already-scanned titles
+                            // (LastSegmentScanAt), so a newly-added episode — or a
+                            // stubborn miss — never gets another shot. Queue THIS
+                            // episode for the background pass, which runs it at low
+                            // priority once nobody is watching; debounced once per
+                            // process so repeat opens of a genuinely segment-less
+                            // episode don't re-decode it; it'll be ready on a later open.
                             if ((missingIntro || missingCredits) && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
                             {
                                 var peers = files
                                     .Where(f => (f.Season ?? 1) == s && f.Episode != null && !string.IsNullOrEmpty(f.FilePath))
                                     .Select(f => (f.Episode!.Value, f.FilePath!)).Distinct().ToList();
-                                var fpBg = fp!;
-                                _ = Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        using var scope = scopeFactory.CreateScope();
-                                        var bg = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
-                                        await bg.DetectForEpisodeAsync(item, s, e, fpBg, peers, cheapOnly: false, CancellationToken.None);
-                                    }
-                                    catch { /* best-effort background detection */ }
-                                });
+                                if (!SegmentDetectionQueue.TryEnqueue(new SegmentDetectionQueue.Request(item, s, e, fp!, peers)))
+                                    _lazyHeavyTried.TryRemove($"{id}|{s}|{e}", out _);   // queue full — a later open retries
                             }
                         }
                     }
@@ -1108,7 +1175,14 @@ internal static class MediaEndpoints
 
     /// <summary>Best-effort: grab one ~480px-wide jpeg frame from <paramref name="file"/>
     /// into <paramref name="outPath"/>. Seeks 90s in (past the OP); retries near
-    /// the start for very short clips.</summary>
+    /// the start for very short clips.
+    ///
+    /// Both pipes are drained (ffmpeg's ~4 KB banner+stats on an unread stderr
+    /// filled the Windows pipe buffer and hung the grab with its gate slot
+    /// held), the frame is written to a temp file and moved into place only on
+    /// a clean exit (the thumb endpoint serves any non-empty file at outPath,
+    /// so a partial JPEG would stick), and a cancelled or stuck run is killed
+    /// before the gate slot is released.</summary>
     private static async Task<bool> GrabVideoFrameAsync(string file, string outPath, CancellationToken ct)
     {
         await _frameGrabGate.WaitAsync(ct);
@@ -1117,6 +1191,7 @@ internal static class MediaEndpoints
             Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
             foreach (var ss in new[] { "90", "3" })
             {
+                var tmp = $"{outPath}.{Guid.NewGuid():N}.tmp.jpg";
                 try
                 {
                     var psi = new System.Diagnostics.ProcessStartInfo
@@ -1127,17 +1202,49 @@ internal static class MediaEndpoints
                         UseShellExecute = false,
                         CreateNoWindow  = true,
                     };
-                    foreach (var a in new[] { "-nostdin", "-ss", ss, "-i", file,
+                    // -threads 2 (not auto = cores): with 3 gate slots a season's
+                    // burst of thumbs otherwise spawns 3 × cores decoder threads;
+                    // 2 rather than 1 because reaching the 90 s mark decodes up to
+                    // a GOP of (possibly 4K HEVC) frames.
+                    foreach (var a in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats",
+                                              "-threads", "2", "-ss", ss, "-i", file,
                                               "-frames:v", "1", "-vf", "scale=480:-1",
-                                              "-q:v", "4", "-y", outPath })
+                                              "-q:v", "4", "-y", tmp })
                         psi.ArgumentList.Add(a);
 
                     using var p = System.Diagnostics.Process.Start(psi);
                     if (p is null) continue;
-                    await p.WaitForExitAsync(ct);
-                    if (File.Exists(outPath) && new FileInfo(outPath).Length > 0) return true;
+                    var stdout = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+                    var stderr = p.StandardError.ReadToEndAsync(CancellationToken.None);
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(60));
+                    try
+                    {
+                        await p.WaitForExitAsync(timeout.Token);
+                        await Task.WhenAll(stdout, stderr);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        try { p.Kill(entireProcessTree: true); } catch { }
+                        try { await p.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+                        if (ct.IsCancellationRequested) return false;
+                        continue;   // stuck on this offset — try the next one
+                    }
+                    if (p.ExitCode != 0 || !File.Exists(tmp) || new FileInfo(tmp).Length == 0) continue;
+
+                    try { File.Move(tmp, outPath, overwrite: true); }
+                    catch (IOException) when (File.Exists(outPath) && new FileInfo(outPath).Length > 0)
+                    {
+                        // A concurrent grab of the same episode won and its file is
+                        // being served (Windows won't replace an open file) — use it.
+                    }
+                    return true;
                 }
                 catch { /* try the next seek offset */ }
+                finally
+                {
+                    try { File.Delete(tmp); } catch { /* absent after a successful move */ }
+                }
             }
             return false;
         }

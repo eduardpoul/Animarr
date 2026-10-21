@@ -19,6 +19,13 @@ public sealed record SegmentEpisodeContext(
     /// episodes). Empty on the cheap/lazy path.</summary>
     public IReadOnlyList<(int Episode, string Path)> SeasonFiles { get; init; }
         = Array.Empty<(int Episode, string Path)>();
+
+    /// <summary>Background passes only: parks until nobody is watching
+    /// (<see cref="Services.PlaybackActivity.WaitForIdleAsync"/>). Media-decoding
+    /// providers await it before each ffmpeg run, so playback that starts
+    /// mid-episode stops the pass after at most one decode. Null on the
+    /// inline/cheap paths, which never decode.</summary>
+    public Func<CancellationToken, Task>? WaitForIdleAsync { get; init; }
 }
 
 /// <summary>A detected segment before persistence. Times are seconds from the

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Animarr.Shared.Models;
 using Animarr.Web.Data;
@@ -13,15 +14,43 @@ public partial class MetadataService
 {
     // ── Theme music (anime OP/ED) ─────────────────────────────────────────────
 
+    // Negative cache for the detail page's lazy backfill (EnsureThemeMusicAsync):
+    // item id → (until, id/title signature) of the last lookup that found no
+    // theme. Without it every open of a theme-less anime (donghua, new titles
+    // AnimeThemes lacks) repeated 1-3 external calls (AniList resolve + up to two
+    // AnimeThemes lookups). The signature makes a re-identify (new MAL/AniList
+    // id or title) re-check at once; explicit Rescan bypasses the cache. In
+    // memory and bounded — a restart just re-checks.
+    private static readonly ConcurrentDictionary<Guid, (DateTime Until, string Signature)> _themeMisses = new();
+    private static readonly TimeSpan ThemeMissTtl = TimeSpan.FromHours(24);
+    private const int ThemeMissCap = 4096;
+
+    private static string ThemeMissSignature(MediaItem item)
+        => $"{item.MalId}|{item.AniListId}|{item.EnglishTitle ?? item.Title}";
+
+    private static void RememberThemeMiss(MediaItem item)
+    {
+        var now = DateTime.UtcNow;
+        if (_themeMisses.Count >= ThemeMissCap)
+        {
+            foreach (var (k, v) in _themeMisses)
+                if (v.Until <= now) _themeMisses.TryRemove(k, out _);
+            if (_themeMisses.Count >= ThemeMissCap) _themeMisses.Clear();
+        }
+        _themeMisses[item.Id] = (now + ThemeMissTtl, ThemeMissSignature(item));
+    }
+
     /// <summary>
     /// Best-effort fetch of the title's opening/ending theme from AnimeThemes.moe,
     /// cached as theme.ogg in the media folder's <c>.animarr/&lt;folderId&gt;/</c> dir
     /// (NOT the central image cache — kept next to the media to keep the Docker data
     /// volume small). Only runs for anime-like items. Never throws — theme music is
     /// non-critical, so any failure (no match, read-only mount, network) just leaves
-    /// ThemePath null and identification continues.
+    /// ThemePath null and identification continues. Returns true only when
+    /// AnimeThemes was actually queried and had no theme for the title (the
+    /// negative-cacheable outcome); false for found / skipped / failed.
     /// </summary>
-    private async Task FillThemeMusicAsync(
+    private async Task<bool> FillThemeMusicAsync(
         MediaItem item, FolderWatcher folder, bool forceRefresh, Action<string>? log, CancellationToken ct,
         bool bypassEnabledGate = false)
     {
@@ -34,21 +63,21 @@ public partial class MetadataService
             {
                 await using var prefDb = await dbFactory.CreateDbContextAsync(ct);
                 if (!await prefDb.UserPreferences.AnyAsync(p => p.ThemeMusicEnabled, ct))
-                    return;
+                    return false;
             }
 
             var genres = DeserialiseGenreNames(item.GenresJson);
-            if (!LooksLikeAnime(item, genres)) return;
+            if (!LooksLikeAnime(item, genres)) return false;
 
             var dir = ThemeDir(folder);
-            if (dir is null) { log?.Invoke("[Theme] No media dir resolved — skipping."); return; }
+            if (dir is null) { log?.Invoke("[Theme] No media dir resolved — skipping."); return false; }
             var dest = Path.Combine(dir, "theme.ogg");
 
             // Idempotent: keep the existing file unless a forced refresh.
             if (!forceRefresh && File.Exists(dest))
             {
                 item.ThemePath = dest;
-                return;
+                return false;
             }
 
             // Resolve a MAL/AniList id. MAL is off by default, so most anime reach
@@ -57,7 +86,14 @@ public partial class MetadataService
             int? aniListId = item.AniListId;
             if (malId is null)
             {
-                var match = await aniList.ResolveAsync(item.EnglishTitle ?? item.Title, ct);
+                var (match, definitive) = await aniList.TryResolveAsync(item.EnglishTitle ?? item.Title, ct);
+                // AniList rate-limited / unreachable: not an answer, so not a
+                // "no theme" verdict either — the caller must not negative-cache it.
+                if (match is null && !definitive && aniListId is null)
+                {
+                    log?.Invoke($"[Theme] AniList unavailable for \"{item.Title}\" — will retry later.");
+                    return false;
+                }
                 if (match is not null)
                 {
                     malId     = match.IdMal;
@@ -77,10 +113,10 @@ public partial class MetadataService
             if (pick is null && aniListId is int a)
                 pick = await animeThemes.GetBestThemeAsync("AniList", a.ToString(), ct);
 
-            if (pick is null) { log?.Invoke($"[Theme] No theme found for \"{item.Title}\"."); return; }
+            if (pick is null) { log?.Invoke($"[Theme] No theme found for \"{item.Title}\"."); return true; }
 
             try { Directory.CreateDirectory(dir); }
-            catch (Exception ex) { log?.Invoke($"[Theme] Can't create {dir} (read-only media mount?): {ex.Message}"); return; }
+            catch (Exception ex) { log?.Invoke($"[Theme] Can't create {dir} (read-only media mount?): {ex.Message}"); return false; }
 
             if (await animeThemes.DownloadAsync(pick.AudioUrl, dest, ct))
             {
@@ -92,10 +128,12 @@ public partial class MetadataService
             {
                 log?.Invoke($"[Theme] download failed: {pick.AudioUrl}");
             }
+            return false;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Theme music fetch failed for folder {Id}", folder.Id);
+            return false;
         }
     }
 
@@ -110,13 +148,21 @@ public partial class MetadataService
         if (item is null) return null;
         if (!string.IsNullOrEmpty(item.ThemePath) && File.Exists(item.ThemePath)) return item.ThemePath;
 
+        // Looked up recently with these same ids/title and AnimeThemes had nothing.
+        if (_themeMisses.TryGetValue(item.Id, out var miss) && miss.Until > DateTime.UtcNow
+            && miss.Signature == ThemeMissSignature(item))
+            return null;
+
         var folder = await db.FolderWatchers.FindAsync([item.FolderId], ct);
         if (folder is null) return null;
 
-        await FillThemeMusicAsync(item, folder, forceRefresh: false, log: null, ct);
+        var notFound = await FillThemeMusicAsync(item, folder, forceRefresh: false, log: null, ct);
         // Save whatever the pass produced — ThemePath and/or freshly bridged
         // MAL/AniList ids (worth keeping even when no theme was found).
         if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
+        // Signature taken after the save, so it includes any ids just bridged —
+        // exactly what the next open will load.
+        if (notFound) RememberThemeMiss(item);
         return item.ThemePath;
     }
 

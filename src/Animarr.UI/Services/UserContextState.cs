@@ -47,15 +47,25 @@ public sealed class UserContextState
     /// router redirects to /welcome (or /setup if SetupRequired).</summary>
     public async Task LoadAsync(CancellationToken ct = default)
     {
+        // All three requests go out at once — this was three serial round trips
+        // on the boot path before the shell could paint. /me and
+        // /me/preferences are speculative: on an anonymous boot they 401 and
+        // their results are simply dropped below (faults observed, never
+        // thrown).
+        var statusTask = _api.GetAuthStatusAsync(ct);
+        var meTask     = _api.GetMeAsync(ct);
+        var prefsTask  = _api.GetMyPreferencesAsync(ct);
+        ObserveFaults(meTask);
+        ObserveFaults(prefsTask);
         try
         {
-            AuthStatus = await _api.GetAuthStatusAsync(ct);
+            AuthStatus = await statusTask;
             if (AuthStatus.Authenticated)
             {
-                Me = await _api.GetMeAsync(ct);
+                Me = await meTask;
                 if (Me is not null)
                 {
-                    try { Preferences = await _api.GetMyPreferencesAsync(ct); }
+                    try { Preferences = await prefsTask; }
                     catch { Preferences = null; }
                 }
             }
@@ -79,12 +89,16 @@ public sealed class UserContextState
     /// then re-fetch the full /me payload to pick up permissions + folder scope.</summary>
     public async Task RefreshMeAsync(CancellationToken ct = default)
     {
+        // /me and /me/preferences side by side (were serial).
+        var meTask    = _api.GetMeAsync(ct);
+        var prefsTask = _api.GetMyPreferencesAsync(ct);
+        ObserveFaults(prefsTask);
         try
         {
-            Me = await _api.GetMeAsync(ct);
+            Me = await meTask;
             if (Me is not null)
             {
-                try { Preferences = await _api.GetMyPreferencesAsync(ct); }
+                try { Preferences = await prefsTask; }
                 catch { Preferences = null; }
                 AuthStatus = AuthStatus is null
                     ? new AuthStatusDto(false, true)
@@ -113,4 +127,11 @@ public sealed class UserContextState
         Preferences = prefs;
         OnChange?.Invoke();
     }
+
+    /// <summary>Mark a speculative request's exception as observed — its
+    /// result may legitimately go unused (e.g. /me on an anonymous boot).</summary>
+    private static void ObserveFaults(Task task) =>
+        task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 }

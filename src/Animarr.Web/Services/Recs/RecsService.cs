@@ -41,9 +41,13 @@ public sealed class RecsService(
     private static readonly TimeSpan RotateEvery = TimeSpan.FromHours(2);
 
     // TMDB related feeds barely move day to day — cache per (id, kind) so a
-    // detail page reopen or a Home reload costs zero external calls.
-    private static readonly ConcurrentDictionary<(int Id, bool Movie), (DateTime At, List<TmdbSearchResult> Items)> _relatedCache = new();
+    // detail page reopen or a Home reload costs zero external calls. Entries
+    // hold only what a card needs (no overview etc.), expired ones are pruned
+    // on write and the map is capped, so months of browsing can't grow it
+    // without bound.
+    private static readonly ConcurrentDictionary<(int Id, bool Movie), (DateTime At, List<RelatedHit> Items)> _relatedCache = new();
     private static readonly TimeSpan RelatedTtl = TimeSpan.FromHours(24);
+    private const int RelatedCacheMax = 512;
     /// <summary>Per-user For-you pools (see <see cref="BuildForYouPoolAsync"/>).</summary>
     private static readonly ConcurrentDictionary<Guid, (DateTime At, List<RecCardDto> Pool)> _forYouPool = new();
 
@@ -52,7 +56,10 @@ public sealed class RecsService(
     public async Task<List<RecCardDto>> GetSimilarAsync(Guid mediaItemId, Guid userId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
+        var item = await db.MediaItems.AsNoTracking()
+            .Where(m => m.Id == mediaItemId)
+            .Select(SlimItem)
+            .FirstOrDefaultAsync(ct);
         if (item is null) return [];
 
         var all = await LoadCatalogAsync(db, ct);
@@ -277,7 +284,7 @@ public sealed class RecsService(
             {
                 if (take <= 0 || seeds.Count == 0) return [];
                 var maxSeedW = seeds.Max(s => weights.GetValueOrDefault(s.Id));
-                var votes = new Dictionary<int, (double Score, TmdbSearchResult R, bool Movie, string Seed)>();
+                var votes = new Dictionary<int, (double Score, RelatedHit R, bool Movie, string Seed)>();
                 foreach (var seed in seeds.Where(s => s.TmdbId is int))
                 {
                     var isMovie = seed.MediaType == MediaItemType.Movie;
@@ -322,10 +329,31 @@ public sealed class RecsService(
 
     // ── shared bits ─────────────────────────────────────────────────────────
 
+    /// <summary>The only MediaItem columns scoring and cards read (labels,
+    /// display title, card fields). Projected so the catalog load — every
+    /// detail-page open — skips the wide JSON/description columns; the
+    /// result is a partial, untracked MediaItem private to this service.</summary>
+    private static readonly System.Linq.Expressions.Expression<Func<MediaItem, MediaItem>> SlimItem = m => new MediaItem
+    {
+        Id                  = m.Id,
+        Title               = m.Title,
+        EnglishTitle        = m.EnglishTitle,
+        OriginalTitle       = m.OriginalTitle,
+        Year                = m.Year,
+        MediaType           = m.MediaType,
+        Rating              = m.Rating,
+        TmdbId              = m.TmdbId,
+        PosterPath          = m.PosterPath,
+        GenresJson          = m.GenresJson,
+        GenresLocalizedJson = m.GenresLocalizedJson,
+        TagsJson            = m.TagsJson,
+    };
+
     private static Task<List<MediaItem>> LoadCatalogAsync(AppDbContext db, CancellationToken ct)
         => db.MediaItems.AsNoTracking()
             .Where(m => m.IdentificationStatus == IdentificationStatus.Identified ||
                         m.IdentificationStatus == IdentificationStatus.Manual)
+            .Select(SlimItem)
             .ToListAsync(ct);
 
     private async Task<(HashSet<Guid> Local, HashSet<int> Tmdb, HashSet<int> WatchlistTmdb)>
@@ -354,15 +382,18 @@ public sealed class RecsService(
         return scope != "library";
     }
 
-    private async Task<List<TmdbSearchResult>> RelatedCachedAsync(int tmdbId, bool isMovie, CancellationToken ct)
+    private async Task<List<RelatedHit>> RelatedCachedAsync(int tmdbId, bool isMovie, CancellationToken ct)
     {
         var key = (tmdbId, isMovie);
         if (_relatedCache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < RelatedTtl)
             return hit.Items;
         try
         {
-            var items = await tmdb.GetRelatedAsync(tmdbId, isMovie, ct);
+            var items = (await tmdb.GetRelatedAsync(tmdbId, isMovie, ct))
+                .Select(r => new RelatedHit(r.Id, r.DisplayTitle, r.Year, r.PosterPath, r.VoteAverage, r.VoteCount, r.MediaType))
+                .ToList();
             _relatedCache[key] = (DateTime.UtcNow, items);
+            PruneRelatedCache();
             return items;
         }
         catch (Exception ex)
@@ -370,6 +401,19 @@ public sealed class RecsService(
             logger.LogDebug(ex, "[Recs] TMDB related fetch failed for {Id}", tmdbId);
             return [];
         }
+    }
+
+    /// <summary>Drop expired entries, then the oldest ones beyond
+    /// <see cref="RelatedCacheMax"/>. Runs on writes only (one per TMDB fetch).</summary>
+    private static void PruneRelatedCache()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (k, v) in _relatedCache)
+            if (now - v.At >= RelatedTtl) _relatedCache.TryRemove(k, out _);
+        var over = _relatedCache.Count - RelatedCacheMax;
+        if (over <= 0) return;
+        foreach (var k in _relatedCache.OrderBy(kv => kv.Value.At).Take(over).Select(kv => kv.Key).ToList())
+            _relatedCache.TryRemove(k, out _);
     }
 
     /// <summary>Canonical genre + tag labels of a title (the language-independent
@@ -411,17 +455,23 @@ public sealed class RecsService(
         reasonTitle, reasonTag,
         InLibrary: true);
 
-    private static RecCardDto ExternalCard(TmdbSearchResult r, bool seedIsMovie, string? reasonTitle)
+    private static RecCardDto ExternalCard(RelatedHit r, bool seedIsMovie, string? reasonTitle)
     {
         // /similar of a TV title returns TV entries (no media_type field) —
         // fall back to the seed's kind when the result doesn't say.
         var isMovie = r.MediaType == "movie" || (r.MediaType is null && seedIsMovie);
         return new(
-            null, r.Id, r.DisplayTitle, r.Year,
+            null, r.Id, r.Title, r.Year,
             string.IsNullOrEmpty(r.PosterPath) ? null : TmdbClient.PosterUrl(r.PosterPath, "w342"),
             r.VoteAverage > 0 ? r.VoteAverage : null,
             isMovie ? "movie" : "tv",
             reasonTitle, null,
             InLibrary: false);
     }
+
+    /// <summary>The slice of a TMDB recommendation/similar hit that
+    /// <see cref="ExternalCard"/> and the vote tie-break read.</summary>
+    private sealed record RelatedHit(
+        int Id, string Title, int? Year, string? PosterPath,
+        double VoteAverage, int VoteCount, string? MediaType);
 }

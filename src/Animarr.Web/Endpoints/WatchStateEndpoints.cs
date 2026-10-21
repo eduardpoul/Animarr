@@ -33,6 +33,7 @@ internal static class WatchStateEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var rows = await db.WatchStates
+                .AsNoTracking()
                 .Where(w => w.MediaItemId == mediaItemId && w.UserId == uid)
                 .OrderByDescending(w => w.LastSeenAt)
                 .ToListAsync(ct);
@@ -48,6 +49,7 @@ internal static class WatchStateEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
+            http.RequestServices.GetRequiredService<PlaybackActivity>().NotePing();   // background jobs yield to this viewer
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var now = DateTime.UtcNow;

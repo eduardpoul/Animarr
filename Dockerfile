@@ -1,3 +1,8 @@
+# Requires BuildKit with Dockerfile syntax 1.4+ (the default since Docker 23):
+# the final stage uses `COPY --link` / `COPY --chmod`, which the legacy builder
+# rejects with "unknown flag". On an older Docker, build with
+# DOCKER_BUILDKIT=1 and add `# syntax=docker/dockerfile:1.7` as the first line.
+#
 # .NET images pinned to an exact patch + distro. The floating `10.0` tags
 # meant a deploy reused whatever 10.0.x the build host had cached (no
 # --pull), silently missing runtime security patches, and would jump to a
@@ -34,14 +39,21 @@ COPY ["src/Animarr.Web.Client/Animarr.Web.Client.csproj","src/Animarr.Web.Client
 COPY ["src/Animarr.Web/Animarr.Web.csproj",             "src/Animarr.Web/"]
 RUN dotnet restore "src/Animarr.Web/Animarr.Web.csproj"
 
-COPY . .
-
 # Install node deps for Animarr.UI (the Tailwind build target lives there
 # since Phase 5 hard cutover stripped Razor + Tailwind from Animarr.Web).
 # Platform-specific optional packages (@tailwindcss/oxide-linux-x64-gnu)
 # are resolved by running `npm install` from inside the Linux container.
+# Only package*.json are copied first, so this layer stays cached until the
+# npm dependencies change instead of re-running on every source edit.
+# (.dockerignore keeps the host's node_modules out of the COPY . . below.)
+COPY ["src/Animarr.UI/package.json", "src/Animarr.UI/package-lock.json", "src/Animarr.UI/"]
 WORKDIR "/src/src/Animarr.UI"
 RUN npm install
+
+WORKDIR /src
+COPY . .
+
+WORKDIR "/src/src/Animarr.UI"
 # Explicitly recompile Tailwind. The MSBuild BuildTailwindCSS target has
 # Inputs="Styles/*.css" Outputs="wwwroot/app.css" — when COPY brings both
 # Styles/ source and an already-tracked wwwroot/app.css output into the
@@ -52,22 +64,30 @@ RUN npm install
 # CSS regardless of what wwwroot/app.css the dev committed (or didn't).
 RUN npm run css:build
 
+# No separate `dotnet build` step: its -o /app/build output was never used,
+# and `dotnet publish` below builds anyway (it was compiling everything twice).
 WORKDIR "/src/src/Animarr.Web"
-RUN dotnet build "Animarr.Web.csproj" -c Release -o /app/build
 
 # Publish stage — produces the final layout including:
 #   • Animarr.Web.dll (API + Razor + WASM static-file host)
 #   • wwwroot/_framework/* (WASM bundle from Animarr.Web.Client)
 #   • wwwroot/_content/Animarr.UI/* (RCL static web assets)
+# `-r linux-x64 --self-contained false`: still framework-dependent (runs on the
+# aspnet base), but NuGet native assets are resolved for this image's platform
+# only — libe_sqlite3.so etc. land next to the DLLs instead of a runtimes/ tree
+# for ~25 RIDs (win/osx/musl/arm/…, ~32 MB). Only Animarr.Web gets the RID; the
+# WASM client keeps browser-wasm. (Don't add -r to the `dotnet restore` above:
+# a restore-time RID does flow into the WASM client and fails.)
 FROM build AS publish
-RUN dotnet publish "Animarr.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Animarr.Web.csproj" -c Release -r linux-x64 --self-contained false \
+        -o /app/publish /p:UseAppHost=false
 
 # llama.cpp server binaries for the built-in ("embedded") LLM provider. We copy
 # just the llama-server executable from the official images:
 #   • CPU build — no Vulkan link, so it always runs (default, lean).
-#   • Vulkan build — only invoked after the entrypoint installs libvulkan1 at
-#     runtime (ANIMARR_LLM_VULKAN=1). The binaries cost only tens of MB; the
-#     heavy Vulkan userspace (mesa) is NOT baked in — it's installed on demand.
+#   • Vulkan build — only used when ANIMARR_LLM_VULKAN=1 and a /dev/dri render
+#     node is passed in. Its userspace (libvulkan1 + mesa-vulkan-drivers) is
+#     baked into the runtime stage below.
 # Both pinned to llama.cpp b11669 (= release v0.7.0): the CPU image by tag +
 # digest, the Vulkan source checkout by the same tag, so the two builds match
 # and a deploy can't silently pick up whatever upstream pushed that day.
@@ -88,10 +108,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp /src/llama.cpp && \
     cmake -S /src/llama.cpp -B /src/llama.cpp/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF && \
-    cmake --build /src/llama.cpp/build -j --target llama-server && \
-    mkdir -p /opt/out && \
+    cmake --build /src/llama.cpp/build -j --target llama-server
+# Collect the binary + its shared libs. `cp -P` keeps the soname symlink chain
+# (libX.so -> libX.so.0 -> libX.so.0.N.M) as symlinks: plain cp dereferenced
+# them into three full copies of every library (147 MB instead of ~49 MB).
+# COPY --from preserves the symlinks into the final image.
+RUN mkdir -p /opt/out && \
     cp /src/llama.cpp/build/bin/llama-server /opt/out/ && \
-    find /src/llama.cpp/build -name '*.so*' -exec cp -n {} /opt/out/ \;
+    find /src/llama.cpp/build -name '*.so*' -exec cp -Pn {} /opt/out/ \;
 
 # FFmpeg stage — pinned static build (security fix for CVE-2026-8461)
 # -------------------------------------------------------------------
@@ -186,6 +210,15 @@ WORKDIR /app
 # pinned static BtbN stage above (CVE-2026-8461 fix; see the COPY below). apt
 # here installs only the hwaccel userspace those static binaries dlopen at runtime,
 # plus tzdata so the viewer's X-Time-Zone (IANA id) resolves for the stats.
+#
+# Vulkan for the embedded LLM (ANIMARR_LLM_VULKAN=1): libvulkan1 + the Mesa
+# Vulkan ICDs (radv / anv / lavapipe). These used to be apt-installed by the
+# entrypoint at every new container's boot (~9 s from the network, 99 MB
+# written to the container layer, offline boots relied on a .deb cache on the
+# data volume). The heavy part (libllvm + mesa-libgallium) is already here via
+# mesa-va-drivers, so baking them in costs only ~17 MB compressed. Being
+# installed changes nothing unless the flag is set: the app still picks the
+# Vulkan llama-server only with ANIMARR_LLM_VULKAN=1 and a /dev/dri render node.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         mesa-va-drivers \
@@ -194,15 +227,29 @@ RUN apt-get update && \
         libva-drm2 libva2 \
         libgomp1 \
         libvulkan1 \
+        mesa-vulkan-drivers \
         tzdata \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+
+# Layer order: least → most frequently changing. Every layer after a changed one
+# is rebuilt and re-shipped (deploys `docker save` the image), so the app
+# publish — new on every deploy — must be the LAST layer. Previously it sat
+# before llama/entrypoint, so an app-only change re-shipped ~315 MB of
+# unchanged layers.
+#
+# `COPY --link` makes a layer independent of the layers below it: when the apt
+# layer changes (base bump), these copies are reused from cache as the same
+# blobs instead of being re-executed with fresh directory mtimes (which made
+# byte-identical ffmpeg/llama layers get new digests on every rebuild).
+# Not used for /lib/x86_64-linux-gnu below: on Noble /lib is a symlink to
+# usr/lib, and --link does not resolve symlinks in the destination path.
 
 # Drop in the pinned static ffmpeg/ffprobe (see the FFmpeg stage above). They
 # land in /usr/local/bin — ahead of /usr/bin on PATH — so the app's `ffmpeg`/
 # `ffprobe` child processes resolve to the patched 8.1.2 build. COPY preserves
 # the +x bits set during extraction.
-COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --link --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 
 # Overlay libva 2.22 over Noble's 2.20 (see the libva stage above) — required
 # by the static ffmpeg's hwupload path (vaMapBuffer2). Same soname, drop-in.
@@ -211,28 +258,29 @@ COPY --from=libva /opt/libva/lib/libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/lib
 RUN ln -sf libva.so.2.2200.0 /lib/x86_64-linux-gnu/libva.so.2 && \
     ln -sf libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/libva-drm.so.2
 
-# Create data directory for SQLite
-RUN mkdir -p /app/data && chmod 777 /app/data
-
-COPY --from=publish /app/publish .
-
 # Built-in llama.cpp servers for the "embedded" LLM provider (see FROM aliases).
 # The official llama-server is a thin launcher that dynamically loads sibling
 # .so files in /app (libllama, libggml-*, libllama-server-impl, …), so we copy
 # the WHOLE /app dir, not just the binary. CPU build always runs; the Vulkan
-# build is only invoked after the entrypoint installs libvulkan1 at boot
-# (ANIMARR_LLM_VULKAN=1). The app sets LD_LIBRARY_PATH to these dirs at launch.
-COPY --from=llama-cpu    /app/     /opt/llama/cpu/
-COPY --from=llama-vulkan /opt/out/ /opt/llama/vulkan/
-RUN chmod +x /opt/llama/cpu/llama-server /opt/llama/vulkan/llama-server
+# build is only used with ANIMARR_LLM_VULKAN=1 (its Vulkan userspace is in the
+# apt layer above). The app sets LD_LIBRARY_PATH to these dirs at launch.
+# Both llama-server binaries are already executable in their source stages
+# (the old `RUN chmod +x` layer here was an empty 4 kB diff).
+COPY --link --from=llama-cpu    /app/     /opt/llama/cpu/
+COPY --link --from=llama-vulkan /opt/out/ /opt/llama/vulkan/
 
-# Entrypoint wrapper: optionally installs the Vulkan userspace at boot, then
-# execs the app as PID 1 so SIGTERM reaches it (clean llama-server shutdown).
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Entrypoint wrapper: execs the app as PID 1 so SIGTERM reaches it (clean
+# llama-server and torrent shutdown). --chmod: git stores it as 0644.
+COPY --link --chmod=755 docker/entrypoint.sh /entrypoint.sh
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 EXPOSE 8080
 
 ENV ASPNETCORE_URLS=http://+:8080
 
 ENTRYPOINT ["/entrypoint.sh"]
+
+# The app itself — keep this the last layer (see "Layer order" above).
+COPY --link --from=publish /app/publish .

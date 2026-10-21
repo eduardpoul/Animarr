@@ -15,15 +15,23 @@ internal static class RequestTimeZone
 {
     private static readonly ConcurrentDictionary<string, TimeZoneInfo?> Cache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Real zone ids number a few hundred, but the header is
+    /// client-controlled: past this many distinct values new ids are resolved
+    /// per request instead of growing the cache without bound.</summary>
+    private const int MaxCached = 1024;
+
     public static TimeZoneInfo Resolve(HttpContext? http)
     {
         var id = http?.Request.Headers[AnimarrHeaders.TimeZone].ToString();
         if (string.IsNullOrWhiteSpace(id) || id.Length > 64) return TimeZoneInfo.Local;
-        return Cache.GetOrAdd(id.Trim(), static key =>
-        {
-            try { return TimeZoneInfo.FindSystemTimeZoneById(key); }
-            catch { return null; }   // unknown id / no tzdata — cache the miss too
-        }) ?? TimeZoneInfo.Local;
+        var key = id.Trim();
+        if (Cache.TryGetValue(key, out var cached)) return cached ?? TimeZoneInfo.Local;
+
+        TimeZoneInfo? tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById(key); }
+        catch { tz = null; }   // unknown id / no tzdata — cache the miss too
+        if (Cache.Count < MaxCached) Cache.TryAdd(key, tz);
+        return tz ?? TimeZoneInfo.Local;
     }
 
     /// <summary>Calendar day of <paramref name="utc"/> in <paramref name="tz"/>.</summary>

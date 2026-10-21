@@ -226,13 +226,24 @@
         if (dx < 0) NextSlideManual(); else PrevSlide();
     }
 
+    /// <summary>URL last handed to backdrop.js. PushBackdrop runs from
+    /// OnParametersSet — i.e. on EVERY Home re-render — and each push made
+    /// backdrop.js reset both layers and re-rasterise the full-screen blur, so
+    /// only push when the image actually changes.</summary>
+    private string? _pushedBackdropUrl;
+
     private async void PushBackdrop()
     {
         if (_active is null) return;
         var path = _active.FanartPath ?? _active.PosterPath;
         if (string.IsNullOrEmpty(path)) return;
-        var url = Animarr.UI.Services.MediaUrl.Image(path);
-        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 14, 38); } catch { }
+        // Width-capped: the layer sits under blur(14px) brightness(38%).
+        // (No ?t= version here — ContinueWatchItemDto carries no refresh stamp.)
+        var url = Animarr.UI.Services.MediaUrl.Image(path, width: Animarr.UI.Services.MediaUrl.BlurredBackdropWidth);
+        if (url == _pushedBackdropUrl) return;
+        _pushedBackdropUrl = url;
+        try { await JS.InvokeVoidAsync("initBackdrop", new[] { url }, 0, 14, 38); }
+        catch { _pushedBackdropUrl = null; /* not pushed — retry on the next change */ }
     }
 
     public void Dispose()
