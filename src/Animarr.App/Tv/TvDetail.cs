@@ -26,9 +26,18 @@ public sealed class TvDetailPage : ContentPage
         Content = new NativeHost(ctx => _view = new TvDetailView(ctx, this, id, title, fanartPath));
     }
 
+    private bool _leaving;
+    protected override bool OnBackButtonPressed()
+    {
+        if (_leaving) return true;            // 2nd Back during the pop animation
+        _leaving = true;
+        return base.OnBackButtonPressed();
+    }
+
     protected override void OnAppearing()
     {
         base.OnAppearing();
+        _leaving = false;
         if (_shown) _view?.RefreshWatch();   // back from the player: progress moved
         _shown = true;
     }
@@ -291,7 +300,12 @@ internal sealed class TvDetailView : FrameLayout
             col.LayoutParameters = new RecyclerView.LayoutParams(-1, -2);
             col.SetClipChildren(false);
             col.SetClipToPadding(false);
-            col.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 96), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 8));
+            col.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 8));
+
+            // visible Back (the remote's Back key does the same)
+            var back = TvUi.Button(ctx, "‹  " + TvL.T("common.btn_back", "Назад", "Back"), false,
+                () => _ = d._page.Navigation.PopAsync(), sp: 15);
+            col.AddView(back, TvUi.Lp(-2, TvUi.Dp(ctx, 40), 0, 0, 0, TvUi.Dp(ctx, 28)));
 
             _title = TvUi.Text_(ctx, TvUi.TDisplay, TvUi.Text, TvUi.Semibold, 2, d._initialTitle);
             col.AddView(_title, TvUi.Lp(TvUi.Dp(ctx, 560), -2));

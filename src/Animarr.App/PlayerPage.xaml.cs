@@ -171,7 +171,14 @@ public partial class PlayerPage : ContentPage
 
     // Android 13+ delivers Back through MAUI, not Activity.OnBackPressed:
     // close the submenu / HUD first, only then leave the player.
-    protected override bool OnBackButtonPressed() => OnBack() || base.OnBackButtonPressed();
+    private bool _leaving;
+    protected override bool OnBackButtonPressed()
+    {
+        if (_leaving) return true;            // 2nd Back during the pop animation
+        if (OnBack()) return true;
+        _leaving = true;
+        return base.OnBackButtonPressed();
+    }
     private bool OnBack()
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }

@@ -13,11 +13,22 @@ namespace Animarr.App.Tv;
 /// cards took seconds to build and re-uploaded every texture on each frame.</summary>
 public sealed class TvLibraryPage : ContentPage
 {
+    private TvLibraryView? _view;
+    private bool _leaving;
     public TvLibraryPage(Guid? section = null)
     {
         NavigationPage.SetHasNavigationBar(this, false);
         BackgroundColor = Microsoft.Maui.Graphics.Color.FromArgb("#1c1c1c");
-        Content = new NativeHost(ctx => new TvLibraryView(ctx, this, section));
+        Content = new NativeHost(ctx => _view = new TvLibraryView(ctx, this, section));
+    }
+
+    // Back → the top menu first, then home.
+    protected override bool OnBackButtonPressed()
+    {
+        if (_leaving) return true;            // 2nd Back during the pop animation
+        if (_view is { } v && !v.Bar.HasFocus) { v.Bar.Active.RequestFocus(); return true; }
+        _leaving = true;
+        return base.OnBackButtonPressed();
     }
 }
 
@@ -31,11 +42,15 @@ internal static class TvGrid
         g.SetColumnWidth(TvUi.Dp(ctx, TvUi.PosterW));
         g.HorizontalSpacing = TvUi.Dp(ctx, TvUi.Gap);
         g.VerticalSpacing = TvUi.Dp(ctx, 14);
-        g.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 14), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 40));
+        // Row-by-row paging: the focused row's top sits on a key line 12 dp below
+        // the grid's top edge, so the row above scrolls fully out of view instead
+        // of being sliced under the pills; 12 dp is room for the 1.08 focus zoom.
+        g.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 12), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 40));
         g.SetClipToPadding(false);
         g.SetClipChildren(false);
         g.WindowAlignment = BaseGridView.WindowAlignBothEdge;
-        g.WindowAlignmentOffsetPercent = 35f;
+        g.WindowAlignmentOffset = TvUi.Dp(ctx, 12);
+        g.WindowAlignmentOffsetPercent = BaseGridView.WindowAlignOffsetPercentDisabled;
         g.ItemAlignmentOffsetPercent = 0;
         g.SetItemAnimator(null);
         g.SetRecycledViewPool(Rails.SharedPool);
@@ -76,6 +91,7 @@ internal sealed class TvLibraryView : LinearLayout
     private readonly List<(Guid Id, string Label)> _sections = new();
     private readonly Dictionary<Guid, HashSet<Guid>> _sectionFolders = new();
     private Guid? _active;
+    public TvTopBar Bar { get; }
 
     public TvLibraryView(Context ctx, ContentPage page, Guid? section) : base(ctx)
     {
@@ -84,16 +100,20 @@ internal sealed class TvLibraryView : LinearLayout
         SetBackgroundColor(TvUi.Bg);
         // keep clipping ON here: the grid scrolls under the header, not over it
 
+        Bar = new TvTopBar(ctx, TvTab.Library, page);
+        AddView(Bar.View, TvUi.Lp(-1, TvUi.Dp(ctx, 40), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX)));
+
         var head = TvUi.Row(ctx);
         head.SetGravity(GravityFlags.Bottom);
         head.AddView(TvUi.Text_(ctx, TvUi.THeadline + 4, TvUi.Text, TvUi.Semibold, 1, TvL.T("home.library_title", "Библиотека", "Library")));
         _count = TvUi.Text_(ctx, 15, TvUi.TextFaint);
         head.AddView(_count, TvUi.Lp(-2, -2, TvUi.Dp(ctx, 14), 0, 0, TvUi.Dp(ctx, 4)));
-        AddView(head, TvUi.Lp(-1, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX)));
+        AddView(head, TvUi.Lp(-1, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 24), TvUi.Dp(ctx, TvUi.SafeX)));
 
         _pills = TvUi.Row(ctx);
         _pills.SetClipChildren(false);
-        AddView(_pills, TvUi.Lp(-1, TvUi.Dp(ctx, 40), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 16), TvUi.Dp(ctx, TvUi.SafeX)));
+        _pills.SetClipToPadding(false);
+        AddView(_pills, TvUi.Lp(-1, TvUi.Dp(ctx, 40), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 16), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 16)));
 
         _grid = TvGrid.Posters(ctx, _adapter);
         AddView(_grid, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -169,11 +189,21 @@ internal sealed class TvLibraryView : LinearLayout
 /// virtualised poster grid. Debounced 350 ms.</summary>
 public sealed class TvSearchPage : ContentPage
 {
+    private TvSearchView? _view;
+    private bool _leaving;
     public TvSearchPage()
     {
         NavigationPage.SetHasNavigationBar(this, false);
         BackgroundColor = Microsoft.Maui.Graphics.Color.FromArgb("#1c1c1c");
-        Content = new NativeHost(ctx => new TvSearchView(ctx, this));
+        Content = new NativeHost(ctx => _view = new TvSearchView(ctx, this));
+    }
+
+    protected override bool OnBackButtonPressed()
+    {
+        if (_leaving) return true;            // 2nd Back during the pop animation
+        if (_view is { } v && !v.Bar.HasFocus) { v.Bar.Active.RequestFocus(); return true; }
+        _leaving = true;
+        return base.OnBackButtonPressed();
     }
 }
 
@@ -185,6 +215,7 @@ internal sealed class TvSearchView : LinearLayout
     private readonly EditText _box;
     private readonly TextView _status;
     private CancellationTokenSource? _cts;
+    public TvTopBar Bar { get; }
 
     public TvSearchView(Context ctx, ContentPage page) : base(ctx)
     {
@@ -192,8 +223,8 @@ internal sealed class TvSearchView : LinearLayout
         Orientation = Orientation.Vertical;
         SetBackgroundColor(TvUi.Bg);
 
-        AddView(TvUi.Text_(ctx, TvUi.THeadline + 4, TvUi.Text, TvUi.Semibold, 1, TvL.T("search.title", "Поиск", "Search")),
-            TvUi.Lp(-2, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY)));
+        Bar = new TvTopBar(ctx, TvTab.Search, page);
+        AddView(Bar.View, TvUi.Lp(-1, TvUi.Dp(ctx, 40), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX)));
 
         _box = new EditText(ctx)
         {
@@ -213,7 +244,7 @@ internal sealed class TvSearchView : LinearLayout
         _box.Background = normal;
         _box.FocusChange += (_, e) => _box.Background = e.HasFocus ? focus : normal;
         _box.TextChanged += (_, _) => Debounce();
-        AddView(_box, TvUi.Lp(TvUi.Dp(ctx, 560), TvUi.Dp(ctx, 52), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 16)));
+        AddView(_box, TvUi.Lp(TvUi.Dp(ctx, 560), TvUi.Dp(ctx, 52), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 28)));
 
         _status = TvUi.Text_(ctx, 14, TvUi.TextFaint);
         AddView(_status, TvUi.Lp(-2, -2, TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 10)));

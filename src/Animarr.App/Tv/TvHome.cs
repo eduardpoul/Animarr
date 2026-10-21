@@ -358,8 +358,6 @@ internal sealed class TvHomeView : FrameLayout
     }
 
     internal void OpenLibrary(Guid? section) => _ = _page.Navigation.PushAsync(new TvLibraryPage(section));
-    internal void OpenSearch() => _ = _page.Navigation.PushAsync(new TvSearchPage());
-    internal void OpenProfile() => _ = _page.Navigation.PushAsync(new ProfilePanelPage());
 
     internal async Task PlayOrOpenAsync(string id, string? title, string? fanart)
     {
@@ -475,19 +473,11 @@ internal sealed class TvHomeView : FrameLayout
             col.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX), 0);
             root.AddView(col, new FrameLayout.LayoutParams(-1, -1));
 
-            // ── top bar ──
-            var bar = _bar = TvUi.Row(ctx);
-            bar.SetGravity(GravityFlags.CenterVertical);
-            bar.SetClipChildren(false);
-            var logo = TvUi.Text_(ctx, 22, TvUi.Text, TvUi.Semibold, 1, "Animarr");
-            bar.AddView(logo, TvUi.Lp(-2, -2, 0, 0, TvUi.Dp(ctx, 28)));
-            _tabHome = Tab(ctx, TvL.T("nav.home", "Главная", "Home"), selected: true, () => { });
-            bar.AddView(_tabHome);
-            bar.AddView(Tab(ctx, TvL.T("home.library_title", "Библиотека", "Library"), false, () => home.OpenLibrary(null)), TvUi.Lp(-2, -2, TvUi.Dp(ctx, 8)));
-            bar.AddView(Tab(ctx, TvL.T("search.title", "Поиск", "Search"), false, home.OpenSearch), TvUi.Lp(-2, -2, TvUi.Dp(ctx, 8)));
-            bar.AddView(new AView(ctx), new LinearLayout.LayoutParams(0, 1, 1f));
-            bar.AddView(Tab(ctx, TvL.T("profile.title", "Профиль", "Profile"), false, home.OpenProfile, solid: true));
-            col.AddView(bar, new LinearLayout.LayoutParams(-1, TvUi.Dp(ctx, 40)));
+            // ── top bar (shared with Library / Search) ──
+            var bar = new TvTopBar(ctx, TvTab.Home, home._page);
+            _bar = bar.View;
+            _tabHome = bar.Active;
+            col.AddView(bar.View, bar.Lp(ctx));
 
             // ── hero text ──
             _eyebrow = TvUi.Text_(ctx, 14, TvUi.AccentHi, TvUi.Medium);
@@ -522,26 +512,6 @@ internal sealed class TvHomeView : FrameLayout
 
             _dots = TvUi.Row(ctx);
             col.AddView(_dots, TvUi.Lp(-2, -2, 0, TvUi.Dp(ctx, 18)));
-        }
-
-        private static TextView Tab(Context ctx, string text, bool selected, Action click, bool solid = false)
-        {
-            var t = TvUi.Text_(ctx, 15, selected ? TvUi.Text : TvUi.TextDim, TvUi.Medium, 1, text);
-            t.Gravity = GravityFlags.Center;
-            int hp = TvUi.Dp(ctx, 16);
-            t.SetPadding(hp, 0, hp, 0);
-            t.Focusable = true; t.Clickable = true; t.FocusableInTouchMode = false;
-            var normal = selected || solid ? TvUi.Round(ctx, TvUi.Surface2, 20) : null;
-            var focus = TvUi.Round(ctx, AColor.White, 20);
-            t.Background = normal;
-            t.FocusChange += (_, e) =>
-            {
-                t.Background = e.HasFocus ? focus : normal;
-                t.SetTextColor(e.HasFocus ? AColor.ParseColor("#1a1a1a") : (selected || solid ? TvUi.Text : TvUi.TextDim));
-            };
-            t.Click += (_, _) => click();
-            t.LayoutParameters = new LinearLayout.LayoutParams(-2, -1);
-            return t;
         }
 
         public void Bind(HeroModel? m)
