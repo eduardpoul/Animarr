@@ -86,7 +86,14 @@ public partial class MetadataService
             int? aniListId = item.AniListId;
             if (malId is null)
             {
-                var match = await aniList.ResolveAsync(item.EnglishTitle ?? item.Title, ct);
+                var (match, definitive) = await aniList.TryResolveAsync(item.EnglishTitle ?? item.Title, ct);
+                // AniList rate-limited / unreachable: not an answer, so not a
+                // "no theme" verdict either — the caller must not negative-cache it.
+                if (match is null && !definitive && aniListId is null)
+                {
+                    log?.Invoke($"[Theme] AniList unavailable for \"{item.Title}\" — will retry later.");
+                    return false;
+                }
                 if (match is not null)
                 {
                     malId     = match.IdMal;
