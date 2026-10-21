@@ -238,7 +238,7 @@
             }
             catch { /* section filter degrades to no-op */ }
 
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
+            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView });
             // De-duplication: collapse by Id first (defensive), then by
             // (lowercased trimmed Title, Year) so the block never shows the
             // same logical title twice.

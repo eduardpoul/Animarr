@@ -45,4 +45,21 @@ public sealed record MediaListQuery
     public int? Take   { get; init; }
     /// <summary>"recent" (default), "title", "rating", "year".</summary>
     public string? Sort { get; init; }
+
+    /// <summary>Response shape. <c>null</c> (default) = the full
+    /// <see cref="Models.MediaItemDto"/>. <see cref="CardView"/> = only what the
+    /// list screens read (poster grid, Home hero, folder stats, movie-folder
+    /// filter): ids, titles, year, type, art paths, description + keywords (hero),
+    /// rating, studio/language, episode count, hue, LLM confidence,
+    /// identification status, refresh stamp, categories, favourite. Dropped:
+    /// identification candidates, seasons, genres, tagline, theme, external ids,
+    /// confidences, filler/recap flags. The response still reads as
+    /// <c>MediaItemDto[]</c> (absent fields keep the DTO defaults); servers
+    /// older than this option ignore it and send the full DTO. Server side:
+    /// <c>MediaMappings.ToCardDto</c> — add a field there when a list screen
+    /// starts reading it.</summary>
+    public string? View { get; init; }
+
+    /// <summary>Value of <see cref="View"/> for the slim list shape.</summary>
+    public const string CardView = "card";
 }

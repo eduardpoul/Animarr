@@ -21,6 +21,9 @@ public static class ApiRoutes
     public const string MediaBackdropAlts = "/api/media/{id}/backdrop-alternatives";
     public const string MediaBackdropList = "/api/media/backdrops";
     public const string MediaNeedsReview  = "/api/media/needs-review";
+    /// <summary>GET — just the number of NeedsReview titles the caller can
+    /// see (same filter as <see cref="MediaNeedsReview"/>), as a bare int.</summary>
+    public const string MediaNeedsReviewCount = "/api/media/needs-review/count";
     public const string MediaContinue     = "/api/media/{id}/continue";
     public const string MediaFiles        = "/api/media/{id}/files";
     /// <summary>PUT a manual (season, episode) override for one file of this

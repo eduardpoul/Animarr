@@ -28,6 +28,38 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+// Compress dynamic text responses (API JSON, the SPA shell, HLS playlists).
+// Nothing did before — Caddy's site block has no `encode` and the direct :8080
+// path is bare Kestrel — so e.g. the full catalog list went out as ~1.4 MB of
+// identity JSON (≈0.25 MB as Brotli).
+// Levels: the JSON writer flushes the response every few KB, and every flush
+// ends a Brotli block — at Brotli's Fastest level (quality 1) that collapsed
+// the catalog to only 2.2× (worse than gzip). Optimal is quality 4 since
+// .NET 7 (not 11) and holds ~6× through the flushes at ~7 ms per MB; gzip
+// shrugs off flushes, so it stays at Fastest (4×, ~1.3 ms per MB).
+// Media bytes are never touched: video/*, audio/*, image/* and
+// application/octet-stream aren't in the MIME list, and the middleware skips
+// any response that carries Content-Range (Range requests) or already has a
+// Content-Encoding (MapStaticAssets' precompressed .br/.gz files).
+// XML is left out on purpose: its only producer is the DLNA MediaServer
+// (desc.xml + SOAP), and renderer HTTP stacks are too uneven to risk it.
+// EnableForHttps: the same JSON goes out behind Caddy's TLS; BREACH needs an
+// attacker who can both inject text into a response and watch its encrypted
+// length, which is out of scope for a household server.
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true;
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+    o.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes
+        .Concat(["application/vnd.apple.mpegurl"]);
+    o.ExcludedMimeTypes = ["text/xml", "application/xml"];
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(o =>
+    o.Level = System.IO.Compression.CompressionLevel.Optimal);
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(o =>
+    o.Level = System.IO.Compression.CompressionLevel.Fastest);
+
 // Bind AppSettings
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("AppSettings"));
@@ -476,6 +508,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
+
+// Ahead of everything that writes a body (static files, the SPA fallback,
+// every endpoint) so they all go through it — see AddResponseCompression.
+app.UseResponseCompression();
 
 // Map modern font MIME types — Kestrel's default for .ttf is the obsolete
 // `application/x-font-ttf` which some browsers refuse to apply. font/ttf is

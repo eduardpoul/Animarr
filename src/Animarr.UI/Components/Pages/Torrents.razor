@@ -697,7 +697,7 @@ else
             try
             {
                 var movies = await Api.GetMediaItemsAsync(
-                    new MediaListQuery { Type = MediaItemType.Movie, Take = 10000 });
+                    new MediaListQuery { Type = MediaItemType.Movie, Take = 10000, View = MediaListQuery.CardView });
                 _movieFolderIds = movies.Select(m => m.FolderId).ToHashSet();
             }
             catch { _movieFolderIds = new HashSet<Guid>(); }
