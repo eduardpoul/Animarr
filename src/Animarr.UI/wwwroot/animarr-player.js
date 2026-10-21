@@ -342,6 +342,109 @@
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[c]));
     }
+    // ── Subtitle cue rendering (safe) ─────────────────────────────────
+    // Artplayer paints the active cues with innerHTML; with `escape:false` the
+    // raw text of a subtitle file (often shipped inside a torrent) became live
+    // HTML in the page — `<img src=x onerror=…>` in an .srt ran script. The
+    // player now runs Artplayer with escape:true (inert text as the fallback)
+    // and repaints each cue change through this renderer, which builds DOM
+    // nodes itself: text only ever lands in text nodes, and the few tags worth
+    // keeping become real elements — <b> <i> <u>, WebVTT colour classes
+    // (<c.yellow>) and the SRT-style <font color="…">. Every other tag
+    // (<v>, <lang>, <ruby>, timestamps, anything unknown) is dropped and only
+    // its text kept.
+    const CUE_TAGS = { b: 'b', i: 'i', u: 'u' };
+    // WebVTT §"default text colour" classes (`<c.yellow>`).
+    const CUE_COLORS = {
+        white: '#fff', lime: '#0f0', cyan: '#0ff', red: '#f00',
+        yellow: '#ff0', magenta: '#f0f', blue: '#00f', black: '#000',
+    };
+    const CUE_ENTITIES = {
+        amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+        lrm: '‎', rlm: '‏',
+    };
+    function decodeCueEntities(s) {
+        return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+            if (e[0] === '#') {
+                const cp = (e[1] === 'x' || e[1] === 'X') ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+                return (Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff) ? String.fromCodePoint(cp) : m;
+            }
+            const v = CUE_ENTITIES[e.toLowerCase()];
+            return v != null ? v : m;
+        });
+    }
+    // A colour value we are willing to put into style.color: #rgb[a] /
+    // #rrggbb[aa] or a bare CSS colour keyword. Assigned through the CSSOM
+    // (never as markup), so even a junk value can't escape the property.
+    function safeCueColor(v) {
+        v = String(v || '').trim().toLowerCase();
+        return /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(v) || /^[a-z]{3,20}$/.test(v) ? v : null;
+    }
+    /** Append one cue line (raw WebVTT/SRT cue text) to `parent` as DOM. */
+    function appendCueLine(parent, line) {
+        const stack = [{ tag: null, node: parent }];
+        const top = () => stack[stack.length - 1].node;
+        const text = (s) => { if (s) top().appendChild(document.createTextNode(decodeCueEntities(s))); };
+        let i = 0;
+        while (i < line.length) {
+            const lt = line.indexOf('<', i);
+            if (lt < 0) { text(line.slice(i)); break; }
+            text(line.slice(i, lt));
+            const gt = line.indexOf('>', lt + 1);
+            if (gt < 0) { text(line.slice(lt)); break; }   // stray '<' → literal text
+            const raw = line.slice(lt + 1, gt);
+            i = gt + 1;
+            const closing = raw[0] === '/';
+            const m = /^([a-z][a-z0-9]*)((?:\.[\w-]+)*)/i.exec(closing ? raw.slice(1) : raw);
+            if (!m) {
+                // <00:01.000> karaoke timestamps and <!…> are markup → drop;
+                // anything else ("5 < 6 > 4") was never a tag → keep as text.
+                if (!/^\s*[\d!]/.test(raw)) text(line.slice(lt, gt + 1));
+                continue;
+            }
+            const name = m[1].toLowerCase();
+            if (closing) {
+                // Close the innermost matching element (ignore unmatched ones).
+                for (let k = stack.length - 1; k > 0; k--) {
+                    if (stack[k].tag === name) { stack.length = k; break; }
+                }
+                continue;
+            }
+            let el = null;
+            const classes = m[2] ? m[2].slice(1).toLowerCase().split('.') : [];
+            const classColor = classes.map(c => CUE_COLORS[c]).find(Boolean) || null;
+            if (CUE_TAGS[name]) {
+                el = document.createElement(CUE_TAGS[name]);
+            } else if (name === 'c' || name === 'font') {
+                el = document.createElement('span');
+                if (name === 'font') {
+                    const cm = /\bcolor\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(raw);
+                    const col = cm ? safeCueColor(cm[1] ?? cm[2] ?? cm[3]) : null;
+                    if (col) el.style.color = col;
+                }
+            }
+            if (!el) continue;                              // unsupported tag: keep its text only
+            if (classColor) el.style.color = classColor;
+            top().appendChild(el);
+            stack.push({ tag: name, node: el });
+        }
+    }
+    /** Repaint Artplayer's subtitle box from the active cues (same structure
+     *  Artplayer produces: one .art-subtitle-line per non-empty cue line). */
+    function renderCuesSafely($subtitle, cues) {
+        if (!$subtitle) return;
+        $subtitle.textContent = '';
+        (cues || []).forEach((cue, group) => {
+            String((cue && cue.text) || '').split(/\r?\n/).filter(l => l.trim()).forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'art-subtitle-line';
+                div.dataset.group = String(group);
+                appendCueLine(div, line);
+                $subtitle.appendChild(div);
+            });
+        });
+    }
+
     /** Build the player accent colour from the active --accent-hue (set by the
      *  theme / user accent picker), keeping the player's own bright L/C so it
      *  reads well over video. Mirrors the --hud-accent token in
@@ -553,7 +656,8 @@
                 this.art.subtitle.switch(opts.url, {
                     type:  opts.type || 'vtt',
                     name:  opts.name || '',
-                    escape: false,
+                    // Inert text if anything ever bypasses renderCuesSafely.
+                    escape: true,
                 });
                 this.art.subtitle.show = true;
             } catch (e) { console.warn('subtitle switch failed', e); }
@@ -2680,7 +2784,10 @@
                 // no-op effect on every track change.
                 type: 'vtt',
                 encoding: 'utf-8',
-                escape: false,
+                // Artplayer paints cues with innerHTML: escape:true keeps file
+                // text inert, and the 'subtitleAfterUpdate' hook below repaints
+                // them through renderCuesSafely so <b>/<i>/<u> still render.
+                escape: true,
                 // User's subtitle size (px). Omitted (Artplayer default) when 0.
                 ...(PREFS.subSize > 0 ? { style: { fontSize: PREFS.subSize + 'px' } } : {}),
             } : {},
@@ -2690,6 +2797,13 @@
                 style: { position: 'absolute', inset: '0', zIndex: '30',
                          pointerEvents: 'none' },
             }],
+            });
+            // Repaint every cue change through the safe renderer (see
+            // renderCuesSafely). Artplayer emits this synchronously right after
+            // its own (escaped) innerHTML write, so nothing paints in between.
+            art.on('subtitleAfterUpdate', (cues) => {
+                try { renderCuesSafely(art.template.$subtitle, cues); }
+                catch (e) { console.warn('subtitle render failed', e); }
             });
             adapter = new ArtplayerAdapter(art);
             // Direct Stream: route seeks through a remux-reload (the source has
