@@ -461,6 +461,23 @@ internal static class MediaEndpoints
             return Results.Ok(rows.Select(r => r.ToDto()).ToArray());
         });
 
+        // Count-only twin of the list above for the NavPane chip, which used
+        // to download every NeedsReview DTO (candidates included) just to read
+        // .Length. Same role folder filter + predicate, so it always matches
+        // the list (and the hub's NeedsReviewCountChanged push).
+        app.MapGet(ApiRoutes.MediaNeedsReviewCount, async (
+            IDbContextFactory<AppDbContext> dbFactory,
+            IUserContext userCtx,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            var count = await db.MediaItems
+                .ApplyRoleFolderFilter(me?.Role)
+                .CountAsync(m => (int)m.IdentificationStatus == (int)SharedEnums.IdentificationStatus.NeedsReview, ct);
+            return Results.Ok(count);
+        });
+
         // File enumeration — surfaces the (season, episode) → file mapping the
         // Razor MediaDetail page computes locally. WASM/MAUI consumers use this
         // to drive the per-episode Play CTA without filesystem access.

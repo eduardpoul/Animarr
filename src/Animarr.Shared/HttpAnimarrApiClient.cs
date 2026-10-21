@@ -105,6 +105,20 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
         => await _http.GetFromJsonAsync<MediaItemDto[]>(ApiRoutes.MediaNeedsReview, JsonOpts, ct)
             ?? Array.Empty<MediaItemDto>();
 
+    public async Task<int> GetNeedsReviewCountAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.GetAsync(ApiRoutes.MediaNeedsReviewCount, ct);
+        // A server older than the endpoint has no such route: the request
+        // falls through to its SPA fallback (200 text/html) or 404s. Count
+        // the full list there, as clients before the endpoint did.
+        var isJson = resp.Content.Headers.ContentType?.MediaType?
+            .Contains("json", StringComparison.OrdinalIgnoreCase) == true;
+        if (resp.StatusCode == HttpStatusCode.NotFound || (resp.IsSuccessStatusCode && !isJson))
+            return (await GetNeedsReviewAsync(ct)).Length;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<int>(JsonOpts, ct);
+    }
+
     public Task<ContinueWatchDto?> GetContinueAsync(Guid mediaItemId, CancellationToken ct = default)
         => GetOrNullAsync<ContinueWatchDto>(ApiRoutes.MediaContinueFor(mediaItemId), ct);
 

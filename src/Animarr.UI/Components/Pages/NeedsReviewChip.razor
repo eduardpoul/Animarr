@@ -46,8 +46,8 @@
     {
         try
         {
-            var items = await Api.GetNeedsReviewAsync();
-            _count = items.Length;
+            // Count only — the dialog loads the items (with candidates) itself.
+            _count = await Api.GetNeedsReviewCountAsync();
         }
         catch { /* network blip — keep last value */ }
     }
