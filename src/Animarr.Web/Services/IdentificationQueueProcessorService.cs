@@ -7,17 +7,49 @@ using Microsoft.EntityFrameworkCore;
 namespace Animarr.Web.Services;
 
 /// <summary>
-/// Background service that polls IdentificationQueue and processes jobs one at a time.
+/// Background service that drains IdentificationQueue and processes jobs one at a time.
 /// Serial processing prevents flooding Ollama with parallel LLM requests.
 /// Pipeline: LLM (optional) → TMDB/MAL search → download images → save MediaItem.
+///
+/// Event-driven: enqueue sites (and resume) call <see cref="Wake"/>; while jobs
+/// are queued they run back to back (one start per <see cref="JobSpacing"/>,
+/// the old poll's pace); an idle queue is only re-checked every
+/// <see cref="IdlePoll"/> as a safety net. It used to query SQLite every 2 s
+/// forever (~86k queries/day with nothing to do).
 /// </summary>
 public class IdentificationQueueProcessorService(
     IDbContextFactory<AppDbContext> dbFactory,
     IServiceScopeFactory scopeFactory,
     ILogger<IdentificationQueueProcessorService> logger) : BackgroundService
 {
-    private const int PollMs    = 2000;
+    /// <summary>Minimum spacing between job starts — the pace the old 2 s
+    /// PeriodicTimer poll imposed (a soft brake on TMDB/LLM request bursts).</summary>
+    private static readonly TimeSpan JobSpacing = TimeSpan.FromSeconds(2);
+    /// <summary>Fallback re-check of an idle queue when nobody called <see cref="Wake"/>.</summary>
+    private static readonly TimeSpan IdlePoll = TimeSpan.FromSeconds(30);
     private const int MaxRetries = 3;
+
+    // Retention: Done/Failed rows (each carrying its multi-KB LogDetails) were
+    // never deleted. Rows older than RetentionAge go, except the newest
+    // RetentionKeepNewest finished ones — the AI popup reads the latest 200 rows
+    // (GET /api/identification-queue), so its list and counters don't change.
+    private static readonly TimeSpan RetentionAge   = TimeSpan.FromDays(30);
+    private static readonly TimeSpan RetentionEvery = TimeSpan.FromDays(1);
+    private const int RetentionKeepNewest = 200;
+
+    private static readonly SemaphoreSlim WakeSignal = new(0);
+    private static int _wakePending;
+
+    /// <summary>Nudge the processor: a job was enqueued / removed, or the queue
+    /// resumed. Static so enqueue sites that only hold a DbContext (the folder
+    /// watcher, folder/media/rename endpoints) need no DI plumbing — there is
+    /// one processor per process. Cheap and idempotent: a burst of calls
+    /// collapses into one wake-up.</summary>
+    public static void Wake()
+    {
+        if (Interlocked.Exchange(ref _wakePending, 1) == 0)
+            WakeSignal.Release();
+    }
 
     // ── Live counters & events ──────────────────────────────────────────────
     // Subscribed by the sidebar LLM status card, Settings → AI/LLM hero card,
@@ -42,6 +74,7 @@ public class IdentificationQueueProcessorService(
         if (IsPaused == paused) return;
         IsPaused = paused;
         QueueChanged?.Invoke();
+        if (!paused) Wake();   // pick the backlog up now, not at the next idle re-check
     }
 
     /// <summary>Count of items the pipeline finished as Identified | Manual since process start.</summary>
@@ -79,15 +112,28 @@ public class IdentificationQueueProcessorService(
         await RefreshQueueDepthAsync(stoppingToken);
         _ = WarmUpOllamaAsync(stoppingToken);   // fire-and-forget warm-up
 
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollMs));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        // First pass one spacing after start (as the old timer's first tick):
+        // drains whatever was queued / recovered across the restart.
+        try { await Task.Delay(JobSpacing, stoppingToken); }
+        catch (OperationCanceledException) { return; }
+
+        var lastPruneAt = DateTime.MinValue;
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var passStart = DateTime.UtcNow;
+            var processed = false;
             try
             {
+                if (passStart - lastPruneAt >= RetentionEvery)
+                {
+                    lastPruneAt = passStart;
+                    await PruneFinishedJobsAsync(stoppingToken);
+                }
+
                 // Paused → don't pick up the next job, but keep refreshing depth so the
                 // popup still reflects newly-queued items piling up behind the pause.
                 if (!IsPaused)
-                    await ProcessNextJobAsync(stoppingToken);
+                    processed = await ProcessNextJobAsync(stoppingToken);
                 await RefreshQueueDepthAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
@@ -104,7 +150,62 @@ public class IdentificationQueueProcessorService(
                     CurrentlyProcessingFolderId = null;
                     QueueChanged?.Invoke();
                 }
+                // A failure may leave work Queued (e.g. for retry) — come back at
+                // the old poll pace instead of parking until the idle re-check.
+                processed = true;
             }
+
+            try
+            {
+                if (processed)
+                {
+                    // More may be waiting: next pass right away, but no sooner
+                    // than one JobSpacing after this one started.
+                    var wait = JobSpacing - (DateTime.UtcNow - passStart);
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait, stoppingToken);
+                }
+                else
+                {
+                    // Queue empty (or paused): sleep until Wake() or the idle re-check.
+                    await WakeSignal.WaitAsync(IdlePoll, stoppingToken);
+                    // Reset AFTER waking: a Wake() from here on — e.g. an enqueue
+                    // racing the next pass's query — releases the signal again.
+                    Volatile.Write(ref _wakePending, 0);
+                }
+            }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    /// <summary>Delete Done/Failed jobs older than <see cref="RetentionAge"/>,
+    /// keeping the newest <see cref="RetentionKeepNewest"/> finished ones
+    /// regardless of age. Runs on the first pass and then daily; best-effort.</summary>
+    private async Task PruneFinishedJobsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var cutoff = DateTime.UtcNow - RetentionAge;
+            var keep = db.IdentificationQueues
+                .Where(q => q.Status == IdentificationQueueStatus.Done
+                         || q.Status == IdentificationQueueStatus.Failed)
+                .OrderByDescending(q => q.QueuedAt)
+                .Take(RetentionKeepNewest)
+                .Select(q => q.Id);
+            var pruned = await db.IdentificationQueues
+                .Where(q => (q.Status == IdentificationQueueStatus.Done
+                          || q.Status == IdentificationQueueStatus.Failed)
+                         && q.QueuedAt < cutoff
+                         && !keep.Contains(q.Id))
+                .ExecuteDeleteAsync(ct);
+            if (pruned > 0)
+                logger.LogInformation("Pruned {Count} finished identification jobs older than {Days} days.",
+                    pruned, (int)RetentionAge.TotalDays);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Pruning finished identification jobs failed — continuing.");
         }
     }
 
@@ -153,7 +254,8 @@ public class IdentificationQueueProcessorService(
             logger.LogInformation("Recovered {Count} interrupted identification jobs.", count);
     }
 
-    private async Task ProcessNextJobAsync(CancellationToken ct)
+    /// <summary>Runs the oldest Queued job. False when there was none.</summary>
+    private async Task<bool> ProcessNextJobAsync(CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
@@ -162,7 +264,7 @@ public class IdentificationQueueProcessorService(
             .OrderBy(q => q.QueuedAt)
             .FirstOrDefaultAsync(ct);
 
-        if (job is null) return;
+        if (job is null) return false;
 
         job.Status = IdentificationQueueStatus.Processing;
         await db.SaveChangesAsync(ct);
@@ -249,17 +351,29 @@ public class IdentificationQueueProcessorService(
                 Log,
                 ct);
 
+            // Steps 3-6 all work on the MediaItem step 2 created / updated for
+            // this folder — resolve its id once (it used to be looked up again,
+            // with a fresh context, in every step). Best-effort like the steps.
+            Guid? itemId = null;
+            try
+            {
+                await using var itemDb = await dbFactory.CreateDbContextAsync(ct);
+                itemId = await itemDb.MediaItems
+                    .Where(m => m.FolderId == job.FolderId)
+                    .Select(m => (Guid?)m.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+            catch (Exception idEx)
+            {
+                logger.LogWarning(idEx, "MediaItem lookup failed for folder {FolderId} — skipping the post-identify steps.", job.FolderId);
+            }
+
             // Step 3: category classification (best-effort; failures don't block).
-            // Resolve the MediaItem owning this folder and run the classifier.
+            // Run the classifier on the MediaItem owning this folder.
             // Manual overrides are preserved by ClassifyAsync — re-identifications
             // never trample user category edits.
             try
             {
-                await using var catDb = await dbFactory.CreateDbContextAsync(ct);
-                var itemId = await catDb.MediaItems
-                    .Where(m => m.FolderId == job.FolderId)
-                    .Select(m => (Guid?)m.Id)
-                    .FirstOrDefaultAsync(ct);
                 if (itemId is Guid mid)
                 {
                     var classifier = scope.ServiceProvider
@@ -285,12 +399,7 @@ public class IdentificationQueueProcessorService(
                 var mapEpisodes = await appCfg.GetAsync<bool>(AppConfigKeys.LlmEpisodeMapping, false, ct);
                 if (mapEpisodes)
                 {
-                    await using var epDb = await dbFactory.CreateDbContextAsync(ct);
-                    var epItemId = await epDb.MediaItems
-                        .Where(m => m.FolderId == job.FolderId)
-                        .Select(m => (Guid?)m.Id)
-                        .FirstOrDefaultAsync(ct);
-                    if (epItemId is Guid emid)
+                    if (itemId is Guid emid)
                     {
                         var epResolver = scope.ServiceProvider.GetRequiredService<EpisodeLlmResolver>();
                         var placed = await epResolver.ResolveAsync(emid, ct);
@@ -310,12 +419,7 @@ public class IdentificationQueueProcessorService(
             // effort; failures never block identification.
             try
             {
-                await using var soDb = await dbFactory.CreateDbContextAsync(ct);
-                var soItemId = await soDb.MediaItems
-                    .Where(m => m.FolderId == job.FolderId)
-                    .Select(m => (Guid?)m.Id)
-                    .FirstOrDefaultAsync(ct);
-                if (soItemId is Guid smid)
+                if (itemId is Guid smid)
                 {
                     var offsetResolver = scope.ServiceProvider.GetRequiredService<SeasonOffsetResolver>();
                     var offsets = await offsetResolver.ResolveAsync(smid, ct);
@@ -335,12 +439,7 @@ public class IdentificationQueueProcessorService(
             // self-skipping, so a restart that drops the task just re-detects.
             try
             {
-                await using var segDb = await dbFactory.CreateDbContextAsync(ct);
-                var segItemId = await segDb.MediaItems
-                    .Where(m => m.FolderId == job.FolderId)
-                    .Select(m => (Guid?)m.Id)
-                    .FirstOrDefaultAsync(ct);
-                if (segItemId is Guid segMid)
+                if (itemId is Guid segMid)
                 {
                     _ = Task.Run(async () =>
                     {
@@ -418,5 +517,6 @@ public class IdentificationQueueProcessorService(
         QueueProcessedSinceStart++;
         ItemIdentified?.Invoke(job.FolderId);
         QueueChanged?.Invoke();
+        return true;
     }
 }

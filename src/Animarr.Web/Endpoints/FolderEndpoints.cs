@@ -206,6 +206,7 @@ internal static class FolderEndpoints
                                 QueuedAt = DateTime.UtcNow,
                             });
                         if (toQueue.Count > 0) await qdb.SaveChangesAsync();
+                        IdentificationQueueProcessorService.Wake();
                         log.LogInformation(
                             "Rescan of section {Id}: {New} new folder(s) discovered, {Queued} queued for identification.",
                             id, newIds.Count, toQueue.Count);

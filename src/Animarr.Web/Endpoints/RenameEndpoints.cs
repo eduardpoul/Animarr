@@ -130,7 +130,8 @@ internal static class RenameEndpoints
             db.IdentificationQueues.Add(entity);
             await db.SaveChangesAsync(ct);
 
-            // The processor polls every few seconds; no manual nudge needed.
+            // The processor sleeps while the queue is empty — nudge it.
+            IdentificationQueueProcessorService.Wake();
             return Results.Created($"{ApiRoutes.IdentificationQueue}/{entity.Id}", entity.ToDto());
         }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
@@ -146,6 +147,7 @@ internal static class RenameEndpoints
                 return Results.Conflict("Already processing — wait for completion.");
             db.IdentificationQueues.Remove(entity);
             await db.SaveChangesAsync(ct);
+            IdentificationQueueProcessorService.Wake();   // re-count depth → AI popup
             return Results.NoContent();
         }).RequireAuthorization(AuthConstants.Policies.SystemSettings);
 

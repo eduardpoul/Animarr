@@ -304,6 +304,7 @@ public class FolderWatcherService(
                             QueuedAt = DateTime.UtcNow,
                         });
                         await idDb.SaveChangesAsync();
+                        IdentificationQueueProcessorService.Wake();
                         logger.LogDebug("Queued identification for new folder {Path}", dirPath);
                     }
                 }
@@ -388,6 +389,7 @@ public class FolderWatcherService(
                             QueuedAt = DateTime.UtcNow,
                         });
                         await idDb.SaveChangesAsync();
+                        IdentificationQueueProcessorService.Wake();
                         logger.LogDebug("Queued identification for flat movie {Path}", filePath);
                     }
                 }
@@ -813,6 +815,7 @@ public class FolderWatcherService(
                     QueuedAt = DateTime.UtcNow,
                 });
             if (toQueue.Count > 0) await qdb.SaveChangesAsync(ct);
+            IdentificationQueueProcessorService.Wake();
             queued = toQueue.Count;
         }
         logger.LogInformation("Section discovery registered {New} new item(s), queued {Queued} for identification.",
