@@ -3,6 +3,13 @@
 public class AppSettings
 {
     public int WatcherDelayMs { get; set; } = 2000;
+
+    /// <summary>HDR → SDR tone mapping when an HDR source has to be re-encoded
+    /// to SDR H.264: "auto" (libplacebo on Vulkan when the GPU passes the
+    /// startup probe, else the CPU tonemapx), "libplacebo", "tonemapx" or
+    /// "off" (old behaviour: truncate to 8-bit, washed-out colours).</summary>
+    public string HdrToneMapping { get; set; } = "auto";
+
     public string[] VideoExtensions { get; set; } = [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm", ".rmvb", ".rm", ".3gp", ".divx", ".mpg", ".mpeg", ".ogv", ".vob", ".f4v"];
     public string[] SubtitleExtensions { get; set; } = [".srt", ".ass", ".ssa", ".vtt", ".sub"];
     /// <summary>Standalone audio containers we treat as sideload-able external

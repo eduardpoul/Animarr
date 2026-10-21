@@ -94,8 +94,9 @@ public sealed partial class HlsSessionService
     ///     ORIGINAL bitstream, zero quality loss, fastest start. Covers 8-bit
     ///     AND 10-bit/HDR. Default once the browser reports HEVC via clientHevc.
     ///   • HEVC + client CAN'T decode HEVC → re-encode to H.264 (NVENC, else
-    ///     VAAPI for 8-bit) for browser compatibility; 10-bit w/o NVENC falls
-    ///     back to stream-copy (best effort — needs a HEVC client or cast).
+    ///     VAAPI — 10-bit only where the GPU decodes Main10) for browser
+    ///     compatibility, HDR tone-mapped to SDR; otherwise stream-copy (best
+    ///     effort — needs a HEVC client or cast).
     /// clientHevc = MediaSource.isTypeSupported('…hvc1…') on the client.</summary>
     private HlsPlan ChoosePlan(ProbeInfo probe, int maxHeight = 0, bool clientHevc = false, int maxBitrate = 0)
     {
@@ -106,8 +107,7 @@ public sealed partial class HlsSessionService
         //   NVENC  — decodes H.264 + HEVC 8/10-bit, encodes H.264. Preferred.
         //   VAAPI  — Vega/Intel decode H.264 + HEVC (incl. 10-bit on VCN); we
         //            encode H.264 8-bit so the Main10-ENCODE limitation doesn't
-        //            apply. HDR is flattened to SDR (acceptable for a smaller
-        //            rung; proper tonemap is a later refinement).
+        //            apply. HDR is tone-mapped to SDR (libplacebo / tonemapx).
         //   libx264 — CPU fallback when no GPU encoder is present.
         if ((maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height) || maxBitrate > 0)
         {
@@ -133,12 +133,15 @@ public sealed partial class HlsSessionService
             if (clientHevc)
                 return HlsPlan.Fmp4StreamCopy;
 
-            // Browser can't decode HEVC → re-encode to H.264 for compatibility.
-            // NVENC first (handles 10-bit Main10 decode, which VAAPI on Vega
-            // can't); then VAAPI for 8-bit only; finally stream-copy fallback.
+            // Browser can't decode HEVC → re-encode to H.264 for compatibility
+            // (10-bit HDR gets tone-mapped to SDR on the way, see ToneMapperFor).
+            // NVENC first; then VAAPI — for 10-bit only when the GPU decodes
+            // Main10 (vainfo VAProfileHEVCMain10/VLD; the Vega 11 host does,
+            // older iGPUs don't); finally stream-copy fallback.
             if (_hardware?.Current.Nvenc.Available == true)
                 return HlsPlan.Fmp4NvencReencode;
-            if (!probe.Is10Bit && _hardware?.Current.Vaapi.Available == true)
+            if (_hardware?.Current.Vaapi.Available == true
+                && (!probe.Is10Bit || _hardware.Current.VaapiHevc10Decode))
                 return HlsPlan.Fmp4VaapiReencode;
             return HlsPlan.Fmp4StreamCopy;   // HEVC: let the browser decode the bitstream
         }

@@ -33,7 +33,17 @@ public sealed class HardwareInfoService
         EncoderStatus Qsv,
         string[] HwAccels,
         string[] HwEncoders,
-        DateTime ProbedAt);
+        DateTime ProbedAt,
+        ToneMapSupport? ToneMapping = null,
+        // VAAPI decodes HEVC Main10 (VAProfileHEVCMain10 / VLD) — gates the
+        // 10-bit HEVC → H.264 re-encode on VAAPI hosts.
+        bool VaapiHevc10Decode = false);
+
+    /// <summary>HDR → SDR tone mappers the image's ffmpeg can actually run
+    /// here. <see cref="Libplacebo"/> is a real end-to-end probe (VAAPI-derived
+    /// Vulkan device + libplacebo on a 10-bit test frame), not just the filter
+    /// list — the filter exists in every build but needs a working GPU ICD.</summary>
+    public sealed record ToneMapSupport(bool Libplacebo, bool Tonemapx, bool TonemapCuda, string? VulkanDevice);
 
     private readonly ILogger<HardwareInfoService> _logger;
     public HardwareReport Current { get; private set; }
@@ -57,13 +67,83 @@ public sealed class HardwareInfoService
     {
         var hwAccels = ProbeHwAccels();
         var encoders = ProbeHwEncoders();
+        var vaapi = ProbeVaapi(hwAccels, encoders);
         return new HardwareReport(
-            Vaapi:     ProbeVaapi(hwAccels, encoders),
+            Vaapi:     vaapi,
             Nvenc:     ProbeNvenc(hwAccels, encoders),
             Qsv:       ProbeQsv(hwAccels, encoders),
             HwAccels:  hwAccels,
             HwEncoders: encoders,
-            ProbedAt:   DateTime.UtcNow);
+            ProbedAt:   DateTime.UtcNow,
+            ToneMapping: ProbeToneMapping(vaapi.Available),
+            VaapiHevc10Decode: vaapi.Available
+                && Regex.IsMatch(_vainfo, @"VAProfileHEVCMain10\s*:\s*VAEntrypointVLD"));
+    }
+
+    private ToneMapSupport ProbeToneMapping(bool vaapiAvailable)
+    {
+        var filters = RunCommand("ffmpeg", new[] { "-hide_banner", "-filters" }, 3000) ?? "";
+        bool HasFilter(string name) => Regex.IsMatch(filters, $@"\s{Regex.Escape(name)}\s");
+        bool tonemapx = HasFilter("tonemapx");
+        bool tonemapCuda = HasFilter("tonemap_cuda");
+
+        // libplacebo only pays off on a real GPU next to the VAAPI encoder: run
+        // the exact device setup the VAAPI plan uses on a tiny 10-bit frame.
+        // A software Vulkan ICD (llvmpipe / lavapipe) would "work" but be far
+        // too slow, so it doesn't count.
+        bool libplacebo = false;
+        string? device = null;
+        if (vaapiAvailable && HasFilter("libplacebo"))
+        {
+            var (ok, log) = RunExitCode("ffmpeg", new[]
+            {
+                "-hide_banner", "-v", "verbose",
+                "-init_hw_device", "vaapi=va:/dev/dri/renderD128",
+                "-init_hw_device", "vulkan=vk@va", "-filter_hw_device", "vk",
+                "-f", "lavfi", "-i", "testsrc2=s=256x144:d=0.2,format=yuv420p10le",
+                "-vf", $"hwupload,{HdrToneMap.LibplaceboFilter},hwdownload,format=nv12",
+                "-f", "null", "-",
+            }, 10000);
+            var m = Regex.Match(log, @"Device \d+ selected: (.+?) \(", RegexOptions.IgnoreCase);
+            if (!m.Success) m = Regex.Match(log, @"GPU listing:\s*\S*\s*\d+: ([^\r\n(]+)", RegexOptions.IgnoreCase);
+            device = m.Success ? m.Groups[1].Value.Trim() : null;
+            libplacebo = ok && !(device ?? "").Contains("llvmpipe", StringComparison.OrdinalIgnoreCase);
+        }
+        return new ToneMapSupport(libplacebo, tonemapx, tonemapCuda, device);
+    }
+
+    /// <summary>Runs a command to completion and reports whether it exited 0,
+    /// plus its combined output (stderr is where ffmpeg logs).</summary>
+    private (bool Ok, string Output) RunExitCode(string cmd, string[] args, int timeoutMs)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName               = cmd,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi);
+            if (p is null) return (false, "");
+            var stdout = p.StandardOutput.ReadToEndAsync();
+            var stderr = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(true); } catch { }
+                return (false, "");
+            }
+            Task.WaitAll([stdout, stderr], 1000);
+            return (p.ExitCode == 0, stdout.Result + "\n" + stderr.Result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "RunExitCode failed for {Cmd}", cmd);
+            return (false, "");
+        }
     }
 
     // ─── ffmpeg-level probes ─────────────────────────────────────────────
@@ -95,8 +175,12 @@ public sealed class HardwareInfoService
 
     // ─── Vendor-specific probes ──────────────────────────────────────────
 
+    /// <summary>vainfo output from the last VAAPI probe (decode-profile checks).</summary>
+    private string _vainfo = "";
+
     private EncoderStatus ProbeVaapi(string[] hwAccels, string[] encoders)
     {
+        _vainfo = "";
         bool ffmpegHasVaapi = hwAccels.Contains("vaapi") && encoders.Any(e => e.EndsWith("_vaapi"));
         bool driExists      = File.Exists("/dev/dri/renderD128") || Directory.Exists("/dev/dri");
 
@@ -116,6 +200,7 @@ public sealed class HardwareInfoService
 
         // /dev/dri exists + ffmpeg has vaapi → try `vainfo` for vendor info.
         var vainfo = RunCommand("vainfo", Array.Empty<string>(), 2500) ?? "";
+        _vainfo = vainfo;
         string? vendor = null, deviceName = null, driverInfo = null;
         // vainfo prints lines like:
         //   Driver version: Mesa Gallium driver 23.2.1 for AMD Radeon Vega 11
@@ -258,9 +343,12 @@ public sealed class HardwareInfoService
 
     private void LogReport(HardwareReport r)
     {
-        _logger.LogInformation("HW probe: VAAPI={V} NVENC={N} QSV={Q}",
+        _logger.LogInformation("HW probe: VAAPI={V} NVENC={N} QSV={Q} HDR tone map: libplacebo={P} tonemapx={X} tonemap_cuda={C}",
             r.Vaapi.Available  ? $"✓ {r.Vaapi.Vendor} {r.Vaapi.DeviceName}".Trim() : "✗",
             r.Nvenc.Available  ? $"✓ {r.Nvenc.DeviceName}" : "✗",
-            r.Qsv.Available    ? $"✓ Intel" : "✗");
+            r.Qsv.Available    ? $"✓ Intel" : "✗",
+            r.ToneMapping?.Libplacebo == true ? $"✓ {r.ToneMapping.VulkanDevice}".Trim() : "✗",
+            r.ToneMapping?.Tonemapx == true ? "✓" : "✗",
+            r.ToneMapping?.TonemapCuda == true ? "✓" : "✗");
     }
 }

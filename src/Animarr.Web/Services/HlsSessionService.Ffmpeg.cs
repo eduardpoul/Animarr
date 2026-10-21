@@ -32,7 +32,10 @@ public sealed partial class HlsSessionService
         string? externalAudioPath = null,
         // Output bitrate cap in Mbps (0 = use the resolution ladder). Threaded
         // to the re-encode builders, which feed it to RateFor.
-        int maxBitrate = 0)
+        int maxBitrate = 0,
+        // HDR → SDR tone mapping for the re-encode plans (None = SDR source or
+        // off). Chosen once per session by ToneMapperFor.
+        HdrToneMapper toneMapper = HdrToneMapper.None)
     {
         var args = new List<string>();
         var videoCodec = probe?.VideoCodec;
@@ -62,11 +65,11 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec);
+                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec);
+                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
@@ -74,7 +77,7 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath, maxBitrate);
+                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath, maxBitrate, toneMapper);
                 break;
         }
 
@@ -202,7 +205,8 @@ public sealed partial class HlsSessionService
     /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null)
+        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
+        HdrToneMapper toneMapper = HdrToneMapper.None)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -222,11 +226,28 @@ public sealed partial class HlsSessionService
         // and the frames are hwupload'ed so the ENCODE still runs on the GPU.
         var vc = (videoCodec ?? "").ToLowerInvariant();
         bool hwDecode = vc is "h264" or "hevc";
-        args.Add("-vaapi_device");
-        args.Add("/dev/dri/renderD128");
+        bool placebo = toneMapper == HdrToneMapper.Libplacebo;
+        if (placebo)
+        {
+            // libplacebo needs a Vulkan device next to the VAAPI one. Derived
+            // from it (vulkan=vk@va) so the final hwupload can derive its way
+            // back to VAAPI for the encoder; the filter device is Vulkan.
+            args.AddRange(new[]
+            {
+                "-init_hw_device", "vaapi=va:/dev/dri/renderD128",
+                "-init_hw_device", "vulkan=vk@va",
+                "-filter_hw_device", "vk",
+            });
+        }
+        else
+        {
+            args.Add("-vaapi_device");
+            args.Add("/dev/dri/renderD128");
+        }
         if (hwDecode)
         {
             args.Add("-hwaccel"); args.Add("vaapi");
+            if (placebo) { args.Add("-hwaccel_device"); args.Add("va"); }
             args.Add("-hwaccel_output_format"); args.Add("vaapi");
         }
 
@@ -256,20 +277,32 @@ public sealed partial class HlsSessionService
         {
             args.Add("-copyts");
         }
-        string vf;
-        if (hwDecode)
+        var size = targetHeight > 0 ? $"w=-2:h={targetHeight}:" : "";
+        string vf = (hwDecode, toneMapper) switch
         {
-            vf = "format=nv12|vaapi,hwupload";
-            if (targetHeight > 0)
-                vf = $"scale_vaapi=w=-2:h={targetHeight}:format=nv12,{vf}";
-        }
-        else
-        {
+            // HDR on the GPU path. Downscale FIRST on the VAAPI surfaces (cheap
+            // fixed-function), then download the p010 frames for tone mapping:
+            // Vega/Raven can't map VAAPI surfaces into Vulkan zero-copy
+            // (VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT), and
+            // letting libplacebo scale at 4K made it 0.5× realtime vs 1.4×.
+            (true, HdrToneMapper.Libplacebo) =>
+                $"scale_vaapi={size}format=p010,hwdownload,format=p010,hwupload,"
+                + $"{HdrToneMap.LibplaceboFilter},hwdownload,format=nv12,hwupload=derive_device=vaapi",
+            (true, HdrToneMapper.Tonemapx) =>
+                $"scale_vaapi={size}format=p010,hwdownload,format=p010,{HdrToneMap.TonemapxFilter},hwupload",
+            // SDR (or tone mapping off). Always convert the surface to nv12 —
+            // h264_vaapi only takes 8-bit, and a 10-bit HEVC source decodes
+            // to p010 surfaces (the old no-downscale `format=nv12|vaapi` chain
+            // handed p010 straight to the encoder and failed).
+            (true, _) => $"scale_vaapi={size}format=nv12",
+            // Software-decoded HDR (e.g. 10-bit AV1 / VP9 without a GPU decoder).
+            (false, HdrToneMapper.Libplacebo) =>
+                $"hwupload,{HdrToneMap.LibplaceboScaled(targetHeight)},hwdownload,format=nv12,hwupload=derive_device=vaapi",
+            (false, HdrToneMapper.Tonemapx) =>
+                (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + $"{HdrToneMap.TonemapxFilter},hwupload",
             // Software-decoded frames: upload first, then scale ON the GPU.
-            vf = "format=nv12,hwupload";
-            if (targetHeight > 0)
-                vf += $",scale_vaapi=w=-2:h={targetHeight}";
-        }
+            _ => "format=nv12,hwupload" + (targetHeight > 0 ? $",scale_vaapi=w=-2:h={targetHeight}" : ""),
+        };
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
@@ -285,6 +318,7 @@ public sealed partial class HlsSessionService
             "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
     /// <summary>fMP4 HLS with NVIDIA NVENC re-encode to H.264 + B-frames
@@ -295,7 +329,8 @@ public sealed partial class HlsSessionService
     /// reintroduce the fMP4 TFDT sync wobble.</summary>
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null)
+        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
+        HdrToneMapper toneMapper = HdrToneMapper.None)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -337,13 +372,19 @@ public sealed partial class HlsSessionService
         // Optional scale: on-GPU via scale_cuda for GPU-decoded frames;
         // plain CPU scale for software-decoded legacy codecs (NVENC takes
         // system-memory nv12/yuv420p frames directly).
-        var vf = hwDecode
-            ? (targetHeight > 0
-                ? $"scale_cuda=w=-2:h={targetHeight}:format=nv12"
-                : "scale_cuda=format=nv12")
-            : (targetHeight > 0
-                ? $"scale=-2:{targetHeight},format=nv12"
-                : "format=nv12");
+        var size = targetHeight > 0 ? $"w=-2:h={targetHeight}:" : "";
+        var vf = (hwDecode, toneMapper) switch
+        {
+            // HDR: scale on the GPU in 10-bit, then tone-map — on the GPU with
+            // tonemap_cuda, or downloaded to the CPU tonemapx (NVENC takes
+            // system-memory nv12 directly).
+            (true, HdrToneMapper.TonemapCuda) => $"scale_cuda={size}format=p010,{HdrToneMap.TonemapCudaFilter}",
+            (true, HdrToneMapper.Tonemapx)    => $"scale_cuda={size}format=p010,hwdownload,format=p010,{HdrToneMap.TonemapxFilter}",
+            (true, _)                         => $"scale_cuda={size}format=nv12",
+            (false, HdrToneMapper.None)       => (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + "format=nv12",
+            // Software-decoded HDR: CPU tone mapping (tonemap_cuda would need an upload first).
+            (false, _)                        => (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + HdrToneMap.TonemapxFilter,
+        };
         var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
@@ -361,6 +402,7 @@ public sealed partial class HlsSessionService
             "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
     /// <summary>fMP4 HLS via SOFTWARE libx264 re-encode + optional downscale.
@@ -374,7 +416,7 @@ public sealed partial class HlsSessionService
     /// downscaled rung on a small screen.</summary>
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0)
+        string? externalAudioPath = null, int maxBitrate = 0, HdrToneMapper toneMapper = HdrToneMapper.None)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -403,6 +445,8 @@ public sealed partial class HlsSessionService
         var outH = targetHeight > 0 ? targetHeight : sourceHeight;
         var rate = RateFor(outH, maxBitrate);
         var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+        // HDR: CPU tone mapping after the (cheaper, smaller) downscale.
+        if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;
         args.AddRange(new[]
         {
             "-map", "0:v:0?",
@@ -419,6 +463,7 @@ public sealed partial class HlsSessionService
             "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
     /// <summary>fMP4 HLS with full stream-copy. Used for 10-bit HEVC HDR / DV

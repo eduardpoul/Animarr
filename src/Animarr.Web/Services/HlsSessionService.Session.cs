@@ -42,6 +42,9 @@ public sealed partial class HlsSessionService
         // Carried so a backward-scrub restart keeps muxing the same dub track
         // instead of silently reverting to the source audio.
         public string? ExternalAudioPath { get; }
+        /// <summary>HDR → SDR mapper chosen at start — a seek-restart only has a
+        /// minimal probe (no colour transfer), so it reuses this.</summary>
+        public HdrToneMapper ToneMapper { get; }
         public DateTime CreatedAt  { get; }
         public DateTime LastActive { get; private set; }
 
@@ -97,8 +100,10 @@ public sealed partial class HlsSessionService
         public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
             int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
-            string? audioCodec = null, bool is10Bit = false, int startSegment = 0)
+            string? audioCodec = null, bool is10Bit = false, int startSegment = 0,
+            HdrToneMapper toneMapper = HdrToneMapper.None)
         {
+            ToneMapper      = toneMapper;
             RunStartSegment = startSegment;
             ProducedTop     = startSegment - 1;
             PlayFrontier    = startSegment;

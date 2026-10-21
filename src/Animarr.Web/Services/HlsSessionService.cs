@@ -75,6 +75,7 @@ public sealed partial class HlsSessionService : IDisposable
 
     private readonly ILogger<HlsSessionService> _logger;
     private readonly HardwareInfoService? _hardware;
+    private readonly string _toneMapMode;
     private readonly MediaProbeCache _probeCache;
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
@@ -87,10 +88,12 @@ public sealed partial class HlsSessionService : IDisposable
     public int ActiveSessionCount => _sessions.Count;
 
     public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null,
-        MediaProbeCache? probeCache = null)
+        MediaProbeCache? probeCache = null,
+        Microsoft.Extensions.Options.IOptions<Configuration.AppSettings>? appOptions = null)
     {
         _logger  = logger;
         _hardware = hardware;
+        _toneMapMode = (appOptions?.Value.HdrToneMapping ?? "auto").Trim().ToLowerInvariant();
         _probeCache = probeCache
             ?? new MediaProbeCache(Microsoft.Extensions.Logging.Abstractions.NullLogger<MediaProbeCache>.Instance);
         // /tmp on Linux is tmpfs by default on most distros — segments live
@@ -253,6 +256,30 @@ public sealed partial class HlsSessionService : IDisposable
         return new PlaybackDecision(false, null, duration, null);
     }
 
+    /// <summary>Picks the HDR → SDR tone mapper for a re-encode of an HDR
+    /// source (None for SDR sources and copy plans): libplacebo on the VAAPI
+    /// plan when the startup probe found a real Vulkan GPU, the CPU tonemapx
+    /// otherwise; tonemap_cuda on NVENC. <c>AppSettings:HdrToneMapping</c>
+    /// can force "libplacebo" / "tonemapx" or turn it "off".</summary>
+    private HdrToneMapper ToneMapperFor(HlsPlan plan, ProbeInfo? probe)
+    {
+        if (probe is null || !HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision)) return HdrToneMapper.None;
+        if (_toneMapMode == "off") return HdrToneMapper.None;
+        var caps = _hardware?.Current.ToneMapping;
+        bool tonemapx = caps?.Tonemapx == true;
+        var cpu = tonemapx ? HdrToneMapper.Tonemapx : HdrToneMapper.None;
+        if (_toneMapMode == "tonemapx") return plan is HlsPlan.Fmp4VaapiReencode or HlsPlan.Fmp4NvencReencode
+            or HlsPlan.Fmp4SoftwareReencode ? cpu : HdrToneMapper.None;
+        return plan switch
+        {
+            HlsPlan.Fmp4VaapiReencode    => caps?.Libplacebo == true ? HdrToneMapper.Libplacebo : cpu,
+            HlsPlan.Fmp4NvencReencode    => _toneMapMode != "libplacebo" && caps?.TonemapCuda == true
+                                                ? HdrToneMapper.TonemapCuda : cpu,
+            HlsPlan.Fmp4SoftwareReencode => cpu,
+            _                            => HdrToneMapper.None,
+        };
+    }
+
     /// <summary>
     /// Builds the <see cref="PlayerOutputInfo"/> the HUD reads off — the
     /// stream the player actually receives after our serving decision. For
@@ -260,7 +287,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
-        bool isDirectStream = false)
+        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -297,12 +324,17 @@ public sealed partial class HlsSessionService : IDisposable
                 _                            => "unknown",
             };
 
+        // What happened to an HDR source on a re-encode: tone-mapped to SDR
+        // (correct colours) or — tone mapping off / unavailable — just lost.
+        var hdrNote = !isReencode || !HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision) ? ""
+            : toneMapper != HdrToneMapper.None ? $" (HDR → SDR tone-mapped, {HdrToneMap.Describe(toneMapper)})"
+            : " (HDR lost)";
         string? reason = isDirectPlay || isDirectStream ? null : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
-            HlsPlan.Fmp4VaapiReencode => "Re-encoded to H.264 via VAAPI (GPU) for browser compatibility (HDR lost)",
-            HlsPlan.Fmp4NvencReencode => "Re-encoded to H.264 via NVENC (GPU) for browser compatibility (HDR lost)",
-            HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality (HDR lost)",
+            HlsPlan.Fmp4VaapiReencode => "Re-encoded to H.264 via VAAPI (GPU) for browser compatibility" + hdrNote,
+            HlsPlan.Fmp4NvencReencode => "Re-encoded to H.264 via NVENC (GPU) for browser compatibility" + hdrNote,
+            HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality" + hdrNote,
             HlsPlan.Fmp4StreamCopy    => "HEVC stream-copied to fMP4 — original bitstream, no re-encode (browser decodes HEVC; HDR/10-bit preserved)",
             _                          => null,
         };
@@ -640,14 +672,15 @@ public sealed partial class HlsSessionService : IDisposable
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
-        _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H})",
+        var toneMapper = ToneMapperFor(plan, probe);
+        _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap}",
             token, plan, (int)Math.Round(audioOffsetSec * 1000),
-            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height);
+            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper);
         var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
-            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate);
+            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper);
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
@@ -676,7 +709,7 @@ public sealed partial class HlsSessionService : IDisposable
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
             externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false,
-            startSegment: startSegment);
+            startSegment: startSegment, toneMapper: toneMapper);
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
         // mid-start — the endpoint passes RequestAborted): stop the session's
@@ -768,7 +801,7 @@ public sealed partial class HlsSessionService : IDisposable
         // Use probeForPlaylist so a downscaled re-encode reports the OUTPUT
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
-            ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false)
+            ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -951,7 +984,8 @@ public sealed partial class HlsSessionService : IDisposable
                 audioOffsetSec: session.AudioOffsetSec,
                 audioTrackIndex: session.AudioTrackIndex,
                 externalAudioPath: session.ExternalAudioPath,
-                maxBitrate: session.MaxBitrate);
+                maxBitrate: session.MaxBitrate,
+                toneMapper: session.ToneMapper);
 
             var psi = new ProcessStartInfo
             {
