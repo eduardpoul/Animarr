@@ -168,6 +168,10 @@ public partial class PlayerPage : ContentPage
     }
 
     public static bool HandleGlobalBack() => Current?.OnBack() ?? false;
+
+    // Android 13+ delivers Back through MAUI, not Activity.OnBackPressed:
+    // close the submenu / HUD first, only then leave the player.
+    protected override bool OnBackButtonPressed() => OnBack() || base.OnBackButtonPressed();
     private bool OnBack()
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }
@@ -260,6 +264,19 @@ public partial class PlayerPage : ContentPage
             var m = vg.Resources?.DisplayMetrics;
             int w = m?.WidthPixels  ?? 1920;
             int h = m?.HeightPixels ?? 1080;
+            // SurfaceView by default: video on its own compositor layer (no UI
+            // redraw per video frame, 4K plane, HDR/DV, frame-rate switching).
+            // The old TextureView path stays behind the bench flag "+texture".
+            if (!Bench.BenchLog.Has("texture"))
+            {
+                var sv = new Android.Views.SurfaceView(vg.Context!) { LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h) };
+                vg.AddView(sv, 0);
+                LayoutNative(sv, w, h);
+                NativePlayerService.RegisterSurfaceView(sv);
+                RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspectMatrix();
+                _attached = true;
+                return;
+            }
             var tv = new Android.Views.TextureView(vg.Context!)
             {
                 LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h),

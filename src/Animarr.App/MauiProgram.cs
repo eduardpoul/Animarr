@@ -23,6 +23,13 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+#if ANDROID
+            .ConfigureMauiHandlers(h =>
+            {
+                h.AddHandler<Bench.NativePosterGrid, Bench.NativePosterGridHandler>();
+                h.AddHandler<Tv.NativeHost, Tv.NativeHostHandler>();
+            })
+#endif
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -300,7 +307,9 @@ public static class MauiProgram
         // Mirror the restored cookies into the WebView store too — its <img>
         // fetches (episode thumbs on cookie-gated servers) authenticate via
         // the WEBVIEW's cookies, not the HttpClient container.
-        CookiePersistence.SyncToWebView(cookieJar);
+        // TV runs native pages only: touching CookieManager would load the whole
+        // Chromium WebView (~0.1 s on a desktop CPU, seconds + tens of MB on the TV).
+        if (!DeviceKind.IsTv) CookiePersistence.SyncToWebView(cookieJar);
         builder.Services.AddSingleton(cookieJar);
         builder.Services.AddSingleton(sp =>
         {
@@ -395,8 +404,13 @@ public static class MauiProgram
         // sockets while the splash screen is still up — by the time the user
         // navigates to /discovery there's already a populated cache to show.
         // Also publishes the static accessor used by MdnsBridge.
-        var browser = app.Services.GetRequiredService<MdnsBrowserService>();
-        MdnsBrowserService.RegisterStaticInstance(browser);
+        // TV: the server picker resolves the mDNS browser on demand; the eager
+        // start (and the JS-bridge static) is only for the Blazor phone shell.
+        if (!DeviceKind.IsTv)
+        {
+            var browser = app.Services.GetRequiredService<MdnsBrowserService>();
+            MdnsBrowserService.RegisterStaticInstance(browser);
+        }
 
         // Watch Next bridge: publish the singleton so the JS-side static
         // [JSInvokable] in WatchNextBridge can dispatch to the live service
@@ -428,9 +442,13 @@ public static class MauiProgram
         // WebView loads (ConfigureAndroidWebView pushes the proxy base URL into
         // the page on init). Start() is a no-op-safe try/catch; the static
         // accessor lets ConfigureAndroidWebView read the chosen port.
-        var mediaProxy = app.Services.GetRequiredService<LocalMediaProxyService>();
-        mediaProxy.Start();
-        LocalMediaProxyService.RegisterStaticInstance(mediaProxy);
+        // Loopback proxy only serves the WebView player — not needed on the TV.
+        if (!DeviceKind.IsTv)
+        {
+            var mediaProxy = app.Services.GetRequiredService<LocalMediaProxyService>();
+            mediaProxy.Start();
+            LocalMediaProxyService.RegisterStaticInstance(mediaProxy);
+        }
         // Media auth: the hybrid WebView can't attach the auth cookie to a
         // cross-site <img>/<video> (SameSite), so every media URL the Blazor
         // side builds carries the session media token (MediaUrl / the player

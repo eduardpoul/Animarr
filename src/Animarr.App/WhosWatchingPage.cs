@@ -232,7 +232,7 @@ public sealed class WhosWatchingPage : ContentPage
         if (_mode == PickerMode.Switch && signedInAsThem && p.HasPin)
         {
             await TvAuthFlow.ApplyDefaultAsync(DefaultChoice);
-            TvRoot.Go(new CatalogNativePage());
+            TvRoot.Go(TvRoot.Home());
             return;
         }
         if (p.HasPin)

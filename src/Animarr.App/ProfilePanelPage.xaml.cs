@@ -319,7 +319,7 @@ public partial class ProfilePanelPage : ContentPage
     private async Task LegacySwitchAsync(RosterUserDto u)
     {
         var res = await _api.SwitchUserAsync(new SwitchUserRequest(u.Id, null));
-        if (res.Ok) TvRoot.Go(new CatalogNativePage());
+        if (res.Ok) TvRoot.Go(TvRoot.Home());
         else StatusLabel.Text = TvL.T("profile.err_switch_failed", "Не удалось переключиться — попробуйте снова.",
             "Couldn't switch — try again.");
     }
@@ -338,7 +338,7 @@ public partial class ProfilePanelPage : ContentPage
             // Pull the new pack, then rebuild the whole shell so every page picks
             // up the language (pages bake their strings at construction time).
             await TvL.LoadAsync(_http, code);
-            TvRoot.Go(new CatalogNativePage());
+            TvRoot.Go(TvRoot.Home());
         }
         catch
         {

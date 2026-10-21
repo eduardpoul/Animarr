@@ -79,8 +79,8 @@ public static class TvFocus
                 layers.SetLayerInset(0, glowIn, glowIn, glowIn, glowIn);
                 v.Foreground = layers;
             }
-            v.Elevation = 12 * d;
-            v.BringToFront();
+            if (!Bench.BenchLog.Has("noelev")) v.Elevation = 12 * d;
+            if (!Bench.BenchLog.Has("nobtf")) v.BringToFront();
         }
         else
         {

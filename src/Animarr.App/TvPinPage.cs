@@ -402,7 +402,7 @@ public sealed class TvPinPage : ContentPage
             }
             // Setup done: honour a "Sign in by default" chosen in the picker.
             await TvAuthFlow.ApplyDefaultAsync(_makeDefault);
-            TvRoot.Go(new CatalogNativePage());
+            TvRoot.Go(TvRoot.Home());
             return;
         }
         _busy = false;

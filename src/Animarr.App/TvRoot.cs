@@ -20,6 +20,15 @@ public static class TvRoot
     /// <summary>Replace the current window's root with <paramref name="page"/>
     /// wrapped in a fresh, chrome-less NavigationPage. Safe from any screen's
     /// code-behind.</summary>
+    /// <summary>The TV home: the new native (Fluent, virtualised) screen on
+    /// Android, the old XAML catalog elsewhere.</summary>
+    public static Page Home()
+#if ANDROID
+        => new Tv.TvHomePage();
+#else
+        => new CatalogNativePage();
+#endif
+
     public static void Go(Page page)
     {
         var win = Application.Current?.Windows.FirstOrDefault();

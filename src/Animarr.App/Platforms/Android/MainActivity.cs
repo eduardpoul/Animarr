@@ -1,4 +1,4 @@
-﻿using Android.App;
+using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
@@ -170,6 +170,7 @@ public class MainActivity : MauiAppCompatActivity
         // activity — re-apply the TV scale BEFORE MAUI initializes and reads
         // density for its dp→px conversions.
         ApplyTvUiScaleToAppResources();
+        Bench.BenchLog.Mark("activity-oncreate-start");
 
         // MulticastLock is acquired earlier in MainApplication.OnCreate so it's
         // already held by the time MauiProgram.CreateMauiApp resolves
@@ -264,6 +265,8 @@ public class MainActivity : MauiAppCompatActivity
         catch { /* insets unavailable — resource dimens above already applied */ }
 
         CaptureDeepLink(Intent);
+        Bench.BenchLog.Mode = Intent?.GetStringExtra("bench");
+        Bench.BenchLog.Mark($"activity-oncreate-end mode={Bench.BenchLog.Mode}");
 
         // Back-gesture handling temporarily disabled. The earlier
         // OnBackPressedDispatcher.AddCallback intercept appeared to
@@ -333,6 +336,8 @@ public class MainActivity : MauiAppCompatActivity
     {
         // Player HUD open → Back closes the HUD, not the page.
         if (PlayerPage.HandleGlobalBack()) return;
+        // New native TV screens: Back first returns focus to the top menu.
+        if (Tv.TvBack.Handler?.Invoke() == true) return;
 
         // Native TV flow (no WebView on these pages): pop the MAUI navigation
         // stack — player → detail → catalog — before anything else, so BACK

@@ -46,7 +46,7 @@ internal static class TvAuthFlow
         var dev = await TryGetDeviceAsync();
         if (dev is null)
         {
-            TvRoot.Go(status.Authenticated ? new CatalogNativePage() : new PairingPage());
+            TvRoot.Go(status.Authenticated ? TvRoot.Home() : new PairingPage());
             return;
         }
 
@@ -91,7 +91,7 @@ internal static class TvAuthFlow
             TvRoot.Go(TvPinPage.ForSetup(makeDefaultAfterPin, name));
             return;
         }
-        TvRoot.Go(new CatalogNativePage());
+        TvRoot.Go(TvRoot.Home());
     }
 
     /// <summary>Sign out of this TV: the server also removes the profile (and
