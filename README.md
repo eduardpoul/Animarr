@@ -281,4 +281,9 @@ Solution layout:
 
 ## License
 
-Apache‑2.0
+GNU General Public License v3.0 (GPL‑3.0) — see [LICENSE](LICENSE).
+
+Animarr bundles FFmpeg under the GPL in two places, which is why the project as a whole is GPL‑3.0 (it was Apache‑2.0 up to v0.7.0):
+
+- the server image ships [jellyfin‑ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (GPL), run as a separate program;
+- the Android app links Jellyfin's [Media3 FFmpeg audio decoder](https://github.com/jellyfin/jellyfin-androidx-media) (GPL‑3.0) for AC‑3 / E‑AC‑3 / DTS / TrueHD playback on devices without those decoders.
