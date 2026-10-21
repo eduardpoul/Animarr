@@ -498,11 +498,25 @@ internal static class AuthEndpoints
                 .Take(candidateCap)
                 .ToList();
 
+            // Everything the resolver reads from the DB, for all candidates in one
+            // batch (4 queries, not 4 per series — this endpoint used to run ~123
+            // per Home load); the per-series disk walk + parse is then served from
+            // the resolver's cache while the folder is unchanged. A failed load
+            // skips every candidate, as a per-series failure skips that one.
+            IReadOnlyDictionary<Guid, MediaFileResolver.Inputs> inputs;
+            try { inputs = await resolver.LoadInputsAsync(db, engaged.Select(e => e.MediaItemId).ToList(), ct); }
+            catch (Exception) when (!ct.IsCancellationRequested) { inputs = new Dictionary<Guid, MediaFileResolver.Inputs>(); }
+
             var hits = new List<(Guid Id, int Season, int Episode, bool IsNew, DateTime LastSeenAt)>();
             foreach (var e in engaged)
             {
                 MediaFileDto[] files;
-                try { files = await resolver.ResolveAsync(e.MediaItemId, ct); }
+                try
+                {
+                    files = inputs.TryGetValue(e.MediaItemId, out var input)
+                        ? resolver.Resolve(input)
+                        : Array.Empty<MediaFileDto>();
+                }
                 catch { continue; }
 
                 var onDisk = files
