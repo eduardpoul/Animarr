@@ -95,10 +95,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp /src/llama.cpp && \
     cmake -S /src/llama.cpp -B /src/llama.cpp/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF && \
-    cmake --build /src/llama.cpp/build -j --target llama-server && \
-    mkdir -p /opt/out && \
+    cmake --build /src/llama.cpp/build -j --target llama-server
+# Collect the binary + its shared libs. `cp -P` keeps the soname symlink chain
+# (libX.so -> libX.so.0 -> libX.so.0.N.M) as symlinks: plain cp dereferenced
+# them into three full copies of every library (147 MB instead of ~49 MB).
+# COPY --from preserves the symlinks into the final image.
+RUN mkdir -p /opt/out && \
     cp /src/llama.cpp/build/bin/llama-server /opt/out/ && \
-    find /src/llama.cpp/build -name '*.so*' -exec cp -n {} /opt/out/ \;
+    find /src/llama.cpp/build -name '*.so*' -exec cp -Pn {} /opt/out/ \;
 
 # FFmpeg stage — pinned static build (security fix for CVE-2026-8461)
 # -------------------------------------------------------------------
