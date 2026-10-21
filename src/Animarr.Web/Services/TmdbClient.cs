@@ -129,6 +129,14 @@ public class TmdbClient(IHttpClientFactory httpFactory, ILogger<TmdbClient> logg
     public Task<TmdbTvDetail?> GetTvDetailAsync(int tmdbId, string? language = null, CancellationToken ct = default)
         => GetJsonAsync<TmdbTvDetail>($"{BaseUrl}/tv/{tmdbId}?append_to_response=images,content_ratings,external_ids,credits,keywords&language={ToTmdbLocale(language)}&include_image_language={ImageLangParam(language)}", ct);
 
+    /// <summary>Plain <c>/tv/{id}</c> (no append_to_response) deserialized into
+    /// just the airing fields. The airing refresh only needs
+    /// next_episode_to_air / in_production; the full detail call drags in
+    /// images, credits, keywords, ratings and ids — ~50-300 KB per title vs a
+    /// few KB here.</summary>
+    public Task<TmdbTvAiring?> GetTvAiringAsync(int tmdbId, CancellationToken ct = default)
+        => GetJsonAsync<TmdbTvAiring>($"{BaseUrl}/tv/{tmdbId}?language=en-US", ct);
+
     /// <param name="language">UI language code (en/ru/uk/de/es). null → English.
     /// Controls episode Name/Overview localization.</param>
     public Task<TmdbSeasonDetail?> GetSeasonDetailAsync(int tmdbId, int seasonNumber, string? language = null, CancellationToken ct = default)
@@ -396,6 +404,14 @@ public class TmdbSeasonSummary
 }
 
 /// <summary>Slim episode ref used by next/last_episode_to_air on the TV detail.</summary>
+/// <summary>The airing subset of <c>/tv/{id}</c> — see <see cref="TmdbClient.GetTvAiringAsync"/>.</summary>
+public sealed class TmdbTvAiring
+{
+    public string? Status { get; set; }
+    [JsonPropertyName("in_production")] public bool InProduction { get; set; }
+    [JsonPropertyName("next_episode_to_air")] public TmdbEpisodeBrief? NextEpisodeToAir { get; set; }
+}
+
 public class TmdbEpisodeBrief
 {
     [JsonPropertyName("episode_number")] public int EpisodeNumber { get; set; }
