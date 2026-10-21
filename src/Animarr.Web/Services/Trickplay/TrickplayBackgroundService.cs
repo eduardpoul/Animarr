@@ -14,15 +14,17 @@ namespace Animarr.Web.Services.Trickplay;
 /// first. <see cref="MediaItem.LastTrickplayScanAt"/> gates re-scans; the
 /// torrent-completion hook clears it so fresh episodes get sprites promptly.
 ///
-/// Politeness: the whole tick is skipped while any HLS transcode session is
-/// alive — sprite decoding is cheap but a weak NAS shouldn't split cores with
-/// a live transcode. (Direct Play/Stream cost little; ffmpeg also runs at
-/// BelowNormal priority as a second belt.)
+/// Politeness: the whole tick is skipped while anyone is watching
+/// (<see cref="PlaybackActivity"/>: a live HLS transcode OR a recent player
+/// progress ping, so Direct Play/Stream viewers count too) — a sprite pass
+/// reads every file end to end, and on an HDD that read competes with the
+/// viewer's. The per-file loop parks on the same signal, and ffmpeg itself
+/// starts at nice 10 / idle I/O as a second belt.
 /// </summary>
 public sealed class TrickplayBackgroundService(
     IDbContextFactory<AppDbContext> dbFactory,
     IServiceScopeFactory scopeFactory,
-    HlsSessionService hls,
+    PlaybackActivity playback,
     ILogger<TrickplayBackgroundService> logger) : BackgroundService
 {
     // Staggered ~25s after the segment pass's 20s so boot work doesn't pile up.
@@ -50,8 +52,9 @@ public sealed class TrickplayBackgroundService(
 
     private async Task<bool> ProcessOneAsync(CancellationToken ct)
     {
-        // Yield fully to live transcodes — retry on the idle cadence.
-        if (hls.ActiveSessionCount > 0) return false;
+        // Yield fully to playback (HLS, Direct Play, Direct Stream) — retry on
+        // the idle cadence.
+        if (playback.IsActive) return false;
 
         Guid itemId;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
