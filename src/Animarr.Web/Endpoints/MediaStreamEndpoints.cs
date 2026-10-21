@@ -73,6 +73,7 @@ internal static class MediaStreamEndpoints
     app.MapMethods("/api/video", new[] { "GET", "HEAD" }, async (
             string path,
             MediaPathValidator pathValidator,
+            MediaProbeCache probeCache,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
     {
@@ -129,7 +130,10 @@ internal static class MediaStreamEndpoints
         //  • DolbyVision-flagged HEVC (profile 8.1 = HDR10-compatible) carries a
         //    DOVI configuration box that browsers can't parse. Strip it via the
         //    hevc_metadata bitstream filter so the player sees plain HDR10.
-        var (videoCodec, hasDolbyVision) = await PeekVideoCodecAsync(fullPath!);
+        // Cached per file (MediaProbeCache) — every ?seek= reload lands here,
+        // and the playback start already probed the same file.
+        var (videoCodec, hasDolbyVision) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
+        if (http.RequestAborted.IsCancellationRequested) return Results.Empty;   // seeked away mid-probe
 
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
         // AVI carries no pts for B-frames (XviD/DivX): stream-copied into fMP4
@@ -336,44 +340,29 @@ internal static class MediaStreamEndpoints
     app.MapGet("/api/probe", async (
             string path,
             MediaPathValidator pathValidator,
-            ILoggerFactory loggerFactory) =>
+            MediaProbeCache probeCache,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
         if (!ok) return earlyResult!;
 
-        var logger = loggerFactory.CreateLogger("ApiProbe");
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName               = "ffprobe",
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-        };
-        foreach (var a in new[]
-        {
-            "-v", "error",
-            "-print_format", "json",
-            "-show_format", "-show_streams",
-            fullPath!,
-        }) psi.ArgumentList.Add(a);
-
+        // Same cached `-show_format -show_streams` JSON the HLS start parses —
+        // the web player fires this in parallel with /api/hls/start, so the two
+        // now share one ffprobe instead of running it twice (three with the
+        // start's second probe). Failures are logged by the cache (with stderr).
         try
         {
-            using var p = System.Diagnostics.Process.Start(psi)!;
-            var json = await p.StandardOutput.ReadToEndAsync();
-            await p.WaitForExitAsync();
-            if (p.ExitCode != 0)
-            {
-                var err = await p.StandardError.ReadToEndAsync();
-                logger.LogWarning("ffprobe non-zero for {Path}: {Err}", fullPath, err);
-                return Results.StatusCode(500);
-            }
-            return Results.Content(json, "application/json");
+            var json = await probeCache.GetStreamsJsonAsync(fullPath!, ct);
+            return json is null ? Results.StatusCode(500) : Results.Content(json, "application/json");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Results.Empty;   // client went away
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "ffprobe failed for {Path}", fullPath);
+            loggerFactory.CreateLogger("ApiProbe").LogError(ex, "ffprobe failed for {Path}", fullPath);
             return Results.StatusCode(500);
         }
     })
@@ -475,48 +464,34 @@ internal static class MediaStreamEndpoints
         return app;
     }
 
-    /// <summary>Quick ffprobe peek of the first video stream so /api/video can
-    /// branch on codec / Dolby-Vision presence. Returns ("hevc", true) for
-    /// HDR10-compatible DV profile 8 files.</summary>
-    private static async Task<(string? codec, bool hasDolbyVision)> PeekVideoCodecAsync(string fullPath)
+    /// <summary>First video stream's codec + Dolby-Vision presence so /api/video
+    /// can branch on them. Returns ("hevc", true) for HDR10-compatible DV
+    /// profile 8 files. Read from the cached <c>-show_streams</c> JSON (the
+    /// first <c>codec_type=video</c> stream = ffprobe's <c>v:0</c>) instead of a
+    /// dedicated ffprobe per request.</summary>
+    private static async Task<(string? codec, bool hasDolbyVision)> PeekVideoCodecAsync(
+        MediaProbeCache probeCache, string fullPath, CancellationToken ct)
     {
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in new[]
-            {
-                "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name:stream_side_data=side_data_type",
-                "-print_format", "default=noprint_wrappers=1:nokey=0",
-                fullPath,
-            }) psi.ArgumentList.Add(a);
+            var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
+            if (json is null) return (null, false);
 
-            using var p = System.Diagnostics.Process.Start(psi);
-            if (p is null) return (null, false);
-            var output = await p.StandardOutput.ReadToEndAsync();
-            await p.WaitForExitAsync();
-            if (p.ExitCode != 0) return (null, false);
-
-            string? codec = null;
-            bool dv = false;
-            foreach (var raw in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, false);
+            foreach (var s in streams.EnumerateArray())
             {
-                var line = raw.Trim();
-                if (line.StartsWith("codec_name=", StringComparison.Ordinal))
-                    codec = line["codec_name=".Length..].Trim();
-                else if (line.StartsWith("side_data_type=", StringComparison.Ordinal)
-                      && line.Contains("DOVI", StringComparison.OrdinalIgnoreCase))
-                    dv = true;
+                if (!s.TryGetProperty("codec_type", out var type) || type.GetString() != "video") continue;
+                var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
+                bool dv = false;
+                if (s.TryGetProperty("side_data_list", out var sd) && sd.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var el in sd.EnumerateArray())
+                        if (el.TryGetProperty("side_data_type", out var sdt)
+                            && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
+                            dv = true;
+                return (codec, dv);
             }
-            return (codec, dv);
+            return (null, false);
         }
         catch
         {

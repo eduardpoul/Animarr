@@ -15,28 +15,10 @@ public sealed partial class HlsSessionService
     {
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in new[]
-            {
-                "-v", "error",
-                "-print_format", "json",
-                "-show_format",
-                "-show_streams",
-                fullPath,
-            }) psi.ArgumentList.Add(a);
-
-            using var p = Process.Start(psi);
-            if (p is null) return null;
-            var json = await p.StandardOutput.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            if (p.ExitCode != 0) return null;
+            // Shared with /api/probe and /api/video (MediaProbeCache): one
+            // ffprobe per file version instead of one per caller.
+            var json = await _probeCache.GetStreamsJsonAsync(fullPath, ct);
+            if (json is null) return null;
 
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -150,14 +132,10 @@ public sealed partial class HlsSessionService
                 _                    => null,
             };
 
-            // Override the has_b_frames estimate with the ACTUAL max composition
-            // offset measured from the opening packets — accurate for deep
-            // B-pyramids (UHD remuxes) where has_b_frames badly under-counts.
-            // Falls back to the estimate above only if the packet probe yields
-            // nothing (returns null).
-            if (await MeasureReorderDelayAsync(fullPath, ct) is double measuredDelay)
-                reorderDelaySec = measuredDelay;
-
+            // reorderDelaySec stays the has_b_frames estimate here. The packet
+            // measurement that overrides it (MeasureReorderDelayAsync) is a
+            // second ffprobe only the fMP4 stream-copy plan needs, so StartAsync
+            // runs it for that plan alone instead of on every probe.
             return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
                 colorTransfer, audioChannels, audioLanguage, reorderDelaySec);
         }
@@ -193,30 +171,9 @@ public sealed partial class HlsSessionService
     {
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            // Read only the first ~48 packets (a handful of GOPs) from the file
-            // start — enough to see the steady-state pyramid depth, cheap to read.
-            foreach (var a in new[]
-            {
-                "-v", "error", "-select_streams", "v:0",
-                "-read_intervals", "%+#48",
-                "-show_entries", "packet=pts_time,dts_time",
-                "-of", "csv=p=0",
-                fullPath,
-            }) psi.ArgumentList.Add(a);
-
-            using var p = Process.Start(psi);
-            if (p is null) return null;
-            var outp = await p.StandardOutput.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            if (p.ExitCode != 0) return null;
+            // First ~48 packets' pts,dts (MediaProbeCache, cached per file).
+            var outp = await _probeCache.GetReorderPacketsCsvAsync(fullPath, ct);
+            if (outp is null) return null;
 
             double max = 0;
             bool any = false;

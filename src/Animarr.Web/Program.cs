@@ -121,6 +121,8 @@ builder.Services.AddScoped<MetadataService>();
 // Background "metadata language changed → re-fetch the library" pass + its progress.
 builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
+// One cached ffprobe per file version for HLS start, /api/probe and /api/video.
+builder.Services.AddSingleton<MediaProbeCache>();
 builder.Services.AddSingleton<HlsSessionService>();
 builder.Services.AddSingleton<DlnaService>();
 // Probes /dev/dri, vainfo, nvidia-smi, ffmpeg -hwaccels at startup so the

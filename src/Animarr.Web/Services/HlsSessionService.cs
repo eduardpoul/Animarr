@@ -75,6 +75,7 @@ public sealed partial class HlsSessionService : IDisposable
 
     private readonly ILogger<HlsSessionService> _logger;
     private readonly HardwareInfoService? _hardware;
+    private readonly MediaProbeCache _probeCache;
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
     private readonly Timer _gcTimer;
@@ -85,10 +86,13 @@ public sealed partial class HlsSessionService : IDisposable
     /// playback.</summary>
     public int ActiveSessionCount => _sessions.Count;
 
-    public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null)
+    public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null,
+        MediaProbeCache? probeCache = null)
     {
         _logger  = logger;
         _hardware = hardware;
+        _probeCache = probeCache
+            ?? new MediaProbeCache(Microsoft.Extensions.Logging.Abstractions.NullLogger<MediaProbeCache>.Instance);
         // /tmp on Linux is tmpfs by default on most distros — segments live
         // in RAM and never hit the SSD. Fall back to OS temp on Windows dev.
         var root = OperatingSystem.IsLinux() ? "/tmp/animarr-hls" : Path.Combine(Path.GetTempPath(), "animarr-hls");
@@ -608,11 +612,13 @@ public sealed partial class HlsSessionService : IDisposable
         //   and any -itsoffset would just throw it off.
         // fMP4 stream-copy keeps the source's B-frames, so video presentation
         // lags decode by the reorder delay while audio plays on time → audio
-        // runs ahead. Pre-load the measured delay (from probe) as the baseline
-        // itsoffset; the SW slider then trims on top. 0 for every other plan
-        // (re-encode strips B-frames via -bf 0; TS carries PCR timing).
-        var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy
-            ? Math.Clamp(probe?.ReorderDelaySec ?? 0.0, 0.0, 1.0) : 0.0;
+        // runs ahead. Pre-load the measured delay as the baseline itsoffset; the
+        // SW slider then trims on top. 0 for every other plan (re-encode strips
+        // B-frames via -bf 0; TS carries PCR timing) — which is why the packet
+        // probe runs only here instead of on every probe.
+        var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy && probe is not null
+            ? Math.Clamp(await MeasureReorderDelayAsync(fullPath, ct) ?? probe.ReorderDelaySec, 0.0, 1.0)
+            : 0.0;
         var audioOffsetSec = reorderDelaySec + (externalAudioPath is not null
             // External dub sync is a different problem from the source's own A/V
             // wobble (it depends on how the dub was authored vs the video cut),
