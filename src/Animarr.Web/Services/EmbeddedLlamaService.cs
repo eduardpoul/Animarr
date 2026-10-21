@@ -304,6 +304,15 @@ public sealed class EmbeddedLlamaService : IHostedService
         psi.ArgumentList.Add("-ngl");    psi.ArgumentList.Add(ngl.ToString());
         psi.ArgumentList.Add("-c");      psi.ArgumentList.Add(cfg.Ctx.ToString());
         psi.ArgumentList.Add("-a");      psi.ArgumentList.Add("embedded");
+        if (QuotaThreads() is int threads)
+        {
+            psi.ArgumentList.Add("--threads"); psi.ArgumentList.Add(threads.ToString());
+        }
+        // Identification is background work: nice 10 from launch (Linux) so a
+        // bulk run on the CPU provider yields to a live transcode instead of
+        // saturating the box; BelowNormal after start elsewhere. CPU only —
+        // no idle I/O class, the model load should stay quick.
+        var niced = LowPriorityProcess.Wrap(psi, niceness: 10, idleIo: false);
 
         Process proc;
         try
@@ -313,6 +322,7 @@ public sealed class EmbeddedLlamaService : IHostedService
             proc.ErrorDataReceived  += (_, e) => CaptureStderr(e.Data);
             proc.OutputDataReceived += (_, e) => CaptureStderr(e.Data);
             proc.Start();
+            if (!niced) LowPriorityProcess.LowerAfterStart(proc);
             proc.BeginErrorReadLine();
             proc.BeginOutputReadLine();
         }
@@ -696,6 +706,36 @@ public sealed class EmbeddedLlamaService : IHostedService
         var port = ((IPEndPoint)any.LocalEndpoint).Port;
         any.Stop();
         return port;
+    }
+
+    /// <summary>
+    /// Thread count to pass to llama-server, or null to keep its own default.
+    /// llama.cpp sizes its pool from the host's physical cores and ignores a
+    /// container CPU quota (<c>--cpus</c>): with --cpus=2 on a 16-core host it
+    /// ran 16 threads into a 2-CPU budget, throttling the whole container
+    /// (HLS ffmpeg included). <see cref="Environment.ProcessorCount"/> honours
+    /// the quota/affinity, so when it's below the host's online CPU count we
+    /// cap to it; on an unconstrained box llama's default is kept as-is.
+    /// </summary>
+    private static int? QuotaThreads()
+    {
+        try
+        {
+            if (!OperatingSystem.IsLinux()) return null;
+            var online = File.ReadAllText("/sys/devices/system/cpu/online").Trim();   // e.g. "0-31" or "0-3,8-11"
+            var host = 0;
+            foreach (var part in online.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var range = part.Split('-');
+                host += range.Length == 2 ? int.Parse(range[1]) - int.Parse(range[0]) + 1 : 1;
+            }
+            var allowed = Environment.ProcessorCount;
+            return allowed < host ? Math.Max(1, allowed) : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void SetLibraryPath(ProcessStartInfo psi, string binary)
