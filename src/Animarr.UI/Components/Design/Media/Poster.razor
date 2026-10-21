@@ -78,10 +78,37 @@
     // the new authority. Without this, the very first render of a cookie-
     // restored MAUI boot bakes the wrong host into src and never updates.
     protected override void OnInitialized()
-        => Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+    {
+        Animarr.UI.Services.MediaUrl.OnBaseChanged += OnBaseChanged;
+        _rendered = RenderInputs();   // what the first render (always runs) shows
+    }
     public void Dispose()
         => Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnBaseChanged;
     private void OnBaseChanged() => InvokeAsync(StateHasChanged);
+
+    // ── Render gate ───────────────────────────────────────────────────────
+    // Item is a record, which Blazor's parameter diff always treats as "maybe
+    // changed" — so every parent render (Home filter / prefs changes, each
+    // Search keystroke over up to 240 cards) re-rendered every poster. The card
+    // only shows the Item instance (records are replaced, never mutated), the
+    // media base + token baked into the image URL, and localized labels — so
+    // re-render only when one of those changed.
+    private (object? Item, string Base, string? Token, string Lang) _rendered;
+
+    private (object? Item, string Base, string? Token, string Lang) RenderInputs() =>
+        (Item, Animarr.UI.Services.MediaUrl.Base, Animarr.UI.Services.MediaUrl.Token, L.CurrentLanguage);
+
+    protected override bool ShouldRender()
+    {
+        var now = RenderInputs();
+        if (ReferenceEquals(now.Item, _rendered.Item)
+            && now.Base  == _rendered.Base
+            && now.Token == _rendered.Token
+            && now.Lang  == _rendered.Lang)
+            return false;
+        _rendered = now;
+        return true;
+    }
 
     private string TypeLabel(MediaItemType t) => t switch
     {

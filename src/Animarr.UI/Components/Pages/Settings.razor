@@ -592,14 +592,20 @@
         new("imdb_search", true),
     };
 
+    /// <summary>Shared, not per call: ReadSourceFlags runs several times per
+    /// render of the Metadata tab, and every fresh options instance rebuilds
+    /// the List&lt;SourceFlag&gt; contract (reflection, slow in the WASM
+    /// interpreter).</summary>
+    private static readonly System.Text.Json.JsonSerializerOptions SourceFlagJson =
+        new() { PropertyNameCaseInsensitive = true };
+
     private List<SourceFlag> ReadSourceFlags()
     {
         var json = _config.GetValueOrDefault(AppConfigKeys.SearchSourceOrder);
         if (string.IsNullOrWhiteSpace(json)) return DefaultSourceFlags.ToList();
         try
         {
-            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<SourceFlag>>(json,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<SourceFlag>>(json, SourceFlagJson);
             return parsed is { Count: > 0 } ? parsed : DefaultSourceFlags.ToList();
         }
         catch { return DefaultSourceFlags.ToList(); }

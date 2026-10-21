@@ -74,10 +74,13 @@
     else
     {
         <div class="catalog-grid">
-            @* Cap rendered items so the catalog stays snappy at 1000+ entries. *@
+            @* Cap rendered items so the catalog stays snappy at 1000+ entries.
+               @key (Ids are unique — _allItems is de-duplicated by Id): a chip
+               change moves the existing cards instead of feeding every grid
+               position a new Item (re-render + <img> src swap / re-request). *@
             @foreach (var item in _filtered.Take(240))
             {
-                <Poster Item="@item" />
+                <Poster @key="item.Id" Item="@item" />
             }
         </div>
         @if (_filtered.Count > 240)
@@ -105,36 +108,17 @@
 
         try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup */ }
 
+        // Chips + folder map data are independent of each other and of the
+        // catalog — they go out together and are awaited after it (were four
+        // serial round trips). Each keeps its own fallback; a failed sections
+        // call no longer blanks the grid.
+        var categoriesTask = OrDefault(() => Api.GetCategoriesAsync(), Array.Empty<CategoryDto>());
+        var sectionsTask   = OrDefault(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>());
+        var foldersTask    = OrDefault<FolderWatcherDto[]?>(async () => await Api.GetFoldersAsync(), null);
+
         try
         {
-            try
-            {
-                var cats = await Api.GetCategoriesAsync();
-                _categories = cats.ToList();
-            }
-            catch { _categories.Clear(); }
-
-            var sections = await Api.GetSectionFoldersAsync();
-            _sections = sections.OrderBy(f => f.Label).ToList();
-
-            try
-            {
-                var allFolders = await Api.GetFoldersAsync();
-                foreach (var sec in _sections)
-                {
-                    var ids = allFolders
-                        .Where(f => f.ParentSectionId == sec.Id)
-                        .Select(f => f.Id)
-                        .ToHashSet();
-                    ids.Add(sec.Id);
-                    _childFolderIdsBySection[sec.Id] = ids;
-                }
-            }
-            catch { /* folder filter degrades to no-op */ }
-
-            // A TopBar folder pill may already be active when we land here —
-            // adopt it so the grid matches the pill highlight.
-            SyncSectionFromFolderJump();
+            // The catalog — the chip data above is already in flight meanwhile.
 
             var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title", View = MediaListQuery.CardView });
             _allItems = items
@@ -146,8 +130,36 @@
         }
         catch { /* offline — empty grid */ }
 
+        _categories = (await categoriesTask).ToList();
+        _sections   = (await sectionsTask).OrderBy(f => f.Label).ToList();
+        // A failed folder fetch degrades the folder filter to a no-op.
+        if (await foldersTask is { } allFolders)
+        {
+            foreach (var sec in _sections)
+            {
+                var ids = allFolders
+                    .Where(f => f.ParentSectionId == sec.Id)
+                    .Select(f => f.Id)
+                    .ToHashSet();
+                ids.Add(sec.Id);
+                _childFolderIdsBySection[sec.Id] = ids;
+            }
+        }
+
+        // A TopBar folder pill may already be active when we land here —
+        // adopt it so the grid matches the pill highlight.
+        SyncSectionFromFolderJump();
+
         _loading = false;
         ApplyFilter();
+    }
+
+    /// <summary>Start <paramref name="call"/> now; await it later. Any failure
+    /// resolves to <paramref name="fallback"/>, so the parallel loads never throw.</summary>
+    private static async Task<T> OrDefault<T>(Func<Task<T>> call, T fallback)
+    {
+        try { return await call(); }
+        catch { return fallback; }
     }
 
     private void SetActiveCategory(string? name)
