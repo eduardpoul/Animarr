@@ -65,7 +65,7 @@ public sealed class NativePlayerService : IDisposable
     // Surface is created (race between MainActivity.OnCreate inserting the view
     // and the surface being allocated once it goes Visible). When the surface
     // arrives (SurfaceCreated) we drain this and complete the attach.
-    private (string Url, long ResumeMs, bool PlayWhenReady)? _pendingPlay;
+    private (string Url, long ResumeMs, bool PlayWhenReady, SideloadSubtitle? Subtitle, bool TextEnabled)? _pendingPlay;
     private bool _surfaceReady;
 
     // Diagnostic one-shot guards (logcat tag "Animarr.NativePlayer"). Used to
@@ -92,6 +92,78 @@ public sealed class NativePlayerService : IDisposable
     /// calls that land before that point go onto a pending queue, drained once
     /// the surface is ready (SurfaceCreated).
     /// </summary>
+    // ── Subtitles ───────────────────────────────────────────────────────────
+    // ExoPlayer decodes text / bitmap subtitles into Cues but draws nothing
+    // itself (there is no PlayerView here — the video goes straight into a
+    // raw SurfaceView), so the TV showed no subtitles on any path. A Media3
+    // SubtitleView laid over the video surface renders them, fed by onCues.
+    private static global::AndroidX.Media3.UI.SubtitleView? s_subtitleView;
+
+    /// <summary>Format id of the side-loaded subtitle track (SubtitleConfiguration
+    /// id → Format.id), so the player page can tell it from embedded tracks.</summary>
+    public const string SideloadTrackId = "animarr-sideload";
+
+    /// <summary>Fired on the main thread whenever ExoPlayer's track list or
+    /// selection changes (new stream prepared, track switched).</summary>
+    public event Action? TracksChanged;
+
+    public static void RegisterSubtitleView(global::AndroidX.Media3.UI.SubtitleView view)
+    {
+        s_subtitleView = view;
+        // Readable from across the room: white, bold, black outline, no box;
+        // a little above Media3's default size (0.0533 of the view height).
+        // Embedded ASS font sizes are ignored (scripts authored for a
+        // 1080-line canvas come out huge), positions / colours are kept.
+        view.SetStyle(new global::AndroidX.Media3.UI.CaptionStyleCompat(
+            global::Android.Graphics.Color.White, global::Android.Graphics.Color.Transparent,
+            global::Android.Graphics.Color.Transparent,
+            1 /* CaptionStyleCompat.EDGE_TYPE_OUTLINE */, global::Android.Graphics.Color.Black,
+            global::Android.Graphics.Typeface.DefaultBold));
+        view.SetFractionalTextSize(0.06f);
+        view.SetApplyEmbeddedFontSizes(false);
+        // The bottom margin is the view's own padding, not Media3's
+        // bottomPaddingFraction: that one only moves cues WITHOUT a line
+        // position (SRT / embedded), while WebVTT's default "line -1" cues sat
+        // on the very edge of the screen (TV overscan).
+        view.SetBottomPaddingFraction(0f);
+    }
+
+    private static bool s_subtitlesRaised;
+
+    /// <summary>Lift the subtitles above the HUD's bottom bar while it is up;
+    /// also re-applies the margin after the view was (re)laid out.</summary>
+    public static void SetSubtitlesRaised(bool raised)
+    {
+        s_subtitlesRaised = raised;
+        if (s_subtitleView is not { } v || v.Width <= 0 || v.Height <= 0) return;
+        int w = v.Width, h = v.Height;
+        v.SetPadding(0, 0, 0, (int)(h * (raised ? 0.22f : 0.07f)));
+        // A raw native child of a MAUI layout: nobody else lays it out again.
+        v.Measure(global::Android.Views.View.MeasureSpec.MakeMeasureSpec(w, MeasureSpecMode.Exactly),
+                  global::Android.Views.View.MeasureSpec.MakeMeasureSpec(h, MeasureSpecMode.Exactly));
+        v.Layout(v.Left, v.Top, v.Left + w, v.Top + h);
+    }
+
+    public static void RelayoutSubtitles() => SetSubtitlesRaised(s_subtitlesRaised);
+
+    private sealed class PlayerEvents : Java.Lang.Object, global::AndroidX.Media3.Common.IPlayerListener
+    {
+        public void OnCues(global::AndroidX.Media3.Common.Text.CueGroup cueGroup)
+        {
+            if (s_subtitleView is not { } view) return;
+            // CueGroup.cues is a Guava ImmutableList (bound as an opaque type) —
+            // it IS a java.util.List, so wrap the handle instead of copying.
+            var cues = cueGroup.Cues;
+            view.SetCues(cues is null
+                ? new List<global::AndroidX.Media3.Common.Text.Cue>()
+                : global::Android.Runtime.JavaList<global::AndroidX.Media3.Common.Text.Cue>.FromJniHandle(
+                    cues.Handle, global::Android.Runtime.JniHandleOwnership.DoNotTransfer));
+        }
+
+        public void OnTracksChanged(global::AndroidX.Media3.Common.Tracks tracks)
+            => Instance?.TracksChanged?.Invoke();
+    }
+
     // BENCH (tv-ui-analysis): SurfaceView variant — video on its own HWC layer.
     private static SurfaceView? s_surfaceView;
     public static void RegisterSurfaceView(SurfaceView sv)
@@ -207,7 +279,8 @@ public sealed class NativePlayerService : IDisposable
         {
             _pendingPlay = null;
             // Direct attach — don't recurse into PlayAsync (would re-queue).
-            DoPlay(pending.Value.Url, pending.Value.ResumeMs, pending.Value.PlayWhenReady);
+            var p = pending.Value;
+            DoPlay(p.Url, p.ResumeMs, p.PlayWhenReady, p.Subtitle, p.TextEnabled);
         }
         else if (_player is not null && (s_textureView is not null || s_surfaceView is not null))
         {
@@ -286,8 +359,14 @@ public sealed class NativePlayerService : IDisposable
     /// <c>/api/file</c> URL or an HLS manifest URL — ExoPlayer auto-detects).
     /// <paramref name="playWhenReady"/> false prepares the stream paused — a
     /// restart (quality / track switch, remux seek) keeps the user's pause.
+    /// <paramref name="subtitle"/> side-loads a WebVTT track with the stream
+    /// (the server's conversion of an embedded or sidecar subtitle — a Direct
+    /// Stream / HLS stream carries none); <paramref name="textEnabled"/> false
+    /// keeps every text track off, so Media3 doesn't auto-pick a
+    /// default/forced one behind the player's back.
     /// </summary>
-    public Task PlayAsync(string url, long resumeMs = 0, bool playWhenReady = true)
+    public Task PlayAsync(string url, long resumeMs = 0, bool playWhenReady = true,
+                          SideloadSubtitle? subtitle = null, bool textEnabled = false)
     {
 #if ANDROID
         try
@@ -296,7 +375,7 @@ public sealed class NativePlayerService : IDisposable
             // we know the TextureView's SurfaceTexture is allocated. Without
             // this we'd race the surface-allocation event and silently
             // attach to a null surface (audio plays, video is black).
-            _pendingPlay = (url, resumeMs, playWhenReady);
+            _pendingPlay = (url, resumeMs, playWhenReady, subtitle, textEnabled);
             _logger.LogInformation("NativePlayer: PlayAsync url={Url} resume={ResumeMs}ms (queued, awaiting surface)",
                 url, resumeMs);
 
@@ -350,7 +429,8 @@ public sealed class NativePlayerService : IDisposable
     /// first cold-start play. Idempotent against rapid re-entries because
     /// we drain <c>_pendingPlay</c> before doing the work.
     /// </summary>
-    private void DoPlay(string url, long resumeMs, bool playWhenReady)
+    private void DoPlay(string url, long resumeMs, bool playWhenReady,
+                        SideloadSubtitle? subtitle = null, bool textEnabled = false)
     {
         var ctx = Microsoft.Maui.ApplicationModel.Platform.AppContext;
         if (ctx is null)
@@ -366,10 +446,30 @@ public sealed class NativePlayerService : IDisposable
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
                     $"DoPlay url={url} svNull={s_textureView is null} " +
                     $"svValid={(s_textureView?.IsAvailable.ToString() ?? "?")} " +
-                    $"svSize={s_textureView?.Width ?? -1}x{s_textureView?.Height ?? -1}");
+                    $"svSize={s_textureView?.Width ?? -1}x{s_textureView?.Height ?? -1}" +
+                    (subtitle is null ? "" : $" sub={subtitle.Url}"));
                 AttachSurface();
-                var item = MediaItem.FromUri(url);
-                _player.SetMediaItem(item);
+                var builder = new MediaItem.Builder().SetUri(url)!;
+                if (subtitle is not null)
+                {
+                    var subConfig = new MediaItem.SubtitleConfiguration.Builder(global::Android.Net.Uri.Parse(subtitle.Url)!)
+                        .SetMimeType(MimeTypes.TextVtt)!        // /api/subtitle?format=webvtt = text/vtt
+                        .SetLanguage(subtitle.Language ?? "und")!
+                        .SetLabel(subtitle.Label)!
+                        .SetId(SideloadTrackId)!
+                        .SetSelectionFlags(global::AndroidX.Media3.Common.C.SelectionFlagDefault)!
+                        .Build()!;
+                    builder.SetSubtitleConfigurations(new List<MediaItem.SubtitleConfiguration> { subConfig });
+                }
+                // Text selection is the player page's call, not Media3's
+                // default/forced heuristics: off, or on with no override (the
+                // page picks the exact track once OnTracksChanged lists them).
+                var tsp = _player.TrackSelectionParameters.BuildUpon();
+                tsp.ClearOverridesOfType(global::AndroidX.Media3.Common.C.TrackTypeText);
+                tsp.SetTrackTypeDisabled(global::AndroidX.Media3.Common.C.TrackTypeText, !textEnabled);
+                _player.TrackSelectionParameters = tsp.Build();
+                s_subtitleView?.SetCues(new List<global::AndroidX.Media3.Common.Text.Cue>());
+                _player.SetMediaItem(builder.Build());
                 _player.Prepare();
                 if (resumeMs > 0) _player.SeekTo(resumeMs);
                 _player.PlayWhenReady = playWhenReady;
@@ -772,7 +872,10 @@ public sealed class NativePlayerService : IDisposable
         var builder = new ExoPlayerBuilder(ctx, renderers)
             .SetAudioAttributes(attrs, handleAudioFocus: true)!
             .SetLoadControl(load)!;
-        return (IExoPlayer)builder.Build()!;
+        var player = (IExoPlayer)builder.Build()!;
+        // Cues → SubtitleView, track changes → the player page.
+        player.AddListener(new PlayerEvents());
+        return player;
     }
 #endif
 
@@ -976,9 +1079,17 @@ public sealed class NativePlayerService : IDisposable
                     {
                         global::AndroidX.Media3.Common.Format fmt;
                         try { fmt = g.GetTrackFormat(ti); } catch { continue; }
-                        bool selected;
+                        if (fmt is null) continue;
+                        bool selected, supported;
                         try { selected = g.IsTrackSelected(ti); } catch { selected = false; }
-                        list.Add(new TrackOption(gi, ti, LabelFor(trackType, fmt, ti), selected));
+                        try { supported = g.IsTrackSupported(ti); } catch { supported = true; }
+                        int flags = fmt.SelectionFlags;
+                        list.Add(new TrackOption(gi, ti, LabelFor(trackType, fmt, ti), selected,
+                            Language: fmt.Language, Name: fmt.Label, Id: fmt.Id,
+                            Codecs: fmt.Codecs ?? fmt.SampleMimeType, Channels: fmt.ChannelCount,
+                            Supported: supported,
+                            Forced: (flags & global::AndroidX.Media3.Common.C.SelectionFlagForced) != 0,
+                            Default: (flags & global::AndroidX.Media3.Common.C.SelectionFlagDefault) != 0));
                     }
                 }
             }
@@ -1083,6 +1194,7 @@ public sealed class NativePlayerService : IDisposable
                 p.ClearOverridesOfType(global::AndroidX.Media3.Common.C.TrackTypeText);
                 p.SetTrackTypeDisabled(global::AndroidX.Media3.Common.C.TrackTypeText, true);
                 _player.TrackSelectionParameters = p.Build();
+                s_subtitleView?.SetCues(new List<global::AndroidX.Media3.Common.Text.Cue>());
             }
         }
         catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.DisableSubtitles"); }
@@ -1090,78 +1202,29 @@ public sealed class NativePlayerService : IDisposable
     }
 
 #if ANDROID
-    /// <summary>Build a human label for a track: "Русский · 5.1 · EAC3",
-    /// "English" (subtitle), "1080p · HEVC" (video). Falls back to an index.</summary>
+    /// <summary>Build a human label for a track: "Русский · Дубляж · 5.1 · AC3",
+    /// "Английский · SRT" (subtitle), "1080p · HEVC" (video). Falls back to an index.</summary>
     private static string LabelFor(int trackType, global::AndroidX.Media3.Common.Format fmt, int ti)
     {
-        string lang = LangName(fmt.Language);
-        if (trackType == global::AndroidX.Media3.Common.C.TrackTypeAudio)
+        string lang = TrackLabels.LangName(fmt.Language);
+        if (trackType is global::AndroidX.Media3.Common.C.TrackTypeAudio or global::AndroidX.Media3.Common.C.TrackTypeText)
         {
+            bool audio = trackType == global::AndroidX.Media3.Common.C.TrackTypeAudio;
             var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(fmt.Label)) parts.Add(fmt.Label!);
-            else if (!string.IsNullOrEmpty(lang)) parts.Add(lang);
-            else parts.Add($"Дорожка {ti + 1}");
-            var ch = ChannelText(fmt.ChannelCount);
-            if (ch is not null) parts.Add(ch);
-            var codec = AudioCodecShort(fmt.SampleMimeType);
+            if (!string.IsNullOrEmpty(lang)) parts.Add(lang);
+            if (!string.IsNullOrWhiteSpace(fmt.Label) && !string.Equals(fmt.Label, lang, StringComparison.OrdinalIgnoreCase))
+                parts.Add(fmt.Label!);
+            if (parts.Count == 0) parts.Add(audio ? $"Дорожка {ti + 1}" : $"Субтитры {ti + 1}");
+            if (audio && TrackLabels.Channels(fmt.ChannelCount) is { } ch) parts.Add(ch);
+            var codec = TrackLabels.CodecFromMime(fmt.Codecs) ?? TrackLabels.CodecFromMime(fmt.SampleMimeType);
             if (codec is not null) parts.Add(codec);
             return string.Join(" · ", parts);
-        }
-        if (trackType == global::AndroidX.Media3.Common.C.TrackTypeText)
-        {
-            if (!string.IsNullOrWhiteSpace(fmt.Label)) return fmt.Label!;
-            if (!string.IsNullOrEmpty(lang)) return lang;
-            return $"Субтитры {ti + 1}";
         }
         var vp = new List<string>();
         if (fmt.Height > 0) vp.Add($"{fmt.Height}p");
         var vc = VideoCodecShort(fmt.SampleMimeType);
         if (vc is not null) vp.Add(vc);
         return vp.Count > 0 ? string.Join(" · ", vp) : $"Видео {ti + 1}";
-    }
-
-    private static string LangName(string? code)
-    {
-        if (string.IsNullOrEmpty(code)) return string.Empty;
-        return code.ToLowerInvariant() switch
-        {
-            "ja" or "jpn" => "Японский",
-            "en" or "eng" => "Английский",
-            "ru" or "rus" => "Русский",
-            "uk" or "ukr" => "Украинский",
-            "zh" or "chi" or "zho" => "Китайский",
-            "ko" or "kor" => "Корейский",
-            "de" or "ger" or "deu" => "Немецкий",
-            "es" or "spa" => "Испанский",
-            "fr" or "fre" or "fra" => "Французский",
-            "und" or "" => string.Empty,
-            _ => code.ToUpperInvariant(),
-        };
-    }
-
-    private static string? ChannelText(int channels) => channels switch
-    {
-        1 => "Моно",
-        2 => "Стерео",
-        6 => "5.1",
-        8 => "7.1",
-        _ => channels > 0 ? $"{channels}.0" : null,
-    };
-
-    private static string? AudioCodecShort(string? mime)
-    {
-        if (string.IsNullOrEmpty(mime)) return null;
-        var s = mime.ToLowerInvariant();
-        if (s.Contains("eac3") || s.Contains("ec-3")) return "EAC3";
-        if (s.Contains("ac3") || s.Contains("ac-3")) return "AC3";
-        if (s.Contains("aac"))    return "AAC";
-        if (s.Contains("dts"))    return "DTS";
-        if (s.Contains("truehd")) return "TrueHD";
-        if (s.Contains("opus"))   return "Opus";
-        if (s.Contains("flac"))   return "FLAC";
-        if (s.Contains("vorbis")) return "Vorbis";
-        if (s.Contains("mp3") || s.Contains("mpeg")) return "MP3";
-        return null;
     }
 
     private static string? VideoCodecShort(string? mime)
@@ -1211,5 +1274,16 @@ public sealed record NativePlayerState(
 /// <summary>One selectable track for the HUD's audio / subtitle / quality menus.
 /// <paramref name="GroupIndex"/> + <paramref name="TrackIndex"/> address it inside
 /// ExoPlayer's current <c>Tracks.Groups</c>; <paramref name="Label"/> is display
-/// text; <paramref name="Selected"/> marks the currently active one.</summary>
-public sealed record TrackOption(int GroupIndex, int TrackIndex, string Label, bool Selected);
+/// text; <paramref name="Selected"/> marks the currently active one. The rest is
+/// the raw Format data (language, container track name, Format.id, codecs,
+/// channels, default/forced flags) and whether a renderer on this device can
+/// play it — what the player page needs to match a track to the server's
+/// probe and to hide what the device can't play.</summary>
+public sealed record TrackOption(int GroupIndex, int TrackIndex, string Label, bool Selected,
+    string? Language = null, string? Name = null, string? Id = null, string? Codecs = null,
+    int Channels = 0, bool Supported = true, bool Forced = false, bool Default = false);
+
+/// <summary>A WebVTT subtitle side-loaded next to the stream (MediaItem
+/// SubtitleConfiguration): the server's conversion of an embedded track or a
+/// sidecar file.</summary>
+public sealed record SideloadSubtitle(string Url, string? Language, string? Label);

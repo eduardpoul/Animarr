@@ -121,6 +121,13 @@ public partial class PlayerPage : ContentPage
         _ = NativePlayerService.Instance?.SetAspectRatioAsync(_aspect);
 
         RootGrid.Loaded += (_, _) => AttachAndStart();
+
+        if (NativePlayerService.Instance is { } nps) nps.TracksChanged += OnPlayerTracksChanged;
+        // Subtitles move up while the HUD's bottom bar is on screen.
+        Hud.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(IsVisible)) NativePlayerService.SetSubtitlesRaised(Hud.IsVisible);
+        };
     }
 
     protected override void OnAppearing()
@@ -303,6 +310,7 @@ public partial class PlayerPage : ContentPage
                 vg.AddView(sv, 0);
                 LayoutNative(sv, w, h);
                 NativePlayerService.RegisterSurfaceView(sv);
+                AttachSubtitleView(vg, w, h);
                 RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspectMatrix();
                 _attached = true;
                 return;
@@ -321,10 +329,30 @@ public partial class PlayerPage : ContentPage
             RootGrid.SizeChanged += (_, _) => { if (_textureView is { } t) LayoutNative(t, w, h); };
 
             NativePlayerService.RegisterTextureView(tv);
+            AttachSubtitleView(vg, w, h);
             _attached = true;
         }
 #endif
     }
+
+#if ANDROID
+    /// <summary>Media3 SubtitleView right above the video surface (index 1),
+    /// below the XAML HUD; full screen, so subtitles of a letterboxed film sit
+    /// low on the screen rather than over the picture. Raw native child, so
+    /// laid out by hand like the surface.</summary>
+    private void AttachSubtitleView(Android.Views.ViewGroup vg, int w, int h)
+    {
+        var subs = new AndroidX.Media3.UI.SubtitleView(vg.Context!)
+        {
+            LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h),
+        };
+        vg.AddView(subs, 1);
+        LayoutNative(subs, w, h);
+        NativePlayerService.RegisterSubtitleView(subs);
+        NativePlayerService.SetSubtitlesRaised(Hud.IsVisible);
+        RootGrid.SizeChanged += (_, _) => { LayoutNative(subs, w, h); NativePlayerService.RelayoutSubtitles(); };
+    }
+#endif
 
 #if ANDROID
     private Android.Views.TextureView? _textureView;
@@ -359,6 +387,9 @@ public partial class PlayerPage : ContentPage
     /// <summary>A start failed with nothing (alive) left playing: OK / play
     /// retries it.</summary>
     private (long ResumeMs, int MaxHeight)? _retryStart;
+    /// <summary>Tokenised URL of the current Direct Play file / HLS manifest —
+    /// re-prepared in place when a side-loaded subtitle changes.</summary>
+    private string? _streamUrl;
 
     /// <summary>True while the current stream is the /api/video progressive
     /// remux — a non-seekable ffmpeg pipe. SeekTo on it snaps to 0, so SeekBy
@@ -393,14 +424,19 @@ public partial class PlayerPage : ContentPage
     /// never falls back to the raw /api/file silently: that played the original
     /// under a "720p" label and dropped the selected tracks.
     /// </para>
-    /// <paramref name="playWhenReady"/> null keeps the current play/pause state.
+    /// <paramref name="playWhenReady"/> null keeps the current play/pause state;
+    /// <paramref name="onFail"/> undoes a track choice made for this restart
+    /// when it fails and the previous stream keeps playing.
     /// </summary>
-    private async Task StartStreamAsync(long resumeMs, int maxHeight, bool? playWhenReady = null)
+    private async Task StartStreamAsync(long resumeMs, int maxHeight, bool? playWhenReady = null,
+                                        Action? onFail = null)
     {
         int gen = ++_startGen;
         _startCts?.Cancel();
         var cts = _startCts = new CancellationTokenSource();
         var ct = cts.Token;
+        // Track catalog (server probe + sidecar files) in parallel with the start.
+        var catalog = EnsureCatalogAsync();
         // A restart (quality / track switch, remux seek, fallback rung) keeps a
         // pause: it used to force PlayWhenReady=true.
         bool play = playWhenReady
@@ -465,7 +501,7 @@ public partial class PlayerPage : ContentPage
         }
         if (!HasStreamUrl(body))
         {
-            OnStartFailed(failure ?? "нет ответа", resumeMs, maxHeight);
+            OnStartFailed(failure ?? "нет ответа", resumeMs, maxHeight, onFail);
             return;
         }
 
@@ -488,8 +524,20 @@ public partial class PlayerPage : ContentPage
             if (newToken is not null) StopHlsSession(newToken);
             int cap = o.Height > 1080 ? 1080 : 720;
             FlashInfo($"{o.Height}p не поддерживается устройством — {cap}p");
-            _ = StartStreamAsync(resumeMs, cap, play);
+            _ = StartStreamAsync(resumeMs, cap, play, onFail);
             return;
+        }
+
+        // A file's first start waits briefly for its track catalog, so the
+        // default subtitle goes out with the stream (no second prepare).
+        if (!catalog.IsCompleted)
+        {
+            await Task.WhenAny(catalog, Task.Delay(2000));
+            if (gen != _startGen || _closed)
+            {
+                if (newToken is not null) StopHlsSession(newToken);
+                return;
+            }
         }
 
         // Success — only now does the new stream replace the old one.
@@ -505,7 +553,11 @@ public partial class PlayerPage : ContentPage
         if (prevToken is not null && prevToken != _hlsToken) StopHlsSession(prevToken);
 
         var mediaUrl = TvMedia.Url(Abs(b.DirectPlayUrl ?? b.DirectStreamUrl ?? b.ManifestUrl)!);
+        _streamUrl = mediaUrl;
         _streamBaseMs = 0;
+        DecideSubIfNeeded();
+        var (sideload, textOn) = BuildSubPlan();
+        _textApplied = false;
         if (directStream)
         {
             // Progressive remux pipe: NOT seekable — bake the offset into the
@@ -514,7 +566,7 @@ public partial class PlayerPage : ContentPage
             var seekSec = resumeMs / 1000;
             if (seekSec > 0)
                 mediaUrl += (mediaUrl.Contains('?') ? "&" : "?") + $"seek={seekSec}";
-            NativePlayerService.Instance?.PlayAsync(mediaUrl, 0, play);
+            NativePlayerService.Instance?.PlayAsync(mediaUrl, 0, play, sideload, textOn);
         }
         else
         {
@@ -525,7 +577,7 @@ public partial class PlayerPage : ContentPage
             // twice — the HUD, saved progress, skip/Up-Next timing and quality/
             // error restarts all ran at 2× the real position. Seek explicitly on
             // that absolute timeline rather than relying on EXT-X-START handling.
-            NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs, play);
+            NativePlayerService.Instance?.PlayAsync(mediaUrl, resumeMs, play, sideload, textOn);
         }
         _ = LoadSegmentsAsync();
     }
@@ -547,18 +599,378 @@ public partial class PlayerPage : ContentPage
     /// it stays (with the settings it was started with — the menus read those
     /// back, so the switch is rolled back); otherwise the error stays on screen
     /// and OK / play retries the same start.</summary>
-    private void OnStartFailed(string reason, long resumeMs, int maxHeight)
+    private void OnStartFailed(string reason, long resumeMs, int maxHeight, Action? onFail)
     {
         Log($"start failed: {reason} (maxHeight={maxHeight}, kind={_kind})");
         var st = NativePlayerService.Instance?.GetState();
         bool oldAlive = _kind != StreamKind.None && st is not null && string.IsNullOrEmpty(st.ErrorMessage);
         if (oldAlive)
         {
+            onFail?.Invoke();
             FlashInfo($"Не удалось переключить поток ({reason}) — остаётся текущий");
             return;
         }
         _retryStart = (resumeMs, maxHeight);
         ShowError($"Не удалось запустить воспроизведение ({reason}). OK — повторить");
+    }
+
+    // ── Track catalog: what the FILE carries, whatever the stream tier ──────
+    // ExoPlayer only sees the tracks of the stream it plays: all of them on
+    // Direct Play, one audio and no subtitles on Direct Stream / HLS. The
+    // menus are built from the server's probe of the file (+ sidecar files
+    // from /api/external-tracks) instead, so a choice is the same thing on
+    // every tier and survives restarts: embedded audio #N / subtitle #N
+    // (ffprobe order — the server's audioTrackIndex / /api/subtitle track=N)
+    // or a sidecar path.
+
+    private sealed record ProbeTrack(int Index, string? Lang, string? Title, string? Codec,
+                                     int Channels, bool Default, bool Forced);
+
+    private List<ProbeTrack> _probeAudio = new();
+    private List<ProbeTrack> _probeSubs = new();
+    private List<ExternalTrackDto> _extAudio = new();
+    private List<ExternalTrackDto> _extSubs = new();
+    private bool _probeOk;
+    private string? _catalogPath;
+    private Task _catalogTask = Task.CompletedTask;
+
+    private Task EnsureCatalogAsync()
+    {
+        if (string.Equals(_catalogPath, _filePath, StringComparison.Ordinal)) return _catalogTask;
+        _catalogPath = _filePath;
+        _probeAudio = new(); _probeSubs = new(); _extAudio = new(); _extSubs = new();
+        _probeOk = false;
+        _subNeedsServer.Clear();
+        return _catalogTask = LoadCatalogAsync(_filePath);
+    }
+
+    private async Task LoadCatalogAsync(string path)
+    {
+        var p = Uri.EscapeDataString(path);
+        var probeTask = _http.GetStringAsync($"/api/probe?path={p}");
+        var extTask = _http.GetFromJsonAsync<List<ExternalTrackDto>>($"{ApiRoutes.ExternalTracks}?path={p}", Json);
+        List<ProbeTrack> audio = new(), subs = new();
+        bool ok = false;
+        try
+        {
+            using var doc = JsonDocument.Parse(await probeTask);
+            if (doc.RootElement.TryGetProperty("streams", out var streams))
+            {
+                foreach (var s in streams.EnumerateArray())
+                {
+                    var type = Str(s, "codec_type");
+                    if (type is not ("audio" or "subtitle")) continue;
+                    var tags = s.TryGetProperty("tags", out var t) ? t : default;
+                    var disp = s.TryGetProperty("disposition", out var d) ? d : default;
+                    var list = type == "audio" ? audio : subs;
+                    list.Add(new ProbeTrack(list.Count,
+                        Str(tags, "language") ?? Str(tags, "LANGUAGE"),
+                        Str(tags, "title") ?? Str(tags, "TITLE"),
+                        Str(s, "codec_name"),
+                        s.TryGetProperty("channels", out var ch) && ch.TryGetInt32(out var n) ? n : 0,
+                        Flag(disp, "default"), Flag(disp, "forced")));
+                }
+                ok = true;
+            }
+        }
+        catch (Exception ex) { Log($"probe failed: {ex.Message}"); }
+        List<ExternalTrackDto> ext = new();
+        try { ext = await extTask ?? new(); }
+        catch (Exception ex) { Log($"external-tracks failed: {ex.Message}"); }
+
+        if (!string.Equals(path, _filePath, StringComparison.Ordinal) || _closed) return;   // episode changed
+        _probeAudio = audio;
+        _probeSubs = subs;
+        _probeOk = ok;
+        _extAudio = ext.Where(e => e.Kind == "audio").ToList();
+        // /api/subtitle converts text formats only (a .sup / .idx can't become WebVTT).
+        _extSubs = ext.Where(e => e.Kind == "subtitle" && e.Ext?.ToLowerInvariant()
+                       is "srt" or "ass" or "ssa" or "vtt" or "webvtt" or "sub" or "smi" or "txt").ToList();
+        Log($"catalog: {audio.Count} audio, {subs.Count} subs, {_extAudio.Count} ext audio, {_extSubs.Count} ext subs");
+
+        // A stream that started before the catalog arrived: pick its default
+        // subtitle now.
+        if (_sub is null && _kind != StreamKind.None)
+        {
+            DecideSubIfNeeded();
+            if (_sub is { IsOff: false }) ApplySubChoice();
+        }
+
+        static string? Str(JsonElement e, string name) =>
+            e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString() : null;
+        static bool Flag(JsonElement e, string name) =>
+            e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) && i != 0;
+    }
+
+    // ── Subtitles ───────────────────────────────────────────────────────────
+    // Direct Play: an embedded track Media3 can render is switched in place
+    // (track selection, PGS included). Everything else — any embedded track
+    // on Direct Stream / HLS (those streams carry no subtitles), a sidecar
+    // file, an embedded track Media3 can't render — is the server's WebVTT
+    // conversion side-loaded with the stream (/api/subtitle). That URL is
+    // checked once before it is attached: a 422 (bitmap track, undecodable
+    // charset) on a side-loaded source would fail the whole playback.
+
+    /// <summary>Subtitle choice: embedded track #Embedded (ffprobe subtitle
+    /// order), a sidecar file, or off.</summary>
+    private readonly record struct SubSel(int Embedded, string? External)
+    {
+        public static SubSel Off => new(-1, null);
+        public bool IsOff => Embedded < 0 && External is null;
+    }
+
+    /// <summary>null = not decided for this file yet (catalog not loaded).</summary>
+    private SubSel? _sub;
+    /// <summary>The previous episode's choice, carried to the next one by
+    /// language (Off stays off).</summary>
+    private (bool Off, string? Lang)? _subCarry;
+    /// <summary>The current stream's text selection has been applied (set on
+    /// the first OnTracksChanged after each prepare).</summary>
+    private bool _textApplied;
+    /// <summary>Embedded tracks Media3 can't render on this Direct Play file —
+    /// they go through the server's conversion instead.</summary>
+    private readonly HashSet<int> _subNeedsServer = new();
+    /// <summary>/api/subtitle URLs (relative, no token) known to convert.</summary>
+    private readonly HashSet<string> _goodSubs = new(StringComparer.Ordinal);
+
+    private void DecideSubIfNeeded()
+    {
+        if (_sub is not null || !_catalogTask.IsCompleted) return;
+        _sub = PickDefaultSub();
+        Log($"subtitle default: {DescribeSub(_sub.Value)}");
+    }
+
+    private SubSel PickDefaultSub()
+    {
+        if (_subCarry is { } carry)
+        {
+            if (carry.Off || carry.Lang is null) return SubSel.Off;
+            var same = _probeSubs.Where(s => TrackLabels.NormLang(s.Lang) == carry.Lang && SubListable(s)).ToList();
+            if ((same.FirstOrDefault(s => !s.Forced) ?? same.FirstOrDefault()) is { } e) return new SubSel(e.Index, null);
+            if (_extSubs.FirstOrDefault(x => TrackLabels.NormLang(x.Language) == carry.Lang) is { } x) return new SubSel(-1, x.Path);
+            return SubSel.Off;
+        }
+        // Fresh start: the file's default-flagged track; else a forced track in
+        // the audio's language (signs / foreign lines); else off — like Media3.
+        if (_probeSubs.FirstOrDefault(s => s.Default && SubListable(s)) is { } def) return new SubSel(def.Index, null);
+        var audioLang = TrackLabels.NormLang((_probeAudio.FirstOrDefault(a => a.Default) ?? _probeAudio.FirstOrDefault())?.Lang);
+        if (audioLang is not null
+            && _probeSubs.FirstOrDefault(s => s.Forced && SubListable(s) && TrackLabels.NormLang(s.Lang) == audioLang) is { } forced)
+            return new SubSel(forced.Index, null);
+        return SubSel.Off;
+    }
+
+    /// <summary>Can this embedded track be shown at all on the current tier?
+    /// Text → always (Media3 or the server's WebVTT); bitmap → only when Media3
+    /// renders it itself on Direct Play.</summary>
+    private bool SubListable(ProbeTrack s, IReadOnlyList<TrackOption>? media3Text = null)
+    {
+        if (TrackLabels.IsTextSubtitle(s.Codec)) return true;
+        if (_kind != StreamKind.DirectPlay) return false;
+        media3Text ??= NativePlayerService.Instance?.GetTextTracks() ?? System.Array.Empty<TrackOption>();
+        return MapEmbeddedSub(s.Index, media3Text) is { Supported: true };
+    }
+
+    /// <summary>Media3 text track for embedded subtitle #k on Direct Play. The
+    /// Matroska / MP4 extractors expose the container's subtitle tracks in
+    /// order; if Media3 skipped one (an unsupported codec), match by rank
+    /// among the tracks of the same language.</summary>
+    private TrackOption? MapEmbeddedSub(int k, IReadOnlyList<TrackOption> media3Text)
+    {
+        var emb = media3Text.Where(t => t.Id?.Contains(NativePlayerService.SideloadTrackId) != true).ToList();
+        if (!_probeOk) return k >= 0 && k < emb.Count ? emb[k] : null;
+        if (k < 0 || k >= _probeSubs.Count) return null;
+        if (emb.Count == _probeSubs.Count) return emb[k];
+        var lang = TrackLabels.NormLang(_probeSubs[k].Lang);
+        int rank = _probeSubs.Take(k).Count(p => TrackLabels.NormLang(p.Lang) == lang);
+        return emb.Where(t => TrackLabels.NormLang(t.Language) == lang).Skip(rank).FirstOrDefault();
+    }
+
+    /// <summary>/api/subtitle URL (relative, no token) of a choice; null for a
+    /// track that can't become WebVTT.</summary>
+    private string? SubtitleRelUrl(SubSel s)
+    {
+        if (s.External is { } ext)
+            return $"/api/subtitle?path={Uri.EscapeDataString(ext)}&track=0&format=webvtt";
+        if (s.Embedded < 0) return null;
+        if (_probeOk && (s.Embedded >= _probeSubs.Count || !TrackLabels.IsTextSubtitle(_probeSubs[s.Embedded].Codec)))
+            return null;
+        return $"/api/subtitle?path={Uri.EscapeDataString(_filePath)}&track={s.Embedded}&format=webvtt";
+    }
+
+    /// <summary>How the current choice goes out with the next prepare of the
+    /// current stream: a side-loaded WebVTT (only once its URL is known to
+    /// convert — otherwise it's checked in the background and the stream
+    /// reloaded), Media3's own track (Direct Play, text on), or nothing.</summary>
+    private (SideloadSubtitle? Sideload, bool TextOn) BuildSubPlan()
+    {
+        if (_sub is not { } s || s.IsOff) return (null, false);
+        if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded))
+            return (null, true);   // OnTracksChanged selects the Media3 track
+        var rel = SubtitleRelUrl(s);
+        if (rel is null) return (null, false);
+        if (!_goodSubs.Contains(rel))
+        {
+            _ = VerifySubThenReloadAsync(rel, s);
+            return (null, false);
+        }
+        return (new SideloadSubtitle(TvMedia.Url(Abs(rel)!), SubLang(s), SubLabel(s)), true);
+    }
+
+    private async Task<bool> CheckSubtitleAsync(string rel)
+    {
+        if (_goodSubs.Contains(rel)) return true;
+        try
+        {
+            // The first request converts the track into the server's cache (a
+            // full read of the container for an embedded one) — ExoPlayer's own
+            // fetch then gets the cached file.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            using var resp = await _http.GetAsync(rel, cts.Token);
+            if (!resp.IsSuccessStatusCode) { Log($"subtitle {rel}: HTTP {(int)resp.StatusCode}"); return false; }
+            var body = await resp.Content.ReadAsStringAsync(cts.Token);
+            if (string.IsNullOrWhiteSpace(body)) return false;
+            _goodSubs.Add(rel);
+            return true;
+        }
+        catch (Exception ex) { Log($"subtitle {rel}: {ex.Message}"); return false; }
+    }
+
+    private async Task VerifySubThenReloadAsync(string rel, SubSel forChoice, SubSel? previous = null)
+    {
+        var file = _filePath;
+        if (!await CheckSubtitleAsync(rel))
+        {
+            if (file == _filePath && _sub == forChoice)
+            {
+                // Back to what is actually on screen, so the sheet doesn't mark
+                // a track that never loaded.
+                _sub = previous ?? SubSel.Off;
+                FlashInfo("Эти субтитры не удалось загрузить");
+            }
+            return;
+        }
+        if (file != _filePath || _sub != forChoice || _closed) return;
+        ReloadForSubtitles();
+    }
+
+    /// <summary>Re-prepare the current stream with the current subtitle
+    /// choice at the current position and play state. Direct Play / HLS
+    /// re-open the same URL; the Direct Stream pipe can't be re-opened
+    /// mid-way, so it is restarted at the position.</summary>
+    private void ReloadForSubtitles(Action? onFail = null)
+    {
+        var st = NativePlayerService.Instance?.GetState();
+        long pos = _streamBaseMs + (st?.PositionMs ?? 0);
+        if (_kind == StreamKind.DirectStream)
+        {
+            _ = StartStreamAsync(pos, _maxHeight, onFail: onFail);
+            return;
+        }
+        if (_streamUrl is null) return;
+        var (sideload, textOn) = BuildSubPlan();
+        _textApplied = false;
+        Log($"subtitle reload: {DescribeSub(_sub ?? SubSel.Off)} at {pos} ms");
+        NativePlayerService.Instance?.PlayAsync(_streamUrl, pos, st?.PlayWhenReady ?? true, sideload, textOn);
+    }
+
+    /// <summary>ExoPlayer listed / re-selected tracks: apply the subtitle
+    /// choice to the freshly prepared stream (once per prepare).</summary>
+    private void OnPlayerTracksChanged()
+    {
+        if (_textApplied || _sub is not { } s || NativePlayerService.Instance is not { } nps) return;
+        if (s.IsOff) { _textApplied = true; return; }
+        var text = nps.GetTextTracks();
+        if (text.FirstOrDefault(t => t.Id?.Contains(NativePlayerService.SideloadTrackId) == true) is { } side)
+        {
+            _textApplied = true;
+            if (!side.Selected) nps.SelectTrack(side.GroupIndex, side.TrackIndex);
+            Log($"subtitle: side-loaded track selected ({DescribeSub(s)})");
+            return;
+        }
+        if (_kind != StreamKind.DirectPlay || s.External is not null || _subNeedsServer.Contains(s.Embedded)) return;
+        // Wait for the prepared track list (the first callback can be empty).
+        if (nps.GetAudioTracks().Count == 0 && nps.GetVideoTracks().Count == 0) return;
+        _textApplied = true;
+        if (MapEmbeddedSub(s.Embedded, text) is { Supported: true } t)
+        {
+            nps.SelectTrack(t.GroupIndex, t.TrackIndex);
+            Log($"subtitle: Media3 track {t.GroupIndex}/{t.TrackIndex} for embedded #{s.Embedded}");
+            return;
+        }
+        // Media3 can't render it here → the server's WebVTT conversion.
+        _subNeedsServer.Add(s.Embedded);
+        Log($"subtitle: embedded #{s.Embedded} not renderable by Media3 → server WebVTT");
+        if (SubtitleRelUrl(s) is { } rel) _ = VerifySubThenReloadAsync(rel, s);
+    }
+
+    private string? SubLang(SubSel s) =>
+        s.External is { } p ? _extSubs.FirstOrDefault(x => x.Path == p)?.Language
+        : s.Embedded >= 0 && s.Embedded < _probeSubs.Count ? _probeSubs[s.Embedded].Lang : null;
+
+    private string SubLabel(SubSel s)
+    {
+        if (s.IsOff) return "Выключены";
+        if (s.External is { } p)
+            return _extSubs.FirstOrDefault(x => x.Path == p) is { } x ? ExternalLabel(x) : System.IO.Path.GetFileName(p);
+        if (s.Embedded < _probeSubs.Count)
+        {
+            var t = _probeSubs[s.Embedded];
+            var parts = new List<string>();
+            var lang = TrackLabels.LangName(t.Lang);
+            if (lang.Length > 0) parts.Add(lang);
+            if (!string.IsNullOrWhiteSpace(t.Title)) parts.Add(t.Title!);
+            if (parts.Count == 0) parts.Add($"Дорожка {t.Index + 1}");
+            if (TrackLabels.Codec(t.Codec) is { } c) parts.Add(c);
+            if (t.Forced) parts.Add("форсированные");
+            return string.Join(" · ", parts);
+        }
+        return $"Дорожка {s.Embedded + 1}";
+    }
+
+    /// <summary>"Русский · SRT · файл", "AniLibria · MKA · файл": the full
+    /// language name when the server's label is just the language word,
+    /// else its label (dub studio / folder hint).</summary>
+    private static string ExternalLabel(ExternalTrackDto x)
+    {
+        var lang = TrackLabels.LangName(x.Language);
+        var name = lang.Length > 0 && !(x.Label ?? "").Trim().Contains(' ') ? lang : (x.Label ?? x.FileName);
+        return $"{name} · {(x.Ext ?? "").ToUpperInvariant()} · файл";
+    }
+
+    private static string DescribeSub(SubSel s) =>
+        s.IsOff ? "off" : s.External is { } p ? $"external {System.IO.Path.GetFileName(p)}" : $"embedded #{s.Embedded}";
+
+    /// <summary>Apply the current choice to the playing stream (CC sheet, or
+    /// a default picked after the stream started).</summary>
+    private void ApplySubChoice(SubSel? previous = null)
+    {
+        if (_sub is not { } s || NativePlayerService.Instance is not { } nps) return;
+        if (s.IsOff) { _textApplied = true; nps.DisableSubtitles(); return; }
+        if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)
+            && MapEmbeddedSub(s.Embedded, nps.GetTextTracks()) is { Supported: true } t)
+        {
+            // In place, no re-prepare.
+            _textApplied = true;
+            nps.SelectTrack(t.GroupIndex, t.TrackIndex);
+            return;
+        }
+        var rel = SubtitleRelUrl(s);
+        if (rel is null) { _sub = previous ?? SubSel.Off; FlashInfo("Эти субтитры недоступны"); return; }
+        if (_goodSubs.Contains(rel)) { ReloadForSubtitles(() => _sub = previous); return; }
+        FlashInfo("Загрузка субтитров…");
+        _ = VerifySubThenReloadAsync(rel, s, previous);
+    }
+
+    private void ChooseSub(SubSel sel)
+    {
+        if (_sub == sel) return;
+        var previous = _sub;
+        _sub = sel;
+        Log($"subtitle chosen: {DescribeSub(sel)}");
+        FlashInfo(sel.IsOff ? "Субтитры выключены" : $"Субтитры: {SubLabel(sel)}");
+        ApplySubChoice(previous);
     }
 
     // ── Episode navigation (⏮ / ⏭) ──────────────────────────────────────────
@@ -601,6 +1013,9 @@ public partial class PlayerPage : ContentPage
         _maxHeight = 0; _sourceHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
         _isDirectStream = false; _forceTranscode = false; _capFallback = false;   // per-file decisions
         _recoveringSinceUtc = null;
+        // Tracks are per file: carry the subtitle choice by language (or off).
+        if (_sub is { } sub) _subCarry = (sub.IsOff, sub.IsOff ? null : TrackLabels.NormLang(SubLang(sub)));
+        _sub = null;
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
         EyebrowLabel.Text = _episode is not null
@@ -831,21 +1246,40 @@ public partial class PlayerPage : ContentPage
 
     private void OpenSubsSheet()
     {
-        var tracks = NativePlayerService.Instance?.GetTextTracks() ?? System.Array.Empty<TrackOption>();
-        var rows = new List<SheetRow>
+        // The file's tracks (probe) + sidecar files, not just what the current
+        // stream carries: a Direct Stream / HLS stream has no subtitles of its
+        // own. Bitmap tracks only where Media3 renders them (Direct Play).
+        var cur = _sub ?? SubSel.Off;
+        var rows = new List<SheetRow> { new("Выключены", cur.IsOff, () => ChooseSub(SubSel.Off)) };
+        var media3 = _kind == StreamKind.DirectPlay
+            ? NativePlayerService.Instance?.GetTextTracks() ?? System.Array.Empty<TrackOption>()
+            : System.Array.Empty<TrackOption>();
+        if (_probeOk)
         {
-            new("Выключены", !tracks.Any(t => t.Selected), () =>
+            foreach (var s in _probeSubs)
             {
-                NativePlayerService.Instance?.DisableSubtitles();
-                FlashInfo("Субтитры выключены");
-            }),
-        };
-        foreach (var t in tracks)
-            rows.Add(new SheetRow(t.Label, t.Selected, () =>
+                if (!SubListable(s, media3)) continue;
+                var sel = new SubSel(s.Index, null);
+                rows.Add(new SheetRow(SubLabel(sel), cur == sel, () => ChooseSub(sel)));
+            }
+        }
+        else
+        {
+            // No probe (server error): Direct Play still lists what Media3 sees.
+            var emb = media3.Where(t => t.Id?.Contains(NativePlayerService.SideloadTrackId) != true).ToList();
+            for (int i = 0; i < emb.Count; i++)
             {
-                NativePlayerService.Instance?.SelectTrack(t.GroupIndex, t.TrackIndex);
-                FlashInfo($"Субтитры: {t.Label}");
-            }));
+                if (!emb[i].Supported) continue;
+                var sel = new SubSel(i, null);
+                rows.Add(new SheetRow(emb[i].Label, cur == sel, () => ChooseSub(sel)));
+            }
+        }
+        foreach (var x in _extSubs)
+        {
+            var sel = new SubSel(-1, x.Path);
+            rows.Add(new SheetRow(ExternalLabel(x), cur == sel, () => ChooseSub(sel)));
+        }
+        if (!_catalogTask.IsCompleted) rows.Add(new SheetRow("Загрузка списка…", false, null));
         OpenListSheet("СУБТИТРЫ", rows, SubsButton);
     }
 
@@ -1130,6 +1564,7 @@ public partial class PlayerPage : ContentPage
         _closed = true;
         _startGen++;
         _startCts?.Cancel();
+        if (NativePlayerService.Instance is { } nps) nps.TracksChanged -= OnPlayerTracksChanged;
         _timer?.Stop();
         _hudTimer?.Stop();
         var st = NativePlayerService.Instance?.GetState();
