@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -6,36 +5,28 @@ namespace Animarr.Web.Services.Segments;
 
 /// <summary>Tiny ffprobe helper for the segment pipeline — only the bits the
 /// detection cascade needs. ffprobe is resolved from PATH, matching the rest of
-/// the app's ffmpeg/ffprobe usage (HlsSessionService, /api/probe).</summary>
+/// the app's ffmpeg/ffprobe usage (HlsSessionService, /api/probe). Runs through
+/// <see cref="FfprobeRunner"/>: stderr drained, killed after
+/// <see cref="ProbeTimeout"/> — the token is the app lifetime, so a dead mount
+/// used to park a background pass forever.</summary>
 public static class MediaProbe
 {
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>File duration in seconds, or 0 when ffprobe is unavailable / the
     /// file can't be read.</summary>
     public static async Task<double> GetDurationAsync(string filePath, CancellationToken ct = default)
     {
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in new[]
-            {
+            var r = await FfprobeRunner.RunAsync(
+            [
                 "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 filePath,
-            }) psi.ArgumentList.Add(a);
-
-            using var p = Process.Start(psi);
-            if (p is null) return 0;
-            var stdout = await p.StandardOutput.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            return double.TryParse(stdout.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0;
+            ], ProbeTimeout, ct);
+            return double.TryParse(r.StdOut.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0;
         }
         catch
         {
@@ -52,21 +43,9 @@ public static class MediaProbe
     {
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "ffprobe",
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            };
-            foreach (var a in new[] { "-v", "error", "-print_format", "json", "-show_chapters", filePath })
-                psi.ArgumentList.Add(a);
-
-            using var p = Process.Start(psi);
-            if (p is null) return Array.Empty<Chapter>();
-            var stdout = await p.StandardOutput.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
+            var r = await FfprobeRunner.RunAsync(
+                ["-v", "error", "-print_format", "json", "-show_chapters", filePath], ProbeTimeout, ct);
+            var stdout = r.StdOut;
             if (string.IsNullOrWhiteSpace(stdout)) return Array.Empty<Chapter>();
 
             using var doc = JsonDocument.Parse(stdout);

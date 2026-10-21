@@ -139,6 +139,12 @@ public sealed partial class HlsSessionService
             return new ProbeInfo(duration, vCodec, aCodec, width, height, combined, hasDv, is10Bit,
                 colorTransfer, audioChannels, audioLanguage, reorderDelaySec);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller (HLS start request) went away — let the endpoint drop
+            // it instead of carrying on with "probe failed" and spawning ffmpeg.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "ffprobe failed for {Path}", fullPath);

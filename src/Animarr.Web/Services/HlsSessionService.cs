@@ -500,11 +500,12 @@ public sealed partial class HlsSessionService : IDisposable
 
         var token = Guid.NewGuid().ToString("N");
         var dir   = Path.Combine(_rootDir, token);
-        Directory.CreateDirectory(dir);
 
         // 1. Probe so we know the duration + codec hints upfront. Without
         //    duration we can't build a VOD playlist — fall back to live mode.
+        //    Throws if the caller gave up meanwhile, hence the dir comes after.
         var probe = await ProbeMediaAsync(fullPath, ct);
+        Directory.CreateDirectory(dir);
         if (probe is null || probe.DurationSec <= 0)
         {
             _logger.LogWarning("HLS: probe failed for {Path}, falling back to live encoding mode", fullPath);
@@ -956,7 +957,9 @@ public sealed partial class HlsSessionService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName               = "ffmpeg",
-                RedirectStandardOutput = true,
+                // Not redirected — nobody reads it, and an undrained 64 KB pipe
+                // blocks ffmpeg mid-segment (see the same psi in StartAsync).
+                RedirectStandardOutput = false,
                 RedirectStandardError  = true,
                 UseShellExecute        = false,
                 CreateNoWindow         = true,

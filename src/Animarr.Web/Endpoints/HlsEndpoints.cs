@@ -127,8 +127,10 @@ internal static class HlsEndpoints
                 : nativeCaps.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                             .Select(t => t.ToLowerInvariant())
                             .ToHashSet();
+            // RequestAborted: an abandoned start (rapid Next/Prev) stops waiting on
+            // the probe and falls into the OperationCanceledException catch below.
             var decision = externalAudioFull is null && !wantCap && !wantTrack
-                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, nativeCaps: caps)
+                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, http.RequestAborted, nativeCaps: caps)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
