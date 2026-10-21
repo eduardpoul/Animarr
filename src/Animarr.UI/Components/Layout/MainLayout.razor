@@ -62,8 +62,7 @@
 
         <MobileShell ActiveDownloads="_activeDownloads"
                      MoreOpen="_navDrawerOpen"
-                     OnMoreClickEvent="@(() => _navDrawerOpen = !_navDrawerOpen)"
-                     OnProfileClickEvent="@(() => OpenSettings(null))" />
+                     OnMoreClickEvent="@(() => _navDrawerOpen = !_navDrawerOpen)" />
 
         @* Phone nav drawer scrim — tap outside the drawer to close it. *@
         @if (_navDrawerOpen)

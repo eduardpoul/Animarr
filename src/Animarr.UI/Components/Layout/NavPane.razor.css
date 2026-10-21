@@ -39,6 +39,9 @@
         transform: translateX(-102%);
         visibility: hidden;
         transition: transform var(--motion-base), visibility 0s linear 200ms;
+        /* Scrolling the drawer's list to its end mustn't hand the gesture
+           on to the page behind it (see also the html rule in components.css). */
+        overscroll-behavior: contain;
     }
     .d-nav.is-drawer-open {
         transform: none;

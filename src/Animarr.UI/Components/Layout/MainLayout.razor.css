@@ -144,6 +144,8 @@
     inset: 0;
     z-index: 69;
     background: var(--scrim);
+    /* A swipe on the dimmed page closes nothing and scrolls nothing. */
+    touch-action: none;
 }
 @media (min-width: 960px) {
     .ml-nav-scrim { display: none; }

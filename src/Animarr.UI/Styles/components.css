@@ -183,6 +183,12 @@ html.is-scrolled .d-mobile-nav {
 
 .d-mobile-nav__spacer { flex: 1; }
 
+/* Phone nav drawer open: the page behind it stays put — a swipe over the
+   scrim (or past the end of the drawer's list) used to scroll it. */
+@media (max-width: 959px) {
+    html:has(.d-nav.is-drawer-open) { overflow: hidden; }
+}
+
 /* Mobile bottom tab bar (Fluent 2 mobile TabBar): 4–5 destinations, icon
    on top of a 10/14 label, selected = brand colour + filled icon. Acrylic
    over the content; grows by the home-indicator inset. */

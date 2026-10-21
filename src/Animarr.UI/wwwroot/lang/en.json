@@ -1488,7 +1488,6 @@
   "continue.slot_n_aria": "Slot {0}",
   "mobile.top_nav_aria": "Top navigation",
   "mobile.tabbar_aria": "Primary mobile navigation",
-  "mobile.open_profile_aria": "Open profile",
   "mobile.active_fmt": "{0} active",
   "mobile.tab_more": "More",
   "pin.enter_aria": "Enter PIN",

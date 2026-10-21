@@ -1,11 +1,12 @@
 @*
     Mobile shell (< 960px) — Fluent 2 mobile pattern:
-      • top app bar (brand + live-downloads pill + avatar). Transparent over
+      • top app bar (brand + live-downloads pill). Transparent over
         the hero at the top of the page, acrylic once the page scrolls
         (html.is-scrolled, set by app-shell.js).
       • bottom tab bar with the main destinations — Home · Library · Search ·
         Downloads · More. "More" opens the full NavPane as a slide-in drawer
-        (Calendar, Watchlist, Stats, folders, settings, profile…).
+        (Calendar, Watchlist, Stats, folders, settings, profile…). The
+        profile lives there too — no avatar button up top.
     Hidden on desktop, where the NavPane is pinned on the left.
 *@
 
@@ -26,12 +27,6 @@
             <span class="sb-live__dot"></span>@ActiveDownloads @L["layout.live_label"]
         </span>
     }
-    @if (UserCtx.Me is { } me)
-    {
-        <button type="button" class="d-mobile-nav__avatar tv-focus" @onclick="OnProfileClick" aria-label="@L["mobile.open_profile_aria"]">
-            <Avatar Name="@me.User.Name" HueOverride="me.User.AvatarHue" ImagePath="@me.User.AvatarPath" Size="sm" />
-        </button>
-    }
 </nav>
 
 <nav class="d-tabbar" aria-label="@L["mobile.tabbar_aria"]">
@@ -51,14 +46,12 @@
 
 @code {
     [Parameter] public int ActiveDownloads { get; set; }
-    [Parameter] public EventCallback OnProfileClickEvent { get; set; }
     /// <summary>"More" tab — the layout opens / closes the NavPane drawer.</summary>
     [Parameter] public EventCallback OnMoreClickEvent { get; set; }
     /// <summary>Whether that drawer is open (highlights the More tab).</summary>
     [Parameter] public bool MoreOpen { get; set; }
 
-    private Task OnProfileClick() => OnProfileClickEvent.InvokeAsync();
-    private Task OnMoreClick()    => OnMoreClickEvent.InvokeAsync();
+    private Task OnMoreClick() => OnMoreClickEvent.InvokeAsync();
 
     private RenderFragment Tab(string href, string icon, string iconActive, string label, bool active) => __builder =>
     {
