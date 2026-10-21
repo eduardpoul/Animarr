@@ -172,10 +172,20 @@
          Pulled in only for the android target — other platforms keep
          the Artplayer-on-<video> path. -->
     <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-        <PackageReference Include="Xamarin.AndroidX.Media3.Common"          Version="1.4.1.1" />
-        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer"       Version="1.4.1.1" />
-        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer.Hls"   Version="1.4.1.1" />
-        <PackageReference Include="Xamarin.AndroidX.Media3.UI"              Version="1.4.1.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.Common"          Version="1.11.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer"       Version="1.11.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer.Hls"   Version="1.11.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.UI"              Version="1.11.1" />
+        <PackageReference Include="Xamarin.AndroidX.Media3.Decoder"         Version="1.11.1" />
+        <!-- FFmpeg audio decoders for Media3 (AC-3 / E-AC-3 / DTS / DTS-HD /
+             TrueHD / FLAC / ALAC / Opus / Vorbis …) so files whose audio the SoC
+             can't decode still Direct Play instead of a server AAC 2.0 remux.
+             Jellyfin's prebuilt AAR (the same one jellyfin-androidtv ships with
+             Media3 1.11.1). Loaded by DefaultRenderersFactory via reflection,
+             so no C# binding is needed. The AAR is GPL-3.0 — one of the
+             reasons the project is licensed GPL-3.0 (see LICENSE / README). -->
+        <AndroidMavenLibrary Include="org.jellyfin.media3:media3-ffmpeg-decoder" Version="1.9.0+1" Bind="false" />
+        <ProguardConfiguration Include="Platforms\Android\proguard-media3-ffmpeg.cfg" />
         <!-- TV: leanback-grid only (HorizontalGridView / VerticalGridView = RecyclerView
              with TV focus alignment + per-row focus memory), no Leanback fragments. -->
         <PackageReference Include="Xamarin.AndroidX.Leanback.Grid"          Version="1.0.0.4" />

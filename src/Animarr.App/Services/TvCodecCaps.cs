@@ -22,7 +22,7 @@ internal static class TvCodecCaps
 #if ANDROID
         var tokens = new List<string>
         {
-            // Media3 1.4 bundled extractors (device-independent).
+            // Media3 bundled extractors (device-independent).
             "mp4", "m4v", "mov", "mkv", "webm", "ts", "m2ts", "avi", "flv", "ogg", "wav",
         };
 
@@ -88,6 +88,15 @@ internal static class TvCodecCaps
             tokens.AddRange(new[] { "h264", "aac", "mp3" });
         }
 
+        // Audio the bundled FFmpeg extension decodes in software (Jellyfin's
+        // media3-ffmpeg-decoder): the player falls back to it when the SoC has
+        // no MediaCodec decoder, so these files can Direct Play as-is instead
+        // of a server-side AAC 2.0 remux.
+        foreach (var (mime, token) in probes)
+            if (mime.StartsWith("audio/", StringComparison.Ordinal) && FfmpegSupports(mime))
+                tokens.Add(token);
+        if (FfmpegSupports("audio/vnd.dts.hd")) tokens.Add("dts");
+
         _cached = string.Join(',', tokens.Distinct());
 #else
         _cached = "";
@@ -97,4 +106,47 @@ internal static class TvCodecCaps
 #endif
         return _cached;
     }
+
+#if ANDROID
+    private static bool? _ffmpegAvailable;
+
+    /// <summary>Asks <c>androidx.media3.decoder.ffmpeg.FfmpegLibrary</c> (no C#
+    /// binding — the AAR is consumed with Bind="false") whether the native
+    /// FFmpeg decoders loaded and cover <paramref name="mime"/>.</summary>
+    private static bool FfmpegSupports(string mime)
+    {
+        try
+        {
+            // The app's ClassLoader explicitly: Get() runs on a pool thread, and a
+            // bare Class.forName there resolves against the system loader, which
+            // can't see APK classes (ClassNotFoundException).
+            using var cls = global::Java.Lang.Class.ForName("androidx.media3.decoder.ffmpeg.FfmpegLibrary",
+                true, global::Android.App.Application.Context.ClassLoader);
+            if (_ffmpegAvailable is null)
+            {
+                var isAvailable = global::Android.Runtime.JNIEnv.GetStaticMethodID(cls.Handle, "isAvailable", "()Z");
+                _ffmpegAvailable = global::Android.Runtime.JNIEnv.CallStaticBooleanMethod(cls.Handle, isAvailable);
+                var getVersion = global::Android.Runtime.JNIEnv.GetStaticMethodID(cls.Handle, "getVersion", "()Ljava/lang/String;");
+                var version = global::Java.Lang.Object.GetObject<global::Java.Lang.String>(
+                    global::Android.Runtime.JNIEnv.CallStaticObjectMethod(cls.Handle, getVersion),
+                    global::Android.Runtime.JniHandleOwnership.TransferLocalRef)?.ToString();
+                global::Android.Util.Log.Info("Animarr.Caps", $"FFmpeg extension available={_ffmpegAvailable} version={version}");
+            }
+            if (_ffmpegAvailable != true) return false;
+            var supportsFormat = global::Android.Runtime.JNIEnv.GetStaticMethodID(cls.Handle, "supportsFormat", "(Ljava/lang/String;)Z");
+            using var jmime = new global::Java.Lang.String(mime);
+            return global::Android.Runtime.JNIEnv.CallStaticBooleanMethod(cls.Handle, supportsFormat,
+                new global::Android.Runtime.JValue(jmime));
+        }
+        catch (global::System.Exception ex)
+        {
+            if (_ffmpegAvailable is null)
+                global::Android.Util.Log.Warn("Animarr.Caps", $"FFmpeg extension missing: {ex.Message}");
+            _ffmpegAvailable = false;
+            return false;
+        }
+    }
+#else
+    private static bool FfmpegSupports(string mime) => false;
+#endif
 }

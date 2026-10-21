@@ -759,7 +759,15 @@ public sealed class NativePlayerService : IDisposable
             .SetTargetBufferBytes(64 * 1024 * 1024)!
             .SetPrioritizeTimeOverSizeThresholds(false)!
             .Build();
-        var builder = new ExoPlayerBuilder(ctx)
+        // Extension renderers ON (not PREFER): the platform MediaCodec decoders
+        // and HDMI passthrough still come first; the FFmpeg audio renderer
+        // (org.jellyfin.media3:media3-ffmpeg-decoder) only takes AC-3 / E-AC-3 /
+        // DTS / TrueHD / … when the SoC has no decoder for them. Decoder
+        // fallback lets a codec that fails to init fall through to the next one.
+        var renderers = new global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory(ctx)
+            .SetExtensionRendererMode(global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory.ExtensionRendererModeOn)!
+            .SetEnableDecoderFallback(true)!;
+        var builder = new ExoPlayerBuilder(ctx, renderers)
             .SetAudioAttributes(attrs, handleAudioFocus: true)!
             .SetLoadControl(load)!;
         return (IExoPlayer)builder.Build()!;
