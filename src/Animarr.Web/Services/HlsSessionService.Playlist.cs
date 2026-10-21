@@ -31,7 +31,37 @@ public sealed partial class HlsSessionService
         public string VideoMap => VideoStreamIndex >= 0
             ? "0:" + VideoStreamIndex.ToString(CultureInfo.InvariantCulture)
             : "0:V:0?";
+
+        /// <summary>Every audio stream, index = ffmpeg's <c>a:N</c>. Empty for
+        /// the seek-restart's minimal probe.</summary>
+        public IReadOnlyList<AudioStreamInfo> AudioStreams { get; init; } = [];
+
+        /// <summary>
+        /// This probe with the top-level audio fields (codec / channels /
+        /// language — first track by default) describing the track the session
+        /// actually maps: source track <paramref name="audioTrackIndex"/>, or
+        /// that track of the external dub (<paramref name="external"/>, probed
+        /// separately). Everything downstream — TS passthrough, master-playlist
+        /// CODECS, the Info block, the seek-restart — then talks about the
+        /// SELECTED track: switching to the English track used to keep
+        /// reporting "AC-3 5.1 (RUS)" from track 0.
+        /// </summary>
+        public ProbeInfo ForAudioTrack(int audioTrackIndex, ProbeInfo? external, bool hasExternal)
+        {
+            var list = hasExternal ? external?.AudioStreams : AudioStreams;
+            if (list is null || audioTrackIndex < 0 || audioTrackIndex >= list.Count)
+            {
+                // External dub that couldn't be probed: its language is
+                // unknown — don't claim the source's.
+                return hasExternal ? this with { AudioLanguage = null } : this;
+            }
+            var a = list[audioTrackIndex];
+            return this with { AudioCodec = a.Codec, AudioChannels = a.Channels, AudioLanguage = a.Language };
+        }
     }
+
+    /// <summary>One audio stream of a probed file.</summary>
+    private sealed record AudioStreamInfo(string? Codec, int Channels, string? Language);
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once
@@ -182,13 +212,15 @@ public sealed partial class HlsSessionService
         _ => false,
     };
 
-    /// <summary>TS-path audio passthrough decision. The probe only records the
-    /// FIRST audio stream's codec, so passthrough is safe only when that stream
-    /// is the one mapped: picking track N (e.g. AC3/DTS/FLAC behind an AAC
-    /// track 0) used to stream-copy N on the strength of track 0's codec —
-    /// silence in the browser, or ffmpeg refusing FLAC-in-TS.</summary>
-    private static bool TsAudioPassthrough(string? firstAudioCodec, int audioTrackIndex, bool externalAudio)
-        => !externalAudio && audioTrackIndex == 0 && IsBrowserCompatibleAudioInTs(firstAudioCodec);
+    /// <summary>TS-path audio passthrough decision for the MAPPED track.
+    /// <paramref name="mappedAudioCodec"/> must be the codec of the stream
+    /// actually mapped (<see cref="ProbeInfo.ForAudioTrack"/>) — deciding on
+    /// track 0's codec while mapping track N (AC3/DTS/FLAC behind an AAC track
+    /// 0) stream-copied N: silence in the browser, or ffmpeg refusing
+    /// FLAC-in-TS. An external dub is always transcoded (its codec is
+    /// whatever the .mka holds).</summary>
+    private static bool TsAudioPassthrough(string? mappedAudioCodec, bool externalAudio)
+        => !externalAudio && IsBrowserCompatibleAudioInTs(mappedAudioCodec);
 
     private static string BuildMasterPlaylist(ProbeInfo p)
     {

@@ -41,6 +41,7 @@ public sealed partial class HlsSessionService
             string? audioCodecsAttr = null;
             double reorderDelaySec = 0;   // B-frame reorder delay → audio itsoffset for stream-copy
             int videoStreamIndex = -1;    // absolute stream index of the main video (the `-map 0:N`)
+            var audioStreams = new List<AudioStreamInfo>();   // every audio stream, 0:a:N order
 
             if (root.TryGetProperty("streams", out var streams))
             {
@@ -107,27 +108,38 @@ public sealed partial class HlsSessionService
 
                         videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
                     }
-                    else if (type == "audio" && aCodec is null)
+                    else if (type == "audio")
                     {
-                        // Capture the FIRST audio stream's codec name. ChoosePlan
-                        // uses this to decide passthrough vs AAC re-encode on the
-                        // MPEG-TS branch. We still default the MSE CODECS=… string
-                        // to mp4a.40.2 because the fMP4 path always transcodes;
-                        // the TS branch sidesteps the master playlist's codecs
-                        // attribute entirely (browsers infer from segment bytes).
-                        if (s.TryGetProperty("codec_name", out var acn)) aCodec = acn.GetString();
-                        if (s.TryGetProperty("channels",   out var ach) && ach.TryGetInt32(out var ci))
-                            audioChannels = ci;
+                        // EVERY audio stream, in order — index N here is ffmpeg's
+                        // 0:a:N, so the session can describe (and pass through)
+                        // the track the user actually picked, not just track 0.
+                        string? codec = s.TryGetProperty("codec_name", out var acn) ? acn.GetString() : null;
+                        int channels = s.TryGetProperty("channels", out var ach) && ach.TryGetInt32(out var ci) ? ci : 0;
                         // Language tag: ffprobe puts it under tags.language, but
                         // MKV-from-Matroska sometimes uses LANGUAGE (uppercase).
+                        string? language = null;
                         if (s.TryGetProperty("tags", out var tags))
                         {
                             if (tags.TryGetProperty("language", out var langEl))
-                                audioLanguage = langEl.GetString();
+                                language = langEl.GetString();
                             else if (tags.TryGetProperty("LANGUAGE", out var langElU))
-                                audioLanguage = langElU.GetString();
+                                language = langElU.GetString();
                         }
-                        audioCodecsAttr = "mp4a.40.2";
+                        audioStreams.Add(new AudioStreamInfo(codec, channels, language));
+
+                        if (aCodec is null)
+                        {
+                            // The FIRST audio stream fills the top-level fields:
+                            // what Direct Play / Direct Stream (and a start with
+                            // the default track) play. StartAsync swaps in the
+                            // selected track (ForAudioTrack). We still default the
+                            // MSE CODECS=… string to mp4a.40.2 because the fMP4
+                            // path always transcodes; the TS branch builds its own.
+                            aCodec = codec;
+                            audioChannels = channels;
+                            audioLanguage = language;
+                            audioCodecsAttr = "mp4a.40.2";
+                        }
                     }
                 }
             }
@@ -148,6 +160,7 @@ public sealed partial class HlsSessionService
                 colorTransfer, audioChannels, audioLanguage, reorderDelaySec)
             {
                 VideoStreamIndex = videoStreamIndex,
+                AudioStreams     = audioStreams,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -20,8 +20,9 @@ public sealed partial class HlsSessionService
         public double  SeekSec    { get; }
         public int     SegmentCount { get; }
         public string? VideoCodec { get; }
-        // First audio stream's codec from the start probe — the seek-restart
-        // has no probe and needs it for the TS passthrough decision.
+        // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
+        // start probe — the seek-restart has no probe and needs it for the TS
+        // passthrough decision.
         public string? AudioCodec { get; }
         // Source bit depth, likewise for the restart (Hi10P must not hw-decode).
         public bool    Is10Bit    { get; }

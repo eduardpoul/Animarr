@@ -336,7 +336,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
-        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None)
+        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, bool externalAudio = false)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -393,8 +393,10 @@ public sealed partial class HlsSessionService : IDisposable
         // TS path with a browser-native source codec; every other path — Direct
         // Stream, fMP4 copy/reencode, TS with incompatible audio — transcodes to
         // AAC stereo, so the Info block reports AAC 2.0 there, not e.g. TrueHD 7.1.
+        // On an HLS session probe's audio fields are the SELECTED track's
+        // (ProbeInfo.ForAudioTrack) — codec, channels and language alike.
         bool audioCopied = isDirectPlay
-            || (plan == HlsPlan.TsStreamCopy && IsBrowserCompatibleAudioInTs(probe.AudioCodec));
+            || (plan == HlsPlan.TsStreamCopy && TsAudioPassthrough(probe.AudioCodec, externalAudio));
 
         return new PlayerOutputInfo(
             Plan:            planName,
@@ -615,6 +617,12 @@ public sealed partial class HlsSessionService : IDisposable
         //    duration we can't build a VOD playlist — fall back to live mode.
         //    Throws if the caller gave up meanwhile, hence the dir comes after.
         var probe = await ProbeMediaAsync(fullPath, ct);
+        // From here on the probe's audio fields describe the track the session
+        // MAPS (source track N, or the external dub's) instead of track 0, so
+        // TS passthrough, CODECS, the Info block and the restart agree with it.
+        var hasExternalAudio = externalAudioPath is not null;
+        var externalProbe = hasExternalAudio ? await ProbeMediaAsync(externalAudioPath!, ct) : null;
+        probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
         Directory.CreateDirectory(dir);
         if (probe is null || probe.DurationSec <= 0)
         {
@@ -662,8 +670,9 @@ public sealed partial class HlsSessionService : IDisposable
         else if (probe is not null && plan == HlsPlan.TsStreamCopy)
         {
             // MPEG-TS branch: declare the source-native CODECS so browsers know
-            // what they're getting. Audio codec depends on passthrough decision.
-            var audioCodec = TsAudioPassthrough(probe.AudioCodec, audioTrackIndex, externalAudioPath is not null)
+            // what they're getting. Audio codec depends on passthrough decision
+            // for the SELECTED track (probe.AudioCodec is that track's).
+            var audioCodec = TsAudioPassthrough(probe.AudioCodec, hasExternalAudio)
                 ? probe.AudioCodec switch
                 {
                     "ac3"   => "ac-3",
@@ -881,7 +890,8 @@ public sealed partial class HlsSessionService : IDisposable
         // Use probeForPlaylist so a downscaled re-encode reports the OUTPUT
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
-            ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper)
+            ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
+                externalAudio: hasExternalAudio)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
