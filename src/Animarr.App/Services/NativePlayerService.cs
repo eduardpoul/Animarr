@@ -751,8 +751,17 @@ public sealed class NativePlayerService : IDisposable
             .SetUsage(global::AndroidX.Media3.Common.C.UsageMedia)
             .SetContentType(global::AndroidX.Media3.Common.C.AudioContentTypeMovie)
             .Build();
+        // Default LoadControl targets ~131 MB for a video track (2000 × 64 KB) —
+        // on a 3 GB TV that is the single biggest Java-heap consumer during
+        // high-bitrate Direct Play. 64 MB still holds ~50 s of a 10 Mbit/s file
+        // (the 50 s time cap wins) and ~6 s of an 80 Mbit/s remux on the LAN.
+        var load = new global::AndroidX.Media3.ExoPlayer.DefaultLoadControl.Builder()
+            .SetTargetBufferBytes(64 * 1024 * 1024)!
+            .SetPrioritizeTimeOverSizeThresholds(false)!
+            .Build();
         var builder = new ExoPlayerBuilder(ctx)
-            .SetAudioAttributes(attrs, handleAudioFocus: true);
+            .SetAudioAttributes(attrs, handleAudioFocus: true)!
+            .SetLoadControl(load)!;
         return (IExoPlayer)builder.Build()!;
     }
 #endif

@@ -511,7 +511,7 @@ public partial class PlayerPage : ContentPage
         PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
-        if (dur > 0)
+        if (dur > 0 && _pendingSeekMs is null)
         {
             Scrubber.Progress = Math.Clamp((double)absPos / dur, 0, 1);
             PositionLabel.Text = Fmt(absPos);
@@ -837,6 +837,16 @@ public partial class PlayerPage : ContentPage
         _infoTimer.Start();
     }
 
+    private long? _pendingSeekMs;
+    private IDispatcherTimer? _seekTimer;
+
+    private void OnSeekSettled(object? sender, EventArgs e)
+    {
+        if (_pendingSeekMs is not long t) return;
+        _pendingSeekMs = null;
+        _ = StartStreamAsync(t, _maxHeight);
+    }
+
     private void SeekBy(long deltaMs)
     {
         var st = NativePlayerService.Instance?.GetState();
@@ -849,7 +859,20 @@ public partial class PlayerPage : ContentPage
         // the target instead; PTS stay absolute via -output_ts_offset.
         if (_isDirectStream)
         {
-            _ = StartStreamAsync(target, _maxHeight);
+            // Every restart of the remux pipe costs the server ffprobe + ffmpeg:
+            // accumulate held / repeated presses and restart once, 450 ms after
+            // the last one; show the target meanwhile.
+            target = Math.Clamp((_pendingSeekMs ?? absPos) + deltaMs, 0, dur > 0 ? dur : long.MaxValue);
+            _pendingSeekMs = target;
+            PositionLabel.Text = Fmt(target);
+            if (dur > 0) Scrubber.Progress = Math.Clamp((double)target / dur, 0, 1);
+            _seekTimer ??= Dispatcher.CreateTimer();
+            _seekTimer.Stop();
+            _seekTimer.Interval = TimeSpan.FromMilliseconds(450);
+            _seekTimer.IsRepeating = false;
+            _seekTimer.Tick -= OnSeekSettled;
+            _seekTimer.Tick += OnSeekSettled;
+            _seekTimer.Start();
             return;
         }
         // Back to the stream's own timeline (absolute for Direct Play and HLS —

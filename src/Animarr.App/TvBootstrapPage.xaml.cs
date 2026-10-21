@@ -51,7 +51,8 @@ public partial class TvBootstrapPage : ContentPage
         try
         {
             // Probe first: an unreachable saved server falls back to the picker.
-            await api.GetAuthStatusAsync();
+            using (var probe = new CancellationTokenSource(TimeSpan.FromSeconds(6)))
+                await api.GetAuthStatusAsync(probe.Token);
 #if ANDROID
             Bench.BenchLog.Mark("bootstrap-authstatus");
             switch (Bench.BenchLog.Base)

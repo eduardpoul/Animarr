@@ -106,6 +106,7 @@ internal sealed class TvHomeView : FrameLayout
         try
         {
             var token = TvMedia.EnsureTokenAsync();
+            _ = Task.Run(() => Services.TvCodecCaps.Get());   // ~17×codecs JNI calls, not on the first Play
             var libT = _data.Get<TvData.MediaItem[]>("/api/media?take=500");
             var contT = _data.Get<TvData.ContinueItem[]>("/api/me/continue?take=12");
             var nextT = _data.Get<TvData.ContinueItem[]>("/api/me/next-up?take=12");

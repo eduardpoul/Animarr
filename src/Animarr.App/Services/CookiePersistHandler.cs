@@ -36,7 +36,8 @@ public sealed class CookiePersistHandler : DelegatingHandler
             CookiePersistence.Save(_container);
             // Keep the WebView's own cookie store in step so its <img> /
             // media fetches stay authenticated (login, refresh, logout).
-            CookiePersistence.SyncToWebView(_container);
+            // TV has no WebView: touching CookieManager would load Chromium.
+            if (!DeviceKind.IsTv) CookiePersistence.SyncToWebView(_container);
         }
         return response;
     }
