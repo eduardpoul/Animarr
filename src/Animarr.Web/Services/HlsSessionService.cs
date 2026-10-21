@@ -154,6 +154,32 @@ public sealed partial class HlsSessionService : IDisposable
             => $"user={(string.IsNullOrEmpty(UserId) ? "-" : UserId)} client={(string.IsNullOrEmpty(ClientId) ? "-" : ClientId)}";
     }
 
+    /// <summary>Lowest / highest accepted <c>maxHeight</c> cap (0 = no cap).</summary>
+    public const int MinMaxHeight = 144, MaxMaxHeight = 4320;
+
+    /// <summary>
+    /// Validates the quality / track knobs of a start request before anything
+    /// is probed or stopped. Returns the error (code + message for a 400) or
+    /// null, and the cap to actually use: an odd height is rounded DOWN to
+    /// even — 4:2:0 encoders need even dimensions (libx264 aborts on
+    /// <c>scale=-2:481</c>), so 721 means 720. The track index is checked
+    /// against the real track count later, in <see cref="StartAsync"/>, once
+    /// the file is probed.
+    /// </summary>
+    public static (string Code, string Message)? ValidateStartOptions(int audioTrackIndex, int maxHeight,
+        int maxBitrate, out int effectiveMaxHeight)
+    {
+        effectiveMaxHeight = maxHeight & ~1;
+        if (audioTrackIndex < 0)
+            return (StartFailedException.InvalidAudioTrack, $"audioTrackIndex must be 0 or greater (got {audioTrackIndex}).");
+        if (maxHeight < 0 || (maxHeight > 0 && (maxHeight < MinMaxHeight || maxHeight > MaxMaxHeight)))
+            return (StartFailedException.InvalidMaxHeight,
+                $"maxHeight must be 0 (no cap) or between {MinMaxHeight} and {MaxMaxHeight} (got {maxHeight}).");
+        if (maxBitrate < 0)
+            return (StartFailedException.InvalidMaxBitrate, $"maxBitrate must be 0 (no cap) or a positive Mbps value (got {maxBitrate}).");
+        return null;
+    }
+
     /// <summary>How long <see cref="StartAsync"/> waits for ffmpeg's first
     /// segment (+ init for fMP4). Generous on purpose: a cold-cache seek into a
     /// huge UHD MKV can take 10–30 s before the first flush.</summary>
@@ -175,6 +201,12 @@ public sealed partial class HlsSessionService : IDisposable
         public const string FfmpegTimeout = "ffmpeg_timeout";
         /// <summary>At the session cap and every session is another client's live playback (503).</summary>
         public const string TooManySessions = "too_many_sessions";
+        /// <summary>audioTrackIndex negative or past the last audio track (400).</summary>
+        public const string InvalidAudioTrack = "invalid_audio_track";
+        /// <summary>maxHeight negative or outside <see cref="MinMaxHeight"/>..<see cref="MaxMaxHeight"/> (400).</summary>
+        public const string InvalidMaxHeight = "invalid_max_height";
+        /// <summary>maxBitrate negative (400).</summary>
+        public const string InvalidMaxBitrate = "invalid_max_bitrate";
 
         public string Code { get; } = code;
         public int StatusCode { get; } = statusCode;
@@ -550,6 +582,34 @@ public sealed partial class HlsSessionService : IDisposable
         SessionOwner? owner = null)
     {
         var who = owner ?? SessionOwner.Unknown;
+        // The endpoint already validated these (ValidateStartOptions); keep the
+        // encoder-safe invariants for any other caller: even cap, no negatives.
+        maxHeight = Math.Max(0, maxHeight) & ~1;
+        maxBitrate = Math.Max(0, maxBitrate);
+        if (audioTrackIndex < 0)
+            throw new StartFailedException(StartFailedException.InvalidAudioTrack, StatusCodes.Status400BadRequest,
+                $"audioTrackIndex must be 0 or greater (got {audioTrackIndex}).");
+
+        // 1. Probe so we know the duration + codec hints upfront. Without
+        //    duration we can't build a VOD playlist — fall back to live mode.
+        //    Runs BEFORE the pre-flight cleanup so a request rejected below (or
+        //    abandoned meanwhile — the probe throws then) can't have torn down
+        //    this client's current session first. Cached per file version
+        //    (MediaProbeCache), so it's cheap on a restart.
+        var probe = await ProbeMediaAsync(fullPath, ct);
+        var hasExternalAudio = externalAudioPath is not null;
+        var externalProbe = hasExternalAudio ? await ProbeMediaAsync(externalAudioPath!, ct) : null;
+        // An audio index past the last track used to map nothing (the `?` in
+        // -map 0:a:N?) — a silent stream with no error. Reject it instead.
+        // Unknown when the probe failed (then ffmpeg gets its chance as before).
+        var audioTracks = hasExternalAudio ? externalProbe?.AudioStreams.Count : probe?.AudioStreams.Count;
+        if (audioTracks is int count && audioTrackIndex > 0 && audioTrackIndex >= count)
+            throw new StartFailedException(StartFailedException.InvalidAudioTrack, StatusCodes.Status400BadRequest,
+                $"audioTrackIndex {audioTrackIndex} is out of range: the {(hasExternalAudio ? "external audio file" : "source")} has {count} audio track{(count == 1 ? "" : "s")}.");
+        // From here on the probe's audio fields describe the track the session
+        // MAPS (source track N, or the external dub's) instead of track 0, so
+        // TS passthrough, CODECS, the Info block and the restart agree with it.
+        probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
 
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
         // 1) Kill this CLIENT's existing sessions for the same source file — a
@@ -612,17 +672,6 @@ public sealed partial class HlsSessionService : IDisposable
 
         var token = Guid.NewGuid().ToString("N");
         var dir   = Path.Combine(_rootDir, token);
-
-        // 1. Probe so we know the duration + codec hints upfront. Without
-        //    duration we can't build a VOD playlist — fall back to live mode.
-        //    Throws if the caller gave up meanwhile, hence the dir comes after.
-        var probe = await ProbeMediaAsync(fullPath, ct);
-        // From here on the probe's audio fields describe the track the session
-        // MAPS (source track N, or the external dub's) instead of track 0, so
-        // TS passthrough, CODECS, the Info block and the restart agree with it.
-        var hasExternalAudio = externalAudioPath is not null;
-        var externalProbe = hasExternalAudio ? await ProbeMediaAsync(externalAudioPath!, ct) : null;
-        probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
         Directory.CreateDirectory(dir);
         if (probe is null || probe.DurationSec <= 0)
         {

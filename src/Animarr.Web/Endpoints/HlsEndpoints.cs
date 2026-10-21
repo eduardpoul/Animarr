@@ -84,6 +84,15 @@ internal static class HlsEndpoints
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
         if (!ok) return earlyResult!;
 
+        // Reject nonsense knobs up front with a 400 instead of starting a
+        // stream that is silent (an audio index past the last track — checked
+        // against the probed track count inside StartAsync) or that crashes the
+        // encoder (an odd height: rounded down to even here). Negative values
+        // used to be clamped to 0 silently.
+        if (HlsSessionService.ValidateStartOptions(audioTrackIndex ?? 0, maxHeight ?? 0, maxBitrate ?? 0,
+                out var effectiveMaxHeight) is { } invalid)
+            return StartProblem(StatusCodes.Status400BadRequest, invalid.Code, invalid.Message);
+
         // Validate the external audio path the same way (must be inside a watched
         // root + exist). On failure we DON'T fail playback — we just drop the dub
         // and play the source's own audio, which is the least-surprising fallback
@@ -116,7 +125,7 @@ internal static class HlsEndpoints
             // (Direct Play AND Direct Stream) and fall through to the HLS pipeline
             // where maxHeight/maxBitrate actually apply. Same for an external dub,
             // which needs the HLS mux to combine foreign audio with the video.
-            bool wantCap = (maxHeight ?? 0) > 0 || (maxBitrate ?? 0) > 0;
+            bool wantCap = effectiveMaxHeight > 0 || (maxBitrate ?? 0) > 0;
             // A non-default audio track likewise needs the HLS mux: Direct Play
             // serves the raw file (the browser plays ITS default track) and the
             // /api/video remux maps 0:a:0 — so picking e.g. the Russian dub in the
@@ -192,11 +201,11 @@ internal static class HlsEndpoints
             var result = await hls.StartAsync(fullPath!, seekSec,
                 audioOffsetHwSec: audioOffsetHwSec,
                 audioOffsetSwSec: audioOffsetSwSec,
-                audioTrackIndex:  Math.Max(0, audioTrackIndex ?? 0),
-                maxHeight:        Math.Max(0, maxHeight ?? 0),
+                audioTrackIndex:  audioTrackIndex ?? 0,     // validated ≥ 0 above; range-checked in StartAsync
+                maxHeight:        effectiveMaxHeight,       // validated, even
                 externalAudioPath: externalAudioFull,
                 clientHevc:       wantHevc,
-                maxBitrate:       Math.Max(0, maxBitrate ?? 0),
+                maxBitrate:       maxBitrate ?? 0,          // validated ≥ 0 above
                 // An abandoned start (rapid Next/Prev, player closed mid-start)
                 // stops its ffmpeg instead of encoding on for the 5-min idle GC.
                 ct:               http.RequestAborted,
@@ -230,8 +239,8 @@ internal static class HlsEndpoints
             // first segment). StartAsync already logged the ffmpeg stderr tail
             // and removed the session. The client gets the reason + a stable
             // code so it can fall back instead of waiting on a dead manifest.
-            loggerFactory.CreateLogger("ApiHls").LogWarning("HLS start failed for {Path}: {Code} — {Reason}",
-                fullPath, ex.Code, ex.Message);
+            loggerFactory.CreateLogger("ApiHls").Log(ex.StatusCode < 500 ? LogLevel.Information : LogLevel.Warning,
+                "HLS start failed for {Path}: {Code} — {Reason}", fullPath, ex.Code, ex.Message);
             return StartProblem(ex.StatusCode, ex.Code, ex.Message);
         }
         catch (Exception ex)
