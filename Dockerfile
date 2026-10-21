@@ -219,11 +219,24 @@ RUN apt-get update && \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Layer order: least → most frequently changing. Every layer after a changed one
+# is rebuilt and re-shipped (deploys `docker save` the image), so the app
+# publish — new on every deploy — must be the LAST layer. Previously it sat
+# before llama/entrypoint, so an app-only change re-shipped ~315 MB of
+# unchanged layers.
+#
+# `COPY --link` makes a layer independent of the layers below it: when the apt
+# layer changes (base bump), these copies are reused from cache as the same
+# blobs instead of being re-executed with fresh directory mtimes (which made
+# byte-identical ffmpeg/llama layers get new digests on every rebuild).
+# Not used for /lib/x86_64-linux-gnu below: on Noble /lib is a symlink to
+# usr/lib, and --link does not resolve symlinks in the destination path.
+
 # Drop in the pinned static ffmpeg/ffprobe (see the FFmpeg stage above). They
 # land in /usr/local/bin — ahead of /usr/bin on PATH — so the app's `ffmpeg`/
 # `ffprobe` child processes resolve to the patched 8.1.2 build. COPY preserves
 # the +x bits set during extraction.
-COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --link --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 
 # Overlay libva 2.22 over Noble's 2.20 (see the libva stage above) — required
 # by the static ffmpeg's hwupload path (vaMapBuffer2). Same soname, drop-in.
@@ -232,28 +245,29 @@ COPY --from=libva /opt/libva/lib/libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/lib
 RUN ln -sf libva.so.2.2200.0 /lib/x86_64-linux-gnu/libva.so.2 && \
     ln -sf libva-drm.so.2.2200.0 /lib/x86_64-linux-gnu/libva-drm.so.2
 
-# Create data directory for SQLite
-RUN mkdir -p /app/data && chmod 777 /app/data
-
-COPY --from=publish /app/publish .
-
 # Built-in llama.cpp servers for the "embedded" LLM provider (see FROM aliases).
 # The official llama-server is a thin launcher that dynamically loads sibling
 # .so files in /app (libllama, libggml-*, libllama-server-impl, …), so we copy
 # the WHOLE /app dir, not just the binary. CPU build always runs; the Vulkan
 # build is only used with ANIMARR_LLM_VULKAN=1 (its Vulkan userspace is in the
 # apt layer above). The app sets LD_LIBRARY_PATH to these dirs at launch.
-COPY --from=llama-cpu    /app/     /opt/llama/cpu/
-COPY --from=llama-vulkan /opt/out/ /opt/llama/vulkan/
-RUN chmod +x /opt/llama/cpu/llama-server /opt/llama/vulkan/llama-server
+# Both llama-server binaries are already executable in their source stages
+# (the old `RUN chmod +x` layer here was an empty 4 kB diff).
+COPY --link --from=llama-cpu    /app/     /opt/llama/cpu/
+COPY --link --from=llama-vulkan /opt/out/ /opt/llama/vulkan/
 
 # Entrypoint wrapper: execs the app as PID 1 so SIGTERM reaches it (clean
-# llama-server and torrent shutdown).
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# llama-server and torrent shutdown). --chmod: git stores it as 0644.
+COPY --link --chmod=755 docker/entrypoint.sh /entrypoint.sh
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 EXPOSE 8080
 
 ENV ASPNETCORE_URLS=http://+:8080
 
 ENTRYPOINT ["/entrypoint.sh"]
+
+# The app itself — keep this the last layer (see "Layer order" above).
+COPY --link --from=publish /app/publish .
