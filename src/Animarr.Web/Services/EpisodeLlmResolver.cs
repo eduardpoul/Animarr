@@ -48,11 +48,6 @@ public sealed class EpisodeLlmResolver(
 
         int declaredSeasons = CountSeasons(item.SeasonsJson);
         int resolved = 0;
-        // The item's existing override rows, read once (on the first verdict)
-        // instead of one query per verdict. Each file gets at most one verdict
-        // per run (groups are disjoint, pairs are de-duplicated below), so a
-        // snapshot answers exactly what the per-verdict DB read did.
-        Dictionary<string, EpisodeFileMapping>? existing = null;
 
         foreach (var grp in unresolved.GroupBy(f => f.Season))
         {
@@ -102,11 +97,11 @@ public sealed class EpisodeLlmResolver(
             var pairs = await llm.MapFilesToEpisodesAsync(names, episodes, ct);
             if (pairs is null || pairs.Count == 0) continue;
 
-            // One verdict per file: small models do repeat a file index, and when
-            // the row lookup below read the DB rather than the change tracker, a
-            // second pair for the same file added a duplicate (item, path) row,
-            // the unique index failed SaveChanges and the whole run's placements
-            // were lost. (The lookup snapshot now also records rows added here.)
+            // One verdict per file: small models do repeat a file index, and the
+            // row lookup below reads the DB, not the change tracker — a second
+            // pair for the same file added a duplicate (item, path) row, the
+            // unique index failed SaveChanges and the whole run's placements
+            // were lost.
             foreach (var (idx, ep) in pairs.DistinctBy(p => p.FileIndex))
             {
                 if (idx < 0 || idx >= groupFiles.Count) continue;
@@ -123,16 +118,13 @@ public sealed class EpisodeLlmResolver(
                     (rowSeason, rowEpisode) = se;
                 }
 
-                existing ??= await db.EpisodeFileMappings
-                    .Where(m => m.MediaItemId == mediaItemId)
-                    .ToDictionaryAsync(m => m.FilePath, ct);
-                var row = existing.GetValueOrDefault(file.FilePath);
+                var row = await db.EpisodeFileMappings
+                    .FirstOrDefaultAsync(m => m.MediaItemId == mediaItemId && m.FilePath == file.FilePath, ct);
                 if (row is { Source: MappingSource.Manual }) continue; // never trump a manual fix
                 if (row is null)
                 {
                     row = new EpisodeFileMapping { MediaItemId = mediaItemId, FilePath = file.FilePath };
                     db.EpisodeFileMappings.Add(row);
-                    existing[file.FilePath] = row;
                 }
 
                 row.Season     = rowSeason;
