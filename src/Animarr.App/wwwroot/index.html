@@ -402,11 +402,18 @@
         // post-boot. Pure-WASM browser context: DotNet bridge never
         // appears, loop times out, no harm done.
         (async function () {
-            for (var i = 0; i < 50; i++) {
-                if (window.DotNet && typeof window.DotNet.invokeMethodAsync === 'function') break;
+            // Wait for Blazor to have rendered (Routes sets the flag), not
+            // just for the DotNet global: a call that reaches .NET before the
+            // page is attached throws "Cannot receive IPC messages when no
+            // page is attached" and the attach never completes — the app hung
+            // on the boot screen. AOT starts .NET fast enough to hit that on
+            // most launches.
+            for (var i = 0; i < 150; i++) {
+                if (window.__animarrBlazorReady && window.DotNet
+                    && typeof window.DotNet.invokeMethodAsync === 'function') break;
                 await new Promise(function (r) { setTimeout(r, 100); });
             }
-            if (!window.DotNet) return;
+            if (!window.__animarrBlazorReady || !window.DotNet) return;
             try {
                 var isTv = await window.DotNet.invokeMethodAsync('Animarr.App', 'IsTelevision');
                 if (isTv === true && !document.documentElement.classList.contains('tv-mode')) {

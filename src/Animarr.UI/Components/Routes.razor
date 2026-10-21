@@ -60,6 +60,13 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // The page is attached and rendering: index.html's boot probes may
+        // call into .NET from now on (earlier calls broke the attach).
+        if (firstRender)
+        {
+            try { await JS.InvokeVoidAsync("eval", "window.__animarrBlazorReady = true"); }
+            catch { /* no JS host — nothing waits on it */ }
+        }
         if (!firstRender || _ready) return;
         // Capped: if the pack has to come over HTTP from a dead server, show
         // the app (with keys) rather than a blank screen.
