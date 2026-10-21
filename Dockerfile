@@ -121,41 +121,32 @@ RUN mkdir -p /opt/out && \
     cp /src/llama.cpp/build/bin/llama-server /opt/out/ && \
     find /src/llama.cpp/build -name '*.so*' -exec cp -Pn {} /opt/out/ \;
 
-# FFmpeg stage — pinned static build (security fix for CVE-2026-8461)
-# -------------------------------------------------------------------
+# FFmpeg stage — pinned static jellyfin-ffmpeg build
+# -------------------------------------------------
 # Ubuntu Noble's apt ffmpeg is 6.1.1, vulnerable to CVE-2026-8461 ("PixelSmash":
 # heap out-of-bounds write in the MagicYUV decoder, CVSS 8.8), fixed upstream in
-# 8.1.2 — and Ubuntu has shipped no backport. We instead drop in a static
-# release/8.1 build from BtbN/FFmpeg-Builds: the Linux build the official
-# ffmpeg.org/download page recommends, maintained by FFmpeg upstream developer
-# Timo Rothenpieler ("BtbN"). Pinned to a dated autobuild tag + sha256 so the
-# binary is reproducible and changes only when we consciously bump it. The gpl
-# static binaries link only glibc (verified via ldd); hwaccel (vaapi/nvenc/qsv)
-# is dlopen'd at runtime against the driver libs the final stage installs.
-# Current pin: n8.1.3-9 (keeps the 8.1.2 MagicYUV fix, adds the 8.1.3
-# backports for lcldec / rscc / tiff / zmqsend).
+# 8.1.2 — and Ubuntu has shipped no backport, so we drop in a static build.
+# Since 0.7.x that build is jellyfin-ffmpeg (https://github.com/jellyfin/jellyfin-ffmpeg):
+# upstream FFmpeg 8.1.3 + ~100 media-server patches — HDR / Dolby Vision tone
+# mapping on AMD/Intel/NVIDIA (tonemap_opencl/_vaapi/_cuda, libplacebo fixes,
+# DV P5 reshaping, fast CPU `tonemapx`), `remove_dovi` / `remove_hdr10plus`
+# bitstream options, DOVI side data carried into hlsenc/mpegtsenc, GPU subtitle
+# burn-in, OpenCL deinterlace and AMD `hevc_vaapi` fixes. The "portable" build
+# is fully static (like the BtbN one it replaces): hwaccel is dlopen'd at runtime
+# against the driver libs the final stage installs. Pinned to a release tag +
+# sha256 so the binary changes only when we consciously bump it.
 #
-# To bump: pick a newer tag at https://github.com/BtbN/FFmpeg-Builds/releases
-# and update FFMPEG_URL + FFMPEG_SHA256 (the release's checksums.sha256 lists
-# it). ONLY pin a month-end build (autobuild-YYYY-MM-<last day>-…): BtbN keeps
-# those for two years but deletes daily builds after 14 days — the previous
-# mid-month pin (autobuild-2026-06-23) 404'd that way and broke the build.
-# The `-version` check below fails the build if the archive is corrupt or the
-# wrong arch.
+# To bump: pick a newer tag at https://github.com/jellyfin/jellyfin-ffmpeg/releases
+# (the `…_portable_linux64-gpl.tar.xz` asset; its sha256 is the release asset
+# digest) and update FFMPEG_URL + FFMPEG_SHA256. The archive holds just
+# `ffmpeg` + `ffprobe`. The `-version` check below fails the build if the archive
+# is corrupt or the wrong arch.
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_RUNTIME_TAG} AS ffmpeg
-ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
-ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl xz-utils ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" && \
-    echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
-    mkdir -p /opt/ffmpeg/bin && \
-    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp && \
-    cp /tmp/ffmpeg-*/bin/ffmpeg /tmp/ffmpeg-*/bin/ffprobe /opt/ffmpeg/bin/ && \
-    /opt/ffmpeg/bin/ffmpeg -version
+ARG FFMPEG_URL=https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v8.1.3-1/jellyfin-ffmpeg_8.1.3-1_portable_linux64-gpl.tar.xz
+ARG FFMPEG_SHA256=b86dc023c64a5a9a410e6e3a938a970460214fae78f31c1553c9f88f1c289b6a
+RUN apt-get update &&     apt-get install -y --no-install-recommends curl xz-utils ca-certificates &&     rm -rf /var/lib/apt/lists/* &&     curl -fsSL -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" &&     echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - &&     mkdir -p /opt/ffmpeg/bin &&     tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg/bin ffmpeg ffprobe &&     chmod +x /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe &&     /opt/ffmpeg/bin/ffmpeg -version
 
-# libva ≥ 2.21 — the static BtbN ffmpeg calls vaMapBuffer2 (added in libva
+# libva ≥ 2.21 — the static ffmpeg calls vaMapBuffer2 (added in libva
 # 2.21) on the sw-decode → hwupload → h264_vaapi path (legacy-codec transcode
 # offload). Ubuntu Noble ships libva 2.20, and the lazily-bound symbol aborts
 # ffmpeg (implib assert) the first time hwupload runs. Build 2.22 from source
@@ -204,14 +195,14 @@ WORKDIR /app
 #       (mounted into the container when `--gpus all` is set). We don't
 #       bake `libnvidia-encode-*` into the image because the version has
 #       to match the host driver — and the toolkit handles that mounting.
-#     • ffmpeg from Debian already includes h264_nvenc / hevc_nvenc encoders
+#     • the static ffmpeg already includes h264_nvenc / hevc_nvenc encoders
 #       (they're enabled at compile time, only the runtime libs are external).
 #
 # Deploy script (deploy.ps1) detects host capabilities and adds the matching
 # docker run flags (`--device /dev/dri --group-add video` for VAAPI,
 # `--gpus all` for NVIDIA). One image, any GPU.
 # NOTE: ffmpeg/ffprobe are NOT installed from apt anymore — they come from the
-# pinned static BtbN stage above (CVE-2026-8461 fix; see the COPY below). apt
+# pinned static jellyfin-ffmpeg stage above (CVE-2026-8461 fix; see the COPY below). apt
 # here installs only the hwaccel userspace those static binaries dlopen at runtime,
 # plus tzdata so the viewer's X-Time-Zone (IANA id) resolves for the stats.
 #
@@ -251,7 +242,7 @@ RUN apt-get update && \
 
 # Drop in the pinned static ffmpeg/ffprobe (see the FFmpeg stage above). They
 # land in /usr/local/bin — ahead of /usr/bin on PATH — so the app's `ffmpeg`/
-# `ffprobe` child processes resolve to the patched 8.1.2 build. COPY preserves
+# `ffprobe` child processes resolve to the pinned jellyfin-ffmpeg build. COPY preserves
 # the +x bits set during extraction.
 COPY --link --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 
