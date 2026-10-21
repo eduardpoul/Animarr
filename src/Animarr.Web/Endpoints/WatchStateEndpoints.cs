@@ -48,6 +48,7 @@ internal static class WatchStateEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
+            http.RequestServices.GetRequiredService<PlaybackActivity>().NotePing();   // background jobs yield to this viewer
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var now = DateTime.UtcNow;

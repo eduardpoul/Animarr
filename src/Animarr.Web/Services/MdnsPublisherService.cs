@@ -40,13 +40,28 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
     private ServiceDiscovery?  _discovery;
     private ServiceProfile?    _profile;
     /// <summary>Periodic re-announce timer. Makaretu's `Announce()` is a
-    /// one-shot at startup; without re-broadcasting, clients that join the
-    /// network later (TV booting, phone walking back into WiFi range) won't
-    /// see the server until they actively query — and some Windows / Android
-    /// stacks query so rarely the registration is effectively invisible. A
-    /// 15-second cadence keeps mDNS announcements live without spamming
-    /// the network.</summary>
+    /// one-shot at startup; without re-broadcasting, a client that was
+    /// already browsing when we came up (TV app left open across a server
+    /// restart) only sees us on its next query, and some Windows / Android
+    /// stacks back their continuous queries off to many minutes.
+    ///
+    /// Cadence: RFC 6762 §8.3 style — re-announce 1 s after start, then
+    /// doubling (2, 4, 8 … s) up to <see cref="MaxReannounce"/>, and reset to
+    /// the fast start whenever the NIC set changes. That keeps the
+    /// "restart → clients see it within seconds" property of the old fixed
+    /// 15 s timer while sending ~360 instead of 5,760 announcements a day,
+    /// each of which woke every mDNS listener (phones, TVs) on the LAN.
+    /// Clients that start browsing later query, and the responder
+    /// (<c>Advertise</c>) answers those at any time.</summary>
     private Timer? _reannounceTimer;
+    private readonly object _reannounceLock = new();
+    private TimeSpan _nextReannounce = FirstReannounce;
+    private static readonly TimeSpan FirstReannounce = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxReannounce   = TimeSpan.FromMinutes(4);
+
+    /// <summary>Background publication (see <see cref="StartAsync"/>).</summary>
+    private Task? _publishTask;
+    private readonly CancellationTokenSource _stopCts = new();
 
     public MdnsPublisherService(
         ILogger<MdnsPublisherService> logger,
@@ -58,7 +73,18 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
         _config       = config;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Off the startup critical path: hosted services start one after the
+        // other before Kestrel listens, and MulticastService.Start() enumerates
+        // and binds every NIC — measured ~2 s of a 3.9 s boot on a Windows box
+        // with ~30 adapters. Discovery being ready a moment after the HTTP
+        // server is harmless.
+        _publishTask = Task.Run(() => PublishAsync(_stopCts.Token));
+        return Task.CompletedTask;
+    }
+
+    private async Task PublishAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -166,7 +192,8 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
                 }
                 // Re-announce on NIC topology changes so a freshly-joined
                 // interface (WiFi roam, ethernet plug) gets PTR records sent
-                // immediately rather than waiting for the next periodic tick.
+                // immediately rather than waiting for the next periodic tick,
+                // and restart the fast announce sequence for it.
                 try
                 {
                     if (_profile is not null && _discovery is not null)
@@ -176,6 +203,7 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
                 {
                     _logger.LogDebug(ex, "mDNS re-announce on NIC change failed");
                 }
+                ResetReannounceBackoff();
             };
 
             // Diagnostic: log incoming queries so we can verify clients reach
@@ -196,6 +224,9 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
                 }
             };
 
+            // Shut down while we were still resolving config — don't bind.
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Order matters: start the MulticastService first (binds the
             // sockets) THEN advertise so the SD layer can announce immediately
             // on the now-open transports.
@@ -203,26 +234,23 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
             _discovery.Advertise(_profile);
             _discovery.Announce(_profile);
 
-            // Periodic re-announce. RFC 6762 §8.3 allows / encourages this for
-            // shared services so late-joining clients don't have to wait for
-            // a query cycle. 15 seconds is well under the typical mDNS cache
-            // TTL but rare enough to be invisible to packet captures.
-            _reannounceTimer = new Timer(_ =>
+            // Periodic re-announce with back-off (see _reannounceTimer). A
+            // one-shot timer re-armed from its own callback, so ticks never
+            // overlap.
+            lock (_reannounceLock)
             {
-                try
-                {
-                    if (_profile is not null && _discovery is not null)
-                        _discovery.Announce(_profile);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "mDNS periodic re-announce failed");
-                }
-            }, state: null, dueTime: TimeSpan.FromSeconds(15), period: TimeSpan.FromSeconds(15));
+                _nextReannounce = FirstReannounce;
+                _reannounceTimer = new Timer(_ => Reannounce(), state: null,
+                    dueTime: _nextReannounce, period: Timeout.InfiniteTimeSpan);
+            }
 
             _logger.LogInformation(
                 "mDNS published: instance='{Instance}' type='{Service}' port={Port} serverId={ServerId}",
                 instanceName, ServiceType, port, serverId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Host stopping before publication finished.
         }
         catch (Exception ex)
         {
@@ -235,9 +263,48 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    private void Reannounce()
     {
-        try { _reannounceTimer?.Dispose(); } catch { }
+        try
+        {
+            if (_profile is not null && _discovery is not null)
+                _discovery.Announce(_profile);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "mDNS periodic re-announce failed");
+        }
+
+        lock (_reannounceLock)
+        {
+            var doubled = _nextReannounce + _nextReannounce;
+            _nextReannounce = doubled < MaxReannounce ? doubled : MaxReannounce;
+            try { _reannounceTimer?.Change(_nextReannounce, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { /* stopping */ }
+        }
+    }
+
+    private void ResetReannounceBackoff()
+    {
+        lock (_reannounceLock)
+        {
+            _nextReannounce = FirstReannounce;
+            try { _reannounceTimer?.Change(_nextReannounce, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { /* stopping */ }
+        }
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Let a still-running background publication finish (or bail out)
+        // before tearing down what it may be creating.
+        try { _stopCts.Cancel(); } catch { }
+        if (_publishTask is not null)
+        {
+            try { await _publishTask.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
+            catch { /* timed out / host gave up — dispose below regardless */ }
+        }
+        try { lock (_reannounceLock) _reannounceTimer?.Dispose(); } catch { }
         try
         {
             if (_discovery is not null && _profile is not null)
@@ -245,11 +312,11 @@ public sealed class MdnsPublisherService : IHostedService, IDisposable
         }
         catch { /* shutting down — ignore */ }
         try { _mdns?.Stop(); } catch { }
-        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
+        try { _stopCts.Cancel(); } catch { }
         try { _reannounceTimer?.Dispose(); } catch { }
         try { _discovery?.Dispose(); } catch { }
         try { _mdns?.Dispose(); } catch { }

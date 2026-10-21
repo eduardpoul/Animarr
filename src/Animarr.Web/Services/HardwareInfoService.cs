@@ -215,7 +215,13 @@ public sealed class HardwareInfoService
 
     /// <summary>Run a CLI tool and return its merged stdout/stderr (or null
     /// on launch failure / timeout). Tools that aren't installed return null
-    /// instead of throwing — probing missing utilities is normal here.</summary>
+    /// instead of throwing — probing missing utilities is normal here.
+    ///
+    /// Both pipes are read asynchronously BEFORE waiting: the old synchronous
+    /// ReadToEnd() blocked until the tool exited, so the timeout never applied
+    /// (a wedged vainfo / nvidia-smi on a stuck GPU driver hung startup, since
+    /// this runs in the singleton's constructor), and reading stdout then
+    /// stderr in sequence could deadlock on a chatty stderr.</summary>
     private string? RunCommand(string cmd, string[] args, int timeoutMs)
     {
         try
@@ -231,13 +237,17 @@ public sealed class HardwareInfoService
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             if (p is null) return null;
-            var combinedOut = p.StandardOutput.ReadToEnd() + "\n" + p.StandardError.ReadToEnd();
+            var stdout = p.StandardOutput.ReadToEndAsync();
+            var stderr = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(timeoutMs))
             {
                 try { p.Kill(true); } catch { }
                 return null;
             }
-            return combinedOut;
+            // Exited: the pipes hit EOF right away unless a grandchild still
+            // holds them — bound that wait too.
+            if (!Task.WaitAll([stdout, stderr], 1000)) return null;
+            return stdout.Result + "\n" + stderr.Result;
         }
         catch (Exception ex)
         {

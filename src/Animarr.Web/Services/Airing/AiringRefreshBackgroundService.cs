@@ -165,7 +165,8 @@ public sealed class AiringRefreshBackgroundService(
         {
             try
             {
-                var detail = await tmdb.GetTvDetailAsync(m.TmdbId!.Value, ct: ct);
+                // Light /tv/{id}: only next_episode_to_air / in_production are read.
+                var detail = await tmdb.GetTvAiringAsync(m.TmdbId!.Value, ct);
                 if (detail is null) { m.LastAiringCheckAt = now; continue; }
                 var next = detail.NextEpisodeToAir;
                 m.AiringStatus = next is not null || detail.InProduction ? "RELEASING" : "FINISHED";

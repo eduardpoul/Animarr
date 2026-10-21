@@ -29,7 +29,13 @@ public sealed class SegmentDetectionService(
     /// to network/metadata providers (AniSkip, chapters) — pass false from the
     /// background pass to also run media-decoding providers. Returns the number of
     /// episodes for which something was written.</summary>
-    public async Task<int> DetectForItemAsync(Guid mediaItemId, bool cheapOnly, CancellationToken ct = default)
+    /// <param name="waitForIdle">Background pass only: awaited before each
+    /// uncovered episode (and by the decoding providers before each ffmpeg run)
+    /// so the pass parks while someone is watching instead of competing with
+    /// playback for CPU and disk. Null = never wait.</param>
+    public async Task<int> DetectForItemAsync(
+        Guid mediaItemId, bool cheapOnly, CancellationToken ct = default,
+        Func<CancellationToken, Task>? waitForIdle = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == mediaItemId, ct);
@@ -73,10 +79,11 @@ public sealed class SegmentDetectionService(
         {
             ct.ThrowIfCancellationRequested();
             if (covered.Contains((season, episode))) continue;
+            if (waitForIdle is not null) await waitForIdle(ct);
             try
             {
                 var peers = seasonFiles.TryGetValue(season, out var sf) ? sf : Array.Empty<(int Episode, string Path)>();
-                if (await DetectForEpisodeAsync(item, season, episode, filePath, peers, cheapOnly, ct))
+                if (await DetectForEpisodeAsync(item, season, episode, filePath, peers, cheapOnly, ct, waitForIdle))
                     touched++;
             }
             catch (OperationCanceledException) { throw; }
@@ -98,16 +105,21 @@ public sealed class SegmentDetectionService(
     /// <inheritdoc cref="DetectForEpisodeAsync(MediaItem,int,int,string,bool,CancellationToken)"/>
     /// <param name="seasonFiles">Every on-disk file in the same season as
     /// (episode, path), for the chromaprint provider's nearest-peer comparison.</param>
+    /// <param name="waitForIdle">Background callers: handed to the decoding
+    /// providers, which park on it before each ffmpeg run while playback is
+    /// active. Null on the inline paths.</param>
     public async Task<bool> DetectForEpisodeAsync(
         MediaItem item, int season, int episode, string filePath,
-        IReadOnlyList<(int Episode, string Path)> seasonFiles, bool cheapOnly, CancellationToken ct = default)
+        IReadOnlyList<(int Episode, string Path)> seasonFiles, bool cheapOnly, CancellationToken ct = default,
+        Func<CancellationToken, Task>? waitForIdle = null)
     {
         if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return false;
 
         var dur = await MediaProbe.GetDurationAsync(filePath, ct);
         var ctx = new SegmentEpisodeContext(item, season, episode, filePath, dur)
         {
-            SeasonFiles = seasonFiles,
+            SeasonFiles      = seasonFiles,
+            WaitForIdleAsync = waitForIdle,
         };
 
         // Config-gated provider set (BlackFrame off by default — it decodes video).

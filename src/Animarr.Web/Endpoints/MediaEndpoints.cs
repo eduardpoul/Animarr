@@ -858,29 +858,23 @@ internal static class MediaEndpoints
                             // chromaprint provider can still detect it (e.g. donghua,
                             // which aren't on AniList, or an episode chromaprint simply
                             // missed on its last pass), but it decodes minutes of audio
-                            // — too slow to run inline. The batch pass would do it,
-                            // except it skips already-scanned titles (LastSegmentScanAt),
-                            // so a newly-added episode — or a stubborn miss — never gets
-                            // another shot. Run chromaprint for THIS episode in the
-                            // background, debounced once per process so repeat opens of
-                            // a genuinely segment-less episode don't re-decode it; it'll
-                            // be ready on a later open.
+                            // — too slow to run inline, and far too heavy to start the
+                            // moment Play is pressed (up to 8 ffmpeg decodes, GBs of
+                            // reads racing the player's first segments). The batch pass
+                            // would do it, except it skips already-scanned titles
+                            // (LastSegmentScanAt), so a newly-added episode — or a
+                            // stubborn miss — never gets another shot. Queue THIS
+                            // episode for the background pass, which runs it at low
+                            // priority once nobody is watching; debounced once per
+                            // process so repeat opens of a genuinely segment-less
+                            // episode don't re-decode it; it'll be ready on a later open.
                             if ((missingIntro || missingCredits) && _lazyHeavyTried.TryAdd($"{id}|{s}|{e}", 0))
                             {
                                 var peers = files
                                     .Where(f => (f.Season ?? 1) == s && f.Episode != null && !string.IsNullOrEmpty(f.FilePath))
                                     .Select(f => (f.Episode!.Value, f.FilePath!)).Distinct().ToList();
-                                var fpBg = fp!;
-                                _ = Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        using var scope = scopeFactory.CreateScope();
-                                        var bg = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
-                                        await bg.DetectForEpisodeAsync(item, s, e, fpBg, peers, cheapOnly: false, CancellationToken.None);
-                                    }
-                                    catch { /* best-effort background detection */ }
-                                });
+                                if (!SegmentDetectionQueue.TryEnqueue(new SegmentDetectionQueue.Request(item, s, e, fp!, peers)))
+                                    _lazyHeavyTried.TryRemove($"{id}|{s}|{e}", out _);   // queue full — a later open retries
                             }
                         }
                     }
@@ -1108,7 +1102,14 @@ internal static class MediaEndpoints
 
     /// <summary>Best-effort: grab one ~480px-wide jpeg frame from <paramref name="file"/>
     /// into <paramref name="outPath"/>. Seeks 90s in (past the OP); retries near
-    /// the start for very short clips.</summary>
+    /// the start for very short clips.
+    ///
+    /// Both pipes are drained (ffmpeg's ~4 KB banner+stats on an unread stderr
+    /// filled the Windows pipe buffer and hung the grab with its gate slot
+    /// held), the frame is written to a temp file and moved into place only on
+    /// a clean exit (the thumb endpoint serves any non-empty file at outPath,
+    /// so a partial JPEG would stick), and a cancelled or stuck run is killed
+    /// before the gate slot is released.</summary>
     private static async Task<bool> GrabVideoFrameAsync(string file, string outPath, CancellationToken ct)
     {
         await _frameGrabGate.WaitAsync(ct);
@@ -1117,6 +1118,7 @@ internal static class MediaEndpoints
             Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
             foreach (var ss in new[] { "90", "3" })
             {
+                var tmp = $"{outPath}.{Guid.NewGuid():N}.tmp.jpg";
                 try
                 {
                     var psi = new System.Diagnostics.ProcessStartInfo
@@ -1127,17 +1129,49 @@ internal static class MediaEndpoints
                         UseShellExecute = false,
                         CreateNoWindow  = true,
                     };
-                    foreach (var a in new[] { "-nostdin", "-ss", ss, "-i", file,
+                    // -threads 2 (not auto = cores): with 3 gate slots a season's
+                    // burst of thumbs otherwise spawns 3 × cores decoder threads;
+                    // 2 rather than 1 because reaching the 90 s mark decodes up to
+                    // a GOP of (possibly 4K HEVC) frames.
+                    foreach (var a in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats",
+                                              "-threads", "2", "-ss", ss, "-i", file,
                                               "-frames:v", "1", "-vf", "scale=480:-1",
-                                              "-q:v", "4", "-y", outPath })
+                                              "-q:v", "4", "-y", tmp })
                         psi.ArgumentList.Add(a);
 
                     using var p = System.Diagnostics.Process.Start(psi);
                     if (p is null) continue;
-                    await p.WaitForExitAsync(ct);
-                    if (File.Exists(outPath) && new FileInfo(outPath).Length > 0) return true;
+                    var stdout = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+                    var stderr = p.StandardError.ReadToEndAsync(CancellationToken.None);
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(60));
+                    try
+                    {
+                        await p.WaitForExitAsync(timeout.Token);
+                        await Task.WhenAll(stdout, stderr);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        try { p.Kill(entireProcessTree: true); } catch { }
+                        try { await p.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+                        if (ct.IsCancellationRequested) return false;
+                        continue;   // stuck on this offset — try the next one
+                    }
+                    if (p.ExitCode != 0 || !File.Exists(tmp) || new FileInfo(tmp).Length == 0) continue;
+
+                    try { File.Move(tmp, outPath, overwrite: true); }
+                    catch (IOException) when (File.Exists(outPath) && new FileInfo(outPath).Length > 0)
+                    {
+                        // A concurrent grab of the same episode won and its file is
+                        // being served (Windows won't replace an open file) — use it.
+                    }
+                    return true;
                 }
                 catch { /* try the next seek offset */ }
+                finally
+                {
+                    try { File.Delete(tmp); } catch { /* absent after a successful move */ }
+                }
             }
             return false;
         }

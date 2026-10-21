@@ -122,6 +122,9 @@ builder.Services.AddScoped<MetadataService>();
 builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
 builder.Services.AddSingleton<HlsSessionService>();
+// "Someone is watching" (HLS sessions + player progress pings) — background
+// full-file jobs (trickplay, chromaprint) park while it's true.
+builder.Services.AddSingleton<PlaybackActivity>();
 builder.Services.AddSingleton<DlnaService>();
 // Probes /dev/dri, vainfo, nvidia-smi, ffmpeg -hwaccels at startup so the
 // Settings UI can show what's actually usable on this host.
