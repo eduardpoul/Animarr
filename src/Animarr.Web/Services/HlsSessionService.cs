@@ -842,8 +842,7 @@ public sealed partial class HlsSessionService : IDisposable
             //     window, or before this run's start (the resume point's
             //     start_number, an earlier restart). Restart at target to
             //     produce it.
-            const int restartThreshold = 12;
-            bool needsRestart = gap > restartThreshold || targetSeg <= producedTop;
+            bool needsRestart = gap > RestartThresholdSegments || targetSeg <= producedTop;
             if (needsRestart)
             {
                 _logger.LogInformation("HLS {Token}: seek-jump from seg-{From} to seg-{To}, restarting ffmpeg",

@@ -49,6 +49,11 @@ public sealed partial class HlsSessionService
     /// a re-encode to get going again.</summary>
     private const int ThrottleLowWaterSegments = 10;
 
+    /// <summary>How far past this run's newest segment a request may land and
+    /// still be waited for; anything further restarts ffmpeg at the target
+    /// (<see cref="WaitForFileAsync"/>).</summary>
+    private const int RestartThresholdSegments = 12;
+
     /// <summary>Throttle/prune tick. Pausing is the only part that can't be
     /// driven by segment requests (ffmpeg races ahead between them), so the
     /// interval bounds the overshoot past the high-water mark to ~0.1 s of
@@ -144,9 +149,16 @@ public sealed partial class HlsSessionService
         if (session.SegmentCount <= 0 || segment >= session.SegmentCount) return;
         lock (session.ThrottleLock)
         {
+            var top = RefreshProducedTop(session);
+            // A request this far ahead is served by a restart at the target,
+            // whose SwapProcess sets the frontier. If that restart never happens
+            // (request aborted while queued on RestartLock, ffmpeg failed to
+            // start), a frontier moved here would prune this run's upcoming
+            // segments and wedge it — leave it to the restart.
+            if (segment > top + RestartThresholdSegments) return;
             if (segment > session.PlayFrontier) session.PlayFrontier = segment;
             if (!session.Paused) return;
-            if (RefreshProducedTop(session) - session.PlayFrontier <= ThrottleLowWaterSegments)
+            if (top - session.PlayFrontier <= ThrottleLowWaterSegments)
                 ResumeLocked(session);
         }
     }
