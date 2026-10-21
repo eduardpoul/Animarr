@@ -38,10 +38,19 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
     private static readonly int MinIntroPoints  = (int)(15.0 / SampleDuration);  // ≥15 s run to count
     private static readonly int MinCreditsPoints = (int)(15.0 / SampleDuration);
 
+    /// <summary>A stuck ffmpeg (dead NFS mount, corrupt file) is killed after
+    /// this so it can't wedge the queue. Generous: the 12-min head window of a
+    /// big remux at idle I/O priority on a busy HDD can legitimately take minutes.</summary>
+    private static readonly TimeSpan FfmpegTimeout = TimeSpan.FromMinutes(10);
+
     // Per-(file,window) fingerprint cache. The provider is scoped to one
     // DetectForItem run, so a peer fingerprinted for episode 1 is reused for
     // episode 2, 3, … — N unique fingerprints per season, not N².
     private readonly Dictionary<string, uint[]> _cache = new();
+
+    // Per-file duration cache, same scope: the tail window needs each peer's
+    // runtime, and re-probing it for every episode cost 3 ffprobes per episode.
+    private readonly Dictionary<string, double> _durations = new(StringComparer.OrdinalIgnoreCase);
 
     public bool CanRun(SegmentEpisodeContext ctx)
         => ctx.SeasonFiles.Count >= 2 && File.Exists(ctx.FilePath);
@@ -61,15 +70,17 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
         if (peers.Count == 0) return Array.Empty<DetectedSegment>();
 
         var result = new List<DetectedSegment>();
+        // The orchestrator already probed this episode's runtime.
+        if (ctx.DurationSec > 0) _durations[ctx.FilePath] = ctx.DurationSec;
 
         // ── Intro: shared audio at the head ───────────────────────────────
-        var aHead = await GetFingerprintAsync(ctx.FilePath, 0, HeadWindowSec, ct);
+        var aHead = await GetFingerprintAsync(ctx, ctx.FilePath, 0, HeadWindowSec, ct);
         if (aHead.Length > MinIntroPoints)
         {
             var bHeads = new List<uint[]>();
             foreach (var peer in peers)
             {
-                var bHead = await GetFingerprintAsync(peer, 0, HeadWindowSec, ct);
+                var bHead = await GetFingerprintAsync(ctx, peer, 0, HeadWindowSec, ct);
                 if (bHead.Length > MinIntroPoints) bHeads.Add(bHead);
             }
 
@@ -92,15 +103,15 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
         if (ctx.DurationSec > TailWindowSec)
         {
             var aTailStart = ctx.DurationSec - TailWindowSec;
-            var aTail = await GetFingerprintAsync(ctx.FilePath, aTailStart, TailWindowSec, ct);
+            var aTail = await GetFingerprintAsync(ctx, ctx.FilePath, aTailStart, TailWindowSec, ct);
             if (aTail.Length > MinCreditsPoints)
             {
                 var bTails = new List<uint[]>();
                 foreach (var peer in peers)
                 {
-                    var peerDur = await MediaProbe.GetDurationAsync(peer, ct);
+                    var peerDur = await GetDurationAsync(peer, ct);
                     var peerTailStart = peerDur > TailWindowSec ? peerDur - TailWindowSec : 0;
-                    var bTail = await GetFingerprintAsync(peer, peerTailStart, TailWindowSec, ct);
+                    var bTail = await GetFingerprintAsync(ctx, peer, peerTailStart, TailWindowSec, ct);
                     if (bTail.Length > MinCreditsPoints) bTails.Add(bTail);
                 }
 
@@ -125,18 +136,32 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
         return result;
     }
 
-    private async Task<uint[]> GetFingerprintAsync(string file, double ssSec, double durSec, CancellationToken ct)
+    private async Task<uint[]> GetFingerprintAsync(
+        SegmentEpisodeContext ctx, string file, double ssSec, double durSec, CancellationToken ct)
     {
         var key = $"{file}|{ssSec:0}|{durSec:0}";
         if (_cache.TryGetValue(key, out var cached)) return cached;
+        // Background pass: don't start a decode while someone is watching.
+        if (ctx.WaitForIdleAsync is { } waitForIdle) await waitForIdle(ct);
         var fp = await FingerprintAsync(file, ssSec, durSec, ct);
         _cache[key] = fp;
         return fp;
     }
 
+    private async Task<double> GetDurationAsync(string file, CancellationToken ct)
+    {
+        if (_durations.TryGetValue(file, out var cached)) return cached;
+        var d = await MediaProbe.GetDurationAsync(file, ct);
+        _durations[file] = d;
+        return d;
+    }
+
     /// <summary>Extract a raw Chromaprint fingerprint (array of 32-bit points)
     /// from a window of the file's first audio stream via ffmpeg's chromaprint
-    /// muxer. Empty array on any failure (missing muxer, decode error).</summary>
+    /// muxer. Empty array on any failure (missing muxer, decode error, timeout).
+    /// Runs deprioritised (nice 10 + idle I/O on Linux, BelowNormal elsewhere)
+    /// with a 2-thread decoder cap — this is background work that must never
+    /// fight a live transcode or a viewer's disk reads.</summary>
     private async Task<uint[]> FingerprintAsync(string file, double ssSec, double durSec, CancellationToken ct)
     {
         var inv = CultureInfo.InvariantCulture;
@@ -150,7 +175,7 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
                 UseShellExecute        = false,
                 CreateNoWindow         = true,
             };
-            var args = new List<string> { "-nostdin", "-v", "error" };
+            var args = new List<string> { "-nostdin", "-v", "error", "-threads", "2" };
             if (ssSec > 0) { args.Add("-ss"); args.Add(ssSec.ToString("0.###", inv)); }
             args.Add("-i"); args.Add(file);
             args.Add("-t"); args.Add(durSec.ToString("0.###", inv));
@@ -163,13 +188,26 @@ public sealed class ChromaprintProvider(ILogger<ChromaprintProvider> logger) : I
             args.Add("-");
             foreach (var a in args) psi.ArgumentList.Add(a);
 
-            using var p = Process.Start(psi);
+            using var p = LowPriorityProcess.Start(psi);
             if (p is null) return Array.Empty<uint>();
             using var ms = new MemoryStream();
-            var copy = p.StandardOutput.BaseStream.CopyToAsync(ms, ct);
-            var err  = p.StandardError.ReadToEndAsync(ct);
-            await Task.WhenAll(copy, err);
-            await p.WaitForExitAsync(ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(FfmpegTimeout);
+            try
+            {
+                var copy = p.StandardOutput.BaseStream.CopyToAsync(ms, timeout.Token);
+                var err  = p.StandardError.ReadToEndAsync(timeout.Token);
+                await Task.WhenAll(copy, err);
+                await p.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout or shutdown: never leave the decoder running orphaned.
+                try { p.Kill(entireProcessTree: true); } catch { }
+                if (ct.IsCancellationRequested) throw;
+                logger.LogWarning("[Chromaprint] ffmpeg timed out on {File}", Path.GetFileName(file));
+                return Array.Empty<uint>();
+            }
 
             if (p.ExitCode != 0 || ms.Length < 4)
             {

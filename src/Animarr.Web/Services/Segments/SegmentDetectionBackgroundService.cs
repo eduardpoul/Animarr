@@ -12,7 +12,10 @@ namespace Animarr.Web.Services.Segments;
 /// identified titles one at a time. Cheap providers (AniSkip) already ran
 /// inline after identification; this fills the gaps for titles AniSkip didn't
 /// cover. Serial + low cadence so a season's ffmpeg fingerprinting never fights
-/// playback/transcoding for CPU.
+/// playback/transcoding for CPU: the pass parks on <see cref="PlaybackActivity"/>
+/// before each title, each episode and each ffmpeg run (HLS, Direct Play and
+/// Direct Stream viewers all count), and the decodes themselves run at nice 10
+/// / idle I/O with a 2-thread cap.
 ///
 /// <see cref="MediaItem.LastSegmentScanAt"/> gates the queue: a title is scanned
 /// once, then only re-scanned after <see cref="RescanAfter"/>. The work itself
@@ -22,6 +25,7 @@ namespace Animarr.Web.Services.Segments;
 public sealed class SegmentDetectionBackgroundService(
     IDbContextFactory<AppDbContext> dbFactory,
     IServiceScopeFactory scopeFactory,
+    PlaybackActivity playback,
     ILogger<SegmentDetectionBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(20);
@@ -40,7 +44,12 @@ public sealed class SegmentDetectionBackgroundService(
         while (!stoppingToken.IsCancellationRequested)
         {
             bool didWork = false;
-            try { didWork = await ProcessOneAsync(stoppingToken); }
+            try
+            {
+                // Nobody's watching → go; otherwise park here (cheap 15s poll).
+                await playback.WaitForIdleAsync(stoppingToken);
+                didWork = await ProcessOneAsync(stoppingToken);
+            }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { logger.LogWarning(ex, "[Segments] background pass failed"); }
 
@@ -75,7 +84,7 @@ public sealed class SegmentDetectionBackgroundService(
         {
             using var scope = scopeFactory.CreateScope();
             var detector = scope.ServiceProvider.GetRequiredService<SegmentDetectionService>();
-            var n = await detector.DetectForItemAsync(itemId, cheapOnly: false, ct);
+            var n = await detector.DetectForItemAsync(itemId, cheapOnly: false, ct, playback.WaitForIdleAsync);
             if (n > 0)
                 logger.LogInformation("[Segments] background pass wrote segments for {Count} episode(s) of {Id}", n, itemId);
         }
