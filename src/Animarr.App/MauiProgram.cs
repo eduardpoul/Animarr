@@ -335,6 +335,9 @@ public static class MauiProgram
         });
         builder.Services.AddAnimarrApiClient();
         builder.Services.AddAnimarrUiState();
+        // Packs come from the APK first — Welcome / Discovery render before
+        // there's a server to fetch them from.
+        builder.Services.AddSingleton<ILanguagePackSource, PackagedLanguagePackSource>();
         builder.Services.AddScoped<LocalizationService>();
         builder.Services.AddSingleton<ThemeService>();
         builder.Services.AddSingleton<ToastService>();

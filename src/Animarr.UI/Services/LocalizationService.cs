@@ -1,27 +1,51 @@
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace Animarr.UI.Services;
 
 /// <summary>
-/// Client-side localisation. Fetches the active language pack as JSON over
-/// HTTP at startup; pages read translations via the indexer (<c>L["key"]</c>)
+/// Reads a language pack without the network. The MAUI app registers one that
+/// opens the copy packaged in the APK: the packs ship there anyway, and on the
+/// first screens (Welcome / Discovery) there is no server yet to fetch them
+/// from, so the HTTP path showed bare i18n keys.
+/// </summary>
+public interface ILanguagePackSource
+{
+    /// <summary>The pack for <paramref name="language"/>, or null when this
+    /// source doesn't have it.</summary>
+    Task<Dictionary<string, string>?> TryLoadAsync(string language, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Client-side localisation. Loads the active language pack as JSON at
+/// startup; pages read translations via the indexer (<c>L["key"]</c>)
 /// and listen for <see cref="LanguageChanged"/> to re-render when the user
 /// switches.
 ///
-/// Originally this read JSON from the server filesystem via
-/// <c>IWebHostEnvironment</c> — for WASM/MAUI we read from <c>/lang/{code}.json</c>
-/// (served by the API host, which keeps the same JSON files in wwwroot).
+/// Sources, in order: any registered <see cref="ILanguagePackSource"/> (the
+/// MAUI app's packaged copy), then <c>_content/Animarr.UI/lang/{code}.json</c>
+/// over HTTP (the WASM client, served by the API host).
 /// </summary>
 public class LocalizationService
 {
     private readonly HttpClient _http;
+    private readonly ILanguagePackSource[] _local;
     private Dictionary<string, string> _strings = new();
     private string _currentLanguage = "en";
 
-    public LocalizationService(HttpClient http) { _http = http; }
+    public LocalizationService(HttpClient http, IEnumerable<ILanguagePackSource> local)
+    {
+        _http  = http;
+        _local = local.ToArray();
+    }
 
     public string CurrentLanguage => _currentLanguage;
+
+    /// <summary>True once any pack has been loaded (until then the indexer
+    /// returns keys).</summary>
+    public bool IsLoaded => _strings.Count > 0;
+
     public IReadOnlyList<(string Code, string Label)> SupportedLanguages { get; } =
     [
         ("en", "English"),
@@ -33,41 +57,59 @@ public class LocalizationService
 
     public event Action? LanguageChanged;
 
+    /// <summary>Language to boot with before the user's server-side preference
+    /// is known: the one cached from the last session, else the device's UI
+    /// language when we ship it, else English.</summary>
+    public string ResolveBootLanguage(string? cached)
+    {
+        if (IsSupported(cached)) return cached!;
+        var device = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        return IsSupported(device) ? device : "en";
+    }
+
+    private bool IsSupported(string? code) =>
+        !string.IsNullOrWhiteSpace(code)
+        && SupportedLanguages.Any(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase));
+
     public async Task LoadAsync(string language, CancellationToken ct = default)
     {
-        // The packs ship as static web assets inside the RCL, so both
-        // standalone WASM (Animarr.Web.Client) and the MAUI hybrid
-        // (Animarr.App) find them at the same well-known URL relative
-        // to the host without any extra wiring.
-        //
-        // Fallback chain: requested language → "en" → keys-as-values. The
-        // SupportedLanguages list advertises a few packs (uk/de/es) that
-        // may not have JSON files shipped yet — when the user picks one
-        // we load it if available, otherwise we transparently load "en"
-        // so the UI shows English text instead of bare i18n keys.
+        // Fallback chain: requested language → "en" → keys-as-values, so a
+        // missing pack shows English instead of bare i18n keys.
         if (await TryLoadAsync(language, ct)) return;
         if (language != "en") await TryLoadAsync("en", ct);
     }
 
     private async Task<bool> TryLoadAsync(string language, CancellationToken ct)
     {
+        foreach (var source in _local)
+        {
+            try
+            {
+                if (await source.TryLoadAsync(language, ct) is { Count: > 0 } dict)
+                    return Apply(language, dict);
+            }
+            catch { /* fall through to the next source */ }
+        }
+
         try
         {
             var dict = await _http.GetFromJsonAsync<Dictionary<string, string>>(
                 $"_content/Animarr.UI/lang/{language}.json", ct);
-            if (dict is not null)
-            {
-                _strings = dict;
-                _currentLanguage = language;
-                LanguageChanged?.Invoke();
-                return true;
-            }
+            if (dict is not null) return Apply(language, dict);
         }
         catch
         {
             // Network / parse failure — caller will try the fallback.
         }
         return false;
+    }
+
+    private bool Apply(string language, Dictionary<string, string> dict)
+    {
+        _strings = dict;
+        _currentLanguage = language;
+        LanguageChanged?.Invoke();
+        return true;
     }
 
     public string this[string key] =>

@@ -9,31 +9,63 @@
     z-index: 1;
 }
 
-/* Full-screen loading state — a foreground ring + caption reads as "still
-   fetching" (the old thin bar looked like an empty library). */
-.catalog-loading {
+/* First-load state — a copy of the index.html boot screen (keep the two in
+   step: colours, sizes, gap), laid over the shell so the hand-off from the
+   boot screen doesn't move a pixel. Brand orange, like the splash. */
+.catalog-boot {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 80px 24px;
-    min-height: 280px;
+    gap: 24px;
+    background: #0b0d10;
+    font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
 }
-.catalog-loading__ring {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 3px solid var(--ink-3);
-    border-top-color: var(--accent-hi);
-    animation: catalog-loading-spin 0.9s linear infinite;
+.catalog-boot ::deep .catalog-boot__mark {
+    display: block;
+    border-radius: 24px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+                0 18px 48px -12px oklch(0.70 0.16 50 / 0.5);
+    animation: catalog-boot-breathe 2.4s ease-in-out infinite;
 }
-.catalog-loading__label {
-    font-size: 14px;
-    line-height: 20px;
-    color: var(--text-dim);
+.catalog-boot__bar {
+    position: relative;
+    width: 136px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
 }
-@keyframes catalog-loading-spin { to { transform: rotate(360deg); } }
+.catalog-boot__bar::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 40%;
+    border-radius: inherit;
+    background: oklch(0.75 0.14 50);
+    animation: catalog-boot-slide 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+.catalog-boot__label {
+    font-size: 13px;
+    line-height: 18px;
+    color: rgba(255, 255, 255, 0.55);
+}
+@keyframes catalog-boot-slide {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(250%); }
+}
+@keyframes catalog-boot-breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.03); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .catalog-boot ::deep .catalog-boot__mark,
+    .catalog-boot__bar::after { animation: none; }
+    .catalog-boot__bar::after { width: 100%; opacity: 0.6; }
+}
 
 /* ── Home library block ─────────────────────────────────────────────
    Compact slice of the catalog: two poster rows on desktop (four on

@@ -63,16 +63,17 @@
         }
         catch { }
 
-        // Localisation pack — try the user's stored language first, fall
-        // back to English. Both are wrapped in try/catch so a slow / dead
-        // server doesn't throw out of the detached task and crash the
-        // process. Worst case the UI shows i18n keys verbatim — readable.
+        // Localisation pack — normally Routes already loaded it before the
+        // first page rendered; this only catches a load that timed out there.
+        // Try the stored language first, then the device's, then English.
+        // Wrapped in try/catch so a slow / dead server doesn't throw out of
+        // the detached task. Worst case the UI shows i18n keys verbatim.
+        if (Loc.IsLoaded) return;
         try
         {
             var stored = await JS.InvokeAsync<string?>(
                 "eval", "localStorage.getItem('animarr-lang')");
-            var lang = string.IsNullOrWhiteSpace(stored) ? "en" : stored!;
-            await Loc.LoadAsync(lang);
+            await Loc.LoadAsync(Loc.ResolveBootLanguage(stored));
         }
         catch
         {

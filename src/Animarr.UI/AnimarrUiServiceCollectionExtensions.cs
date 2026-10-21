@@ -54,6 +54,8 @@ public static class AnimarrUiServiceCollectionExtensions
         // v5 multi-server: registry of known Animarr servers. Scoped — same
         // lifetime envelope as UserContextState; one per circuit/app instance.
         services.AddScoped<ServerRegistryState>();
+        // Last Home feed — instant repaint when navigating back to Home.
+        services.AddScoped<HomeFeedCache>();
         return services;
     }
 }

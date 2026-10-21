@@ -111,13 +111,21 @@ public static class PlatformBridge
 #endif
     }
 
+    /// <summary>One client for every proxied image — a page of posters used to
+    /// open (and leave in TIME_WAIT) a socket per image. Auth rides in the
+    /// URL's ?mt= token, so it needs no cookies.</summary>
+    private static readonly System.Net.Http.HttpClient ImageHttp = new()
+    {
+        Timeout = System.TimeSpan.FromSeconds(10),
+    };
+
     /// <summary>Fetch an http:// image from .NET land and return it as a
     /// base64 data-URL. The JS image-proxy uses this to side-step Chromium
     /// WebView's mixed-content gate, which refuses to load http:// resources
     /// from the https://0.0.0.x/ bundle even with MixedContentMode set to
     /// AlwaysAllow. Returns the data URL (e.g. "data:image/jpeg;base64,…")
-    /// or an empty string on failure — JS treats empty as "leave img.src
-    /// alone" so the broken-image icon still appears for genuinely missing
+    /// or an empty string on failure — JS then runs the img's own onerror
+    /// fallback, or leaves the broken-image icon for genuinely missing
     /// resources rather than silently disappearing.</summary>
     [JSInvokable("FetchImageAsDataUrl")]
     public static async Task<string> FetchImageAsDataUrlAsync(string url)
@@ -125,11 +133,7 @@ public static class PlatformBridge
         if (string.IsNullOrWhiteSpace(url)) return "";
         try
         {
-            using var http = new System.Net.Http.HttpClient
-            {
-                Timeout = System.TimeSpan.FromSeconds(8),
-            };
-            using var resp = await http.GetAsync(url).ConfigureAwait(false);
+            using var resp = await ImageHttp.GetAsync(url).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return "";
             var bytes = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
             var mime  = resp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";

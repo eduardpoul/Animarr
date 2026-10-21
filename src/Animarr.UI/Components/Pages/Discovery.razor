@@ -314,18 +314,21 @@
 
             // Drain whichever path finishes first (and isn't empty). Subnet
             // probe always returns something when the server is reachable, so
-            // mDNS is allowed to lose the race.
-            while (scanned.Count == 0)
+            // mDNS is allowed to lose the race. A path that came back empty
+            // leaves the race: WhenAny over an already-finished task returns
+            // at once, so keeping it in spun this loop synchronously on the UI
+            // thread — the app froze ("Scanning · 8 s") until the probe ended,
+            // and the probe's own reply needed that thread to arrive.
+            var racing = new List<Task<JsServer[]?>> { mdnsTask, probeTask };
+            while (scanned.Count == 0 && racing.Count > 0)
             {
-                var winner = await Task.WhenAny(mdnsTask, probeTask, overallTimeout);
+                var winner = await Task.WhenAny(racing.Append<Task>(overallTimeout));
                 if (winner == overallTimeout) break;
 
+                var done = (Task<JsServer[]?>)winner;
+                racing.Remove(done);
                 JsServer[]? hits = null;
-                try
-                {
-                    if (winner == mdnsTask)        hits = await mdnsTask;
-                    else if (winner == probeTask)  hits = await probeTask;
-                }
+                try { hits = await done; }
                 catch { /* one path failed — keep waiting on the other */ }
 
                 if (hits is { Length: > 0 })
@@ -336,9 +339,6 @@
                             scanned.Add(r);
                     if (scanned.Count > 0) break;
                 }
-
-                // Both tasks completed empty → bail.
-                if (mdnsTask.IsCompleted && probeTask.IsCompleted) break;
             }
         }
         catch (OperationCanceledException) { /* user navigated away */ }

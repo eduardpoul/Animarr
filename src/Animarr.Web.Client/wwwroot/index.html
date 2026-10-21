@@ -155,33 +155,56 @@
             display: grid; place-items: center;
             z-index: 9999;
         }
+        /* Brand orange (the default accent, hue 50) — fixed, like the
+           native splash and the app icon, whatever accent the user picked. */
         .animarr-boot {
+            --boot-accent: oklch(0.75 0.14 50);
             display: flex; flex-direction: column;
-            align-items: center; gap: 18px;
-            font-family: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+            align-items: center; gap: 24px;
+            font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
         }
         .animarr-boot__mark {
-            width: 84px; height: 84px;
+            width: 88px; height: 88px;
             display: block;
-            border-radius: 22px;
-            box-shadow: 0 16px 40px -12px oklch(0.62 0.06 200 / 0.35);
+            border-radius: 24px;
+            color: var(--boot-accent);
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+                        0 18px 48px -12px oklch(0.70 0.16 50 / 0.5);
+            animation: animarr-boot-breathe 2.4s ease-in-out infinite;
         }
-        .animarr-boot__ring {
-            width: 22px; height: 22px;
-            border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.10);
-            border-top-color: #84c0d2;
-            animation: animarr-boot-spin 0.9s linear infinite;
-            margin-top: 8px;
+        /* Fluent indeterminate progress bar. */
+        .animarr-boot__bar {
+            position: relative;
+            width: 136px; height: 3px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+        }
+        .animarr-boot__bar::after {
+            content: "";
+            position: absolute; inset: 0 auto 0 0;
+            width: 40%;
+            border-radius: inherit;
+            background: var(--boot-accent);
+            animation: animarr-boot-slide 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
         }
         .animarr-boot__label {
-            font-family: 'JetBrains Mono', ui-monospace, "SF Mono", monospace;
-            font-size: 11px;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: rgba(154, 163, 178, 0.7);
+            font-size: 13px;
+            line-height: 18px;
+            color: rgba(255, 255, 255, 0.55);
         }
-        @@keyframes animarr-boot-spin { to { transform: rotate(360deg); } }
+        @keyframes animarr-boot-slide {
+            from { transform: translateX(-100%); }
+            to   { transform: translateX(250%); }
+        }
+        @keyframes animarr-boot-breathe {
+            0%, 100% { transform: scale(1); }
+            50%      { transform: scale(1.03); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .animarr-boot__mark, .animarr-boot__bar::after { animation: none; }
+            .animarr-boot__bar::after { width: 100%; opacity: 0.6; }
+        }
     </style>
 
     <div id="app">
@@ -189,16 +212,29 @@
             <svg class="animarr-boot__mark" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <rect width="72" height="72" rx="20" fill="#0a0c10"/>
                 <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
-                      fill="#84c0d2"
+                      fill="currentColor"
                       fill-rule="evenodd"/>
                 <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
                       fill="#ffffff">
                     <animate attributeName="opacity" values="0.6;1;0.6" dur="2.4s" repeatCount="indefinite"/>
                 </path>
             </svg>
-            <div class="animarr-boot__ring" aria-hidden="true"></div>
-            <div class="animarr-boot__label">Loading library</div>
+            <div class="animarr-boot__bar" role="progressbar" aria-label="Loading"></div>
+            <div class="animarr-boot__label">Loading library…</div>
         </div>
+        <script>
+            // Label in the interface language — the pack isn't loaded yet.
+            (function () {
+                var lang = '';
+                try { lang = localStorage.getItem('animarr-lang') || ''; } catch (_) { }
+                lang = (lang || navigator.language || 'en').slice(0, 2).toLowerCase();
+                // Same strings as the pack's catalog.loading, shown next by Home.
+                var text = { ru: 'Загружаем библиотеку…', uk: 'Завантаження бібліотеки…',
+                             de: 'Bibliothek wird geladen…', es: 'Cargando biblioteca…' }[lang];
+                var el = document.querySelector('.animarr-boot__label');
+                if (text && el) el.textContent = text;
+            })();
+        </script>
     </div>
 
     <div id="blazor-error-ui">

@@ -49,20 +49,17 @@ var host = builder.Build();
 // real strings instead of keys on initial paint. Prefer the language cached in
 // localStorage by the previous session (written by MainLayout / ProfilePanel):
 // a non-English user's first paint is then already localized instead of
-// flashing English until /api/me/preferences resolves. Falls back to "en" on
-// an empty cache or any interop hiccup; LoadAsync itself falls back to en.json
-// for a missing pack.
+// flashing English until /api/me/preferences resolves. An empty cache (first
+// visit, sign-in page) uses the browser's language when we ship it, else "en";
+// LoadAsync itself falls back to en.json for a missing pack.
 var loc = host.Services.GetRequiredService<LocalizationService>();
-var bootLang = "en";
+string? cachedLang = null;
 try
 {
     if (host.Services.GetRequiredService<IJSRuntime>() is IJSInProcessRuntime jsSync)
-    {
-        var cached = jsSync.Invoke<string?>("localStorage.getItem", "animarr-lang");
-        if (!string.IsNullOrWhiteSpace(cached)) bootLang = cached;
-    }
+        cachedLang = jsSync.Invoke<string?>("localStorage.getItem", "animarr-lang");
 }
-catch { /* keep "en" */ }
-await loc.LoadAsync(bootLang);
+catch { /* no cache — device language */ }
+await loc.LoadAsync(loc.ResolveBootLanguage(cachedLang));
 
 await host.RunAsync();

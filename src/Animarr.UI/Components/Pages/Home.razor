@@ -7,24 +7,29 @@
 @inject UserContextState UserCtx
 @inject IJSRuntime JS
 @inject Animarr.UI.Services.ServerRegistryState ServerReg
+@inject Animarr.UI.Services.HomeFeedCache FeedCache
 
 <PageTitle>Animarr</PageTitle>
 
+@if (_loading)
+{
+    @* First load: the boot screen (index.html), continued — same mark, bar
+       and caption in the same spot, so splash → boot → Home reads as one
+       screen until the feed lands. A full-screen brand state, not an in-page
+       one: a thin bar inside the empty catalog looked like "empty library"
+       ("после деплоя всегда каталог пустой пишет"). Outside .catalog-page,
+       whose z-index would keep it under the tab bar. Later visits paint from
+       HomeFeedCache and skip this. *@
+    <div class="catalog-boot" role="status">
+        <BrandMark Size="88" AColor="oklch(0.75 0.14 50)" ExtraClass="catalog-boot__mark" />
+        <div class="catalog-boot__bar" aria-hidden="true"></div>
+        <div class="catalog-boot__label">@L["catalog.loading"]</div>
+    </div>
+}
+
 <div class="catalog-page">
 
-    @if (_loading)
-    {
-        @* Centered loading screen with branded ring spinner — the previous
-           thin indeterminate bar at the top of the catalog let the page
-           look like "empty library" while the data was still in flight
-           (user reported this as "после деплоя всегда каталог пустой
-           пишет"). A foreground spinner is unmistakably a transient state. *@
-        <div class="catalog-loading">
-            <div class="catalog-loading__ring"></div>
-            <div class="catalog-loading__label">@L["catalog.loading"]</div>
-        </div>
-    }
-    else
+    @if (!_loading)
     {
         @* ── Section stack ─────────────────────────────────────────────
            Home is a stack of per-user reorderable sections (ProfilePanel →
@@ -180,89 +185,55 @@
         // to call from any page that fetches at boot.
         try { await ServerReg.LoadAsync(); } catch { /* localStorage hiccup — fall through */ }
 
+        // Back on Home within the session (from Settings, a title, …): paint
+        // the last feed at once and refresh it quietly. Re-running the whole
+        // load (the full library among it) behind a spinner on every visit
+        // made the app look like it restarted.
+        if (FeedCache.TryGet(UserCtx.Me?.User.Id, Animarr.UI.Services.MediaUrl.Base) is { } cached)
+        {
+            ApplySnapshot(cached);
+            _ = RefreshAsync();
+            return;
+        }
+
+        var snapshot = await FetchAsync();
+        FeedCache.Store(snapshot);
+        ApplySnapshot(snapshot);
+    }
+
+    private readonly CancellationTokenSource _cts = new();
+
+    /// <summary>Re-fetch behind a cached paint. An incomplete fetch (offline,
+    /// server hiccup) keeps what's on screen instead of blanking it.</summary>
+    private async Task RefreshAsync()
+    {
         try
         {
-            // Continue Watching — v5 hero source of truth. Returns at most 5
-            // in-progress titles for the current user; empty array if the
-            // user hasn't started anything (Home falls back to Featured).
-            try { _continueItems = await Api.GetContinueWatchingAsync(take: 5); }
-            catch { _continueItems = Array.Empty<ContinueWatchItemDto>(); }
-
-            // Next Up — next episode per engaged series. Folds "new episode"
-            // items into the hero and fills the rail under it.
-            try { _nextUpItems = await Api.GetNextUpAsync(take: 12); }
-            catch { _nextUpItems = Array.Empty<ContinueWatchItemDto>(); }
-
-            // "For you" — heuristic recommendations (skipped entirely when the
-            // user hid the section, so no wasted TMDB round-trips).
-            if (_homeSections.Contains("foryou"))
+            var fresh = await FetchAsync();
+            if (_cts.IsCancellationRequested || !fresh.Complete) return;
+            FeedCache.Store(fresh);
+            await InvokeAsync(() =>
             {
-                try { _forYou = await Api.GetForYouAsync(); }
-                catch { _forYou = Array.Empty<RecCardDto>(); }
-            }
-
-            // "This week" — airing events for the current week (rail collapses
-            // when the week is empty).
-            if (_homeSections.Contains("thisweek"))
-            {
-                try
-                {
-                    var events = await Api.GetCalendarAsync(back: 1, ahead: 7);
-                    var weekEnd = DateTime.Now.Date.AddDays(7);
-                    _thisWeek = events
-                        .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
-                        .OrderBy(e => e.AiringAtUtc)
-                        .ToArray();
-                }
-                catch { _thisWeek = Array.Empty<CalendarEventDto>(); }
-            }
-
-            var sections = await Api.GetSectionFoldersAsync();
-            _sections = sections.OrderBy(f => f.Label).ToList();
-
-            // Build the section → child-folder-id map HERE, right after _sections
-            // loads — NOT in OnAfterRenderAsync (see git history: lifecycle race
-            // left the map empty forever and folder pills filtered to zero).
-            try
-            {
-                var allFolders = await Api.GetFoldersAsync();
-                foreach (var sec in _sections)
-                {
-                    var ids = allFolders
-                        .Where(f => f.ParentSectionId == sec.Id)
-                        .Select(f => f.Id)
-                        .ToHashSet();
-                    ids.Add(sec.Id);
-                    _childFolderIdsBySection[sec.Id] = ids;
-                }
-            }
-            catch { /* section filter degrades to no-op */ }
-
-            var items = await Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" });
-            // De-duplication: collapse by Id first (defensive), then by
-            // (lowercased trimmed Title, Year) so the block never shows the
-            // same logical title twice.
-            _allItems = items
-                .GroupBy(m => m.Id)
-                .Select(g => g.First())
-                .GroupBy(m => (m.Title?.Trim().ToLowerInvariant() ?? "", m.Year))
-                .Select(g => g.First())
-                .ToList();
-
-            // Featured hero pool: everything with fanart, best-rated first.
-            // The top-5 cut happens per folder in ApplyFilter — cutting here
-            // (library-wide) left most folder views without a hero.
-            _featuredPool = _allItems
-                .Where(m => !string.IsNullOrEmpty(m.FanartPath))
-                .OrderByDescending(m => m.Rating ?? 0)
-                .ThenByDescending(m => m.RatingCount ?? 0)
-                .ToList();
-
-            // Carousel cadence from server config.
-            var intStr = await Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec);
-            if (int.TryParse(intStr?.Value, out var iv)) _heroInterval = iv;
+                if (_cts.IsCancellationRequested) return;
+                ApplySnapshot(fresh);
+                StateHasChanged();
+            });
         }
-        catch { /* offline — empty sections */ }
+        catch { /* keep the cached feed */ }
+    }
+
+    private void ApplySnapshot(HomeFeedSnapshot s)
+    {
+        _continueItems = s.Continue;
+        _nextUpItems   = s.NextUp;
+        _forYou        = s.ForYou;
+        _thisWeek      = s.ThisWeek;
+        _sections      = s.Sections;
+        _childFolderIdsBySection.Clear();
+        foreach (var (k, v) in s.ChildFolderIdsBySection) _childFolderIdsBySection[k] = v;
+        _allItems      = s.AllItems;
+        _featuredPool  = s.FeaturedPool;
+        _heroInterval  = s.HeroInterval;
 
         // A NavPane folder picked on another page (SetActiveFolder, then
         // navigate here) or while this load ran fired OnChange before
@@ -271,6 +242,106 @@
         _activeSection = ResolveActiveSection();
         _loading = false;
         ApplyFilter();
+    }
+
+    /// <summary>Load everything Home shows. The requests are independent, so
+    /// they run side by side (they used to go one after another).</summary>
+    private async Task<HomeFeedSnapshot> FetchAsync()
+    {
+        var userId = UserCtx.Me?.User.Id;
+        var complete = true;
+
+        async Task<T> Safe<T>(Func<Task<T>> call, T fallback, bool required = false)
+        {
+            try { return await call(); }
+            catch
+            {
+                if (required) complete = false;
+                return fallback;
+            }
+        }
+
+        // Continue Watching — v5 hero source of truth. At most 5 in-progress
+        // titles for the current user; empty when nothing's started (Home
+        // falls back to Featured).
+        var continueTask = Safe(() => Api.GetContinueWatchingAsync(take: 5), Array.Empty<ContinueWatchItemDto>());
+        // Next Up — next episode per engaged series. Folds "new episode"
+        // items into the hero and fills the rail under it.
+        var nextUpTask = Safe(() => Api.GetNextUpAsync(take: 12), Array.Empty<ContinueWatchItemDto>());
+        // "For you" — heuristic recommendations (skipped entirely when the
+        // user hid the section, so no wasted TMDB round-trips).
+        var forYouTask = _homeSections.Contains("foryou")
+            ? Safe(() => Api.GetForYouAsync(), Array.Empty<RecCardDto>())
+            : Task.FromResult(Array.Empty<RecCardDto>());
+        // "This week" — airing events for the current week (rail collapses
+        // when the week is empty).
+        var calendarTask = _homeSections.Contains("thisweek")
+            ? Safe(() => Api.GetCalendarAsync(back: 1, ahead: 7), Array.Empty<CalendarEventDto>())
+            : Task.FromResult(Array.Empty<CalendarEventDto>());
+        var sectionsTask = Safe(() => Api.GetSectionFoldersAsync(), Array.Empty<FolderWatcherDto>(), required: true);
+        var foldersTask  = Safe(() => Api.GetFoldersAsync(), Array.Empty<FolderWatcherDto>());
+        var itemsTask    = Safe(() => Api.GetMediaItemsAsync(new MediaListQuery { Take = 10000, Sort = "title" }),
+                                Array.Empty<MediaItemDto>(), required: true);
+        // Carousel cadence from server config.
+        var intervalTask = Safe(() => Api.GetAppConfigValueAsync(AppConfigKeys.BackdropIntervalSec), (AppConfigEntryDto?)null);
+
+        await Task.WhenAll(continueTask, nextUpTask, forYouTask, calendarTask,
+                           sectionsTask, foldersTask, itemsTask, intervalTask);
+
+        var weekEnd  = DateTime.Now.Date.AddDays(7);
+        var thisWeek = calendarTask.Result
+            .Where(e => e.AiringAtUtc.ToLocalTime().Date < weekEnd)
+            .OrderBy(e => e.AiringAtUtc)
+            .ToArray();
+
+        var sections = sectionsTask.Result.OrderBy(f => f.Label).ToList();
+
+        // Section → child-folder-id map, built right with the sections — NOT
+        // in OnAfterRenderAsync (see git history: lifecycle race left the map
+        // empty forever and folder pills filtered to zero). A failed folder
+        // load degrades the section filter to a no-op.
+        var childIds = new Dictionary<Guid, HashSet<Guid>>();
+        if (foldersTask.Result.Length > 0)
+        {
+            foreach (var sec in sections)
+            {
+                var ids = foldersTask.Result
+                    .Where(f => f.ParentSectionId == sec.Id)
+                    .Select(f => f.Id)
+                    .ToHashSet();
+                ids.Add(sec.Id);
+                childIds[sec.Id] = ids;
+            }
+        }
+
+        // De-duplication: collapse by Id first (defensive), then by
+        // (lowercased trimmed Title, Year) so the block never shows the
+        // same logical title twice.
+        var allItems = itemsTask.Result
+            .GroupBy(m => m.Id)
+            .Select(g => g.First())
+            .GroupBy(m => (m.Title?.Trim().ToLowerInvariant() ?? "", m.Year))
+            .Select(g => g.First())
+            .ToList();
+
+        // Featured hero pool: everything with fanart, best-rated first.
+        // The top-5 cut happens per folder in ApplyFilter — cutting here
+        // (library-wide) left most folder views without a hero.
+        var featuredPool = allItems
+            .Where(m => !string.IsNullOrEmpty(m.FanartPath))
+            .OrderByDescending(m => m.Rating ?? 0)
+            .ThenByDescending(m => m.RatingCount ?? 0)
+            .ToList();
+
+        var heroInterval = int.TryParse(intervalTask.Result?.Value, out var iv) ? iv : _heroInterval;
+
+        // A profile switch mid-load would tag one user's feed with another's id.
+        if (userId != UserCtx.Me?.User.Id) complete = false;
+
+        return new HomeFeedSnapshot(
+            userId, Animarr.UI.Services.MediaUrl.Base, complete,
+            continueTask.Result, nextUpTask.Result, forYouTask.Result, thisWeek,
+            sections, childIds, allItems, featuredPool, heroInterval);
     }
 
     /// <summary>Recompute the render stack from the stored preference —
@@ -414,6 +485,8 @@
 
     public void Dispose()
     {
+        _cts.Cancel();
+        _cts.Dispose();
         CategoryNav.OnChange -= OnCategoryChanged;
         FolderJump.OnChange  -= OnFolderJumpChanged;
         UserCtx.OnChange     -= OnUserChanged;

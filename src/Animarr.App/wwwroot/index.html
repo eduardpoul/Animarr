@@ -81,32 +81,56 @@
             display: grid; place-items: center;
             z-index: 9999;
         }
+        /* Brand orange (the default accent, hue 50) — fixed, like the
+           native splash and the app icon, whatever accent the user picked. */
         .animarr-boot {
+            --boot-accent: oklch(0.75 0.14 50);
             display: flex; flex-direction: column;
-            align-items: center; gap: 18px;
+            align-items: center; gap: 24px;
+            font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
         }
         .animarr-boot__mark {
-            width: 84px; height: 84px;
+            width: 88px; height: 88px;
             display: block;
-            border-radius: 22px;
-            box-shadow: 0 16px 40px -12px oklch(0.62 0.06 200 / 0.35);
+            border-radius: 24px;
+            color: var(--boot-accent);
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+                        0 18px 48px -12px oklch(0.70 0.16 50 / 0.5);
+            animation: animarr-boot-breathe 2.4s ease-in-out infinite;
         }
-        .animarr-boot__ring {
-            width: 22px; height: 22px;
-            border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.10);
-            border-top-color: #84c0d2;
-            animation: animarr-boot-spin 0.9s linear infinite;
-            margin-top: 8px;
+        /* Fluent indeterminate progress bar. */
+        .animarr-boot__bar {
+            position: relative;
+            width: 136px; height: 3px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+        }
+        .animarr-boot__bar::after {
+            content: "";
+            position: absolute; inset: 0 auto 0 0;
+            width: 40%;
+            border-radius: inherit;
+            background: var(--boot-accent);
+            animation: animarr-boot-slide 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
         }
         .animarr-boot__label {
-            font-family: 'JetBrains Mono', ui-monospace, "SF Mono", monospace;
-            font-size: 11px;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: rgba(154, 163, 178, 0.7);
+            font-size: 13px;
+            line-height: 18px;
+            color: rgba(255, 255, 255, 0.55);
         }
-        @keyframes animarr-boot-spin { to { transform: rotate(360deg); } }
+        @keyframes animarr-boot-slide {
+            from { transform: translateX(-100%); }
+            to   { transform: translateX(250%); }
+        }
+        @keyframes animarr-boot-breathe {
+            0%, 100% { transform: scale(1); }
+            50%      { transform: scale(1.03); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .animarr-boot__mark, .animarr-boot__bar::after { animation: none; }
+            .animarr-boot__bar::after { width: 100%; opacity: 0.6; }
+        }
     </style>
 
     <!-- Same player vendor setup as the WASM host. The BlazorWebView's
@@ -120,6 +144,15 @@
 
     <!-- v5 Phase 7: html5-qrcode for TV-pairing QR scan. Same CDN as WASM. -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
+
+    <script>
+        // Back button: MainActivity.TryHandleWebViewBack reads this stamp — a
+        // popstate a moment ago means the WebView already stepped back for
+        // this press, so the native side mustn't decide again.
+        window.addEventListener('popstate', function () {
+            window.__animarrPoppedAt = performance.now();
+        });
+    </script>
 
     <script>
         // ── http:// image proxy ───────────────────────────────────────
@@ -136,19 +169,56 @@
         // sees the http:// URL, so Mixed Content never trips.
         //
         // Cost: each image goes through one DotNet round-trip + a
-        // ~33%-larger base64 string. For our LAN-served posters / fanart
-        // (50-200 KB each) that's a one-time hit on first paint; subsequent
-        // renders pull from the browser's normal data-URL cache.
+        // ~33%-larger base64 string. The data URLs are kept in a small LRU
+        // (by size), so coming back to a page repaints its posters at once
+        // instead of fetching every one through .NET again.
+        //
+        // Fallbacks: the renderer still fires `error` for the blocked http://
+        // src, BEFORE the proxy has answered — so a page's onerror fallback
+        // (NextUpRail swaps the episode thumb for the fanart, EpisodeCard hides
+        // the img) ran on every image and raced the proxy: thumbs got hidden,
+        // or the swapped-in fallback was never proxied and stayed broken. A
+        // capture listener swallows those errors; the page's onerror runs only
+        // when the proxy itself couldn't fetch the image.
         (function () {
             var pending = new WeakSet();    // imgs already in flight
             var lastSrc = new WeakMap();    // img -> the http src we last proxied
+
+            // src -> data URL, oldest first (Map keeps insertion order).
+            var cache = new Map();
+            var cacheChars = 0;
+            var CACHE_MAX_CHARS = 24 * 1024 * 1024;   // ~18 MB of images
+
+            function cacheGet(src) {
+                var v = cache.get(src);
+                if (v === undefined) return null;
+                cache.delete(src);              // refresh: move to newest
+                cache.set(src, v);
+                return v;
+            }
+
+            function cachePut(src, dataUrl) {
+                if (dataUrl.length > CACHE_MAX_CHARS / 8) return;   // one huge image shouldn't flush the rest
+                if (cache.has(src)) return;
+                cache.set(src, dataUrl);
+                cacheChars += dataUrl.length;
+                while (cacheChars > CACHE_MAX_CHARS && cache.size > 0) {
+                    var oldest = cache.keys().next().value;
+                    cacheChars -= cache.get(oldest).length;
+                    cache.delete(oldest);
+                }
+            }
+
+            function isHttp(src) {
+                return !!src && src.toLowerCase().startsWith('http://');
+            }
 
             async function rewriteImg(img) {
                 if (!img || pending.has(img)) return;
                 var src = img.getAttribute('src');
                 // Only http:// needs proxying. A data: / https: / relative src
                 // (incl. one WE just set) is already safe — bail.
-                if (!src || !src.toLowerCase().startsWith('http://')) return;
+                if (!isHttp(src)) return;
                 // Already proxied THIS exact http src? Skip. But if the src
                 // changed to a DIFFERENT http URL (the hero reuses the same
                 // <img> node and just swaps src on its 30s rotation), the
@@ -158,10 +228,16 @@
                 if (lastSrc.get(img) === src) return;
                 if (!window.DotNet) return;  // not ready yet
                 pending.add(img);
+                var ok = false;
                 try {
-                    var dataUrl = await DotNet.invokeMethodAsync(
-                        'Animarr.App', 'FetchImageAsDataUrl', src);
+                    var dataUrl = cacheGet(src);
+                    if (!dataUrl) {
+                        dataUrl = await DotNet.invokeMethodAsync(
+                            'Animarr.App', 'FetchImageAsDataUrl', src);
+                        if (dataUrl && dataUrl.length > 0) cachePut(src, dataUrl);
+                    }
                     if (dataUrl && dataUrl.length > 0) {
+                        ok = true;
                         // Guard against a rotation that swapped src again while
                         // we awaited — don't paint a stale image over a newer one.
                         if (img.getAttribute('src') === src) {
@@ -170,12 +246,24 @@
                         }
                     }
                 } catch (e) {
-                    // Leave the broken-image icon visible — that's a
-                    // diagnostic signal that the proxy itself failed,
-                    // not just that the URL was unreachable.
                     console.warn('image proxy failed for', src, e);
                 } finally {
                     pending.delete(img);
+                }
+
+                // The src changed while we were fetching (a fallback swap, a
+                // re-render with a fresh media token): proxy the new one.
+                if (img.getAttribute('src') !== src) { rewriteImg(img); return; }
+                if (!ok) fail(img, src);
+            }
+
+            // The proxy couldn't get the image: now run the page's own onerror
+            // fallback (its error event was swallowed below). Remember the src
+            // so a fallback that leaves it in place doesn't loop.
+            function fail(img, src) {
+                lastSrc.set(img, src);
+                if (typeof img.onerror === 'function') {
+                    try { img.onerror.call(img, new Event('error')); } catch (e) { }
                 }
             }
 
@@ -184,6 +272,14 @@
                 var imgs = root.querySelectorAll('img[src^="http://"]');
                 for (var i = 0; i < imgs.length; i++) rewriteImg(imgs[i]);
             }
+
+            // Capture phase on document runs before the img's own onerror.
+            document.addEventListener('error', function (e) {
+                var t = e.target;
+                if (!t || t.tagName !== 'IMG' || !isHttp(t.getAttribute('src'))) return;
+                e.stopImmediatePropagation();
+                rewriteImg(t);
+            }, true);
 
             function attach() {
                 sweep(document);
@@ -534,16 +630,29 @@
             <svg class="animarr-boot__mark" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <rect width="72" height="72" rx="20" fill="#0a0c10"/>
                 <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
-                      fill="#84c0d2"
+                      fill="currentColor"
                       fill-rule="evenodd"/>
                 <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
                       fill="#ffffff">
                     <animate attributeName="opacity" values="0.6;1;0.6" dur="2.4s" repeatCount="indefinite"/>
                 </path>
             </svg>
-            <div class="animarr-boot__ring" aria-hidden="true"></div>
-            <div class="animarr-boot__label">Loading library</div>
+            <div class="animarr-boot__bar" role="progressbar" aria-label="Loading"></div>
+            <div class="animarr-boot__label">Loading library…</div>
         </div>
+        <script>
+            // Label in the interface language — the pack isn't loaded yet.
+            (function () {
+                var lang = '';
+                try { lang = localStorage.getItem('animarr-lang') || ''; } catch (_) { }
+                lang = (lang || navigator.language || 'en').slice(0, 2).toLowerCase();
+                // Same strings as the pack's catalog.loading, shown next by Home.
+                var text = { ru: 'Загружаем библиотеку…', uk: 'Завантаження бібліотеки…',
+                             de: 'Bibliothek wird geladen…', es: 'Cargando biblioteca…' }[lang];
+                var el = document.querySelector('.animarr-boot__label');
+                if (text && el) el.textContent = text;
+            })();
+        </script>
     </div>
     <div id="blazor-error-ui" data-nosnippet>
         Что-то пошло не так.

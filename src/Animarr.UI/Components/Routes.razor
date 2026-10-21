@@ -4,15 +4,76 @@
 
     The host (WASM client or MAUI hybrid) wraps this in its own App.razor —
     the Routes component itself stays platform-neutral.
+
+    Holds the router back until a language pack is loaded. The WASM client
+    preloads it in Program.cs (no wait); the MAUI app has no such hook, and a
+    page without parameters doesn't re-render when its layout does — so a
+    pack that landed after the first paint left bare i18n keys on screen
+    (Welcome showed "welcome.tagline"). The app reads the pack from its own
+    package, so the wait is a few milliseconds.
 *@
-<Router AppAssembly="@typeof(Routes).Assembly">
-    <Found Context="routeData">
-        <RouteView RouteData="@routeData" DefaultLayout="@typeof(Animarr.UI.Components.Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
-    </Found>
-    <NotFound>
-        <LayoutView Layout="@typeof(Animarr.UI.Components.Layout.MainLayout)">
-            <Animarr.UI.Components.Pages.NotFound />
-        </LayoutView>
-    </NotFound>
-</Router>
+@inject LocalizationService Loc
+@inject IJSRuntime JS
+
+@if (_ready)
+{
+    <Router AppAssembly="@typeof(Routes).Assembly">
+        <Found Context="routeData">
+            <RouteView RouteData="@routeData" DefaultLayout="@typeof(Animarr.UI.Components.Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <LayoutView Layout="@typeof(Animarr.UI.Components.Layout.MainLayout)">
+                <Animarr.UI.Components.Pages.NotFound />
+            </LayoutView>
+        </NotFound>
+    </Router>
+}
+else
+{
+    @* Hold the boot screen while the pack loads — index.html styles it
+       (#app:has(.animarr-boot)). Rendering nothing here wiped index.html's
+       copy and blanked the screen between it and Home's first-load state. *@
+    <div class="animarr-boot">
+        <BrandMark Size="88" AColor="currentColor" ExtraClass="animarr-boot__mark" />
+        <div class="animarr-boot__bar" aria-hidden="true"></div>
+        <div class="animarr-boot__label">@BootLabel</div>
+    </div>
+}
+
+@code {
+    private bool _ready;
+
+    /// <summary>The boot screen's caption, before the pack is in — the same
+    /// strings index.html shows (and the pack's catalog.loading after it).</summary>
+    private static string BootLabel =>
+        System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        {
+            "ru" => "Загружаем библиотеку…",
+            "uk" => "Завантаження бібліотеки…",
+            "de" => "Bibliothek wird geladen…",
+            "es" => "Cargando biblioteca…",
+            _    => "Loading library…",
+        };
+
+    protected override void OnInitialized() => _ready = Loc.IsLoaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _ready) return;
+        // Capped: if the pack has to come over HTTP from a dead server, show
+        // the app (with keys) rather than a blank screen.
+        await Task.WhenAny(LoadPackAsync(), Task.Delay(1500));
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task LoadPackAsync()
+    {
+        string? cached = null;
+        try { cached = await JS.InvokeAsync<string?>("localStorage.getItem", "animarr-lang"); }
+        catch { /* storage blocked — the device language decides */ }
+        try { await Loc.LoadAsync(Loc.ResolveBootLanguage(cached)); }
+        catch { /* keys-as-values fallback */ }
+    }
+}

@@ -176,6 +176,13 @@ public class MainActivity : MauiAppCompatActivity
         // MdnsBrowserService. Activity.OnCreate is too late for that.
         base.OnCreate(savedInstanceState);
 
+        // The WebView and its parents are transparent (native-video
+        // passthrough), so until index.html paints, the window background
+        // shows — the light theme's white flashed between the splash and the
+        // boot screen. Paint it the boot screen's colour instead.
+        Window?.SetBackgroundDrawable(
+            new Android.Graphics.Drawables.ColorDrawable(Android.Graphics.Color.ParseColor("#0b0d10")));
+
         // UI-scale diagnostics: which density each context actually reports.
         try
         {
@@ -331,8 +338,28 @@ public class MainActivity : MauiAppCompatActivity
 #pragma warning disable CA1422 // OnBackPressed is deprecated on API 33+ but still fires
     public override void OnBackPressed()
     {
+        if (TryHandleWebViewBack()) return;
+        base.OnBackPressed();
+    }
+#pragma warning restore CA1422
+
+    /// <summary>Back decision for the phone's WebView shell. In JS: close the
+    /// topmost drawer / modal / player; else pop one route; else, off the root,
+    /// go Home (a deep link has no history); on Home itself send the app to the
+    /// background. Shared by <see cref="OnBackPressed"/> and
+    /// <c>MainPage.OnBackButtonPressed</c> — on Android 13+ Back reaches MAUI's
+    /// page hook, not the activity, and MAUI's default then moved the app to
+    /// the background, so Back from Settings looked like the app closing.
+    ///
+    /// The WebView can also step back through its own history on the same
+    /// press, before this script runs (seen on API 36): the page is already
+    /// Home by then. index.html stamps every popstate, and a fresh stamp
+    /// means the press was handled — deciding again would exit the app from
+    /// a Back that only meant "leave Settings".</summary>
+    internal bool TryHandleWebViewBack()
+    {
         // Player HUD open → Back closes the HUD, not the page.
-        if (PlayerPage.HandleGlobalBack()) return;
+        if (PlayerPage.HandleGlobalBack()) return true;
 
         // Native TV flow (no WebView on these pages): pop the MAUI navigation
         // stack — player → detail → catalog — before anything else, so BACK
@@ -346,7 +373,7 @@ public class MainActivity : MauiAppCompatActivity
             if (nav?.NavigationStack is { Count: > 1 })
             {
                 _ = nav.PopAsync();
-                return;
+                return true;
             }
         }
         catch { /* fall through to the WebView / default handler */ }
@@ -358,18 +385,22 @@ public class MainActivity : MauiAppCompatActivity
             {
                 webView.EvaluateJavascript(
                     "(function(){" +
+                    "  if (window.__animarrPoppedAt && performance.now() - window.__animarrPoppedAt < 400) return 'pop';" +
                     "  if (window.animarrHandleBack && window.animarrHandleBack()) return 'consumed';" +
-                    "  if (window.history.length > 1) { window.history.back(); return 'pop'; }" +
+                    "  var p = location.pathname;" +
+                    "  if (p === '/' || p === '/welcome') return 'exit';" +
+                    "  var can = window.navigation ? window.navigation.canGoBack : window.history.length > 1;" +
+                    "  if (can) { window.history.back(); return 'pop'; }" +
+                    "  if (window.Blazor && window.Blazor.navigateTo) { window.Blazor.navigateTo('/'); return 'home'; }" +
                     "  return 'exit';" +
                     "})()",
                     new BackResultCallback(this));
-                return;
+                return true;
             }
         }
         catch { /* WebView missing or threw — fall through to default */ }
-        base.OnBackPressed();
+        return false;
     }
-#pragma warning restore CA1422
 
     /// <summary>Status-bar / nav-bar heights in CSS px, in a static so the
     /// JS string built in <see cref="SafeAreaCssSnippet"/> can be consumed
@@ -409,9 +440,15 @@ public class MainActivity : MauiAppCompatActivity
         // JSON-encode the CSS string so quotes/newlines are safe inside the
         // injected JS literal.
         var json = System.Text.Json.JsonSerializer.Serialize(css);
+        // The first push can land while index.html is still parsing — no
+        // <head> yet. apply() threw on it and, the retries being scheduled
+        // after that call, never ran: some launches kept no safe-area at all
+        // (top bar under the status bar, tab bar under the gesture bar). The
+        // timers go first now and apply() waits for <head>.
         return
             "(function(){" +
             "  function apply(){" +
+            "    if(!document.head||!document.documentElement)return;" +
             "    var el=document.getElementById('animarr-safe-style');" +
             "    if(!el){el=document.createElement('style');el.id='animarr-safe-style';document.head.appendChild(el);}" +
             "    el.textContent=" + json + ";" +
@@ -419,8 +456,9 @@ public class MainActivity : MauiAppCompatActivity
             "    d.style.setProperty('--animarr-safe-top','" + top + "px');" +
             "    d.style.setProperty('--animarr-safe-bottom','" + bot + "px');" +
             "  }" +
-            "  apply();" +
             "  setTimeout(apply,400);setTimeout(apply,1200);setTimeout(apply,2500);" +
+            "  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);" +
+            "  apply();" +
             "})();";
     }
 
@@ -532,9 +570,11 @@ public class MainActivity : MauiAppCompatActivity
     ///
     /// • "consumed" — a drawer / player closed in JS, stay put.
     /// • "pop"      — Blazor router popped one route, stay put.
-    /// • "exit"     — user was at Welcome with no history; finish() so
-    ///                the launcher takes over instead of leaving the
-    ///                app frozen on a dead screen.
+    /// • "home"     — no history off the root (deep link): went Home.
+    /// • "exit"     — user is on Home / Welcome: move the task to the
+    ///                background like the launcher's own Back. The activity
+    ///                stays alive, so reopening resumes where the user was
+    ///                instead of rebooting the WebView and reloading it all.
     /// • anything else (transport blip, null) — treat as 'exit'
     ///   defensively, the user can always relaunch.</summary>
     private sealed class BackResultCallback : Java.Lang.Object, global::Android.Webkit.IValueCallback
@@ -546,7 +586,8 @@ public class MainActivity : MauiAppCompatActivity
             var s = value?.ToString() ?? "";
             if (s.Contains("consumed", System.StringComparison.OrdinalIgnoreCase)) return;
             if (s.Contains("pop",      System.StringComparison.OrdinalIgnoreCase)) return;
-            _activity.RunOnUiThread(() => _activity.Finish());
+            if (s.Contains("home",     System.StringComparison.OrdinalIgnoreCase)) return;
+            _activity.RunOnUiThread(() => _activity.MoveTaskToBack(true));
         }
     }
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- Animarr app icon — foreground. New v6 mark from
      design-system/scratch-mark4.html: dark rounded tile + sharp geometric
-     "A" in teal accent + white sparkle in the top-right corner.
+     "A" in the orange accent + white sparkle in the top-right corner.
 
      MAUI emits this layer as the adaptive-icon foreground on Android and
      as the squircle/rounded-rect content on iOS / Windows. Aggressive
@@ -25,7 +25,7 @@
                Sparkle: M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z -->
         <g transform="scale(4.333)">
             <path d="M14 58 L32 12 L40 12 L58 58 L48 58 L43 46 L29 46 L24 58 Z M31 39 L41 39 L36 24 Z"
-                  fill="#84c0d2"
+                  fill="#f49157"
                   fill-rule="evenodd"/>
             <path d="M58 14 L60 18 L64 19 L60 21 L58 25 L56 21 L52 19 L56 18 Z"
                   fill="#ffffff"/>
