@@ -67,11 +67,18 @@ public sealed partial class HlsSessionService : IDisposable
     // sync. 4s keeps per-segment overhead modest while shaving start latency.
     private const double SegmentDurationSec = 4.0;
     /// <summary>Hard cap on concurrent active sessions across the whole host.
-    /// Single-user Animarr realistically has 1-2 (one main player + maybe a
-    /// background tab); anything past this is almost certainly leaked sessions
-    /// from tab-close-without-detach, and each one ties up an ffmpeg + tmpfs
-    /// dir, so we evict the oldest LRU when we hit the cap.</summary>
+    /// A household realistically has 1-3 (a player or two + maybe a background
+    /// tab); anything past this is almost certainly leaked sessions from
+    /// tab-close-without-detach, and each one ties up an ffmpeg + tmpfs dir, so
+    /// at the cap a start evicts — its own client's sessions first, then idle
+    /// ones (see <see cref="StartAsync"/>).</summary>
     private const int MaxConcurrentSessions = 5;
+
+    /// <summary>A session touched (segment fetch / keepalive) within this
+    /// window counts as someone's live playback and is never evicted for
+    /// another client. The players ping every 30 s, even while paused, so this
+    /// is three missed pings.</summary>
+    private static readonly TimeSpan ActiveSessionGrace = TimeSpan.FromSeconds(90);
 
     private readonly ILogger<HlsSessionService> _logger;
     private readonly HardwareInfoService? _hardware;
@@ -131,6 +138,22 @@ public sealed partial class HlsSessionService : IDisposable
     public sealed record StartResult(string Token, string ManifestRelativeUrl, double TotalDurationSec,
         PlayerOutputInfo Output);
 
+    /// <summary>
+    /// Who a session belongs to: the account (<paramref name="UserId"/>) and the
+    /// client device (<paramref name="ClientId"/>). A new start replaces only
+    /// sessions of the SAME owner — the "same player restarted with another
+    /// track/quality" case — so the TV and a browser, or two profiles, can watch
+    /// the same file side by side without killing each other's stream.
+    /// </summary>
+    public readonly record struct SessionOwner(string UserId, string ClientId)
+    {
+        /// <summary>For callers that can't say (none today) — they share one bucket.</summary>
+        public static readonly SessionOwner Unknown = new("", "");
+
+        public override string ToString()
+            => $"user={(string.IsNullOrEmpty(UserId) ? "-" : UserId)} client={(string.IsNullOrEmpty(ClientId) ? "-" : ClientId)}";
+    }
+
     /// <summary>How long <see cref="StartAsync"/> waits for ffmpeg's first
     /// segment (+ init for fMP4). Generous on purpose: a cold-cache seek into a
     /// huge UHD MKV can take 10–30 s before the first flush.</summary>
@@ -150,6 +173,8 @@ public sealed partial class HlsSessionService : IDisposable
         public const string FfmpegExited = "ffmpeg_exited";
         /// <summary>ffmpeg still running but no first segment within <see cref="StartupTimeout"/> (504).</summary>
         public const string FfmpegTimeout = "ffmpeg_timeout";
+        /// <summary>At the session cap and every session is another client's live playback (503).</summary>
+        public const string TooManySessions = "too_many_sessions";
 
         public string Code { get; } = code;
         public int StatusCode { get; } = statusCode;
@@ -516,11 +541,21 @@ public sealed partial class HlsSessionService : IDisposable
         // Cap output video bitrate in Mbps (player Bitrate menu). >0 forces a
         // re-encode at this bitrate; 0 = no cap. Carried on the session so
         // seek-restarts keep it (mirrors maxHeight).
-        int maxBitrate = 0)
+        int maxBitrate = 0,
+        // Whose session this is (account + client device, see SessionOwner).
+        // Dedup and cap eviction only ever replace the caller's own sessions
+        // or idle ones — never another client's live playback.
+        SessionOwner? owner = null)
     {
+        var who = owner ?? SessionOwner.Unknown;
+
         // ─── Pre-flight cleanup: dedupe + cap ──────────────────────────────
-        // 1) Kill EXISTING sessions for the same source file — a second Play
-        //    on the same movie means the user wants the new one. We exempt
+        // 1) Kill this CLIENT's existing sessions for the same source file — a
+        //    second Play on the same movie from the same player (another
+        //    audio track / quality, a reload) means it wants the new one. The
+        //    key is (user, device, path), not the path alone: the path-only
+        //    dedup tore down the TV's stream when a browser opened the same
+        //    episode, or one profile's when another started it. We exempt
         //    very recently created sessions (<3s) because they're still in
         //    their startup wait loop, and tearing them down mid-startup is
         //    what caused "first attempt doesn't start, retry works" — the
@@ -529,29 +564,48 @@ public sealed partial class HlsSessionService : IDisposable
         //    again from scratch.
         var dedupCutoff = DateTime.UtcNow - TimeSpan.FromSeconds(3);
         var stalePathSessions = _sessions
-            .Where(kv => string.Equals(kv.Value.SourcePath, fullPath, StringComparison.OrdinalIgnoreCase)
+            .Where(kv => kv.Value.Owner == who
+                      && string.Equals(kv.Value.SourcePath, fullPath, StringComparison.OrdinalIgnoreCase)
                       && kv.Value.CreatedAt < dedupCutoff)
             .Select(kv => kv.Key)
             .ToList();
         foreach (var t in stalePathSessions)
         {
-            _logger.LogInformation("HLS: reaping prior session {Token} for same source", t);
+            _logger.LogInformation("HLS: reaping prior session {Token} for same source ({Owner})", t, who);
             Stop(t);
         }
 
         // 2) Enforce the global cap. If we're at the limit AFTER the dedup
-        //    step, evict the oldest-activity session — this catches the case
-        //    where the user has multiple tabs open on different files and
-        //    has accumulated leaked sessions from earlier closes.
+        //    step, evict — in this order — the caller's own oldest session
+        //    (leaked tabs on other files), then the least recently used IDLE
+        //    session of anyone (no segment fetch / keepalive for
+        //    ActiveSessionGrace: a closed tab or a crashed client). Other
+        //    clients' live sessions are never evicted: when every slot is
+        //    one, this start fails with 503 instead of cutting off someone's
+        //    playback.
         while (_sessions.Count >= MaxConcurrentSessions)
         {
-            var oldest = _sessions
+            var idleCutoff = DateTime.UtcNow - ActiveSessionGrace;
+            var victim = _sessions
+                .Where(kv => kv.Value.Owner == who)
+                .OrderBy(kv => kv.Value.LastActive)
+                .Select(kv => kv.Key)
+                .FirstOrDefault()
+                ?? _sessions
+                .Where(kv => kv.Value.LastActive < idleCutoff)
                 .OrderBy(kv => kv.Value.LastActive)
                 .Select(kv => kv.Key)
                 .FirstOrDefault();
-            if (oldest is null) break;
-            _logger.LogInformation("HLS: at session cap, evicting LRU {Token}", oldest);
-            Stop(oldest);
+            if (victim is null)
+            {
+                _logger.LogWarning("HLS: at the session cap ({Max}) and every session is another client's live playback — refusing start for {Path} ({Owner})",
+                    MaxConcurrentSessions, fullPath, who);
+                throw new StartFailedException(StartFailedException.TooManySessions, StatusCodes.Status503ServiceUnavailable,
+                    $"The server is already streaming {MaxConcurrentSessions} sessions to other players.");
+            }
+            _logger.LogInformation("HLS: at session cap, evicting {Token} ({Owner})", victim,
+                _sessions.TryGetValue(victim, out var v) ? v.Owner : default);
+            Stop(victim);
         }
 
         var token = Guid.NewGuid().ToString("N");
@@ -697,9 +751,9 @@ public sealed partial class HlsSessionService : IDisposable
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
         var toneMapper = ToneMapperFor(plan, probe);
-        _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap}",
+        _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap} {Owner}",
             token, plan, (int)Math.Round(audioOffsetSec * 1000),
-            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper);
+            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper, who);
         var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
@@ -720,7 +774,7 @@ public sealed partial class HlsSessionService : IDisposable
         var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
             externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false,
-            startSegment: startSegment, toneMapper: toneMapper);
+            startSegment: startSegment, toneMapper: toneMapper, owner: who);
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
         // mid-start — the endpoint passes RequestAborted): stop the session's

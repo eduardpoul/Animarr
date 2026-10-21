@@ -77,6 +77,7 @@ internal static class HlsEndpoints
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
             HlsSessionService hls,
+            DeviceTrust deviceTrust,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
     {
@@ -198,7 +199,9 @@ internal static class HlsEndpoints
                 maxBitrate:       Math.Max(0, maxBitrate ?? 0),
                 // An abandoned start (rapid Next/Prev, player closed mid-start)
                 // stops its ffmpeg instead of encoding on for the 5-min idle GC.
-                ct:               http.RequestAborted);
+                ct:               http.RequestAborted,
+                // Replaces only this client's earlier session on the same file.
+                owner:            await SessionOwnerAsync(http, deviceTrust));
             return Results.Ok(new
             {
                 token        = result.Token,
@@ -351,6 +354,33 @@ internal static class HlsEndpoints
     .RequireAuthorization(AuthConstants.Policies.SystemSettings);
 
         return app;
+    }
+
+    /// <summary>
+    /// Who is starting this session — the HLS dedup / eviction key next to the
+    /// path (<see cref="HlsSessionService.SessionOwner"/>).
+    ///   • User: the account claim, present for the cookie and for media tokens
+    ///     (session and link kinds; a DLNA link has none → "").
+    ///   • Client: the server-issued device id from the sealed
+    ///     <c>animarr_device</c> cookie (browsers, the MAUI shells and the TV
+    ///     keep it in their cookie jars). The media token can't serve: session
+    ///     tokens are per USER (identical on every device in a 6-hour bucket).
+    ///     A cookie-less caller (curl, a stripped proxy) falls back to a hash of
+    ///     remote address + User-Agent — stable for one device, distinct across
+    ///     devices on the LAN.
+    /// </summary>
+    private static async Task<HlsSessionService.SessionOwner> SessionOwnerAsync(HttpContext http, DeviceTrust deviceTrust)
+    {
+        var user = http.User.FindFirst(AuthConstants.UserIdClaim)?.Value ?? "";
+        Guid? device = null;
+        try { device = await deviceTrust.GetDeviceIdAsync(http, http.RequestAborted); }
+        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
+        catch { /* DB hiccup — fall back to the address-based id below */ }
+        if (device is Guid d) return new(user, "d:" + d.ToString("N"));
+
+        var fingerprint = $"{http.Connection.RemoteIpAddress}|{http.Request.Headers.UserAgent}";
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint));
+        return new(user, "a:" + Convert.ToHexString(hash, 0, 8).ToLowerInvariant());
     }
 
     /// <summary>

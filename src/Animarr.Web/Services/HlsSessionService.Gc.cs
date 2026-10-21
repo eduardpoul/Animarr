@@ -99,7 +99,9 @@ public sealed partial class HlsSessionService
                 SegmentsReady:   Math.Max(produced, 0),
                 IdleSec:         (DateTime.UtcNow - s.LastActive).TotalSeconds,
                 FfmpegExited:    exited,
-                FfmpegExitCode:  exited ? s.Process.ExitCode : (int?)null
+                FfmpegExitCode:  exited ? s.Process.ExitCode : (int?)null,
+                OwnerUserId:     s.Owner.UserId,
+                OwnerClientId:   s.Owner.ClientId
             );
         }).ToArray();
     }
@@ -107,7 +109,9 @@ public sealed partial class HlsSessionService
     public sealed record HlsSessionStatus(
         string Token, string SourcePath, double StartSeekSec,
         int SegmentsTotal, int SegmentsReady, double IdleSec,
-        bool FfmpegExited, int? FfmpegExitCode);
+        bool FfmpegExited, int? FfmpegExitCode,
+        // Who started it (see SessionOwner) — for "whose stream is this".
+        string? OwnerUserId = null, string? OwnerClientId = null);
 
     private static void TryRemoveDir(string dir)
     {

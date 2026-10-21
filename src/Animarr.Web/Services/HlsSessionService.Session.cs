@@ -45,6 +45,9 @@ public sealed partial class HlsSessionService
         /// <summary>HDR → SDR mapper chosen at start — a seek-restart only has a
         /// minimal probe (no colour transfer), so it reuses this.</summary>
         public HdrToneMapper ToneMapper { get; }
+        /// <summary>Account + client device that started the session — the
+        /// dedup / eviction key next to the source path.</summary>
+        public SessionOwner Owner { get; }
         public DateTime CreatedAt  { get; }
         public DateTime LastActive { get; private set; }
 
@@ -101,8 +104,9 @@ public sealed partial class HlsSessionService
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
             int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
             string? audioCodec = null, bool is10Bit = false, int startSegment = 0,
-            HdrToneMapper toneMapper = HdrToneMapper.None)
+            HdrToneMapper toneMapper = HdrToneMapper.None, SessionOwner owner = default)
         {
+            Owner           = owner;
             ToneMapper      = toneMapper;
             RunStartSegment = startSegment;
             ProducedTop     = startSegment - 1;
