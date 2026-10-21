@@ -63,6 +63,7 @@ internal sealed class TvHomeView : FrameLayout
     private readonly RowsAdapter _adapter;
     private readonly List<object> _rowModels = new();
     private HeroHolder? _hero;
+    private readonly FocusKeeper _focus;
 
     // hero carousel
     private TvData.ContinueItem[] _feed = Array.Empty<TvData.ContinueItem>();
@@ -93,6 +94,7 @@ internal sealed class TvHomeView : FrameLayout
         _adapter = new RowsAdapter(this);
         _rows.SetAdapter(_adapter);
         AddView(_rows, new LayoutParams(-1, -1));
+        _focus = new FocusKeeper(this);
 
         _rowModels.Add(HeroRowMarker.Instance);
         _ = LoadAsync();
@@ -156,6 +158,7 @@ internal sealed class TvHomeView : FrameLayout
     /// <summary>Back from detail / player: refresh the resume feed (progress moved).</summary>
     public void OnReturn()
     {
+        _focus.Restore(() => _hero?.FocusPrimary());
         if ((DateTime.UtcNow - _lastRefresh).TotalSeconds < 5) return;
         _lastRefresh = DateTime.UtcNow;
         _ = RefreshFeedAsync();
@@ -467,6 +470,7 @@ internal sealed class TvHomeView : FrameLayout
 
             var col = TvUi.Column(ctx);
             col.SetClipChildren(false);
+            col.SetClipToPadding(false);
             col.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, TvUi.SafeY), TvUi.Dp(ctx, TvUi.SafeX), 0);
             root.AddView(col, new FrameLayout.LayoutParams(-1, -1));
 

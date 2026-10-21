@@ -22,10 +22,10 @@ public sealed class WhosWatchingPage : ContentPage
 {
     public enum PickerMode { Startup, Switch }
 
-    private static readonly Color Bg     = Color.FromArgb("#0a0c10");
-    private static readonly Color Card   = Color.FromArgb("#151a21");
-    private static readonly Color Accent = Color.FromArgb("#e8772e");
-    private static readonly Color Dim    = Color.FromArgb("#7b8290");
+    private static readonly Color Bg     = Color.FromArgb("#1c1c1c");
+    private static readonly Color Card   = Color.FromArgb("#2b2b2b");
+    private static readonly Color Accent = Color.FromArgb("#bb5000");
+    private static readonly Color Dim    = Color.FromArgb("#9a9a9a");
 
     private readonly PickerMode _mode;
     private readonly FlexLayout _grid = new()
@@ -34,9 +34,9 @@ public sealed class WhosWatchingPage : ContentPage
         Direction = Microsoft.Maui.Layouts.FlexDirection.Row,
         JustifyContent = Microsoft.Maui.Layouts.FlexJustify.Center,
     };
-    private readonly Label _toggleValue = new() { FontFamily = "Geist", FontSize = 15, FontAttributes = FontAttributes.Bold, VerticalOptions = LayoutOptions.Center };
-    private readonly Label _toggleHint  = new() { TextColor = Dim, FontFamily = "Geist", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _status      = new() { TextColor = Color.FromArgb("#e0908f"), FontFamily = "Geist", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center, IsVisible = false };
+    private readonly Label _toggleValue = new() { FontFamily = "sans-serif", FontSize = 15, FontAttributes = FontAttributes.Bold, VerticalOptions = LayoutOptions.Center };
+    private readonly Label _toggleHint  = new() { TextColor = Dim, FontFamily = "sans-serif", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _status      = new() { TextColor = Color.FromArgb("#e0908f"), FontFamily = "sans-serif", FontSize = 13, HorizontalTextAlignment = TextAlignment.Center, IsVisible = false };
     private DeviceStateDto? _state;
     private bool _defaultOn;
     private bool _loaded;
@@ -68,7 +68,7 @@ public sealed class WhosWatchingPage : ContentPage
         var title = new Label
         {
             Text = TvL.T("switch.title", "Кто смотрит?", "Who's watching?"),
-            TextColor = Colors.White, FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold,
+            TextColor = Colors.White, FontFamily = "sans-serif-medium", FontAttributes = FontAttributes.Bold,
             FontSize = 30, HorizontalTextAlignment = TextAlignment.Center,
         };
 
@@ -85,7 +85,7 @@ public sealed class WhosWatchingPage : ContentPage
                     new Label
                     {
                         Text = TvL.T("switch.default_label", "Входить по умолчанию", "Sign in by default"),
-                        TextColor = Colors.White, FontFamily = "Geist", FontSize = 15,
+                        TextColor = Colors.White, FontFamily = "sans-serif", FontSize = 15,
                         VerticalOptions = LayoutOptions.Center,
                     },
                     _toggleValue,
@@ -126,7 +126,7 @@ public sealed class WhosWatchingPage : ContentPage
             StrokeThickness = 0, BackgroundColor = Colors.Transparent,
             StrokeShape = new RoundRectangle { CornerRadius = 10 },
             Padding = new Thickness(18, 10),
-            Content = new Label { Text = text, TextColor = Color.FromArgb("#cfd3da"), FontFamily = "Geist", FontSize = 15 },
+            Content = new Label { Text = text, TextColor = Color.FromArgb("#d6d6d6"), FontFamily = "sans-serif", FontSize = 15 },
         };
         b.Behaviors.Add(new TvFocusBehavior { Radius = 10, Command = new Command(act) });
         return b;
@@ -182,7 +182,7 @@ public sealed class WhosWatchingPage : ContentPage
             HorizontalOptions = LayoutOptions.Center,
             Content = new Label
             {
-                Text = initial, TextColor = Colors.White, FontFamily = "ArchivoBlack",
+                Text = initial, TextColor = Colors.White, FontFamily = "sans-serif-medium",
                 FontAttributes = FontAttributes.Bold, FontSize = 30,
                 HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center,
             },
@@ -201,14 +201,14 @@ public sealed class WhosWatchingPage : ContentPage
                     disc,
                     new Label
                     {
-                        Text = p.Name, TextColor = Colors.White, FontFamily = "Geist", FontSize = 16,
+                        Text = p.Name, TextColor = Colors.White, FontFamily = "sans-serif", FontSize = 16,
                         FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center,
                         LineBreakMode = LineBreakMode.TailTruncation,
                     },
                     new Label
                     {
                         Text = (p.HasPin ? "🔒 " : "🔑 ") + role,
-                        TextColor = Dim, FontFamily = "Geist", FontSize = 12,
+                        TextColor = Dim, FontFamily = "sans-serif", FontSize = 12,
                         HorizontalTextAlignment = TextAlignment.Center,
                     },
                 },

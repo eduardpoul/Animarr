@@ -65,27 +65,21 @@ public static class TvFocus
                 // view's own drawing to its rounded outline (clipToOutline), so
                 // an outside-the-bounds ring vanishes — instead the 3dp accent
                 // ring hugs the edge with a 5dp soft glow bleeding inward.
+                // Fluent/Google-TV focus: one 3 dp white ring (no glow layer).
                 var ring = new Android.Graphics.Drawables.GradientDrawable();
                 ring.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
                 ring.SetCornerRadius(cornerDp * d);
-                ring.SetStroke((int)(3 * d), Android.Graphics.Color.ParseColor("#f5934f"));
-                var glow = new Android.Graphics.Drawables.GradientDrawable();
-                glow.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
-                glow.SetCornerRadius((cornerDp - 2) * d);
-                glow.SetStroke((int)(5 * d), Android.Graphics.Color.ParseColor("#40e8772e"));
-                var layers = new Android.Graphics.Drawables.LayerDrawable(
-                    new Android.Graphics.Drawables.Drawable[] { glow, ring });
-                int glowIn = (int)(2 * d);
-                layers.SetLayerInset(0, glowIn, glowIn, glowIn, glowIn);
-                v.Foreground = layers;
+                ring.SetStroke((int)(3 * d), Android.Graphics.Color.White);
+                v.Foreground = ring;
             }
-            if (!Bench.BenchLog.Has("noelev")) v.Elevation = 12 * d;
-            if (!Bench.BenchLog.Has("nobtf")) v.BringToFront();
+            // Draw above neighbours via Z — no elevation shadow (GPU) and no
+            // BringToFront (that requestLayout()s the whole parent).
+            v.TranslationZ = 1f;
         }
         else
         {
             v.Foreground = null;
-            v.Elevation = 0;
+            v.TranslationZ = 0f;
         }
     }
 

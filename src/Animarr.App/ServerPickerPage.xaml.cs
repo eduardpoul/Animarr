@@ -107,19 +107,19 @@ public partial class ServerPickerPage : ContentPage
                 new Label
                 {
                     Text = string.IsNullOrWhiteSpace(s.Name) ? "Animarr" : s.Name,
-                    TextColor = Colors.White, FontFamily = "Geist", FontSize = 17,
+                    TextColor = Colors.White, FontFamily = "sans-serif", FontSize = 17,
                 },
                 new Label
                 {
-                    Text = s.BaseUrl, TextColor = Color.FromArgb("#7b8290"),
-                    FontFamily = "GeistMono", FontSize = 12,
+                    Text = s.BaseUrl, TextColor = Color.FromArgb("#9a9a9a"),
+                    FontFamily = "sans-serif", FontSize = 12,
                 },
             },
         };
         var card = new Border
         {
             StrokeThickness = 0,
-            BackgroundColor = Color.FromArgb("#151a21"),
+            BackgroundColor = Color.FromArgb("#2b2b2b"),
             Padding = new Thickness(18, 12),
             StrokeShape = new RoundRectangle { CornerRadius = 10 },
             Content = stack,
@@ -173,7 +173,7 @@ public partial class ServerPickerPage : ContentPage
     private void SetStatus(string text, bool warn = false)
     {
         StatusLabel.Text = text;
-        StatusLabel.TextColor = warn ? Color.FromArgb("#e8a33d") : Color.FromArgb("#7b8290");
+        StatusLabel.TextColor = warn ? Color.FromArgb("#f49157") : Color.FromArgb("#9a9a9a");
     }
 
     // Accept "host", "host:port" or a full URL — default to http:// for the

@@ -61,10 +61,10 @@ public sealed class TvPinPage : ContentPage
     public static TvPinPage ForChange(int min, int max)
         => new(PinMode.Change, null, null, min, max);
 
-    private static readonly Color Bg     = Color.FromArgb("#0a0c10");
-    private static readonly Color Card   = Color.FromArgb("#151a21");
-    private static readonly Color Accent = Color.FromArgb("#e8772e");
-    private static readonly Color Dim    = Color.FromArgb("#7b8290");
+    private static readonly Color Bg     = Color.FromArgb("#1c1c1c");
+    private static readonly Color Card   = Color.FromArgb("#2b2b2b");
+    private static readonly Color Accent = Color.FromArgb("#bb5000");
+    private static readonly Color Dim    = Color.FromArgb("#9a9a9a");
     private static readonly Color Warn   = Color.FromArgb("#e0908f");
 
     private readonly PinMode _mode;
@@ -79,11 +79,11 @@ public sealed class TvPinPage : ContentPage
     private string? _currentPin;  // Change: the old PIN
     private readonly string? _userName;   // Setup: whose PIN ("Set a PIN for Anna")
 
-    private readonly Label _title = new() { TextColor = Colors.White, FontFamily = "ArchivoBlack", FontAttributes = FontAttributes.Bold, FontSize = 30, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _sub   = new() { TextColor = Color.FromArgb("#aeb4c0"), FontFamily = "Geist", FontSize = 15, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _error = new() { TextColor = Warn, FontFamily = "Geist", FontSize = 14, HorizontalTextAlignment = TextAlignment.Center, IsVisible = false };
+    private readonly Label _title = new() { TextColor = Colors.White, FontFamily = "sans-serif-medium", FontAttributes = FontAttributes.Bold, FontSize = 30, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _sub   = new() { TextColor = Color.FromArgb("#c8c8c8"), FontFamily = "sans-serif", FontSize = 15, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _error = new() { TextColor = Warn, FontFamily = "sans-serif", FontSize = 14, HorizontalTextAlignment = TextAlignment.Center, IsVisible = false };
     private readonly HorizontalStackLayout _dots = new() { Spacing = 14, HorizontalOptions = LayoutOptions.Center };
-    private readonly Label _okLabel = new() { Text = "OK", TextColor = Colors.White, FontFamily = "Geist", FontAttributes = FontAttributes.Bold, FontSize = 18, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
+    private readonly Label _okLabel = new() { Text = "OK", TextColor = Colors.White, FontFamily = "sans-serif", FontAttributes = FontAttributes.Bold, FontSize = 18, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
     private Border? _firstKey;
 
     private TvPinPage(PinMode mode, DeviceProfileDto? target, bool? makeDefault, int min, int max, string? userName = null)
@@ -121,7 +121,7 @@ public sealed class TvPinPage : ContentPage
         var eyebrow = new Label
         {
             Text = "PIN",
-            TextColor = Color.FromArgb("#e8a33d"), FontFamily = "GeistMono", FontSize = 12,
+            TextColor = Color.FromArgb("#f49157"), FontFamily = "sans-serif", FontSize = 12,
             CharacterSpacing = 3, HorizontalTextAlignment = TextAlignment.Center,
         };
 
@@ -186,7 +186,7 @@ public sealed class TvPinPage : ContentPage
                 Text = TvL.T("setpin.why",
                     "У каждого профиля свой PIN на этом устройстве, поэтому никто другой не откроет ваш.",
                     "Each profile has its own PIN on this device, so no one else can open yours."),
-                TextColor = Dim, FontFamily = "Geist", FontSize = 12,
+                TextColor = Dim, FontFamily = "sans-serif", FontSize = 12,
             });
         }
 
@@ -233,8 +233,8 @@ public sealed class TvPinPage : ContentPage
             Padding = new Thickness(18, 10),
             Content = new Label
             {
-                Text = text, FontFamily = "Geist", FontSize = 15,
-                TextColor = danger ? Warn : Color.FromArgb("#cfd3da"),
+                Text = text, FontFamily = "sans-serif", FontSize = 15,
+                TextColor = danger ? Warn : Color.FromArgb("#d6d6d6"),
             },
         };
         b.Behaviors.Add(new TvFocusBehavior { Radius = 10, Command = new Command(act) });
@@ -293,7 +293,7 @@ public sealed class TvPinPage : ContentPage
             _dots.Children.Add(new Label
             {
                 Text = i < _buffer.Length ? "●" : "○",
-                TextColor = i < _buffer.Length ? Accent : Color.FromArgb("#5b6472"),
+                TextColor = i < _buffer.Length ? Accent : Color.FromArgb("#8f8f8f"),
                 FontSize = 22,
             });
         }

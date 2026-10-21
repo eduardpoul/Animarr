@@ -744,8 +744,8 @@ public partial class PlayerPage : ContentPage
         var label = new Label
         {
             Text = (r.Selected ? "●  " : "      ") + r.Label,
-            TextColor = r.Selected ? Color.FromArgb("#e8a33d") : Colors.White,
-            FontFamily = "Geist",
+            TextColor = r.Selected ? Color.FromArgb("#f49157") : Colors.White,
+            FontFamily = "sans-serif",
             FontSize = 15,
             VerticalOptions = LayoutOptions.Center,
         };

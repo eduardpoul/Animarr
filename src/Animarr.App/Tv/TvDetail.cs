@@ -54,6 +54,7 @@ internal sealed class TvDetailView : FrameLayout
     private List<CardItem> _episodes = new();
     private readonly string? _initialTitle;
     private HeaderHolder? _header;
+    private readonly FocusKeeper _focus;
 
     public TvDetailView(Context ctx, ContentPage page, string id, string? title, string? fanartPath) : base(ctx)
     {
@@ -76,6 +77,7 @@ internal sealed class TvDetailView : FrameLayout
         _adapter = new RowsAdapter(this);
         _rows.SetAdapter(_adapter);
         AddView(_rows, new LayoutParams(-1, -1));
+        _focus = new FocusKeeper(this);
 
         // the backdrop scrolls away with the header (no fixed full-screen layer)
         _rows.AddOnScrollListener(new ScrollFollower(_backdrop));
@@ -126,7 +128,11 @@ internal sealed class TvDetailView : FrameLayout
         catch (Exception ex) { Android.Util.Log.Warn("AnimarrTv", $"detail load: {ex.Message}"); }
     }
 
-    public void RefreshWatch() => _ = RefreshWatchAsync();
+    public void RefreshWatch()
+    {
+        _focus.Restore(() => _header?.FocusPlay());
+        _ = RefreshWatchAsync();
+    }
 
     private async Task RefreshWatchAsync()
     {
@@ -284,6 +290,7 @@ internal sealed class TvDetailView : FrameLayout
             var col = (LinearLayout)ItemView;
             col.LayoutParameters = new RecyclerView.LayoutParams(-1, -2);
             col.SetClipChildren(false);
+            col.SetClipToPadding(false);
             col.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 96), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 8));
 
             _title = TvUi.Text_(ctx, TvUi.TDisplay, TvUi.Text, TvUi.Semibold, 2, d._initialTitle);
@@ -356,6 +363,7 @@ internal sealed class TvDetailView : FrameLayout
             sv.SetClipChildren(false);
             _row = TvUi.Row(ctx);
             _row.SetClipChildren(false);
+            _row.SetClipToPadding(false);
             _row.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 14), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 10));
             sv.AddView(_row, new ViewGroup.LayoutParams(-2, -1));
         }
@@ -384,6 +392,7 @@ internal sealed class TvDetailView : FrameLayout
             var row = (LinearLayout)ItemView;
             row.LayoutParameters = new RecyclerView.LayoutParams(-1, -2);
             row.SetClipChildren(false);
+            row.SetClipToPadding(false);
             row.SetPadding(TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 10), TvUi.Dp(ctx, TvUi.SafeX), TvUi.Dp(ctx, 6));
             for (int i = 0; i < PerRow; i++)
             {

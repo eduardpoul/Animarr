@@ -4,7 +4,7 @@
              xmlns:local="clr-namespace:Animarr.App"
              x:Class="Animarr.App.ProfilePanelPage"
              x:Name="Root"
-             BackgroundColor="#0a0c10">
+             BackgroundColor="#1c1c1c">
     <ScrollView>
         <VerticalStackLayout Padding="56,44,56,60" Spacing="36"
                              MaximumWidthRequest="1100" HorizontalOptions="Center">
@@ -18,65 +18,65 @@
                     <Label Text="‹" TextColor="White" FontSize="26" TranslationY="-2" HorizontalOptions="Center"
                            VerticalOptions="Center" />
                 </Border>
-                <Label x:Name="EyebrowLabel" Text="ПРОФИЛЬ" TextColor="#e8a33d" FontFamily="GeistMono"
+                <Label x:Name="EyebrowLabel" Text="ПРОФИЛЬ" TextColor="#f49157" FontFamily="sans-serif"
                        FontSize="12" CharacterSpacing="3" VerticalOptions="Center" />
             </HorizontalStackLayout>
 
             <!-- who's watching -->
             <VerticalStackLayout Spacing="16">
-                <Label x:Name="RosterTitle" Text="Кто смотрит" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <Label x:Name="RosterTitle" Text="Кто смотрит" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="24" />
                 <FlexLayout x:Name="RosterHost" Wrap="Wrap" Direction="Row" />
             </VerticalStackLayout>
 
             <!-- this device: "Who's watching" picker, default profile, own PIN.
                  Hidden on servers without per-device profiles. -->
             <VerticalStackLayout x:Name="DeviceSection" Spacing="16" IsVisible="False">
-                <Label x:Name="DeviceTitle" Text="Это устройство" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <Label x:Name="DeviceTitle" Text="Это устройство" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="24" />
                 <HorizontalStackLayout Spacing="12">
                     <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            BackgroundColor="#151a21" Padding="22,13">
+                            BackgroundColor="#2b2b2b" Padding="22,13">
                         <Border.Behaviors>
                             <local:TvFocusBehavior x:Name="SwitchUserFocus" Radius="10" />
                         </Border.Behaviors>
-                        <Label x:Name="SwitchUserLabel" Text="Сменить пользователя" TextColor="White" FontFamily="Geist" FontSize="15" />
+                        <Label x:Name="SwitchUserLabel" Text="Сменить пользователя" TextColor="White" FontFamily="sans-serif" FontSize="15" />
                     </Border>
                     <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            BackgroundColor="#151a21" Padding="22,13">
+                            BackgroundColor="#2b2b2b" Padding="22,13">
                         <Border.Behaviors>
                             <local:TvFocusBehavior x:Name="DefaultFocus" Radius="10" />
                         </Border.Behaviors>
                         <HorizontalStackLayout Spacing="12">
-                            <Label x:Name="DefaultLabel" Text="Входить по умолчанию" TextColor="White" FontFamily="Geist" FontSize="15" />
-                            <Label x:Name="DefaultValue" Text="Выкл." TextColor="#7b8290" FontFamily="Geist" FontAttributes="Bold" FontSize="15" />
+                            <Label x:Name="DefaultLabel" Text="Входить по умолчанию" TextColor="White" FontFamily="sans-serif" FontSize="15" />
+                            <Label x:Name="DefaultValue" Text="Выкл." TextColor="#9a9a9a" FontFamily="sans-serif" FontAttributes="Bold" FontSize="15" />
                         </HorizontalStackLayout>
                     </Border>
                     <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            BackgroundColor="#151a21" Padding="22,13">
+                            BackgroundColor="#2b2b2b" Padding="22,13">
                         <Border.Behaviors>
                             <local:TvFocusBehavior x:Name="ChangePinFocus" Radius="10" />
                         </Border.Behaviors>
-                        <Label x:Name="ChangePinLabel" Text="Сменить PIN" TextColor="White" FontFamily="Geist" FontSize="15" />
+                        <Label x:Name="ChangePinLabel" Text="Сменить PIN" TextColor="White" FontFamily="sans-serif" FontSize="15" />
                     </Border>
                 </HorizontalStackLayout>
-                <Label x:Name="DefaultHint" Text="" TextColor="#7b8290" FontFamily="Geist" FontSize="13" />
+                <Label x:Name="DefaultHint" Text="" TextColor="#9a9a9a" FontFamily="sans-serif" FontSize="13" />
             </VerticalStackLayout>
 
             <!-- interface language. HorizontalStackLayout, NOT FlexLayout: a
                  FlexLayout mis-measures chips added after the first layout pass
                  (async prefs load) and clips the last glyph of each label. -->
             <VerticalStackLayout Spacing="16">
-                <Label x:Name="LangTitle" Text="Язык интерфейса" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <Label x:Name="LangTitle" Text="Язык интерфейса" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="24" />
                 <!-- web-style select: closed box + ▾, OK opens the option sheet -->
                 <Border x:Name="LangSelect" WidthRequest="320" HorizontalOptions="Start"
                         StrokeThickness="1" Stroke="#26FFFFFF" StrokeShape="RoundRectangle 10"
-                        BackgroundColor="#151a21" Padding="16,11">
+                        BackgroundColor="#2b2b2b" Padding="16,11">
                     <Border.Behaviors>
                         <local:TvFocusBehavior x:Name="LangSelectFocus" Radius="10" />
                     </Border.Behaviors>
                     <Grid ColumnDefinitions="*,Auto">
                         <Label x:Name="LangValue" Text="…" TextColor="White"
-                               FontFamily="Geist" FontSize="14" />
-                        <Label Grid.Column="1" Text="▾" TextColor="#8a91a0" FontSize="12"
+                               FontFamily="sans-serif" FontSize="14" />
+                        <Label Grid.Column="1" Text="▾" TextColor="#9a9a9a" FontSize="12"
                                VerticalOptions="Center" />
                     </Grid>
                 </Border>
@@ -84,17 +84,17 @@
 
             <!-- interface scale (TV-only text zoom: small / normal / large) -->
             <VerticalStackLayout Spacing="16">
-                <Label x:Name="ScaleTitle" Text="Масштаб интерфейса" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <Label x:Name="ScaleTitle" Text="Масштаб интерфейса" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="24" />
                 <Border x:Name="ScaleSelect" WidthRequest="320" HorizontalOptions="Start"
                         StrokeThickness="1" Stroke="#26FFFFFF" StrokeShape="RoundRectangle 10"
-                        BackgroundColor="#151a21" Padding="16,11">
+                        BackgroundColor="#2b2b2b" Padding="16,11">
                     <Border.Behaviors>
                         <local:TvFocusBehavior x:Name="ScaleSelectFocus" Radius="10" />
                     </Border.Behaviors>
                     <Grid ColumnDefinitions="*,Auto">
                         <Label x:Name="ScaleValue" Text="Обычный" TextColor="White"
-                               FontFamily="Geist" FontSize="14" />
-                        <Label Grid.Column="1" Text="▾" TextColor="#8a91a0" FontSize="12"
+                               FontFamily="sans-serif" FontSize="14" />
+                        <Label Grid.Column="1" Text="▾" TextColor="#9a9a9a" FontSize="12"
                                VerticalOptions="Center" />
                     </Grid>
                 </Border>
@@ -102,27 +102,27 @@
 
             <!-- server + logout -->
             <VerticalStackLayout Spacing="16">
-                <Label x:Name="ServerTitle" Text="Сервер" TextColor="White" FontFamily="ArchivoBlack" FontAttributes="Bold" FontSize="24" />
+                <Label x:Name="ServerTitle" Text="Сервер" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold" FontSize="24" />
                 <HorizontalStackLayout Spacing="12">
                     <Border StrokeThickness="0" StrokeShape="RoundRectangle 10"
-                            BackgroundColor="#151a21" Padding="22,13">
+                            BackgroundColor="#2b2b2b" Padding="22,13">
                         <Border.Behaviors>
                             <local:TvFocusBehavior x:Name="ChangeServerFocus" Radius="10" />
                         </Border.Behaviors>
-                        <Label x:Name="ChangeServerLabel" Text="Сменить сервер" TextColor="White" FontFamily="Geist" FontSize="15" />
+                        <Label x:Name="ChangeServerLabel" Text="Сменить сервер" TextColor="White" FontFamily="sans-serif" FontSize="15" />
                     </Border>
                     <Border StrokeThickness="1" Stroke="#3a2020" StrokeShape="RoundRectangle 10"
                             BackgroundColor="#1a1315" Padding="22,13">
                         <Border.Behaviors>
                             <local:TvFocusBehavior x:Name="LogoutFocus" Radius="10" />
                         </Border.Behaviors>
-                        <Label x:Name="LogoutLabel" Text="Выйти" TextColor="#e0908f" FontFamily="Geist" FontSize="15" />
+                        <Label x:Name="LogoutLabel" Text="Выйти" TextColor="#e0908f" FontFamily="sans-serif" FontSize="15" />
                     </Border>
                 </HorizontalStackLayout>
             </VerticalStackLayout>
 
-            <Label x:Name="StatusLabel" Text="" TextColor="#7b8290"
-                   FontFamily="GeistMono" FontSize="12" />
+            <Label x:Name="StatusLabel" Text="" TextColor="#9a9a9a"
+                   FontFamily="sans-serif" FontSize="12" />
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

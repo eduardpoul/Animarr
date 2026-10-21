@@ -48,13 +48,22 @@ internal static class TvUi
 
     /// <summary>Accent = oklch(0.56 0.16 hue) / accent-hi = oklch(0.75 0.14 hue),
     /// hue from the user's AccentHue preference (web default 50).</summary>
-    public static AColor Accent   { get; private set; } = Oklch(0.56, 0.16, 50);
-    public static AColor AccentHi { get; private set; } = Oklch(0.75, 0.14, 50);
+    public static AColor Accent   { get; private set; } = Oklch(0.56, 0.16, SavedHue());
+    public static AColor AccentHi { get; private set; } = Oklch(0.75, 0.14, SavedHue());
 
+    private const string HueKey = "animarr_tv_accent_hue";
+    private static int SavedHue()
+    {
+        try { return Microsoft.Maui.Storage.Preferences.Get(HueKey, 50); } catch { return 50; }
+    }
+
+    /// <summary>Apply + remember the profile's accent, so the next launch paints
+    /// the right colour from the first frame (no default-orange flash).</summary>
     public static void SetAccentHue(int hue)
     {
         Accent = Oklch(0.56, 0.16, hue);
         AccentHi = Oklch(0.75, 0.14, hue);
+        try { Microsoft.Maui.Storage.Preferences.Set(HueKey, hue); } catch { }
     }
 
     // ── Units ────────────────────────────────────────────────────────────────
@@ -174,6 +183,36 @@ internal static class TvUi
         }
         return AColor.Rgb(Gam(r), Gam(g), Gam(bl));
     }
+}
+
+/// <summary>Remembers the last focused view inside a native screen and puts
+/// focus back there when the page re-appears (after the player / detail page),
+/// so the remote never lands "nowhere" and Back keeps its meaning.</summary>
+internal sealed class FocusKeeper : Java.Lang.Object, ViewTreeObserver.IOnGlobalFocusChangeListener
+{
+    private readonly ViewGroup _root;
+    private WeakReference<AView>? _last;
+    public FocusKeeper(ViewGroup root)
+    {
+        _root = root;
+        root.ViewAttachedToWindow += (_, _) => root.ViewTreeObserver?.AddOnGlobalFocusChangeListener(this);
+        root.ViewDetachedFromWindow += (_, _) => root.ViewTreeObserver?.RemoveOnGlobalFocusChangeListener(this);
+    }
+
+    public void OnGlobalFocusChanged(AView? oldFocus, AView? newFocus)
+    {
+        if (newFocus is null) return;
+        for (var p = newFocus.Parent; p is not null; p = p.Parent)
+            if (ReferenceEquals(p, _root)) { _last = new WeakReference<AView>(newFocus); return; }
+    }
+
+    /// <summary>Re-focus the remembered view (if still attached), else <paramref name="fallback"/>.</summary>
+    public void Restore(Action? fallback = null) => _root.PostDelayed(() =>
+    {
+        if (_root.HasFocus) return;
+        if (_last is not null && _last.TryGetTarget(out var v) && v.IsAttachedToWindow && v.RequestFocus()) return;
+        fallback?.Invoke();
+    }, 120);
 }
 
 /// <summary>Hosts one native Android view tree as a MAUI page's content. The

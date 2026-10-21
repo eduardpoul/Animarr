@@ -82,7 +82,7 @@ internal sealed class TvLibraryView : LinearLayout
         _page = page; _active = section;
         Orientation = Orientation.Vertical;
         SetBackgroundColor(TvUi.Bg);
-        SetClipChildren(false);
+        // keep clipping ON here: the grid scrolls under the header, not over it
 
         var head = TvUi.Row(ctx);
         head.SetGravity(GravityFlags.Bottom);
