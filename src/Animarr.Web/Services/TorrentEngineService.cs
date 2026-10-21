@@ -49,6 +49,12 @@ public class TorrentEngineService : BackgroundService
     private readonly ConcurrentDictionary<string, long> _uploadedTotal = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> _lastBytesSent = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>What <see cref="PersistStatsAsync"/> last wrote per torrent, so an
+    /// unchanged torrent costs no DB work. Dropped (→ re-persisted, ratio re-checked)
+    /// whenever something else writes the record's State or its seed-ratio inputs.</summary>
+    private readonly ConcurrentDictionary<string, (long Downloaded, long Uploaded, TorrentState State)> _persisted
+        = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Fires every 500 ms (only if values changed) and on any torrent state change.</summary>
     public event Action? StateChanged;
 
@@ -388,6 +394,7 @@ public class TorrentEngineService : BackgroundService
                 record.CompletedAt = DateTime.UtcNow;
                 record.State = TorrentRecordState.Seeding;
                 await ctx.SaveChangesAsync();
+                _persisted.TryRemove(infoHash, out _);
 
                 // A finished download is the precise "files are fully on disk" signal
                 // (unlike a FileSystemWatcher, which fires mid-download). New episodes
@@ -459,6 +466,7 @@ public class TorrentEngineService : BackgroundService
                 record.State = TorrentRecordState.Error;
                 record.ErrorMessage = reason;
                 await ctx.SaveChangesAsync();
+                _persisted.TryRemove(infoHash, out _);
             }
         }
         }
@@ -486,6 +494,7 @@ public class TorrentEngineService : BackgroundService
             record.TotalSize = mgr.Torrent.Size;
             record.State     = TorrentRecordState.Downloading;
             await ctx.SaveChangesAsync();
+            _persisted.TryRemove(infoHash, out _);
 
             var remap   = !string.IsNullOrWhiteSpace(record.CustomRootFolderName);
             var flatten = record.SkipSubfolderStructure;
@@ -632,15 +641,34 @@ public class TorrentEngineService : BackgroundService
 
     private async Task PersistStatsAsync()
     {
+        // Only torrents whose counters/state moved since the last write. It used
+        // to run one query per torrent every 30 s even when nothing changed — a
+        // seeding-only library re-read every record twice a minute.
+        var dirty = new Dictionary<string, TorrentLiveStats>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (hash, stats) in _liveStats)
+        {
+            if (_persisted.TryGetValue(hash, out var last)
+                && last == (stats.Downloaded, stats.Uploaded, stats.State))
+                continue;
+            dirty[hash] = stats;
+        }
+        if (dirty.Count == 0) return;
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
 
+        // One IN query instead of N (uses IX_TorrentRecords_InfoHash).
+        var hashes  = dirty.Keys.ToList();
+        var records = await ctx.TorrentRecords
+            .Where(r => hashes.Contains(r.InfoHash))
+            .ToListAsync();
+
         var ratioReached = new List<TorrentManager>();
-        foreach (var (hash, stats) in _liveStats)
+        foreach (var record in records)
         {
-            var record = await ctx.TorrentRecords.FirstOrDefaultAsync(r => r.InfoHash == hash);
-            if (record is null) continue;
+            if (!dirty.TryGetValue(record.InfoHash, out var stats)) continue;
+            var hash = record.InfoHash;
             // The ratio is reached while SEEDING, long after the one check at
             // completion in OnStateChangedAsync — so evaluate it here too.
             if (_managers.TryGetValue(hash, out var seeding) && seeding.State == TorrentState.Seeding
@@ -659,6 +687,11 @@ public class TorrentEngineService : BackgroundService
                 record.State = live;
         }
         await ctx.SaveChangesAsync();
+
+        // Remember what's on disk now — only after the save went through.
+        foreach (var record in records)
+            if (dirty.TryGetValue(record.InfoHash, out var saved))
+                _persisted[saved.InfoHash] = (saved.Downloaded, saved.Uploaded, saved.State);
 
         foreach (var mgr in ratioReached)
         {
@@ -907,6 +940,9 @@ public class TorrentEngineService : BackgroundService
     /// <summary>Persist the StopAfterDownload flag for a torrent.</summary>
     public async Task SetStopAfterDownloadAsync(string infoHash, bool value)
     {
+        // Called by the torrent update endpoint, which may also have changed the
+        // per-torrent seed ratio — have the next persist re-check it.
+        _persisted.TryRemove(infoHash, out _);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var ctx = await db.CreateDbContextAsync();
@@ -1100,6 +1136,7 @@ public class TorrentEngineService : BackgroundService
                 rec.ErrorMessage = null;
                 rec.State = TorrentRecordState.Downloading;
                 await ctx.SaveChangesAsync();
+                _persisted.TryRemove(infoHash, out _);
             }
         }
 
@@ -1149,6 +1186,7 @@ public class TorrentEngineService : BackgroundService
         _folderWatchers.TryRemove(infoHash, out _);
         _uploadedTotal.TryRemove(infoHash, out _);
         _lastBytesSent.TryRemove(infoHash, out _);
+        _persisted.TryRemove(infoHash, out _);
 
         // C-1: dispose per-torrent semaphore so it doesn't leak across add/remove cycles.
         if (_torrentLocks.TryRemove(infoHash, out var sem))
@@ -1242,6 +1280,8 @@ public class TorrentEngineService : BackgroundService
 
         // M-12: keep cached snapshot in sync.
         _cachedConfig = cfg;
+        // The global seed ratio may have changed — re-check every torrent.
+        _persisted.Clear();
     }
 
     // -------------------------------------------------------------------------
@@ -1326,6 +1366,7 @@ public class TorrentEngineService : BackgroundService
         if (record is null) return;
         record.State = state;
         await ctx.SaveChangesAsync();
+        _persisted.TryRemove(infoHash, out _);   // next persist re-applies the live state
     }
 
     private static async Task ApplyFileSelectionsAsync(TorrentManager mgr, ICollection<TorrentFileSelection> selections)
