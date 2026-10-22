@@ -611,6 +611,7 @@
   "player.reason_audio_unsupported": "audio converted for this device",
   "player.reason_audio_track": "another audio track",
   "player.reason_external_audio": "external dub mixed in",
+  "player.reason_audio_sync": "remuxed to apply the remembered audio sync",
   "player.reason_hdr_tonemap": "HDR tone-mapped to SDR",
   "player.reason_hdr_lost": "HDR lost",
   "player.buffer_mobile": "phone",

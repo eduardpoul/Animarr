@@ -3230,6 +3230,7 @@
         reason_audio_unsupported:     'audio converted for this device',
         reason_audio_track:           'another audio track',
         reason_external_audio:        'external dub mixed in',
+        reason_audio_sync:            'remuxed to apply the remembered audio sync',
         reason_hdr_tonemap:           'HDR tone-mapped to SDR',
         reason_hdr_lost:              'HDR lost',
         // HUD (buttons, tooltips, menus)
@@ -5215,7 +5216,7 @@
     // the fallback for a code this player doesn't know yet.
     const REASON_CODES = ['user_quality_cap', 'user_bitrate_cap', 'codec_unsupported', 'dolby_vision', 'interlaced',
         'burned_subtitle', 'container_unsupported', 'audio_unsupported', 'audio_track', 'external_audio',
-        'hdr_tonemap', 'hdr_lost'];
+        'audio_sync', 'hdr_tonemap', 'hdr_lost'];
     /** Why the stream isn't the file as is, localized; '' for Direct Play. */
     function reasonText(output) {
         if (!output) return '';

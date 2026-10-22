@@ -610,6 +610,7 @@
   "player.reason_audio_unsupported": "audio convertido para este dispositivo",
   "player.reason_audio_track": "otra pista de audio",
   "player.reason_external_audio": "doblaje externo mezclado",
+  "player.reason_audio_sync": "reempaquetado para aplicar la sincronización de audio recordada",
   "player.reason_hdr_tonemap": "HDR convertido a SDR",
   "player.reason_hdr_lost": "HDR perdido",
   "player.buffer_mobile": "móvil",

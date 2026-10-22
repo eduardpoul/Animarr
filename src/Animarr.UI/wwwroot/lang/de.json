@@ -610,6 +610,7 @@
   "player.reason_audio_unsupported": "Ton für dieses Gerät umgewandelt",
   "player.reason_audio_track": "andere Tonspur",
   "player.reason_external_audio": "externe Synchronfassung eingemischt",
+  "player.reason_audio_sync": "neu verpackt, um den gemerkten Tonversatz anzuwenden",
   "player.reason_hdr_tonemap": "HDR auf SDR abgebildet",
   "player.reason_hdr_lost": "HDR verloren",
   "player.buffer_mobile": "Smartphone",

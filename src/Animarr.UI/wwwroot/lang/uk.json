@@ -610,6 +610,7 @@
   "player.reason_audio_unsupported": "звук перетворено для пристрою",
   "player.reason_audio_track": "інша аудіодоріжка",
   "player.reason_external_audio": "підмішано зовнішню озвучку",
+  "player.reason_audio_sync": "перепаковано, щоб застосувати запам’ятовану синхронізацію звуку",
   "player.reason_hdr_tonemap": "HDR перетворено на SDR",
   "player.reason_hdr_lost": "HDR втрачено",
   "player.buffer_mobile": "телефон",
