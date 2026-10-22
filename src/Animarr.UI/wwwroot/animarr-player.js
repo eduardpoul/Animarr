@@ -768,7 +768,7 @@
     //     once(event, fn)                 → void
     //     setSubtitle({url, name, type})  → void   (url=null disables)
     //     setSubtitleVisible(bool)        → void
-    //     setAspectRatio(value)           → void   ('default' | '16:9' | …)
+    //     setView({aspect, zoom, pan})    → void   (picture geometry)
     //     rawVideoElement()               → HTMLVideoElement|null
     //                                              (only for canvas sampling
     //                                               in letterbox detect; null
@@ -944,22 +944,36 @@
             try { this.art.subtitle.show = !!b; } catch {}
         }
 
-        // ── Aspect ratio ──────────────────────────────────────────────
-        // object-fit:cover is what makes baked-in letterbox bars crop off;
-        // 'default' restores Artplayer's contain behaviour.
-        setAspectRatio(value) {
+        // ── Picture geometry (tasks 3.1 / 3.4) ────────────────────────
+        // view = { aspect, zoom, pan } (see ASPECT_MODES):
+        //   fit      contain — the whole frame, bars where it doesn't fill
+        //   fill     cover   — fills the player, crops the overflow
+        //   stretch  fill    — fills the player, distorts
+        //   force:R  the frame STRETCHED to display aspect R (an anamorphic /
+        //            mis-flagged file), in the largest R box that fits
+        //   crop:R   the frame COVERING an R box — crops baked-in bars
+        //            (the ultrawide auto-crop uses this)
+        // The R box is Artplayer's aspectRatio (it sizes the <video> and
+        // re-applies on resize); object-fit then maps the frame into it.
+        // zoom (≥ 1) scales the picture about its centre; pan (−1…1, + =
+        // the picture moves up, revealing its bottom) shifts what a zoom or
+        // a cover crop pushed out of view — object-position for the cover
+        // overflow, a translate for the zoom's.
+        setView(view) {
             try {
-                this.art.aspectRatio = value;
                 const video = this.art.video || this.art.template?.$video;
                 if (!video) return;
-                if (value === 'default') {
-                    video.style.objectFit = '';
-                    video.style.aspectRatio = '';
-                } else {
-                    video.style.objectFit = 'cover';
-                    video.style.aspectRatio = value.replace(':', ' / ');
-                }
-            } catch (e) { console.warn('aspectRatio set failed', e); }
+                const { mode, ratio } = parseAspect(view && view.aspect);
+                const want = ratio || 'default';
+                if (this.art.aspectRatio !== want) this.art.aspectRatio = want;
+                video.style.objectFit = (mode === 'fill' || mode === 'crop') ? 'cover'
+                                      : (mode === 'stretch' || mode === 'force') ? 'fill' : '';
+                const z = Math.max(1, (view && view.zoom) || 1);
+                const p = Math.max(-1, Math.min(1, (view && view.pan) || 0));
+                video.style.objectPosition = p ? '50% ' + (50 + p * 50) + '%' : '';
+                video.style.transform = (z !== 1 || p)
+                    ? 'scale(' + z + ') translateY(' + (-p * (z - 1) / (2 * z) * 100).toFixed(3) + '%)' : '';
+            } catch (e) { console.warn('picture geometry failed', e); }
         }
 
         // ── Raw video element (canvas sampling only) ──────────────────
@@ -1128,8 +1142,9 @@
             // is the canonical "off". This is here for contract parity.
             if (!b) { try { this.bridge.setSubtitle(null, null); } catch {} }
         }
-        setAspectRatio(value) {
-            try { this.bridge.setAspect(value || 'default'); }
+        setView(view) {
+            const { ratio } = parseAspect(view && view.aspect);
+            try { this.bridge.setAspect(ratio || 'default'); }
             catch (e) { console.warn('native setAspect failed', e); }
         }
 
@@ -1644,6 +1659,69 @@
         });
     }
 
+    /** Aspect button → "Picture": one mode out of Fit / Fill / Stretch, a
+     *  forced display aspect (stretch) or a crop to N:M, plus zoom and
+     *  vertical shift. Any pick here counts as the user's (no auto-crop
+     *  over it). */
+    function openPictureSettingsPopup(root, anchor, entry) {
+        openPanelPopup(root, anchor, t('picture'), (body, ready) => {
+            const all = [];   // every mode chip, across the three rows: one choice
+            const refresh = () => all.forEach(b => b.classList.toggle('is-active', b.dataset.value === (entry.currentAspect || 'fit')));
+            const pickRow = (label, options) => {
+                const ctl = panelRow(body, label);
+                options.forEach(o => {
+                    const b = mkEl('button', 'vp-chip', o.label);
+                    b.type = 'button';
+                    b.dataset.value = o.value;
+                    b.addEventListener('click', () => {
+                        if (!ready()) return;
+                        entry.currentAspect = o.value;
+                        entry.aspectPicked  = true;   // even "Fit": no auto-crop over it
+                        applyView(entry);
+                        refresh();
+                    });
+                    ctl.appendChild(b);
+                    all.push(b);
+                });
+            };
+            pickRow(t('picture_mode'), ASPECT_MODES.map(m => ({ value: m, label: t('aspect_' + m) })));
+            pickRow(t('picture_force'), FORCE_RATIOS.map(r => ({ value: 'force:' + r, label: r })));
+            pickRow(t('picture_crop'), CROP_RATIOS.map(r => ({ value: 'crop:' + r, label: r })));
+            refresh();
+
+            const zoomCtl = panelRow(body, t('picture_zoom'));
+            const zoomVal = panelStepper(zoomCtl, entry.zoom || 1,
+                [{ label: '−', delta: -0.1 }, { label: '+', delta: 0.1 }],
+                (z) => Math.round(z * 100) + '%', ready,
+                (d) => {
+                    entry.zoom = Math.round(Math.max(1, Math.min(ZOOM_MAX, (entry.zoom || 1) + d)) * 100) / 100;
+                    applyView(entry);
+                    return entry.zoom;
+                });
+            const panCtl = panelRow(body, t('picture_shift'));
+            const fmtPan = (p) => p === 0 ? '0' : (p > 0 ? '▲ ' : '▼ ') + Math.round(Math.abs(p) * 100) + '%';
+            const panVal = panelStepper(panCtl, entry.pan || 0,
+                [{ label: '▼', delta: -0.1 }, { label: '▲', delta: 0.1 }],
+                fmtPan, ready,
+                (d) => {
+                    entry.pan = Math.round(Math.max(-1, Math.min(1, (entry.pan || 0) + d)) * 10) / 10;
+                    applyView(entry);
+                    return entry.pan;
+                });
+            const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
+            reset.type = 'button';
+            reset.addEventListener('click', () => {
+                if (!ready()) return;
+                entry.zoom = 1; entry.pan = 0;
+                applyView(entry);
+                zoomVal.set(1); panVal.set(0);
+            });
+            zoomCtl.appendChild(reset);
+            if (document.querySelector('.vp-hud[data-touch="1"]'))
+                body.appendChild(mkEl('div', 'vp-panel__hint', t('picture_pinch_hint')));
+        });
+    }
+
     // ── media-info popup (read-only) ──────────────────────────────────
     // Shows the post-transcode video/audio details (resolution, codec, bit
     // depth, HDR, audio, playback path) that used to live in the top-right meta
@@ -1891,8 +1969,30 @@
         }
     }
 
-    // Aspect picker presets; entry.currentAspect is an index into this.
-    const ASPECT_VALUES = ['default', '21:9', '16:9', '4:3', '2.35:1'];
+    // Picture modes (entry.currentAspect holds one of these keys; see
+    // ArtplayerAdapter.setView for what each does).
+    const ASPECT_MODES  = ['fit', 'fill', 'stretch'];
+    const FORCE_RATIOS  = ['16:9', '4:3', '21:9', '2.35:1', '1.85:1'];
+    const CROP_RATIOS   = ['21:9', '2.35:1', '1.85:1', '16:9', '4:3'];
+    const ZOOM_MAX      = 3;
+    /** 'fit' | 'fill' | 'stretch' | 'force:16:9' | 'crop:2.35:1' →
+     *  { mode, ratio } (ratio null for the first three; unknown → fit). */
+    function parseAspect(key) {
+        const k = String(key || 'fit');
+        const m = /^(force|crop):(.+)$/.exec(k);
+        if (m && (m[1] === 'force' ? FORCE_RATIOS : CROP_RATIOS).includes(m[2])) return { mode: m[1], ratio: m[2] };
+        return { mode: ASPECT_MODES.includes(k) ? k : 'fit', ratio: null };
+    }
+    /** Push entry's picture state (aspect, zoom, pan) to the adapter. */
+    function applyView(entry) {
+        if (entry && entry.adapter && entry.adapter.setView)
+            entry.adapter.setView({ aspect: entry.currentAspect, zoom: entry.zoom, pan: entry.pan });
+    }
+    /** Has the user touched the picture (any mode pick, zoom or pan)? Then
+     *  the ultrawide auto-crop stays out of it. */
+    function viewPicked(entry) {
+        return !!entry.aspectPicked || (entry.zoom || 1) !== 1 || (entry.pan || 0) !== 0;
+    }
 
     /** Sidecar subtitle file → /api/subtitle converts it to WebVTT on the fly
      *  (a standalone .srt/.ass exposes its single subtitle stream as 0:s:0). */
@@ -1900,36 +2000,31 @@
         return apiUrl('/api/subtitle?path=' + encodeURIComponent(path) + '&track=0&format=webvtt');
     }
 
-    /** Map a measured inner-content aspect ratio onto our preset aspect
-     *  list. Returns the index into the aspect popup's items array, or
-     *  null if no preset is a good fit. */
-    function bestAspectIdxFor(innerRatio) {
+    /** Map a measured inner-content aspect ratio onto a crop preset, or
+     *  null if none is a good fit. */
+    function bestCropFor(innerRatio) {
         if (!Number.isFinite(innerRatio)) return null;
-        if (innerRatio >= 2.30) return 4;  // "2.35:1 (cinema)"
-        if (innerRatio >= 2.15) return 1;  // "21:9 (ultrawide)"
-        return null;                       // not cinema/ultrawide content
+        if (innerRatio >= 2.30) return 'crop:2.35:1';   // cinema
+        if (innerRatio >= 2.15) return 'crop:21:9';     // ultrawide
+        return null;                                    // not cinema/ultrawide content
     }
 
-    /** Try the letterbox detection, apply best-matching aspect if the
+    /** Try the letterbox detection, apply best-matching crop if the
      *  viewport is at least 21:9 wide AND content has clear letterbox.
-     *  Idempotent — calling twice when aspect is already set won't re-apply. */
+     *  Never over an explicit choice: any picture pick (even "Fit", kept
+     *  across stream restarts), zoom or pan wins; nor twice. */
     function autoCropIfUltrawide(adapter, entry) {
-        const aspect = entry.currentAspect;
-        if (aspect != null && aspect !== 0) return;  // user already picked
-        // An explicit "Default" pick (kept across stream restarts) is a choice
-        // too — don't crop over it.
-        if (entry.aspectPicked) return;
+        if (viewPicked(entry) || (entry.currentAspect || 'fit') !== 'fit') return;
         const screenRatio = window.innerWidth / Math.max(1, window.innerHeight);
         if (screenRatio < 2.15) return;  // not ultrawide → don't crop 16:9
 
         const sample = detectLetterbox(adapter);
         if (!sample || sample.tooDark || sample.innerRatio == null) return;
-        const idx = bestAspectIdxFor(sample.innerRatio);
-        if (idx == null) return;
+        const target = bestCropFor(sample.innerRatio);
+        if (!target) return;
 
-        const target = ASPECT_VALUES[idx];
-        entry.currentAspect = idx;
-        adapter.setAspectRatio(target);
+        entry.currentAspect = target;
+        applyView(entry);
         console.info('animarr: auto-aspect →', target, {
             innerRatio: sample.innerRatio.toFixed(3),
             screenRatio: screenRatio.toFixed(3),
@@ -2164,8 +2259,45 @@
             let downX = 0, downY = 0;
             let lastTapAt = 0, lastTapZone = '', sideTapTimer = null;
             const DT_MS = 280;   // double-tap window
+            // ── pinch-zoom (task 3.4) ───────────────────────────────
+            // Two fingers on the bare video: spread / pinch zooms (1×–3×),
+            // moving them together shifts the picture up / down. Registered
+            // before the tap handler so the fingers' pointerups (and the
+            // first one right after) never count as taps. The tap layer is
+            // touch-action:none in touch mode so the browser doesn't zoom
+            // the page instead.
+            const touches = new Map();   // pointerId → { x, y }
+            let pinch = null, gestureUntil = 0;
+            const pair = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), y: (a.y + b.y) / 2 }; };
+            tapEl.addEventListener('pointerdown', (e) => {
+                if (e.pointerType !== 'touch') return;
+                touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                if (touches.size === 2 && callbacks.pinch && callbacks.getView) {
+                    const p = pair(), v = callbacks.getView();
+                    pinch = { d0: Math.max(1, p.d), y0: p.y, z0: v.zoom, p0: v.pan };
+                    if (sideTapTimer) { clearTimeout(sideTapTimer); sideTapTimer = null; }
+                }
+            });
+            tapEl.addEventListener('pointermove', (e) => {
+                if (!touches.has(e.pointerId)) return;
+                touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                if (!pinch || touches.size < 2) return;
+                const p = pair();
+                const h = Math.max(1, tapEl.clientHeight);
+                const zoom = Math.round(Math.max(1, Math.min(ZOOM_MAX, pinch.z0 * p.d / pinch.d0)) * 100) / 100;
+                // Fingers moving down drag the picture down (pan − = down).
+                const pan = Math.round(Math.max(-1, Math.min(1, pinch.p0 - 2 * (p.y - pinch.y0) / h)) * 100) / 100;
+                callbacks.pinch(zoom, pan);
+            });
+            const endTouch = (e) => {
+                if (!touches.delete(e.pointerId)) return;
+                if (pinch && touches.size < 2) { pinch = null; gestureUntil = Date.now() + 500; }
+            };
+            tapEl.addEventListener('pointerup', endTouch);
+            tapEl.addEventListener('pointercancel', endTouch);
             tapEl.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
             tapEl.addEventListener('pointerup', (e) => {
+                if (pinch || touches.size > 0 || Date.now() < gestureUntil) return;   // a pinch, not a tap
                 if (Math.hypot((e.clientX || 0) - downX, (e.clientY || 0) - downY) > 12) return;
                 const openPopup = root.querySelector('.vp-hud-popup');
                 if (openPopup) {
@@ -2774,6 +2906,16 @@
         track_forced:       'forced',
         track_commentary:   'commentary',
         track_external:     'external',
+        picture:            'Picture',
+        picture_mode:       'Scaling',
+        picture_force:      'Force aspect (stretch)',
+        picture_crop:       'Crop to',
+        picture_zoom:       'Zoom',
+        picture_shift:      'Vertical shift',
+        picture_pinch_hint: 'Pinch with two fingers to zoom, move them to shift',
+        aspect_fit:         'Fit',
+        aspect_fill:        'Fill (zoom)',
+        aspect_stretch:     'Stretch',
     };
     function t(key) {
         return LABELS[key] || LABEL_DEFAULTS[key] || key;
@@ -3822,19 +3964,21 @@
             entry.currentExtSubPath = extSubNow.path;
         }
 
+        // Picture: Fit unless a restart carries the replaced stream's
+        // mode / zoom / pan (and whether the user picked it) over.
+        entry.currentAspect = (restore && restore.aspect) || 'fit';
+        entry.aspectPicked  = !!(restore && restore.aspectPicked);
+        entry.zoom          = (restore && restore.zoom) || 1;
+        entry.pan           = (restore && restore.pan) || 0;
+        if (entry.currentAspect !== 'fit' || entry.zoom !== 1 || entry.pan !== 0) {
+            applyView(entry);
+            // Again once the stream is up (Artplayer sizes the ratio box
+            // from the player, which a fresh instance may still be laying out).
+            adapter.once('loadedmetadata', () => applyView(entry));
+        }
+
         // ── Restart: put the replaced stream's choices back ───────────
         if (restore) {
-            // Aspect preset — applied once the frame size is known.
-            if (restore.aspect != null) {
-                entry.currentAspect = restore.aspect;
-                entry.aspectPicked  = restore.aspectPicked;
-                const value = ASPECT_VALUES[restore.aspect];
-                if (value && value !== 'default') {
-                    const v = adapter.rawVideoElement && adapter.rawVideoElement();
-                    if (v && v.readyState >= 1) adapter.setAspectRatio(value);
-                    else adapter.once('loadedmetadata', () => adapter.setAspectRatio(value));
-                }
-            }
             // Artplayer took `muted` / `autoplay` as options; the native
             // adapter needs telling.
             if (!art) {
@@ -3900,15 +4044,14 @@
             volume: () => openVolumePopup(hudRoot, 'volume', adapter, (v) => {
                 hudCtl?.setVolumeIcon(v, adapter.muted);
             }),
-            aspect: () => {
-                const items   = ['Default', '21:9 (ultrawide)', '16:9', '4:3', '2.35:1 (cinema)'];
-                const cur     = entry.currentAspect ?? 0;
-                openPickerPopup(hudRoot, 'aspect', 'Aspect ratio', items, cur, (i) => {
-                    entry.currentAspect = i;
-                    entry.aspectPicked  = true;   // even "Default": no auto-crop over it
-                    adapter.setAspectRatio(ASPECT_VALUES[i]);
-                });
+            aspect: () => openPictureSettingsPopup(hudRoot, 'aspect', entry),
+            // Pinch on touch (attachHud): zoom + vertical pan, live.
+            pinch: (zoom, pan) => {
+                entry.zoom = zoom;
+                entry.pan  = pan;
+                applyView(entry);
             },
+            getView: () => ({ zoom: entry.zoom || 1, pan: entry.pan || 0 }),
             offset: () => {
                 if (!offsetChannel || !window.animarrCalibrate) return;
                 openOffsetPopup(hudRoot, 'offset', offsetChannel,
@@ -4187,8 +4330,11 @@
         adapter.once('loadeddata', () => {
             setTimeout(() => {
                 autoCropIfUltrawide(adapter, entry);
-                if (entry.currentAspect == null) {
-                    setTimeout(() => autoCropIfUltrawide(adapter, entry), 4000);
+                // Still on Fit, untouched → one more look (dark intro frame).
+                if (entry.currentAspect === 'fit' && !viewPicked(entry)) {
+                    setTimeout(() => {
+                        if (WIRED.get(elementId) === entry) autoCropIfUltrawide(adapter, entry);
+                    }, 4000);
                 }
             }, 600);
         });
@@ -4380,8 +4526,10 @@
                   : entry.currentSubIdx != null ? { idx: entry.currentSubIdx }
                   : { off: true },
             subOffset:    entry.subOffset || 0,
-            aspect:       entry.currentAspect ?? null,
+            aspect:       entry.currentAspect || 'fit',
             aspectPicked: !!entry.aspectPicked,
+            zoom:         entry.zoom || 1,
+            pan:          entry.pan || 0,
         };
     }
 

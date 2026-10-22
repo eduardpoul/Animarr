@@ -570,7 +570,8 @@ html:has(.vp-backdrop) { overflow: hidden; }
 /* Panel variant (openPanelPopup): labelled rows of chips / steppers /
    sliders. Scrolls when the player is short (phone in landscape). */
 .vp-hud-popup--panel {
-    width: min(380px, calc(100% - 32px));
+    /* right: 40px (the popup shell) + a 16px gutter on the left on phones. */
+    width: min(380px, calc(100% - 56px));
     max-width: none;
     max-height: calc(100% - 140px);
     overflow-y: auto;
@@ -875,12 +876,19 @@ html:has(.vp-backdrop) { overflow: hidden; }
    which used to re-toggle the just-opened settings menu shut ("appears then
    immediately disappears"). `manipulation` keeps pan/pinch and does NOT affect
    the pointer-event-based ±10 double-tap-seek. */
-.vp-hud[data-touch="1"] .vp-hud__tap,
 .vp-hud[data-touch="1"] .vp-btn,
 .vp-hud[data-touch="1"] .vp-hud__cplay,
 .vp-hud-popup {
     touch-action: manipulation;
 }
+/* The bare-video tap layer takes every gesture itself: taps, the ±10
+   double-tap and the two-finger pinch-zoom (attachHud) — with
+   `manipulation` the browser would pinch-zoom the page instead. */
+.vp-hud[data-touch="1"] .vp-hud__tap { touch-action: none; }
+
+/* Zoom / pan (ArtplayerAdapter.setView) scale the <video> past its box;
+   keep it inside the player. */
+.vp-art .art-video-player { overflow: hidden; }
 
 /* Transient notice (showToast) — e.g. a quality / audio switch that failed and
    kept the previous stream. Top centre, under the HUD's top bar; never takes
