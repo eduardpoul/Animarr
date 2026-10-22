@@ -21,7 +21,8 @@ namespace Animarr.UI.Services;
 ///     OS provides per-app sandboxing so the registry is private to Animarr.
 ///
 /// When the active server changes (LoadAsync hydrates Current /
-/// AddServerAsync registers the first server / SetCurrentAsync switches), the
+/// AddServerAsync registers the first server / SetCurrentAsync switches / the
+/// Current entry is re-added under another URL), the
 /// shared <see cref="ServerAddressProvider"/> is updated so subsequent API
 /// calls land on the chosen origin. We deliberately route through the
 /// provider instead of mutating <see cref="HttpClient.BaseAddress"/> directly
@@ -201,11 +202,16 @@ public sealed class ServerRegistryState
             _servers.Add(entry);
         }
 
-        var becameCurrent = _currentServerId is null;
+        bool wasCurrent = _currentServerId == entry.ServerId;
         _currentServerId ??= entry.ServerId;
 
         await PersistAsync(ct);
-        if (becameCurrent) ApplyCurrentToHttp();
+        // The first server becomes Current — and the Current entry itself may
+        // just have moved: the same server (same ServerId) re-added or
+        // re-discovered under another URL (LAN IP / host name / port). Both
+        // retarget the HttpClient now; the moved case used to wait for an app
+        // restart, so a sign-in right after went to the old address.
+        if (entry.ServerId == _currentServerId) ApplyCurrentToHttp(sameServer: wasCurrent);
         OnChange?.Invoke();
     }
 
@@ -237,7 +243,12 @@ public sealed class ServerRegistryState
     public async Task SetCurrentAsync(string serverId, CancellationToken ct = default)
     {
         if (_servers.All(s => s.ServerId != serverId)) return;
-        if (_currentServerId == serverId) return;
+        if (_currentServerId == serverId)
+        {
+            // Picked again — its URL may have changed since it became Current.
+            if (ApplyCurrentToHttp(sameServer: true)) OnChange?.Invoke();
+            return;
+        }
         _currentServerId = serverId;
         await PersistAsync(ct);
         ApplyCurrentToHttp();
@@ -314,11 +325,23 @@ public sealed class ServerRegistryState
     /// before the last `/` is treated as a directory and anything past it as
     /// the file. Without the slash, "/api/me" gets resolved as a sibling of
     /// the server URL's last path segment and the path drops on the floor.
+    ///
+    /// The media URL base goes with it (<see cref="MediaUrl.SetBase"/>, which
+    /// also drops the old server's media token): images, the web player and
+    /// the native players resolve and sign media against the new server at
+    /// once — the layouts only re-applied it on their next render (the login
+    /// page's AuthLayout never did after a switch). Cookies need nothing: the
+    /// shared CookieContainer keeps them per host, so another server's address
+    /// has its own (or none yet — the login page then signs in there); when
+    /// <paramref name="sameServer"/> (the Current install under a new URL) the
+    /// MAUI host copies the old host's cookies to the new one
+    /// (<see cref="ServerAddressProvider.Retargeted"/>), so the session follows.
+    /// Returns true when the target changed.
     /// </summary>
-    private void ApplyCurrentToHttp()
+    private bool ApplyCurrentToHttp(bool sameServer = false)
     {
         var cur = Current;
-        if (cur is null) return;
+        if (cur is null) return false;
 
         var target = new Uri(cur.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
 
@@ -326,9 +349,11 @@ public sealed class ServerRegistryState
             string.Equals(_addr.Current.GetLeftPart(UriPartial.Authority),
                           target.GetLeftPart(UriPartial.Authority),
                           StringComparison.OrdinalIgnoreCase))
-            return;
+            return false;
 
-        _addr.Current = target;
+        _addr.Retarget(target, sameServer);
+        MediaUrl.SetBase(target.GetLeftPart(UriPartial.Authority));
+        return true;
     }
 
     /// <summary>Serialisable shape — owns both the list and the

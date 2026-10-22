@@ -34,6 +34,20 @@ public sealed class ServerAddressProvider
     /// handle gracefully).</summary>
     public Uri? Current { get; set; }
 
+    /// <summary>Raised by <see cref="Retarget"/>: (from, to, sameServer).
+    /// sameServer = the same install (ServerId) now reached under another URL
+    /// — the MAUI host then carries that host's cookies over, so the session
+    /// follows the server instead of looking signed out on the new address.</summary>
+    public event Action<Uri?, Uri, bool>? Retargeted;
+
+    /// <summary>Point the client at <paramref name="to"/> (ServerRegistryState).</summary>
+    public void Retarget(Uri to, bool sameServer)
+    {
+        var from = Current;
+        Current = to;
+        Retargeted?.Invoke(from, to, sameServer);
+    }
+
     /// <summary>Absolute URL of a SignalR hub route. HubConnection talks through
     /// its own .NET HTTP stack, so under MAUI it must target the real server —
     /// the BlazorWebView origin (NavigationManager: https://0.0.0.0 on Android,

@@ -109,6 +109,38 @@ public static class CookiePersistence
         }
     }
 
+    /// <summary>The same server reached under another URL (the registry's
+    /// Current entry moved — LAN IP / host name / port): give the new host the
+    /// old host's cookies, so the session follows the server instead of every
+    /// call coming back 401 until a new sign-in. Saved and mirrored into the
+    /// WebView like a Set-Cookie.</summary>
+    public static void CopyHost(CookieContainer container, Uri from, Uri to)
+    {
+        try
+        {
+            if (string.Equals(from.Host, to.Host, StringComparison.OrdinalIgnoreCase)) return;   // port only: cookies are per host already
+            int n = 0;
+            foreach (var c in container.GetCookies(from).Where(c => !c.Expired))
+            {
+                var copy = new Cookie(c.Name, c.Value, string.IsNullOrEmpty(c.Path) ? "/" : c.Path, to.Host)
+                {
+                    HttpOnly = c.HttpOnly,
+                    Secure   = c.Secure,
+                };
+                if (c.Expires != DateTime.MinValue) copy.Expires = c.Expires;
+                container.Add(copy);
+                n++;
+            }
+            if (n == 0) return;
+            Save(container);
+            SyncToWebView(container);
+#if ANDROID
+            global::Android.Util.Log.Info("Animarr.Auth", $"server moved {from.Authority} → {to.Authority}: {n} cookie(s) carried over");
+#endif
+        }
+        catch { /* worst case the new address asks to sign in */ }
+    }
+
     /// <summary>Mirror the container's cookies into the Android WebView's
     /// CookieManager. The auth cookie lives in the app's HttpClient pipeline,
     /// but <c>&lt;img&gt;</c> / media requests issued by the BlazorWebView go

@@ -311,6 +311,11 @@ public static class MauiProgram
         // Chromium WebView (~0.1 s on a desktop CPU, seconds + tens of MB on the TV).
         if (!DeviceKind.IsTv) CookiePersistence.SyncToWebView(cookieJar);
         builder.Services.AddSingleton(cookieJar);
+        // The Current server reached under a new URL: its session follows it.
+        addr.Retargeted += (from, to, sameServer) =>
+        {
+            if (sameServer && from is not null) CookiePersistence.CopyHost(cookieJar, from, to);
+        };
         builder.Services.AddSingleton(sp =>
         {
             // Pipeline (outermost → innermost):
