@@ -1,8 +1,8 @@
 namespace Animarr.Shared.Models;
 
-// Per-file playback facts the players read next to /api/probe
-// (docs/playback-master-plan-2026-10.md §6.2, Этап 7, 3.3). All cached per
-// file version (path + mtime + size) on the server.
+// Per-file playback facts the players read next to /api/probe: chapters,
+// black-bar crop, loudness, subtitle tracks and fonts. All cached per file
+// version (path + mtime + size) on the server.
 
 /// <summary>One container chapter — <c>GET /api/chapters?path=</c> answers an
 /// array of these, in start order (empty when the file has none).</summary>

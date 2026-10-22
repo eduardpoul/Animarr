@@ -13,8 +13,6 @@ namespace Animarr.Web.Data.Models;
 /// with the same group key (external, see
 /// <see cref="Animarr.Shared.Models.ExternalTrackDto.GroupKey"/>).
 /// <see cref="Services.TrackPreferenceService"/> does the matching.
-///
-/// Spec: docs/playback-master-plan-2026-10.md §6.5, task 2.2.
 /// </summary>
 public class TrackPreference
 {
