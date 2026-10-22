@@ -695,6 +695,7 @@ public partial class PlayerPage : ContentPage
         // The title's track memory (once per file): before the subtitle
         // default below, which it decides.
         if (startFile == _filePath) ApplyTrackDefaults(b.TrackDefaults, directPlay);
+        if (_aspect == "crop:auto") _ = LoadContentAspectAsync(_filePath);
 
         // A file's first start waits briefly for its track catalog, and any
         // start for the check of a subtitle it must side-load, so the subtitle
@@ -828,6 +829,7 @@ public partial class PlayerPage : ContentPage
         _audioNeedsServer.Clear();
         _directPlayable = null;
         NativePlayerService.Instance?.SetFrameRateHint(0);   // the new file's comes with its probe
+        NativePlayerService.Instance?.SetContentAspect(0);
         return _catalogTask = LoadCatalogAsync(_filePath);
     }
 
@@ -1204,7 +1206,8 @@ public partial class PlayerPage : ContentPage
 
     /// <summary>The TV's aspect values ⇄ the vocabulary the web stores in the
     /// memory: <c>fit</c> / <c>fill</c> / <c>stretch</c> / <c>force:R</c> /
-    /// <c>crop:R</c>, plus <c>_z…</c> / <c>_p…</c> zoom and pan the TV ignores.</summary>
+    /// <c>crop:R</c> / <c>crop:auto</c>, plus <c>_z…</c> / <c>_p…</c> zoom and
+    /// pan the TV ignores.</summary>
     private static string ToWebAspect(string tv) => tv switch
     {
         "" or "default" => "fit",
@@ -1224,6 +1227,7 @@ public partial class PlayerPage : ContentPage
             "fill"    => "zoom",
             "stretch" => "stretch",
             _ when mode.StartsWith("force:", StringComparison.Ordinal) && IsRatio(mode[6..]) => mode[6..],
+            "crop:auto" => mode,
             _ when mode.StartsWith("crop:", StringComparison.Ordinal) && IsRatio(mode[5..]) => mode,
             _         => null,
         };
@@ -2123,10 +2127,11 @@ public partial class PlayerPage : ContentPage
             new("Авто (вписать)",             _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
             new("Заполнить экран (обрезать)", _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
             new("Обрезать до 21:9 / 2.35",    _aspect is "crop:2.35" or "crop:2.35:1", () => ApplyAspect("crop:2.35:1", "обрезка до 2.35")),
+            new("Убрать чёрные полосы (авто)", _aspect == "crop:auto",   () => ApplyAspect("crop:auto", "без полос")),
             new("Растянуть на экран",         _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
         };
         // Another crop ratio, remembered from the web player for this title.
-        if (_aspect.StartsWith("crop:", StringComparison.Ordinal) && _aspect is not ("crop:2.35" or "crop:2.35:1"))
+        if (_aspect.StartsWith("crop:", StringComparison.Ordinal) && _aspect is not ("crop:2.35" or "crop:2.35:1" or "crop:auto"))
         {
             var other = _aspect;
             rows.Insert(3, new SheetRow($"Обрезать до {other[5..]}", true, () => ApplyAspect(other, $"обрезка до {other[5..]}")));
@@ -2145,8 +2150,36 @@ public partial class PlayerPage : ContentPage
         // The device default for titles without a memory, and this title's.
         Preferences.Default.Set("player_aspect", value);
         QueueTrackPrefs(p => p with { Aspect = ToWebAspect(value) });
+        if (value == "crop:auto") _ = LoadContentAspectAsync(_filePath);
         _ = NativePlayerService.Instance?.SetAspectRatioAsync(value);
         FlashInfo($"Формат: {label}");
+    }
+
+    private string? _contentAspectFor;
+
+    /// <summary>"crop:auto": the server's bar detection for this file
+    /// (/api/media-facts; it measures in the background — "pending" is asked
+    /// again a few times). No bars / unknown → the surface stays fitted.</summary>
+    private async Task LoadContentAspectAsync(string path)
+    {
+        if (_contentAspectFor == path) return;
+        _contentAspectFor = path;
+        for (int attempt = 0; attempt < 4 && path == _filePath && !_closed; attempt++)
+        {
+            try
+            {
+                var facts = await _http.GetFromJsonAsync<MediaFactsDto>(
+                    $"/api/media-facts?path={Uri.EscapeDataString(path)}&wait=5", Json);
+                var v = facts?.Video;
+                if (v is { CropStatus: "pending" }) { await Task.Delay(5000); continue; }
+                if (path != _filePath) return;
+                float a = v is { CropStatus: "detected", ContentAspect: > 0 } ? (float)v.ContentAspect : 0f;
+                Log($"media facts: crop {v?.CropStatus} contentAspect={v?.ContentAspect:0.###} (display {v?.DisplayAspect:0.###})");
+                NativePlayerService.Instance?.SetContentAspect(a);
+                return;
+            }
+            catch (Exception ex) { Log($"media facts: {ex.Message}"); return; }
+        }
     }
 
     private void OpenQualitySheet()

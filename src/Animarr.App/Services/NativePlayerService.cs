@@ -156,6 +156,8 @@ public sealed class NativePlayerService : IDisposable
     ///   <item>"stretch" — the whole screen, distorted;</item>
     ///   <item>"16:9" / "2.35:1" … — forced display aspect: the picture is
     ///         stretched to that ratio, fitted;</item>
+    ///   <item>"crop:auto" — the same with R = the picture inside the bars
+    ///         the server detected in this file (/api/media-facts).</item>
     ///   <item>"crop:2.35:1" (any "crop:R", the web's vocabulary) — cut bars
     ///         baked into the picture: the frame covers an R box fitted in the
     ///         screen, so the centre 2.35:1 band of a taller frame fills the
@@ -192,7 +194,9 @@ public sealed class NativePlayerService : IDisposable
         if (mode.StartsWith("crop:", StringComparison.Ordinal))
         {
             // The web's crop:R: the frame COVERS an R box fitted in the screen.
-            float band = ParseAspect(mode[5..]);
+            // crop:auto: R = the picture inside the bars baked into this file
+            // (/api/media-facts contentAspect); unknown yet → fit.
+            float band = mode == "crop:auto" ? _contentAspect : ParseAspect(mode[5..]);
             if (videoAspect > 0f && band > 0f)
             {
                 float boxW = Math.Min(W, H * band), boxH = boxW / band;
@@ -494,6 +498,17 @@ public sealed class NativePlayerService : IDisposable
         return Task.CompletedTask;
     }
 
+    /// <summary>The current file's picture aspect without its baked-in bars
+    /// (the server's crop detection), for "crop:auto"; 0 = unknown.</summary>
+    public void SetContentAspect(float aspect)
+    {
+#if ANDROID
+        if (Math.Abs(aspect - _contentAspect) < 0.001f) return;
+        _contentAspect = aspect;
+        if (_aspectValue == "crop:auto") ApplyAspect();
+#endif
+    }
+
     /// <summary>Aspect mode of the video surface (see ApplySurfaceAspect for
     /// the modes); re-applied on every new decoded size.</summary>
     public Task SetAspectRatioAsync(string value)
@@ -507,6 +522,9 @@ public sealed class NativePlayerService : IDisposable
 
 #if ANDROID
     private string _aspectValue = "default";
+    /// <summary>Display aspect of the current file's picture without its
+    /// baked-in bars (0 = unknown) — what "crop:auto" crops to.</summary>
+    private float _contentAspect;
     // Decoded video geometry in display orientation (OnVideoSize).
     private int   _vidW;
     private int   _vidH;
