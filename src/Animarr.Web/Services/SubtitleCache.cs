@@ -51,19 +51,22 @@ public static class SubtitleCache
         var dir = Path.Combine(cacheRoot, "subtitles");
         Directory.CreateDirectory(dir);
 
-        var fi   = new FileInfo(sourcePath);
-        // "|cs1": conversions made before charset handling may hold a track
-        // whose non-UTF-8 cues ffmpeg silently dropped (it exits 0 below 2/3 bad
-        // cues). A new key re-converts every track once.
-        var key  = $"{sourcePath}|{track}|{outFormat}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|cs1";
-        var hash = Convert.ToHexString(
-            System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
-        var cached = Path.Combine(dir, $"{hash}.{(outFormat == "ass" ? "ass" : "vtt")}");
+        var fi     = new FileInfo(sourcePath);
+        var cached = CachedPath(dir, sourcePath, track, outFormat, fi);
 
         if (File.Exists(cached))
         {
             TouchForLru(cached);
             return new Result(cached, 0, "");
+        }
+
+        // An ASS / SSA source asked for as ASS is served as the original
+        // script (styles, typesetting, [Fonts] intact) instead of a round trip
+        // through ffmpeg's ASS decoder + encoder.
+        if (outFormat == "ass")
+        {
+            var original = await TryOriginalAssAsync(sourcePath, track, cached, fi, codecLookup, ct);
+            if (original is not null) return original;
         }
 
         // Unique temp names: two concurrent requests for the same track each
@@ -132,6 +135,141 @@ public static class SubtitleCache
         {
             foreach (var t in temps) TryDelete(t);
         }
+    }
+
+    /// <summary>Where track <paramref name="track"/> of <paramref name="sourcePath"/>
+    /// in <paramref name="outFormat"/> is cached, keyed by the file version.</summary>
+    private static string CachedPath(string dir, string sourcePath, int track, string outFormat, FileInfo fi)
+    {
+        // "|cs1": conversions made before charset handling may hold a track
+        // whose non-UTF-8 cues ffmpeg silently dropped (it exits 0 below 2/3 bad
+        // cues). A new key re-converts every track once. "|orig1" (ASS only):
+        // ASS / SSA sources are now copied, not re-encoded.
+        var key  = $"{sourcePath}|{track}|{outFormat}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|cs1"
+                   + (outFormat == "ass" ? "|orig1" : "");
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
+        return Path.Combine(dir, $"{hash}.{(outFormat == "ass" ? "ass" : "vtt")}");
+    }
+
+    /// <summary>The cached conversion of a track, or null when it was never
+    /// made (no ffmpeg run, no side effect).</summary>
+    public static string? TryGetCached(string sourcePath, int track, string outFormat, string cacheRoot)
+    {
+        try
+        {
+            var path = CachedPath(Path.Combine(cacheRoot, "subtitles"), sourcePath, track, outFormat, new FileInfo(sourcePath));
+            return File.Exists(path) ? path : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// The original script of an ASS / SSA source into <paramref name="cached"/>:
+    /// a standalone <c>.ass</c> / <c>.ssa</c> file as is (re-encoded to UTF-8
+    /// when it isn't), an embedded ASS / SSA track as its raw packets
+    /// (<c>-c:s copy -f ass</c> — the muxer writes the track's own header).
+    /// null = not an ASS source (or the copy failed): convert as before.
+    /// </summary>
+    private static async Task<Result?> TryOriginalAssAsync(string sourcePath, int track, string cached, FileInfo fi,
+        Func<CancellationToken, Task<string?>>? codecLookup, CancellationToken ct)
+    {
+        var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+        bool standalone = ext is ".ass" or ".ssa";
+        if (standalone)
+        {
+            if (track != 0 || fi.Length == 0 || fi.Length > SubtitleCharset.MaxConvertBytes) return null;
+        }
+        else if (SubtitleCharset.IsTextSubtitleFile(sourcePath)
+                 || codecLookup is null || !SubtitleCodecs.IsAss(await codecLookup(ct)))
+        {
+            return null;
+        }
+
+        var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            if (standalone)
+            {
+                await File.WriteAllBytesAsync(tmp, await File.ReadAllBytesAsync(sourcePath, ct), ct);
+            }
+            else
+            {
+                var copy = await RunAsync(
+                [
+                    "-hide_banner", "-loglevel", "warning",
+                    "-i", sourcePath, "-map", $"0:s:{track}", "-c:s", "copy", "-f", "ass", "-y", tmp,
+                ], tmp, ct);
+                if (copy.Path is null) return null;
+            }
+            var charset = await EnsureUtf8Async(tmp, ct);
+            File.Move(tmp, cached, overwrite: true);
+            return new Result(cached, 0, "", charset);
+        }
+        finally { TryDelete(tmp); }
+    }
+
+    /// <summary>
+    /// Copy several embedded ASS / SSA tracks into the cache in ONE read of
+    /// the container (each extraction is a full read — Matroska has no index
+    /// for subtitle packets). Tracks already cached are skipped; a track whose
+    /// copy fails is just left for <see cref="GetOrExtractAsync"/>.
+    /// </summary>
+    public static async Task EnsureOriginalAssAsync(string sourcePath, IReadOnlyCollection<int> tracks,
+        string cacheRoot, CancellationToken ct)
+    {
+        var dir = Path.Combine(cacheRoot, "subtitles");
+        Directory.CreateDirectory(dir);
+        var fi = new FileInfo(sourcePath);
+        var todo = tracks.Distinct()
+            .Select(t => (Track: t, Cached: CachedPath(dir, sourcePath, t, "ass", fi)))
+            .Where(x => !File.Exists(x.Cached))
+            .Select(x => (x.Track, x.Cached, Tmp: $"{x.Cached}.{Guid.NewGuid():N}.tmp"))
+            .ToList();
+        if (todo.Count == 0) return;
+
+        var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-i", sourcePath };
+        foreach (var x in todo)
+            args.AddRange(["-map", $"0:s:{x.Track}", "-c:s", "copy", "-f", "ass", "-y", x.Tmp]);
+        try
+        {
+            // Only a clean run is cached — a failed one may have cut any output short.
+            if ((await RunAsync(args, todo[0].Tmp, ct)).ExitCode != 0) return;
+            foreach (var x in todo)
+            {
+                if (!File.Exists(x.Tmp) || new FileInfo(x.Tmp).Length == 0) continue;
+                await EnsureUtf8Async(x.Tmp, ct);
+                File.Move(x.Tmp, x.Cached, overwrite: true);
+            }
+        }
+        finally
+        {
+            foreach (var x in todo) TryDelete(x.Tmp);
+        }
+    }
+
+    /// <summary>Re-encode a copied / standalone script to UTF-8 in place when
+    /// it is in a legacy code page; the detected source charset, or null when
+    /// it already was UTF-8.</summary>
+    private static async Task<string?> EnsureUtf8Async(string file, CancellationToken ct)
+    {
+        var bytes = await File.ReadAllBytesAsync(file, ct);
+        if (bytes.Length > SubtitleCharset.MaxConvertBytes) return null;
+        var detected = SubtitleCharset.Detect(bytes.AsSpan(0, Math.Min(bytes.Length, SubtitleCharset.MaxSampleBytes)),
+            truncated: bytes.Length > SubtitleCharset.MaxSampleBytes);
+        // ffmpeg reads a UTF-16 file with a BOM itself, a browser-side
+        // renderer is told charset=utf-8 — so a served script is UTF-8.
+        var bom = detected == SubtitleCharset.Utf16LeBom ? System.Text.Encoding.Unicode
+                : detected == SubtitleCharset.Utf16BeBom ? System.Text.Encoding.BigEndianUnicode
+                : null;
+        if (bom is not null)
+        {
+            await File.WriteAllBytesAsync(file, System.Text.Encoding.UTF8.GetBytes(bom.GetString(bytes, 2, bytes.Length - 2)), ct);
+            return detected.Name;
+        }
+        if (!detected.NeedsConversion) return null;
+        await File.WriteAllBytesAsync(file, SubtitleCharset.ToUtf8(bytes, detected), ct);
+        return detected.Name;
     }
 
     /// <summary>

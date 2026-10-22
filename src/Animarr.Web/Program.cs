@@ -174,6 +174,10 @@ builder.Services.AddSingleton<MetadataLanguageService>();
 builder.Services.AddSingleton<IWatchStateService, WatchStateService>();
 // One cached ffprobe per file version for HLS start, /api/probe and /api/video.
 builder.Services.AddSingleton<MediaProbeCache>();
+// Subtitle renderer facts (/api/subtitle/tracks) + MKV font attachments for
+// libass renderers (/api/subtitle/fonts, /api/subtitle/font).
+builder.Services.AddSingleton<SubtitleFontService>();
+builder.Services.AddSingleton<SubtitleTrackInfoService>();
 builder.Services.AddSingleton<HlsSessionService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.
@@ -632,6 +636,7 @@ app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification)
 app.MapMediaStreamEndpoints();
 app.MapHlsEndpoints();
 app.MapPlaybackFactsEndpoints();
+app.MapSubtitleAssetEndpoints();
 app.MapDlnaServerEndpoints();
 app.MapExternalPlayerEndpoints();
 

@@ -12,3 +12,52 @@ namespace Animarr.Shared.Models;
 /// <param name="EndSec">End in seconds; a missing end is the next chapter's
 /// start (the file's duration for the last one).</param>
 public sealed record ChapterDto(int Index, string? Title, double StartSec, double EndSec);
+
+/// <summary><c>GET /api/subtitle/tracks?path=[&amp;analyze=1]</c>: the subtitle
+/// tracks of a video (or of a standalone subtitle file — then one track,
+/// index 0) and the fonts attached to it.</summary>
+/// <param name="Fonts">Font attachments (filled when the file has an ASS / SSA
+/// track; extracted on the first call per file version).</param>
+public sealed record SubtitleTracksDto(IReadOnlyList<SubtitleTrackInfoDto> Tracks, IReadOnlyList<SubtitleFontDto> Fonts);
+
+/// <param name="Index">s:N — what <c>/api/subtitle?track=</c> takes.</param>
+/// <param name="Codec">ffprobe codec_name ("subrip", "ass", "hdmv_pgs_subtitle").</param>
+/// <param name="Kind">"text" (convertible to WebVTT / ASS) or "image" (PGS,
+/// VobSub, DVB — needs a bitmap renderer or burn-in).</param>
+/// <param name="Ass">ASS / SSA tracks: the script analysis; null when not
+/// analyzed yet (ask with <c>analyze=1</c>, which copies the uncached ASS
+/// tracks out in one read of the container) or for other codecs.</param>
+/// <param name="VttUrl">Text tracks: WebVTT URL (relative; append the media
+/// token like any media URL).</param>
+/// <param name="AssUrl">Text tracks: ASS URL — the ORIGINAL script for an ASS /
+/// SSA source (styles, typesetting intact), a default-styled conversion
+/// otherwise.</param>
+public sealed record SubtitleTrackInfoDto(
+    int Index,
+    string? Codec,
+    string Kind,
+    string? Language,
+    string? Title,
+    bool IsDefault,
+    bool IsForced,
+    AssInfoDto? Ass,
+    string? VttUrl,
+    string? AssUrl);
+
+/// <param name="Complex">True when a plain WebVTT rendering loses what
+/// matters — use a libass renderer (JASSUB) for it.</param>
+/// <param name="Reasons">"pos", "move", "org", "animation", "karaoke",
+/// "clip", "fade", "rotation", "shear", "drawing", "many-styles".</param>
+/// <param name="Fonts">Font names the script asks for (styles + \fn).</param>
+public sealed record AssInfoDto(int Styles, int Events, bool Complex, IReadOnlyList<string> Reasons,
+    IReadOnlyList<string> Fonts);
+
+/// <summary>One font attachment — <c>GET /api/subtitle/fonts?path=</c> answers
+/// an array of these.</summary>
+/// <param name="Id">Absolute stream index of the attachment.</param>
+/// <param name="Family">Typographic family ("Arial") — the key JASSUB's
+/// <c>availableFonts</c> map wants (lower-cased).</param>
+/// <param name="Url">Relative URL of the font file
+/// (<c>/api/subtitle/font?path=…&amp;id=N</c>).</param>
+public sealed record SubtitleFontDto(int Id, string FileName, string? MimeType, long? SizeBytes,
+    string? Family, string? FullName, string? PostScriptName, string Url);
