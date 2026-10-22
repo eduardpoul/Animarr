@@ -438,4 +438,10 @@ public static class AppConfigKeys
     /// <summary>API key gating GET /api/server/dashboard. Managed through
     /// <see cref="ApiRoutes.ServerDashboardKey"/>, not the generic config PUT.</summary>
     public const string DashboardApiKey   = "server.dashboard_api_key";
+
+    // ─── Playback ─────────────────────────────────────────────────────────
+    /// <summary>"true" allows the "optimize for TV" remux job (an MKV with
+    /// Cues next to the media in .animarr, preferred by Direct Play). OFF by
+    /// default; started per title by an admin.</summary>
+    public const string TvRemuxEnabled = "playback.tv_remux_enabled";
 }

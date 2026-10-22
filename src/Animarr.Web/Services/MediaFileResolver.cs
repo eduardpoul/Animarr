@@ -28,6 +28,10 @@ public sealed partial class MediaFileResolver
     private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> VideoExtsBySpan =
         VideoExts.GetAlternateLookup<ReadOnlySpan<char>>();
 
+    /// <summary>Animarr's media-adjacent asset dir.</summary>
+    private static bool IsAssetDir(ReadOnlySpan<char> name)
+        => name.Equals(".animarr", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Exactly the traversal <c>Directory.EnumerateFiles(path, "*",
     /// SearchOption.AllDirectories)</c> performs (hidden/system entries
     /// included, an inaccessible sub-directory throws).</summary>
@@ -289,13 +293,16 @@ public sealed partial class MediaFileResolver
         // dropped before a path string is even built. Directories are yielded
         // too (for the stamps above); a directory entry comes out of its
         // parent's listing, before the walk descends into it.
+        // The title's own asset dir (.animarr: trickplay, theme music, the
+        // "optimize for TV" copies) holds derived videos, not episodes.
         var walk = new FileSystemEnumerable<(string Path, bool IsDirectory, long Size)>(
             folderPath,
             static (ref FileSystemEntry e) => (e.ToSpecifiedFullPath(), e.IsDirectory, e.IsDirectory ? 0 : e.Length),
             TreeWalk)
         {
             ShouldIncludePredicate = static (ref FileSystemEntry e) =>
-                e.IsDirectory || VideoExtsBySpan.Contains(Path.GetExtension(e.FileName)),
+                e.IsDirectory ? !IsAssetDir(e.FileName) : VideoExtsBySpan.Contains(Path.GetExtension(e.FileName)),
+            ShouldRecursePredicate = static (ref FileSystemEntry e) => !IsAssetDir(e.FileName),
         };
         foreach (var (filePath, isDirectory, size) in walk)
         {

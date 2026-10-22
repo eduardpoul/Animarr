@@ -525,7 +525,7 @@
 - **Офлайн-задачи с кешем `.animarr`:**
   - DV P7 → P8.1;
   - Hi10P → HEVC10;
-  - M2TS / WMV / MKV с zlib → MKV с Cues.
+  - M2TS / WMV / MKV с zlib → MKV с Cues. ✅ 2026-10-22: «Оптимизировать для ТВ» — `TvRemuxService`, ремукс без перекодирования (`-map 0 -c copy`, Cues в начале) для M2TS, WMV/ASF, MKV без Cues и MKV со сжатыми (zlib) дорожками → `.animarr/<folderId>/tv/`; Direct Play берёт копию, пока она новее исходника. Настройка `playback.tv_remux_enabled` (выкл. по умолчанию), запуск по тайтлу админом: `GET/POST/DELETE /api/media/{id}/tv-remux`; по одной задаче, ждёт, пока никто не смотрит; пропуск, если после записи останется < 512 МБ. `.animarr` больше не попадает в список серий (MediaFileResolver), DLNA и LLM-листинг.
 - **Телефон: «Открыть во внешнем плеере»** (VLC / mpv / MX) с возвратом позиции.
 - **libVLC** — только если статистика ошибок это оправдает.
 - **Чистка:**

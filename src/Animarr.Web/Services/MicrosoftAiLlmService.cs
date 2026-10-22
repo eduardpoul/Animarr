@@ -327,8 +327,10 @@ public class MicrosoftAiLlmService(
             if (!Directory.Exists(folderPath)) return [];
             var videoExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".m2ts" };
+            // Not the derived videos of the .animarr asset dir (TV copies).
+            var assetDir = Path.DirectorySeparatorChar + ".animarr" + Path.DirectorySeparatorChar;
             var all = Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
-                .Where(f => videoExt.Contains(Path.GetExtension(f)))
+                .Where(f => videoExt.Contains(Path.GetExtension(f)) && !f.Contains(assetDir, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(f => f, NaturalStringComparer.Ordinal)
                 .ToList();
 

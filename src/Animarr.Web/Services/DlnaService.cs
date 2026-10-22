@@ -713,9 +713,12 @@ public sealed class DlnaService : IHostedService, IDisposable
         {
             try
             {
+                // Not the derived videos of the title's .animarr asset dir.
+                var assetDir = Path.DirectorySeparatorChar + ".animarr" + Path.DirectorySeparatorChar;
                 var first = Directory
                     .EnumerateFiles(folder.Path, "*", SearchOption.AllDirectories)
-                    .Where(f => VideoExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                    .Where(f => VideoExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())
+                                && !f.Contains(assetDir, StringComparison.OrdinalIgnoreCase))
                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                     .FirstOrDefault();
                 return first;
