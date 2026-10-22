@@ -576,6 +576,7 @@
   "player.sub_bitmap_failed": "Diese Untertitel ließen sich nicht zeichnen",
   "player.error_burn": "Untertitel konnten nicht eingebrannt werden, der vorherige Stream bleibt",
   "player.track_n": "Spur {0}",
+  "player.chapter_n": "Kapitel {0}",
   "player.track_default": "Standard",
   "player.track_forced": "erzwungen",
   "player.track_commentary": "Kommentar",

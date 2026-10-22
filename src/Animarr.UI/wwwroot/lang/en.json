@@ -577,6 +577,7 @@
   "player.sub_bitmap_failed": "Couldn't draw these subtitles",
   "player.error_burn": "Couldn't burn the subtitles in, staying on the previous stream",
   "player.track_n": "Track {0}",
+  "player.chapter_n": "Chapter {0}",
   "player.track_default": "default",
   "player.track_forced": "forced",
   "player.track_commentary": "commentary",

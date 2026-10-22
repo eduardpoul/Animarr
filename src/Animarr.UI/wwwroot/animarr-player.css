@@ -247,6 +247,44 @@ html:has(.vp-backdrop) { overflow: hidden; }
     z-index: 4;
 }
 .vp-hud__preview--on { opacity: 1; }
+/* Without a trickplay frame (only a chapter title + time) the bubble is a
+   compact text chip. */
+.vp-hud__preview--text { padding: 4px 10px 2px; border-radius: 8px; }
+.vp-hud__preview--text .vp-hud__preview-img { display: none; }
+.vp-hud__preview--text .vp-hud__preview-time { position: static; background: none; padding: 0 0 2px; }
+.vp-hud__preview-chapter {
+    max-width: 240px;
+    padding: 3px 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.vp-hud__preview-chapter:empty { display: none; }
+.vp-hud__preview:not(.vp-hud__preview--text) .vp-hud__preview-chapter {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    max-width: none;
+    padding: 3px 6px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.72), transparent);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+
+/* Chapter marks: small gaps in the seek bar at each chapter start. */
+.vp-hud__chapters { position: absolute; inset: 0; pointer-events: none; }
+.vp-hud__chapter-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    margin-left: -1.5px;
+    background: rgba(8,10,13,0.85);
+}
 .vp-hud__preview-img { background-repeat: no-repeat; }
 .vp-hud__preview-time {
     position: absolute;

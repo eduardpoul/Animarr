@@ -1382,9 +1382,11 @@
       <div class="vp-hud__track" data-act="seek">
         <div class="vp-hud__track-buffer" data-bind="buffer"></div>
         <div class="vp-hud__track-fill"   data-bind="fill"></div>
+        <div class="vp-hud__chapters"     data-bind="chapters"></div>
         <div class="vp-hud__thumb"        data-bind="thumb"></div>
         <div class="vp-hud__preview" data-bind="preview">
           <div class="vp-hud__preview-img"  data-bind="preview-img"></div>
+          <div class="vp-hud__preview-chapter" data-bind="preview-chapter"></div>
           <div class="vp-hud__preview-time" data-bind="preview-time">0:00</div>
         </div>
       </div>
@@ -2118,6 +2120,14 @@
         });
     }
 
+    /** The chapter `t` falls in, with its display label ("Chapter 3" when
+     *  untitled); null when there are none. */
+    function chapterAt(chapters, t) {
+        let hit = null;
+        for (const c of chapters || []) { if (t + 0.001 >= c.startSec) hit = c; else break; }
+        return hit ? { label: (hit.title && hit.title.trim()) || tf('chapter_n', hit.index + 1) } : null;
+    }
+
     // ── HUD controller — owns event wiring + DOM updates ──────────────
     // Takes the abstract `adapter` (PlayerAdapter contract): every playback
     // interaction goes through it, never the raw Artplayer API.
@@ -2152,6 +2162,8 @@
             preview:     $('[data-bind="preview"]'),
             previewImg:  $('[data-bind="preview-img"]'),
             previewTime: $('[data-bind="preview-time"]'),
+            previewChapter: $('[data-bind="preview-chapter"]'),
+            chapters:    $('[data-bind="chapters"]'),
         };
 
         // ── touch / phone layout gate ─────────────────────────────────
@@ -2607,14 +2619,28 @@
             if (refs.preview) refs.preview.classList.remove('vp-hud__preview--on');
         }
         function seekPreviewAt(clientX) {
-            const tp = entry.trickplay;
-            if (!refs.preview || !tp || !tp.spriteUrl || !tp.count) { hideSeekPreview(); return; }
+            // The bubble shows the trickplay frame and / or the chapter the
+            // position falls in (with neither it stays hidden).
+            const tp0 = entry.trickplay;
+            const tp = tp0 && tp0.spriteUrl && tp0.count ? tp0 : null;
+            const chapters = entry.chapters || [];
+            if (!refs.preview || (!tp && !chapters.length)) { hideSeekPreview(); return; }
             const dur = adapter.duration || entry.totalDuration || 0;
             if (dur <= 0) { hideSeekPreview(); return; }
             const rect = refs.track.getBoundingClientRect();
             if (rect.width <= 0) return;
             const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
             const t   = dur * pct;
+            const ch = chapterAt(chapters, t);
+            refs.previewChapter.textContent = ch ? ch.label : '';
+            refs.preview.classList.toggle('vp-hud__preview--text', !tp);
+            if (!tp) {
+                refs.previewTime.textContent = formatTime(t);
+                const halfT = (refs.preview.offsetWidth || 80) / 2;
+                refs.preview.style.left = Math.max(halfT, Math.min(rect.width - halfT, clientX - rect.left)) + 'px';
+                refs.preview.classList.add('vp-hud__preview--on');
+                return;
+            }
             let idx = Math.floor(t / (tp.intervalSec || 10));
             idx = Math.max(0, Math.min(tp.count - 1, idx));
             const col = idx % tp.cols, row = Math.floor(idx / tp.cols);
@@ -2920,6 +2946,21 @@
                 refs.name.textContent   = name   || '';
             },
             setMeta(text) { refs.meta.textContent = text || ''; },
+            // Chapter marks on the seek bar (gaps at each chapter start but
+            // the first), placed once the duration is known.
+            setChapters(list) {
+                if (!refs.chapters) return;
+                refs.chapters.textContent = '';
+                const dur = adapter.duration || entry.totalDuration || 0;
+                if (!(dur > 0)) return;
+                (list || []).forEach((c) => {
+                    if (!(c.startSec > 0.5) || c.startSec >= dur - 0.5) return;
+                    const m = document.createElement('div');
+                    m.className = 'vp-hud__chapter-mark';
+                    m.style.left = (c.startSec / dur * 100) + '%';
+                    refs.chapters.appendChild(m);
+                });
+            },
             // Quality indicator (plan 4.2): badge text, re-encoded flag, and
             // the button's tooltip / accessible name.
             // Speed badge ("1.5×", none at 1×) + tooltip.
@@ -3095,6 +3136,7 @@
         error_burn:         "Couldn't burn the subtitles in, staying on the previous stream",
         sub_styled_hint:    'This track is drawn with its own ASS styles and fonts; size and colour apply to plain text tracks.',
         track_n:            'Track {0}',
+        chapter_n:          'Chapter {0}',
         track_default:      'default',
         track_forced:       'forced',
         track_commentary:   'commentary',
@@ -3899,6 +3941,13 @@
             ? fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)), { signal: abort.signal })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null)
             : Promise.resolve(null);
+        // Chapters (marks on the seek bar, titles in its preview) — never
+        // awaited by the start; drawn when they and the duration are in.
+        entry.chapters = [];
+        const chaptersPromise = mediaPath
+            ? fetch(apiUrl('/api/chapters?path=' + encodeURIComponent(mediaPath)), { signal: abort.signal })
+                .then(r => (r.ok ? r.json() : [])).then(l => (Array.isArray(l) ? l : [])).catch(() => [])
+            : Promise.resolve([]);
         // Which renderer each subtitle track needs + the fonts attached to the
         // video (task 2.5). Never awaited by the start — its first call per
         // file extracts the font attachments; a libass track waits for it.
@@ -4631,6 +4680,14 @@
         }
         hudCtl.setSpeed(readRatePref());
         entry.hudRoot = hudRoot;
+
+        // Chapter marks: once both the list and the duration are known.
+        chaptersPromise.then((list) => {
+            if (WIRED.get(elementId) !== entry) return;
+            entry.chapters = list;
+            hudCtl.setChapters(list);
+            adapter.on('durationchange', () => hudCtl.setChapters(entry.chapters));
+        });
 
         // Hide buttons that don't apply to current playback.
         hudCtl.setOffsetEnabled(!!offsetChannel);

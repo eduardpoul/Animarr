@@ -576,6 +576,7 @@
   "player.sub_bitmap_failed": "No se pudieron dibujar estos subtítulos",
   "player.error_burn": "No se pudieron incrustar los subtítulos; se mantiene el flujo anterior",
   "player.track_n": "Pista {0}",
+  "player.chapter_n": "Capítulo {0}",
   "player.track_default": "predeterminada",
   "player.track_forced": "forzados",
   "player.track_commentary": "comentario",

@@ -577,6 +577,7 @@
   "player.sub_bitmap_failed": "Не удалось отрисовать эти субтитры",
   "player.error_burn": "Не удалось вжечь субтитры, остаётся прежний поток",
   "player.track_n": "Дорожка {0}",
+  "player.chapter_n": "Глава {0}",
   "player.track_default": "по умолчанию",
   "player.track_forced": "форсированные",
   "player.track_commentary": "комментарий",
