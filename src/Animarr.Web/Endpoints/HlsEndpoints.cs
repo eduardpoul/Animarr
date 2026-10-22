@@ -625,7 +625,10 @@ internal static class HlsEndpoints
     ///     tokens are per USER (identical on every device in a 6-hour bucket).
     ///     A cookie-less caller (curl, a stripped proxy) falls back to a hash of
     ///     remote address + User-Agent — stable for one device, distinct across
-    ///     devices on the LAN.
+    ///     devices on the LAN. Not across devices behind a proxy that isn't in
+    ///     ANIMARR_TRUSTED_PROXIES (or a NAT): there every cookie-less caller
+    ///     with the same User-Agent comes from the proxy's address and shares
+    ///     one device key — one owner for the dedup / eviction.
     /// </summary>
     internal static async Task<HlsSessionService.SessionOwner> SessionOwnerAsync(HttpContext http, DeviceTrust deviceTrust)
     {
