@@ -12,7 +12,8 @@ namespace Animarr.Web.Services.Auth;
 /// Two schemes share one handler:
 ///   • <see cref="TokenScheme"/>   — session tokens AND per-file link tokens.
 ///     Only for the path-addressed byte endpoints, where
-///     <see cref="MediaPathValidator"/> enforces a link's file binding.
+///     <see cref="MediaPathValidator"/> enforces a link's file binding. An
+///     anonymous DLNA link opens only <see cref="DlnaLinkEndpoints"/>.
 ///   • <see cref="SessionScheme"/> — session tokens only. For everything else a
 ///     cookie-less client needs (id-addressed media endpoints, HLS keepalive,
 ///     DLNA cast control, SignalR hubs).
@@ -93,8 +94,11 @@ public sealed class MediaTokenAuthenticationHandler(
 
         if (claims.Kind == MediaTokenKind.DlnaLink)
         {
-            // Not tied to an account: honour it only while the admin keeps the
-            // DLNA server on, and only from the LAN (the same gate as browse).
+            // Not tied to an account: honour it only on what a renderer fetches
+            // from the browse answer, only while the admin keeps the DLNA
+            // server on, and only from the LAN (the same gate as browse).
+            if (!DlnaLinkEndpoints.Allows(Context))
+                return AuthenticateResult.Fail("A DLNA link token only opens the DLNA byte endpoints.");
             if (!await dlna.IsServerEnabledAsync(Context.RequestAborted) || !LanRequest.IsLan(Context))
                 return AuthenticateResult.Fail("DLNA server is off or the request isn't from the LAN.");
         }
@@ -127,6 +131,30 @@ public sealed class MediaTokenAuthenticationHandler(
             return authz["Bearer ".Length..].Trim();
         return null;
     }
+}
+
+/// <summary>
+/// The endpoints a DLNA MediaServer link token (<see cref="MediaTokenKind.DlnaLink"/>)
+/// may open — exactly the URLs the browse answer hands a renderer: the raw
+/// file, the MPEG-TS remux and a sidecar's SRT captions. Everything else on the
+/// media surface (HLS starts, analysis, fonts, failure reports …) refuses it:
+/// the token is anonymous, and every library file gets one on the LAN.
+/// Matched by the endpoint's route pattern, so a path's casing or a PathBase
+/// can't widen it.
+/// </summary>
+public static class DlnaLinkEndpoints
+{
+    private static readonly HashSet<string> Routes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Animarr.Shared.ApiRoutes.File,   // /api/file
+        "/api/dlna/stream",
+        "/api/subtitle/srt",
+    };
+
+    public static bool Allows(HttpContext http)
+        => http.GetEndpoint() is Microsoft.AspNetCore.Routing.RouteEndpoint e
+           && e.RoutePattern.RawText is string raw
+           && Routes.Contains("/" + raw.TrimStart('/'));
 }
 
 /// <summary>"Is this request from the local network?" — direct connection

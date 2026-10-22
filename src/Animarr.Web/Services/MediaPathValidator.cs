@@ -163,8 +163,9 @@ public sealed class MediaPathValidator(
         }
 
         // DLNA MediaServer links carry no account; the handler already required
-        // the admin's opt-in + a LAN client, and the MediaServer exposes the whole
-        // library by design. The bound-file check above still applies.
+        // the admin's opt-in + a LAN client + one of the DLNA byte endpoints
+        // (DlnaLinkEndpoints), and the MediaServer exposes the whole library by
+        // design. The bound-file check above still applies.
         if (user.FindFirst(MediaAuth.Claims.Kind)?.Value == ((byte)MediaTokenKind.DlnaLink).ToString())
             return null;
 
