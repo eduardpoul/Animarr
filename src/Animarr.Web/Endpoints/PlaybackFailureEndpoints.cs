@@ -64,7 +64,8 @@ internal static class PlaybackFailureEndpoints
             else if (await hls.DecodeSignatureAsync(fullPath!, ct) is { } sig) key = sig;
             else return Problem(StatusCodes.Status422UnprocessableEntity, "probe_failed", "The file could not be probed.");
 
-            var entry = failures.Record(owner.ClientId, key, plan!, track, body.VideoCodec, body.AudioCodec, body.Error);
+            var entry = failures.Record(owner.ClientId, key, plan!, track, body.VideoCodec, body.AudioCodec, body.Error,
+                http.Connection.RemoteIpAddress?.ToString());
             var steps = failures.StepsFor(owner.ClientId, track == PlaybackFailureService.TrackVideo ? key : null);
             return Results.Ok(new
             {

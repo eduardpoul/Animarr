@@ -32,13 +32,20 @@ public sealed class PlaybackFailureService
     public static readonly TimeSpan Expiry = TimeSpan.FromDays(30);
 
     private const int MaxEntries = 2000;
+    /// <summary>Entries kept per device and per remote address: a client can't
+    /// grow the store (and the file rewritten on every report) without bound —
+    /// a cookie-less caller's device id is an address + User-Agent hash, so a
+    /// rotating User-Agent is a fresh "device" each time.</summary>
+    private const int MaxPerDevice = 50, MaxPerAddress = 200;
+    /// <summary>Reports within this window are written to disk together.</summary>
+    private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(5);
 
     /// <summary>One remembered failure.</summary>
     /// <param name="Key">"v:{signature}" (video) or "a:{codec}" (audio).</param>
     /// <param name="Plan">The plan the device failed on ("directplay",
     /// "directstream", "ts-copy", "fmp4-copy", "nvenc-reencode" …).</param>
     public sealed record Entry(string Device, string Key, string Plan, string Track, string? VideoCodec,
-        string? AudioCodec, string? Error, int Count, DateTime FirstAt, DateTime LastAt);
+        string? AudioCodec, string? Error, int Count, DateTime FirstAt, DateTime LastAt, string? Address = null);
 
     /// <summary>What a start must avoid for this device and stream.</summary>
     public sealed record Steps(bool NoDirectPlay, bool NoDirectStream, bool NoCopy, bool NoHevcOutput,
@@ -52,6 +59,7 @@ public sealed class PlaybackFailureService
     private readonly ILogger<PlaybackFailureService> _logger;
     private readonly string? _file;
     private readonly object _saveLock = new();
+    private int _saveScheduled;
 
     public PlaybackFailureService(ILogger<PlaybackFailureService> logger, MediaCachePaths? paths = null)
     {
@@ -77,19 +85,39 @@ public sealed class PlaybackFailureService
         return c is "aac" or "mp3" or "ac3" or "eac3" or "dts" or "truehd" or "opus" or "vorbis" or "flac" ? c : null;
     }
 
+    /// <summary>A client-supplied codec name: ≤ 32 chars of <c>[a-z0-9_.-]</c>
+    /// (lower-cased), else null — it is only stored and echoed.</summary>
+    public static string? CleanCodec(string? codec)
+    {
+        if (string.IsNullOrWhiteSpace(codec)) return null;
+        var c = codec.Trim().ToLowerInvariant();
+        return c.Length <= 32 && c.All(ch => ch is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '.' or '-') ? c : null;
+    }
+
+    /// <summary>The player's error text: ≤ 300 chars, control characters out.</summary>
+    public static string? CleanError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return null;
+        var s = new string(error.Where(ch => !char.IsControl(ch)).Take(300).ToArray()).Trim();
+        return s.Length == 0 ? null : s;
+    }
+
+    /// <param name="address">The reporting client's remote address (per-address cap).</param>
     public Entry Record(string device, string key, string plan, string track, string? videoCodec, string? audioCodec,
-        string? error)
+        string? error, string? address = null)
     {
         var now = DateTime.UtcNow;
-        error = error is { Length: > 300 } ? error[..300] : error;
+        videoCodec = CleanCodec(videoCodec);
+        audioCodec = CleanCodec(audioCodec);
+        error = CleanError(error);
         var id = Id(device, key, plan);
         var entry = _entries.AddOrUpdate(id,
-            _ => new Entry(device, key, plan, track, videoCodec, audioCodec, error, 1, now, now),
+            _ => new Entry(device, key, plan, track, videoCodec, audioCodec, error, 1, now, now, address),
             (_, old) => old with { VideoCodec = videoCodec, AudioCodec = audioCodec, Error = error,
-                                   Count = old.Count + 1, LastAt = now });
-        _logger.LogInformation("Playback failure #{Count} on device {Device}: {Key} plan={Plan} ({Track}; {Video}/{Audio}) — {Error}",
+                                   Count = old.Count + 1, LastAt = now, Address = address ?? old.Address });
+        _logger.LogDebug("Playback failure #{Count} on device {Device}: {Key} plan={Plan} ({Track}; {Video}/{Audio}) — {Error}",
             entry.Count, device, key, plan, track, videoCodec, audioCodec, error);
-        Trim();
+        Trim(device, address);
         Save();
         return entry;
     }
@@ -153,14 +181,22 @@ public sealed class PlaybackFailureService
 
     private static string Id(string device, string key, string plan) => device + "\n" + key + "\n" + plan;
 
-    private void Trim()
+    private void Trim(string? device = null, string? address = null)
     {
         var cutoff = DateTime.UtcNow - Expiry;
         foreach (var (id, e) in _entries)
             if (e.LastAt < cutoff) _entries.TryRemove(id, out _);
-        if (_entries.Count <= MaxEntries) return;
-        foreach (var (id, _) in _entries.OrderBy(kv => kv.Value.LastAt).Take(_entries.Count - MaxEntries).ToList())
-            _entries.TryRemove(id, out _);
+        // Oldest first past the per-device / per-address / total caps.
+        void Cap(Func<Entry, bool> which, int max)
+        {
+            var mine = _entries.Where(kv => which(kv.Value)).ToList();
+            if (mine.Count <= max) return;
+            foreach (var (id, _) in mine.OrderBy(kv => kv.Value.LastAt).Take(mine.Count - max).ToList())
+                _entries.TryRemove(id, out _);
+        }
+        if (device is not null) Cap(e => e.Device == device, MaxPerDevice);
+        if (address is not null) Cap(e => e.Address == address, MaxPerAddress);
+        Cap(_ => true, MaxEntries);
     }
 
     private void Load()
@@ -176,7 +212,20 @@ public sealed class PlaybackFailureService
         catch (Exception ex) { _logger.LogWarning(ex, "Playback failures: reading {File} failed — starting empty", _file); }
     }
 
+    /// <summary>Writes the store a few seconds after the first change since
+    /// the last write — a burst of reports is one file write, not one each.</summary>
     private void Save()
+    {
+        if (_file is null || Interlocked.Exchange(ref _saveScheduled, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(SaveDelay);
+            Volatile.Write(ref _saveScheduled, 0);
+            SaveNow();
+        });
+    }
+
+    private void SaveNow()
     {
         if (_file is null) return;
         lock (_saveLock)
