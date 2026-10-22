@@ -304,6 +304,11 @@ public class MainActivity : MauiAppCompatActivity
         base.OnNewIntent(intent);
         if (intent is not null) Intent = intent;
         CaptureDeepLink(intent);
+        // The app was already running: the signed-in layout drains the link
+        // now (a constant script — the id stays on this side until asked for).
+        if (PendingDeepLinkMediaId is not null)
+            try { FindWebView(Window?.DecorView)?.EvaluateJavascript("window.animarrDeepLinkArrived && window.animarrDeepLinkArrived();", null); }
+            catch { /* no WebView (TV shell) — Welcome / the next layout picks it up */ }
     }
 
     /// <summary>Forward Android's system back gesture (edge swipe / hardware

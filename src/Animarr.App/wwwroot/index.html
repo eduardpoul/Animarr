@@ -569,6 +569,16 @@
                 return await DotNet.invokeMethodAsync('Animarr.App', 'ConsumePendingDeepLink');
             } catch { return null; }
         };
+        // A deep link while the app runs: the signed-in layout registers
+        // itself (MainLayout), MainActivity.OnNewIntent calls
+        // animarrDeepLinkArrived and the layout drains the pending link.
+        window.animarrOnDeepLink = function (ref) { window.__animarrDeepLinkRef = ref; };
+        window.animarrDeepLinkArrived = function () {
+            try {
+                var ref = window.__animarrDeepLinkRef;
+                if (ref) ref.invokeMethodAsync('ConsumeDeepLink').catch(function () { });
+            } catch (e) { }
+        };
 
         // Watch-Next publish/remove. Fired from animarr-player.js on every
         // progress tick + pause/ended. The static [JSInvokable] in

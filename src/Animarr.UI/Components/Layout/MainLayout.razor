@@ -266,6 +266,10 @@
 
         if (UserCtx.IsAuthenticated)
         {
+            // A launcher card / Continue-watching tile (animarr://play/{id},
+            // the phone app): open the title now that auth is known — a
+            // signed-in start lands here, never on Welcome.
+            await RegisterDeepLinksAsync();
             // Independent of each other (each owns its error handling) —
             // start them together instead of six serial round trips.
             var tasks = new List<Task>
@@ -642,8 +646,37 @@
         InvokeAsync(StateHasChanged);
     }
 
+    // ── Deep links (the phone app's animarr://play/{id}) ─────────────────────
+    private DotNetObjectReference<MainLayout>? _deepLinkRef;
+
+    /// <summary>Consume a link that started the app, and register for the
+    /// ones that arrive while it runs (the activity calls back). No hook (a
+    /// browser) → nothing.</summary>
+    private async Task RegisterDeepLinksAsync()
+    {
+        _deepLinkRef ??= DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("animarrOnDeepLink", _deepLinkRef); }
+        catch { return; }
+        await ConsumeDeepLinkAsync();
+    }
+
+    [JSInvokable]
+    public Task ConsumeDeepLink() => InvokeAsync(ConsumeDeepLinkAsync);
+
+    private async Task ConsumeDeepLinkAsync()
+    {
+        if (!UserCtx.IsAuthenticated) return;   // stays pending until a signed-in layout
+        string? id = null;
+        try { id = await JS.InvokeAsync<string?>("animarrConsumePendingDeepLink"); }
+        catch { return; }
+        // The title's page (MediaDetail, /catalog/{id}); the id is a GUID (the
+        // activity only keeps those) — checked again before it becomes a route.
+        if (Guid.TryParse(id, out var mediaId)) Nav.NavigateTo($"/catalog/{mediaId}");
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _deepLinkRef?.Dispose();
         Animarr.UI.Services.MediaUrl.OnBaseChanged -= OnMediaUrlChanged;
         _mediaTokenTimer?.Dispose();
         UserCtx.OnChange -= OnUserCtxChanged;

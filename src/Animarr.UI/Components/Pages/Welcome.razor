@@ -89,8 +89,9 @@
         try { deepLinkId = await JS.InvokeAsync<string?>("animarrConsumePendingDeepLink"); }
         catch { /* shim absent (browser WASM) — no deep link path */ }
 
+        // The title's page is /catalog/{id} (there is no /media/ route).
         Nav.NavigateTo(
-            !string.IsNullOrEmpty(deepLinkId) ? $"/media/{deepLinkId}" : "/",
+            Guid.TryParse(deepLinkId, out var mediaId) ? $"/catalog/{mediaId}" : "/",
             replace: true);
     }
 
