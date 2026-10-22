@@ -17,6 +17,11 @@ namespace Animarr.Web.Services;
 /// never becomes a cached empty subtitle. The directory is size-capped, oldest
 /// first.
 ///
+/// One conversion per output: a request for a track that is already being
+/// converted awaits that job instead of starting a second ffmpeg over the same
+/// file (a player retrying, a second tab, the TV and the web at once), and a
+/// finished file is published once — a later writer keeps the published copy.
+///
 /// Text that isn't UTF-8 (a Windows-1251 SRT, say) is re-encoded to UTF-8
 /// before ffmpeg reads it — see <see cref="SubtitleCharset"/> for the detection
 /// and for why that beats <c>-sub_charenc</c>:
@@ -62,6 +67,34 @@ public static class SubtitleCache
     /// being written is retried later anyway (its size, so its key, changes).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Result Result, DateTime Until)> Failures = new();
     private static readonly TimeSpan FailureTtl = TimeSpan.FromHours(1);
+
+    /// <summary>Conversions running now, per cache file: later callers await
+    /// the first one's task.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<Result>>> Running =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The job for <paramref name="key"/>: the running one, else
+    /// <paramref name="work"/> started now. It leaves the map when it ends.</summary>
+    private static Task<Result> Shared(string key, Func<CancellationToken, Task<Result>> work, CancellationToken ct)
+    {
+        Lazy<Task<Result>>? mine = null;
+        mine = new Lazy<Task<Result>>(async () =>
+        {
+            try { return await work(ct); }
+            finally { Running.TryRemove(new KeyValuePair<string, Lazy<Task<Result>>>(key, mine!)); }
+        });
+        return Running.GetOrAdd(key, mine).Value;
+    }
+
+    /// <summary>Move a finished temp file to its cache name. A copy already
+    /// published there (another writer got there first) wins: it is complete
+    /// by construction, may be open for a response, and is the same content.</summary>
+    private static void Publish(string tmp, string cached)
+    {
+        try { File.Move(tmp, cached, overwrite: false); }
+        catch (IOException) when (File.Exists(cached)) { TryDelete(tmp); }
+        catch (UnauthorizedAccessException) when (File.Exists(cached)) { TryDelete(tmp); }
+    }
 
     private static Result? KnownFailure(string cached)
     {
@@ -116,6 +149,17 @@ public static class SubtitleCache
             return Remember(cached, new Result(null, -1,
                 $"Bitmap subtitle ({sourceCodec}) can't be converted to text.", FailureCode: ImageSubtitle));
 
+        return await Shared(cached, t => ConvertOneAsync(sourcePath, track, outFormat, dir, cached, fi, codecLookup, t), ct);
+    }
+
+    /// <summary>The conversion behind <see cref="GetOrExtractAsync"/> — run
+    /// once per cache file at a time (<see cref="Shared"/>).</summary>
+    private static async Task<Result> ConvertOneAsync(string sourcePath, int track, string outFormat, string dir,
+        string cached, FileInfo fi, Func<CancellationToken, Task<string?>>? codecLookup, CancellationToken ct)
+    {
+        // A job that queued behind another one may find the file made.
+        if (File.Exists(cached)) return new Result(cached, 0, "");
+
         // An ASS / SSA source asked for as ASS is served as the original
         // script (styles, typesetting, [Fonts] intact) instead of a round trip
         // through ffmpeg's ASS decoder + encoder.
@@ -125,8 +169,7 @@ public static class SubtitleCache
             if (original is not null) return original;
         }
 
-        // Unique temp names: two concurrent requests for the same track each
-        // extract (as before) and the second rename just replaces the first.
+        // Unique temp names; Publish keeps whichever copy landed first.
         var work = $"{cached}.{Guid.NewGuid():N}";
         var tmp  = work + ".tmp";
         var temps = new List<string> { tmp };
@@ -177,8 +220,10 @@ public static class SubtitleCache
                 }
             }
 
+            // A full analysis queue is "not now", not a broken track.
+            if (r.FailureCode == Busy) return r;
             if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
-            File.Move(tmp, cached, overwrite: true);
+            Publish(tmp, cached);
             NoteWrite(dir, cached);
             return r with { Path = cached };
         }
@@ -217,20 +262,25 @@ public static class SubtitleCache
             return Remember(cached, new Result(null, -1,
                 codec is null ? "No such subtitle track." : $"Subtitle track {track} is {codec}, not PGS.", FailureCode: NotPgs));
 
-        var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
-        try
+        return await Shared(cached, async t =>
         {
-            var r = await RunAsync(
-            [
-                "-hide_banner", "-loglevel", "warning",
-                "-i", sourcePath, "-map", $"0:s:{track}", "-c:s", "copy", "-f", "sup", "-y", tmp,
-            ], tmp, ct);
-            if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
-            File.Move(tmp, cached, overwrite: true);
-            NoteWrite(dir, cached);
-            return r with { Path = cached };
-        }
-        finally { TryDelete(tmp); }
+            if (File.Exists(cached)) return new Result(cached, 0, "");
+            var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                var r = await RunAsync(
+                [
+                    "-hide_banner", "-loglevel", "warning",
+                    "-i", sourcePath, "-map", $"0:s:{track}", "-c:s", "copy", "-f", "sup", "-y", tmp,
+                ], tmp, t);
+                if (r.FailureCode == Busy) return r;
+                if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
+                Publish(tmp, cached);
+                NoteWrite(dir, cached);
+                return r with { Path = cached };
+            }
+            finally { TryDelete(tmp); }
+        }, ct);
     }
 
     /// <summary>Where track <paramref name="track"/> of <paramref name="sourcePath"/>
@@ -300,7 +350,7 @@ public static class SubtitleCache
                 if (copy.Path is null) return null;
             }
             var charset = await EnsureUtf8Async(tmp, ct);
-            File.Move(tmp, cached, overwrite: true);
+            Publish(tmp, cached);
             return new Result(cached, 0, "", charset);
         }
         finally { TryDelete(tmp); }
@@ -320,7 +370,7 @@ public static class SubtitleCache
         var fi = new FileInfo(sourcePath);
         var todo = tracks.Distinct()
             .Select(t => (Track: t, Cached: CachedPath(dir, sourcePath, t, "ass", fi)))
-            .Where(x => !File.Exists(x.Cached))
+            .Where(x => !File.Exists(x.Cached) && !Running.ContainsKey(x.Cached))
             .Select(x => (x.Track, x.Cached, Tmp: $"{x.Cached}.{Guid.NewGuid():N}.tmp"))
             .ToList();
         if (todo.Count == 0) return;
@@ -336,7 +386,7 @@ public static class SubtitleCache
             {
                 if (!File.Exists(x.Tmp) || new FileInfo(x.Tmp).Length == 0) continue;
                 await EnsureUtf8Async(x.Tmp, ct);
-                File.Move(x.Tmp, x.Cached, overwrite: true);
+                Publish(x.Tmp, x.Cached);
             }
         }
         finally
