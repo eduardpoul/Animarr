@@ -667,13 +667,24 @@ public partial class PlayerPage : ContentPage
         // Sent without the chosen track to see whether the file Direct Plays —
         // it doesn't: restart with the track before anything plays (the wrong
         // language is never heard). This answer's HLS session is not used.
-        if (NeedsTrackRestart(directPlay, trackParams))
+        if (NeedsTrackRestart(directPlay, trackParams) && !CarriesChosenAudio(b))
         {
-            if (newToken is not null) StopHlsSession(newToken);
-            _directPlayable = false;   // → the restart sends audioTrackIndex
-            Log($"start #{gen}: {(directStream ? "DirectStream" : "Hls")} carries a:0 only → restart with the track");
-            _ = StartStreamAsync(resumeMs, maxHeight, play, onFail);
-            return;
+            if (directStream && b.TrackDefaults is not null
+                && !b.DirectStreamUrl!.Contains("audioTrackIndex=", StringComparison.Ordinal))
+            {
+                // A server with track memory also maps any embedded track in
+                // the /api/video remux: keep Direct Stream, no second start.
+                b = b with { DirectStreamUrl = b.DirectStreamUrl + $"&audioTrackIndex={_audio!.Value.Embedded}" };
+                Log($"start #{gen}: DirectStream with embedded #{_audio.Value.Embedded} (audioTrackIndex on /api/video)");
+            }
+            else
+            {
+                if (newToken is not null) StopHlsSession(newToken);
+                _directPlayable = false;   // → the restart sends audioTrackIndex
+                Log($"start #{gen}: {(directStream ? "DirectStream" : "Hls")} carries a:0 only → restart with the track");
+                _ = StartStreamAsync(resumeMs, maxHeight, play, onFail);
+                return;
+            }
         }
 
         // The title's track memory (once per file): before the subtitle
@@ -940,16 +951,20 @@ public partial class PlayerPage : ContentPage
     }
 
     /// <summary>A start sent without the chosen embedded track (to learn whether
-    /// the file Direct Plays) came back as a stream that carries a:0 only.
-    /// <para>
-    /// SERVER HOOK: once /api/video takes audioTrackIndex (server work in
-    /// progress, not merged), a Direct Stream answer could keep its tier by
-    /// appending &amp;audioTrackIndex=N to directStreamUrl instead of this
-    /// restart onto HLS. Until then the restart sends the parameter and the
-    /// server answers with whatever tier carries the track.
-    /// </para></summary>
+    /// the file Direct Plays) came back as a stream that doesn't Direct Play.
+    /// A Direct Stream answer of a current server keeps its tier — /api/video
+    /// takes audioTrackIndex (its URL gets the track appended); otherwise the
+    /// start is repeated with audioTrackIndex and the server answers with
+    /// whatever tier carries the track (Direct Stream on a current server,
+    /// HLS on an older one).</summary>
     private bool NeedsTrackRestart(bool directPlay, string trackParams) =>
         !directPlay && trackParams.Length == 0 && _audio is { External: null, Embedded: > 0 };
+
+    /// <summary>The answer's stream already carries the chosen embedded track
+    /// (the title's memory named the same one and the server mapped it).</summary>
+    private bool CarriesChosenAudio(StartResponse b) =>
+        _audio is { External: null } a
+        && b.TrackDefaults?.Audio is { Kind: "embedded", Applied: true, Index: int i } && i == a.Embedded;
 
     private void DecideAudioIfNeeded()
     {
