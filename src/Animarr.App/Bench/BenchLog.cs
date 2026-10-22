@@ -39,4 +39,15 @@ internal static class BenchLog
         public void DoFrame(long frameTimeNanos) => _a();
     }
 }
+#else
+namespace Animarr.App.Bench;
+
+/// <summary>No bench modes off Android (the flags are an Android intent extra).</summary>
+internal static class BenchLog
+{
+    public static string? Mode => null;
+    public static string? Base => null;
+    public static bool Has(string flag) => false;
+    public static void Mark(string tag) { }
+}
 #endif

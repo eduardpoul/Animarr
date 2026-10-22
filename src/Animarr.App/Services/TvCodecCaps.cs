@@ -55,7 +55,9 @@ internal static class TvCodecCaps
 #endif
     }
 
+#if ANDROID
     private static string? _lastLogged;
+#endif
 
     /// <summary>Containers + codecs (MediaCodecList / FFmpeg — fixed per device).</summary>
     private static string CodecTokens()

@@ -326,6 +326,16 @@ public sealed class NativePlayerService : IDisposable
             global::Android.Util.Log.Error("Animarr.NativePlayer", $"AttachSurface failed: {ex.Message}");
         }
     }
+#else
+    // The same surface on the other targets (the native player page is
+    // Android-only; these keep the shared page code compiling).
+    public const string SideloadTrackId = "animarr-sideload";
+#pragma warning disable CS0067 // never raised off Android
+    public event Action? TracksChanged;
+#pragma warning restore CS0067
+    public static void SetSubtitlesRaised(bool raised) { }
+    public static void RelayoutSubtitles() { }
+    public static void RefreshSubtitleStyle() { }
 #endif
 
     public NativePlayerService(ILogger<NativePlayerService> logger)
