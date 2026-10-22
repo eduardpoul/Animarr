@@ -61,6 +61,7 @@ public partial class TvBootstrapPage : ContentPage
                 case "lib": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new LibraryAllPage()); return;
                 case { } m when m.StartsWith("detail:"): await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new NativeDetailPage(m[7..], "BENCH", null)); return;
                 case "nlib": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Tv.TvLibraryPage()); return;
+                case "nprofile": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Tv.TvProfilePage()); return;
                 case "ndetail": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new Tv.TvDetailPage(Bench.BenchLog.Mode!.Split(':')[1], "BENCH", null)); return;
                 case "oldhome": await TvL.LoadLastAsync(TvAuthFlow.Http); TvRoot.Go(new CatalogNativePage()); return;
                 case "play": TvRoot.Go(new PlayerPage(Guid.Parse("00000000-0000-0000-0000-000000002716"), 1, 3, "/lib/x/e3.mkv", "BENCH", 0)); return;

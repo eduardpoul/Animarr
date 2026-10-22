@@ -58,6 +58,10 @@ public partial class PlayerPage : ContentPage
     private int _outputBitDepth;
     /// <summary>HLS segmentation of the current stream ("keyframe" / "grid").</summary>
     private string? _outputSegmentation;
+    /// <summary>The current stream's codecs and main transcode reason (start
+    /// answer's output), and the server's plan list — for ⓘ and failure reports.</summary>
+    private string? _outputVideoCodec, _outputAudioCodec, _outputReason;
+    private List<PlanCandidateDto>? _candidates;
 
     // Playback timeline. All three tiers expose ExoPlayer positions on the file's
     // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
@@ -733,6 +737,10 @@ public partial class PlayerPage : ContentPage
         _outputPlan = b.Output?.Plan;
         _outputBitDepth = b.Output?.BitDepth ?? 0;
         _outputSegmentation = b.Output?.Segmentation;
+        _outputVideoCodec = b.Output?.VideoCodec;
+        _outputAudioCodec = b.Output?.AudioCodec;
+        _outputReason = b.Output?.TranscodeReasonCode;
+        _candidates = b.Candidates;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         _renditions = _kind == StreamKind.Hls && b.AudioRenditions is { Count: > 0 } rl ? rl : null;
@@ -741,7 +749,9 @@ public partial class PlayerPage : ContentPage
             Log($"start #{gen}: {rs.Count} audio renditions " +
                 string.Join(", ", rs.Select(r => $"{r.Id}{(r.Default ? "*" : "")} {r.Codec}/{r.Channels}")));
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}" +
-            (b.Output?.Segmentation is { } seg ? $" segmentation={seg}" : ""));
+            (b.Output?.Segmentation is { } seg ? $" segmentation={seg}" : "") +
+            (b.Output?.TranscodeReasonCode is { } why ? $" reason={why}" : "") +
+            (b.Candidates is { Count: > 0 } cands ? " | " + DescribeCandidates(cands) : ""));
         // Only a start the server was free to Direct Play tells whether it can
         // (track 0 named explicitly doesn't change that).
         if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent && !burning)
@@ -855,6 +865,7 @@ public partial class PlayerPage : ContentPage
         _subNeedsServer.Clear();
         _audioNeedsServer.Clear();
         _directPlayable = null;
+        _failureReports = 0;
         NativePlayerService.Instance?.SetFrameRateHint(0);   // the new file's comes with its probe
         NativePlayerService.Instance?.SetContentAspect(0);
         _chapters = new();
@@ -2123,6 +2134,16 @@ public partial class PlayerPage : ContentPage
         long absPos = _streamBaseMs + st.PositionMs;
         _durationMs = dur;
 
+        // Bench "+fakefail" / "+fakefaila": the first stream fails its video /
+        // audio decoder once, 3 s in (the failure feedback path end to end).
+        if (!_benchFailed && st.Playing && st.PositionMs > 3000
+            && (Bench.BenchLog.Has("fakefail") || Bench.BenchLog.Has("fakefaila")))
+        {
+            _benchFailed = true;
+            st = st with { ErrorMessage = "bench: simulated decoder failure", ErrorCode = "ERROR_CODE_DECODING_FAILED",
+                           ErrorTrack = Bench.BenchLog.Has("fakefaila") ? "audio" : "video" };
+        }
+
         // Capability negotiation safety net: the device ADVERTISED a decoder
         // but it failed at runtime (vendor quirks, a level the SoC can't take)
         // → retry with nativeCaps off, which sends the server down its HLS
@@ -2132,6 +2153,16 @@ public partial class PlayerPage : ContentPage
             _recoveringSinceUtc = null;
         if (!string.IsNullOrEmpty(st.ErrorMessage) && _recoveringSinceUtc is null)
         {
+            // First the server's failure feedback: it remembers the plan this
+            // device failed on and the same start steps to the next one
+            // (device_failed_before). A server without it → the local rungs.
+            if (_failureFeedback != false && _failureReports < MaxFailureReports && _kind != StreamKind.None)
+            {
+                _failureReports++;
+                _recoveringSinceUtc = DateTime.UtcNow;
+                _ = ReportFailureThenRestartAsync(absPos, st);
+                return;
+            }
             if (!_forceTranscode)
             {
                 _forceTranscode = true;
@@ -2211,6 +2242,75 @@ public partial class PlayerPage : ContentPage
             RecordProgress(absPos, dur);
         if (_ticks % 2 == 0) UpdateLoudness();
     }
+
+    // ── Decoder failure feedback (plan 6.1) ─────────────────────────────────
+    // A fatal decoder error is reported to /api/playback/failure with the plan,
+    // codecs and which decoder failed; the server remembers it for this device
+    // and this kind of stream (30 days), so the restart — and every later start
+    // of such a file — skips that plan (Direct Play → the HLS copy → a
+    // re-encode, or the failed audio codec transcoded). Device settings →
+    // "Сбросить ошибки воспроизведения" forgets them.
+
+    private const int MaxFailureReports = 3;
+    private bool _benchFailed;
+    /// <summary>Reports made for the current file (reset per file).</summary>
+    private int _failureReports;
+    /// <summary>The server takes failure reports (null: not tried yet).</summary>
+    private bool? _failureFeedback;
+
+    private string CurrentPlanName() => _outputPlan is { Length: > 0 } p ? p
+        : _kind switch { StreamKind.DirectPlay => "directplay", StreamKind.DirectStream => "directstream", _ => "" };
+
+    private async Task ReportFailureThenRestartAsync(long absPos, NativePlayerState st)
+    {
+        var file = _filePath;
+        // The audio that plays: the selected rendition's codec on a rendition
+        // stream, else the output's.
+        string? audioCodec = _outputAudioCodec;
+        if (_renditions is { } rs && RenditionFor(rs, CurrentAudio()) is { } cur) audioCodec = cur.Codec;
+        var report = new
+        {
+            path = file,
+            plan = CurrentPlanName(),
+            videoCodec = _outputVideoCodec ?? st.ActualCodec,
+            audioCodec,
+            error = $"{st.ErrorCode}: {st.ErrorMessage}",
+            track = st.ErrorTrack ?? "video",
+        };
+        FailureAnswer? answer = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resp = await _http.PostAsJsonAsync("/api/playback/failure", report, Json, cts.Token);
+            if (resp.IsSuccessStatusCode) answer = await resp.Content.ReadFromJsonAsync<FailureAnswer>(Json, cts.Token);
+            else if ((int)resp.StatusCode is 404 or 405) _failureFeedback = false;   // an older server
+            Log($"failure reported: {report.plan} {report.track} {report.videoCodec}/{report.audioCodec} {st.ErrorCode} → HTTP {(int)resp.StatusCode}" +
+                (answer?.Next is { } n ? $" next: noDP={n.NoDirectPlay} noDS={n.NoDirectStream} noCopy={n.NoCopy} noHevc={n.NoHevcOutput} transcodeAudio=[{string.Join(",", n.TranscodeAudio ?? new())}]" : ""));
+        }
+        catch (Exception ex) { Log($"failure report failed: {ex.Message}"); }
+        if (_closed || file != _filePath) return;
+        if (answer is { Recorded: true })
+        {
+            _failureFeedback = true;
+            FlashInfo("Устройство не справилось с потоком — сервер подбирает другой способ");
+            _recoveringSinceUtc = DateTime.UtcNow;
+            _ = StartStreamAsync(absPos, _maxHeight);
+            return;
+        }
+        // Not recorded: the local rungs (no caps, then a 1080p re-encode).
+        _failureReports = MaxFailureReports;
+        _recoveringSinceUtc = null;
+    }
+
+    /// <summary>"directplay ✗ container_unsupported · ts-copy ✓ · sw-reencode" —
+    /// the start's candidates[] for the log and ⓘ.</summary>
+    private static string DescribeCandidates(IEnumerable<PlanCandidateDto> cands) =>
+        string.Join(" · ", cands.Select(c => c.Status switch
+        {
+            "selected" => $"{c.Plan} ✓",
+            "skipped"  => $"{c.Plan} ✗ {string.Join(",", c.Reasons ?? new())}".TrimEnd(),
+            _          => $"{c.Plan}{(c.Reasons is { Count: > 0 } r ? $" ({string.Join(",", r)})" : "")}",
+        }));
 
     // ── Loudness levelling (device setting, off by default) ─────────────────
     // The server measures each track's EBU R128 loudness once (in the
@@ -2723,7 +2823,11 @@ public partial class PlayerPage : ContentPage
         });
         if (_renditions is { Count: > 0 } rs) parts.Add($"аудио: {rs.Count} рендишн(а), без перезапуска");
         if (Math.Abs(_speed - 1f) > 0.01f) parts.Add(SpeedText(_speed));
-        FlashInfo(string.Join(" · ", parts.Where(p => p.Length > 0)));
+        if (_outputReason is { Length: > 0 } why) parts.Add($"причина: {why}");
+        var text = string.Join(" · ", parts.Where(p => p.Length > 0));
+        // The server's plan list: what it tried and why it skipped the rest.
+        if (_candidates is { Count: > 0 } cands) text += "\n" + DescribeCandidates(cands);
+        FlashInfo(text, seconds: 6);
     }
 
     // Playback speed ------------------------------------------------------------
@@ -2773,14 +2877,14 @@ public partial class PlayerPage : ContentPage
         InfoLine.IsVisible = false;
     }
 
-    private void FlashInfo(string text)
+    private void FlashInfo(string text, double seconds = 2.5)
     {
         if (_errorShown) return;   // don't let a transient line replace the error
         InfoLine.Text = text;
         InfoLine.IsVisible = true;
         _infoTimer?.Stop();
         _infoTimer = Dispatcher.CreateTimer();
-        _infoTimer.Interval = TimeSpan.FromSeconds(2.5);
+        _infoTimer.Interval = TimeSpan.FromSeconds(seconds);
         _infoTimer.IsRepeating = false;
         _infoTimer.Tick += (_, _) => InfoLine.IsVisible = false;
         _infoTimer.Start();
@@ -2902,7 +3006,8 @@ public partial class PlayerPage : ContentPage
     private sealed record StartResponse(
         string? DirectPlayUrl, string? DirectStreamUrl, string? ManifestUrl,
         double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output,
-        TrackDefaultsDto? TrackDefaults = null, List<AudioRenditionDto>? AudioRenditions = null);
+        TrackDefaultsDto? TrackDefaults = null, List<AudioRenditionDto>? AudioRenditions = null,
+        List<PlanCandidateDto>? Candidates = null);
 
     /// <summary>One audioRenditions[] entry: Id "a{N}" (embedded 0:a:N) or
     /// "x{N}" (a dub), Kind "embedded" / "external", Uri relative to the master.</summary>
@@ -2912,7 +3017,18 @@ public partial class PlayerPage : ContentPage
     /// <param name="Segmentation">HLS: "keyframe" (segments cut on the file's
     /// key frames — the remux copy) or "grid" (4 s, a re-encode).</param>
     private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height,
-                                      string? Segmentation = null);
+                                      string? Segmentation = null, string? AudioCodec = null,
+                                      string? TranscodeReasonCode = null);
+
+    /// <summary>One candidates[] entry of a start: a plan in the order the
+    /// server tries them, "selected" / "skipped" / "fallback", and why.</summary>
+    private sealed record PlanCandidateDto(string? Plan, string? Status, List<string>? Reasons);
+
+    /// <summary>POST /api/playback/failure answer: what this device's next
+    /// start of this kind of stream avoids.</summary>
+    private sealed record FailureAnswer(bool Recorded, string? Key, FailureNext? Next);
+    private sealed record FailureNext(bool NoDirectPlay, bool NoDirectStream, bool NoCopy, bool NoHevcOutput,
+                                      List<string>? TranscodeAudio);
 
     /// <summary>/api/hls/start error body (ProblemDetails + `code`).</summary>
     private sealed record StartProblem(string? Title, string? Detail, int? Status, string? Code);

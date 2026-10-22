@@ -133,6 +133,12 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
         pb.AddView(_passBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
         _loudBtn = TvUi.Button(ctx, "…", false, ToggleLoudness, sp: 15);
         pb.AddView(_loudBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
+        // The server remembers the streams this device's decoders failed on
+        // (and plays them another way since): forget that, e.g. after a
+        // firmware update.
+        var pb2 = Buttons();
+        pb2.AddView(TvUi.Button(ctx, TvL.T("tv.reset_failures", "Сбросить ошибки воспроизведения", "Reset playback failures"),
+            false, () => _ = ResetFailuresAsync(), sp: 15), TvUi.Lp(-2, TvUi.Dp(ctx, 44)));
         _col.AddView(TvUi.Text_(ctx, 13, TvUi.TextFaint, TvUi.Regular, 6,
             TvL.T("tv.playback_hint",
                 "Частота кадров: экран переключается на частоту видео (24 / 25 / 50 Гц) — движение плавнее, но при запуске и смене серии экран гаснет на 1–2 с.\n" +
@@ -408,6 +414,25 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
     {
         Services.TvPlaybackPrefs.NormalizeLoudness = !Services.TvPlaybackPrefs.NormalizeLoudness;
         PaintPlayback();
+    }
+
+    /// <summary>DELETE /api/playback/failure: this device's remembered decoder
+    /// failures — its next starts try the direct paths again.</summary>
+    private async Task ResetFailuresAsync()
+    {
+        try
+        {
+            using var resp = await _data.Http.DeleteAsync("/api/playback/failure");
+            int removed = 0;
+            if (resp.IsSuccessStatusCode
+                && System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement
+                       .TryGetProperty("removed", out var r) && r.TryGetInt32(out var n))
+                removed = n;
+            _status.Text = resp.IsSuccessStatusCode
+                ? TvL.T("tv.reset_failures_done", "Ошибки воспроизведения сброшены", "Playback failures reset") + $": {removed}"
+                : TvL.T("tv.reset_failures_error", "Не удалось сбросить", "Couldn't reset") + $" (HTTP {(int)resp.StatusCode})";
+        }
+        catch { _status.Text = TvL.T("tv.reset_failures_error", "Не удалось сбросить", "Couldn't reset"); }
     }
 
     private void TogglePassthrough()

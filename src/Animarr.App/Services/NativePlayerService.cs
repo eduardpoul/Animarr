@@ -876,8 +876,25 @@ public sealed class NativePlayerService : IDisposable
                 bool buffering = state == 2;
                 // PlayerError non-null = fatal until the next prepare; the page
                 // climbs its fallback rungs on it.
-                string? error = null;
-                try { error = _player.PlayerError?.Message; } catch { }
+                string? error = null, errorCode = null, errorTrack = null;
+                try
+                {
+                    if (_player.PlayerError is global::AndroidX.Media3.Common.PlaybackException pe)
+                    {
+                        error = pe.Message;
+                        errorCode = pe.ErrorCodeName;
+                        // Which decoder failed (the server's failure feedback
+                        // steps the video plan or transcodes that audio codec).
+                        var mime = pe is global::AndroidX.Media3.ExoPlayer.ExoPlaybackException xe
+                                   && xe.Type == global::AndroidX.Media3.ExoPlayer.ExoPlaybackException.TypeRenderer
+                            ? xe.RendererFormat?.SampleMimeType : null;
+                        errorTrack = global::AndroidX.Media3.Common.MimeTypes.IsAudio(mime) ? "audio"
+                                   : global::AndroidX.Media3.Common.MimeTypes.IsVideo(mime) ? "video"
+                                   // AudioTrack init / write failures carry no renderer format.
+                                   : pe.ErrorCode is 5001 or 5002 ? "audio" : null;
+                    }
+                }
+                catch { }
                 // VideoFormat is what the player actually decodes, which can
                 // differ from the source (a capped re-encode, a tone-mapped
                 // HDR source).
@@ -942,7 +959,7 @@ public sealed class NativePlayerService : IDisposable
 
                 return new NativePlayerState(pos, dur, playing, ended, buffering,
                     error, actualCodec, actualBitDepth, actualWidth, actualHeight,
-                    _player.PlayWhenReady);
+                    _player.PlayWhenReady, errorCode, errorTrack);
             }
         }
         catch { return NativePlayerState.Empty; }
@@ -1241,7 +1258,11 @@ public sealed record NativePlayerState(
     int     ActualHeight,
     // The play/pause intent (ExoPlayer PlayWhenReady) — true while buffering
     // too, unlike Playing. A stream restart re-applies it.
-    bool    PlayWhenReady = false)
+    bool    PlayWhenReady = false,
+    // The fatal error's PlaybackException code name ("ERROR_CODE_DECODING_FAILED")
+    // and which renderer failed: "video" / "audio" (null: not a decoder).
+    string? ErrorCode = null,
+    string? ErrorTrack = null)
 {
     public static NativePlayerState Empty { get; } =
         new(0, 0, false, false, false, null, string.Empty, 0, 0, 0);
