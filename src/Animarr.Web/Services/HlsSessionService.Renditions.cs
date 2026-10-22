@@ -27,6 +27,12 @@ public sealed partial class HlsSessionService
     /// of a lossless track would otherwise fill the session dir to EOF.</summary>
     private const int AudioRunWindowSegments = 45;
 
+    /// <summary>Rendition ffmpeg runs one session keeps at once: the one being
+    /// played and the one being switched to. The playlist route is a
+    /// capability URL — without a cap a client could start a run of every
+    /// a{N} / x{N} at once.</summary>
+    private const int MaxRenditionRuns = 2;
+
     /// <summary>A rendition nobody asked for this long has its ffmpeg stopped
     /// (the player switched away); the next request restarts it.</summary>
     private static readonly TimeSpan AudioRunIdle = TimeSpan.FromSeconds(90);
@@ -386,6 +392,21 @@ public sealed partial class HlsSessionService
             // Stopped while the old run was being killed: no new run, and no
             // CreateDirectory bringing the deleted session dir back.
             if (session.Stopped) return;
+            await session.RenditionLaunchLock.WaitAsync(ct);
+            try
+            {
+            // Make room: the least recently requested other runs stop first
+            // (and are gone before this one starts).
+            var others = session.Renditions!
+                .Where(o => !ReferenceEquals(o, r) && o.Proc is { HasExited: false })
+                .OrderBy(o => o.LastRequest).ToList();
+            for (int i = 0; i <= others.Count - MaxRenditionRuns; i++)
+            {
+                var victim = others[i].Proc!;
+                try { victim.Kill(true); } catch { }
+                try { using var c = new CancellationTokenSource(2000); await victim.WaitForExitAsync(c.Token); } catch { }
+                _logger.LogDebug("HLS {Token}: rendition {Id} stopped to make room for {New}", session.Token, others[i].Id, r.Id);
+            }
             Directory.CreateDirectory(r.Dir);
             foreach (var f in Directory.EnumerateFiles(r.Dir, "raw-*")) TryDelete(f);
 
@@ -417,6 +438,8 @@ public sealed partial class HlsSessionService
                     r.LastPruneFloor = int.MinValue;
                 }
             }
+            }
+            finally { session.RenditionLaunchLock.Release(); }
         }
         finally { r.RunLock.Release(); }
     }

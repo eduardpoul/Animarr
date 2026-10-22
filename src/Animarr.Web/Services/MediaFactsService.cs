@@ -24,6 +24,15 @@ public sealed class MediaFactsService
         _store      = store;
     }
 
+    /// <summary>Crop detection in an AnalysisGate slot; a full queue = no
+    /// result now (status "unknown", the next request tries again).</summary>
+    private static async Task<CropDetector.Result?> DetectGatedAsync(string fullPath, CropDetector.VideoStream video,
+        CancellationToken ct)
+    {
+        try { return await AnalysisGate.Default.RunAsync(t => CropDetector.DetectAsync(fullPath, video, t), park: false, ct); }
+        catch (AnalysisBusyException) { return null; }
+    }
+
     /// <summary>The facts of <paramref name="fullPath"/> (already validated).
     /// Waits up to <paramref name="wait"/> for a crop measurement still to be
     /// made; past that the answer says "pending" and the measurement finishes
@@ -37,7 +46,7 @@ public sealed class MediaFactsService
 
         var crop = _store.TryGet<CropDetector.Result>(CropKind, fullPath)
                    ?? await _store.GetOrComputeAsync(CropKind, fullPath,
-                          token => CropDetector.DetectAsync(fullPath, video, token), CropTimeout, wait, ct);
+                          token => DetectGatedAsync(fullPath, video, token), CropTimeout, wait, ct);
         string status = crop is null
             ? (_store.IsPending(CropKind, fullPath) ? "pending" : "unknown")
             : crop.Crop is not null ? "detected"

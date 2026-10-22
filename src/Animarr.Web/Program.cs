@@ -187,6 +187,9 @@ builder.Services.AddSingleton<DlnaStreamService>();
 // "Optimize for TV" remux (opt-in, per title): MKV with Cues in .animarr.
 builder.Services.AddSingleton<TvRemuxService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TvRemuxService>());
+// One limit for every file-analysis ffmpeg / ffprobe (crop, key-frame scan,
+// subtitle extraction, loudness) — see AnalysisGate.
+builder.Services.AddSingleton(sp => new AnalysisGate(sp));
 builder.Services.AddSingleton<KeyframeIndexService>();
 builder.Services.AddSingleton<HlsSessionService>();
 builder.Services.AddSingleton<PlaybackFailureService>();
@@ -491,6 +494,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationHubB
 builder.Services.AddHostedService<MdnsPublisherService>();
 
 var app = builder.Build();
+// Build the gate now: static helpers (SubtitleCache) reach it through
+// AnalysisGate.Default, which the DI instance sets.
+app.Services.GetRequiredService<AnalysisGate>();
 
 // Apply EF Core migrations on startup. Skipped only when the DB is already up-to-date
 // — we check by looking for the latest expected migration row, since the migration lock

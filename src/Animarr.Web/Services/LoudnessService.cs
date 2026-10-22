@@ -20,7 +20,6 @@ public sealed partial class LoudnessService
     /// <summary>…but never pushes the true peak above this.</summary>
     public const double PeakCeilingDbtp = -1.0;
 
-    private static readonly SemaphoreSlim OneAtATime = new(1, 1);
     private static readonly TimeSpan MeasureTimeout = TimeSpan.FromMinutes(20);
 
     private readonly FileFactsStore _store;
@@ -59,10 +58,17 @@ public sealed partial class LoudnessService
         return json is null ? 0 : CountAudio().Count(json);
     }
 
+    /// <summary>A full decode of the track: background work in an
+    /// AnalysisGate slot, parked while anyone is watching; a full queue = no
+    /// measurement now (the next request asks again).</summary>
     private async Task<Measurement?> MeasureAsync(string fullPath, int track, CancellationToken ct)
     {
-        await OneAtATime.WaitAsync(ct);
-        try
+        try { return await AnalysisGate.Default.RunAsync(t => MeasureNowAsync(fullPath, track, t), park: true, ct); }
+        catch (AnalysisBusyException) { return null; }
+    }
+
+    private async Task<Measurement?> MeasureNowAsync(string fullPath, int track, CancellationToken ct)
+    {
         {
             var psi = new ProcessStartInfo
             {
@@ -97,10 +103,6 @@ public sealed partial class LoudnessService
             _logger.LogInformation("Loudness of {Path} a:{Track}: {I} LUFS, LRA {Lra} LU, peak {Peak} dBTP ({Ms} ms)",
                 fullPath, track, m.IntegratedLufs, m.LoudnessRangeLu, m.TruePeakDbtp, started.ElapsedMilliseconds);
             return m.IntegratedLufs is null ? null : m;
-        }
-        finally
-        {
-            OneAtATime.Release();
         }
     }
 

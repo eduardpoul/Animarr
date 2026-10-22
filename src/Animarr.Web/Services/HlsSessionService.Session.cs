@@ -61,6 +61,10 @@ public sealed partial class HlsSessionService
         /// launch an ffmpeg (or recreate the dir) for a session that is gone.</summary>
         public volatile bool Stopped;
 
+        /// <summary>Serialises rendition run launches of this session, so the
+        /// "at most MaxRenditionRuns" count can't be raced by two launches.</summary>
+        public SemaphoreSlim RenditionLaunchLock { get; } = new(1, 1);
+
         // ── Audio renditions (HlsSessionService.Renditions.cs) ──
         /// <summary>The video runs carry no audio: every audio option is its
         /// own rendition with its own ffmpeg runs.</summary>

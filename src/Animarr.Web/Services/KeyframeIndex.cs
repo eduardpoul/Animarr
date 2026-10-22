@@ -31,7 +31,9 @@ public sealed record KeyframeIndex(double[] Times, string Source);
 public sealed class KeyframeIndexService
 {
     private const int MaxEntries = 256;
-    private static readonly TimeSpan ScanTimeout = TimeSpan.FromMinutes(15);
+    /// <summary>A packet scan reads the whole file; it runs in an AnalysisGate
+    /// slot and gives up after this (waiting for the slot included).</summary>
+    private static readonly TimeSpan ScanTimeout = TimeSpan.FromMinutes(5);
     /// <summary>A container index is a few KB of reads; past this the file is
     /// pathological (or the parse is) and it falls back to the scan.</summary>
     private static readonly TimeSpan ParseTimeout = TimeSpan.FromSeconds(10);
@@ -120,9 +122,13 @@ public sealed class KeyframeIndexService
         try
         {
             var sel = videoStreamIndex >= 0 ? videoStreamIndex.ToString(CultureInfo.InvariantCulture) : "V:0";
-            var r = await FfprobeRunner.RunAsync(
+            // Bounded and cancellable: the whole run (slot wait included) has
+            // ScanTimeout; concurrent requests for the same file share this one
+            // scan (the slot cache in GetAsync).
+            using var limit = new CancellationTokenSource(ScanTimeout);
+            var r = await AnalysisGate.Default.RunAsync(t => FfprobeRunner.RunAsync(
                 ["-v", "error", "-select_streams", sel, "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", fullPath],
-                ScanTimeout, CancellationToken.None);
+                ScanTimeout, t), park: false, limit.Token);
             if (r.ExitCode != 0) return null;
             var times = new List<double>();
             foreach (var line in r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))

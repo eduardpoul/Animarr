@@ -53,6 +53,8 @@ public static class SubtitleCache
     public const string ImageSubtitle = "image_subtitle";
     public const string ConvertFailed = "convert_failed";
     public const string NotPgs        = "not_pgs";
+    /// <summary>The analysis queue (AnalysisGate) is full — try again later.</summary>
+    public const string Busy          = "analysis_busy";
 
     /// <summary>Failed conversions per cache key (= source version + track +
     /// format), so a bitmap or broken track isn't re-read in full on every
@@ -426,6 +428,14 @@ public static class SubtitleCache
     /// <summary>Run one ffmpeg; success = exit 0 and a non-empty
     /// <paramref name="output"/> (then <see cref="Result.Path"/> = output).</summary>
     private static async Task<Result> RunAsync(IEnumerable<string> args, string output, CancellationToken ct)
+    {
+        // A conversion reads the whole container: one of the AnalysisGate's
+        // slots, not one process per request.
+        try { return await AnalysisGate.Default.RunAsync(t => RunNowAsync(args, output, t), park: false, ct); }
+        catch (AnalysisBusyException) { return new Result(null, -1, "analysis queue full", FailureCode: Busy); }
+    }
+
+    private static async Task<Result> RunNowAsync(IEnumerable<string> args, string output, CancellationToken ct)
     {
         var psi = new ProcessStartInfo
         {

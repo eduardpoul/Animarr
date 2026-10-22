@@ -54,7 +54,11 @@ public sealed class FileFactsStore
     {
         var key = Key(kind, fullPath);
         if (key is null) return null;
-        if (_memo.Count > MaxMemoEntries) _memo.Clear();
+        // Evict finished entries only: clearing a running computation let the
+        // next request start a duplicate of it.
+        if (_memo.Count > MaxMemoEntries)
+            foreach (var (k, v) in _memo)
+                if (v.IsValueCreated && v.Value.IsCompleted) _memo.TryRemove(k, out _);
         var lazy = _memo.GetOrAdd(key, k => new Lazy<Task<JsonElement?>>(() => LoadOrRunAsync(k, kind, fullPath, compute, timeout)));
         var task = lazy.Value;
         try

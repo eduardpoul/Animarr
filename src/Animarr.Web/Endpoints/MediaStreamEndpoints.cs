@@ -450,6 +450,10 @@ internal static class MediaStreamEndpoints
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
                     fullPath, track, r.ExitCode, LastLines(r.Error, 5));
                 http.Response.Headers.CacheControl = "no-store";
+                if (r.FailureCode == SubtitleCache.Busy)
+                    return Results.Problem(detail: "The server is busy analysing other files — try again shortly.",
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        extensions: new Dictionary<string, object?> { ["code"] = SubtitleCache.Busy });
                 // `code` tells a client why: image_subtitle (a bitmap track —
                 // fetch it as .sup / burn it in) or convert_failed.
                 return Results.Problem(detail: "This subtitle track can't be converted to text.",
