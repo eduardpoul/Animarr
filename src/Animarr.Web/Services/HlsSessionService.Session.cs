@@ -56,6 +56,11 @@ public sealed partial class HlsSessionService
         /// <summary>Runs started so far (names each run's list).</summary>
         public int RunCount;
 
+        /// <summary>Set by Stop before anything is killed: a rendition run
+        /// being (re)started concurrently — a request, the prefetch — must not
+        /// launch an ffmpeg (or recreate the dir) for a session that is gone.</summary>
+        public volatile bool Stopped;
+
         // ── Audio renditions (HlsSessionService.Renditions.cs) ──
         /// <summary>The video runs carry no audio: every audio option is its
         /// own rendition with its own ffmpeg runs.</summary>

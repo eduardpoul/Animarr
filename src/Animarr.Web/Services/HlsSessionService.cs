@@ -1782,6 +1782,7 @@ public sealed partial class HlsSessionService : IDisposable
     public void Stop(string token)
     {
         if (!_sessions.TryRemove(token, out var s)) return;
+        s.Stopped = true;
         var proc = s.Process;
         try { if (!proc.HasExited) proc.Kill(true); } catch { }
         var renditionProcs = StopRenditions(s);

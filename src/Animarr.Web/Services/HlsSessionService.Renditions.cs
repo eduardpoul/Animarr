@@ -293,7 +293,7 @@ public sealed partial class HlsSessionService
     /// </summary>
     public async Task<string?> WaitForRenditionFileAsync(string token, string id, string fileName, CancellationToken ct)
     {
-        if (!_sessions.TryGetValue(token, out var session) || session.Renditions is null) return null;
+        if (!_sessions.TryGetValue(token, out var session) || session.Renditions is null || session.Stopped) return null;
         var r = session.Renditions.FirstOrDefault(x => x.Id == id);
         if (r is null) return null;
         session.Touch();
@@ -351,6 +351,7 @@ public sealed partial class HlsSessionService
         await r.RunLock.WaitAsync(ct);
         try
         {
+            if (session.Stopped) return;
             var p = r.Proc;
             int top = RenditionTop(r);
             bool keep = p is not null && !p.HasExited && target >= r.RunStart && target < r.RunEnd
@@ -364,6 +365,9 @@ public sealed partial class HlsSessionService
                 try { using var c = new CancellationTokenSource(2000); await p.WaitForExitAsync(c.Token); } catch { }
                 try { p.Dispose(); } catch { }
             }
+            // Stopped while the old run was being killed: no new run, and no
+            // CreateDirectory bringing the deleted session dir back.
+            if (session.Stopped) return;
             Directory.CreateDirectory(r.Dir);
             foreach (var f in Directory.EnumerateFiles(r.Dir, "raw-*")) TryDelete(f);
 
@@ -372,6 +376,13 @@ public sealed partial class HlsSessionService
             var args = BuildRenditionArgs(session, r, target, end, listPath,
                 seamOutSec: r.SeamSegment == target ? r.SeamSec : null);
             var (proc, _) = LaunchFfmpeg(args, r.Dir, session.Token + "/" + r.Id, target, tail: null);
+            if (session.Stopped)
+            {
+                // Stop ran between the check and the launch (it saw the old
+                // process, not this one): this run dies here.
+                try { proc.Kill(true); } catch { }
+                return;
+            }
             lock (r.FinalizeLock)
             {
                 r.Proc = proc;
