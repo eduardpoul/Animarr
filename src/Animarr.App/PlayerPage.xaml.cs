@@ -2001,6 +2001,54 @@ public partial class PlayerPage : ContentPage
 
         if (++_ticks % 5 == 0 && absPos > 0)
             RecordProgress(absPos, dur);
+        if (_ticks % 2 == 0) UpdateLoudness();
+    }
+
+    // ── Loudness levelling (device setting, off by default) ─────────────────
+    // The server measures each track's EBU R128 loudness once (in the
+    // background — "pending" is asked again later) and suggests a gain
+    // towards -16 LUFS; the player applies it for whatever track plays now
+    // (an embedded one, or a dub file as its own track 0).
+
+    private string? _loudnessKey;
+    private DateTime _loudnessRetryUtc;
+
+    private void UpdateLoudness()
+    {
+        if (!TvPlaybackPrefs.NormalizeLoudness)
+        {
+            if (_loudnessKey is not null) { _loudnessKey = null; NativePlayerService.Instance?.SetLoudnessGain(0); }
+            return;
+        }
+        if (_streamFilePath != _filePath || _kind == StreamKind.None) return;
+        var a = CurrentAudio();
+        var (path, track) = a.External is { } dub ? (dub, 0) : (_filePath, Math.Max(0, a.Embedded));
+        var key = $"{path}#{track}";
+        if (key == _loudnessKey && DateTime.UtcNow < _loudnessRetryUtc) return;
+        if (key == _loudnessKey && _loudnessRetryUtc == DateTime.MaxValue) return;   // measured
+        bool changed = key != _loudnessKey;
+        _loudnessKey = key;
+        _loudnessRetryUtc = DateTime.UtcNow.AddSeconds(30);   // in flight / pending → ask again later
+        if (changed) NativePlayerService.Instance?.SetLoudnessGain(0);   // nothing stale meanwhile
+        _ = LoadLoudnessAsync(key, path, track);
+    }
+
+    private async Task LoadLoudnessAsync(string key, string path, int track)
+    {
+        try
+        {
+            var dto = await _http.GetFromJsonAsync<LoudnessDto>(
+                $"/api/loudness?path={Uri.EscapeDataString(path)}&track={track}&wait=5", Json);
+            if (key != _loudnessKey || _closed) return;
+            Log($"loudness {FileName(path)} a:{track}: {dto?.Status} {dto?.IntegratedLufs:0.0} LUFS peak {dto?.TruePeakDbtp:0.0} → gain {dto?.GainDb:+0.0;-0.0;0} dB");
+            if (dto is { Status: "measured", GainDb: double gain })
+            {
+                _loudnessRetryUtc = DateTime.MaxValue;
+                NativePlayerService.Instance?.SetLoudnessGain(gain);
+            }
+            else if (dto?.Status == "unknown") _loudnessRetryUtc = DateTime.MaxValue;
+        }
+        catch (Exception ex) { Log($"loudness: {ex.Message}"); }
     }
 
     private void UpdateSkip(double posSec)

@@ -476,25 +476,69 @@ public sealed class NativePlayerService : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>Output volume on a 0..1 scale (ExoPlayer's own gain; mute = 0).</summary>
+    /// <summary>Output volume on a 0..1 scale (ExoPlayer's own gain; mute = 0),
+    /// times the loudness levelling's attenuation.</summary>
     public Task SetVolumeAsync(float volume)
     {
 #if ANDROID
+        _userVolume = System.Math.Clamp(volume, 0f, 1f);
+        ApplyGain();
+#endif
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Loudness levelling for the current track (dB; 0 = none): a
+    /// negative gain lowers the player volume, a positive one goes through a
+    /// LoudnessEnhancer on the player's audio session, capped at +9 dB (the
+    /// server already limits it to keep the true peak ≤ -1 dBTP). Bitstream
+    /// passthrough audio isn't touched by either.</summary>
+    public void SetLoudnessGain(double gainDb)
+    {
+#if ANDROID
+        _gainDb = System.Math.Clamp(gainDb, -30, MaxBoostDb);
+        ApplyGain();
+#endif
+    }
+
+#if ANDROID
+    private const double MaxBoostDb = 9;
+    private float _userVolume = 1f;
+    private double _gainDb;
+    private global::Android.Media.Audiofx.LoudnessEnhancer? _enhancer;
+    private int _enhancerSession;
+
+    private void ApplyGain()
+    {
         try
         {
             lock (_lock)
             {
-                if (_player is not null)
+                if (_player is null) return;
+                float cut = _gainDb < 0 ? (float)System.Math.Pow(10, _gainDb / 20) : 1f;
+                _player.Volume = _userVolume * cut;
+                int session = _player.AudioSessionId;
+                if (_gainDb > 0.05 && session > 0)
                 {
-                    var v = System.Math.Clamp(volume, 0f, 1f);
-                    _player.Volume = v;
+                    if (_enhancer is null || _enhancerSession != session)
+                    {
+                        _enhancer?.Release();
+                        _enhancer = new global::Android.Media.Audiofx.LoudnessEnhancer(session);
+                        _enhancerSession = session;
+                    }
+                    _enhancer.SetTargetGain((int)System.Math.Round(_gainDb * 100));   // millibels
+                    _enhancer.SetEnabled(true);
                 }
+                else if (_enhancer is not null)
+                {
+                    _enhancer.SetEnabled(false);
+                }
+                global::Android.Util.Log.Info("Animarr.NativePlayer",
+                    $"gain {_gainDb:+0.0;-0.0;0} dB → volume {_player.Volume:0.###}, enhancer {(_gainDb > 0.05 ? $"+{_gainDb:0.0} dB on session {session}" : "off")}");
             }
         }
-        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.SetVolumeAsync"); }
-#endif
-        return Task.CompletedTask;
+        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.ApplyGain"); }
     }
+#endif
 
     /// <summary>Playback speed (0.5–2×, pitch kept — Media3's Sonic time
     /// stretch). The player keeps it across prepares; a new player takes it
@@ -593,6 +637,8 @@ public sealed class NativePlayerService : IDisposable
             {
                 // A new player page starts on a fresh surface: no geometry yet.
                 _sizeKnown = false; _vidW = _vidH = 0; _vidPar = 1f;
+                try { _enhancer?.Release(); } catch { }
+                _enhancer = null; _gainDb = 0; _userVolume = 1f;
                 ResetFrameRate();
                 // Release() drops the decoder buffers (~50-200MB on a 4K HDR
                 // stream — lives in C++ JNI heap, not the .NET GC reachable
