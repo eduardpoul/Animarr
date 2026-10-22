@@ -1362,31 +1362,6 @@
         }
     }
 
-    /** Picks which audio-offset channel applies. Returns 'hw' / 'sw' / null.
-     *  Server-side `output.plan` is authoritative — it tells us exactly which
-     *  ffmpeg path was picked. Falls back to a probe-derived guess only if
-     *  the start response didn't include an output block (older server). */
-    function determineOffsetChannel(output, probeInfo) {
-        if (output && output.plan) {
-            switch (output.plan) {
-                case 'directplay':     return null;     // no transcode
-                case 'ts-copy':        return null;     // PCR-sync, no -itsoffset
-                case 'vaapi-reencode':
-                case 'nvenc-reencode':
-                case 'sw-reencode':    return 'hw';     // -bf 0 + browser chain latency
-                case 'fmp4-copy':      return 'sw';     // B-frames preserved, fMP4 TFDT residual
-                default:               return null;
-            }
-        }
-        // Legacy fallback (probe-based heuristic).
-        if (!probeInfo) return null;
-        if (probeInfo.playbackTier === 'directplay') return null;
-        const codec = (probeInfo.videoCodec || '').toLowerCase();
-        if (codec === 'h264') return null;
-        if (codec === 'hevc') return probeInfo.bitDepth >= 10 ? 'sw' : 'hw';
-        return 'hw';
-    }
-
     /** Merge in-file audio streams and discovered external dub files into one
      *  ordered list for the Audio picker. Embedded streams come first (their
      *  source index preserved); external entries follow, labelled by
@@ -3634,17 +3609,17 @@
     // Each audio of a title — an embedded track or a dub — has its own sync
     // offset (± AUDIO_OFFSET_MAX ms, + = the sound later): remembered in the
     // profile's track memory (PUT audioOffsetMs) and, while nothing is, a
-    // dub's "DELAY Nms" from its file name. The server applies an offset only
-    // when it starts a stream, on the channel its plan uses (hw = re-encode,
-    // sw = fMP4 copy and every external dub; Direct Play / Direct Stream /
-    // TS copy of the file's own audio take none), so the per-audio value
-    // rides on top of the pipeline baseline above in BOTH channels, and a
+    // dub's "DELAY Nms" from its file name. It travels as its own start
+    // parameter, audioSyncMs, never folded into the pipeline baselines above
+    // (those only reach the plans with a second audio input): the server
+    // applies it on EVERY HLS plan — the TS copy shifts the audio packets in
+    // place — and moves a Direct Play / Direct Stream start with a non-zero
+    // one to the HLS copy. A fresh open sends none: with usePrefs the server
+    // takes the remembered one itself (trackDefaults.audioOffsetApplied). A
     // change is applied by a seamless restart at the same position.
     const AUDIO_OFFSET_MAX = 3000;
-    function audioOffsetsFor(ms) {
-        const base = readAudioOffsets();
-        const v = Math.round(Number(ms) || 0);
-        return { hw: base.hw + v, sw: base.sw + v };
+    function clampAudioOffset(ms) {
+        return Math.max(-AUDIO_OFFSET_MAX, Math.min(AUDIO_OFFSET_MAX, Math.round(Number(ms) || 0)));
     }
     /** The offset track defaults name for their audio: remembered (0
      *  included), else the dub's DELAY from its name, else 0 — the server
@@ -3782,15 +3757,19 @@
         // title memory → profile language → flags, task 2.2 — the server starts
         // on that audio directly, no second start); a restart names the audio
         // it is on, index 0 included, so the server never re-resolves it.
+        const namedAudio = !!p.externalAudioPath || !(p.usePrefs && !(p.audioTrackIndex > 0));
         const audioQuery = p.externalAudioPath
             ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath)
-            : p.usePrefs && !(p.audioTrackIndex > 0) ? '&usePrefs=1'
+            : !namedAudio ? '&usePrefs=1'
             : '&audioTrackIndex=' + Math.max(0, p.audioTrackIndex | 0);
+        // That audio's own sync offset, explicitly (0 included) whenever the
+        // start names the audio; a usePrefs start leaves it to the server.
+        const syncQuery = namedAudio ? '&audioSyncMs=' + clampAudioOffset(p.audioOffsetMs) : '';
         const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + p.offsets.hw
             + '&audioOffsetSwMs=' + p.offsets.sw
-            + audioQuery
+            + audioQuery + syncQuery
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
             + (Number.isFinite(p.burnSubtitle) && p.burnSubtitle >= 0 ? '&burnSubtitle=' + p.burnSubtitle : '')
@@ -4013,10 +3992,9 @@
         // switchQuality so changing quality doesn't silently drop the dub.
         let externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
             ? opts.externalAudioPath : null;
-        // The current audio's own sync offset (2.8) in what this start sends:
-        // a restart carries it (baseline + offset); a fresh open (usePrefs)
-        // sends only the pipeline baseline — the server adds the audio's
-        // offset itself and says so (trackDefaults.audioOffsetApplied).
+        // The current audio's own sync offset (2.8): a restart sends it as
+        // audioSyncMs; a fresh open (usePrefs) sends none — the server applies
+        // the remembered one itself and says so (trackDefaults.audioOffsetApplied).
         const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs : 0;
         // Subtitle track s:N burned into the picture by the server (2.6), or none.
         const burnSubtitle = (opts && Number.isFinite(opts.burnSubtitle) && opts.burnSubtitle >= 0) ? opts.burnSubtitle : null;
@@ -4091,8 +4069,8 @@
         }
         if (stale()) return;
 
-        // ── 2) Audio-sync offsets (audioOffsetsFor) + client caps ─────
-        const offsets = audioOffsetsFor(audioOffsetMs);
+        // ── 2) Audio-sync baselines + client caps ─────────────────────
+        const offsets = readAudioOffsets();
         // Usually cached already (preload / an earlier attach); a first-ever
         // probe gets a short budget, after which the start goes without.
         const caps = await clientCapsWithin(1200);
@@ -4130,6 +4108,7 @@
             try {
                 started = await startStream(mediaPath, {
                     resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs, burnSubtitle,
+                    audioOffsetMs,
                     // Fallback floor reached earlier on this player (1.7).
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
@@ -4334,12 +4313,11 @@
         entry.externalAudioList = externalAudioList;
         entry.externalSubList   = externalSubList;
 
-        // External dub sync always rides the manual 'sw' slider channel (the
-        // server routes its -itsoffset through audioOffsetSwSec for every
-        // plan), so surface the Sync control whenever an external audio track
-        // is active — even on the TS path that otherwise has no offset knob.
-        let offsetChannel = determineOffsetChannel(entry.output, mediaInfo);
-        if (externalAudioPath) offsetChannel = 'sw';
+        // The per-audio Sync control applies on every plan (audioSyncMs: the
+        // HLS plans shift the audio, a Direct Play / Direct Stream restarts as
+        // the HLS copy with it) — offered whenever there is audio at all.
+        const syncAvailable = audioList.length > 0 || externalAudioList.length > 0
+            || !!(entry.output && entry.output.audioCodec);
 
         // ── 5) Instantiate player + adapter ───────────────────────────
         // Direct Stream base (no ?seek — the adapter appends one per seek). The
@@ -4703,7 +4681,7 @@
             },
             getView: () => ({ zoom: entry.zoom || 1, pan: entry.pan || 0 }),
             offset: () => {
-                if (!offsetChannel) return;
+                if (!syncAvailable) return;
                 const cur = buildAudioOptions(entry).find(o => o.current);
                 openAudioSyncPopup(hudRoot, 'offset', entry, cur ? cur.label : '',
                     (ms) => setAudioOffset(elementId, ms));
@@ -4883,10 +4861,10 @@
         });
 
         // Hide buttons that don't apply to current playback.
-        hudCtl.setOffsetEnabled(!!offsetChannel);
+        hudCtl.setOffsetEnabled(syncAvailable);
         // A remembered sync offset the start didn't carry (see the track
         // defaults above): apply it now, seamlessly.
-        if (offsetChannel && (entry.audioOffsetMs || 0) !== (entry.streamAudioOffsetMs || 0)) {
+        if (syncAvailable && (entry.audioOffsetMs || 0) !== (entry.streamAudioOffsetMs || 0)) {
             setTimeout(() => { if (WIRED.get(elementId) === entry) applyAudioOffset(elementId); }, 600);
         }
         // Initial volume icon + wire the mute toggle (hotkey 'm' or external
@@ -5423,7 +5401,7 @@
         try {
             started = await startStream(entry.mediaPath,
                 Object.assign({
-                    resumeSec: snap.pos, offsets: audioOffsetsFor(plan.audioOffsetMs), caps: CAPS,
+                    resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS,
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
                 }, plan), ctl.signal);
