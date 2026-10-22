@@ -30,7 +30,13 @@ public static class WatchNextBridge
     {
         var svc = WatchNextService.Instance;
         if (svc is null) return;
-        try { await svc.UpsertAsync(mediaId, title, posterUrl, positionMs, durationMs); }
+        // The id becomes the row's animarr://play/{id} intent: a GUID only; the
+        // poster an http(s) URL the launcher may load.
+        if (!System.Guid.TryParse(mediaId, out var id)) return;
+        if (!System.Uri.TryCreate(posterUrl, System.UriKind.Absolute, out var poster)
+            || (poster.Scheme != System.Uri.UriSchemeHttp && poster.Scheme != System.Uri.UriSchemeHttps))
+            posterUrl = "";
+        try { await svc.UpsertAsync(id.ToString(), title ?? "", posterUrl, positionMs, durationMs); }
         catch { /* swallow — bridge can't throw back to JS without breaking the player */ }
     }
 
@@ -42,8 +48,8 @@ public static class WatchNextBridge
     public static async Task WatchNextRemove(string mediaId)
     {
         var svc = WatchNextService.Instance;
-        if (svc is null) return;
-        try { await svc.RemoveAsync(mediaId); }
+        if (svc is null || !System.Guid.TryParse(mediaId, out var id)) return;
+        try { await svc.RemoveAsync(id.ToString()); }
         catch { /* swallow — same reason as Upsert */ }
     }
 }

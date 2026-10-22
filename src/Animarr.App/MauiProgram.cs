@@ -149,8 +149,9 @@ public static class MauiProgram
                     var proxy = Services.LocalMediaProxyService.Instance;
                     if (proxy is { Port: > 0 })
                     {
+                        // JSON-encoded, never spliced into the script as text.
                         webView.EvaluateJavascript(
-                            $"window.animarrLocalProxyBase = '{proxy.BaseUrl}';", null);
+                            $"window.animarrLocalProxyBase = {System.Text.Json.JsonSerializer.Serialize(proxy.BaseUrl)};", null);
                         Android.Util.Log.Info("Animarr.WebView",
                             $"Local proxy base pushed: {proxy.BaseUrl}");
                     }

@@ -20,6 +20,19 @@ namespace Animarr.App.JsInterop;
 /// </summary>
 public static class NativePlayerBridge
 {
+    private static bool IsPlausiblePath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && path.Length <= 4096 && !path.Any(char.IsControl)
+        && !path.Contains("://", StringComparison.Ordinal);
+
+    /// <summary>Control characters dropped, length capped (labels, the media
+    /// session, the notification).</summary>
+    private static string? PlainText(string? s, int max)
+    {
+        if (s is null) return null;
+        var clean = new string(s.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        return clean.Length > max ? clean[..max] : clean;
+    }
+
     /// <summary>The device's player setting: "native" | "web" (get with an
     /// empty <paramref name="set"/>), or "" where no native phone player
     /// exists — the web settings card hides itself then.</summary>
@@ -40,7 +53,12 @@ public static class NativePlayerBridge
     {
 #if ANDROID
         if (DeviceKind.IsTv || Services.TvPlaybackPrefs.PhonePlayer != "native") return "web";
-        if (!Guid.TryParse(mediaItemId, out var id) || string.IsNullOrEmpty(path)) return "web";
+        // The page renders library strings (titles, file names): treat the call
+        // as data. A GUID, a server path (only ever sent to the server, which
+        // validates it against its library), sane numbers, a plain-text title.
+        if (!Guid.TryParse(mediaItemId, out var id) || !IsPlausiblePath(path)) return "web";
+        if (season is < 0 or > 10_000 || episode is < 0 or > 100_000) return "web";
+        title = PlainText(title, 300);
         try
         {
             return await MainThread.InvokeOnMainThreadAsync(async () =>

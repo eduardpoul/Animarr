@@ -688,12 +688,14 @@ public class MainActivity : MauiAppCompatActivity
         var data = intent?.Data;
         if (data is null) return;
         if (!string.Equals(data.Scheme, "animarr", System.StringComparison.OrdinalIgnoreCase)) return;
-        // Path is "/{mediaId}" when host is "play"; first segment is the ID.
+        // animarr://play/{mediaId} only, the id a GUID: any app can send this
+        // intent, and the id becomes a route ("/media/{id}") in the WebView.
+        if (!string.Equals(data.Host, "play", System.StringComparison.OrdinalIgnoreCase)) return;
         var path = data.Path;
         if (string.IsNullOrEmpty(path)) return;
         var trimmed = path.TrimStart('/');
         var slash = trimmed.IndexOf('/');
         var mediaId = slash >= 0 ? trimmed[..slash] : trimmed;
-        if (!string.IsNullOrEmpty(mediaId)) PendingDeepLinkMediaId = mediaId;
+        if (System.Guid.TryParse(mediaId, out var id)) PendingDeepLinkMediaId = id.ToString();
     }
 }

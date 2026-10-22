@@ -130,9 +130,13 @@ public sealed class LocalMediaProxyService
                 return;
             }
 
-            // RawUrl is the path+query exactly as the WebView requested it; map
-            // it onto the real server's origin.
-            var target = new Uri(serverBase, req.RawUrl ?? "/");
+            // The path+query the WebView requested, put onto the real server's
+            // origin by string — never Uri resolution: an absolute-form request
+            // line ("GET http://other/…") or a network-path one ("GET //other/…")
+            // would otherwise resolve to another host, and the loopback port is
+            // reachable by every app on the device.
+            var pathAndQuery = req.Url?.PathAndQuery ?? "/";
+            var target = new Uri(serverBase.GetLeftPart(UriPartial.Authority) + "/" + pathAndQuery.TrimStart('/'));
             using var fwd = new HttpRequestMessage(new HttpMethod(req.HttpMethod), target);
 
             // Copy request body (POST/PUT — e.g. /api/dlna/play).

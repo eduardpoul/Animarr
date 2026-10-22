@@ -36,26 +36,29 @@ internal sealed class AnimarrWebChromeClient : WebChromeClient
     {
         if (request is null) { _inner?.OnPermissionRequest(request); return; }
 
-        // Grant any of the camera / mic resources the page asks for. We're
-        // a single-purpose self-hosted media app — there's nothing the user
-        // could be tricked into authorising that they didn't already opt
-        // into by installing Animarr. The corresponding Android permission
-        // (CAMERA) is still required at the manifest level; if it's missing
-        // the system blocks the WebView before we even reach this callback.
+        // The camera (the pairing QR scanner) and only for the app's own page
+        // (the BlazorWebView virtual host https://0.0.0.x): an embedded frame
+        // (a trailer, a provider page) asking for the camera, or anyone asking
+        // for the microphone, is denied here — the inner client would grant
+        // whatever the app holds. The Android CAMERA permission is still
+        // needed at the manifest / runtime level.
         var requested = request.GetResources() ?? Array.Empty<string>();
         var granted = new System.Collections.Generic.List<string>();
+        bool ownPage = request.Origin?.Host?.StartsWith("0.0.0.", StringComparison.Ordinal) == true;
         foreach (var r in requested)
         {
-            if (r == PermissionRequest.ResourceVideoCapture ||
-                r == PermissionRequest.ResourceAudioCapture)
-            {
+            if (ownPage && r == PermissionRequest.ResourceVideoCapture)
                 granted.Add(r);
-            }
         }
         if (granted.Count > 0)
         {
             try { request.Grant(granted.ToArray()); }
             catch { request.Deny(); }
+            return;
+        }
+        if (requested.Any(r => r == PermissionRequest.ResourceVideoCapture || r == PermissionRequest.ResourceAudioCapture))
+        {
+            request.Deny();
             return;
         }
 

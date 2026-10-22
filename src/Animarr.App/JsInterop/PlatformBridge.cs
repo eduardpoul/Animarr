@@ -127,16 +127,29 @@ public static class PlatformBridge
     /// or an empty string on failure — JS then runs the img's own onerror
     /// fallback, or leaves the broken-image icon for genuinely missing
     /// resources rather than silently disappearing.</summary>
+    private const long MaxProxiedImageBytes = 16L * 1024 * 1024;
+
     [JSInvokable("FetchImageAsDataUrl")]
     public static async Task<string> FetchImageAsDataUrlAsync(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return "";
+        // http(s) only, and only what is an image: the <img> it serves may
+        // point anywhere (a poster URL from metadata), and handing an
+        // arbitrary LAN page or JSON back to the page as data would let
+        // script read what the browser itself never could.
+        if (!System.Uri.TryCreate(url, System.UriKind.Absolute, out var u)
+            || (u.Scheme != System.Uri.UriSchemeHttp && u.Scheme != System.Uri.UriSchemeHttps))
+            return "";
         try
         {
-            using var resp = await ImageHttp.GetAsync(url).ConfigureAwait(false);
+            using var resp = await ImageHttp.GetAsync(u, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return "";
+            var mime = resp.Content.Headers.ContentType?.MediaType ?? "";
+            if (!mime.StartsWith("image/", System.StringComparison.OrdinalIgnoreCase)
+                || resp.Content.Headers.ContentLength is > MaxProxiedImageBytes)
+                return "";
             var bytes = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-            var mime  = resp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            if (bytes.Length > MaxProxiedImageBytes) return "";
             return $"data:{mime};base64,{System.Convert.ToBase64String(bytes)}";
         }
         catch

@@ -533,10 +533,21 @@ public partial class PlayerPage
             if (url is null) FlashInfo("Не удалось получить поток для внешнего плеера");
             return;
         }
+        // Only http(s) on this server goes to another app — never a file:// /
+        // content:// or a foreign host, whatever the answer contained.
+        if (!IsCurrentServerUrl(url))
+        {
+            if (token is not null) StopHlsSession(token);
+            Log("external: refused a stream URL off the current server");
+            FlashInfo("Не удалось получить поток для внешнего плеера");
+            return;
+        }
         // The chosen subtitle as a file the player adds (shifted by the server).
         var subs = new List<(string Url, string Name)>();
-        if (_sub is { IsOff: false, Burn: false } sub && SubtitleRelUrl(sub) is { } rel)
-            subs.Add((TvMedia.Url(Abs(_subOffsetMs != 0 ? rel + $"&offsetMs={_subOffsetMs}" : rel)!), SubLabel(sub)));
+        if (_sub is { IsOff: false, Burn: false } sub && SubtitleRelUrl(sub) is { } rel
+            && TvMedia.Url(Abs(_subOffsetMs != 0 ? rel + $"&offsetMs={_subOffsetMs}" : rel)!) is { } subUrl
+            && IsCurrentServerUrl(subUrl))
+            subs.Add((subUrl, SubLabel(sub)));
         var title = _episode is not null ? $"{_title} · S{_season ?? 1}E{_episode}" : _title;
         bool started = ExternalPlayers.Launch(activity, player, url, title, fromStart ? 0 : pos, subs,
                                               r => OnExternalResult(r, token, file, pos));
@@ -546,6 +557,13 @@ public partial class PlayerPage
             FlashInfo(player is null ? "Нет приложения, которое откроет видео" : $"{player.Name} не открылся");
         }
     }
+
+    private bool IsCurrentServerUrl(string? url) =>
+        _addr.Current is { } server
+        && Uri.TryCreate(url, UriKind.Absolute, out var u)
+        && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+        && string.Equals(u.GetLeftPart(UriPartial.Authority), server.GetLeftPart(UriPartial.Authority),
+                         StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The URL for the other app: the raw file (Direct Play, the
     /// player demuxes and decodes it all itself and seeks in it) unless the

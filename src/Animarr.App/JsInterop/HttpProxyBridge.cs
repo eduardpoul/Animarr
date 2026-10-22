@@ -25,6 +25,18 @@ namespace Animarr.App.JsInterop;
 /// </summary>
 public static class HttpProxyBridge
 {
+    /// <summary>An absolute http(s) URL on the active server's scheme, host and port.</summary>
+    internal static bool IsCurrentServer(string? url)
+    {
+        var current = (IPlatformApplication.Current?.Services
+                .GetService(typeof(Animarr.UI.Services.ServerAddressProvider)) as Animarr.UI.Services.ServerAddressProvider)?.Current;
+        return current is not null
+               && System.Uri.TryCreate(url, System.UriKind.Absolute, out var u)
+               && (u.Scheme == System.Uri.UriSchemeHttp || u.Scheme == System.Uri.UriSchemeHttps)
+               && string.Equals(u.GetLeftPart(System.UriPartial.Authority), current.GetLeftPart(System.UriPartial.Authority),
+                                System.StringComparison.OrdinalIgnoreCase);
+    }
+
     // Reused across calls; HttpClient is designed to be shared. No cookie
     // container needed — the media URLs the player JS builds carry the
     // session media token (?mt=); the auth cookie rides on the Blazor-side
@@ -47,9 +59,16 @@ public static class HttpProxyBridge
     {
         try
         {
-            using var req = new System.Net.Http.HttpRequestMessage(
-                new System.Net.Http.HttpMethod(string.IsNullOrEmpty(method) ? "GET" : method),
-                url);
+            // Only the active Animarr server, over http(s), with a plain
+            // method: the page renders strings from the library (titles, file
+            // names, sidecar labels) — a bridge that fetched any URL with any
+            // method and handed the body back would be an open relay into the
+            // LAN for anything that got script into it.
+            var verb = string.IsNullOrEmpty(method) ? "GET" : method.ToUpperInvariant();
+            if (!IsCurrentServer(url) || verb is not ("GET" or "HEAD" or "POST" or "PUT" or "PATCH" or "DELETE"))
+                return new ProxyResponse(0, "text/plain",
+                    System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("not the active server")));
+            using var req = new System.Net.Http.HttpRequestMessage(new System.Net.Http.HttpMethod(verb), url);
 
             if (!string.IsNullOrEmpty(body))
                 req.Content = new System.Net.Http.StringContent(
