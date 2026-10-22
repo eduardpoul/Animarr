@@ -443,6 +443,8 @@ public partial class PlayerPage : ContentPage
                     ?? (_kind == StreamKind.None || (NativePlayerService.Instance?.GetState()?.PlayWhenReady ?? true));
         _retryStart = null;
         string? failure = null;
+        string trackParams = "";
+        bool capsSent = false;
         StartResponse? body = null;
         try
         {
@@ -451,17 +453,30 @@ public partial class PlayerPage : ContentPage
             // relative to the playlist and authorised by the session id in
             // their path.
             await TvMedia.EnsureTokenAsync();
+            // The previous episode's audio language is matched against this
+            // file's tracks before the request, so the chosen track is in the
+            // first stream rather than a restart.
+            if (_audio is null && _audioCarry is not null)
+            {
+                if (!catalog.IsCompleted) await Task.WhenAny(catalog, Task.Delay(2000));
+                DecideAudioIfNeeded();
+            }
             var seekSec = resumeMs / 1000;
+            trackParams = AudioStartParams(maxHeight);
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
-                      $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1";
+                      $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1" + trackParams;
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
                 if (!string.IsNullOrEmpty(caps))
+                {
                     url += $"&nativeCaps={Uri.EscapeDataString(caps)}";
+                    capsSent = true;
+                }
             }
 
-            Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}");
+            Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}" +
+                (trackParams.Length > 0 && _audio is { } sentAudio ? $" audio={DescribeAudio(sentAudio)}" : ""));
             // Two attempts, like the web player, but only where a second try
             // can help: a network error or a 5xx such as start_failed /
             // too_many_sessions (a start racing the cleanup of the previous
@@ -538,6 +553,18 @@ public partial class PlayerPage : ContentPage
             return;
         }
 
+        // Sent without the chosen track to see whether the file Direct Plays —
+        // it doesn't: restart with the track before anything plays (the wrong
+        // language is never heard). This answer's HLS session is not used.
+        if (NeedsTrackRestart(directPlay, trackParams))
+        {
+            if (newToken is not null) StopHlsSession(newToken);
+            _directPlayable = false;   // → the restart sends audioTrackIndex
+            Log($"start #{gen}: {(directStream ? "DirectStream" : "Hls")} carries a:0 only → restart with the track");
+            _ = StartStreamAsync(resumeMs, maxHeight, play, onFail);
+            return;
+        }
+
         // A file's first start waits briefly for its track catalog, and any
         // start for the check of a subtitle it must side-load, so the subtitle
         // goes out with the stream instead of a second prepare right after.
@@ -556,6 +583,8 @@ public partial class PlayerPage : ContentPage
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
+        // Only a start the server was free to Direct Play tells whether it can.
+        if (maxHeight == 0 && trackParams.Length == 0 && capsSent) _directPlayable = directPlay;
         _isDirectStream = directStream;
         ClearError();
 
@@ -570,6 +599,7 @@ public partial class PlayerPage : ContentPage
         DecideSubIfNeeded();
         var (sideload, textOn) = BuildSubPlan();
         _textApplied = false;
+        _audioApplied = false;
         if (directStream)
         {
             // Progressive remux pipe: NOT seekable — bake the offset into the
@@ -653,6 +683,8 @@ public partial class PlayerPage : ContentPage
         _probeAudio = new(); _probeSubs = new(); _extAudio = new(); _extSubs = new();
         _probeOk = false;
         _subNeedsServer.Clear();
+        _audioNeedsServer.Clear();
+        _directPlayable = null;
         return _catalogTask = LoadCatalogAsync(_filePath);
     }
 
@@ -713,6 +745,175 @@ public partial class PlayerPage : ContentPage
                 ? v.GetString() : null;
         static bool Flag(JsonElement e, string name) =>
             e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) && i != 0;
+    }
+
+    // ── Audio ───────────────────────────────────────────────────────────────
+    // Direct Play: ExoPlayer has every embedded track — switch in place. On
+    // Direct Stream / HLS the stream carries ONE audio track (the /api/video
+    // remux maps 0:a:0), so another track is a restart with audioTrackIndex
+    // (the server then muxes it into HLS, transcoded to AAC); a sidecar dub
+    // is a restart with externalAudio (a second ffmpeg input). A track the
+    // device can't decode on Direct Play goes the same server way instead of
+    // failing in the decoder.
+
+    /// <summary>Audio choice: embedded #Embedded (ffprobe audio order = the
+    /// server's audioTrackIndex) or a sidecar dub file.</summary>
+    private readonly record struct AudioSel(int Embedded, string? External);
+
+    /// <summary>null = the default (server: a:0; Direct Play: Media3's pick).</summary>
+    private AudioSel? _audio;
+    /// <summary>Previous episode's audio language, matched on the next file.</summary>
+    private string? _audioCarry;
+    private bool _audioApplied;
+    /// <summary>This file Direct Plays on this device (learned from an uncapped
+    /// start without track parameters) — then an embedded audio switch needs
+    /// no audioTrackIndex (which would force HLS): it is selected locally.</summary>
+    private bool? _directPlayable;
+    /// <summary>Embedded audio tracks ExoPlayer can't decode on this device.</summary>
+    private readonly HashSet<int> _audioNeedsServer = new();
+
+    /// <summary>Track parameters for the next /api/hls/start. An embedded track
+    /// goes out as audioTrackIndex only when the stream must carry it: the
+    /// server skips Direct Play for any audioTrackIndex &gt; 0. On a file not
+    /// known to Direct Play or not (the first start of a carried language)
+    /// the start goes out without it — a Direct Play answer then selects the
+    /// track locally, any other answer is restarted with it before it plays
+    /// (<see cref="NeedsTrackRestart"/>).</summary>
+    private string AudioStartParams(int maxHeight)
+    {
+        if (_audio is { External: { } ext })
+            return $"&externalAudio={Uri.EscapeDataString(ext)}";
+        if (_audio is { Embedded: > 0 } a)
+        {
+            bool canDirectPlay = maxHeight == 0 && !_forceTranscode && !Bench.BenchLog.Has("nocaps")
+                                 && !_audioNeedsServer.Contains(a.Embedded);
+            if (!canDirectPlay || _directPlayable == false) return $"&audioTrackIndex={a.Embedded}";
+        }
+        return "";
+    }
+
+    /// <summary>A start sent without the chosen embedded track (to learn whether
+    /// the file Direct Plays) came back as a stream that carries a:0 only.
+    /// <para>
+    /// SERVER HOOK: once /api/video takes audioTrackIndex (server work in
+    /// progress, not merged), a Direct Stream answer could keep its tier by
+    /// appending &amp;audioTrackIndex=N to directStreamUrl instead of this
+    /// restart onto HLS. Until then the restart sends the parameter and the
+    /// server answers with whatever tier carries the track.
+    /// </para></summary>
+    private bool NeedsTrackRestart(bool directPlay, string trackParams) =>
+        !directPlay && trackParams.Length == 0 && _audio is { External: null, Embedded: > 0 };
+
+    private void DecideAudioIfNeeded()
+    {
+        if (_audio is not null || _audioCarry is null || !_catalogTask.IsCompleted) return;
+        var lang = _audioCarry;
+        _audioCarry = null;
+        if (_probeAudio.FirstOrDefault(a => TrackLabels.NormLang(a.Lang) == lang) is { } e)
+            _audio = new AudioSel(e.Index, null);
+        else if (_extAudio.FirstOrDefault(x => TrackLabels.NormLang(x.Language) == lang) is { } x)
+            _audio = new AudioSel(-1, x.Path);
+        if (_audio is { } sel) Log($"audio carried: {DescribeAudio(sel)}");
+    }
+
+    /// <summary>Media3 audio track for embedded audio #k on Direct Play
+    /// (container order; by rank within the language if Media3 skipped one).</summary>
+    private TrackOption? MapEmbeddedAudio(int k, IReadOnlyList<TrackOption> media3Audio)
+    {
+        if (!_probeOk) return k >= 0 && k < media3Audio.Count ? media3Audio[k] : null;
+        if (k < 0 || k >= _probeAudio.Count) return null;
+        if (media3Audio.Count == _probeAudio.Count) return media3Audio[k];
+        var lang = TrackLabels.NormLang(_probeAudio[k].Lang);
+        int rank = _probeAudio.Take(k).Count(p => TrackLabels.NormLang(p.Lang) == lang);
+        return media3Audio.Where(t => TrackLabels.NormLang(t.Language) == lang).Skip(rank).FirstOrDefault();
+    }
+
+    /// <summary>What actually plays: the dub, Media3's selected track on Direct
+    /// Play, else the index the stream was started with.</summary>
+    private AudioSel CurrentAudio()
+    {
+        if (_audio is { External: not null } ext) return ext;
+        if (_kind == StreamKind.DirectPlay && NativePlayerService.Instance is { } nps)
+        {
+            var media3 = nps.GetAudioTracks();
+            int count = _probeOk ? _probeAudio.Count : media3.Count;
+            for (int k = 0; k < count; k++)
+                if (MapEmbeddedAudio(k, media3) is { Selected: true }) return new AudioSel(k, null);
+        }
+        return _audio ?? new AudioSel(0, null);
+    }
+
+    private string AudioLabel(ProbeTrack a)
+    {
+        var parts = new List<string>();
+        var lang = TrackLabels.LangName(a.Lang);
+        if (lang.Length > 0) parts.Add(lang);
+        if (!string.IsNullOrWhiteSpace(a.Title)) parts.Add(a.Title!);
+        if (parts.Count == 0) parts.Add($"Дорожка {a.Index + 1}");
+        if (TrackLabels.Codec(a.Codec) is { } c) parts.Add(c);
+        if (TrackLabels.Channels(a.Channels) is { } ch) parts.Add(ch);
+        return string.Join(" · ", parts);
+    }
+
+    private static string DescribeAudio(AudioSel s) =>
+        s.External is { } p ? $"external {FileName(p)}" : $"embedded #{s.Embedded}";
+
+    /// <summary>Last segment of a server path — '\' (a Windows server) or '/';
+    /// Path.GetFileName on Android only knows '/'.</summary>
+    private static string FileName(string path) => path[(path.LastIndexOfAny(new[] { '/', '\\' }) + 1)..];
+
+    private void ChooseAudio(AudioSel sel, string label)
+    {
+        if (CurrentAudio() == sel) { FlashInfo("Уже выбрано"); return; }
+        var previous = _audio;
+        Log($"audio chosen: {DescribeAudio(sel)} (tier {_kind})");
+        if (sel.External is null && _kind == StreamKind.DirectPlay && !_audioNeedsServer.Contains(sel.Embedded)
+            && NativePlayerService.Instance is { } nps
+            && MapEmbeddedAudio(sel.Embedded, nps.GetAudioTracks()) is { } t)
+        {
+            if (t.Supported)
+            {
+                // Direct Play: in place, no restart.
+                _audio = sel;
+                nps.SelectTrack(t.GroupIndex, t.TrackIndex);
+                FlashInfo($"Аудио: {label}");
+                return;
+            }
+            // No decoder for it here: the server transcodes it (the restart
+            // below then sends audioTrackIndex).
+            _audioNeedsServer.Add(sel.Embedded);
+        }
+        // The stream carries one audio track: restart it with the new one at
+        // the current position (play / pause kept). A failed start keeps the
+        // old stream and the old choice.
+        _audio = sel;
+        FlashInfo($"Аудио: {label} — перезапуск потока…");
+        var st = NativePlayerService.Instance?.GetState();
+        _ = StartStreamAsync(_streamBaseMs + (st?.PositionMs ?? 0), _maxHeight, onFail: () => _audio = previous);
+    }
+
+    /// <summary>Direct Play prepared: put the chosen embedded track on (once
+    /// per prepare). A track the device can't decode → the server transcodes it.</summary>
+    private void ApplyAudioOnTracks(NativePlayerService nps)
+    {
+        if (_audioApplied) return;
+        if (_kind != StreamKind.DirectPlay) { _audioApplied = true; return; }   // the server muxed it
+        var media3 = nps.GetAudioTracks();
+        if (media3.Count == 0) return;   // not prepared yet
+        _audioApplied = true;
+        if (_audio is not { External: null } a) return;   // default: Media3's pick
+        var t = MapEmbeddedAudio(a.Embedded, media3);
+        if (t is { Supported: true })
+        {
+            if (!t.Selected) nps.SelectTrack(t.GroupIndex, t.TrackIndex);
+            Log($"audio: Media3 track {t.GroupIndex}/{t.TrackIndex} for embedded #{a.Embedded}");
+            return;
+        }
+        _audioNeedsServer.Add(a.Embedded);
+        Log($"audio: embedded #{a.Embedded} not decodable here → server transcode");
+        FlashInfo("Дорожку не декодирует устройство — перекодирую на сервере");
+        var st = nps.GetState();
+        _ = StartStreamAsync(_streamBaseMs + st.PositionMs, _maxHeight);
     }
 
     // ── Subtitles ───────────────────────────────────────────────────────────
@@ -905,6 +1106,7 @@ public partial class PlayerPage : ContentPage
         if (_streamUrl is null) return;
         var (sideload, textOn) = BuildSubPlan();
         _textApplied = false;
+        _audioApplied = false;
         Log($"subtitle reload: {DescribeSub(_sub ?? SubSel.Off)} at {pos} ms");
         NativePlayerService.Instance?.PlayAsync(_streamUrl, pos, st?.PlayWhenReady ?? true, sideload, textOn);
     }
@@ -913,7 +1115,9 @@ public partial class PlayerPage : ContentPage
     /// choice to the freshly prepared stream (once per prepare).</summary>
     private void OnPlayerTracksChanged()
     {
-        if (_textApplied || _sub is not { } s || NativePlayerService.Instance is not { } nps) return;
+        if (NativePlayerService.Instance is not { } nps) return;
+        ApplyAudioOnTracks(nps);
+        if (_textApplied || _sub is not { } s) return;
         if (s.IsOff) { _textApplied = true; return; }
         var text = nps.GetTextTracks();
         if (text.FirstOrDefault(t => t.Id?.Contains(NativePlayerService.SideloadTrackId) == true) is { } side)
@@ -947,7 +1151,7 @@ public partial class PlayerPage : ContentPage
     {
         if (s.IsOff) return "Выключены";
         if (s.External is { } p)
-            return _extSubs.FirstOrDefault(x => x.Path == p) is { } x ? ExternalLabel(x) : System.IO.Path.GetFileName(p);
+            return _extSubs.FirstOrDefault(x => x.Path == p) is { } x ? ExternalLabel(x) : FileName(p);
         if (s.Embedded < _probeSubs.Count)
         {
             var t = _probeSubs[s.Embedded];
@@ -974,7 +1178,7 @@ public partial class PlayerPage : ContentPage
     }
 
     private static string DescribeSub(SubSel s) =>
-        s.IsOff ? "off" : s.External is { } p ? $"external {System.IO.Path.GetFileName(p)}" : $"embedded #{s.Embedded}";
+        s.IsOff ? "off" : s.External is { } p ? $"external {FileName(p)}" : $"embedded #{s.Embedded}";
 
     /// <summary>Apply the current choice to the playing stream (CC sheet, or
     /// a default picked after the stream started).</summary>
@@ -1050,6 +1254,11 @@ public partial class PlayerPage : ContentPage
         // Tracks are per file: carry the subtitle choice by language (or off).
         if (_sub is { } sub) _subCarry = (sub.IsOff, sub.IsOff ? null : TrackLabels.NormLang(SubLang(sub)));
         _sub = null;
+        if (_audio is { } aud)
+            _audioCarry = TrackLabels.NormLang(aud.External is { } dub
+                ? _extAudio.FirstOrDefault(x => x.Path == dub)?.Language
+                : aud.Embedded < _probeAudio.Count ? _probeAudio[aud.Embedded].Lang : null);
+        _audio = null;
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
         EyebrowLabel.Text = _episode is not null
@@ -1264,17 +1473,42 @@ public partial class PlayerPage : ContentPage
     // Track lists -------------------------------------------------------------
     private void OpenAudioSheet()
     {
-        var tracks = NativePlayerService.Instance?.GetAudioTracks() ?? System.Array.Empty<TrackOption>();
+        // The file's tracks (probe) + sidecar dubs — a Direct Stream / HLS
+        // stream itself carries only the one it was started with. Every row
+        // is playable: what ExoPlayer can't decode locally is transcoded by
+        // the server (audioTrackIndex / externalAudio restart).
+        var cur = CurrentAudio();
         var rows = new List<SheetRow>();
-        if (tracks.Count == 0)
-            rows.Add(new SheetRow("Оригинал", true, null));
+        if (_probeOk)
+        {
+            foreach (var a in _probeAudio)
+            {
+                var sel = new AudioSel(a.Index, null);
+                var label = AudioLabel(a);
+                rows.Add(new SheetRow(label, cur == sel, () => ChooseAudio(sel, label)));
+            }
+        }
         else
-            foreach (var t in tracks)
-                rows.Add(new SheetRow(t.Label, t.Selected, () =>
-                {
-                    NativePlayerService.Instance?.SelectTrack(t.GroupIndex, t.TrackIndex);
-                    FlashInfo($"Аудио: {t.Label}");
-                }));
+        {
+            // No probe (server error): what ExoPlayer sees, minus what this
+            // device can't decode.
+            var media3 = NativePlayerService.Instance?.GetAudioTracks() ?? System.Array.Empty<TrackOption>();
+            for (int i = 0; i < media3.Count; i++)
+            {
+                if (!media3[i].Supported) continue;
+                var sel = new AudioSel(i, null);
+                var label = media3[i].Label;
+                rows.Add(new SheetRow(label, media3[i].Selected, () => ChooseAudio(sel, label)));
+            }
+        }
+        foreach (var x in _extAudio)
+        {
+            var sel = new AudioSel(-1, x.Path);
+            var label = ExternalLabel(x);
+            rows.Add(new SheetRow(label, cur == sel, () => ChooseAudio(sel, label)));
+        }
+        if (!_catalogTask.IsCompleted) rows.Add(new SheetRow("Загрузка списка…", false, null));
+        if (rows.Count == 0) rows.Add(new SheetRow("Оригинал", true, null));
         OpenListSheet("АУДИОДОРОЖКА", rows, AudioButton);
     }
 
