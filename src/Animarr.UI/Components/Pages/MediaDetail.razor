@@ -1149,13 +1149,14 @@ else
                 var prefs = UserCtx.Preferences;
                 if (prefs is not null)
                 {
-                    // "Off" and "Forced" in the subtitle-language picker are
-                    // modes, not languages: ToIso639 maps both to null, which the
-                    // player used to read as "no preference → enable track 1".
+                    // "Default", "Forced" and "Off" in the subtitle-language
+                    // picker are modes, not languages (ToIso639 maps them to
+                    // null); any language means "Always" in that language.
                     var subPref = prefs.SubtitlePreferredLanguage;
                     var subMode = string.Equals(subPref, "Off", StringComparison.OrdinalIgnoreCase) ? "off"
                                 : string.Equals(subPref, "Forced", StringComparison.OrdinalIgnoreCase) ? "forced"
-                                : "auto";
+                                : string.Equals(subPref, "Default", StringComparison.OrdinalIgnoreCase) ? "default"
+                                : "always";
                     await JS.InvokeVoidAsync("animarrPlayer.setPrefs", new
                     {
                         audioLang = Animarr.Shared.LanguageNameMap.ToIso639(prefs.AudioPreferredLanguage),

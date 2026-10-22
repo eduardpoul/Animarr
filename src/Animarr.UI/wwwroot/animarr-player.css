@@ -75,8 +75,27 @@ html:has(.vp-backdrop) { overflow: hidden; }
    art-control-show lift, which follows its hidden built-in control bar rather
    than ours — so cues no longer hop around on unrelated mouse moves. */
 .vp-art .art-video-player .art-subtitle {
-    bottom: calc(var(--vp-sub-lift, 0px) + var(--art-subtitle-bottom)) !important;
+    /* + the user's "Height" step (--vp-sub-pos, % of the player height). */
+    bottom: calc(var(--vp-sub-lift, 0px) + var(--vp-sub-pos, 0%) + var(--art-subtitle-bottom)) !important;
+    color: var(--vp-sub-color, #fff);
 }
+/* Subtitle edge (Subtitles → Timing & style; data-sub-edge set by
+   applySubStyle). "outline" is Artplayer's own 8-way text-shadow. */
+.vp-art .art-video-player[data-sub-edge="shadow"] .art-subtitle {
+    text-shadow: 0 2px 3px rgba(0,0,0,0.95), 0 0 10px rgba(0,0,0,0.7);
+}
+.vp-art .art-video-player[data-sub-edge="box"] .art-subtitle,
+.vp-art .art-video-player[data-sub-edge="none"] .art-subtitle { text-shadow: none; }
+.vp-art .art-video-player[data-sub-edge="box"] .art-subtitle-line {
+    padding: 0.06em 0.45em;
+    border-radius: 0.2em;
+    background: rgba(0,0,0,0.72);
+}
+
+/* Artplayer's own notices ("Switch Subtitle: …", "Subtitle Offset: …",
+   "Rate: …") are English-only and duplicate what our HUD / popups already
+   show; the player reports problems itself (toast / error panel). */
+.vp-art .art-notice { display: none !important; }
 
 /* ── HUD root ─────────────────────────────────────────────────────── */
 .vp-hud {
@@ -539,6 +558,79 @@ html:has(.vp-backdrop) { overflow: hidden; }
     font-size: 11px;
     color: rgba(255,255,255,0.55);
     margin-top: 6px;
+}
+/* A picker row that opens a further panel (CC → "Timing & style…"). */
+.vp-hud-popup__item--more {
+    margin-top: 4px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0 0 6px 6px;
+    color: #9aa0a8;
+}
+
+/* Panel variant (openPanelPopup): labelled rows of chips / steppers /
+   sliders. Scrolls when the player is short (phone in landscape). */
+.vp-hud-popup--panel {
+    width: min(380px, calc(100% - 32px));
+    max-width: none;
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
+}
+.vp-panel { display: flex; flex-direction: column; gap: 10px; }
+.vp-panel__row { display: flex; flex-direction: column; gap: 6px; }
+.vp-panel__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c4c8ce;
+}
+.vp-panel__ctl {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+.vp-panel__ctl input[type=range] { flex: 1; min-width: 140px; accent-color: oklch(0.72 0.18 var(--accent-hue, 245)); }
+.vp-panel__value {
+    min-width: 64px;
+    text-align: center;
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: #fff;
+}
+.vp-panel__hint { margin-top: -4px; font-size: 11px; color: rgba(255,255,255,0.5); }
+.vp-chip {
+    all: unset;
+    box-sizing: border-box;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    color: #e8eaed;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+.vp-chip:hover { background: rgba(255,255,255,0.12); }
+.vp-chip:focus-visible { box-shadow: 0 0 0 2px oklch(0.80 0.15 var(--accent-hue, 245)); }
+.vp-chip.is-active {
+    background: oklch(0.72 0.18 var(--accent-hue, 245) / 0.18);
+    border-color: oklch(0.72 0.18 var(--accent-hue, 245) / 0.55);
+    color: oklch(0.85 0.12 var(--accent-hue, 245));
+}
+.vp-chip--step { font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; }
+.vp-chip--swatch {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--vp-swatch);
+    border: 2px solid rgba(0,0,0,0.5);
+}
+.vp-chip--swatch:hover { background: var(--vp-swatch); filter: brightness(1.1); }
+.vp-chip--swatch.is-active {
+    background: var(--vp-swatch);
+    box-shadow: 0 0 0 2px oklch(0.80 0.15 var(--accent-hue, 245));
 }
 
 /* ── Orientation-specific layout (mobile) ─────────────────────────────

@@ -1364,13 +1364,19 @@
                 </select>
             </SettingsCard>
             <SettingsCard Icon="cc" Title="@L["profile.subtitle_lang_label"]" Description="@L["profile.subtitle_lang_desc"]">
+                @* One value, four modes (the player's subMode, see MediaDetail):
+                   a language = "Always" (a track in that language, else the
+                   file's default, else the first); "Default" = only what the
+                   file flags (its default track, else forced signs in the
+                   audio's language); "Forced" = a forced / signs track only;
+                   "Off" = none. *@
                 <select class="fs-select" value="@_subPref" @onchange="OnSubPrefChanged">
                     <option value="Russian">@L["edit_metadata.basics_lang_russian"]</option>
                     <option value="English">@L["edit_metadata.basics_lang_english"]</option>
-                    <option value="Off">@L["profile.subtitle_off"]</option>
-                    @* A mode, like Off: the player enables only a forced / signs track. *@
-                    <option value="Forced">@L["profile.subtitle_forced_only"]</option>
                     <option value="Japanese">@L["edit_metadata.basics_lang_japanese"]</option>
+                    <option value="Default">@L["profile.subtitle_default"]</option>
+                    <option value="Forced">@L["profile.subtitle_forced_only"]</option>
+                    <option value="Off">@L["profile.subtitle_off"]</option>
                 </select>
             </SettingsCard>
             <SettingsCard Icon="cc" Title="@L["profile.subtitle_size_label"]" Description="@($"{_subSize} px")">

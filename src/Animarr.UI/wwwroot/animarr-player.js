@@ -87,46 +87,76 @@
     // ── User audio/subtitle preferences ─────────────────────────────────────
     // Pushed once from MediaDetail via animarrPlayer.setPrefs(...) when the
     // account prefs load. audioLang/subLang are ISO-639-1 codes ('ja','ru') or
-    // null; subSize is a pixel size or 0 (= leave Artplayer's default).
-    //   • subMode  → 'auto' (pick a track, below), 'off' (start with no
-    //                subtitles) or 'forced' (only a forced / signs track, else
-    //                none). "Off" used to arrive as subLang=null and fell
-    //                through to "enable the first track".
-    //   • subLang  → picks the initial subtitle track by language (client-side
+    // null; subSize is a pixel size or 0 (= Artplayer's default 20 px).
+    //   • subMode  → which subtitle a fresh open starts with (Personal
+    //                settings → Subtitles; same four modes as the TV):
+    //                  'default' — what the file flags: its default track,
+    //                              else a forced / signs track in the audio's
+    //                              language, else none;
+    //                  'always'  — a track in the preferred language, else
+    //                              the flagged default, else the first one
+    //                              ('auto' is the old name);
+    //                  'forced'  — only a forced / signs track, else none;
+    //                  'off'     — none.
+    //   • subLang  → the preferred subtitle language for 'always' (client-side
     //                overlay only — never touches the video/audio pipeline).
-    //   • subSize  → Artplayer cue font-size.
+    //   • subSize  → base cue font size; the player's own size step scales it.
     //   • audioLang→ auto-selects the matching audio track ONLY on a transcoding
     //                HLS session (see attach). Direct Play is never disturbed:
     //                we never force a transcode just to switch audio language.
-    let PREFS = { audioLang: null, subLang: null, subSize: 0, subMode: 'auto' };
+    let PREFS = { audioLang: null, subLang: null, subSize: 0, subMode: 'always' };
+    const SUB_MODES = ['default', 'always', 'forced', 'off'];
     function setPrefs(p) {
-        const mode = (p && p.subMode) ? String(p.subMode).toLowerCase() : 'auto';
+        let mode = (p && p.subMode) ? String(p.subMode).toLowerCase() : 'always';
+        if (mode === 'auto') mode = 'always';
         PREFS = {
             audioLang: (p && p.audioLang) ? String(p.audioLang).toLowerCase() : null,
             subLang:   (p && p.subLang)   ? String(p.subLang).toLowerCase()   : null,
             subSize:   (p && Number.isFinite(p.subSize)) ? Math.max(0, p.subSize) : 0,
-            subMode:   (mode === 'off' || mode === 'forced') ? mode : 'auto',
+            subMode:   SUB_MODES.includes(mode) ? mode : 'always',
         };
     }
-    /** Initial subtitle track for a fresh open, per the account's subtitle
-     *  mode: index into `subs` (the probed embedded tracks) or -1 = none.
-     *  auto: preferred language (its full track before a forced / signs one),
-     *  then the container's default-disposition track, then the first. */
-    function pickDefaultSubtitle(subs) {
-        if (PREFS.subMode === 'off') return -1;
-        if (PREFS.subMode === 'forced') return subs.findIndex(s => s.forced);
-        if (PREFS.subLang) {
-            let fallback = -1;
-            for (let i = 0; i < subs.length; i++) {
-                if (normLang(subs[i].lang) !== PREFS.subLang) continue;
-                if (!subs[i].forced) return i;
-                if (fallback < 0) fallback = i;
-            }
-            if (fallback >= 0) return fallback;
+    // A sidecar file that is a forced / signs track (no disposition flags on
+    // a loose file — its name is all there is).
+    const FORCED_NAME_RE = /\bforced\b|\bsigns?\b|надпис|написи/i;
+    /** Initial subtitle for a fresh open, per the account's subtitle mode
+     *  (PREFS.subMode, see above):
+     *    { idx }  — an embedded track (index into `subs`, the probed list),
+     *    { ext }  — a sidecar file (its path, from `ext`),
+     *    null     — none.
+     *  `audioLang` is the playing audio's language (639-1 or ''), which picks
+     *  the forced / signs track a foreign-language scene needs. */
+    function pickDefaultSubtitle(subs, ext, audioLang) {
+        subs = subs || []; ext = ext || [];
+        const mode = PREFS.subMode;
+        if (mode === 'off') return null;
+        const emb = (pred) => { const i = subs.findIndex(pred); return i >= 0 ? { idx: i } : null; };
+        const side = (pred) => { const s = ext.find(pred); return s ? { ext: s.path } : null; };
+        const lang = (s) => normLang(s.lang);
+        const extLang = (s) => normLang(s.language);
+        const extForced = (s) => FORCED_NAME_RE.test((s.fileName || '') + ' ' + (s.label || ''));
+        if (mode === 'forced') {
+            return (PREFS.subLang && emb(s => s.forced && lang(s) === PREFS.subLang))
+                || (audioLang && emb(s => s.forced && lang(s) === audioLang))
+                || emb(s => s.forced)
+                || side(extForced);
         }
-        const d = subs.findIndex(s => s.default);
-        if (d >= 0) return d;
-        return subs.length > 0 ? 0 : -1;
+        if (mode === 'default') {
+            return (PREFS.subLang && emb(s => s.default && lang(s) === PREFS.subLang))
+                || emb(s => s.default)
+                || (audioLang && emb(s => s.forced && lang(s) === audioLang))
+                || null;
+        }
+        // always
+        if (PREFS.subLang) {
+            const hit = emb(s => !s.forced && lang(s) === PREFS.subLang)
+                || side(s => !extForced(s) && extLang(s) === PREFS.subLang)
+                || emb(s => lang(s) === PREFS.subLang)
+                || side(s => extLang(s) === PREFS.subLang);
+            if (hit) return hit;
+        }
+        return emb(s => s.default) || emb(s => !s.forced) || emb(() => true)
+            || side(s => !extForced(s)) || side(() => true);
     }
     // Normalise any track language tag (ISO-639-2/B or /T, ISO-639-1, or a full
     // English name) to a 639-1 2-letter code so preference matching is tolerant
@@ -487,6 +517,81 @@
                 $subtitle.appendChild(div);
             });
         });
+    }
+
+    // ── Subtitle timing offset (task 2.7) ─────────────────────────────
+    // THE one setter: the timing panel, a restart carrying the value over and
+    // a newly loaded track all go through setSubtitleOffset /
+    // applySubtitleOffset, so when per-title track prefs land on the server
+    // (plan §6.5, PUT /api/me/track-prefs + `subtitleOffset` in the start
+    // response) this is the single place that saves / seeds it. Seconds,
+    // positive = cues appear later. Lives for this player session; it applies
+    // to whichever track is loaded (Artplayer keeps the shift per <track>, so
+    // a newly loaded one starts at 0 until this re-applies it).
+    const SUB_OFFSET_MAX = 10;   // same range as Artplayer's own offset control
+    function setSubtitleOffset(entry, sec) {
+        let v = Math.round((Number(sec) || 0) * 10) / 10;
+        v = Math.max(-SUB_OFFSET_MAX, Math.min(SUB_OFFSET_MAX, v));
+        entry.subOffset = v;
+        applySubtitleOffset(entry);
+        return v;
+    }
+    // Shifts the loaded track's cues the way Artplayer's own subtitleOffset
+    // does (from each cue's original times, so re-applying is idempotent),
+    // minus its clamp to [0, art.duration]: that duration reads 0 until the
+    // stream's metadata is in (a track loading during a restart) and for
+    // ever on a Direct Stream remux (video.duration = Infinity), which
+    // collapsed every cue to 0 s. A cue shifted past the end just never shows.
+    function applySubtitleOffset(entry) {
+        const art = entry && entry.art;
+        if (!art || !art.subtitle) return;
+        const want = entry.subOffset || 0;
+        try {
+            for (const c of (art.subtitle.cues || [])) {
+                if (c.vpOrigStart == null) {
+                    if (want === 0) continue;
+                    c.vpOrigStart = c.startTime;
+                    c.vpOrigEnd   = c.endTime;
+                }
+                c.startTime = Math.max(0, c.vpOrigStart + want);
+                c.endTime   = Math.max(0, c.vpOrigEnd + want);
+            }
+            art.subtitle.update();
+        } catch (e) { console.warn('subtitle offset failed', e); }
+    }
+
+    // ── Subtitle style (task 2.7) ─────────────────────────────────────
+    // Size step (scales the account's subtitle size), colour, edge
+    // (outline / shadow / box / none) and how far above the bottom the cues
+    // sit. A per-device look, so localStorage; applied as CSS variables /
+    // data-sub-edge on Artplayer's player element (animarr-player.css).
+    const SUB_STYLE_KEY = 'animarr_player_substyle';
+    const SUB_SCALES = [0.75, 1, 1.25, 1.5, 2];
+    const SUB_COLORS = { white: '#ffffff', yellow: '#ffe14d', cyan: '#6fe6ff', green: '#8cff7a' };
+    const SUB_EDGES = ['outline', 'shadow', 'box', 'none'];
+    const SUB_POS_MAX = 30;      // % of the player height
+    function readSubStyle() {
+        let s = null;
+        try { s = JSON.parse(localStorage.getItem(SUB_STYLE_KEY) || 'null'); } catch {}
+        s = s || {};
+        return {
+            scale: SUB_SCALES.includes(s.scale) ? s.scale : 1,
+            color: SUB_COLORS[s.color] ? s.color : 'white',
+            edge:  SUB_EDGES.includes(s.edge) ? s.edge : 'outline',
+            pos:   Number.isFinite(s.pos) ? Math.max(0, Math.min(SUB_POS_MAX, Math.round(s.pos))) : 0,
+        };
+    }
+    function saveSubStyle(s) {
+        try { localStorage.setItem(SUB_STYLE_KEY, JSON.stringify(s)); } catch {}
+    }
+    function applySubStyle(player, s) {
+        if (!player) return;
+        s = s || readSubStyle();
+        const base = PREFS.subSize > 0 ? PREFS.subSize : 20;
+        player.style.setProperty('--art-subtitle-font-size', Math.round(base * s.scale) + 'px');
+        player.style.setProperty('--vp-sub-color', SUB_COLORS[s.color]);
+        player.style.setProperty('--vp-sub-pos', s.pos + '%');
+        player.dataset.subEdge = s.edge;
     }
 
     /** Build the player accent colour from the active --accent-hue (set by the
@@ -1226,6 +1331,8 @@
     }
 
     // ── popup picker (CC / Audio / Aspect) ────────────────────────────
+    // `items`: strings, or { label, cls } for a row with an extra class
+    // (e.g. the CC list's "Timing & style" row).
     function openPickerPopup(root, anchor, title, items, currentIdx, onPick) {
         const existing = root.querySelector('.vp-hud-popup');
         if (existing) {
@@ -1236,12 +1343,14 @@
         const popup = document.createElement('div');
         popup.className = 'vp-hud-popup';
         popup.setAttribute('data-anchor', anchor);
+        const label = (it) => (it && typeof it === 'object') ? it.label : it;
+        const extra = (it) => (it && typeof it === 'object' && it.cls) ? ' ' + it.cls : '';
         popup.innerHTML = `
             <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
             <div class="vp-hud-popup__list">
                 ${items.map((it, i) => `
-                    <button class="vp-hud-popup__item${i === currentIdx ? ' is-active' : ''}"
-                            data-i="${i}">${escapeHtml(it)}</button>
+                    <button class="vp-hud-popup__item${i === currentIdx ? ' is-active' : ''}${escapeHtml(extra(it))}"
+                            data-i="${i}">${escapeHtml(label(it))}</button>
                 `).join('')}
             </div>`;
         popup.addEventListener('click', (e) => {
@@ -1268,6 +1377,142 @@
             };
             document.addEventListener('click', onDoc, true);
         }, 0);
+    }
+
+    // ── panel popup (subtitle timing & style, picture) ────────────────
+    // Same shell, placement and toggle / outside-click / ghost-click rules
+    // as the pickers, but the body is built by the caller from the small
+    // row / chip / stepper helpers below (DOM + textContent only). Controls
+    // ignore clicks in the first 400 ms: on touch the opening tap's ghost
+    // click would otherwise land on whatever control now sits under it.
+    function openPanelPopup(root, anchor, title, build) {
+        const existing = root.querySelector('.vp-hud-popup');
+        if (existing) {
+            const wasFor = existing.getAttribute('data-anchor');
+            const wasPanel = existing.classList.contains('vp-hud-popup--panel');
+            existing.remove();
+            if (wasFor === anchor && wasPanel) return;   // same button → toggle closed
+        }
+        const popup = document.createElement('div');
+        popup.className = 'vp-hud-popup vp-hud-popup--panel';
+        popup.setAttribute('data-anchor', anchor);
+        popup.appendChild(mkEl('div', 'vp-hud-popup__title', title));
+        const body = mkEl('div', 'vp-panel');
+        popup.appendChild(body);
+        const openedAt = Date.now();
+        popup.dataset.openedAt = String(openedAt);
+        const ready = () => Date.now() - openedAt >= 400;
+        build(body, ready);
+        popup.addEventListener('mousedown', e => e.stopPropagation());
+        popup.addEventListener('click',     e => e.stopPropagation());
+        root.appendChild(popup);
+        setTimeout(() => {
+            const onDoc = (e) => {
+                if (!popup.isConnected) { document.removeEventListener('click', onDoc, true); return; }
+                if (!ready()) return;
+                if (!popup.contains(e.target) && !e.target.closest(`[data-act="${anchor}"]`)) {
+                    popup.remove();
+                    document.removeEventListener('click', onDoc, true);
+                }
+            };
+            document.addEventListener('click', onDoc, true);
+        }, 0);
+        return popup;
+    }
+    function mkEl(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        return e;
+    }
+    /** One labelled row; returns its control cell. */
+    function panelRow(body, label) {
+        const row = mkEl('div', 'vp-panel__row');
+        row.appendChild(mkEl('div', 'vp-panel__label', label));
+        const ctl = mkEl('div', 'vp-panel__ctl');
+        row.appendChild(ctl);
+        body.appendChild(row);
+        return ctl;
+    }
+    /** Segmented choice. options: [{ value, label, title?, swatch? }]. */
+    function panelChips(ctl, options, current, ready, onPick) {
+        const btns = options.map(o => {
+            const b = mkEl('button', 'vp-chip', o.swatch ? null : o.label);
+            b.type = 'button';
+            if (o.swatch) {
+                b.classList.add('vp-chip--swatch');
+                b.style.setProperty('--vp-swatch', o.swatch);
+                b.setAttribute('aria-label', o.label);
+            }
+            if (o.title || o.swatch) b.title = o.title || o.label;
+            b.addEventListener('click', () => {
+                if (!ready()) return;
+                btns.forEach(x => x.classList.toggle('is-active', x === b));
+                onPick(o.value);
+            });
+            ctl.appendChild(b);
+            return b;
+        });
+        btns.forEach((b, i) => b.classList.toggle('is-active', options[i].value === current));
+        return btns;
+    }
+    /** − value + stepper. steps: [{ label, delta }] left of / right of the
+     *  value; `format` renders it. Returns { set(v) } to refresh the value. */
+    function panelStepper(ctl, value, steps, format, ready, onStep) {
+        const val = mkEl('span', 'vp-panel__value', format(value));
+        const mk = (s) => {
+            const b = mkEl('button', 'vp-chip vp-chip--step', s.label);
+            b.type = 'button';
+            b.addEventListener('click', () => { if (ready()) val.textContent = format(onStep(s.delta)); });
+            return b;
+        };
+        steps.filter(s => s.delta < 0).forEach(s => ctl.appendChild(mk(s)));
+        ctl.appendChild(val);
+        steps.filter(s => s.delta > 0).forEach(s => ctl.appendChild(mk(s)));
+        return { set(v) { val.textContent = format(v); } };
+    }
+
+    /** Subtitles → "Timing & style": offset (±, 0.1 s steps) and the cue look.
+     *  `player` = Artplayer's player element (carries the style variables). */
+    function openSubtitleSettingsPopup(root, anchor, entry, player) {
+        openPanelPopup(root, anchor, t('sub_settings'), (body, ready) => {
+            const fmtOffset = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' ' + t('unit_s');
+            const offCtl = panelRow(body, t('sub_offset'));
+            const stepper = panelStepper(offCtl, entry.subOffset || 0,
+                [{ label: '−1', delta: -1 }, { label: '−0.1', delta: -0.1 },
+                 { label: '+0.1', delta: 0.1 }, { label: '+1', delta: 1 }],
+                fmtOffset, ready,
+                (d) => setSubtitleOffset(entry, (entry.subOffset || 0) + d));
+            const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
+            reset.type = 'button';
+            reset.addEventListener('click', () => { if (ready()) stepper.set(setSubtitleOffset(entry, 0)); });
+            offCtl.appendChild(reset);
+            body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_offset_hint')));
+
+            const style = readSubStyle();
+            const update = (patch) => {
+                Object.assign(style, patch);
+                saveSubStyle(style);
+                applySubStyle(player, style);
+            };
+            panelChips(panelRow(body, t('sub_size')),
+                SUB_SCALES.map(v => ({ value: v, label: Math.round(v * 100) + '%' })),
+                style.scale, ready, v => update({ scale: v }));
+            panelChips(panelRow(body, t('sub_color')),
+                Object.keys(SUB_COLORS).map(k => ({ value: k, label: t('color_' + k), swatch: SUB_COLORS[k] })),
+                style.color, ready, v => update({ color: v }));
+            panelChips(panelRow(body, t('sub_edge')),
+                SUB_EDGES.map(k => ({ value: k, label: t('edge_' + k) })),
+                style.edge, ready, v => update({ edge: v }));
+            const posCtl = panelRow(body, t('sub_position'));
+            const range = document.createElement('input');
+            range.type = 'range';
+            range.min = '0'; range.max = String(SUB_POS_MAX); range.step = '1';
+            range.value = String(style.pos);
+            range.setAttribute('aria-label', t('sub_position'));
+            range.addEventListener('input', () => update({ pos: parseInt(range.value, 10) || 0 }));
+            posCtl.appendChild(range);
+        });
     }
 
     // ── media-info popup (read-only) ──────────────────────────────────
@@ -2376,6 +2621,25 @@
         back:               'Back',
         fallback_switched:  'Playback problem — switched to a more compatible stream',
         fallback_restarted: 'Connection lost — the stream was restarted',
+        subtitles:          'Subtitles',
+        sub_off:            'Off',
+        sub_settings:       'Timing & style',
+        sub_offset:         'Timing',
+        sub_offset_hint:    '+ shows the lines later, − earlier',
+        sub_size:           'Size',
+        sub_color:          'Colour',
+        sub_edge:           'Background',
+        sub_position:       'Height',
+        color_white:        'White',
+        color_yellow:       'Yellow',
+        color_cyan:         'Cyan',
+        color_green:        'Green',
+        edge_outline:       'Outline',
+        edge_shadow:        'Shadow',
+        edge_box:           'Box',
+        edge_none:          'None',
+        unit_s:             's',
+        reset:              'Reset',
     };
     function t(key) {
         return LABELS[key] || LABEL_DEFAULTS[key] || key;
@@ -3023,12 +3287,13 @@
                             lang,
                             url:  apiUrl('/api/subtitle?path=' + encodeURIComponent(mediaPath))
                                 + '&track=' + idx + '&format=webvtt',
-                            default: !!(s.disposition && s.disposition.default)
-                                  || (subs.length === 1 && idx === 0),
+                            // The file's own flag only — the "Default" mode
+                            // goes by exactly what the muxer set.
+                            default: !!(s.disposition && s.disposition.default),
                             // Forced flag, or a "Signs" / "Надписи" track that
                             // many releases ship without setting the flag.
                             forced: !!(s.disposition && s.disposition.forced)
-                                 || /\bforced\b|\bsigns?\b|надпис|написи/i.test(title),
+                                 || FORCED_NAME_RE.test(title),
                         };
                     });
 
@@ -3152,6 +3417,8 @@
         const startPaused = !!(restore && restore.paused);
         const restoredExtSub = (restore && restore.sub && restore.sub.ext)
             ? (externalSubList.find(s => s.path === restore.sub.ext) || null) : null;
+        // A fresh open whose subtitle mode picked a sidecar file.
+        let pickedExtSub = null;
 
         // Codec capability gate: ask Android's MediaCodecList whether the
         // device can decode whatever the server's output describes. If not,
@@ -3211,13 +3478,21 @@
             adapter = native;
         } else {
             // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
-            // Initial subtitle track per the account's subtitle mode (Off /
-            // forced only / language → default → first; pickDefaultSubtitle).
-            // Pure client-side overlay — never influences the video/audio
-            // pipeline.
-            initialSubIdx = !(restore && restore.sub) ? pickDefaultSubtitle(subtitleList)
-                : (restore.sub.idx != null && restore.sub.idx < subtitleList.length) ? restore.sub.idx
-                : -1;   // was Off, or an external track (switched to below)
+            // Initial subtitle track per the account's subtitle mode
+            // (pickDefaultSubtitle). Pure client-side overlay — never
+            // influences the video/audio pipeline. An embedded pick goes in
+            // as Artplayer's initial track; a sidecar one is switched to
+            // right after creation (as on a restart).
+            if (!(restore && restore.sub)) {
+                const playingAudio = externalAudioPath
+                    ? normLang((externalAudioList.find(x => x.path === externalAudioPath) || {}).language)
+                    : normLang((audioList.find(a => a.index === audioTrackIndex) || {}).lang);
+                const pick = pickDefaultSubtitle(subtitleList, externalSubList, playingAudio);
+                if (pick && pick.idx != null) initialSubIdx = pick.idx;
+                else if (pick && pick.ext) pickedExtSub = externalSubList.find(s => s.path === pick.ext) || null;
+            } else if (restore.sub.idx != null && restore.sub.idx < subtitleList.length) {
+                initialSubIdx = restore.sub.idx;
+            }   // else: was Off, or an external track (restoredExtSub, below)
             const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
             art = new window.Artplayer({
             container: el,
@@ -3341,8 +3616,9 @@
                 // text inert, and the 'subtitleAfterUpdate' hook below repaints
                 // them through renderCuesSafely so <b>/<i>/<u> still render.
                 escape: true,
-                // User's subtitle size (px). Omitted (Artplayer default) when 0.
-                ...(PREFS.subSize > 0 ? { style: { fontSize: PREFS.subSize + 'px' } } : {}),
+                // No inline style: size / colour / edge / position come from
+                // applySubStyle's CSS variables (an inline font-size would
+                // pin the size against the player's size step).
             },
             layers: [{
                 name: 'animarr-hud',
@@ -3358,6 +3634,9 @@
                 try { renderCuesSafely(art.template.$subtitle, cues); }
                 catch (e) { console.warn('subtitle render failed', e); }
             });
+            // A freshly loaded track starts unshifted: put the offset back.
+            art.on('subtitleLoad', () => applySubtitleOffset(entry));
+            applySubStyle(art.template.$player);
             adapter = new ArtplayerAdapter(art);
             // Direct Stream: route seeks through a remux-reload (the source has
             // no Range) and read duration off the server total, not the live
@@ -3405,16 +3684,20 @@
         // to track 0 (and the block-scoped pick was never visible here), so the
         // menu showed "Track 1" while another track — or none — was on screen.
         entry.currentSubIdx = initialSubIdx >= 0 ? initialSubIdx : null;
+        // Subtitle offset: carried over by a restart, else none yet.
+        entry.subOffset = (restore && Number.isFinite(restore.subOffset)) ? restore.subOffset : 0;
+        // A sidecar subtitle — restored by a restart or picked by the
+        // subtitle mode (embedded ones went in via the initial track above;
+        // Off simply loads none).
+        const extSubNow = restoredExtSub || pickedExtSub;
+        if (extSubNow) {
+            adapter.setSubtitle({ url: externalSubUrl(extSubNow.path), name: extSubNow.label, type: 'vtt' });
+            entry.currentSubIdx = null;
+            entry.currentExtSubPath = extSubNow.path;
+        }
 
         // ── Restart: put the replaced stream's choices back ───────────
         if (restore) {
-            // A sideload subtitle (embedded ones went in via the initial
-            // track above; Off simply loads none).
-            if (restoredExtSub) {
-                adapter.setSubtitle({ url: externalSubUrl(restoredExtSub.path), name: restoredExtSub.label, type: 'vtt' });
-                entry.currentSubIdx = null;
-                entry.currentExtSubPath = restoredExtSub.path;
-            }
             // Aspect preset — applied once the frame size is known.
             if (restore.aspect != null) {
                 entry.currentAspect = restore.aspect;
@@ -3530,9 +3813,13 @@
                 // currentSubIdx (embedded) OR currentExtSubPath (external).
                 const emb = entry.subtitleList   || [];
                 const ext = entry.externalSubList || [];
-                const items = ['Off',
+                // Last row: the timing / style panel (only with a player
+                // that renders the cues itself, i.e. Artplayer).
+                const settingsIdx = entry.art ? 1 + emb.length + ext.length : -1;
+                const items = [t('sub_off'),
                     ...emb.map(s => s.name),
-                    ...ext.map(s => s.label + ' (' + s.ext + ')')];
+                    ...ext.map(s => s.label + ' (' + s.ext + ')'),
+                    ...(settingsIdx > 0 ? [{ label: t('sub_settings') + '…', cls: 'vp-hud-popup__item--more' }] : [])];
                 let cur = 0;
                 if (entry.currentExtSubPath != null) {
                     const ei = ext.findIndex(s => s.path === entry.currentExtSubPath);
@@ -3540,7 +3827,13 @@
                 } else if (entry.currentSubIdx != null) {
                     cur = entry.currentSubIdx + 1;
                 }
-                openPickerPopup(hudRoot, 'cc', 'Subtitles', items, cur, (i) => {
+                openPickerPopup(hudRoot, 'cc', t('subtitles'), items, cur, (i) => {
+                    if (i === settingsIdx) {
+                        // After this picker has closed (it closes right after
+                        // onPick; opening now would just toggle it shut).
+                        setTimeout(() => openSubtitleSettingsPopup(hudRoot, 'cc', entry, entry.art.template.$player), 0);
+                        return;
+                    }
                     if (i === 0) {
                         adapter.setSubtitle(null);
                         entry.currentSubIdx = null;
@@ -3959,6 +4252,7 @@
             sub:    entry.currentExtSubPath ? { ext: entry.currentExtSubPath }
                   : entry.currentSubIdx != null ? { idx: entry.currentSubIdx }
                   : { off: true },
+            subOffset:    entry.subOffset || 0,
             aspect:       entry.currentAspect ?? null,
             aspectPicked: !!entry.aspectPicked,
         };
