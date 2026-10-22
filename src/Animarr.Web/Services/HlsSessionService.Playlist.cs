@@ -150,6 +150,11 @@ public sealed partial class HlsSessionService
         /// that decodes HEVC Main10 — the 10-bit gradients survive instead of
         /// banding in an 8-bit H.264.</summary>
         Hevc10,
+        /// <summary>HEVC Main10 that STAYS HDR10 / HLG (BT.2020 + PQ / HLG tags,
+        /// no tone mapping): an HDR source that must be re-encoded — a
+        /// downscale / bitrate cap, a codec the client lacks — for a client
+        /// that decodes HEVC Main10 and shows HDR.</summary>
+        Hevc10Hdr,
     }
 
     /// <summary>
@@ -170,9 +175,30 @@ public sealed partial class HlsSessionService
             _                         => false,
         };
         if (!main10) return VideoTarget.H264;
+        // HDR10 / HLG — including DV P8 / P7, whose base layer is one — keeps
+        // its HDR for an HDR display (`hdr` token) instead of being tone-mapped.
+        // DV P5 has no such base (IPTPQc2): it is always tone-mapped.
+        if (client.Hdr && HdrTransferOf(probe) is not null) return VideoTarget.Hevc10Hdr;
         bool hi10p = string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && probe.Is10Bit;
         return hi10p ? VideoTarget.Hevc10 : VideoTarget.H264;
     }
+
+    /// <summary>The source's HDR transfer ("smpte2084" = PQ / HDR10,
+    /// "arib-std-b67" = HLG) when a Main10 re-encode can keep it; null for SDR
+    /// and for DV without a compatible base layer (P5).</summary>
+    private static string? HdrTransferOf(ProbeInfo probe)
+    {
+        if (probe.Dovi.Present && !probe.Dovi.CompatibleBase) return null;
+        var t = (probe.ColorTransfer ?? "").ToLowerInvariant();
+        return t is "smpte2084" or "arib-std-b67" ? t : null;
+    }
+
+    /// <summary>Encoder colour tags of a <see cref="VideoTarget.Hevc10Hdr"/>
+    /// output — BT.2020 with the source's transfer, so players switch to HDR
+    /// (a scale filter or the encoder must not leave them unspecified).</summary>
+    private static string[] HdrOutputTags(ProbeInfo? probe)
+        => ["-color_primaries", "bt2020", "-color_trc", (probe is null ? null : HdrTransferOf(probe)) ?? "smpte2084",
+            "-colorspace", "bt2020nc"];
 
     /// <summary>RFC 6381 string of a HEVC Main10 re-encode for the master
     /// playlist: Main10, level by output height (L3.1 / L4 / L5.1).</summary>

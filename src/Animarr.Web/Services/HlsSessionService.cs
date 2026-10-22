@@ -445,7 +445,13 @@ public sealed partial class HlsSessionService : IDisposable
                                or HlsPlan.Fmp4SoftwareReencode;
 
         var hdrFormats = new List<string>();
-        if (!isReencode)
+        if (isReencode && target == VideoTarget.Hevc10Hdr)
+        {
+            // HDR kept through the re-encode (HEVC Main10, BT.2020 tags).
+            hdrFormats.Add(string.Equals(probe.ColorTransfer, "arib-std-b67", StringComparison.OrdinalIgnoreCase)
+                ? "hlg" : "hdr10");
+        }
+        else if (!isReencode)
         {
             // Dolby Vision only where the player gets — and decodes — it; P8 as
             // its base layer and stripped P7 play as the HDR10 / HLG below.
@@ -479,6 +485,7 @@ public sealed partial class HlsSessionService : IDisposable
         // What happened to an HDR source on a re-encode: tone-mapped to SDR
         // (correct colours) or — tone mapping off / unavailable — just lost.
         var hdrNote = !isReencode || !HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision) ? ""
+            : target == VideoTarget.Hevc10Hdr ? " (HDR kept)"
             : toneMapper != HdrToneMapper.None ? $" (HDR → SDR tone-mapped, {HdrToneMap.Describe(toneMapper)})"
             : " (HDR lost)";
         var outName = hevcOut ? "HEVC Main10" : "H.264";
@@ -923,7 +930,8 @@ public sealed partial class HlsSessionService : IDisposable
         // start_number tells ffmpeg's HLS muxer to name its first segment
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
-        var toneMapper = ToneMapperFor(plan, probe);
+        // An HDR-keeping HEVC Main10 output isn't tone-mapped at all.
+        var toneMapper = target == VideoTarget.Hevc10Hdr ? HdrToneMapper.None : ToneMapperFor(plan, probe);
         _logger.LogInformation("HLS {Token}: plan={Plan} video={Target} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H} dv={Dv}/{DvHandling}) tonemap={ToneMap} client={Client} {Owner}",
             token, plan, target, audio, (int)Math.Round(audioOffsetSec * 1000),
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, probe?.Dovi, dovi, toneMapper, caps, who);

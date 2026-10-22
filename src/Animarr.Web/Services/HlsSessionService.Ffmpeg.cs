@@ -80,10 +80,12 @@ public sealed partial class HlsSessionService
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
                     externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
+                if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
                     externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
+                if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
