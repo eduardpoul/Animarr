@@ -81,9 +81,17 @@ public sealed partial class HlsSessionService
     /// <param name="OffsetMs">Total sync offset applied: plan baseline + <paramref name="SyncMs"/>.</param>
     /// <param name="SyncMs">The rendition's own offset (see AudioRendition.SyncSource for <paramref name="SyncSource"/>).</param>
     /// <param name="Uri">Its media playlist, relative to master.m3u8.</param>
+    /// <param name="Copied">The audio passes through as is (else transcoded to <paramref name="Codec"/>).</param>
+    /// <param name="ReasonCodes">Why this audio isn't the source's own as is —
+    /// the audio part of output.transcodeReasonCodes for THIS rendition
+    /// (external_audio, audio_unsupported; empty for a copied embedded
+    /// track). output.audio* / reasons describe the default rendition at
+    /// the start; after a live switch a client takes the Info audio line
+    /// (codec, channels, language, copied, these reasons) from the rendition
+    /// it plays.</param>
     public sealed record AudioRenditionInfo(string Id, string Kind, int? Index, string? Path, string Name,
         string? Language, string Codec, int Channels, bool Default, int OffsetMs, string Uri,
-        int SyncMs = 0, string SyncSource = "none");
+        int SyncMs = 0, string SyncSource = "none", bool Copied = false, string[]? ReasonCodes = null);
 
     /// <summary>
     /// The renditions of a start: every embedded audio track plus the external
@@ -141,7 +149,10 @@ public sealed partial class HlsSessionService
                 await using var scope = _scopes.CreateAsyncScope();
                 if (scope.ServiceProvider.GetService<ExternalTrackService>() is { } ext)
                     foreach (var t in await ext.FindForVideoAsync(fullPath, probe: true, ct))
-                        if (t.Kind == "audio") dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs, t.DurationSec, t.GroupKey));
+                        // A dub ffprobe can't read (Codec null) can't be played
+                        // either — its rendition would only ever answer 503.
+                        if (t.Kind == "audio" && t.Codec is not null)
+                            dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs, t.DurationSec, t.GroupKey));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -234,7 +245,10 @@ public sealed partial class HlsSessionService
     private static List<AudioRenditionInfo> RenditionInfos(IEnumerable<AudioRendition> renditions)
         => renditions.Select(r => new AudioRenditionInfo(r.Id, r.EmbeddedIndex is not null ? "embedded" : "external",
             r.EmbeddedIndex, r.ExternalPath, r.Name, r.Language, r.Audio.Codec, r.Audio.Channels, r.IsDefault,
-            (int)Math.Round(r.OffsetSec * 1000), $"audio/{r.Id}/media.m3u8", r.SyncMs, r.SyncSource)).ToList();
+            (int)Math.Round(r.OffsetSec * 1000), $"audio/{r.Id}/media.m3u8", r.SyncMs, r.SyncSource,
+            r.Audio.Copy,
+            r.ExternalPath is not null ? [ReasonCodes.ExternalAudio]
+            : r.Audio.Copy ? [] : [ReasonCodes.AudioUnsupported])).ToList();
 
     /// <summary>
     /// Writes the rendition's media playlist: the video's segments (same
