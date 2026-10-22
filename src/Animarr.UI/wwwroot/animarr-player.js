@@ -2633,12 +2633,16 @@
      * or throws an Error with `.status` (HTTP status, 0 = network), `.code`
      * (the problem+json `code` extension: invalid_audio_track,
      * invalid_max_height, invalid_max_bitrate, ffmpeg_exited, start_failed,
-     * too_many_sessions, ffmpeg_timeout) and a short `.reason` for the user
-     * (the problem's `detail`). One retry on a network error or a 5xx that a
-     * second try can fix (a start racing the server's cleanup of the previous
-     * session often succeeds a beat later) — never on 504 ffmpeg_timeout (the
-     * server already waited 60 s; a retry just doubles that) or ffmpeg_exited
-     * (the same plan fails the same way). 4xx are never retried.
+     * too_many_sessions, ffmpeg_timeout, superseded) and a short `.reason`
+     * for the user (the problem's `detail`). One retry on a network error or
+     * a 5xx that a second try can fix (a start racing the server's cleanup of
+     * the previous session often succeeds a beat later) — never on 504
+     * ffmpeg_timeout (the server already waited 60 s; a retry just doubles
+     * that) or ffmpeg_exited (the same plan fails the same way). 4xx are
+     * never retried. 409 `superseded` (a newer start for the same file from
+     * this device became playable first and retired this one) is flagged
+     * `.superseded`: callers drop it silently — no toast, no retry, no
+     * fallback rung — since whoever started the newer stream owns playback.
      * Aborting `signal` cancels the request — the server then stops the ffmpeg
      * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
      */
@@ -2684,6 +2688,7 @@
                     status: res.status,
                     code,
                     reason: (why ? why + ' ' : '') + '(HTTP ' + res.status + ')',
+                    superseded: res.status === 409 && code === 'superseded',
                 });
                 const retryable = res.status >= 500 && res.status !== 504
                     && code !== 'ffmpeg_exited' && code !== 'ffmpeg_timeout';
@@ -2955,6 +2960,12 @@
                 }, abort.signal);
             } catch (err) {
                 if ((err && err.name === 'AbortError') || stale()) return;
+                // A newer start for this file from this device replaced it
+                // before it became playable: that one owns playback now.
+                if (err && err.superseded) {
+                    console.info('animarrPlayer: start superseded by a newer one, dropping it');
+                    return;
+                }
                 console.error('animarrPlayer: failed to start session', err);
                 // No player came up — show why, with Retry + Back, instead of a
                 // black overlay that only a page reload got rid of.
@@ -3954,9 +3965,11 @@
     }
 
     /** Is the stream we froze for a switch still servable? Direct Play /
-     *  Direct Stream hold no server session, so yes. An HLS session usually
-     *  isn't: StartAsync reaps a path's older sessions as soon as a new start
-     *  for it arrives — even one that then fails — so ask (keepalive → 404). */
+     *  Direct Stream hold no server session, so yes. An HLS session normally
+     *  is too: the server retires a client's older session on the same file
+     *  only once the new one has produced its first segment, so a failed
+     *  start leaves it running. Still ask (keepalive → 404) — it may have
+     *  been reaped or the server restarted while the new start was warming. */
     async function previousStreamAlive(entry) {
         if (!entry.sessionToken) return true;
         try {
@@ -4027,9 +4040,22 @@
             return;
         }
 
+        if (failure && failure.superseded) {
+            // Another start for this file from this device (another tab)
+            // became playable first and owns playback now; it also retires
+            // our previous session, so neither resume nor re-open it — that
+            // would just take the stream back. Leave the player paused.
+            console.info('animarrPlayer: ' + kind + ' switch superseded by a newer start, dropping it');
+            if (entry.art) { try { entry.art.loading.show = false; } catch {} }
+            return;
+        }
         console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
         const title  = t(kind === 'audio' ? 'error_audio' : 'error_quality');
         const detail = (failure && failure.reason) || '';
+        // The server keeps the previous session alive until a replacement
+        // actually plays, so this is normally true and the old stream simply
+        // continues; re-opening the previous plan is the fallback for a
+        // session that died meanwhile (reaped, server restarted).
         const alive  = await previousStreamAlive(entry);
         if (!isLiveOp(elementId, op) || WIRED.get(elementId) !== entry) return;
         if (alive) {
