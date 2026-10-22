@@ -27,9 +27,10 @@ public sealed class ClientCaps
 
     private readonly HashSet<string> _tokens;
 
-    private ClientCaps(HashSet<string> tokens, int maxAudioChannels, bool hevc, bool hevc10)
+    private ClientCaps(HashSet<string> tokens, int maxAudioChannels, bool hevc, bool hevc10, bool hlsRemux = false)
     {
         _tokens = tokens;
+        HlsRemux = hlsRemux;
         MaxAudioChannels = maxAudioChannels;
         Hevc = hevc || tokens.Contains("hevc");
         Hevc10 = hevc10 || tokens.Contains("hevc10");
@@ -44,6 +45,16 @@ public sealed class ClientCaps
     public bool IsLegacyBrowser => !HasTokens;
 
     public bool Has(string token) => _tokens.Contains(token);
+
+    /// <summary>
+    /// The client wants a needed remux (the video plays, the container or the
+    /// audio doesn't) as a key-frame-exact HLS copy (<c>remux=hls</c>, task 6.2)
+    /// rather than /api/video's progressive pipe: seeking is then a segment
+    /// fetch instead of a reload, and resume / scrub land on the same key
+    /// frames. Direct Play is unaffected. Off = the /api/video Direct Stream
+    /// as before (DLNA and older clients).
+    /// </summary>
+    public bool HlsRemux { get; }
 
     /// <summary>Most output channels the client can play (2 when not reported).</summary>
     public int MaxAudioChannels { get; }
@@ -97,7 +108,7 @@ public sealed class ClientCaps
     /// <paramref name="maxAudioChannels"/> outside 1..8 means "not reported" (2).
     /// </summary>
     public static ClientCaps Parse(string? nativeCaps, int? maxAudioChannels, string? clientHevc = null,
-        string? clientHevc10 = null)
+        string? clientHevc10 = null, string? remux = null)
     {
         var tokens = string.IsNullOrWhiteSpace(nativeCaps)
             ? new HashSet<string>()
@@ -107,7 +118,8 @@ public sealed class ClientCaps
                         .Take(64)
                         .ToHashSet();
         var channels = maxAudioChannels is >= 1 and <= 8 ? maxAudioChannels.Value : DefaultAudioChannels;
-        return new ClientCaps(tokens, channels, Flag(clientHevc), Flag(clientHevc10));
+        return new ClientCaps(tokens, channels, Flag(clientHevc), Flag(clientHevc10),
+            string.Equals(remux?.Trim(), "hls", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The caps as /api/video query parameters (empty for a legacy

@@ -410,6 +410,12 @@ public sealed partial class HlsSessionService
             return mustReencode ? HlsPlan.Fmp4SoftwareReencode : HlsPlan.Fmp4StreamCopy;
         }
 
+        // AV1 / VP9 the client says it decodes: copy into fMP4 like HEVC (what
+        // the Direct Stream remux does for it, and what remux=hls asks for).
+        if (client.HasTokens && (probe.VideoCodec ?? "").ToLowerInvariant() is "av1" or "vp9"
+            && NativeVideoOk(probe, client))
+            return HlsPlan.Fmp4StreamCopy;
+
         // Anything else — mpeg4/XviD (AVI), MPEG-2, VC-1, MPEG-1, … — the browser
         // can't play it and it can't be stream-copied into fMP4 (AVI carries no
         // valid pts → "pts has no value"). Re-encode to H.264. DECODE stays in

@@ -422,6 +422,8 @@ public sealed partial class HlsSessionService : IDisposable
                     : !audioOk ? ReasonCodes.AudioUnsupported
                     : audioTrackIndex > 0 ? ReasonCodes.AudioTrack
                     : ReasonCodes.DolbyVision;   // a DV stream the raw file can't carry (P7 strip, dvh1 entry)
+                // remux=hls: the same need, met by the key-frame HLS copy (StartAsync).
+                if (client.HlsRemux) return new PlaybackDecision(false, null, duration, null);
                 return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration, why);
             }
             // Video codec beyond the device → HLS transcode as usual.
@@ -448,6 +450,7 @@ public sealed partial class HlsSessionService : IDisposable
             // why we route MKV here instead of HLS: original video bitstream +
             // HDR are preserved, and native playback outputs HDR more reliably
             // than MSE. The client owns the seek-reload dance (?seek=N).
+            if (client.HlsRemux) return new PlaybackDecision(false, null, duration, null);
             return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration,
                 ReasonCodes.ContainerUnsupported);
         }
@@ -904,8 +907,13 @@ public sealed partial class HlsSessionService : IDisposable
         var target = ChooseVideoTarget(plan, probe, caps, burning: burn is not null);
         // Why (output.transcodeReasonCode): the plan's reason, or for a copy the
         // dub that forced the HLS mux instead of a native path.
+        bool copyPlan = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy;
         var reasonCode = probe is null ? null
-            : plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy && hasExternalAudio ? ReasonCodes.ExternalAudio
+            : copyPlan && hasExternalAudio ? ReasonCodes.ExternalAudio
+            // A copy for a client that opens this container: it's here for the
+            // audio track (Direct Play plays the file's default one).
+            : copyPlan && audioTrackIndex > 0
+              && caps.Has(Path.GetExtension(fullPath).TrimStart('.').ToLowerInvariant()) ? ReasonCodes.AudioTrack
             : PlanReason(plan, probe, caps, maxHeight, maxBitrate, burning: burn is not null);
         // The audio half (AudioPolicy): copy the mapped track when the client
         // decodes it and the plan's container (TS / fMP4) carries it, else

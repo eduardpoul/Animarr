@@ -78,6 +78,9 @@ internal static class HlsEndpoints
             // destination.maxChannelCount on the web). >= 6 keeps 5.1 when the
             // audio must be transcoded; absent = stereo.
             int? maxAudioChannels,
+            // "hls" = a needed remux comes as a key-frame-exact HLS copy instead
+            // of the progressive /api/video Direct Stream (ClientCaps.HlsRemux).
+            string? remux,
             // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
@@ -160,7 +163,7 @@ internal static class HlsEndpoints
             // Skip the Direct Play probe entirely when an external dub is in play:
             // combining foreign audio with the source video requires the HLS mux
             // path, so a direct file URL would silently drop the dub.
-            var client = ClientCaps.Parse(nativeCaps, maxAudioChannels, clientHevc, clientHevc10);
+            var client = ClientCaps.Parse(nativeCaps, maxAudioChannels, clientHevc, clientHevc10, remux);
             // A height/bitrate cap (the HUD's Quality menu) that really shrinks
             // the stream forces a re-encode — you can't shrink a stream-copy —
             // so ChoosePlaybackAsync then skips BOTH native paths (Direct Play
