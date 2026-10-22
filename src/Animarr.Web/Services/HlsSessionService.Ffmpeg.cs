@@ -45,7 +45,10 @@ public sealed partial class HlsSessionService
         // What the GPU re-encodes write (ChooseVideoTarget).
         VideoTarget target = VideoTarget.H264,
         // Subtitle drawn into the picture (null = none).
-        SubtitleBurn? burn = null)
+        SubtitleBurn? burn = null,
+        // Key-frame-exact copy run (task 6.2): the segment muxer with these
+        // cut times and this CSV list instead of the HLS muxer. null = HLS muxer.
+        (string Times, string ListPath)? keyframeRun = null)
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
@@ -103,6 +106,12 @@ public sealed partial class HlsSessionService
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
                     targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint, burn);
                 break;
+        }
+
+        if (keyframeRun is { } kr)
+        {
+            args.AddRange(KeyframeMuxerArgs(plan, sessionDir, startNumber, kr.Times, kr.ListPath));
+            return args;
         }
 
         // ── HLS muxer options ────────────────────────────────────────────

@@ -85,6 +85,9 @@ public sealed partial class HlsSessionService : IDisposable
     private readonly string _toneMapMode;
     private readonly MediaProbeCache _probeCache;
     private readonly MediaCachePaths? _cachePaths;
+    private readonly KeyframeIndexService? _keyframes;
+    private readonly IServiceScopeFactory? _scopes;
+    private readonly bool _keyframeHlsDefault;
     private readonly SubtitleFontService? _fonts;
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
@@ -101,9 +104,15 @@ public sealed partial class HlsSessionService : IDisposable
         Microsoft.Extensions.Options.IOptions<Configuration.AppSettings>? appOptions = null,
         // Subtitle burn-in (burnSubtitle): the subtitle cache's root and the
         // attached-fonts extractor. Without them a burn request is refused.
-        MediaCachePaths? cachePaths = null, SubtitleFontService? fonts = null)
+        MediaCachePaths? cachePaths = null, SubtitleFontService? fonts = null,
+        // Key-frame-exact copy segmentation (task 6.2): the index service and
+        // a scope factory for the live Playback:KeyframeHls switch.
+        KeyframeIndexService? keyframes = null, IServiceScopeFactory? scopes = null)
     {
         _logger  = logger;
+        _keyframes = keyframes;
+        _scopes = scopes;
+        _keyframeHlsDefault = appOptions?.Value.KeyframeHls ?? true;
         _cachePaths = cachePaths;
         _fonts = fonts;
         _hardware = hardware;
@@ -279,7 +288,10 @@ public sealed partial class HlsSessionService : IDisposable
         bool    Transcoded,
         string? TranscodeReason,
         string? TranscodeReasonCode = null,
-        string[]? TranscodeReasonCodes = null);
+        string[]? TranscodeReasonCodes = null,
+        // HLS sessions: "keyframe" (segments start on the file's key frames —
+        // task 6.2 copy) or "grid" (4 s grid: re-encodes, the fallback copy).
+        string? Segmentation = null);
 
     /// <summary>
     /// Machine-readable reasons for what the server did to a stream
@@ -503,7 +515,8 @@ public sealed partial class HlsSessionService : IDisposable
         DoviHandling dovi = DoviHandling.None, VideoTarget target = VideoTarget.H264,
         // Why: the main reason code (ReasonCodes; null for Direct Play) and the
         // details its text needs — the effective bitrate cap, the source codec.
-        string? reasonCode = null, int capMbps = 0, IEnumerable<string>? extraReasons = null)
+        string? reasonCode = null, int capMbps = 0, IEnumerable<string>? extraReasons = null,
+        string? segmentation = null)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -616,7 +629,8 @@ public sealed partial class HlsSessionService : IDisposable
             Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason,
             TranscodeReasonCode: codes.Count > 0 ? codes[0] : null,
-            TranscodeReasonCodes: codes.ToArray());
+            TranscodeReasonCodes: codes.ToArray(),
+            Segmentation: segmentation);
     }
 
     /// <summary>"HEVC 10-bit", "H.264 10-bit", "MPEG-4" … for the reason text.</summary>
@@ -959,7 +973,25 @@ public sealed partial class HlsSessionService : IDisposable
         var layout = SegmentLayout.Uniform(totalDuration, SegmentDurationSec, videoEnd);
         double ffmpegSeekSec = 0;
         int startSegment = 0;
-        if (seekSec > 0 && layout.Count > 0)
+        // Key-frame-exact copy (task 6.2, HlsSessionService.Keyframes.cs): the
+        // playlist from the file's key frames, cut by the segment muxer at
+        // exactly those times. Supersedes the anchored resume below.
+        KeyframeIndex? keyframeIndex = null;
+        if (isCopyPlan && probe is not null && totalDuration > 0 && _keyframes is not null
+            && await KeyframeHlsEnabledAsync(ct))
+            keyframeIndex = await _keyframes.GetAsync(fullPath, probe.VideoStreamIndex, KeyframeIndexBudget, ct);
+        bool keyframeMode = keyframeIndex is not null;
+        if (keyframeMode)
+        {
+            var timeline = keyframeIndex!.Times.Select(t => t - probe!.StartTimeSec).ToArray();
+            layout = SegmentLayout.FromKeyframes(timeline, totalDuration, videoEnd, SegmentDurationSec);
+            startSegment = seekSec > 0 ? layout.IndexOf(seekSec) : 0;
+            var cut = layout.Cuts![startSegment];
+            ffmpegSeekSec = startSegment > 0 ? CopySeekTarget(cut, null) : 0;
+            _logger.LogDebug("HLS: key-frame layout for {Path}: {Kf} key frames ({Source}) → {Segs} segments, start seg-{Seg} at {Cut:F3}s",
+                fullPath, keyframeIndex.Times.Length, keyframeIndex.Source, layout.Count, startSegment, cut);
+        }
+        else if (seekSec > 0 && layout.Count > 0)
         {
             var anchor = isCopyPlan && probe is not null
                 ? await FindCopyAnchorAsync(fullPath, probe.VideoStreamIndex, seekSec, ct)
@@ -1066,12 +1098,14 @@ public sealed partial class HlsSessionService : IDisposable
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, probe?.Dovi, dovi, toneMapper, caps, who);
         // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
         // at the resume point — the playlist's EXT-X-START still says seekSec.
+        var (keyframeTimes, keyframeWindowEnd) = keyframeMode ? SegmentTimesFor(layout, startSegment) : ("", int.MaxValue);
         var args = BuildFfmpegArgs(fullPath, ffmpegSeekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
             externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio,
-            dovi: dovi, target: target, burn: burn);
+            dovi: dovi, target: target, burn: burn,
+            keyframeRun: keyframeMode ? (keyframeTimes, KeyframeListPath(dir, 0)) : null);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -1095,6 +1129,10 @@ public sealed partial class HlsSessionService : IDisposable
             Dovi = dovi,
             Target = target,
             Burn = burn,
+            KeyframeMode = keyframeMode,
+            KeyframeListPath = keyframeMode ? KeyframeListPath(dir, 0) : null,
+            RunWindowEnd = keyframeWindowEnd,
+            RunCount = 1,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1137,6 +1175,7 @@ public sealed partial class HlsSessionService : IDisposable
         // Phase A — wait for first segment.
         while (true)
         {
+            FinalizeKeyframeSegments(session);
             var ready = (!needsInit || File.Exists(initPath))
                      && File.Exists(firstSegPath)
                      && File.Exists(masterPath);
@@ -1202,6 +1241,7 @@ public sealed partial class HlsSessionService : IDisposable
         var graceDeadline = DateTime.UtcNow.AddSeconds(2);
         while (DateTime.UtcNow < graceDeadline)
         {
+            FinalizeKeyframeSegments(session);
             if (File.Exists(secondSegPath)) break;
             if (proc.HasExited) break;  // ffmpeg done early — fine, return with what we have
             await Task.Delay(100, ct);
@@ -1218,6 +1258,7 @@ public sealed partial class HlsSessionService : IDisposable
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
+                segmentation: keyframeMode ? "keyframe" : "grid",
                 audio: audio, dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
                 extraReasons: [.. hasExternalAudio ? new[] { ReasonCodes.ExternalAudio } : [],
                                .. burn is not null ? new[] { ReasonCodes.BurnedSubtitle } : []])
@@ -1272,6 +1313,7 @@ public sealed partial class HlsSessionService : IDisposable
         var targetSeg = ParseSegmentNumber(fileName);
         if (targetSeg >= 0) NotePlayerRequest(session, targetSeg);
 
+        FinalizeKeyframeSegments(session);
         if (File.Exists(full)) return full;
 
         // If the request is for a segment (seg-NNNNN.{m4s|ts}) and it's not
@@ -1294,7 +1336,12 @@ public sealed partial class HlsSessionService : IDisposable
             //     window, or before this run's start (the resume point's
             //     start_number, an earlier restart). Restart at target to
             //     produce it.
-            bool needsRestart = gap > RestartThresholdSegments || targetSeg <= producedTop;
+            bool needsRestart = gap > RestartThresholdSegments || targetSeg <= producedTop
+                // Key-frame runs: past the run's -segment_times window, or the
+                // run finished (EOF / window end) without writing it.
+                || (session.KeyframeMode && targetSeg < session.SegmentCount
+                    && (targetSeg >= session.RunWindowEnd
+                        || (session.Process.HasExited && SafeExitCode(session.Process) == 0)));
             if (needsRestart)
             {
                 _logger.LogInformation("HLS {Token}: seek-jump from seg-{From} to seg-{To}, restarting ffmpeg",
@@ -1306,6 +1353,7 @@ public sealed partial class HlsSessionService : IDisposable
         var deadline = DateTime.UtcNow + SegmentWaitTimeout;
         while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
         {
+            FinalizeKeyframeSegments(session);
             if (File.Exists(full)) return full;
             if (session.Process.HasExited && session.Process.ExitCode != 0) return null;
             if (session.Process.HasExited) return File.Exists(full) ? full : null;
@@ -1440,10 +1488,15 @@ public sealed partial class HlsSessionService : IDisposable
             // segment), never session.SeekSec + K*4. A copy plan aims the
             // demuxer seek just past that start (CopySeekTarget) so a key frame
             // ON the boundary is the one picked, not the one a GOP before it.
-            var segStart = session.Layout.Start(targetSegment);
-            var sourceSeekSec = segStart > 0 && session.Plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy
+            var segStart = session.KeyframeMode ? session.Layout.Cuts![targetSegment] : session.Layout.Start(targetSegment);
+            var sourceSeekSec = (session.KeyframeMode ? targetSegment > 0 : segStart > 0)
+                && session.Plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy
                 ? CopySeekTarget(segStart, next: null)
                 : segStart;
+            // Key-frame run: the cuts from this segment's key frame on, a new list.
+            var (kfTimes, kfWindowEnd) = session.KeyframeMode
+                ? SegmentTimesFor(session.Layout, targetSegment) : ("", int.MaxValue);
+            var kfList = session.KeyframeMode ? KeyframeListPath(session.OutputDir, session.RunCount) : null;
             // The restart runs off the START's probe (the plan is fixed for the
             // session's lifetime): same video map, codec, bit depth, height and
             // bitrate, and the MAPPED audio track's codec — with that missing the
@@ -1470,7 +1523,8 @@ public sealed partial class HlsSessionService : IDisposable
                 audio: session.Audio,
                 dovi: session.Dovi,
                 target: session.Target,
-                burn: session.Burn);
+                burn: session.Burn,
+                keyframeRun: session.KeyframeMode ? (kfTimes, kfList!) : null);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;
@@ -1481,6 +1535,16 @@ public sealed partial class HlsSessionService : IDisposable
                 return;
             }
 
+            if (session.KeyframeMode)
+            {
+                lock (session.FinalizeLock)
+                {
+                    session.KeyframeListPath = kfList;
+                    session.KeyframeListRead = 0;
+                    session.RunWindowEnd = kfWindowEnd;
+                    session.RunCount++;
+                }
+            }
             session.SwapProcess(proc, targetSegment);
 
             // Tell the playlist that segments from `targetSegment` onward come

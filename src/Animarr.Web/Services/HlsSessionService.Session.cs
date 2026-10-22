@@ -40,6 +40,21 @@ public sealed partial class HlsSessionService
         /// <summary>Subtitle burned into the picture (null = none) — the restart
         /// draws it too.</summary>
         public SubtitleBurn? Burn { get; init; }
+
+        // ── Key-frame-exact copy (HlsSessionService.Keyframes.cs) ──
+        /// <summary>The copy runs use the segment muxer on Layout.Cuts.</summary>
+        public bool KeyframeMode { get; init; }
+        /// <summary>Guards the finalize pass (raw-N → seg-N) and its list state.</summary>
+        public object FinalizeLock { get; } = new();
+        /// <summary>The current run's CSV segment list.</summary>
+        public string? KeyframeListPath;
+        /// <summary>Bytes of that list already finalized.</summary>
+        public long KeyframeListRead;
+        /// <summary>First segment past the current run's -segment_times window
+        /// (SegmentCount = the whole rest of the file).</summary>
+        public int RunWindowEnd = int.MaxValue;
+        /// <summary>Runs started so far (names each run's list).</summary>
+        public int RunCount;
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS

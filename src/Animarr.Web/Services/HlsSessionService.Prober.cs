@@ -25,12 +25,16 @@ public sealed partial class HlsSessionService
 
             double duration = 0;
             long bitRate = 0;
+            double startTime = 0;
             if (root.TryGetProperty("format", out var fmt))
             {
                 if (fmt.TryGetProperty("duration", out var durEl)
                     && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
                     duration = d;
                 bitRate = ParseBitRate(fmt);
+                if (fmt.TryGetProperty("start_time", out var stEl)
+                    && double.TryParse(stEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var st0))
+                    startTime = st0;
             }
             long videoBitRate = 0;
 
@@ -196,6 +200,7 @@ public sealed partial class HlsSessionService
                 SampleAspectRatio = sar,
                 Interlaced       = interlaced,
                 SubtitleCodecs   = subtitleCodecs,
+                StartTimeSec     = startTime,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

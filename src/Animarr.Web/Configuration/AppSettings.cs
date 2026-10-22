@@ -10,6 +10,12 @@ public class AppSettings
     /// "off" (old behaviour: truncate to 8-bit, washed-out colours).</summary>
     public string HdrToneMapping { get; set; } = "auto";
 
+    /// <summary>Key-frame-exact HLS stream copies (plan task 6.2): playlists
+    /// built from the file's key frames, cut exactly there. The AppConfig key
+    /// Playback:KeyframeHls ("true" / "false") overrides this live; false =
+    /// the old 4 s-grid copies.</summary>
+    public bool KeyframeHls { get; set; } = true;
+
     public string[] VideoExtensions { get; set; } = [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm", ".rmvb", ".rm", ".3gp", ".divx", ".mpg", ".mpeg", ".ogv", ".vob", ".f4v"];
     public string[] SubtitleExtensions { get; set; } = [".srt", ".ass", ".ssa", ".vtt", ".sub"];
     /// <summary>Standalone audio containers we treat as sideload-able external

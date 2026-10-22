@@ -187,6 +187,7 @@ builder.Services.AddSingleton<DlnaStreamService>();
 // "Optimize for TV" remux (opt-in, per title): MKV with Cues in .animarr.
 builder.Services.AddSingleton<TvRemuxService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TvRemuxService>());
+builder.Services.AddSingleton<KeyframeIndexService>();
 builder.Services.AddSingleton<HlsSessionService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.

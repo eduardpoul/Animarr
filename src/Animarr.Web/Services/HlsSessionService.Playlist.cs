@@ -42,6 +42,12 @@ public sealed partial class HlsSessionService
         /// </summary>
         public double VideoEndSec { get; init; }
 
+        /// <summary>The container's start time (ffprobe format.start_time,
+        /// seconds): ffmpeg's -ss counts from it, so the key-frame index (raw
+        /// pts) is shifted by it onto the playlist timeline. 1.4 s for a
+        /// typical MPEG-TS, ~0 for Matroska / MP4.</summary>
+        public double StartTimeSec { get; init; }
+
         /// <summary>Dolby Vision profile / level / compatibility (None when
         /// <see cref="HasDolbyVision"/> is false).</summary>
         public DoviInfo Dovi { get; init; } = DoviInfo.None;
@@ -559,6 +565,15 @@ public sealed partial class HlsSessionService
             return Math.Clamp(i, 0, _starts.Length - 1);
         }
 
+        /// <summary>
+        /// Key-frame layouts only (<see cref="FromKeyframes"/>): the timeline
+        /// time of the key frame each segment starts on — where a run for it
+        /// seeks to and what the segment muxer's -segment_times are relative
+        /// to. Equals <see cref="Start"/> except for seg-0, which is announced
+        /// at 0 while its key frame may sit a few ms in. null = grid layout.
+        /// </summary>
+        public double[]? Cuts { get; private init; }
+
         private SegmentLayout(double[] starts, double total, int anchorIndex)
         {
             _starts = starts;
@@ -567,6 +582,39 @@ public sealed partial class HlsSessionService
             double max = 0;
             for (int i = 0; i < starts.Length; i++) max = Math.Max(max, Duration(i));
             MaxDuration = max;
+        }
+
+        /// <summary>Key frames closer than this to the next one are never a
+        /// cut: a copy's -ss has to land between the two (CopySeekTarget aims
+        /// 0.14 s past the cut).</summary>
+        public const double MinCutGapSec = 0.2;
+
+        /// <summary>
+        /// Key-frame-exact layout (task 6.2): each segment starts on a key frame
+        /// of <paramref name="keyframes"/> (timeline seconds, sorted) — the first
+        /// one at least <paramref name="targetSec"/> − 0.25 s after the previous
+        /// segment's start, so short GOPs merge into ~4 s segments and a long
+        /// GOP becomes one long segment (a copy can't split it). No segment
+        /// starts in the last <see cref="MinTailSec"/> of the video.
+        /// </summary>
+        public static SegmentLayout FromKeyframes(double[] keyframes, double totalSec, double contentEndSec,
+            double targetSec)
+        {
+            var end = contentEndSec > 0 && contentEndSec < totalSec ? contentEndSec : totalSec;
+            var starts = new List<double> { 0 };
+            var cuts = new List<double> { Math.Max(0, keyframes[0]) };
+            double last = cuts[0];
+            for (int i = 1; i < keyframes.Length; i++)
+            {
+                var k = keyframes[i];
+                if (k >= end - MinTailSec) break;
+                if (i + 1 < keyframes.Length && keyframes[i + 1] - k <= MinCutGapSec) continue;
+                if (k - last < targetSec - 0.25) continue;
+                starts.Add(k);
+                cuts.Add(k);
+                last = k;
+            }
+            return new SegmentLayout(starts.ToArray(), totalSec, 0) { Cuts = cuts.ToArray() };
         }
 
         /// <summary>The plain 4 s grid (0 segments = unknown duration).

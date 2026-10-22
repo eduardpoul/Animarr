@@ -107,6 +107,7 @@ public sealed partial class HlsSessionService
         if (!session.RestartLock.Wait(0)) return;
         try
         {
+            FinalizeKeyframeSegments(session);
             int floor;
             lock (session.ThrottleLock)
             {
@@ -244,6 +245,13 @@ public sealed partial class HlsSessionService
                 var n = ParseSegmentNumber(Path.GetFileName(path));
                 if (n < fromSegment) continue;
                 try { File.Delete(path); } catch { }
+            }
+            // A key-frame run's unfinalized files (killed mid-segment, or never
+            // listed) — the new run writes them again.
+            foreach (var path in Directory.EnumerateFiles(dir, "raw-*"))
+            {
+                var n = ParseRawNumber(Path.GetFileName(path));
+                if (n >= 0 && n >= fromSegment) try { File.Delete(path); } catch { }
             }
         }
         catch { /* best-effort */ }
