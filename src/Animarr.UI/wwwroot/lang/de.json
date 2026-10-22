@@ -635,6 +635,7 @@
   "player.sync_hint_live": "+ spielt den Ton später, − früher. Gleich übernommen: der Stream startet an derselben Stelle neu.",
   "player.unit_ms": "ms",
   "player.error_sync": "Audio-Synchronisation konnte nicht übernommen werden, die vorherige bleibt",
+  "player.error_superseded": "Ein anderer Start dieses Videos auf diesem Gerät hat übernommen",
   "home.continue_watching": "Weiterschauen",
   "home.new_episode": "Neue Folge",
   "home.next_up": "Als Nächstes",

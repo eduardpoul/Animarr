@@ -2889,6 +2889,7 @@
         sync_hint_live:     '+ plays the sound later, − earlier. Applied in a moment: the stream restarts at the same spot.',
         unit_ms:            'ms',
         error_sync:         "Couldn't apply the audio sync, staying on the previous one",
+        error_superseded:   'Another start of this video on this device took over',
         info_none:          'No media info available',
         info_resolution:    'Resolution',
         info_video:         'Video',
@@ -3273,6 +3274,10 @@
         return ok;
     }
 
+    // How long a first open answered 409 `superseded` waits for the newer
+    // start to show up on its element before it reports the failure.
+    const SUPERSEDED_GRACE_MS = 2500;
+
     function abortError() {
         try { return new DOMException('aborted', 'AbortError'); }
         catch { const e = new Error('aborted'); e.name = 'AbortError'; return e; }
@@ -3293,8 +3298,9 @@
      * that) or ffmpeg_exited (the same plan fails the same way). 4xx are
      * never retried. 409 `superseded` (a newer start for the same file from
      * this device became playable first and retired this one) is flagged
-     * `.superseded`: callers drop it silently — no toast, no retry, no
-     * fallback rung — since whoever started the newer stream owns playback.
+     * `.superseded`: no toast, no retry, no fallback rung — whoever started
+     * the newer stream owns playback. A switch drops it; an open lets the
+     * newer start render and reports only when none shows up (attachStream).
      * Aborting `signal` cancels the request — the server then stops the ffmpeg
      * it was starting (HlsEndpoints passes RequestAborted to StartAsync).
      */
@@ -3643,9 +3649,20 @@
             } catch (err) {
                 if ((err && err.name === 'AbortError') || stale()) return;
                 // A newer start for this file from this device replaced it
-                // before it became playable: that one owns playback now.
+                // before it became playable. When that newer start is ours —
+                // a newer attach / restart on this element, or the player
+                // re-mounted in a new element — it is the one that renders and
+                // this one just goes (stale / disconnected below). When nothing
+                // newer shows up here within a short grace (it was another
+                // tab, or a request we never saw), don't leave an empty
+                // overlay: say so, with Retry / Back.
                 if (err && err.superseded) {
                     console.info('animarrPlayer: start superseded by a newer one, dropping it');
+                    setTimeout(() => {
+                        if (stale() || !el.isConnected || WIRED.get(elementId) !== entry || entry.adapter) return;
+                        showStartError(elementId, el, entry, { reason: t('error_superseded') },
+                            () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(resumeSec), beginOp(elementId)));
+                    }, SUPERSEDED_GRACE_MS);
                     return;
                 }
                 console.error('animarrPlayer: failed to start session', err);

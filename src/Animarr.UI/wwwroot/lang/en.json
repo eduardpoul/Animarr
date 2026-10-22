@@ -636,6 +636,7 @@
   "player.sync_hint_live": "+ plays the sound later, − earlier. Applied in a moment: the stream restarts at the same spot.",
   "player.unit_ms": "ms",
   "player.error_sync": "Couldn't apply the audio sync, staying on the previous one",
+  "player.error_superseded": "Another start of this video on this device took over",
   "home.continue_watching": "Continue watching",
   "home.new_episode": "New episode",
   "home.next_up": "Up next",

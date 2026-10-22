@@ -635,6 +635,7 @@
   "player.sync_hint_live": "+ retrasa el sonido, − lo adelanta. Se aplica enseguida: el flujo se reinicia en el mismo punto.",
   "player.unit_ms": "ms",
   "player.error_sync": "No se pudo aplicar la sincronía del audio; se mantiene la anterior",
+  "player.error_superseded": "Otro inicio de este vídeo en este dispositivo tomó el control",
   "home.continue_watching": "Seguir viendo",
   "home.new_episode": "Nuevo episodio",
   "home.next_up": "A continuación",
