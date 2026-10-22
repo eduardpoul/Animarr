@@ -116,7 +116,7 @@ public sealed partial class HlsSessionService
         }
 
         // External dubs next to the file (ExternalTrackService is scoped).
-        var dubs = new List<(string Path, string? Language, string? Label, string? Codec, int? Channels, int? DelayMs)>();
+        var dubs = new List<(string Path, string? Language, string? Label, string? Codec, int? Channels, int? DelayMs, double? Dur)>();
         try
         {
             if (_scopes is not null)
@@ -124,14 +124,14 @@ public sealed partial class HlsSessionService
                 await using var scope = _scopes.CreateAsyncScope();
                 if (scope.ServiceProvider.GetService<ExternalTrackService>() is { } ext)
                     foreach (var t in await ext.FindForVideoAsync(fullPath, probe: true, ct))
-                        if (t.Kind == "audio") dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs));
+                        if (t.Kind == "audio") dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs, t.DurationSec));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { _logger.LogDebug(ex, "HLS renditions: external dubs of {Path} unavailable", fullPath); }
         if (externalAudioPath is not null
             && !dubs.Any(d => string.Equals(Path.GetFullPath(d.Path), Path.GetFullPath(externalAudioPath), StringComparison.OrdinalIgnoreCase)))
-            dubs.Insert(0, (externalAudioPath, null, Path.GetFileNameWithoutExtension(externalAudioPath), null, null, null));
+            dubs.Insert(0, (externalAudioPath, null, Path.GetFileNameWithoutExtension(externalAudioPath), null, null, null, null));
         for (int n = 0; n < dubs.Count; n++)
         {
             var d = dubs[n];
@@ -139,8 +139,12 @@ public sealed partial class HlsSessionService
             bool isDefault = externalAudioPath is not null
                 && string.Equals(Path.GetFullPath(d.Path), Path.GetFullPath(externalAudioPath), StringComparison.OrdinalIgnoreCase);
             // A dub is always transcoded in the muxed plans; as its own
-            // rendition its probed codec is known, so the policy can copy it.
-            var decision = AudioPolicy.Decide(d.Codec, d.Channels ?? 2, null, caps, output);
+            // rendition its probed codec is known, so the policy can copy it —
+            // unless it is shorter than the video (or its length is unknown):
+            // a copy can't be padded, and a rendition that runs out of packets
+            // stalls the player at its end. Transcoded, it gets silence (apad).
+            bool coversVideo = d.Dur is double dd && dd >= probe.DurationSec - 0.5;
+            var decision = AudioPolicy.Decide(coversVideo ? d.Codec : null, d.Channels ?? 2, null, caps, output);
             list.Add(new AudioRendition
             {
                 Id = id, ExternalPath = d.Path, Language = d.Language, Audio = decision, IsDefault = isDefault,
@@ -380,20 +384,25 @@ public sealed partial class HlsSessionService
             srcStart = Math.Max(0, copyFrom.Value - inputStart);
         }
         else if (r.Audio.Copy && srcStart > 0) copyFrom = srcStart + inputStart;
-        double endOut = end < layout.Count ? layout.Start(end) : session.TotalDurationSec + 1;
+        // The last window ends with the video: a longer dub is cut there, a
+        // shorter one (transcoded) padded up to it.
+        double endOut = end < layout.Count ? layout.Start(end) : session.TotalDurationSec;
+        double runDur = Math.Max(0.1, endOut - outFirst + (end < layout.Count ? 0.2 : 0));
 
         // -loglevel error: the segment muxer's mpegts sub-muxer warns "frame
         // size not set" for every segment of a transcoded track.
         var a = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "error" };
         if (srcStart > 0) a.AddRange(["-ss", srcStart.ToString("F3", inv)]);
-        if (end < layout.Count) a.AddRange(["-t", (endOut - outFirst + 0.2).ToString("F3", inv)]);
+        a.AddRange(["-t", runDur.ToString("F3", inv)]);
         a.AddRange(["-i", r.ExternalPath ?? session.SourcePath, "-copyts"]);
         if (Math.Abs(shift) >= 0.0005) a.AddRange(["-output_ts_offset", shift.ToString("F3", inv)]);
         a.AddRange(["-map", r.ExternalPath is not null ? "0:a:0" : $"0:a:{r.EmbeddedIndex!.Value.ToString(inv)}",
                     "-vn", "-sn", "-dn"]);
         if (copyFrom is double cf && cf > 0)
             a.AddRange(["-bsf:a", $"noise=drop=lt(pts*tb\\,{(cf - 0.0005).ToString("F4", inv)})"]);
-        a.AddRange(r.Audio.Args());
+        // A transcoded track is padded with silence to the window's end: an
+        // audio that ends early (a short dub) still fills every segment.
+        a.AddRange(r.Audio.Copy ? r.Audio.Args() : WithPad(r.Audio.Args().ToArray(), runDur));
         MergeBitstreamFilters(a);
         a.AddRange(["-avoid_negative_ts", "disabled", "-f", "segment", "-segment_format", r.Ts ? "mpegts" : "mp4"]);
         if (!r.Ts)

@@ -55,6 +55,16 @@ public sealed partial class HlsSessionService
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
+        // An external dub shorter than the video (a TV cut on a BD source, a
+        // few seconds missing at the end) left the rest of the stream with no
+        // audio packets at all, and the player stalled forever at the dub's
+        // end (MSE buffers only where every track has data). The dub is always
+        // transcoded here, so pad it with silence to the video's end, and
+        // -shortest stops the output with the video (a longer dub no longer
+        // runs on past it either). whole_dur keeps the pad finite on its own.
+        bool padExternal = externalAudioPath is not null && !videoOnly && audio is not { Copy: true };
+        if (padExternal)
+            audioArgs = WithPad(audioArgs, probe is { DurationSec: > 0 } p ? Math.Max(1, p.DurationSec - seekSec + 1) : null);
         var videoCodec = probe?.VideoCodec;
         // NVDEC and VAAPI have no H.264 High10 decoder: hand Hi10P to the GPU
         // re-encoders as a non-hw-decodable input so it takes their software-
@@ -127,6 +137,7 @@ public sealed partial class HlsSessionService
         if (singleInputCopy && Math.Abs(audioOffsetSec) >= 0.0005)
             args.AddRange(audioOffsetSec > 0 ? ["-bsf:a", ShiftFilter(audioOffsetSec)] : ["-bsf:v", ShiftFilter(-audioOffsetSec)]);
         MergeBitstreamFilters(args);
+        if (padExternal) args.Add("-shortest");
 
         if (keyframeRun is { } kr)
         {
@@ -308,6 +319,25 @@ public sealed partial class HlsSessionService
     {
         var opt = path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");
         return "'" + opt.Replace("'", "'\\''") + "'";
+    }
+
+    /// <summary>
+    /// Transcode audio args with silence appended (<c>apad</c>, up to
+    /// <paramref name="wholeDurSec"/> of output when given): joined onto the
+    /// -af chain (the downmix), else a chain of its own.
+    /// </summary>
+    private static string[] WithPad(string[] audioArgs, double? wholeDurSec)
+    {
+        var pad = wholeDurSec is double w ? "apad=whole_dur=" + w.ToString("F3", CultureInfo.InvariantCulture) : "apad";
+        var list = audioArgs.ToList();
+        var af = list.IndexOf("-af");
+        if (af >= 0 && af + 1 < list.Count) list[af + 1] += "," + pad;
+        else
+        {
+            var ca = list.IndexOf("-c:a");
+            list.InsertRange(ca >= 0 ? ca + 2 : list.Count, ["-af", pad]);
+        }
+        return list.ToArray();
     }
 
     /// <summary>setts bitstream filter delaying a stream by <paramref name="sec"/> (&gt; 0).</summary>

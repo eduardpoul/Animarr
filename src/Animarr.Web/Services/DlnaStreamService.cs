@@ -56,15 +56,24 @@ public sealed partial class DlnaStreamService
         var (videoCodec, audioCodecs) = Codecs(json);
 
         string? audioCodec;
+        // A dub shorter than the video ends the TS's audio early — renderers
+        // stall or stop there. One that doesn't cover the video (or of unknown
+        // length) is transcoded and padded with silence to the video's end.
+        bool padDub = false;
         if (externalAudio is not null)
-            audioCodec = Codecs(await _probeCache.GetStreamsJsonAsync(externalAudio, ct)).Audio.FirstOrDefault();
+        {
+            var dubJson = await _probeCache.GetStreamsJsonAsync(externalAudio, ct);
+            audioCodec = Codecs(dubJson).Audio.FirstOrDefault();
+            var videoDur = MediaFactsService.FormatDuration(json) ?? video.DurationSec;
+            padDub = !(MediaFactsService.FormatDuration(dubJson) is double dubDur && videoDur is double vd && dubDur >= vd - 0.5);
+        }
         else if (audioIndex < 0 || (audioCodecs.Count > 0 && audioIndex >= audioCodecs.Count))
             return (null, $"audio must be 0..{Math.Max(0, audioCodecs.Count - 1)} for this file.");
         else
             audioCodec = audioCodecs.Count > 0 ? audioCodecs[audioIndex] : null;
 
         bool copyVideo = !transcodeVideo && videoCodec is not null && TsVideo.Contains(videoCodec);
-        bool copyAudio = audioCodec is not null && TsAudio.Contains(audioCodec);
+        bool copyAudio = !padDub && audioCodec is not null && TsAudio.Contains(audioCodec);
         var ss = seekSec > 0 ? seekSec.ToString("0.###", CultureInfo.InvariantCulture) : null;
 
         // An offset needs the audio on an input of its own: -itsoffset shifts
@@ -90,6 +99,15 @@ public sealed partial class DlnaStreamService
                          "-vf", "scale='min(1920,iw)':-2", "-g", "48"]);
         if (copyAudio) a.AddRange(["-c:a", "copy"]);
         else a.AddRange(["-c:a", "ac3", "-b:a", "448k"]);
+        if (padDub)
+        {
+            // Silence up to the video's end (finite on its own), and the output
+            // stops with the video.
+            var rest = (video.DurationSec ?? MediaFactsService.FormatDuration(json)) is double total
+                ? Math.Max(1, total - seekSec + 1) : (double?)null;
+            a.AddRange(["-af", rest is double w ? "apad=whole_dur=" + w.ToString("0.###", CultureInfo.InvariantCulture) : "apad",
+                        "-shortest"]);
+        }
         a.AddRange(["-sn", "-dn"]);
         // A negative offset puts the first sound before 0: lift both streams.
         if (shifted && audioOffsetMs < 0) a.AddRange(["-avoid_negative_ts", "make_zero"]);
