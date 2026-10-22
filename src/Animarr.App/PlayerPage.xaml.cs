@@ -52,6 +52,10 @@ public partial class PlayerPage : ContentPage
     /// an episode switch waits for its start: the old stream's position and
     /// end must not be saved against (or advance from) the new episode.</summary>
     private string? _streamFilePath;
+    /// <summary>The current stream's server plan ("ts-copy", "nvenc-reencode"…)
+    /// and the bit depth the server sends, for the ⓘ line.</summary>
+    private string? _outputPlan;
+    private int _outputBitDepth;
 
     // Playback timeline. All three tiers expose ExoPlayer positions on the file's
     // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
@@ -128,9 +132,11 @@ public partial class PlayerPage : ContentPage
         UpNextPlayFocus.Command = new Command(TriggerUpNext);
         UpNextSkipFocus.Command = new Command(SkipCredits);
         UpNextHideFocus.Command = new Command(DismissUpNext);
+        SpeedFocus.Command     = new Command(OpenSpeedSheet);
+        _speed = TvPlaybackPrefs.Speed;
+        SpeedLabel.Text = SpeedText(_speed);
 
-        // Re-apply the remembered aspect mode ("default" = fit/letterbox) —
-        // the raw TextureView stretches non-16:9 sources without it.
+        // Re-apply the remembered aspect mode ("default" = fit / letterbox).
         _aspect = Preferences.Default.Get("player_aspect", "default");
         _ = NativePlayerService.Instance?.SetAspectRatioAsync(_aspect);
 
@@ -295,14 +301,15 @@ public partial class PlayerPage : ContentPage
     }
 
     // Explicit D-pad focus links so the remote can cross from the left transport
-    // row (+10 / Skip) to the right settings row (VOL) and back — a plain
-    // horizontal gap that big isn't bridged by Android's geometric focus search.
+    // row (+10 / Skip) to the right settings row (its first button, speed) and
+    // back — a plain horizontal gap that big isn't bridged by Android's
+    // geometric focus search.
     private void EnsureFocusChain()
     {
 #if ANDROID
         if (_focusChainWired) return;
         _nvSeekFwd = SeekFwdButton.Handler?.PlatformView as Android.Views.View;
-        _nvVol     = VolumeButton.Handler?.PlatformView as Android.Views.View;
+        _nvVol     = SpeedButton.Handler?.PlatformView as Android.Views.View;   // first of the settings row
         _nvSkip    = SkipButton.Handler?.PlatformView as Android.Views.View;
         if (_nvSeekFwd is null || _nvVol is null) return;   // handlers not ready yet — retry next reveal
 
@@ -323,7 +330,8 @@ public partial class PlayerPage : ContentPage
     }
 
     // +10 goes right to the Skip button when it's showing, otherwise straight
-    // across to VOL. Called from EnsureFocusChain and each tick as Skip toggles.
+    // across to the settings row. Called from EnsureFocusChain and each tick
+    // as Skip toggles.
     private void UpdateSkipFocusLink()
     {
 #if ANDROID
@@ -401,35 +409,16 @@ public partial class PlayerPage : ContentPage
             var m = vg.Resources?.DisplayMetrics;
             int w = m?.WidthPixels  ?? 1920;
             int h = m?.HeightPixels ?? 1080;
-            // SurfaceView by default: video on its own compositor layer (no UI
+            // SurfaceView: the video on its own compositor layer (no UI
             // redraw per video frame, 4K plane, HDR/DV, frame-rate switching).
-            // The old TextureView path stays behind the bench flag "+texture".
-            if (!Bench.BenchLog.Has("texture"))
-            {
-                var sv = new Android.Views.SurfaceView(vg.Context!) { LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h) };
-                vg.AddView(sv, 0);
-                LayoutNative(sv, w, h);
-                NativePlayerService.RegisterSurfaceView(sv);
-                AttachSubtitleView(vg, w, h);
-                RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspectMatrix();
-                _attached = true;
-                return;
-            }
-            var tv = new Android.Views.TextureView(vg.Context!)
-            {
-                LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h),
-            };
-            vg.AddView(tv, 0);   // behind the XAML HUD
-
-            // MAUI's layout only arranges its own cross-platform children, so a
-            // raw native child stays 0×0 (video decodes but renders to nothing —
-            // black screen, audio only). Force measure+layout to display size.
-            _textureView = tv;
-            LayoutNative(tv, w, h);
-            RootGrid.SizeChanged += (_, _) => { if (_textureView is { } t) LayoutNative(t, w, h); };
-
-            NativePlayerService.RegisterTextureView(tv);
+            // MAUI's layout only arranges its own cross-platform children, so
+            // a raw native child stays 0×0 — measured and laid out by hand.
+            var sv = new Android.Views.SurfaceView(vg.Context!) { LayoutParameters = new Android.Views.ViewGroup.LayoutParams(w, h) };
+            vg.AddView(sv, 0);   // behind the XAML HUD
+            LayoutNative(sv, w, h);
+            NativePlayerService.RegisterSurfaceView(sv);
             AttachSubtitleView(vg, w, h);
+            RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspect();
             _attached = true;
         }
 #endif
@@ -455,8 +444,6 @@ public partial class PlayerPage : ContentPage
 #endif
 
 #if ANDROID
-    private Android.Views.TextureView? _textureView;
-
     // Native views for the explicit D-pad focus chain across the HUD's centre gap.
     private Android.Views.View? _nvSeekFwd, _nvVol, _nvSkip;
     private bool _focusChainWired;
@@ -698,6 +685,8 @@ public partial class PlayerPage : ContentPage
 
         // Success — only now does the new stream replace the old one.
         _streamFilePath = _filePath;
+        _outputPlan = b.Output?.Plan;
+        _outputBitDepth = b.Output?.BitDepth ?? 0;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
@@ -2075,7 +2064,46 @@ public partial class PlayerPage : ContentPage
         var st = NativePlayerService.Instance?.GetState();
         if (st is null) { FlashInfo("Нет данных"); return; }
         var codec = string.IsNullOrEmpty(st.ActualCodec) ? "—" : st.ActualCodec.ToUpperInvariant();
-        FlashInfo($"{codec} · {st.ActualWidth}×{st.ActualHeight} · {st.ActualBitDepth}-bit");
+        // Bit depth of the decoded stream (its ColorInfo / codecs string); when
+        // the stream doesn't say, the server's probe of what it sends. It used
+        // to be guessed from the colour space.
+        int bits = st.ActualBitDepth > 0 ? st.ActualBitDepth : _outputBitDepth;
+        var parts = new List<string> { codec, $"{st.ActualWidth}×{st.ActualHeight}" };
+        if (bits > 0) parts.Add($"{bits}-bit");
+        parts.Add(_kind switch
+        {
+            StreamKind.DirectPlay   => "Direct Play",
+            StreamKind.DirectStream => "Direct Stream",
+            StreamKind.Hls          => string.IsNullOrEmpty(_outputPlan) ? "HLS" : $"HLS {_outputPlan}",
+            _                       => "",
+        });
+        if (Math.Abs(_speed - 1f) > 0.01f) parts.Add(SpeedText(_speed));
+        FlashInfo(string.Join(" · ", parts.Where(p => p.Length > 0)));
+    }
+
+    // Playback speed ------------------------------------------------------------
+    private static readonly float[] Speeds = { 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f };
+
+    private static string SpeedText(float v) =>
+        (Math.Abs(v - 1f) < 0.01f ? "1" : v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) + "×";
+
+    private void OpenSpeedSheet()
+    {
+        var rows = Speeds.Select(v => new SheetRow(Math.Abs(v - 1f) < 0.01f ? "1× (обычная)" : SpeedText(v),
+                                                   Math.Abs(v - _speed) < 0.01f, () => ApplySpeed(v))).ToList();
+        OpenListSheet("СКОРОСТЬ", rows, SpeedButton);
+    }
+
+    /// <summary>PlaybackParameters on the player, remembered for the next video
+    /// (device-local, like the aspect mode).</summary>
+    private void ApplySpeed(float v)
+    {
+        _speed = v;
+        TvPlaybackPrefs.Speed = v;
+        _ = NativePlayerService.Instance?.SetSpeedAsync(v);
+        SpeedLabel.Text = SpeedText(v);
+        Log($"speed {v:0.##}");
+        FlashInfo($"Скорость: {SpeedText(v)}");
     }
 
     private IDispatcherTimer? _infoTimer;

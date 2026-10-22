@@ -6,7 +6,8 @@
              x:Name="Root"
              BackgroundColor="Black">
     <Grid x:Name="RootGrid">
-        <!-- native ExoPlayer TextureView is inserted at index 0 in code-behind -->
+        <!-- the ExoPlayer SurfaceView (index 0) and the SubtitleView (index 1)
+             are inserted in code-behind -->
 
         <Grid x:Name="Hud" IsVisible="False">
 
@@ -109,6 +110,13 @@
 
                         <!-- right: settings cluster -->
                         <HorizontalStackLayout Grid.Column="1" Spacing="8">
+                            <!-- playback speed 0.5–2× (remembered) -->
+                            <Border x:Name="SpeedButton" WidthRequest="52" HeightRequest="36" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="SpeedFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                                <Label x:Name="SpeedLabel" Text="1×" TextColor="White" FontFamily="sans-serif" FontSize="12"
+                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                            </Border>
                             <Border x:Name="VolumeButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="VolumeFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>

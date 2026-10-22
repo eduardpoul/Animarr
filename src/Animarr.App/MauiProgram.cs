@@ -374,18 +374,9 @@ public static class MauiProgram
         // always resolves to the same instance across page reloads.
         builder.Services.AddSingleton<WatchNextService>();
 
-        // NativePlayerService (Phase 2 ExoPlayer-backed native playback).
-        // Renders into the TextureView MainActivity inserts behind the
-        // transparent BlazorWebView. Used on ALL Android hosts now (TV *and*
-        // phone/tablet): inside the WebView the app is served from the
-        // https://0.0.0.1/ virtual host, so hls.js segment fetches to a
-        // plain-HTTP LAN server are "mixed content" and have to be proxied as
-        // base64 over the JS↔.NET bridge — that bridge's GC churn freezes
-        // playback. ExoPlayer fetches with its own native HTTP stack (no
-        // WebView, no bridge), so playback is smooth + HDR/DV passes through.
-        // The static Instance (set just below build()) is what the JS bridge
-        // NativePlayerBridge dispatches through. On non-Android targets the
-        // service is a harmless no-op shell (IsAvailable => false).
+        // NativePlayerService: the TV's native ExoPlayer, driven by the native
+        // PlayerPage (its SurfaceView + HUD). The phone's WebView player never
+        // uses it. On non-Android targets the service is a no-op shell.
         builder.Services.AddSingleton<NativePlayerService>();
 
         // Subnet probe — TCP fallback for when mDNS broadcasts can't cross
@@ -438,15 +429,10 @@ public static class MauiProgram
         var subnet = app.Services.GetRequiredService<SubnetProbeService>();
         JsInterop.SubnetProbeBridge.RegisterStaticInstance(subnet);
 
-        // Native player: publish the singleton's static accessor so the JS
-        // bridge (NativePlayerBridge JSInvokables → animarrNativePlayer.*) can
-        // dispatch to the live ExoPlayer service no matter which Blazor circuit
-        // made the call. WITHOUT this, NativePlayerService.Instance stays null,
-        // NativePlayerBridge.IsAvailable() returns false, and the JS gate falls
-        // back to the web (hls.js) player on every host — which is exactly the
-        // base64-bridge path that freezes phone playback. Resolved eagerly (the
-        // ctor only stashes the logger; ExoPlayer itself is built lazily on the
-        // first PlayAsync) so Instance is ready before the first navigation.
+        // Native player: publish the singleton's static accessor — the player
+        // page and the activity's lifecycle hooks reach it through
+        // NativePlayerService.Instance. Resolved eagerly (the ctor only stashes
+        // the logger; ExoPlayer itself is built on the first PlayAsync).
         var nativePlayer = app.Services.GetRequiredService<NativePlayerService>();
         NativePlayerService.RegisterStaticInstance(nativePlayer);
 

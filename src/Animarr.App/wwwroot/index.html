@@ -451,40 +451,6 @@
                     await new Promise(function (r) { setTimeout(r, 100); });
                 }
             }
-
-            // Cache the authoritative native-player availability (Android TV
-            // *and* phone/tablet) into a class so
-            // animarrNativePlayer.isAvailable() can answer synchronously from
-            // animarr-player.js attach(). On Android this flips the phone onto
-            // the native ExoPlayer path, bypassing the base64 mixed-content
-            // bridge that freezes WebView (hls.js) playback. The HUD overlay
-            // is identical on both paths, so the on-screen UI doesn't change.
-            // RETRY the probe: window.DotNet.invokeMethodAsync can EXIST a beat
-            // before Blazor's .NET call dispatcher is actually wired, so the
-            // first call(s) throw "No call dispatcher has been set". We retry
-            // for a few seconds until it succeeds. (attach() also re-probes via
-            // isAvailableAsync at play time, so this boot cache is just an
-            // early-warm; if it never lands, playback still gates correctly.)
-            for (var k = 0; k < 60; k++) {
-                try {
-                    var nativeOk = await window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable');
-                    if (nativeOk === true) {
-                        document.documentElement.classList.add('animarr-native-ok');
-                    }
-                    console.info('animarr: native player gate =', nativeOk,
-                        '(animarr-native-ok class '
-                        + (nativeOk === true ? 'ADDED' : 'not added')
-                        + ', after ' + k + ' retries)');
-                    break;
-                } catch (e) {
-                    if (k === 59) {
-                        console.info('animarr: native player gate gave up:',
-                            (e && e.message) || e);
-                        break;
-                    }
-                    await new Promise(function (r) { setTimeout(r, 100); });
-                }
-            }
         })();
 
         // Spatial D-pad navigation lives in _content/Animarr.UI/tv-nav.js
@@ -669,111 +635,10 @@
     <script src="_content/Animarr.UI/app-shell.js"></script>
     <script src="_content/Animarr.UI/qr-scan.js"></script>
 
-    <!-- Phase 2 native player bridge (2026-05-27). On Android TV the future
-         NativeAdapter inside animarr-player.js calls into these methods, each
-         of which proxies to the NativePlayerBridge JSInvokables in the MAUI
-         host (Animarr.App/JsInterop/NativePlayerBridge.cs) → NativePlayerService
-         → ExoPlayer.
-
-         isAvailable() stays hard-false in Phase 2a because ExoPlayer has no
-         SurfaceView to render into yet (Phase 2b ships the custom Handler
-         that lays a PlayerView behind the BlazorWebView). Flipping the gate
-         is a one-line change once 2b lands. The other methods are wired now
-         so the C# pipeline is exercisable from devtools without further JS
-         changes.
-
-         Note on DotNet.invokeMethodAsync: blazor.webview.js publishes the
-         DotNet global once the WebView IPC handshake completes — calls made
-         before that point throw. We don't pre-call anything here; only the
-         NativeAdapter (Phase 2b) will dispatch, by which time Blazor has
-         long since mounted. -->
-    <script>
-        window.animarrNativePlayer = {
-            // Native-path gate. True on ANY Android host (TV and phone/tablet)
-            // — see NativePlayerService.IsAvailable for why the native ExoPlayer
-            // path is used everywhere (it bypasses the base64 mixed-content
-            // bridge that otherwise freezes WebView playback).
-            //
-            // SYNC variant: reads the cached `animarr-native-ok` class. Kept
-            // for any sync caller, but DON'T rely on it being set early — the
-            // boot-time probe that sets it can run before Blazor's .NET call
-            // dispatcher is ready ("No call dispatcher has been set"), in which
-            // case the class is absent until the ASYNC probe below populates it.
-            isAvailable: function () {
-                return document.documentElement.classList.contains('animarr-native-ok');
-            },
-
-            // ASYNC variant — the AUTHORITATIVE gate. animarr-player.js attach()
-            // awaits this the moment the user starts playback, by which point
-            // the Blazor .NET call dispatcher is guaranteed ready, so the query
-            // actually succeeds (unlike the early boot probe, which races it).
-            // Caches the result into the class on success so the sync getter
-            // and subsequent calls are correct too. Returns a Promise<boolean>;
-            // resolves false on any error so the web player is the safe default.
-            isAvailableAsync: function () {
-                if (!window.DotNet || typeof window.DotNet.invokeMethodAsync !== 'function')
-                    return Promise.resolve(
-                        document.documentElement.classList.contains('animarr-native-ok'));
-                return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerIsAvailable')
-                    .then(function (ok) {
-                        if (ok === true)
-                            document.documentElement.classList.add('animarr-native-ok');
-                        console.info('animarr: native gate (async) =', ok);
-                        return ok === true;
-                    })
-                    .catch(function (e) {
-                        console.info('animarr: native gate (async) threw',
-                            (e && e.message) || e);
-                        return false;
-                    });
-            },
-
-            play: function (url, opts) {
-                opts = opts || {};
-                var resumeMs = Math.max(0, Math.round((opts.resumeSec || 0) * 1000));
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerPlay', url, resumeMs);
-            },
-            pause:  function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerPause');  },
-            resume: function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerResume'); },
-            seek:   function (ms)  {
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerSeek', Math.max(0, Math.round(ms || 0)));
-            },
-            detach: function ()    { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerDetach'); },
-            // Polled every 250ms by the JS NativeAdapter while playback is
-            // active. The C# side reads live state off ExoPlayer; we don't
-            // cache because the property reads themselves are cheap.
-            getState: function ()  { return window.DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerGetState'); },
-
-            // Volume (0..1). Mute = 0; the JS adapter restores the saved
-            // volume on un-mute. ExoPlayer applies clamping server-side.
-            setVolume: function (v) {
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerSetVolume', Math.max(0, Math.min(1, v)));
-            },
-            // Subtitle URL (null/'' to disable). Language is an ISO code
-            // hint stored on the MediaItem's SubtitleConfiguration.
-            setSubtitle: function (url, lang) {
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerSetSubtitle', url || null, lang || null);
-            },
-            // 'default' / '21:9' / '16:9' / '4:3' / '2.35:1'. Implemented
-            // via TextureView.SetTransform on the C# side.
-            setAspect: function (value) {
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerSetAspect', value || 'default');
-            },
-            // Pre-flight: ask Android's MediaCodecList whether the device
-            // can actually decode the format we're about to stream. Returns
-            // Promise<bool>. Called once in attach() before committing to
-            // the native path; if false the JS falls back to Artplayer.
-            canDecode: function (codec, bitDepth, hdr, width, height) {
-                return window.DotNet.invokeMethodAsync('Animarr.App',
-                    'NativePlayerCanDecode',
-                    codec || '', bitDepth || 0, hdr || '', width || 0, height || 0);
-            },
-        };
-    </script>
+    <!-- No window.animarrNativePlayer here: the WebView player always plays
+         in the page (hls.js / native <video> via the loopback proxy). Native
+         ExoPlayer playback is the TV's own PlayerPage, which the WebView never
+         drives — animarr-player.js treats the missing bridge as "native
+         unavailable". -->
 </body>
 </html>

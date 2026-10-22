@@ -12,31 +12,15 @@ using Microsoft.Extensions.Logging;
 namespace Animarr.App.Services;
 
 /// <summary>
-/// Bridges the web HUD to a native ExoPlayer instance on Android TV so HDR
-/// metadata + Dolby Vision survive playback (the BlazorWebView's HTML5 video
-/// element strips them on most builds).
+/// The TV's native ExoPlayer (Media3), driven by <see cref="PlayerPage"/>:
+/// prepares a Direct Play file / Direct Stream remux / HLS manifest into the
+/// page's SurfaceView (its own compositor layer: 4K plane, HDR / DV, frame-
+/// rate switching), side-loads subtitles, sizes the surface for the aspect
+/// mode, and exposes state, tracks and track selection to the HUD. One
+/// ExoPlayer per player page, built on the first play and released when the
+/// page closes (decoder buffers live in native memory).
 ///
-/// Phase 2 architecture (2026-05-27):
-///   • <see cref="IsAvailable"/> tells JS whether the native path can be taken
-///     on this host. Android-TV: yes. Other platforms / non-TV Android: no.
-///   • JS-side <c>NativeAdapter</c> calls <see cref="PlayAsync"/> /
-///     <see cref="PauseAsync"/> / <see cref="SeekAsync"/> through the
-///     <c>animarrNativePlayer.*</c> bridge that <see cref="JsInterop.PlatformBridge"/>
-///     publishes on every MAUI launch.
-///   • Native ExoPlayer is constructed lazily on the first <see cref="PlayAsync"/>
-///     call and reused across episode boundaries (cheaper than tearing down +
-///     recreating; ExoPlayer holds large decoder buffers).
-///
-/// What's NOT in Phase 2a (this file):
-///   • Surface attachment. ExoPlayer plays audio fine without a Surface but
-///     can't render video to screen yet. A later iteration will add a custom
-///     MAUI Handler that lays a <c>PlayerView</c> behind the BlazorWebView
-///     and binds it here via <see cref="AttachSurfaceView"/>.
-///   • Resume + position reporting back to .NET / JS. Wired in Phase 2b.
-///
-/// Cross-platform: on non-Android targets (iOS, Mac Catalyst, Windows) this
-/// is a no-op shell. <see cref="IsAvailable"/> returns false so the JS gate
-/// keeps everyone on the existing Artplayer path.
+/// Cross-platform: on non-Android targets this is a no-op shell.
 /// </summary>
 public sealed class NativePlayerService : IDisposable
 {
@@ -49,22 +33,9 @@ public sealed class NativePlayerService : IDisposable
     private IExoPlayer? _player;
     private readonly object _lock = new();
 
-    // SurfaceView that MainActivity inserted at the bottom of DecorView for
-    // ExoPlayer to render into. SurfaceView (not TextureView) because the video
-    // must show THROUGH the transparent BlazorWebView on top: a SurfaceView
-    // gets its own SurfaceFlinger layer composited BELOW the window with a
-    // hardware hole-punch, which is unaffected by the WebView's in-window
-    // opacity. The earlier TextureView composited inside the window's GL
-    // surface and got occluded by the WebView layer on this device (frames
-    // confirmed reaching the surface via OnSurfaceTextureUpdated, but never
-    // visible). Registered once at activity startup; visibility toggled so the
-    // surface only composites during actual playback.
-    private static TextureView? s_textureView;
-
     // Pending play request stashed when PlayAsync runs BEFORE the SurfaceView's
-    // Surface is created (race between MainActivity.OnCreate inserting the view
-    // and the surface being allocated once it goes Visible). When the surface
-    // arrives (SurfaceCreated) we drain this and complete the attach.
+    // Surface exists (the page adds the view, Android allocates its Surface a
+    // moment later). SurfaceCreated drains it and completes the attach.
     private (string Url, long ResumeMs, bool PlayWhenReady, SideloadSubtitle? Subtitle, bool TextEnabled)? _pendingPlay;
     private bool _surfaceReady;
 
@@ -80,13 +51,6 @@ public sealed class NativePlayerService : IDisposable
     // whatever the user had going (play→play; pause→pause).
     private bool _wasPlayingBeforePause;
 
-    /// <summary>
-    /// Called from <c>MainActivity.OnCreate</c> after the SurfaceView is
-    /// inserted into the activity's view tree. We add a SurfaceHolder.Callback
-    /// so the service knows when the underlying Surface is created — PlayAsync
-    /// calls that land before that point go onto a pending queue, drained once
-    /// the surface is ready (SurfaceCreated).
-    /// </summary>
     // ── Subtitles ───────────────────────────────────────────────────────────
     // ExoPlayer decodes text / bitmap subtitles into Cues but draws nothing
     // itself (there is no PlayerView here — the video goes straight into a
@@ -165,8 +129,13 @@ public sealed class NativePlayerService : IDisposable
             => Instance?.OnVideoSize(videoSize.Width, videoSize.Height, videoSize.PixelWidthHeightRatio, "listener");
     }
 
-    // BENCH (tv-ui-analysis): SurfaceView variant — video on its own HWC layer.
+    // The player page's SurfaceView: the video on its own compositor layer
+    // (no UI redraw per frame, a 4K plane, HDR / DV, frame-rate switching).
     private static SurfaceView? s_surfaceView;
+
+    /// <summary>Called by the player page once its SurfaceView is in the view
+    /// tree. A SurfaceHolder callback tells the service when the Surface
+    /// exists — a PlayAsync before that waits in <see cref="_pendingPlay"/>.</summary>
     public static void RegisterSurfaceView(SurfaceView sv)
     {
         s_surfaceView = sv;
@@ -249,9 +218,8 @@ public sealed class NativePlayerService : IDisposable
     /// already swapped for a 90°/270° rotation). The listener is the source; a
     /// stream it says nothing about (same size as the previous one) is taken
     /// from the polled Format. Re-sizes the surface on every change — it used
-    /// to be sized once per prepare (and only on the TextureView path when the
-    /// size changed mid-stream), keeping the previous episode's geometry for
-    /// up to a second and showing a first frame of a new stream stretched.</summary>
+    /// to be sized once per prepare, keeping the previous episode's geometry
+    /// for up to a second and missing a mid-stream change.</summary>
     private void OnVideoSize(int width, int height, float par, string source)
     {
         if (width <= 0 || height <= 0) return;   // VideoSize.UNKNOWN while preparing
@@ -260,17 +228,11 @@ public sealed class NativePlayerService : IDisposable
         if (width == _vidW && height == _vidH && System.Math.Abs(par - _vidPar) <= 0.001f) return;
         global::Android.Util.Log.Info("Animarr.NativePlayer", $"video size {width}x{height} par={par:0.###} ({source})");
         _vidW = width; _vidH = height; _vidPar = par;
-        ApplyAspectMatrix();
+        ApplyAspect();
     }
 
     /// <summary>The current stream's geometry has been reported (reset per prepare).</summary>
     private bool _sizeKnown;
-
-    public static void RegisterTextureView(TextureView textureView)
-    {
-        s_textureView = textureView;
-        textureView.SurfaceTextureListener = new TextureListener();
-    }
 
     /// <summary>Hosted-activity OnPause hook. Stashes <c>PlayWhenReady</c> so
     /// <see cref="OnHostActivityResumed"/> can restore the user's intent —
@@ -301,29 +263,8 @@ public sealed class NativePlayerService : IDisposable
     /// decoder memory across activity recreations.</summary>
     public void OnHostActivityDestroyed() => _ = DetachAsync();
 
-    private sealed class TextureListener : Java.Lang.Object, TextureView.ISurfaceTextureListener
-    {
-        public void OnSurfaceTextureAvailable(global::Android.Graphics.SurfaceTexture surface, int width, int height)
-        {
-            global::Android.Util.Log.Info("Animarr.NativePlayer", "SurfaceTextureAvailable");
-            Instance?.OnSurfaceReady();
-        }
-        public void OnSurfaceTextureSizeChanged(global::Android.Graphics.SurfaceTexture surface, int width, int height)
-            => Instance?.ApplyAspectMatrix();
-        public bool OnSurfaceTextureDestroyed(global::Android.Graphics.SurfaceTexture surface)
-        {
-            var svc = Instance;
-            if (svc is not null) svc._surfaceReady = false;
-            return true;   // let the system release the texture
-        }
-        public void OnSurfaceTextureUpdated(global::Android.Graphics.SurfaceTexture surface) { }
-    }
-
-    /// <summary>
-    /// Called by <see cref="SurfaceWatcher"/> when the TextureView's surface
-    /// is ready to receive frames. Drains any <see cref="_pendingPlay"/>
-    /// stashed by an early PlayAsync call.
-    /// </summary>
+    /// <summary>The SurfaceView's Surface exists: drain a
+    /// <see cref="_pendingPlay"/> stashed by an early PlayAsync.</summary>
     private void OnSurfaceReady()
     {
         _surfaceReady = true;
@@ -335,7 +276,7 @@ public sealed class NativePlayerService : IDisposable
             var p = pending.Value;
             DoPlay(p.Url, p.ResumeMs, p.PlayWhenReady, p.Subtitle, p.TextEnabled);
         }
-        else if (_player is not null && (s_textureView is not null || s_surfaceView is not null))
+        else if (_player is not null && s_surfaceView is not null)
         {
             // Re-attach surface to existing player (e.g. after lifecycle
             // bounce destroyed + recreated the surface).
@@ -352,18 +293,11 @@ public sealed class NativePlayerService : IDisposable
     /// </summary>
     private void AttachSurface()
     {
-        if (_player is not null && s_surfaceView is not null) { _player.SetVideoSurfaceView(s_surfaceView); return; }
-        if (_player is null || s_textureView is null) return;
-        try
-        {
-            _player.SetVideoTextureView(s_textureView);
-            global::Android.Util.Log.Info("Animarr.NativePlayer",
-                "AttachSurface: SetVideoTextureView done");
-        }
+        if (_player is null || s_surfaceView is null) return;
+        try { _player.SetVideoSurfaceView(s_surfaceView); }
         catch (System.Exception ex)
         {
-            global::Android.Util.Log.Error("Animarr.NativePlayer",
-                $"AttachSurface failed: {ex.Message}");
+            global::Android.Util.Log.Error("Animarr.NativePlayer", $"AttachSurface failed: {ex.Message}");
         }
     }
 #endif
@@ -371,40 +305,6 @@ public sealed class NativePlayerService : IDisposable
     public NativePlayerService(ILogger<NativePlayerService> logger)
     {
         _logger = logger;
-    }
-
-    /// <summary>
-    /// Whether the native player path is wired up + usable on the current host.
-    /// Android TV (Leanback) → true. Android phone/tablet, iOS, desktop → false.
-    /// <para>
-    /// Phones were tried on the native path (to dodge the mixed-content base64
-    /// bridge that froze WebView playback) but it doesn't work on this WebView/
-    /// device class: the BlazorWebView occludes any video composited under it,
-    /// and a video composited ON TOP covers the HUD. The proper phone fix is the
-    /// <see cref="LocalMediaProxyService"/> loopback proxy, which lets the
-    /// ordinary web player stream smoothly (HUD over video, no native surface).
-    /// Native stays gated to TVs, where it's still worth it for HDR/DV
-    /// passthrough — to be validated on real TV hardware (the same WebView
-    /// occlusion may or may not apply there). Per-media codec support is gated
-    /// by <see cref="CanDecode"/> with an automatic web-player fallback.
-    /// </para>
-    /// </summary>
-    public bool IsAvailable
-    {
-        get
-        {
-#if ANDROID
-            // Native ExoPlayer is PARKED for now (returns false everywhere). The
-            // loopback-proxy web player is the proven path on both phone AND TV
-            // (HUD overlays cleanly, no surface-compositing fight), so we use it
-            // universally. The native code stays in the tree; re-enable here
-            // (e.g. gate on FEATURE_LEANBACK) once the SurfaceView-under-WebView
-            // compositing + HDR passthrough are validated on real TV hardware.
-            return false;
-#else
-            return false;
-#endif
-        }
     }
 
     /// <summary>
@@ -424,19 +324,15 @@ public sealed class NativePlayerService : IDisposable
 #if ANDROID
         try
         {
-            // Stash the request first — actual ExoPlayer attach happens once
-            // we know the TextureView's SurfaceTexture is allocated. Without
-            // this we'd race the surface-allocation event and silently
-            // attach to a null surface (audio plays, video is black).
+            // Stash the request first — the actual attach happens once the
+            // SurfaceView's Surface exists. Without this we'd race the
+            // surface allocation and attach to nothing (audio, black video).
             _pendingPlay = (url, resumeMs, playWhenReady, subtitle, textEnabled);
             _logger.LogInformation("NativePlayer: PlayAsync url={Url} resume={ResumeMs}ms (queued, awaiting surface)",
                 url, resumeMs);
 
-            // The SurfaceView is created `Gone` in MainActivity so it doesn't
-            // consume compositor time when no playback is happening. Android
-            // only creates the Surface for a VISIBLE SurfaceView — so we flip
-            // to Visible BEFORE the surface can become ready. If the surface is
-            // ALREADY valid (a previous play left it hot), drain immediately.
+            // A Surface that is already valid (a previous play on this page
+            // left it hot) is drained right away; otherwise SurfaceCreated does.
             if (s_surfaceView is not null)
             {
                 s_surfaceView.Post(new Java.Lang.Runnable(() =>
@@ -445,25 +341,9 @@ public sealed class NativePlayerService : IDisposable
                     if (s_surfaceView.Holder?.Surface?.IsValid == true) OnSurfaceReady();
                 }));
             }
-            else if (s_textureView is not null)
-            {
-                s_textureView.Post(new Java.Lang.Runnable(() =>
-                {
-                    s_textureView.Visibility = ViewStates.Visible;
-                    s_textureView.KeepScreenOn = true;
-                    if (s_textureView.IsAvailable)
-                    {
-                        // Surface already live (warm re-play) → attach now.
-                        OnSurfaceReady();
-                    }
-                    // Otherwise SurfaceWatcher.SurfaceCreated fires once Android
-                    // allocates the Surface and drains _pendingPlay via
-                    // OnSurfaceReady.
-                }));
-            }
             else
             {
-                _logger.LogWarning("NativePlayer: SurfaceView not registered yet; play will start when MainActivity registers it");
+                _logger.LogWarning("NativePlayer: SurfaceView not registered yet; play starts once the page registers it");
             }
         }
         catch (System.Exception ex)
@@ -497,10 +377,7 @@ public sealed class NativePlayerService : IDisposable
             {
                 _player ??= BuildPlayer(ctx);
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
-                    $"DoPlay url={url} svNull={s_textureView is null} " +
-                    $"svValid={(s_textureView?.IsAvailable.ToString() ?? "?")} " +
-                    $"svSize={s_textureView?.Width ?? -1}x{s_textureView?.Height ?? -1}" +
-                    (subtitle is null ? "" : $" sub={subtitle.Url}"));
+                    $"DoPlay url={url}" + (subtitle is null ? "" : $" sub={subtitle.Url}"));
                 AttachSurface();
                 var builder = new MediaItem.Builder().SetUri(url)!;
                 if (subtitle is not null)
@@ -537,7 +414,7 @@ public sealed class NativePlayerService : IDisposable
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
                     $"DoPlay prepared, PlayWhenReady={playWhenReady}");
             }
-            ApplyAspectMatrix();  // re-apply user's aspect (or default fit) now that video size is incoming
+            ApplyAspect();  // the aspect mode for the current geometry (the new size follows)
         }
         catch (System.Exception ex)
         {
@@ -573,12 +450,7 @@ public sealed class NativePlayerService : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Set output volume on a 0..1 scale (ExoPlayer's native unit). Mute is
-    /// modelled as volume=0 because <c>IExoPlayer</c> exposes <c>Volume</c>
-    /// but no separate mute property; the JS adapter reads the previous
-    /// volume back from localStorage so the slider restores on un-mute.
-    /// </summary>
+    /// <summary>Output volume on a 0..1 scale (ExoPlayer's own gain; mute = 0).</summary>
     public Task SetVolumeAsync(float volume)
     {
 #if ANDROID
@@ -598,142 +470,50 @@ public sealed class NativePlayerService : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Switch the active subtitle track. Pass <c>null</c> URL to disable.
-    /// Rebuilds the MediaItem with a <c>SubtitleConfiguration</c> attached —
-    /// ExoPlayer doesn't expose a live "swap subtitle" API for sideloaded
-    /// tracks, so we tear down + recreate the MediaItem at the same position.
-    /// The seek-back-to-position dance is invisible to the user (~50ms gap).
-    /// </summary>
-    public Task SetSubtitleAsync(string? subtitleUrl, string? language)
+    /// <summary>Playback speed (0.5–2×, pitch kept — Media3's Sonic time
+    /// stretch). The player keeps it across prepares; a new player takes it
+    /// from <see cref="TvPlaybackPrefs"/>. Audio passed through to a receiver
+    /// (AC-3 / DTS bitstream) can't be stretched: Media3 then plays at 1×.</summary>
+    public Task SetSpeedAsync(float speed)
     {
 #if ANDROID
         try
         {
             lock (_lock)
             {
-                if (_player is null) return Task.CompletedTask;
-                // The C# binding renames MediaItem.LocalConfiguration access
-                // to the `PlaybackProperties` property (Java legacy name —
-                // LocalConfiguration is the type; PlaybackProperties is the
-                // accessor on MediaItem itself).
-                var srcUri = _player.CurrentMediaItem?.PlaybackProperties?.Uri;
-                if (srcUri is null) return Task.CompletedTask;
-
-                var pos       = _player.CurrentPosition;
-                var wasPlaying = _player.PlayWhenReady;
-
-                var itemBuilder = new MediaItem.Builder().SetUri(srcUri);
-                if (!string.IsNullOrEmpty(subtitleUrl))
-                {
-                    var subUri = global::Android.Net.Uri.Parse(subtitleUrl);
-                    var subConfig = new MediaItem.SubtitleConfiguration.Builder(subUri!)
-                        .SetMimeType(MimeTypes.TextVtt)        // /api/subtitle?format=webvtt = text/vtt
-                        .SetLanguage(language ?? "und")
-                        .SetSelectionFlags(global::AndroidX.Media3.Common.C.SelectionFlagDefault)
-                        .Build();
-                    itemBuilder.SetSubtitleConfigurations(
-                        new System.Collections.Generic.List<MediaItem.SubtitleConfiguration> { subConfig });
-                }
-
-                _player.SetMediaItem(itemBuilder.Build());
-                _player.Prepare();
-                if (pos > 0) _player.SeekTo(pos);
-                _player.PlayWhenReady = wasPlaying;
-                _logger.LogInformation("NativePlayer: subtitle → {Url}", subtitleUrl ?? "(off)");
+                if (_player is not null)
+                    _player.PlaybackParameters = new PlaybackParameters(System.Math.Clamp(speed, 0.5f, 2f));
             }
         }
-        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.SetSubtitleAsync"); }
+        catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.SetSpeedAsync"); }
 #endif
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Apply an aspect-ratio crop to the TextureView via a transform matrix.
-    /// <list type="bullet">
-    ///   <item>"default" — preserve native aspect with letterbox/pillarbox.</item>
-    ///   <item>"21:9" / "16:9" / "4:3" / "2.35:1" — zoom one axis to crop the
-    ///         opposite axis so visible content matches the target aspect.
-    ///         Same behaviour as CSS <c>object-fit: cover</c> with a forced
-    ///         container aspect — baked-in letterbox bars get cropped first.</item>
-    /// </list>
-    /// State is stashed so that <c>OnVideoSizeChanged</c> (fired by the
-    /// player listener) can re-apply the matrix once video dimensions land.
-    /// </summary>
+    /// <summary>Aspect mode of the video surface (see ApplySurfaceAspect for
+    /// the modes); re-applied on every new decoded size.</summary>
     public Task SetAspectRatioAsync(string value)
     {
 #if ANDROID
         _aspectValue = value;
-        ApplyAspectMatrix();
+        ApplyAspect();
 #endif
         return Task.CompletedTask;
     }
 
 #if ANDROID
     private string _aspectValue = "default";
-    // Decoded video geometry, captured by GetState's poll (there is no
-    // ExoPlayer listener in this service — the HUD already polls state every
-    // few hundred ms, so a size change is picked up within a tick).
+    // Decoded video geometry in display orientation (OnVideoSize).
     private int   _vidW;
     private int   _vidH;
     private float _vidPar = 1f;
 
-    /// <summary>
-    /// A raw TextureView bound via <c>SetVideoTextureView</c> STRETCHES the
-    /// decoded frame to its bounds (we bypass ExoPlayer's
-    /// AspectRatioFrameLayout entirely), so anything that isn't exactly the
-    /// screen's aspect renders distorted. This applies the aspect correction
-    /// as a texture transform:
-    /// <list type="bullet">
-    ///   <item>"default" — fit: undistorted, letterbox/pillarbox bars.</item>
-    ///   <item>"stretch" — identity: fill the screen, ignore the aspect.</item>
-    ///   <item>"zoom" — cover: undistorted, crops the overflowing axis.</item>
-    ///   <item>"16:9" / "4:3" / "2.35:1"… — force the displayed aspect to the
-    ///         given ratio, fitted inside the view.</item>
-    /// </list>
-    /// Must run on the UI thread. Re-run on: aspect change, decoded-size
-    /// change (GetState), surface size change (TextureListener).
-    /// </summary>
-    internal void ApplyAspectMatrix()
+    /// <summary>Size the surface for the aspect mode and the current geometry
+    /// (posted to the UI thread). Re-run on: aspect change, a new decoded
+    /// size, a page size change.</summary>
+    internal void ApplyAspect()
     {
-        if (s_surfaceView is { } sv) { sv.Post(() => ApplySurfaceAspect(sv)); return; }
-        try
-        {
-            var tv = s_textureView;
-            if (tv is null) return;
-            int vw = tv.Width, vh = tv.Height;
-            if (vw <= 0 || vh <= 0) return;
-
-            var m = new global::Android.Graphics.Matrix();   // identity = stretch
-            float videoAspect = _vidH > 0 && _vidW > 0 ? _vidW * _vidPar / _vidH : 0f;
-            float viewAspect  = (float)vw / vh;
-
-            float target = _aspectValue switch
-            {
-                "stretch"          => 0f,           // identity
-                "zoom"             => videoAspect,
-                null or "" or "default" => videoAspect,
-                _                  => ParseAspect(_aspectValue),
-            };
-
-            if (_aspectValue != "stretch" && target > 0f && viewAspect > 0f)
-            {
-                // k = how much wider the content should display than the view.
-                // Fit keeps both scales ≤ 1 (bars); cover keeps both ≥ 1 (crop).
-                float k = target / viewAspect;
-                float sx, sy;
-                if (_aspectValue == "zoom") { if (k >= 1f) { sx = k; sy = 1f; } else { sx = 1f; sy = 1f / k; } }
-                else                        { if (k <= 1f) { sx = k; sy = 1f; } else { sx = 1f; sy = 1f / k; } }
-                m.SetScale(sx, sy, vw / 2f, vh / 2f);
-            }
-
-            tv.SetTransform(m);
-            tv.Invalidate();
-        }
-        catch (System.Exception ex)
-        {
-            global::Android.Util.Log.Warn("Animarr.NativePlayer", $"ApplyAspectMatrix: {ex.Message}");
-        }
+        if (s_surfaceView is { } sv) sv.Post(() => ApplySurfaceAspect(sv));
     }
 
     private static float ParseAspect(string value)
@@ -761,84 +541,6 @@ public sealed class NativePlayerService : IDisposable
 #endif
 
     /// <summary>
-    /// Ask Android whether the current device can decode the given format —
-    /// before we commit to the native path on attach(). Saves the user from
-    /// a black screen + ExoPlayer error toast on unsupported HEVC 10-bit /
-    /// Dolby Vision profiles (cheap TV boxes claim HEVC support but their
-    /// MediaCodec rejects 10-bit Main10 streams at runtime).
-    ///
-    /// On non-Android: always returns true so the JS side never blocks the
-    /// MAUI-internal pipeline. The Artplayer fallback will catch whatever
-    /// the WebView can't do on that platform.
-    /// </summary>
-    public bool CanDecode(string codec, int bitDepth, string? hdr, int width, int height)
-    {
-#if ANDROID
-        try
-        {
-            var mime = MimeForCodec(codec);
-            if (string.IsNullOrEmpty(mime)) return true;  // unknown codec — let it try
-            var w = width  > 0 ? width  : 1920;
-            var h = height > 0 ? height : 1080;
-            var format = global::Android.Media.MediaFormat.CreateVideoFormat(mime, w, h);
-            if (format is null) return true;
-            // Encode bit-depth + HDR hints into the format so MediaCodecList
-            // matches against decoders that actually expose those profiles.
-            // Without these, a Main10 stream gets misreported as decodable on
-            // 8-bit-only devices, and FindDecoderForFormat returns a path
-            // that crashes at first frame.
-            if (bitDepth >= 10 && string.Equals(codec, "hevc", System.StringComparison.OrdinalIgnoreCase))
-            {
-                // HEVCProfileMain10 = 2 (Android API constant).
-                format.SetInteger(global::Android.Media.MediaFormat.KeyProfile, 2);
-            }
-            var lowerHdr = (hdr ?? string.Empty).ToLowerInvariant();
-            if (lowerHdr == "hdr10")
-            {
-                // COLOR_TRANSFER_ST2084 = 6.
-                try { format.SetInteger(global::Android.Media.MediaFormat.KeyColorTransfer, 6); } catch { }
-            }
-            else if (lowerHdr == "hlg")
-            {
-                // COLOR_TRANSFER_HLG = 7.
-                try { format.SetInteger(global::Android.Media.MediaFormat.KeyColorTransfer, 7); } catch { }
-            }
-            // RegularCodecs (not AllCodecs) ⇒ only software OR hardware that
-            // the framework would actually hand a real stream to. AllCodecs
-            // includes broken / vendor stubs that the OS won't pick.
-            var list = new global::Android.Media.MediaCodecList(
-                global::Android.Media.MediaCodecListKind.RegularCodecs);
-            var decoder = list.FindDecoderForFormat(format);
-            return !string.IsNullOrEmpty(decoder);
-        }
-        catch (System.Exception ex)
-        {
-            _logger.LogWarning(ex, "NativePlayer.CanDecode threw — assuming yes");
-            // Be optimistic on failure — the worst case is we go native then
-            // hit an error which the polling-based error path catches.
-            return true;
-        }
-#else
-        return true;
-#endif
-    }
-
-#if ANDROID
-    /// <summary>Map codec slugs (from server output info) to Android MIME types.</summary>
-    private static string MimeForCodec(string codec)
-    {
-        return (codec ?? string.Empty).ToLowerInvariant() switch
-        {
-            "h264" => global::Android.Media.MediaFormat.MimetypeVideoAvc,
-            "hevc" => global::Android.Media.MediaFormat.MimetypeVideoHevc,
-            "av1"  => global::Android.Media.MediaFormat.MimetypeVideoAv1,
-            "vp9"  => global::Android.Media.MediaFormat.MimetypeVideoVp9,
-            _ => string.Empty,
-        };
-    }
-#endif
-
-    /// <summary>
     /// Tear down the ExoPlayer instance + free decoder buffers. Called on
     /// player close. Idempotent.
     /// </summary>
@@ -849,10 +551,6 @@ public sealed class NativePlayerService : IDisposable
         {
             lock (_lock)
             {
-                if (_player is not null && s_textureView is not null)
-                {
-                    try { _player.ClearVideoTextureView(s_textureView); } catch { }
-                }
                 // A new player page starts on a fresh surface: no geometry yet.
                 _sizeKnown = false; _vidW = _vidH = 0; _vidPar = 1f;
                 ResetFrameRate();
@@ -869,18 +567,8 @@ public sealed class NativePlayerService : IDisposable
                 }
                 _player = null;
             }
-            // Hide the surface so it stops compositing — keeps the WebView
-            // UI underneath visible without the SurfaceView painting black.
-            // Drop KeepScreenOn too so non-playback pages get the OS's normal
-            // dim/lock-out timing back.
-            if (s_textureView is not null)
-            {
-                s_textureView.Post(new Java.Lang.Runnable(() =>
-                {
-                    s_textureView.Visibility = ViewStates.Gone;
-                    s_textureView.KeepScreenOn = false;
-                }));
-            }
+            // Non-playback pages get the OS's normal dim / screensaver timing back.
+            s_surfaceView?.Post(new Java.Lang.Runnable(() => { if (s_surfaceView is { } v) v.KeepScreenOn = false; }));
             _pendingPlay = null;
         }
         catch (System.Exception ex) { _logger.LogWarning(ex, "NativePlayer.DetachAsync"); }
@@ -939,8 +627,11 @@ public sealed class NativePlayerService : IDisposable
         // compete with it.
         bool matchFps = TvPlaybackPrefs.MatchFrameRate && OperatingSystem.IsAndroidVersionAtLeast(31);
         if (matchFps) player.VideoChangeFrameRateStrategy = global::AndroidX.Media3.Common.C.VideoChangeFrameRateStrategyOff;
+        // The remembered speed (Этап 7): kept by the player across prepares.
+        if (Math.Abs(TvPlaybackPrefs.Speed - 1f) > 0.01f)
+            player.PlaybackParameters = new PlaybackParameters(TvPlaybackPrefs.Speed);
         global::Android.Util.Log.Info("Animarr.NativePlayer",
-            $"player: passthrough={(pcmOnly ? "off (PCM only)" : "auto")} matchFrameRate={TvPlaybackPrefs.MatchFrameRate}");
+            $"player: passthrough={(pcmOnly ? "off (PCM only)" : "auto")} matchFrameRate={TvPlaybackPrefs.MatchFrameRate} speed={TvPlaybackPrefs.Speed:0.##}");
         // Cues → SubtitleView, track changes → the player page.
         player.AddListener(new PlayerEvents());
         return player;
@@ -1067,11 +758,9 @@ public sealed class NativePlayerService : IDisposable
     }
 
     /// <summary>
-    /// Read live player state for the HUD's polling timer. JS-side NativeAdapter
-    /// calls this every ~250ms while playback is active; the values drive the
-    /// progress bar, time labels, and play/pause icon. Returns a flat record so
-    /// the JSInterop layer can shuttle a single object across the WebView IPC
-    /// boundary instead of N round trips per tick.
+    /// Live player state for the HUD's tick (once a second): position,
+    /// duration, play state, error, the decoded video format. Also the
+    /// fallback geometry / frame-rate source (see OnVideoSize).
     /// </summary>
     public NativePlayerState GetState()
     {
@@ -1089,17 +778,13 @@ public sealed class NativePlayerService : IDisposable
                 bool ended    = state == 4;
                 bool playing  = _player.PlayWhenReady && state == 3;
                 bool buffering = state == 2;
-                // PlayerError lives on the IPlayer surface — non-null means
-                // playback is fatal and won't recover without a reset. We
-                // surface the message so the JS HUD can show a toast +
-                // offer "Reopen" without round-tripping to .NET.
+                // PlayerError non-null = fatal until the next prepare; the page
+                // climbs its fallback rungs on it.
                 string? error = null;
                 try { error = _player.PlayerError?.Message; } catch { }
-                // VideoFormat reflects what the DECODER reported, which can
-                // differ from what the server advertised (e.g. HDR source
-                // tone-mapped to SDR by the decoder when the display lacks
-                // HDR). Read what's available; default to empty strings so
-                // the JS side doesn't have to null-check.
+                // VideoFormat is what the player actually decodes, which can
+                // differ from the source (a capped re-encode, a tone-mapped
+                // HDR source).
                 string actualCodec = string.Empty;
                 int actualBitDepth = 0;
                 int actualWidth = 0, actualHeight = 0;
@@ -1127,23 +812,7 @@ public sealed class NativePlayerService : IDisposable
                         // follows the video's frame rate when that's enabled
                         // (the container's, else the server probe's).
                         MaybeMatchFrameRate(fmt.FrameRate > 1f ? fmt.FrameRate : _fpsHint);
-                        // ColorInfo's bit-depth fields aren't directly exposed
-                        // as ints; pix_fmt detection happens server-side. Best
-                        // we can do here is mark 10-bit when colorTransfer
-                        // suggests HDR. Cheap approximation.
-                        var colorInfo = fmt.ColorInfo;
-                        if (colorInfo is not null)
-                        {
-                            // ColorSpace BT2020 ≈ 10-bit / HDR content.
-                            // Constants on AndroidX.Media3.Common.C:
-                            //   COLOR_SPACE_BT709 = 1, BT601=2, BT2020=6
-                            try
-                            {
-                                if (colorInfo.ColorSpace == 6) actualBitDepth = 10;
-                                else actualBitDepth = 8;
-                            }
-                            catch { }
-                        }
+                        actualBitDepth = BitDepthOf(fmt);
                     }
                 }
                 catch { /* VideoFormat not available before first frame */ }
@@ -1162,7 +831,7 @@ public sealed class NativePlayerService : IDisposable
                     _diagFmtLogged = true;
                     global::Android.Util.Log.Info("Animarr.NativePlayer",
                         $"VideoFormat decoded: {actualCodec} {actualWidth}x{actualHeight} " +
-                        $"bit={actualBitDepth} → DECODER IS RUNNING (issue is compositing)");
+                        $"{(actualBitDepth > 0 ? actualBitDepth + "-bit" : "bit depth unknown")}");
                 }
                 // At ~250ms/poll, poll 20 ≈ 5s in. If still no format and no
                 // error, the video renderer never started a codec — points at
@@ -1187,6 +856,38 @@ public sealed class NativePlayerService : IDisposable
     }
 
 #if ANDROID
+    /// <summary>Bit depth of the decoded stream: the ColorInfo the extractor
+    /// read from the bitstream (SPS / codec config), else the RFC 6381 codecs
+    /// string — hvc1 profile 2 (Main10), avc1 High10, vp09 / av01 carry the
+    /// depth — else 0 (unknown; the page falls back to the server's probe).
+    /// It used to be guessed from the colour space (BT.2020 ⇒ 10-bit).</summary>
+    private static int BitDepthOf(global::AndroidX.Media3.Common.Format fmt)
+    {
+        try
+        {
+            if (fmt.ColorInfo is { IsBitdepthValid: true } ci && ci.LumaBitdepth > 0) return ci.LumaBitdepth;
+        }
+        catch { }
+        var parts = (fmt.Codecs ?? "").Split('.');
+        if (parts.Length < 2) return 0;
+        switch (parts[0].ToLowerInvariant())
+        {
+            case "hvc1" or "hev1" or "dvh1" or "dvhe":
+                // general_profile_space? + general_profile_idc: 1 Main, 2 Main10.
+                var prof = parts[1].TrimStart('A', 'B', 'C', 'a', 'b', 'c');
+                return prof == "2" ? 10 : prof == "1" ? 8 : 0;
+            case "avc1" or "avc3":
+                // profile_idc (hex): 0x6E High10, 0x7A High422, 0xF4 High444.
+                if (parts[1].Length < 2) return 0;
+                return parts[1][..2].ToUpperInvariant() switch { "6E" or "7A" or "F4" => 10, _ => 8 };
+            case "vp09" when parts.Length >= 4:
+                return int.TryParse(parts[3], out var vp) ? vp : 0;
+            case "av01" when parts.Length >= 4:
+                return int.TryParse(parts[3], out var av) ? av : 0;
+        }
+        return 0;
+    }
+
     /// <summary>Map ExoPlayer's MIME-type strings to the short codec slugs
     /// the HUD plashka already understands (h264, hevc, av1, vp9, ...).</summary>
     private static string NormalizeCodec(string? mime)
@@ -1206,7 +907,7 @@ public sealed class NativePlayerService : IDisposable
     // Reads the tracks ExoPlayer parsed from the current stream so the native
     // HUD can build selection menus, and applies a choice live through
     // TrackSelectionParameters overrides (no MediaItem rebuild for embedded
-    // tracks; sideloaded subtitles still go via SetSubtitleAsync).
+    // tracks; a side-loaded subtitle is a re-prepare through PlayAsync).
 
     /// <summary>Audio tracks embedded in the current stream.</summary>
     public IReadOnlyList<TrackOption> GetAudioTracks()
@@ -1427,9 +1128,9 @@ public sealed class NativePlayerService : IDisposable
     }
 }
 
-/// <summary>Flat snapshot of the native player's playback state, marshalled
-/// across the JS bridge each poll tick. All timing values are in milliseconds.
-/// Optional fields land empty / 0 when no information is available yet.</summary>
+/// <summary>Flat snapshot of the native player's playback state for the HUD
+/// tick. All timing values are in milliseconds. Optional fields land empty /
+/// 0 when no information is available yet.</summary>
 public sealed record NativePlayerState(
     long    PositionMs,
     long    DurationMs,
@@ -1439,7 +1140,7 @@ public sealed record NativePlayerState(
     // Phase 2d additions (2026-05-27):
     string? ErrorMessage,    // non-null only when PlaybackException is fatal
     string  ActualCodec,     // post-decode codec slug ("h264" / "hevc" / "av1" / "")
-    int     ActualBitDepth,  // 8 / 10 based on the decoder's ColorInfo
+    int     ActualBitDepth,  // 8 / 10 from the stream's ColorInfo / codecs string; 0 = unknown
     int     ActualWidth,
     int     ActualHeight,
     // The play/pause intent (ExoPlayer PlayWhenReady) — true while buffering

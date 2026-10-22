@@ -287,12 +287,9 @@ public class MainActivity : MauiAppCompatActivity
         // work, and the back gesture cleanly closes the app instead of
         // crashing into a blank page.
 
-        // Native ExoPlayer video surface is now a TextureView created by the
-        // native PlayerPage (added to its VideoHost + registered via
-        // NativePlayerService.RegisterTextureView), so the activity no longer
-        // inserts a DecorView SurfaceView. A TextureView composites inside the
-        // normal view tree, so the XAML HUD overlays it cleanly — no hole-punch,
-        // no z-order fight (the SurfaceView path was for the old WebView shell).
+        // The native ExoPlayer's video surface is a SurfaceView the native
+        // PlayerPage adds under its XAML HUD (NativePlayerService.
+        // RegisterSurfaceView); the activity no longer inserts one.
     }
 
     protected override void OnNewIntent(Intent? intent)
