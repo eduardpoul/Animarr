@@ -121,7 +121,7 @@ public partial class PlayerPage : ContentPage
             ? $"NOW PLAYING · S{season ?? 1} · EP {episode}"
             : "NOW PLAYING";
 
-        BackFocus.Command      = new Command(async () => await Navigation.PopAsync());
+        BackFocus.Command      = new Command(Leave);
         SeekBackFocus.Command  = new Command(() => SeekBy(-10_000));
         PrevFocus.Command      = new Command(() => GoAdjacentEpisode(-1));
         PlayPauseFocus.Command = new Command(TogglePlay);
@@ -143,6 +143,7 @@ public partial class PlayerPage : ContentPage
         UpNextSkipFocus.Command = new Command(SkipCredits);
         UpNextHideFocus.Command = new Command(DismissUpNext);
         SpeedFocus.Command     = new Command(OpenSpeedSheet);
+        SetUpPhone();
         _speed = TvPlaybackPrefs.Speed;
         SpeedLabel.Text = SpeedText(_speed);
 
@@ -164,6 +165,7 @@ public partial class PlayerPage : ContentPage
     {
         base.OnAppearing();
         Current = this;
+        OnPhoneAppearing();
         RevealHud();  // show the HUD + focus the play button on entry
     }
 
@@ -272,7 +274,11 @@ public partial class PlayerPage : ContentPage
     {
         if (_leaving) return;
         _leaving = true;
-        _ = Navigation.PopAsync();
+#if ANDROID
+        ClearPipParams();
+#endif
+        // The phone opens the player as a modal page over the WebView.
+        _ = Phone ? Navigation.PopModalAsync(false) : Navigation.PopAsync();
     }
 
     public static bool HandleGlobalBack() => Current?.OnBack() ?? false;
@@ -284,12 +290,15 @@ public partial class PlayerPage : ContentPage
     {
         if (_leaving) return true;            // 2nd Back during the pop animation
         if (OnBack()) return true;
+        // Phone: Back leaves the player (a sheet closes first).
+        if (Phone) { Leave(); return true; }
         _leaving = true;
         return base.OnBackButtonPressed();
     }
     private bool OnBack()
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }
+        if (Phone) return false;
         if (Hud.IsVisible) { HideHud(); return true; }
         if (UpNextCard.IsVisible) { DismissUpNext(); return true; }
         return false;       // let navigation pop the page
@@ -297,6 +306,7 @@ public partial class PlayerPage : ContentPage
 
     private void RevealHud()
     {
+        if (_inPip) return;   // picture-in-picture shows the picture only
         Hud.IsVisible = true;
         // With Up Next armed the HUD brings its card along; focus goes to
         // "Смотреть", so OK means the same thing as on the lone card.
@@ -378,6 +388,10 @@ public partial class PlayerPage : ContentPage
         _started = true;
         AttachSurface();
         StartMediaSession();
+        OnPhoneAttached();
+        // The entry reveal ran before the buttons had native views (focus fell
+        // to ‹ Back, the first focusable): focus play / pause now.
+        if (!Phone && Hud.IsVisible && !UpNextCard.IsVisible) Dispatcher.Dispatch(() => FocusRow(PlayPauseButton));
         _ = LoadLevellingAsync();
         _ = StartAsync();
         _ = ResolveAdjacentAsync();
@@ -429,7 +443,8 @@ public partial class PlayerPage : ContentPage
             LayoutNative(sv, w, h);
             NativePlayerService.RegisterSurfaceView(sv);
             AttachSubtitleView(vg, w, h);
-            RootGrid.SizeChanged += (_, _) => NativePlayerService.Instance?.ApplyAspect();
+            // After the native layout pass, at the parent's current size.
+            RootGrid.SizeChanged += (_, _) => vg.Post(() => NativePlayerService.Instance?.ApplyAspect());
             _attached = true;
         }
 #endif
@@ -450,7 +465,13 @@ public partial class PlayerPage : ContentPage
         LayoutNative(subs, w, h);
         NativePlayerService.RegisterSubtitleView(subs);
         NativePlayerService.SetSubtitlesRaised(Hud.IsVisible);
-        RootGrid.SizeChanged += (_, _) => { LayoutNative(subs, w, h); NativePlayerService.RelayoutSubtitles(); };
+        // The current size, not the one at attach: a phone turns to landscape
+        // after the player opened.
+        RootGrid.SizeChanged += (_, _) => vg.Post(() =>
+        {
+            LayoutNative(subs, vg.Width > 0 ? vg.Width : w, vg.Height > 0 ? vg.Height : h);
+            NativePlayerService.RelayoutSubtitles();
+        });
     }
 #endif
 
@@ -468,7 +489,14 @@ public partial class PlayerPage : ContentPage
     }
 #endif
 
-    private Task StartAsync() => StartStreamAsync(_resumeMs, 0, playWhenReady: true);
+    private async Task StartAsync()
+    {
+        // -1: handed over without a position (the phone's WebView) — where
+        // the file was left, like the web player.
+        long resume = _resumeMs >= 0 ? _resumeMs : await SavedPositionAsync(_filePath, _season, _episode);
+        if (_resumeMs < 0 && resume > 0) Log($"resume at {resume} ms (saved position)");
+        await StartStreamAsync(resume, 0, playWhenReady: true);
+    }
 
     private enum StreamKind { None, DirectPlay, DirectStream, Hls }
     /// <summary>Tier of the stream ExoPlayer is playing (None before the first
@@ -604,7 +632,10 @@ public partial class PlayerPage : ContentPage
             // too_many_sessions (a start racing the cleanup of the previous
             // session). Never a 4xx, a 504 ffmpeg_timeout (the server already
             // waited 60 s) or ffmpeg_exited (the same plan fails the same way).
-            for (int attempt = 0; attempt < 2 && !ct.IsCancellationRequested; attempt++)
+            // Bench "+nativefail": every start fails (the phone's fallback to the web player).
+            bool benchFail = Bench.BenchLog.Has("nativefail");
+            if (benchFail) failure = "bench: simulated start failure";
+            for (int attempt = 0; attempt < 2 && !ct.IsCancellationRequested && !benchFail; attempt++)
             {
                 try
                 {
@@ -833,8 +864,9 @@ public partial class PlayerPage : ContentPage
             FlashInfo($"Не удалось переключить поток ({reason}) — остаётся текущий");
             return;
         }
+        if (PhoneFallback(reason)) return;
         _retryStart = (resumeMs, maxHeight);
-        ShowError($"Не удалось запустить воспроизведение ({reason}). OK — повторить");
+        ShowError($"Не удалось запустить воспроизведение ({reason}). {RetryHint}");
     }
 
     // ── Track catalog: what the FILE carries, whatever the stream tier ──────
@@ -1825,15 +1857,17 @@ public partial class PlayerPage : ContentPage
     /// <summary>Where <paramref name="f"/> was left off: an unwatched episode's
     /// saved position (like the detail page), else the start. Asked fresh —
     /// another device may have moved it. A slow / failed answer starts at 0.</summary>
-    private async Task<long> SavedPositionAsync(MediaFileDto f)
+    private Task<long> SavedPositionAsync(MediaFileDto f) => SavedPositionAsync(f.FilePath, f.Season, f.Episode);
+
+    private async Task<long> SavedPositionAsync(string path, int? season, int? episode)
     {
         try
         {
             var ask = _api.GetWatchStatesAsync(_mediaItemId);
             if (await Task.WhenAny(ask, Task.Delay(3000)) != ask) return 0;
             var states = await ask;
-            var ws = states.FirstOrDefault(w => string.Equals(w.FilePath, f.FilePath, StringComparison.OrdinalIgnoreCase))
-                     ?? states.FirstOrDefault(w => (w.Season ?? 1) == (f.Season ?? 1) && w.Episode == f.Episode);
+            var ws = states.FirstOrDefault(w => string.Equals(w.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                     ?? states.FirstOrDefault(w => (w.Season ?? 1) == (season ?? 1) && w.Episode == episode);
             return ws is { IsWatched: false, ProgressMs: > 0 } ? ws.ProgressMs!.Value : 0;
         }
         catch (Exception ex) { Log($"watch states: {ex.Message}"); return 0; }
@@ -1914,11 +1948,22 @@ public partial class PlayerPage : ContentPage
         ChapterMarks.Children.Clear();
         double w = ChapterMarks.Width, dur = _durationMs / 1000.0;
         if (_chapters.Count < 2 || w <= 0 || dur <= 0) return;
+        // The phone's Slider draws its track inside the SeekBar's padding.
+        double pad = 0, top = 1;
+#if ANDROID
+        if (ScrubSlider.IsVisible && ScrubSlider.Handler?.PlatformView is Android.Widget.SeekBar sb
+            && sb.Resources?.DisplayMetrics?.Density is float density && density > 0)
+        {
+            pad = sb.PaddingLeft / density;
+            top = (ScrubRow.Height - 12) / 2;
+        }
+#endif
+        double track = w - 2 * pad;
         foreach (var c in _chapters.Skip(1))
         {
             if (c.StartSec <= 0 || c.StartSec >= dur) continue;
             var tick = new BoxView { Color = Color.FromArgb("#E6FFFFFF"), WidthRequest = 2, HeightRequest = 12 };
-            AbsoluteLayout.SetLayoutBounds(tick, new Rect(w * c.StartSec / dur - 1, 1, 2, 12));
+            AbsoluteLayout.SetLayoutBounds(tick, new Rect(pad + track * c.StartSec / dur - 1, top, 2, 12));
             ChapterMarks.Children.Add(tick);
         }
     }
@@ -2171,10 +2216,10 @@ public partial class PlayerPage : ContentPage
             }
             // Every rung used up: say so (it used to sit silently at the
             // failed frame) and let OK retry from here.
-            if (!_errorShown)
+            if (!_errorShown && !PhoneFallback(st.ErrorMessage ?? "decoder"))
             {
                 _retryStart = (absPos, _maxHeight);
-                ShowError("Не удалось воспроизвести файл. OK — повторить");
+                ShowError($"Не удалось воспроизвести файл. {RetryHint}");
             }
         }
 
@@ -2187,14 +2232,15 @@ public partial class PlayerPage : ContentPage
         // The intent (PlayWhenReady), not Playing: that is false while
         // buffering, so the icon offered "play" and OK "resumed" instead of
         // pausing.
-        PlayPauseIcon.Text  = st.PlayWhenReady ? "❚❚" : "▶";
+        SetPlayIcon(st.PlayWhenReady);
         BufferSpinner.IsVisible = st.Buffering;
+        PhoneTick(st);
 
         if (dur > 0 && Math.Abs(dur - _ticksDurationMs) > 1000) { _ticksDurationMs = dur; Dispatcher.Dispatch(PaintChapterMarks); }
         if (dur > 0 && _pendingSeekMs is null)
         {
-            Scrubber.Progress = Math.Clamp((double)absPos / dur, 0, 1);
-            PositionLabel.Text = Fmt(absPos);
+            SetScrubProgress(Math.Clamp((double)absPos / dur, 0, 1));
+            if (!_scrubbing) PositionLabel.Text = Fmt(absPos);
             DurationLabel.Text = Fmt(dur);
         }
 
@@ -2435,7 +2481,7 @@ public partial class PlayerPage : ContentPage
         }
         if (NativePlayerService.Instance is not { } nps) return;
         if (play) nps.ResumeAsync(); else nps.PauseAsync();
-        PlayPauseIcon.Text = play ? "❚❚" : "▶";
+        SetPlayIcon(play);
         if (!play && !Hud.IsVisible && _sheetMode == SheetMode.None) RevealHud();
     }
 
@@ -2588,7 +2634,7 @@ public partial class PlayerPage : ContentPage
         }
         if (!_catalogTask.IsCompleted) rows.Add(new SheetRow("Загрузка списка…", false, null));
         // Offset (remembered for the title) and the device's look.
-        rows.Add(new SheetRow($"Сдвиг: {OffsetText(_subOffsetMs)}  ·  OK — сбросить", false,
+        rows.Add(new SheetRow($"Сдвиг: {OffsetText(_subOffsetMs)}  ·  {(Phone ? "сбросить" : "OK — сбросить")}", false,
                               () => SetSubOffset(0), KeepOpen: true));
         foreach (var step in new[] { -500, -100, +100, +500 })
             rows.Add(new SheetRow($"{(step < 0 ? "Раньше" : "Позже")} на {Math.Abs(step) / 1000.0:0.0} с",
@@ -2718,6 +2764,7 @@ public partial class PlayerPage : ContentPage
 
         // Focusing the row scrolls the ScrollView to it (native requestChildFocus).
         SheetScroll.IsVisible = true;
+        if (Phone && Height > 0) SheetScroll.MaximumHeightRequest = Math.Max(140, Height - 130);
         _sheetMode = SheetMode.List;
         SheetOverlay.IsVisible = true;
 
@@ -2943,7 +2990,7 @@ public partial class PlayerPage : ContentPage
             // the target meanwhile.
             _pendingSeekMs = target;
             PositionLabel.Text = Fmt(target);
-            if (dur > 0) Scrubber.Progress = Math.Clamp((double)target / dur, 0, 1);
+            if (dur > 0) SetScrubProgress(Math.Clamp((double)target / dur, 0, 1));
             _seekTimer ??= Dispatcher.CreateTimer();
             _seekTimer.Stop();
             _seekTimer.Interval = TimeSpan.FromMilliseconds(450);
@@ -2961,16 +3008,18 @@ public partial class PlayerPage : ContentPage
         NativePlayerService.Instance?.SeekAsync(rel);
     }
 
-    private void RecordProgress(long positionMs, long durationMs)
+    private void RecordProgress(long positionMs, long durationMs) => _ = RecordProgressTask(positionMs, durationMs);
+
+    private Task RecordProgressTask(long positionMs, long durationMs)
     {
-        if (_mediaItemId == Guid.Empty || positionMs <= 0) return;
+        if (_mediaItemId == Guid.Empty || positionMs <= 0) return Task.CompletedTask;
         try
         {
-            _ = _api.RecordProgressAsync(new Animarr.Shared.Requests.RecordProgressRequest(
+            return _api.RecordProgressAsync(new Animarr.Shared.Requests.RecordProgressRequest(
                 _mediaItemId, _season, _episode, _filePath, positionMs,
                 durationMs > 0 ? durationMs : null));
         }
-        catch { }
+        catch { return Task.CompletedTask; }
     }
 
     protected override void OnDisappearing()
@@ -2990,12 +3039,14 @@ public partial class PlayerPage : ContentPage
         _session = null;
 #endif
         var st = NativePlayerService.Instance?.GetState();
-        if (st is not null && _streamFilePath == _filePath)
-            RecordProgress(_streamBaseMs + st.PositionMs,
-                           _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
+        var saved = st is not null && _streamFilePath == _filePath
+            ? RecordProgressTask(_streamBaseMs + st.PositionMs, _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs)
+            : Task.CompletedTask;
         _ = NativePlayerService.Instance?.DetachAsync();
         if (_hlsToken is { } tok) { _hlsToken = null; StopHlsSession(tok); }
         _ = FlushTrackPrefsAsync();
+        OnPhoneDisappearing();
+        _ = ResolveOutcomeAsync(saved);
     }
 
     private async Task KeepAliveAsync(string token)

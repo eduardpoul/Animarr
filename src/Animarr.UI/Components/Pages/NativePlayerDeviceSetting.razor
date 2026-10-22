@@ -1,0 +1,40 @@
+@*
+    The Animarr phone app's player choice for THIS device (window.
+    animarrNativePlayerMode in its index.html): the native player (Media3 —
+    AC-3 / DTS / TrueHD, HDR, picture-in-picture, lock-screen controls) or
+    this web player. Stored on the device, not the account; renders nothing
+    in a browser (no hook).
+*@
+@inject IJSRuntime JS
+
+@if (_mode is not null)
+{
+    <SettingsCard Icon="video" Title="@L["profile.device_player_title"]" Description="@L["profile.device_player_desc"]">
+        <select class="fs-select" value="@_mode" @onchange="OnChanged">
+            <option value="native">@L["profile.device_player_native"]</option>
+            <option value="web">@L["profile.device_player_web"]</option>
+        </select>
+    </SettingsCard>
+}
+
+@code {
+    private string? _mode;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var mode = await JS.InvokeAsync<string?>("animarrNativePlayerMode", "");
+            if (mode is "native" or "web") { _mode = mode; StateHasChanged(); }
+        }
+        catch { /* a browser: no native player */ }
+    }
+
+    private async Task OnChanged(ChangeEventArgs e)
+    {
+        var mode = e.Value?.ToString() == "web" ? "web" : "native";
+        try { _mode = await JS.InvokeAsync<string?>("animarrNativePlayerMode", mode) ?? mode; }
+        catch { _mode = mode; }
+    }
+}

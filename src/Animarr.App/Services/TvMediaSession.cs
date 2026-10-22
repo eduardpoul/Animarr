@@ -36,6 +36,10 @@ internal sealed class TvMediaSession : IDisposable
         _session.Active = true;
     }
 
+    /// <summary>For the phone's media notification (MediaStyle): lock screen,
+    /// the notification shade and the quick-settings player follow this session.</summary>
+    public MediaSession.Token SessionToken => _session.SessionToken;
+
     public void SetMetadata(string title, string? subtitle, long durationMs)
     {
         if (_meta == (title, subtitle, durationMs)) return;

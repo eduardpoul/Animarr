@@ -587,6 +587,29 @@
                 await DotNet.invokeMethodAsync('Animarr.App', 'WatchNextRemove', mediaId);
             } catch { /* swallow */ }
         };
+
+        // Phone: "Play" hands the file to the native player (Media3 — AC-3 /
+        // DTS / TrueHD on the device, HDR, picture-in-picture, lock-screen
+        // controls). Resolves once the native player is done: 'closed' (it
+        // played — refresh the watch state), 'failed' (it could not start —
+        // play it in the web player) or 'web' (this device uses the web
+        // player). MediaDetail feature-detects it; a browser has no hook.
+        window.animarrNativePlay = async function (req) {
+            try {
+                return await DotNet.invokeMethodAsync('Animarr.App', 'NativePlay',
+                    String(req.mediaItemId), req.path, req.season ?? null, req.episode ?? null, req.title ?? null);
+            } catch (e) {
+                console.warn('animarrNativePlay failed', e);
+                return 'failed';
+            }
+        };
+        // The device's player setting: get (no argument) or set 'native' |
+        // 'web'; '' where there is no native phone player.
+        window.animarrNativePlayerMode = async function (mode) {
+            try {
+                return await DotNet.invokeMethodAsync('Animarr.App', 'NativePlayerMode', mode || '');
+            } catch { return ''; }
+        };
     </script>
 </head>
 <body>
@@ -635,10 +658,11 @@
     <script src="_content/Animarr.UI/app-shell.js"></script>
     <script src="_content/Animarr.UI/qr-scan.js"></script>
 
-    <!-- No window.animarrNativePlayer here: the WebView player always plays
-         in the page (hls.js / native <video> via the loopback proxy). Native
-         ExoPlayer playback is the TV's own PlayerPage, which the WebView never
-         drives — animarr-player.js treats the missing bridge as "native
+    <!-- No window.animarrNativePlayer here: animarr-player.js never drives a
+         native player — when the web player runs, it plays in the page
+         (hls.js / native <video> via the loopback proxy). The native player
+         takes over before that, at MediaDetail's Play (animarrNativePlay
+         above); animarr-player.js treats the missing bridge as "native
          unavailable". -->
 </body>
 </html>

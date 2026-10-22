@@ -48,6 +48,18 @@ internal static class TvPlaybackPrefs
         set => Preferences.Default.Set(SubBgKey, Math.Clamp(value, 0, 2));
     }
 
+    /// <summary>Phone / tablet: which player plays a title — "native" (the
+    /// Media3 PlayerPage: AC-3 / DTS / TrueHD decoded on the device, HDR on
+    /// a SurfaceView, picture-in-picture, lock-screen controls; default) or
+    /// "web" (the WebView player: JASSUB-rendered ASS, PGS, the web HUD).
+    /// The TV always plays natively.</summary>
+    public static string PhonePlayer
+    {
+        get => Preferences.Default.Get(PhonePlayerKey, "native") == "web" ? "web" : "native";
+        set => Preferences.Default.Set(PhonePlayerKey, value == "web" ? "web" : "native");
+    }
+    private const string PhonePlayerKey = "player_phone_mode";
+
     /// <summary>Playback speed, 0.5–2× (1 = normal); kept for the next video.</summary>
     public static float Speed
     {

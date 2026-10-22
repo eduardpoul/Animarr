@@ -19,6 +19,10 @@ namespace Animarr.App;
     MainLauncher = true,
     Exported = true,
     LaunchMode = LaunchMode.SingleTop,
+    // Phone: the native player goes picture-in-picture on Home / its PiP
+    // button (PlayerPage). The config changes below keep the activity alive
+    // through the PiP resize.
+    SupportsPictureInPicture = true,
     ConfigurationChanges = ConfigChanges.ScreenSize
                          | ConfigChanges.Orientation
                          | ConfigChanges.UiMode
@@ -610,6 +614,8 @@ public class MainActivity : MauiAppCompatActivity
     protected override void OnPause()
     {
         base.OnPause();
+        // In picture-in-picture the activity is paused but on screen: playback goes on.
+        if (IsInPictureInPictureMode) return;
         try { Services.NativePlayerService.Instance?.OnHostActivityPaused(); }
         catch (System.Exception ex)
         {
@@ -625,6 +631,34 @@ public class MainActivity : MauiAppCompatActivity
         {
             Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityResumed threw: {ex.Message}");
         }
+    }
+
+    /// <summary>No longer visible — also the end of a picture-in-picture
+    /// window the user closed (OnPause didn't pause it): pause.</summary>
+    protected override void OnStop()
+    {
+        base.OnStop();
+        try { Services.NativePlayerService.Instance?.OnHostActivityStopped(); }
+        catch (System.Exception ex)
+        {
+            Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityStopped threw: {ex.Message}");
+        }
+    }
+
+    /// <summary>Home / Recents while the phone's native player plays: below
+    /// Android 12 PiP is entered here (12+ auto-enters from the player's
+    /// PictureInPictureParams).</summary>
+    protected override void OnUserLeaveHint()
+    {
+        base.OnUserLeaveHint();
+        PlayerPage.OnUserLeaveHintGlobal();
+    }
+
+    public override void OnPictureInPictureModeChanged(bool isInPictureInPictureMode,
+                                                       Android.Content.Res.Configuration? newConfig)
+    {
+        base.OnPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        PlayerPage.OnPipModeChangedGlobal(isInPictureInPictureMode);
     }
 
     protected override void OnDestroy()

@@ -289,6 +289,20 @@ public sealed class NativePlayerService : IDisposable
     /// decoder memory across activity recreations.</summary>
     public void OnHostActivityDestroyed() => _ = DetachAsync();
 
+    /// <summary>Hosted-activity OnStop: the window is gone from the screen —
+    /// after a normal OnPause nothing plays any more; a picture-in-picture
+    /// window the user closed still did (OnPause skips PiP): pause it, and
+    /// don't resume it on the next OnResume.</summary>
+    public void OnHostActivityStopped()
+    {
+        lock (_lock)
+        {
+            if (_player is null || !_player.PlayWhenReady) return;
+            _player.PlayWhenReady = false;
+            _wasPlayingBeforePause = false;
+        }
+    }
+
     /// <summary>The SurfaceView's Surface exists: drain a
     /// <see cref="_pendingPlay"/> stashed by an early PlayAsync.</summary>
     private void OnSurfaceReady()

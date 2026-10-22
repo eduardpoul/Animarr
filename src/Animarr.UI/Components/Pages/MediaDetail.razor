@@ -1089,12 +1089,48 @@ else
             _playerSelfRef = null;
         }
 
+        // Phone app: its native player takes the file (see TryNativePlaybackAsync).
+        if (await TryNativePlaybackAsync(path, season, episode)) return;
+
         _playerPath      = path;
         _playerSeason    = season;
         _playerEpisode   = episode;
         _playerElementId = $"vp-{Guid.NewGuid():N}";
         _lastProgressWrite = DateTime.MinValue;
         StateHasChanged();
+    }
+
+    /// <summary>The Animarr phone app (window.animarrNativePlay in its
+    /// index.html) plays the file in its native player and answers once that
+    /// is closed: "closed" — played there, refresh what it recorded; "failed"
+    /// (it could not start) or "web" (the device is set to the web player, or
+    /// was switched to it from the native menu) — this page's player plays
+    /// it. No hook (a browser) → the web player, as always.</summary>
+    private async Task<bool> TryNativePlaybackAsync(string path, int? season, int? episode)
+    {
+        if (_item is null) return false;
+        string? outcome;
+        try
+        {
+            // No timeout: it resolves when the native player is closed.
+            outcome = await JS.InvokeAsync<string?>("animarrNativePlay", CancellationToken.None,
+                new object?[] { new { mediaItemId = _item.Id, path, season, episode, title = _item.Title } });
+        }
+        catch { return false; }
+        if (outcome is not ("closed" or "web")) return false;
+        // The native player recorded progress (maybe a few episodes'): the
+        // episode eyes, Continue and — for "web" — the resume point.
+        try { SetWatchStates(await Api.GetWatchStatesAsync(Id)); } catch { }
+        try
+        {
+            _continue       = await Api.GetContinueAsync(Id);
+            _continueAction = _continue is null ? null : ContinueAction.FromDto(_continue);
+        }
+        catch { }
+        if (outcome == "web") return false;
+        _themeStarted = false;   // the theme comes back, like after the web player
+        StateHasChanged();
+        return true;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

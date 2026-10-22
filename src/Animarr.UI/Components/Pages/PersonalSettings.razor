@@ -1440,6 +1440,8 @@
                        aria-label="@L["profile.default_volume_title"]"
                        value="@_defaultVolume" @onchange="OnDefaultVolumeChanged" />
             </SettingsCard>
+            @* Phone app only: native or web player on this device. *@
+            <NativePlayerDeviceSetting />
         </SettingsGroup>
 
         <SettingsGroup Title="@L["profile.theme_music_title"]">
