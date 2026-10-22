@@ -696,18 +696,28 @@
         const r = entry.subRenderer;
         if (r && r.kind === 'ass') {
             try { r.inst.timeOffset = -want; r.inst.resize(true); } catch {}
+        } else if (r && r.kind === 'bitmap') {
+            try { r.inst.timeOffset = -want; } catch {}
         }
     }
 
-    // ── Subtitle renderers (task 2.5) ─────────────────────────────────
-    // A subtitle choice renders one of two ways (subtitlePlan):
+    // ── Subtitle renderers (tasks 2.5 / 2.6) ──────────────────────────
+    // A subtitle choice renders one of these ways (subtitlePlan):
     //   text — WebVTT through Artplayer's <track> + renderCuesSafely (SRT,
     //          VTT, mov_text, and an ASS script whose styling a WebVTT
     //          rendering doesn't lose — /api/subtitle/tracks says so);
     //   ass  — the ORIGINAL ASS / SSA script through JASSUB (libass in
     //          WebAssembly: positions, karaoke, typesetting, the file's own
     //          fonts), for every ASS track the server marks complex or hasn't
-    //          analysed yet, and every sidecar .ass / .ssa.
+    //          analysed yet, and every sidecar .ass / .ssa;
+    //   bitmap — PGS (embedded via /api/subtitle/sup, or a sidecar .sup) and
+    //          sidecar VobSub (.idx + .sub) through libbitsub (Rust/WASM,
+    //          vendor/libbitsub, MIT);
+    //   burn  — what nothing here can draw (embedded VobSub / DVB, or no
+    //          bitmap renderer on this device): the server burns track s:N
+    //          into the picture (burnSubtitle=N, a re-encode) — only on the
+    //          user's explicit pick, also offered next to every embedded
+    //          bitmap track in the CC menu.
     // JASSUB is self-hosted under wwwroot/vendor/jassub (the server may be
     // offline / LAN-only) and loaded on first use; the fonts attached to the
     // video come from /api/subtitle/tracks, with the bundled Liberation Sans
@@ -727,6 +737,24 @@
                 .catch((e) => { JASSUB_LOAD = null; throw e; });
         }
         return JASSUB_LOAD;
+    }
+    let BITSUB_LOAD = null, BITSUB_BROKEN = false;
+    function loadBitsub() {
+        if (!BITSUB_LOAD) {
+            BITSUB_LOAD = import(vendorUrl('libbitsub/libbitsub.bundle.js'))
+                .catch((e) => { BITSUB_LOAD = null; BITSUB_BROKEN = true; throw e; });
+        }
+        return BITSUB_LOAD;
+    }
+    /** Can this device draw bitmap subtitles itself (else: burn-in)? */
+    function canDrawBitmaps() {
+        return !BITSUB_BROKEN && typeof WebAssembly === 'object' && typeof Worker === 'function';
+    }
+    const IMAGE_SUB_CODECS = { hdmv_pgs_subtitle: 'pgs', pgssub: 'pgs', dvd_subtitle: 'vobsub', dvdsub: 'vobsub', dvb_subtitle: 'dvb' };
+    /** libbitsub layout from the player's subtitle style: size step, height. */
+    function bitmapDisplay(style) {
+        style = style || readSubStyle();
+        return { scale: style.scale, verticalOffset: -style.pos };
     }
     /** family (lower-case) → font URL, as JASSUB's availableFonts wants it. */
     function assFontMap(entry) {
@@ -750,6 +778,14 @@
             if (!s) return null;
             const info = (entry.subTracks || []).find(t => t.index === choice.idx) || null;
             const codec = String((info && info.codec) || s.codec || '').toLowerCase();
+            const image = IMAGE_SUB_CODECS[codec] || (info && info.kind === 'image' ? 'other' : null);
+            if (image) {
+                if (image === 'pgs' && canDrawBitmaps())
+                    return { kind: 'bitmap', format: 'pgs', name: s.name, burnIndex: choice.idx,
+                             subUrl: (info && mediaApiUrl(info.supUrl))
+                                 || apiUrl('/api/subtitle/sup?path=' + encodeURIComponent(entry.mediaPath) + '&track=' + choice.idx) };
+                return { kind: 'burn', name: s.name, burnIndex: choice.idx };
+            }
             if (codec === 'ass' || codec === 'ssa') {
                 // Not analysed yet → libass, to be safe.
                 const complex = info && info.ass ? !!info.ass.complex : true;
@@ -765,6 +801,19 @@
             const x = (entry.externalSubList || []).find(t => samePath(t.path, choice.ext));
             if (!x) return null;
             const ext = String(x.ext || '').toLowerCase();
+            if (x.image) {
+                // A sidecar can't be burned in (burnSubtitle names a track of
+                // the video): drawn here or not at all.
+                if (!canDrawBitmaps()) return { kind: 'none', name: x.label };
+                if (ext === 'sup')
+                    return { kind: 'bitmap', format: 'pgs', name: x.label,
+                             subUrl: apiUrl('/api/subtitle/sup?path=' + encodeURIComponent(x.path) + '&track=0') };
+                if (ext === 'idx' && x.companionPath)
+                    return { kind: 'bitmap', format: 'vobsub', name: x.label,
+                             idxUrl: apiUrl('/api/file?path=' + encodeURIComponent(x.path)),
+                             subUrl: apiUrl('/api/file?path=' + encodeURIComponent(x.companionPath)) };
+                return { kind: 'none', name: x.label };
+            }
             if (ext === 'ass' || ext === 'ssa') {
                 return { kind: 'ass', url: apiUrl('/api/subtitle?path=' + encodeURIComponent(x.path) + '&track=0&format=ass'),
                          fallbackUrl: externalSubUrl(x.path), name: x.label };
@@ -781,17 +830,58 @@
     }
     /** THE place a subtitle choice is put on screen — the CC menu, the
      *  initial pick, a restart. `choice`: { idx } | { ext } | null (Off). */
-    async function applySubtitleChoice(entry, choice) {
+    /** A toast once the HUD is up (the initial pick runs before it is). */
+    function laterToast(entry, title, detail) {
+        setTimeout(() => { if (entry.hudRoot && entry.adapter) showToast(entry.hudRoot, title, detail); }, 1200);
+    }
+    /** `user`: the CC menu (may burn in); else the initial pick / a restart,
+     *  which never starts a re-encode on its own. */
+    async function applySubtitleChoice(entry, choice, user) {
         const token = (entry.subToken = (entry.subToken || 0) + 1);
         disposeSubRenderer(entry);
-        entry.currentSubIdx     = choice && choice.idx != null ? choice.idx : null;
-        entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
         const plan = choice ? subtitlePlan(entry, choice) : null;
         const adapter = entry.adapter;
+        if (plan && plan.kind === 'burn') {
+            if (user && entry.elementId) { burnSubtitleIn(entry.elementId, plan.burnIndex); return; }
+            choice = null;   // nothing can show it without a re-encode
+            laterToast(entry, t('sub_burn_needed'), plan.name);
+        }
+        if (plan && plan.kind === 'none') {
+            choice = null;
+            laterToast(entry, t('sub_unsupported'), plan.name);
+        }
+        entry.currentSubIdx     = choice && choice.idx != null ? choice.idx : null;
+        entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
         if (!adapter) return;
-        if (!plan) { adapter.setSubtitle(null); return; }
+        if (!choice || !plan) { adapter.setSubtitle(null); return; }
         if (plan.kind === 'text') { adapter.setSubtitle({ url: plan.url, name: plan.name, type: 'vtt' }); return; }
         adapter.setSubtitle(null);   // Artplayer's own overlay stays empty
+        if (plan.kind === 'bitmap') {
+            try {
+                const lib = await loadBitsub();
+                const video = entry.art && entry.art.video;
+                if (entry.subToken !== token || !video) return;
+                const Ctor = plan.format === 'vobsub' ? lib.VobSubRenderer : lib.PgsRenderer;
+                const inst = new Ctor({
+                    video,
+                    subUrl: plan.subUrl,
+                    ...(plan.idxUrl ? { idxUrl: plan.idxUrl } : {}),
+                    container: entry.art.template.$player,
+                    timeOffset: -(entry.subOffset || 0),
+                    displaySettings: bitmapDisplay(),
+                    onError: (e) => {
+                        console.warn('animarrPlayer: bitmap subtitles failed', e);
+                        if (entry.subToken === token && entry.hudRoot) showToast(entry.hudRoot, t('sub_bitmap_failed'), plan.name);
+                    },
+                });
+                entry.subRenderer = { kind: 'bitmap', inst, dispose: () => inst.dispose() };
+            } catch (e) {
+                console.warn('animarrPlayer: bitmap subtitle renderer unavailable', e);
+                if (entry.subToken === token && entry.hudRoot)
+                    showToast(entry.hudRoot, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+            }
+            return;
+        }
         try {
             // The video's attached fonts (the tracks answer) before libass starts.
             if (entry.subTracksReady) await withTimeout(entry.subTracksReady, 5000, null);
@@ -1607,21 +1697,26 @@
                 body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_styled_hint')));
                 return;
             }
+            // A bitmap track (PGS / VobSub) takes the size step and the height.
+            const bitmap = entry.subRenderer && entry.subRenderer.kind === 'bitmap' ? entry.subRenderer : null;
             const style = readSubStyle();
             const update = (patch) => {
                 Object.assign(style, patch);
                 saveSubStyle(style);
                 applySubStyle(player, style);
+                if (bitmap) { try { bitmap.inst.setDisplaySettings(bitmapDisplay(style)); } catch {} }
             };
             panelChips(panelRow(body, t('sub_size')),
                 SUB_SCALES.map(v => ({ value: v, label: Math.round(v * 100) + '%' })),
                 style.scale, ready, v => update({ scale: v }));
-            panelChips(panelRow(body, t('sub_color')),
-                Object.keys(SUB_COLORS).map(k => ({ value: k, label: t('color_' + k), swatch: SUB_COLORS[k] })),
-                style.color, ready, v => update({ color: v }));
-            panelChips(panelRow(body, t('sub_edge')),
-                SUB_EDGES.map(k => ({ value: k, label: t('edge_' + k) })),
-                style.edge, ready, v => update({ edge: v }));
+            if (!bitmap) {
+                panelChips(panelRow(body, t('sub_color')),
+                    Object.keys(SUB_COLORS).map(k => ({ value: k, label: t('color_' + k), swatch: SUB_COLORS[k] })),
+                    style.color, ready, v => update({ color: v }));
+                panelChips(panelRow(body, t('sub_edge')),
+                    SUB_EDGES.map(k => ({ value: k, label: t('edge_' + k) })),
+                    style.edge, ready, v => update({ edge: v }));
+            }
             const posCtl = panelRow(body, t('sub_position'));
             const range = document.createElement('input');
             range.type = 'range';
@@ -2992,6 +3087,12 @@
         edge_none:          'None',
         unit_s:             's',
         reset:              'Reset',
+        sub_burn_in:        'burn in',
+        sub_burn_needed:    "These subtitles can only be shown burned into the picture — pick “burn in” under Subtitles",
+        sub_burn_hint:      'Pick “burn in” under Subtitles to have the server draw them into the picture',
+        sub_unsupported:    "These subtitles can't be shown on this device",
+        sub_bitmap_failed:  "Couldn't draw these subtitles",
+        error_burn:         "Couldn't burn the subtitles in, staying on the previous stream",
         sub_styled_hint:    'This track is drawn with its own ASS styles and fonts; size and colour apply to plain text tracks.',
         track_n:            'Track {0}',
         track_default:      'default',
@@ -3483,6 +3584,7 @@
             + audioQuery
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
+            + (Number.isFinite(p.burnSubtitle) && p.burnSubtitle >= 0 ? '&burnSubtitle=' + p.burnSubtitle : '')
             + capsQuery(p.caps, tier));
         let lastErr = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -3707,6 +3809,8 @@
         // sends only the pipeline baseline — the server adds the audio's
         // offset itself and says so (trackDefaults.audioOffsetApplied).
         const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs : 0;
+        // Subtitle track s:N burned into the picture by the server (2.6), or none.
+        const burnSubtitle = (opts && Number.isFinite(opts.burnSubtitle) && opts.burnSubtitle >= 0) ? opts.burnSubtitle : null;
         if (typeof window.Artplayer !== 'function' || !window.Hls) {
             // Loaded on demand (see PLAYER_LIBS) — usually already warm from
             // MediaDetail's preload(), else this is the first-use fetch.
@@ -3731,6 +3835,7 @@
             // Sync offset of the current audio: what the Sync control shows /
             // the next start sends, and what this stream was started with.
             audioOffsetMs, streamAudioOffsetMs: audioOffsetMs,
+            currentBurnSub: burnSubtitle,
             currentMaxHeight: maxHeight,
             currentMaxBitrate: maxBitrate,
             // External-track state. currentExternalAudioPath != null means the
@@ -3752,7 +3857,7 @@
         // open's retry is a fresh open again: the profile picks the audio).
         const retryOpts = (resumeAt) => ({
             audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
-            forceResumeSec: resumeAt, usePrefs, audioOffsetMs,
+            forceResumeSec: resumeAt, usePrefs, audioOffsetMs, burnSubtitle,
             trackDefaults: opts && opts.trackDefaults,
         });
 
@@ -3808,7 +3913,7 @@
         if (!started) {
             try {
                 started = await startStream(mediaPath, {
-                    resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs,
+                    resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs, burnSubtitle,
                     // Fallback floor reached earlier on this player (1.7).
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
@@ -4396,19 +4501,46 @@
                 const ext = entry.externalSubList || [];
                 // Last row: the timing / style panel (only with a player
                 // that renders the cues itself, i.e. Artplayer).
-                const settingsIdx = entry.art ? 1 + emb.length + ext.length : -1;
+                // Embedded bitmap tracks also get an explicit "burn in" row
+                // (2.6) after the list; one the player can't draw at all is
+                // labelled so in its own row.
+                const burnRows = emb.map((s, idx) => ({ idx, plan: subtitlePlan(entry, { idx }) }))
+                    .filter(r => r.plan && (r.plan.kind === 'bitmap' || r.plan.kind === 'burn'));
+                const settingsIdx = entry.art ? 1 + emb.length + ext.length + burnRows.length : -1;
                 const items = [t('sub_off'),
-                    ...emb.map(s => s.name),
+                    ...emb.map((s, idx) => {
+                        const pl = burnRows.find(r => r.idx === idx);
+                        return pl && pl.plan.kind === 'burn' ? s.name + ' · ' + t('sub_burn_in') : s.name;
+                    }),
                     ...ext.map(s => externalTrackLabel(s)),
+                    ...burnRows.map(r => ({ label: t('sub_burn_in') + ': ' + emb[r.idx].name, cls: 'vp-hud-popup__item--more' })),
                     ...(settingsIdx > 0 ? [{ label: t('sub_settings') + '…', cls: 'vp-hud-popup__item--more' }] : [])];
                 let cur = 0;
-                if (entry.currentExtSubPath != null) {
+                if (entry.currentBurnSub != null) {
+                    const bi = burnRows.findIndex(r => r.idx === entry.currentBurnSub);
+                    if (bi >= 0) cur = 1 + emb.length + ext.length + bi;
+                } else if (entry.currentExtSubPath != null) {
                     const ei = ext.findIndex(s => s.path === entry.currentExtSubPath);
                     if (ei >= 0) cur = 1 + emb.length + ei;
                 } else if (entry.currentSubIdx != null) {
                     cur = entry.currentSubIdx + 1;
                 }
                 openPickerPopup(hudRoot, 'cc', t('subtitles'), items, cur, (i) => {
+                    const burnAt = i - (1 + emb.length + ext.length);
+                    if (burnAt >= 0 && burnAt < burnRows.length) {
+                        burnSubtitleIn(elementId, burnRows[burnAt].idx);
+                        return;
+                    }
+                    // Any other pick while a track is burned in: restart without it.
+                    if (entry.currentBurnSub != null && i !== settingsIdx) {
+                        const idx = i - 1;
+                        const choice = i === 0 ? null : idx < emb.length ? { idx } : { ext: ext[idx - emb.length].path };
+                        unburnSubtitle(elementId, choice);
+                        queueTrackPrefs(elementId, { subtitle: !choice ? { kind: 'off' }
+                            : choice.idx != null ? { kind: 'embedded', index: choice.idx }
+                            : { kind: 'external', path: choice.ext } });
+                        return;
+                    }
                     if (i === settingsIdx) {
                         // After this picker has closed (it closes right after
                         // onPick; opening now would just toggle it shut).
@@ -4424,11 +4556,11 @@
                     }
                     const idx = i - 1;
                     if (idx < emb.length) {
-                        applySubtitleChoice(entry, { idx });
+                        applySubtitleChoice(entry, { idx }, true);
                         queueTrackPrefs(elementId, { subtitle: { kind: 'embedded', index: idx } });
                     } else {
                         const s = ext[idx - emb.length];
-                        applySubtitleChoice(entry, { ext: s.path });
+                        applySubtitleChoice(entry, { ext: s.path }, true);
                         queueTrackPrefs(elementId, { subtitle: { kind: 'external', path: s.path } });
                     }
                 });
@@ -4897,6 +5029,7 @@
             maxHeight:         entry.currentMaxHeight || 0,
             maxBitrate:        entry.currentMaxBitrate || 0,
             audioOffsetMs:     entry.audioOffsetMs || 0,
+            burnSubtitle:      entry.currentBurnSub != null ? entry.currentBurnSub : null,
         };
     }
 
@@ -4957,7 +5090,7 @@
      * one's start, and Back / Next / close (detach) make it stale, so a late
      * answer stops its own session instead of resurrecting a player.
      *
-     * @param {'audio'|'quality'|'sync'} kind  Picks the failure message.
+     * @param {'audio'|'quality'|'sync'|'burn'} kind  Picks the failure message.
      * @returns {Promise<boolean>} true once the new plan plays (false: kept
      *                              the previous one, superseded, or stale).
      */
@@ -5012,7 +5145,8 @@
             return false;
         }
         console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
-        const title  = t(kind === 'audio' ? 'error_audio' : kind === 'sync' ? 'error_sync' : 'error_quality');
+        const title  = t(kind === 'audio' ? 'error_audio' : kind === 'sync' ? 'error_sync'
+                       : kind === 'burn' ? 'error_burn' : 'error_quality');
         const detail = (failure && failure.reason) || '';
         // The server keeps the previous session alive until a replacement
         // actually plays, so this is normally true and the old stream simply
@@ -5029,6 +5163,33 @@
         await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
             Object.assign({}, prev, { forceResumeSec: snap.pos, toast: { title, detail }, restore: snap }), op);
         return false;
+    }
+
+    /** Restart with embedded subtitle track s:N burned into the picture
+     *  (nothing on top of it), remembered as that subtitle choice. */
+    async function burnSubtitleIn(elementId, index) {
+        const entry = WIRED.get(elementId);
+        if (!entry || entry.currentBurnSub === index) return false;
+        const prev = { idx: entry.currentSubIdx, ext: entry.currentExtSubPath };
+        disposeSubRenderer(entry);
+        if (entry.adapter) entry.adapter.setSubtitle(null);
+        entry.currentSubIdx = null; entry.currentExtSubPath = null;
+        const ok = await restartStream(elementId, { burnSubtitle: index }, 'burn');
+        if (ok) queueTrackPrefs(elementId, { subtitle: { kind: 'embedded', index } });
+        else if (WIRED.get(elementId) === entry) {
+            applySubtitleChoice(entry, prev.idx != null ? { idx: prev.idx } : prev.ext ? { ext: prev.ext } : null);
+        }
+        return ok;
+    }
+    /** Leave a burned-in subtitle for `choice` ({ idx } | { ext } | null):
+     *  a restart without the burn, the new choice drawn on top as usual. */
+    async function unburnSubtitle(elementId, choice) {
+        const entry = WIRED.get(elementId);
+        if (!entry) return false;
+        // captureState carries these into the restarted stream (restore.sub).
+        entry.currentSubIdx = choice && choice.idx != null ? choice.idx : null;
+        entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
+        return restartStream(elementId, { burnSubtitle: null }, 'burn');
     }
 
     /**

@@ -17,5 +17,11 @@ WebAssembly, styled ASS / SSA subtitles)
   lfa-ponyfill 1.1.1 (MIT), throughput 1.0.2 (MIT).
   jassub-worker.js is the package's emscripten glue, unchanged.
 
+libbitsub/ — libbitsub 1.12.1, https://github.com/altqx/libbitsub (PGS /
+VobSub / DVB bitmap subtitles in WebAssembly): MIT (libbitsub/LICENSE).
+  libbitsub.js + libbitsub_bg.wasm are the package's pkg/ files, unchanged;
+  libbitsub.bundle.js is its dist/ entry bundled, with the wasm / glue paths
+  pointed at this folder.
+
 Rebuild: npm install (the versions above, --ignore-scripts) and bundle with
 esbuild 0.28.2 (bundle, format=esm, minify, target=es2020, legalComments=eof).
