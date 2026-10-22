@@ -3703,10 +3703,13 @@
     //     Stream, Safari aside) — so from the first switch on, switching is
     //     live.
     // Each rendition carries its own sync offset, fixed when the session
-    // starts: the default one gets audioSyncMs, the others renditionOffsets
-    // (id:ms, what this player knows of them), else a dub's DELAY. A switch
-    // to an audio whose remembered offset differs from what its rendition
-    // carries restarts once with that audio as the default.
+    // starts and reported back as syncMs / syncSource: the default one gets
+    // audioSyncMs (or, with usePrefs, the remembered one), the others
+    // renditionOffsets (id:ms — what the previous session reported), else
+    // with usePrefs what track memory holds for them, else a dub's DELAY. So
+    // a live switch needs no look-up; only an older server that doesn't
+    // report syncMs gets the memory asked and, when it differs, one restart
+    // with that audio as the default.
     function hlsJsPlays() {
         return !!(window.Hls && typeof window.Hls.isSupported === 'function' && window.Hls.isSupported());
     }
@@ -3785,6 +3788,40 @@
             if (btn && btn.style.display !== 'none') btn.click();
         }
     }
+    /** Does this rendition say what sync offset it carries (syncMs +
+     *  syncSource: start / request / memory / delay / none)? */
+    function renditionReportsSync(r) {
+        return !!(r && typeof r.syncMs === 'number' && typeof r.syncSource === 'string');
+    }
+    // Audio-side reason codes — the part of output.transcodeReasonCodes a
+    // rendition reports for itself (reasonCodes).
+    const AUDIO_REASON_CODES = ['external_audio', 'audio_unsupported'];
+    /** The session's output with its audio part taken from rendition `r`:
+     *  codec / channels / language and the audio reasons (the start's
+     *  output describes the default rendition). */
+    function outputForRendition(entry, r) {
+        const base = entry.startOutput || entry.output || {};
+        const out = Object.assign({}, base, {
+            audioCodec: r.codec || base.audioCodec,
+            audioChannels: r.channels || base.audioChannels,
+            audioLanguage: r.language || null,
+        });
+        if (Array.isArray(r.reasonCodes)) {
+            const def = (entry.renditions || []).find(x => x.default);
+            const drop = new Set([...AUDIO_REASON_CODES, ...((def && def.reasonCodes) || [])]);
+            const codes = (Array.isArray(base.transcodeReasonCodes) && base.transcodeReasonCodes.length
+                ? base.transcodeReasonCodes : base.transcodeReasonCode ? [base.transcodeReasonCode] : [])
+                .filter(c => !drop.has(c));
+            r.reasonCodes.forEach(c => { if (!codes.includes(c)) codes.push(c); });
+            out.transcodeReasonCodes = codes;
+            out.transcodeReasonCode = codes[0] || null;
+            // The start's English text described the default rendition: it
+            // only stands in for a code this player doesn't know.
+            if (codes.some(c => !REASON_CODES.includes(c))) out.transcodeReason = base.transcodeReason;
+            else out.transcodeReason = null;
+        }
+        return out;
+    }
     /** hls.audioTracks index of rendition `ri` (same order; by name as a
      *  fallback), or -1. */
     function renditionTrackIndex(hls, entry, ri) {
@@ -3814,14 +3851,18 @@
         const own = (entry.renditionOwn && entry.renditionOwn[r.id]) || 0;
         entry.audioOffsetMs = entry.streamAudioOffsetMs = own;
         // What the player now receives (Info): this rendition's audio.
-        entry.output = Object.assign({}, entry.output || {}, {
-            audioCodec: r.codec || (entry.output && entry.output.audioCodec),
-            audioChannels: r.channels || (entry.output && entry.output.audioChannels),
-            audioLanguage: r.language || null,
-        });
+        entry.output = outputForRendition(entry, r);
         setupLoudness(entry);
         if (entry.updateMeta) entry.updateMeta();
-        if (entry.mediaItemId && queueTrackPrefs(elementId, { audio: audioChoice(ext, index) })) {
+        if (!entry.mediaItemId) return true;
+        // The server put the offset track memory holds for this audio on its
+        // rendition already (syncMs): remember the pick, nothing to correct.
+        if (renditionReportsSync(r)) {
+            queueTrackPrefs(elementId, { audio: audioChoice(ext, index) });
+            return true;
+        }
+        // An older server: ask the memory, restart once if it differs.
+        if (queueTrackPrefs(elementId, { audio: audioChoice(ext, index) })) {
             await flushTrackPrefs(elementId);
             let td = null;
             try { td = await entry.dotnetRef.invokeMethodAsync('ResolveTrackPrefs', entry.mediaPath); } catch {}
@@ -4383,6 +4424,7 @@
         // Audio renditions (6.3): the session's audio group. Its DEFAULT one
         // is the audio this stream started on — authoritative for the menus.
         entry.renditions = manifestUrl && started.audioRenditions ? started.audioRenditions : null;
+        entry.startOutput = started.output || null;
         if (entry.renditions) {
             const d = entry.renditions.find(r => r.default);
             if (d) {
@@ -4521,9 +4563,13 @@
         // Each rendition's own sync offset as this session carries it: the
         // default one the start's, the others what renditionOffsets sent,
         // else a dub's DELAY / none.
+        // A server that reports it says so per rendition (syncMs + syncSource:
+        // with usePrefs every rendition carries the offset track memory holds
+        // for it); an older one only applied what was asked, so work it out.
         entry.renditionOwn = {};
         (entry.renditions || []).forEach((r) => {
-            entry.renditionOwn[r.id] = r.default ? (entry.streamAudioOffsetMs || 0)
+            entry.renditionOwn[r.id] = renditionReportsSync(r) ? clampAudioOffset(r.syncMs)
+                : r.default ? (entry.streamAudioOffsetMs || 0)
                 : renditionOffsetMap && renditionOffsetMap[r.id] != null ? clampAudioOffset(renditionOffsetMap[r.id])
                 : r.kind === 'external' ? dubDelayMs(entry, r.path) : 0;
         });
