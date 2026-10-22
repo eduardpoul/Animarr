@@ -651,6 +651,7 @@
   "player.info_video": "Video",
   "player.info_audio": "Ton",
   "player.info_playback": "Wiedergabe",
+  "player.info_renditions": "Ton wechselt ohne Neustart",
   "player.info_reason": "Grund",
   "player.info_caps": "Client-Fähigkeiten",
   "player.info_caps_none": "(nicht ermittelt)",

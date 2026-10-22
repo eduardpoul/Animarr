@@ -651,6 +651,7 @@
   "player.info_video": "Vídeo",
   "player.info_audio": "Audio",
   "player.info_playback": "Reproducción",
+  "player.info_renditions": "el audio cambia al instante",
   "player.info_reason": "Motivo",
   "player.info_caps": "Capacidades del cliente",
   "player.info_caps_none": "(no detectadas)",

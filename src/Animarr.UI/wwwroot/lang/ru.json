@@ -652,6 +652,7 @@
   "player.info_video": "Видео",
   "player.info_audio": "Звук",
   "player.info_playback": "Воспроизведение",
+  "player.info_renditions": "звук переключается на лету",
   "player.info_reason": "Причина",
   "player.info_caps": "Возможности клиента",
   "player.info_caps_none": "(не определены)",

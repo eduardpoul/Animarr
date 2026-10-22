@@ -809,6 +809,8 @@
         const video = entry.art.video;
         const path = entry.currentExternalAudioPath || entry.mediaPath;
         const track = entry.currentExternalAudioPath ? 0 : (entry.currentAudIdx || 0);
+        // A live audio switch (6.3) asks again; only the latest answer counts.
+        const token = entry.loudToken = (entry.loudToken || 0) + 1;
         let res = null;
         for (let attempt = 0; attempt < 6; attempt++) {
             if (entry.adapter == null || entry.art == null) return;   // torn down
@@ -820,11 +822,23 @@
             if (!res || res.status !== 'pending') break;
             await new Promise(r => setTimeout(r, 5000));
         }
+        if (entry.loudToken !== token) return;
+        if (entry.loudness) {
+            // The element is routed already: just retune the gain (0 dB when
+            // this audio isn't measured).
+            const g = res && res.status === 'measured' && Number.isFinite(res.gainDb)
+                ? Math.max(-20, Math.min(15, res.gainDb)) : 0;
+            try { entry.loudness.nodes[1].gain.value = Math.pow(10, g / 20); } catch {}
+            entry.loudness.gainDb = g;
+            entry.loudness.lufs = res && Number.isFinite(res.integratedLufs) ? res.integratedLufs : entry.loudness.lufs;
+            if (entry.updateMeta) entry.updateMeta();
+            return;
+        }
         if (!res || res.status !== 'measured' || !Number.isFinite(res.gainDb) || entry.art == null) return;
         const ctx = loudnessContext();
         if (!ctx) return;
         await whenAudioRuns(ctx);
-        if (entry.art == null || entry.art.video !== video) return;
+        if (entry.art == null || entry.art.video !== video || entry.loudness || entry.loudToken !== token) return;
         try {
             const gainDb = Math.max(-20, Math.min(15, res.gainDb));
             const source = ctx.createMediaElementSource(video);
@@ -3311,6 +3325,7 @@
         info_video:         'Video',
         info_audio:         'Audio',
         info_playback:      'Playback',
+        info_renditions:    'audio switches live',
         info_reason:        'Reason',
         info_caps:          'Client caps',
         info_caps_none:     '(not detected)',
@@ -3621,6 +3636,53 @@
     function clampAudioOffset(ms) {
         return Math.max(-AUDIO_OFFSET_MAX, Math.min(AUDIO_OFFSET_MAX, Math.round(Number(ms) || 0)));
     }
+    // ── Audio as HLS renditions (task 6.3) ───────────────────────────
+    // With audioRenditions=1 an HLS start serves the video alone plus one
+    // EXT-X-MEDIA audio rendition per embedded track and external dub; the
+    // player switches audio with hls.audioTrack = N — no restart, the picture
+    // keeps playing. The price: for a file with several audio options the
+    // server then skips Direct Play / Direct Stream. So it is asked for
+    //   • only where hls.js plays the HLS (Safari's native HLS keeps the
+    //     restart path);
+    //   • on a fresh open, unless the file is one this browser may Direct
+    //     Play as is (MP4 / M4V / MOV / WebM): those keep the raw file on a
+    //     native <video> (no server work, RTX VSR / HDR) for their default
+    //     audio — an MKV goes out as an HLS copy anyway (remux=hls), so for
+    //     it renditions cost nothing;
+    //   • on every restart of a stream that has them, and on the restart an
+    //     audio switch of a stream without them needs anyway (Direct Play /
+    //     Stream, Safari aside) — so from the first switch on, switching is
+    //     live.
+    // Each rendition carries its own sync offset, fixed when the session
+    // starts: the default one gets audioSyncMs, the others renditionOffsets
+    // (id:ms, what this player knows of them), else a dub's DELAY. A switch
+    // to an audio whose remembered offset differs from what its rendition
+    // carries restarts once with that audio as the default.
+    function hlsJsPlays() {
+        return !!(window.Hls && typeof window.Hls.isSupported === 'function' && window.Hls.isSupported());
+    }
+    const RAW_PLAYABLE_EXT = ['mp4', 'm4v', 'mov', 'webm'];
+    /** Ask this start for audio renditions? `p.audioRenditions` set by the
+     *  caller wins (restarts); a fresh open decides by the file. */
+    function wantRenditions(p, mediaPath) {
+        if (!hlsJsPlays()) return false;
+        if (p.audioRenditions != null) return !!p.audioRenditions;
+        const ext = String(mediaPath || '').toLowerCase().split('.').pop();
+        return (p.tier || 0) >= 1 || !RAW_PLAYABLE_EXT.includes(ext);
+    }
+    /** "a1:300,x0:-150" from { id: ms } (the start's default audio excluded). */
+    function renditionOffsetsQuery(map, skipId) {
+        const parts = Object.keys(map || {}).filter(id => id !== skipId && /^[ax]\d+$/.test(id))
+            .map(id => id + ':' + clampAudioOffset(map[id]));
+        return parts.length ? '&renditionOffsets=' + encodeURIComponent(parts.join(',')) : '';
+    }
+    /** The rendition of an audio choice (embedded a:N / a dub path), or -1. */
+    function renditionIndexFor(entry, ext, index) {
+        return (entry.renditions || []).findIndex(r => ext
+            ? r.kind === 'external' && samePath(r.path, ext)
+            : r.kind !== 'external' && (r.index | 0) === (index | 0));
+    }
+
     /** The offset track defaults name for their audio: remembered (0
      *  included), else the dub's DELAY from its name, else 0 — the server
      *  reports that effective value (audioOffsetSource); an older one sent
@@ -3674,6 +3736,61 @@
             if (btn && btn.style.display !== 'none') btn.click();
         }
     }
+    /** hls.audioTracks index of rendition `ri` (same order; by name as a
+     *  fallback), or -1. */
+    function renditionTrackIndex(hls, entry, ri) {
+        const r = entry.renditions && entry.renditions[ri];
+        const tracks = (hls && hls.audioTracks) || [];
+        if (!r || !tracks.length) return -1;
+        if (tracks.length === entry.renditions.length) return ri;
+        return tracks.findIndex(tk => tk.name === r.name);
+    }
+    /** Switch to another audio / dub of a rendition stream live
+     *  (hls.audioTrack). Remembered like a restart switch; when the track
+     *  memory holds another sync offset for that audio than its rendition
+     *  carries, one seamless restart applies it. false: no such rendition. */
+    async function switchRendition(elementId, sel) {
+        const entry = WIRED.get(elementId);
+        const hls = entry && entry.art && entry.art.hls;
+        if (!entry || !hls || !entry.renditions) return false;
+        const ext = (sel && sel.externalAudioPath) || null;
+        const index = ext ? 0 : Math.max(0, (sel && sel.audioTrackIndex) | 0);
+        const ri = renditionIndexFor(entry, ext, index);
+        const ti = renditionTrackIndex(hls, entry, ri);
+        if (ri < 0 || ti < 0) return false;
+        const r = entry.renditions[ri];
+        try { hls.audioTrack = ti; } catch (e) { console.warn('animarrPlayer: audio rendition switch failed', e); return false; }
+        entry.currentAudIdx = index;
+        entry.currentExternalAudioPath = ext;
+        const own = (entry.renditionOwn && entry.renditionOwn[r.id]) || 0;
+        entry.audioOffsetMs = entry.streamAudioOffsetMs = own;
+        // What the player now receives (Info): this rendition's audio.
+        entry.output = Object.assign({}, entry.output || {}, {
+            audioCodec: r.codec || (entry.output && entry.output.audioCodec),
+            audioChannels: r.channels || (entry.output && entry.output.audioChannels),
+            audioLanguage: r.language || null,
+        });
+        setupLoudness(entry);
+        if (entry.updateMeta) entry.updateMeta();
+        if (entry.mediaItemId && queueTrackPrefs(elementId, { audio: audioChoice(ext, index) })) {
+            await flushTrackPrefs(elementId);
+            let td = null;
+            try { td = await entry.dotnetRef.invokeMethodAsync('ResolveTrackPrefs', entry.mediaPath); } catch {}
+            // Switched again / closed meanwhile: that one decides.
+            if (WIRED.get(elementId) !== entry || entry.currentAudIdx !== index
+                || entry.currentExternalAudioPath !== ext) return true;
+            const a = td && td.audio;
+            const same = a && (ext ? a.kind === 'external' && samePath(a.path, ext)
+                                   : a.kind === 'embedded' && (a.index | 0) === index);
+            const want = same ? defaultAudioOffset(td) : own;
+            if (want !== own) {
+                entry.audioOffsetMs = want;
+                applyAudioOffset(elementId);
+            }
+        }
+        return true;
+    }
+
     /** The user picked another audio / dub: remember it, look up ITS sync
      *  offset (track memory → the dub's DELAY → 0), restart onto it. A switch
      *  that fails puts the previous choice back into the memory. */
@@ -3694,8 +3811,11 @@
             if (same) offsetMs = defaultAudioOffset(td);
         }
         if (WIRED.get(elementId) !== entry) return false;   // closed / next episode meanwhile
+        // The restart this switch needs anyway asks for renditions, so the
+        // next switch is live (wantRenditions).
         const ok = await restartStream(elementId,
-            { audioTrackIndex: index, externalAudioPath: ext, audioOffsetMs: offsetMs }, 'audio');
+            { audioTrackIndex: index, externalAudioPath: ext, audioOffsetMs: offsetMs,
+              audioRenditions: hlsJsPlays() || null }, 'audio');
         if (!ok && entry.mediaItemId) queueTrackPrefs(elementId, { audio: prevChoice });
         return ok;
     }
@@ -3765,11 +3885,15 @@
         // That audio's own sync offset, explicitly (0 included) whenever the
         // start names the audio; a usePrefs start leaves it to the server.
         const syncQuery = namedAudio ? '&audioSyncMs=' + clampAudioOffset(p.audioOffsetMs) : '';
+        // Audio renditions (see wantRenditions) + the offsets of the ones
+        // that won't be the default.
+        const rendQuery = p.renditions
+            ? '&audioRenditions=1' + renditionOffsetsQuery(p.renditionOffsetMap, p.defaultRenditionId) : '';
         const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + p.offsets.hw
             + '&audioOffsetSwMs=' + p.offsets.sw
-            + audioQuery + syncQuery
+            + audioQuery + syncQuery + rendQuery
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
             + (Number.isFinite(p.burnSubtitle) && p.burnSubtitle >= 0 ? '&burnSubtitle=' + p.burnSubtitle : '')
@@ -3826,6 +3950,9 @@
                 // Per-profile track defaults (task 2.2; TrackDefaultsDto) —
                 // null from a server without track memory.
                 trackDefaults:   data.trackDefaults || null,
+                // audioRenditions=1: the EXT-X-MEDIA audio group, in
+                // hls.audioTracks order (null = audio muxed in).
+                audioRenditions: (Array.isArray(data.audioRenditions) && data.audioRenditions.length) ? data.audioRenditions : null,
             };
         }
         throw lastErr;
@@ -3998,6 +4125,9 @@
         const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs : 0;
         // Subtitle track s:N burned into the picture by the server (2.6), or none.
         const burnSubtitle = (opts && Number.isFinite(opts.burnSubtitle) && opts.burnSubtitle >= 0) ? opts.burnSubtitle : null;
+        // Audio renditions (6.3): the known offsets of the non-default ones
+        // (whether to ask is decided once hls.js is loaded, below).
+        const renditionOffsetMap = (opts && opts.renditionOffsetMap) || null;
         if (typeof window.Artplayer !== 'function' || !window.Hls) {
             // Loaded on demand (see PLAYER_LIBS) — usually already warm from
             // MediaDetail's preload(), else this is the first-use fetch.
@@ -4045,6 +4175,7 @@
         const retryOpts = (resumeAt) => ({
             audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
             forceResumeSec: resumeAt, usePrefs, audioOffsetMs, burnSubtitle,
+            audioRenditions: opts && opts.audioRenditions, renditionOffsetMap,
             trackDefaults: opts && opts.trackDefaults,
         });
 
@@ -4109,6 +4240,11 @@
                 started = await startStream(mediaPath, {
                     resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs, burnSubtitle,
                     audioOffsetMs,
+                    // The caller's say (a restart), else by file (wantRenditions).
+                    renditions: wantRenditions({ audioRenditions: opts && opts.audioRenditions,
+                        tier: (KEEP.get(elementId) || {}).tierFloor || 0 }, mediaPath),
+                    renditionOffsetMap,
+                    defaultRenditionId: opts && opts.defaultRenditionId,
                     // Fallback floor reached earlier on this player (1.7).
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
@@ -4184,6 +4320,18 @@
                 entry.audioOffsetMs = entry.streamAudioOffsetMs = want;
             } else if (started.trackDefaults && want !== audioOffsetMs) {
                 entry.audioOffsetMs = want;
+            }
+        }
+        // Audio renditions (6.3): the session's audio group. Its DEFAULT one
+        // is the audio this stream started on — authoritative for the menus.
+        entry.renditions = manifestUrl && started.audioRenditions ? started.audioRenditions : null;
+        if (entry.renditions) {
+            const d = entry.renditions.find(r => r.default);
+            if (d) {
+                externalAudioPath = d.kind === 'external' && d.path ? d.path : null;
+                audioTrackIndex   = externalAudioPath ? 0 : Math.max(0, d.index | 0);
+                entry.currentAudIdx = audioTrackIndex;
+                entry.currentExternalAudioPath = externalAudioPath;
             }
         }
         if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
@@ -4312,6 +4460,15 @@
         }
         entry.externalAudioList = externalAudioList;
         entry.externalSubList   = externalSubList;
+        // Each rendition's own sync offset as this session carries it: the
+        // default one the start's, the others what renditionOffsets sent,
+        // else a dub's DELAY / none.
+        entry.renditionOwn = {};
+        (entry.renditions || []).forEach((r) => {
+            entry.renditionOwn[r.id] = r.default ? (entry.streamAudioOffsetMs || 0)
+                : renditionOffsetMap && renditionOffsetMap[r.id] != null ? clampAudioOffset(renditionOffsetMap[r.id])
+                : r.kind === 'external' ? dubDelayMs(entry, r.path) : 0;
+        });
 
         // The per-audio Sync control applies on every plan (audioSyncMs: the
         // HLS plans shift the audio, a Direct Play / Direct Stream restarts as
@@ -4441,6 +4598,10 @@
                 // blocked it, in which case the visible play button is the
                 // fallback (nothing more we can do without a user gesture).
                 hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                    if (entry.renditions) {
+                        const want = renditionTrackIndex(hls, entry, entry.renditions.findIndex(r => r.default));
+                        if (want >= 0 && hls.audioTrack !== want) { try { hls.audioTrack = want; } catch {} }
+                    }
                     if (startPaused) return;   // restart of a paused stream
                     const p = video.play();
                     if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -4692,9 +4853,15 @@
                 const curIdx = Math.max(0, aopts.findIndex(o => o.current));
                 openPickerPopup(hudRoot, 'audio', t('hud_audio'),
                     aopts.map(o => o.label), curIdx,
-                    (i) => {
+                    async (i) => {
                         const o = aopts[i];
                         if (!o || o.current) return;
+                        const sel = {
+                            audioTrackIndex:   o.kind === 'embedded' ? o.index : 0,
+                            externalAudioPath: o.kind === 'external' ? o.path : null,
+                        };
+                        // A rendition stream switches live (6.3).
+                        if (entry.renditions && await switchRendition(elementId, sel)) return;
                         // No live switching with our single-stream transcode —
                         // tear the session down and restart, mapping either the
                         // chosen in-file stream (`-map 0:a:N`) or the external
@@ -4702,10 +4869,7 @@
                         // Remembered for the title, with its own sync offset
                         // (chooseAudio; a failed switch puts the previous
                         // audio back into the memory).
-                        chooseAudio(elementId, {
-                            audioTrackIndex:   o.kind === 'embedded' ? o.index : 0,
-                            externalAudioPath: o.kind === 'external' ? o.path : null,
-                        });
+                        chooseAudio(elementId, sel);
                     });
             },
             cc: () => {
@@ -4942,7 +5106,8 @@
                 // What was chosen in the Quality menu, then how the server
                 // delivers it and why (plan 4.2 — the same on the button).
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
-                lines.push(t('info_playback') + ': ' + planName(o.plan));
+                lines.push(t('info_playback') + ': ' + planName(o.plan)
+                    + (entry.renditions ? ' · ' + t('info_renditions') : ''));
                 const why = reasonText(o);
                 if (why) lines.push(t('info_reason') + ': ' + why);
             }
@@ -5315,7 +5480,15 @@
             maxBitrate:        entry.currentMaxBitrate || 0,
             audioOffsetMs:     entry.audioOffsetMs || 0,
             burnSubtitle:      entry.currentBurnSub != null ? entry.currentBurnSub : null,
+            // Audio renditions stay on (6.3), the current audio the default.
+            audioRenditions:   entry.renditions ? true : null,
+            renditionOffsetMap: entry.renditions ? Object.assign({}, entry.renditionOwn || {}) : null,
+            defaultRenditionId: currentRenditionId(entry),
         };
+    }
+    function currentRenditionId(entry) {
+        const ri = renditionIndexFor(entry, entry.currentExternalAudioPath, entry.currentAudIdx);
+        return ri >= 0 ? entry.renditions[ri].id : null;
     }
 
     /** Player state to carry onto the restarted stream (attachStream applies
@@ -5404,7 +5577,17 @@
                     resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS,
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
-                }, plan), ctl.signal);
+                }, plan, {
+                    renditions: wantRenditions({ audioRenditions: plan.audioRenditions,
+                        tier: (KEEP.get(elementId) || {}).tierFloor || 0 }, entry.mediaPath),
+                    // The audio this start names is the new default (it takes
+                    // audioSyncMs); the known offsets of the others go in
+                    // renditionOffsets.
+                    defaultRenditionId: (() => {
+                        const ri = renditionIndexFor(entry, plan.externalAudioPath, plan.audioTrackIndex);
+                        return ri >= 0 ? entry.renditions[ri].id : null;
+                    })(),
+                }), ctl.signal);
         } catch (err) { failure = err; }
         if (entry.pendingSwitch === ctl) entry.pendingSwitch = null;
         if (!isLiveOp(elementId, op)) {
