@@ -390,6 +390,11 @@ internal static class HlsEndpoints
                                 : renditionsForced ? HlsSessionService.ReasonCodes.AudioRenditions : null,
                 noCopy:           steps.NoCopy,
                 noHevcOutput:     steps.NoHevcOutput,
+                // usePrefs + renditions: every audio's remembered offset rides
+                // on its own rendition (audioRenditions[].syncMs).
+                rememberedAudioOffsets: Flag(usePrefs) && Flag(audioRenditions)
+                    ? await trackPrefs.RememberedAudioOffsetsAsync(userCtx.CurrentUserId, fullPath!, http.RequestAborted)
+                    : null,
                 audioRenditions:  Flag(audioRenditions),
                 renditionOffsets: HlsSessionService.ParseRenditionOffsets(renditionOffsets));
             // The mapped track's codec is one this device failed to decode: it

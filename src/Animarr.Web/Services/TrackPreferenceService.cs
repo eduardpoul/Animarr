@@ -235,6 +235,37 @@ public sealed class TrackPreferenceService
             AudioOffsetSource: offsetSource);
     }
 
+    /// <summary>
+    /// Every remembered audio sync offset of this file's title for
+    /// <paramref name="userId"/> — the season's entries over the title's — by
+    /// <see cref="AudioOffsetKey"/>, clamped like the resolve. Empty without a
+    /// user or a library location. For the audio renditions of a start
+    /// (HlsSessionService), each of which gets its own.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, int>> RememberedAudioOffsetsAsync(Guid? userId, string fullPath,
+        CancellationToken ct)
+    {
+        var empty = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (userId is not Guid uid) return empty;
+        var loc = await LocateAsync(Path.GetFullPath(fullPath), ct);
+        if (loc is null) return empty;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.TrackPreferences.AsNoTracking()
+            .Where(p => p.UserId == uid && p.MediaItemId == loc.MediaItemId
+                        && (p.Season == null || p.Season == loc.Season))
+            .ToListAsync(ct);
+        var offsets = ReadOffsets(rows.FirstOrDefault(r => r.Season is null)?.AudioOffsetsJson);
+        if (loc.Season is int s)
+            foreach (var (k, v) in ReadOffsets(rows.FirstOrDefault(r => r.Season == s)?.AudioOffsetsJson)) offsets[k] = v;
+        foreach (var k in offsets.Keys.ToList()) offsets[k] = Math.Clamp(offsets[k], -MaxAudioOffsetMs, MaxAudioOffsetMs);
+        return offsets;
+    }
+
+    /// <summary>The key an audio's offset is remembered under ("emb:{language}",
+    /// "ext:{base group key}") — see <see cref="RememberedAudioOffsetsAsync"/>.</summary>
+    public static string AudioOffsetKey(string kind, string? language, string? groupKey)
+        => AudioKey(kind, language, groupKey);
+
     /// <summary><paramref name="defaults"/> with <see cref="TrackDefaultAudioDto.Applied"/>
     /// set — whether the stream a start returned already carries that audio.</summary>
     public static TrackDefaultsDto? MarkApplied(TrackDefaultsDto? defaults, bool applied)

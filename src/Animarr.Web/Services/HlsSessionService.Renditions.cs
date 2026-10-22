@@ -47,6 +47,13 @@ public sealed partial class HlsSessionService
         /// external dub starts at 0 while the video's packets carry the
         /// source's start time (-copyts).</summary>
         public double InputShiftSec { get; init; }
+        /// <summary>The rendition's own sync offset (ms, + = later), without the
+        /// plan baseline, and where it came from: "start" (the default
+        /// rendition: the start's audioSyncMs / remembered offset),
+        /// "request" (renditionOffsets), "memory" (track memory), "delay"
+        /// (the dub's DELAY tag), "none".</summary>
+        public int SyncMs { get; init; }
+        public string SyncSource { get; init; } = "none";
         public bool IsDefault { get; set; }
         public required string Dir { get; init; }
         public required bool Ts { get; init; }
@@ -71,9 +78,12 @@ public sealed partial class HlsSessionService
 
     /// <summary>A rendition as the start response lists it (<c>audioRenditions[]</c>).</summary>
     /// <param name="Id">"a{N}" = embedded audio track N (0:a:N); "x{N}" = external dub N.</param>
+    /// <param name="OffsetMs">Total sync offset applied: plan baseline + <paramref name="SyncMs"/>.</param>
+    /// <param name="SyncMs">The rendition's own offset (see AudioRendition.SyncSource for <paramref name="SyncSource"/>).</param>
     /// <param name="Uri">Its media playlist, relative to master.m3u8.</param>
     public sealed record AudioRenditionInfo(string Id, string Kind, int? Index, string? Path, string Name,
-        string? Language, string Codec, int Channels, bool Default, int OffsetMs, string Uri);
+        string? Language, string Codec, int Channels, bool Default, int OffsetMs, string Uri,
+        int SyncMs = 0, string SyncSource = "none");
 
     /// <summary>
     /// The renditions of a start: every embedded audio track plus the external
@@ -88,17 +98,22 @@ public sealed partial class HlsSessionService
     private async Task<List<AudioRendition>> BuildRenditionsAsync(string fullPath, ProbeInfo probe, string dir,
         HlsPlan plan, ClientCaps caps, int audioTrackIndex, string? externalAudioPath, double baselineSec,
         double swBaselineSec, double audioSyncSec, IReadOnlyDictionary<string, int>? renditionOffsets,
-        CancellationToken ct)
+        CancellationToken ct, IReadOnlyDictionary<string, int>? rememberedOffsets = null)
     {
         bool ts = plan == HlsPlan.TsStreamCopy;
         var output = ts ? AudioOutput.HlsTs : AudioOutput.HlsFmp4;
         var list = new List<AudioRendition>();
-        double OffsetFor(string id, bool isDefault, double baseline, int? delayMs)
+        // A rendition's own offset: the default one's is the start's (audioSyncMs
+        // or, with usePrefs, its remembered one); any other's the client's
+        // renditionOffsets, else its remembered one (track memory, usePrefs),
+        // else a dub's DELAY tag.
+        (int Ms, string Source) SyncFor(string id, bool isDefault, string memoryKey, int? delayMs)
         {
-            if (isDefault) return baseline + audioSyncSec;
+            if (isDefault) return ((int)Math.Round(audioSyncSec * 1000), "start");
             if (renditionOffsets is not null && renditionOffsets.TryGetValue(id, out var ms))
-                return baseline + Math.Clamp(ms, -3000, 3000) / 1000.0;
-            return baseline + (delayMs ?? 0) / 1000.0;
+                return (Math.Clamp(ms, -3000, 3000), "request");
+            if (rememberedOffsets is not null && rememberedOffsets.TryGetValue(memoryKey, out var mem)) return (mem, "memory");
+            return delayMs is int dl && dl != 0 ? (Math.Clamp(dl, -3000, 3000), "delay") : (0, "none");
         }
 
         for (int i = 0; i < probe.AudioStreams.Count; i++)
@@ -107,16 +122,18 @@ public sealed partial class HlsSessionService
             var id = "a" + i.ToString(CultureInfo.InvariantCulture);
             bool isDefault = externalAudioPath is null && i == audioTrackIndex;
             var decision = AudioPolicy.Decide(a.Codec, a.Channels, a.Profile, caps, output);
+            var sync = SyncFor(id, isDefault,
+                TrackPreferenceService.AudioOffsetKey(TrackPreferenceService.KindEmbedded, a.Language, null), null);
             list.Add(new AudioRendition
             {
                 Id = id, EmbeddedIndex = i, Language = a.Language, Audio = decision, IsDefault = isDefault,
                 Name = RenditionName(i + 1, a.Language, a.Title, decision), Dir = Path.Combine(dir, "audio", id), Ts = ts,
-                OffsetSec = OffsetFor(id, isDefault, baselineSec, null),
+                OffsetSec = baselineSec + sync.Ms / 1000.0, SyncMs = sync.Ms, SyncSource = sync.Source,
             });
         }
 
         // External dubs next to the file (ExternalTrackService is scoped).
-        var dubs = new List<(string Path, string? Language, string? Label, string? Codec, int? Channels, int? DelayMs, double? Dur)>();
+        var dubs = new List<(string Path, string? Language, string? Label, string? Codec, int? Channels, int? DelayMs, double? Dur, string? GroupKey)>();
         try
         {
             if (_scopes is not null)
@@ -124,14 +141,14 @@ public sealed partial class HlsSessionService
                 await using var scope = _scopes.CreateAsyncScope();
                 if (scope.ServiceProvider.GetService<ExternalTrackService>() is { } ext)
                     foreach (var t in await ext.FindForVideoAsync(fullPath, probe: true, ct))
-                        if (t.Kind == "audio") dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs, t.DurationSec));
+                        if (t.Kind == "audio") dubs.Add((t.Path, t.Language, t.Label, t.Codec, t.Channels, t.DelayMs, t.DurationSec, t.GroupKey));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { _logger.LogDebug(ex, "HLS renditions: external dubs of {Path} unavailable", fullPath); }
         if (externalAudioPath is not null
             && !dubs.Any(d => string.Equals(Path.GetFullPath(d.Path), Path.GetFullPath(externalAudioPath), StringComparison.OrdinalIgnoreCase)))
-            dubs.Insert(0, (externalAudioPath, null, Path.GetFileNameWithoutExtension(externalAudioPath), null, null, null, null));
+            dubs.Insert(0, (externalAudioPath, null, Path.GetFileNameWithoutExtension(externalAudioPath), null, null, null, null, null));
         for (int n = 0; n < dubs.Count; n++)
         {
             var d = dubs[n];
@@ -145,12 +162,14 @@ public sealed partial class HlsSessionService
             // stalls the player at its end. Transcoded, it gets silence (apad).
             bool coversVideo = d.Dur is double dd && dd >= probe.DurationSec - 0.5;
             var decision = AudioPolicy.Decide(coversVideo ? d.Codec : null, d.Channels ?? 2, null, caps, output);
+            var sync = SyncFor(id, isDefault,
+                TrackPreferenceService.AudioOffsetKey(TrackPreferenceService.KindExternal, d.Language, d.GroupKey), d.DelayMs);
             list.Add(new AudioRendition
             {
                 Id = id, ExternalPath = d.Path, Language = d.Language, Audio = decision, IsDefault = isDefault,
                 Name = (d.Label ?? Path.GetFileNameWithoutExtension(d.Path)) + " · " + DescribeAudio(decision),
                 Dir = Path.Combine(dir, "audio", id), Ts = ts,
-                OffsetSec = OffsetFor(id, isDefault, swBaselineSec, d.DelayMs),
+                OffsetSec = swBaselineSec + sync.Ms / 1000.0, SyncMs = sync.Ms, SyncSource = sync.Source,
                 InputShiftSec = probe.StartTimeSec,
             });
         }
@@ -215,7 +234,7 @@ public sealed partial class HlsSessionService
     private static List<AudioRenditionInfo> RenditionInfos(IEnumerable<AudioRendition> renditions)
         => renditions.Select(r => new AudioRenditionInfo(r.Id, r.EmbeddedIndex is not null ? "embedded" : "external",
             r.EmbeddedIndex, r.ExternalPath, r.Name, r.Language, r.Audio.Codec, r.Audio.Channels, r.IsDefault,
-            (int)Math.Round(r.OffsetSec * 1000), $"audio/{r.Id}/media.m3u8")).ToList();
+            (int)Math.Round(r.OffsetSec * 1000), $"audio/{r.Id}/media.m3u8", r.SyncMs, r.SyncSource)).ToList();
 
     /// <summary>
     /// Writes the rendition's media playlist: the video's segments (same

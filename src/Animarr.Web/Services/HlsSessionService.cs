@@ -831,7 +831,10 @@ public sealed partial class HlsSessionService : IDisposable
         IReadOnlyDictionary<string, int>? renditionOffsets = null,
         // Device failure steps (task 6.1, PlaybackFailureService): no stream
         // copy — the re-encode instead; no HEVC re-encode output — H.264.
-        bool noCopy = false, bool noHevcOutput = false)
+        bool noCopy = false, bool noHevcOutput = false,
+        // Remembered audio offsets by TrackPreferenceService.AudioOffsetKey
+        // (usePrefs): each non-default audio rendition gets its own.
+        IReadOnlyDictionary<string, int>? rememberedAudioOffsets = null)
     {
         var who = owner ?? SessionOwner.Unknown;
         var caps = client ?? ClientCaps.Legacy;
@@ -1212,7 +1215,8 @@ public sealed partial class HlsSessionService : IDisposable
                 _ => 0.0,
             };
             renditions = await BuildRenditionsAsync(fullPath, probe, dir, plan, caps, audioTrackIndex, externalAudioPath,
-                planBaseline, reorderDelaySec + audioOffsetSwSec, audioSyncSec, renditionOffsets, ct);
+                planBaseline, reorderDelaySec + audioOffsetSwSec, audioSyncSec, renditionOffsets, ct,
+                rememberedAudioOffsets);
             try
             {
                 if (renditions.Count == 0) renditions = null;
