@@ -94,6 +94,10 @@ internal static class HlsEndpoints
             // explicit variant (iPhone fullscreen, a renderer without subtitle
             // support): always a video re-encode, never a native path.
             int? burnSubtitle,
+            // An EXTERNAL subtitle file to burn in (validated like externalAudio,
+            // but a bad path is a 400 here): .sup / .idx+.sub overlaid, a text
+            // file (.srt / .ass / .vtt …) rendered by libass. Wins over burnSubtitle.
+            string? burnSubtitlePath,
             // "1" = start with the profile's track defaults (task 2.2: title
             // memory → profile settings → flags) when the client passes no
             // explicit audioTrackIndex / externalAudio — that audio AND its sync
@@ -168,6 +172,17 @@ internal static class HlsEndpoints
                      .LogWarning("HLS start: ignoring out-of-bounds external audio {Path}", externalAudio);
         }
 
+        string? burnSubtitleFull = null;
+        if (!string.IsNullOrWhiteSpace(burnSubtitlePath))
+        {
+            var (subOk, subFull, _) = await pathValidator.ResolveLibraryFileAsync(burnSubtitlePath);
+            if (!subOk)
+                return StartProblem(StatusCodes.Status400BadRequest, HlsSessionService.StartFailedException.InvalidSubtitleTrack,
+                    "burnSubtitlePath is not a subtitle file in the library.");
+            burnSubtitleFull = subFull;
+        }
+        bool burning = burnSubtitle is not null || burnSubtitleFull is not null;
+
         try
         {
             var seekSec = seek is > 0 ? seek.Value : 0d;
@@ -200,7 +215,7 @@ internal static class HlsEndpoints
             // the requested track (ChoosePlaybackAsync puts it in the URL).
             // RequestAborted: an abandoned start (rapid Next/Prev) stops waiting on
             // the probe and falls into the OperationCanceledException catch below.
-            var decision = externalAudioFull is null && burnSubtitle is null
+            var decision = externalAudioFull is null && !burning
                 ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
                     maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0,
                     allowDirectPlay: !steps.NoDirectPlay, allowDirectStream: !steps.NoDirectStream)
@@ -208,7 +223,7 @@ internal static class HlsEndpoints
             // An "optimize for TV" copy (TvRemuxService: MKV with Cues in
             // .animarr, same streams in the same order) is what Direct Play
             // serves when the source itself can't be played directly.
-            if (!decision.DirectPlay && externalAudioFull is null && burnSubtitle is null
+            if (!decision.DirectPlay && externalAudioFull is null && !burning
                 && await tvRemux.FreshCopyOfAsync(fullPath!, http.RequestAborted) is { } tvCopy)
             {
                 var copyDecision = await hls.ChoosePlaybackAsync(tvCopy, client, http.RequestAborted,
@@ -222,7 +237,7 @@ internal static class HlsEndpoints
             if (localAudioIndex > 0 && !(decision.DirectPlay && decision.DirectUrl is not null))
             {
                 audioTrackIndex = localAudioIndex;
-                decision = externalAudioFull is null && burnSubtitle is null
+                decision = externalAudioFull is null && !burning
                     ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
                         maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex,
                         allowDirectPlay: !steps.NoDirectPlay, allowDirectStream: !steps.NoDirectStream)
@@ -258,7 +273,7 @@ internal static class HlsEndpoints
             // Did a remembered failure move this start off the tier it would
             // otherwise get? (Then that is the main reason.)
             bool deviceStepped = false;
-            if (steps.Any && externalAudioFull is null && burnSubtitle is null && !syncForced && !renditionsForced)
+            if (steps.Any && externalAudioFull is null && !burning && !syncForced && !renditionsForced)
             {
                 var natural = await hls.ChoosePlaybackAsync(fullPath!, naturalClient, http.RequestAborted,
                     maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0);
@@ -275,7 +290,7 @@ internal static class HlsEndpoints
                 try
                 {
                     return selected is null ? null : await hls.ExplainAsync(fullPath!, client, selected, audioTrackIndex ?? 0,
-                        effectiveMaxHeight, maxBitrate ?? 0, burnSubtitle is not null, steps, requestReasons, http.RequestAborted);
+                        effectiveMaxHeight, maxBitrate ?? 0, burning, steps, requestReasons, http.RequestAborted);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
             }
@@ -368,6 +383,7 @@ internal static class HlsEndpoints
                 // Replaces only this client's earlier session on the same file.
                 owner:            owner,
                 burnSubtitle:     burnSubtitle ?? -1,
+                burnSubtitlePath: burnSubtitleFull,
                 audioSyncSec:     syncMs / 1000.0,
                 forcedReason:     deviceStepped ? HlsSessionService.ReasonCodes.DeviceFailedBefore
                                 : syncForced ? HlsSessionService.ReasonCodes.AudioSync

@@ -174,7 +174,14 @@ public sealed partial class HlsSessionService
     /// ASS conversion (<see cref="AssPath"/>) with the file's attached fonts
     /// (<see cref="FontsDir"/>, null = none).
     /// </summary>
-    private sealed record SubtitleBurn(int Index, bool Image, string? AssPath, string? FontsDir);
+    private sealed record SubtitleBurn(int Index, bool Image, string? AssPath, string? FontsDir)
+    {
+        /// <summary>An external bitmap subtitle file (<c>burnSubtitlePath</c>):
+        /// a PGS <c>.sup</c> or a VobSub <c>.idx</c> (+ its <c>.sub</c>), overlaid
+        /// from its own input (stream <see cref="Index"/> = 0). Text files come
+        /// as <see cref="AssPath"/> like an embedded text track.</summary>
+        public string? ExternalPath { get; init; }
+    }
 
     /// <summary>What a re-encode plan writes (decided once per session, see
     /// <see cref="ChooseVideoTarget"/>).</summary>

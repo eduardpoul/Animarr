@@ -260,8 +260,10 @@ public sealed partial class HlsSessionService
             var input = "[" + videoMap.TrimEnd('?') + "]";
             var pre = deinterlacer is null ? input : $"{input}{deinterlacer}[deint];[deint]";
             // A seeked run reads the subtitles from their own input (#2,
-            // AddBurnInput); from the top they come with the video (#0).
-            var subs = (seekSec > 0 ? videoOnly ? "1" : "2" : "0") + ":s:" + burn.Index.ToString(CultureInfo.InvariantCulture);
+            // AddBurnInput); from the top they come with the video (#0). An
+            // external file is always its own input.
+            var own = seekSec > 0 || burn.ExternalPath is not null;
+            var subs = (own ? videoOnly ? "1" : "2" : "0") + ":s:" + burn.Index.ToString(CultureInfo.InvariantCulture);
             var graph = $"{pre}[{subs}]overlay=eof_action=pass,{vf}[vout]";
             return ["-filter_complex", graph, "-map", "[vout]"];
         }
@@ -288,10 +290,11 @@ public sealed partial class HlsSessionService
     /// </summary>
     private static void AddBurnInput(List<string> args, string fullPath, double seekSec, SubtitleBurn? burn)
     {
-        if (burn is not { Image: true } || seekSec <= 0) return;
+        if (burn is not { Image: true } || (seekSec <= 0 && burn.ExternalPath is null)) return;
         var from = Math.Max(0, seekSec - BurnSubtitleLookbackSec);
         if (from > 0) args.AddRange(["-ss", from.ToString("F3", CultureInfo.InvariantCulture)]);
-        args.AddRange(["-i", fullPath]);
+        // .idx opens through the vobsub demuxer, which reads the .sub beside it.
+        args.AddRange(["-i", burn.ExternalPath ?? fullPath]);
     }
 
     /// <summary>

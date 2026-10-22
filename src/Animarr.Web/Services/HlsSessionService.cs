@@ -785,6 +785,10 @@ public sealed partial class HlsSessionService : IDisposable
         // Embedded subtitle track N (0:s:N) to draw into the picture, -1 = none.
         // Forces a video re-encode (PrepareBurnAsync / ChoosePlan).
         int burnSubtitle = -1,
+        // An EXTERNAL subtitle file to burn in instead (validated by the caller):
+        // .sup / .idx (+ .sub) overlaid, a text file (.srt / .ass / .vtt …)
+        // rendered by libass (PrepareExternalBurnAsync).
+        string? burnSubtitlePath = null,
         // Sync offset of the audio itself (seconds, + = later) — a dub's or a
         // track's remembered offset. Unlike the hw / sw baselines it applies on
         // EVERY plan, the TS copy included: a single-input copy shifts the audio
@@ -839,7 +843,8 @@ public sealed partial class HlsSessionService : IDisposable
         probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
         // Burn-in: checked and prepared (ASS conversion, fonts) before anything
         // is torn down, so a bad track number is a plain 400.
-        var burn = burnSubtitle >= 0 || burnSubtitle < -1
+        var burn = burnSubtitlePath is not null ? await PrepareExternalBurnAsync(fullPath, burnSubtitlePath, ct)
+            : burnSubtitle >= 0 || burnSubtitle < -1
             ? await PrepareBurnAsync(fullPath, probe, burnSubtitle, ct)
             : null;
         // A bitrate cap at/above the source's own bitrate can't shrink anything
@@ -1539,6 +1544,36 @@ public sealed partial class HlsSessionService : IDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { _logger.LogDebug(ex, "HLS burn-in: no attached fonts for {Path}", fullPath); }
         return new SubtitleBurn(index, Image: false, ass, fontsDir);
+    }
+
+    /// <summary>
+    /// An external subtitle file to burn in: a PGS <c>.sup</c> or a VobSub
+    /// <c>.idx</c> (a <c>.sub</c> with an <c>.idx</c> beside it counts as that
+    /// pair) is overlaid from its own input; anything else is a text file,
+    /// converted to ASS through SubtitleCache and drawn by libass with the
+    /// video's attached fonts.
+    /// </summary>
+    private async Task<SubtitleBurn> PrepareExternalBurnAsync(string fullPath, string subPath, CancellationToken ct)
+    {
+        var ext = Path.GetExtension(subPath).ToLowerInvariant();
+        if (ext == ".sub" && File.Exists(Path.ChangeExtension(subPath, ".idx")))
+            (subPath, ext) = (Path.ChangeExtension(subPath, ".idx"), ".idx");
+        if (ext == ".idx" && !File.Exists(Path.ChangeExtension(subPath, ".sub")))
+            throw new StartFailedException(StartFailedException.SubtitleUnavailable, StatusCodes.Status422UnprocessableEntity,
+                "The VobSub .idx has no .sub beside it.");
+        if (ext is ".sup" or ".idx") return new SubtitleBurn(0, Image: true, null, null) { ExternalPath = subPath };
+        if (_cachePaths is null)
+            throw new StartFailedException(StartFailedException.SubtitleUnavailable,
+                StatusCodes.Status422UnprocessableEntity, "Subtitle burn-in isn't available on this server.");
+        var r = await SubtitleCache.GetOrExtractAsync(subPath, 0, "ass", _cachePaths.CacheRoot, ct);
+        if (r.Path is null)
+            throw new StartFailedException(StartFailedException.SubtitleUnavailable, StatusCodes.Status422UnprocessableEntity,
+                $"{Path.GetFileName(subPath)} can't be burned in ({r.FailureCode ?? SubtitleCache.ConvertFailed}).");
+        string? fontsDir = null;
+        try { if (_fonts is not null) fontsDir = await _fonts.FontDirectoryAsync(fullPath, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) { _logger.LogDebug(ex, "HLS burn-in: no attached fonts for {Path}", fullPath); }
+        return new SubtitleBurn(0, Image: false, r.Path, fontsDir);
     }
 
     private static int ParseSegmentNumber(string fileName)
