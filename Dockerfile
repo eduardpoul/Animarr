@@ -214,6 +214,10 @@ WORKDIR /app
 # mesa-va-drivers, so baking them in costs only ~17 MB compressed. Being
 # installed changes nothing unless the flag is set: the app still picks the
 # Vulkan llama-server only with ANIMARR_LLM_VULKAN=1 and a /dev/dri render node.
+#
+# fontconfig + DejaVu (~3 MB): the static ffmpeg's libass finds fonts through
+# fontconfig, and with none installed a burned-in SRT / ASS that brings no
+# attached fonts drew no text at all. DejaVu covers Latin, Cyrillic and Greek.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         mesa-va-drivers \
@@ -223,6 +227,8 @@ RUN apt-get update && \
         libgomp1 \
         libvulkan1 \
         mesa-vulkan-drivers \
+        fontconfig \
+        fonts-dejavu-core \
         tzdata \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
