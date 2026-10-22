@@ -388,6 +388,30 @@ html:has(.vp-backdrop) { overflow: hidden; }
     border-color: var(--hud-border-str);
 }
 
+/* Small status badge on a button (quality in force: "1080p", "720p",
+   "≤6M"; amber when the server re-encodes the video). Corner of the icon in
+   the icons-only style, inline after the label in the full one. */
+.vp-btn { position: relative; }
+.vp-badge {
+    position: absolute;
+    top: 1px;
+    right: -4px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    color: #0f1115;
+    background: var(--hud-accent-hi);
+    pointer-events: none;
+    white-space: nowrap;
+}
+.vp-badge:empty { display: none; }
+.vp-badge--warn { background: oklch(0.82 0.15 75); }
+.vp-hud[data-style="full"] .vp-badge { position: static; margin-left: 2px; }
+
 .vp-glyph {
     display: inline-flex;
     align-items: center;

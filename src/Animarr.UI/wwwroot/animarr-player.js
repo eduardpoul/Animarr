@@ -1372,8 +1372,9 @@
           <span class="vp-label">Volume</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="quality"
-                aria-label="Quality" title="Quality (resolution)">
+                aria-label="Quality" title="Quality (resolution)" data-bind="quality-btn">
           <span class="vp-glyph">${I.quality}</span><span class="vp-label">Quality</span>
+          <span class="vp-badge" data-bind="quality-badge" aria-hidden="true"></span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="aspect"
                 aria-label="Aspect ratio" title="Aspect ratio">
@@ -2056,6 +2057,8 @@
             playIcon:   $('[data-bind="play-icon"]'),
             playLabel:  $('[data-bind="play-label"]'),
             offsetBtn:  $('[data-bind="offset-btn"]'),
+            qualityBtn:   $('[data-bind="quality-btn"]'),
+            qualityBadge: $('[data-bind="quality-badge"]'),
             castBtn:    $('[data-bind="cast-btn"]'),
             volumeIcon: $('[data-bind="volume-icon"]'),
             fsIcon:     $('[data-bind="fs-icon"]'),
@@ -2119,7 +2122,9 @@
             const rows = [
                 { act: 'cc',      label: 'Subtitles',    run: callbacks.cc },
                 { act: 'audio',   label: 'Audio',        run: callbacks.audio },
-                { act: 'quality', label: 'Quality',      run: callbacks.quality },
+                // The touch layout hides the Quality button: carry its badge.
+                { act: 'quality', label: 'Quality' + (refs.qualityBadge && refs.qualityBadge.textContent
+                                      ? ' · ' + refs.qualityBadge.textContent : ''), run: callbacks.quality },
                 { act: 'aspect',  label: 'Aspect ratio', run: callbacks.aspect },
                 { act: 'offset',  label: 'Audio sync',   run: callbacks.offset },
                 { act: 'volume',  label: 'Volume',       run: callbacks.volume },
@@ -2824,6 +2829,18 @@
                 refs.name.textContent   = name   || '';
             },
             setMeta(text) { refs.meta.textContent = text || ''; },
+            // Quality indicator (plan 4.2): badge text, re-encoded flag, and
+            // the button's tooltip / accessible name.
+            setQuality(badge, reencoded, title) {
+                if (refs.qualityBadge) {
+                    refs.qualityBadge.textContent = badge || '';
+                    refs.qualityBadge.classList.toggle('vp-badge--warn', !!reencoded);
+                }
+                if (refs.qualityBtn && title) {
+                    refs.qualityBtn.title = title;
+                    refs.qualityBtn.setAttribute('aria-label', title);
+                }
+            },
             setOffsetEnabled(on) {
                 refs.offsetBtn.style.display = on ? '' : 'none';
             },
@@ -2906,6 +2923,9 @@
         track_forced:       'forced',
         track_commentary:   'commentary',
         track_external:     'external',
+        quality:            'Quality',
+        quality_original:   'Original',
+        unit_mbps:          'Mbps',
         picture:            'Picture',
         picture_mode:       'Scaling',
         picture_force:      'Force aspect (stretch)',
@@ -3601,10 +3621,16 @@
                         if (hasDv) hdrFormats.push('dolbyvision');
                         if (xfer === 'smpte2084') hdrFormats.push('hdr10');
                         else if (xfer === 'arib-std-b67') hdrFormats.push('hlg');
+                        // Source bitrate for the quality menu (4.4): the
+                        // container's overall rate (what ffprobe reports for
+                        // every format, MKV included), else the video's own.
+                        const bps = parseInt((data.format && data.format.bit_rate) || v.bit_rate
+                            || (v.tags && (v.tags.BPS || v.tags['BPS-eng'])) || '0', 10) || 0;
                         mediaInfo = {
                             videoCodec: v.codec_name || '',
                             width:      v.width || 0,
                             height:     v.height || 0,
+                            bitrate:    bps,
                             bitDepth:   is10bit ? 10 : 8,
                             hdr:        hdrFormats[0] || 'sdr',
                             hdrFormats,
@@ -4124,30 +4150,43 @@
                 });
             },
             quality: () => {
-                // One list, three kinds of entries (single-select picker):
-                //   • Original — stream-copy, no re-encode (lossless).
-                //   • Resolution rungs below source — downscale + re-encode at
-                //     the auto bitrate (shown in the label).
-                //   • Bitrate caps — re-encode at SOURCE resolution, capped at
-                //     N Mbps (trim bandwidth without dropping resolution).
+                // One list, three kinds of entries (single-select picker;
+                // plan 4.4 — no "Auto", a choice lasts for this file only):
+                //   • Original · {h}p · {source bitrate} — the file's own
+                //     stream (Direct Play / remux / copy; the server only
+                //     re-encodes it when this client can't decode it).
+                //   • Resolution rungs below the source — downscale +
+                //     re-encode at the server's ladder bitrate ("~N Mbps").
+                //   • Bitrate caps "≤ N Mbps" at the SOURCE resolution, only
+                //     below the source's own bitrate (a cap above it would
+                //     just re-encode for nothing).
                 const srcH = (entry.mediaInfo && entry.mediaInfo.height)
                           || (entry.output && entry.output.height) || 0;
-                const autoMbps = (h) => h <= 480 ? 2.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
-                const items = [{ label: 'Original' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: 0 }];
-                [1440, 1080, 720, 480].forEach(r => {
-                    if (srcH === 0 || r < srcH) items.push({ label: r + 'p · ~' + autoMbps(r) + ' Mbps', h: r, b: 0 });
+                const srcMbps = ((entry.mediaInfo && entry.mediaInfo.bitrate) || 0) / 1e6;
+                const mbps = t('unit_mbps');
+                const items = [{
+                    label: [t('quality_original'), srcH ? srcH + 'p' : '', srcMbps ? fmtMbps(srcMbps) + ' ' + mbps : '']
+                        .filter(Boolean).join(' · '),
+                    h: 0, b: 0,
+                }];
+                QUALITY_HEIGHTS.forEach(r => {
+                    if (srcH === 0 ? r <= 1080 : r < srcH)
+                        items.push({ label: r + 'p · ~' + fmtMbps(autoMbpsFor(r)) + ' ' + mbps, h: r, b: 0 });
                 });
-                // Bitrate-cap presets; ceiling scaled to the source resolution so
-                // a 1080p file doesn't offer 200 Mbps but a 4K file does.
-                const brCeil = srcH >= 2160 ? 200 : srcH >= 1440 ? 120 : srcH >= 1080 ? 40 : srcH >= 720 ? 25 : srcH > 0 ? 16 : 200;
-                [6, 10, 16, 25, 40, 80, 120, 200].forEach(b => {
-                    if (b <= brCeil) items.push({ label: '≤ ' + b + ' Mbps' + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: b });
+                // Clearly below the source: its rate is the container's (audio
+                // included), so a cap within ~10 % of it saves next to nothing.
+                // Unknown source bitrate: fall back to a ceiling by resolution.
+                const brCeil = srcMbps > 0 ? srcMbps * 0.9
+                    : srcH >= 2160 ? 81 : srcH >= 1440 ? 41 : srcH >= 1080 ? 21 : srcH >= 720 ? 11 : 9;
+                QUALITY_CAPS.forEach(b => {
+                    if (b < brCeil)
+                        items.push({ label: '≤ ' + b + ' ' + mbps + (srcH ? ' · ' + srcH + 'p' : ''), h: 0, b: b });
                 });
                 const curH = entry.currentMaxHeight || 0;
                 const curB = entry.currentMaxBitrate || 0;
                 let curIdx = items.findIndex(o => o.h === curH && o.b === curB);
                 if (curIdx < 0) curIdx = 0;
-                openPickerPopup(hudRoot, 'quality', 'Quality', items.map(o => o.label), curIdx, (i) => {
+                openPickerPopup(hudRoot, 'quality', t('quality'), items.map(o => o.label), curIdx, (i) => {
                     const it = items[i];
                     if (it.h === (entry.currentMaxHeight || 0) && it.b === (entry.currentMaxBitrate || 0)) return;
                     switchQuality(elementId, it.h, it.b);
@@ -4228,17 +4267,17 @@
                     aParts.push((core ? core + ' · ' : '') + t('track_external'));
                 }
                 if (aParts.length) lines.push('Audio: ' + aParts.join(' · '));
-                const planTag = {
-                    'directplay':     'Direct Play',
-                    'directstream':   'Direct Stream · remux',
-                    'ts-copy':        'HLS · TS stream-copy',
-                    'vaapi-reencode': 'HLS · VAAPI → H.264',
-                    'nvenc-reencode': 'HLS · NVENC → H.264',
-                    'fmp4-copy':      'HLS · fMP4 stream-copy',
-                }[o.plan] || 'HLS';
-                lines.push('Playback: ' + planTag);
+                // What was chosen in the Quality menu, then how the server
+                // delivers it and why (plan 4.2 — the same on the button).
+                lines.push(t('quality') + ': ' + qualityChoiceText(entry));
+                lines.push('Playback: ' + planName(o.plan));
                 if (o.transcoded && o.transcodeReason) lines.push('Reason: ' + o.transcodeReason);
             }
+            // Quality button: the quality in force as a badge, amber when the
+            // video is re-encoded; the tooltip names the plan and reason.
+            hudCtl.setQuality(qualityBadge(entry), isVideoReencode(o),
+                t('quality') + ': ' + qualityChoiceText(entry)
+                + (o ? ' — ' + planName(o.plan) + (o.transcoded && o.transcodeReason ? ' (' + o.transcodeReason + ')' : '') : ''));
             // What this browser reported (debugging Direct Play decisions).
             lines.push(describeCaps(entry.caps));
             entry.infoLines = lines;
@@ -4492,10 +4531,49 @@
             }), beginOp(elementId));
     }
 
-    /** "~N Mbps" the server's auto bitrate uses for an output height (mirrors
-     *  the quality menu's labels). */
+    /** "~N Mbps" the server's re-encode ladder uses for an output height —
+     *  mirrors RateForHeight in HlsSessionService.Playlist.cs. */
     function autoMbpsFor(h) {
-        return h <= 480 ? 2.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+        return h <= 480 ? 2.5 : h <= 576 ? 3.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+    }
+    // Quality menu rungs (plan 4.4): resolutions offered below the source…
+    const QUALITY_HEIGHTS = [2160, 1440, 1080, 720, 576, 480, 360];
+    // …and bitrate caps (Mbps) offered below the source's own bitrate.
+    const QUALITY_CAPS = [2, 4, 6, 8, 10, 15, 20, 30, 40, 60, 80];
+    /** 2.5 → "2.5", 12 → "12", 8.43 → "8.4". */
+    function fmtMbps(v) {
+        return v >= 10 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
+    }
+    /** Short text for the quality button's badge: the cap in force, else
+     *  the height the player receives ("4K" from 2160 up). */
+    function qualityBadge(entry) {
+        if (entry.currentMaxHeight > 0) return entry.currentMaxHeight + 'p';
+        if (entry.currentMaxBitrate > 0) return '≤' + entry.currentMaxBitrate + 'M';
+        const h = (entry.output && entry.output.height) || (entry.mediaInfo && entry.mediaInfo.height) || 0;
+        return h >= 2160 ? '4K' : h > 0 ? h + 'p' : '';
+    }
+    /** "Original · 1080p" / "720p" / "≤ 6 Mbps · 1080p" — what was chosen. */
+    function qualityChoiceText(entry) {
+        const srcH = (entry.mediaInfo && entry.mediaInfo.height) || (entry.output && entry.output.height) || 0;
+        if (entry.currentMaxHeight > 0) return entry.currentMaxHeight + 'p · ~' + fmtMbps(autoMbpsFor(entry.currentMaxHeight)) + ' ' + t('unit_mbps');
+        if (entry.currentMaxBitrate > 0) return '≤ ' + entry.currentMaxBitrate + ' ' + t('unit_mbps') + (srcH ? ' · ' + srcH + 'p' : '');
+        return t('quality_original') + (srcH ? ' · ' + srcH + 'p' : '');
+    }
+    /** The plan's video was re-encoded (not Direct Play / remux / copy). */
+    function isVideoReencode(output) {
+        return !!(output && /-reencode$/.test(output.plan || ''));
+    }
+    /** Human name of output.plan. */
+    function planName(plan) {
+        return ({
+            'directplay':     'Direct Play',
+            'directstream':   'Direct Stream · remux',
+            'ts-copy':        'HLS · TS stream-copy',
+            'fmp4-copy':      'HLS · fMP4 stream-copy',
+            'vaapi-reencode': 'HLS · VAAPI → H.264',
+            'nvenc-reencode': 'HLS · NVENC → H.264',
+            'sw-reencode':    'HLS · CPU → H.264',
+        })[plan] || 'HLS';
     }
 
     /** The plan the current stream was started with — what a switch changes
