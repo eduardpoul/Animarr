@@ -406,6 +406,11 @@ internal static class MediaStreamEndpoints
     // Browsers only render WebVTT natively via <track>. For ASS/SSA (anime
     // fansubs) the web player renders with JASSUB (fonts from
     // /api/subtitle/fonts) and asks for `?format=ass` here.
+    // `?async=1`: a track that still has to be read out of a big container
+    // answers 202 { code: "subtitle_extracting", retryAfterSec } with
+    // Retry-After after a few seconds instead of holding the request for
+    // minutes; asking again joins the running extraction. Without it the
+    // request waits for the track (old clients).
     app.MapGet("/api/subtitle", async (
             string path,
             MediaPathValidator pathValidator,
@@ -442,10 +447,20 @@ internal static class MediaStreamEndpoints
             // Text that isn't UTF-8 (cp1251 SRT …) is re-encoded first — see
             // SubtitleCharset. The codec lookup (cached ffprobe JSON) is only
             // used when an EMBEDDED track turns out not to be UTF-8.
+            var asyncFlag = http.Request.Query["async"].ToString();
+            bool poll = asyncFlag == "1" || string.Equals(asyncFlag, "true", StringComparison.OrdinalIgnoreCase);
             var r = await SubtitleCache.GetOrExtractAsync(fullPath!, track, outFormat,
                 cachePaths.CacheRoot, http.RequestAborted,
                 codecLookup: c => SubtitleCodecAsync(probeCache, fullPath!, track, c),
-                subtitleCodecs: c => SubtitleCodecsAsync(probeCache, fullPath!, c));
+                subtitleCodecs: c => SubtitleCodecsAsync(probeCache, fullPath!, c),
+                maxWait: poll ? SubtitlePollWait : null);
+            if (r.FailureCode == SubtitleCache.Extracting)
+            {
+                http.Response.Headers.CacheControl = "no-store";
+                http.Response.Headers.RetryAfter = SubtitleRetryAfterSec.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Results.Json(new { code = SubtitleCache.Extracting, retryAfterSec = SubtitleRetryAfterSec },
+                    statusCode: StatusCodes.Status202Accepted);
+            }
             if (r.Path is null)
             {
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
@@ -512,6 +527,11 @@ internal static class MediaStreamEndpoints
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return null; }
     }
+
+    /// <summary>?async=1 on /api/subtitle: how long a request waits for an
+    /// extraction before answering 202, and the Retry-After it gets.</summary>
+    private static readonly TimeSpan SubtitlePollWait = TimeSpan.FromSeconds(4);
+    private const int SubtitleRetryAfterSec = 3;
 
     /// <summary>codec_name of every subtitle stream, in s:N order (cached
     /// probe) — lets SubtitleCache extract all text tracks in one read.</summary>

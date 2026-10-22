@@ -69,6 +69,9 @@ public static class SubtitleCache
     public const string NotPgs        = "not_pgs";
     /// <summary>The analysis queue (AnalysisGate) is full — try again later.</summary>
     public const string Busy          = "analysis_busy";
+    /// <summary>Still extracting after the caller's <c>maxWait</c> — the job
+    /// runs on; ask again (it is joined, not restarted).</summary>
+    public const string Extracting    = "subtitle_extracting";
 
     /// <summary>Failed conversions per cache key (= source version + track +
     /// format), so a bitmap or broken track isn't re-read in full on every
@@ -111,8 +114,15 @@ public static class SubtitleCache
     }
 
     /// <summary>Await a shared job; <paramref name="ct"/> (the request) ends
-    /// only this wait — the job runs on for the next caller.</summary>
-    private static Task<Result> Join(Task<Result> job, CancellationToken ct) => job.WaitAsync(ct);
+    /// only this wait — the job runs on for the next caller. With
+    /// <paramref name="maxWait"/>: an unfinished job after that long answers
+    /// <see cref="Extracting"/> instead.</summary>
+    private static async Task<Result> Join(Task<Result> job, CancellationToken ct, TimeSpan? maxWait = null)
+    {
+        if (maxWait is not { } limit) return await job.WaitAsync(ct);
+        try { return await job.WaitAsync(limit, ct); }
+        catch (TimeoutException) { return new Result(null, -1, "", FailureCode: Extracting); }
+    }
 
     /// <summary>Move a finished temp file to its cache name. A copy already
     /// published there (another writer got there first) wins: it is complete
@@ -150,9 +160,11 @@ public static class SubtitleCache
     /// subtitle stream of the file, in <c>s:N</c> order. Given (with
     /// <paramref name="codecLookup"/>), a text track is extracted together with
     /// all the file's other text tracks in one read.</param>
+    /// <param name="maxWait">Wait at most this long for a conversion that has
+    /// to run; then <see cref="Extracting"/> (null = wait for it).</param>
     public static async Task<Result> GetOrExtractAsync(string sourcePath, int track, string outFormat,
         string cacheRoot, CancellationToken ct, Func<CancellationToken, Task<string?>>? codecLookup = null,
-        Func<CancellationToken, Task<IReadOnlyList<string?>>>? subtitleCodecs = null)
+        Func<CancellationToken, Task<IReadOnlyList<string?>>>? subtitleCodecs = null, TimeSpan? maxWait = null)
     {
         var dir = Path.Combine(cacheRoot, "subtitles");
         Directory.CreateDirectory(dir);
@@ -195,9 +207,9 @@ public static class SubtitleCache
                 await AllTextTracksAsync(sourcePath, fi, dir, allFormat, subtitleCodecs);
                 return File.Exists(cached) ? new Result(cached, 0, "") : await One();
             }
-            return await Join(AllThenOne(), ct);
+            return await Join(AllThenOne(), ct, maxWait);
         }
-        return await Join(One(), ct);
+        return await Join(One(), ct, maxWait);
     }
 
     /// <summary>The format the all-tracks read writes for a request in
