@@ -319,9 +319,13 @@ public sealed partial class HlsSessionService : IDisposable
         // Stream — the native <video> path (RTX VSR / RTX HDR need it) it had
         // before the browser reported caps.
         var dovi = DolbyVision.For(probe.Dovi, client);
+        // Interlaced video plays combed in a browser (no deinterlacer on any
+        // native path) — only a native player takes it as is; for a browser
+        // the HLS re-encode deinterlaces it (ChoosePlan).
+        bool interlacedForBrowser = probe.Interlaced && !client.NativePlayer;
         if (client.HasTokens)
         {
-            bool videoOk = NativeVideoOk(probe, client) && dovi != DoviHandling.Reencode;
+            bool videoOk = NativeVideoOk(probe, client) && dovi != DoviHandling.Reencode && !interlacedForBrowser;
             bool audioOk = probe.AudioStreams.Count == 0 || client.DecodesAudio(probe.AudioCodec);
             bool containerOk = client.Has(container);
             // Direct Play hands over the raw file, DV signalling and all: fine
@@ -356,7 +360,7 @@ public sealed partial class HlsSessionService : IDisposable
         }
 
         bool clientHevc = client.Hevc, clientHevc10 = client.Hevc10;
-        if (audioTrackIndex == 0 && dovi == DoviHandling.None
+        if (audioTrackIndex == 0 && dovi == DoviHandling.None && !interlacedForBrowser
             && IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/file serves the raw bytes with Range support — exactly what
@@ -367,7 +371,8 @@ public sealed partial class HlsSessionService : IDisposable
             return new PlaybackDecision(true, directUrl, duration, output);
         }
 
-        if (dovi != DoviHandling.Reencode && IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
+        if (dovi != DoviHandling.Reencode && !interlacedForBrowser
+            && IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/video remuxes the source to progressive fMP4 (video copy,
             // audio→AAC). The browser plays it as a native <video>, which is

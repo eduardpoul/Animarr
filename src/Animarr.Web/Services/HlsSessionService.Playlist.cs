@@ -46,6 +46,13 @@ public sealed partial class HlsSessionService
         /// <see cref="HasDolbyVision"/> is false).</summary>
         public DoviInfo Dovi { get; init; } = DoviInfo.None;
 
+        /// <summary>The video is interlaced (ffprobe field_order tt / bb / tb /
+        /// bt). Browsers don't deinterlace — combing on every motion — so for
+        /// them it is re-encoded, and every re-encode deinterlaces it (bwdif /
+        /// deinterlace_vaapi / bwdif_cuda). Native players' decoders deinterlace
+        /// themselves.</summary>
+        public bool Interlaced { get; init; }
+
         /// <summary>Pixel aspect ratio as ffprobe reports it ("32:27"): the
         /// CONTAINER's when it has one (Matroska DisplayWidth/Height, MP4 pasp),
         /// else the bitstream's. null / "1:1" / "0:1" = square or unknown.</summary>
@@ -305,6 +312,19 @@ public sealed partial class HlsSessionService
         {
             if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
             if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;
+            return HlsPlan.Fmp4SoftwareReencode;
+        }
+
+        // Interlaced video for a browser: hls.js / MSE show the fields woven
+        // together (combing on every motion) — re-encode, which deinterlaces.
+        // Native players (they declare mkv / ts / avi) deinterlace in their
+        // decoders and keep the copy.
+        if (probe.Interlaced && !client.NativePlayer)
+        {
+            if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
+            if (_hardware?.Current.Vaapi.Available == true
+                && (!probe.Is10Bit || _hardware.Current.VaapiHevc10Decode))
+                return HlsPlan.Fmp4VaapiReencode;
             return HlsPlan.Fmp4SoftwareReencode;
         }
 

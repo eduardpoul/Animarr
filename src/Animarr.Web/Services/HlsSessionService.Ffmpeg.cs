@@ -58,6 +58,8 @@ public sealed partial class HlsSessionService
         // The exact stream the probe picked as the video (never a cover
         // picture in front of it); "0:V:0?" when there was no probe.
         var videoMap = probe?.VideoMap ?? "0:V:0?";
+        // Interlaced source: every re-encode deinterlaces (Deinterlacer).
+        bool deint = probe?.Interlaced == true;
         // Re-encode bitrate from the OUTPUT height: the downscale target, else
         // the source's own height (see RateFor).
         var rate = RateFor(targetHeight > 0 ? targetHeight : probe?.Height ?? 0, maxBitrate, probe);
@@ -80,12 +82,12 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4StreamCopy:
@@ -94,7 +96,7 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs);
+                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint);
                 break;
         }
 
@@ -189,6 +191,22 @@ public sealed partial class HlsSessionService
             || num <= 0 || den <= 0 || num == den)
             return null;
         return $"h264_metadata=sample_aspect_ratio={num}/{den}";
+    }
+
+    /// <summary>
+    /// Deinterlacers for the re-encodes of an interlaced source (6.4). One
+    /// output frame per frame (send_frame: 25i → 25p — cheap, and what the
+    /// encoders' rate ladder assumes), parity from the stream, and only frames
+    /// flagged interlaced are touched (deint=interlaced / auto=1), so a mostly
+    /// progressive file with interlaced inserts isn't softened throughout.
+    /// bwdif / bwdif_cuda / deinterlace_vaapi are in both the dev BtbN build
+    /// and jellyfin-ffmpeg 8.1.3. Telecined film (IVTC) is not handled here.
+    /// </summary>
+    private static class Deinterlacer
+    {
+        public const string Cpu   = "bwdif=mode=send_frame:parity=auto:deint=interlaced";
+        public const string Cuda  = "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced";
+        public const string Vaapi = "deinterlace_vaapi=rate=frame:auto=1";
     }
 
     /// <summary>The historical audio leg: AAC stereo 192k.</summary>
@@ -382,7 +400,7 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -488,6 +506,9 @@ public sealed partial class HlsSessionService
             // Software-decoded frames: upload first, then scale ON the GPU.
             _ => "format=nv12,hwupload" + (targetHeight > 0 ? $",scale_vaapi=w=-2:h={targetHeight}" : ""),
         };
+        // Deinterlace first, where the frames are: on the VAAPI surfaces for
+        // GPU-decoded input, with the CPU bwdif before the upload otherwise.
+        if (deinterlace) vf = (hwDecode ? Deinterlacer.Vaapi : Deinterlacer.Cpu) + "," + vf;
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
@@ -516,7 +537,7 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -579,6 +600,8 @@ public sealed partial class HlsSessionService
             // Software-decoded HDR: CPU tone mapping (tonemap_cuda would need an upload first).
             (false, _)                        => (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + HdrToneMap.TonemapxFilter,
         };
+        // Deinterlace first: bwdif_cuda on NVDEC frames, the CPU bwdif otherwise.
+        if (deinterlace) vf = (hwDecode ? Deinterlacer.Cuda : Deinterlacer.Cpu) + "," + vf;
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
@@ -617,7 +640,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, HdrToneMapper toneMapper = HdrToneMapper.None,
-        string videoMap = "0:V:0?", string[]? audioArgs = null)
+        string videoMap = "0:V:0?", string[]? audioArgs = null, bool deinterlace = false)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -646,6 +669,7 @@ public sealed partial class HlsSessionService
         var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
         // HDR: CPU tone mapping after the (cheaper, smaller) downscale.
         if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;
+        if (deinterlace) vf = Deinterlacer.Cpu + "," + vf;
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture

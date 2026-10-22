@@ -41,6 +41,7 @@ public sealed partial class HlsSessionService
             var dovi = DoviInfo.None;
             string? videoTag = null;      // MP4 sample entry (hvc1 / hev1 / dvh1 / dvhe …)
             string? sar = null;           // pixel aspect ratio, container's first (ProbeInfo.SampleAspectRatio)
+            bool interlaced = false;      // explicit field order (ProbeInfo.Interlaced)
             bool is10Bit = false;
             string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
             int audioChannels = 0;
@@ -98,6 +99,12 @@ public sealed partial class HlsSessionService
                         hasDv = dovi.Present;
                         videoTag = s.TryGetProperty("codec_tag_string", out var tagEl) ? tagEl.GetString() : null;
                         sar = s.TryGetProperty("sample_aspect_ratio", out var sarEl) ? sarEl.GetString() : null;
+                        // field_order: progressive / tt / bb / tb / bt / unknown.
+                        // "unknown" (or absent) counts as progressive — only an
+                        // explicit field order triggers deinterlacing (idet is a
+                        // full decode pass; not run here).
+                        interlaced = s.TryGetProperty("field_order", out var foEl)
+                            && (foEl.GetString() ?? "") is "tt" or "bb" or "tb" or "bt";
                         // B-frame reorder delay → default audio itsoffset for the
                         // fMP4 stream-copy path. has_b_frames is the decoder's
                         // reorder depth; × frame duration = how far video
@@ -182,6 +189,7 @@ public sealed partial class HlsSessionService
                 Dovi             = dovi,
                 VideoCodecTag    = videoTag,
                 SampleAspectRatio = sar,
+                Interlaced       = interlaced,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
