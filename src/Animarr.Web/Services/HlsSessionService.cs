@@ -751,7 +751,8 @@ public sealed partial class HlsSessionService : IDisposable
         // via the WaitForFileAsync seek-restart. A resume point inside a folded
         // tail belongs to the last announced segment.
         bool isCopyPlan = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy;
-        var layout = SegmentLayout.Uniform(totalDuration, SegmentDurationSec);
+        var videoEnd = probe?.VideoEndSec ?? 0;
+        var layout = SegmentLayout.Uniform(totalDuration, SegmentDurationSec, videoEnd);
         double ffmpegSeekSec = 0;
         int startSegment = 0;
         if (seekSec > 0 && layout.Count > 0)
@@ -767,7 +768,7 @@ public sealed partial class HlsSessionService : IDisposable
                 // frame in the probe window, at least the window's end).
                 var firstEnd = Math.Max(kf + SegmentDurationSec,
                     nextKf ?? seekSec + CopyAnchorWindowSec);
-                layout = SegmentLayout.Anchored(totalDuration, SegmentDurationSec, kf, firstEnd);
+                layout = SegmentLayout.Anchored(totalDuration, SegmentDurationSec, kf, firstEnd, videoEnd);
                 startSegment = layout.AnchorIndex;
                 // Land the demuxer seek ON kf (see CopySeekTarget); 0 = from the
                 // top, no seek at all. The first video packet copied IS that key

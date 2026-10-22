@@ -42,6 +42,7 @@ public sealed partial class HlsSessionService
             double reorderDelaySec = 0;   // B-frame reorder delay → audio itsoffset for stream-copy
             int videoStreamIndex = -1;    // absolute stream index of the main video (the `-map 0:N`)
             var audioStreams = new List<AudioStreamInfo>();   // every audio stream, 0:a:N order
+            double videoEnd = 0;          // main video's own end (ProbeInfo.VideoEndSec)
 
             if (root.TryGetProperty("streams", out var streams))
             {
@@ -107,6 +108,7 @@ public sealed partial class HlsSessionService
                         if (hasB > 0 && fps > 0) reorderDelaySec = (hasB + 1) / fps;
 
                         videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
+                        videoEnd = StreamEndSec(s);
                     }
                     else if (type == "audio")
                     {
@@ -161,6 +163,7 @@ public sealed partial class HlsSessionService
             {
                 VideoStreamIndex = videoStreamIndex,
                 AudioStreams     = audioStreams,
+                VideoEndSec      = videoEnd,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -224,6 +227,38 @@ public sealed partial class HlsSessionService
     /// stream they're a cover / thumbnail track).</summary>
     private static bool IsStillImageCodec(string? codec) => (codec ?? "").ToLowerInvariant() is
         "mjpeg" or "png" or "apng" or "bmp" or "gif" or "webp" or "tiff" or "jpegls" or "jpeg2000" or "qoi";
+
+    /// <summary>End of one ffprobe stream in seconds (start_time + duration),
+    /// from <c>duration</c> or, for Matroska (no per-stream duration), the
+    /// <c>DURATION</c> tag ("00:00:20.019000000"). 0 = unknown.</summary>
+    private static double StreamEndSec(JsonElement stream)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        double start = stream.TryGetProperty("start_time", out var st)
+            && double.TryParse(st.GetString(), NumberStyles.Float, inv, out var sv) && sv > 0 ? sv : 0;
+        if (stream.TryGetProperty("duration", out var d)
+            && double.TryParse(d.GetString(), NumberStyles.Float, inv, out var dv) && dv > 0)
+            return start + dv;
+        if (stream.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Object)
+            foreach (var tag in tags.EnumerateObject())
+                if (tag.Name.StartsWith("DURATION", StringComparison.OrdinalIgnoreCase)
+                    && ParseClock(tag.Value.GetString()) is double sec && sec > 0)
+                    return start + sec;
+        return 0;
+    }
+
+    /// <summary>"HH:MM:SS.fffffffff" → seconds (null when it isn't one).</summary>
+    private static double? ParseClock(string? text)
+    {
+        var parts = (text ?? "").Split(':');
+        if (parts.Length != 3) return null;
+        var inv = CultureInfo.InvariantCulture;
+        return int.TryParse(parts[0], NumberStyles.Integer, inv, out var h)
+            && int.TryParse(parts[1], NumberStyles.Integer, inv, out var m)
+            && double.TryParse(parts[2], NumberStyles.Float, inv, out var s)
+            ? h * 3600 + m * 60 + s
+            : null;
+    }
 
     /// <summary>Parse an ffprobe frame-rate string ("24000/1001", "25", "0/0")
     /// into fps. Returns 0 when unknown/zero so callers can skip it.</summary>

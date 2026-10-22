@@ -32,6 +32,16 @@ public sealed partial class HlsSessionService
             ? "0:" + VideoStreamIndex.ToString(CultureInfo.InvariantCulture)
             : "0:V:0?";
 
+        /// <summary>
+        /// Where the main video stream ends (seconds; 0 = unknown), when the
+        /// container says so — the stream duration, or Matroska's per-track
+        /// DURATION tag. The format duration is the LONGEST stream's: a
+        /// subtitle track running to 20.8 s behind video that ends at 20.02 s
+        /// announced a 0.8 s seg-5 no ffmpeg run ever writes (no frame left to
+        /// start it with) — 503 for the player until it gave up.
+        /// </summary>
+        public double VideoEndSec { get; init; }
+
         /// <summary>Every audio stream, index = ffmpeg's <c>a:N</c>. Empty for
         /// the seek-restart's minimal probe.</summary>
         public IReadOnlyList<AudioStreamInfo> AudioStreams { get; init; } = [];
@@ -372,9 +382,12 @@ public sealed partial class HlsSessionService
             MaxDuration = max;
         }
 
-        /// <summary>The plain 4 s grid (0 segments = unknown duration).</summary>
-        public static SegmentLayout Uniform(double totalSec, double segmentSec)
-            => Build(totalSec, segmentSec, prefix: 0, anchorStart: 0, firstEnd: segmentSec);
+        /// <summary>The plain 4 s grid (0 segments = unknown duration).
+        /// <paramref name="contentEndSec"/> = where the video really ends when
+        /// that is before <paramref name="totalSec"/> (0 = unknown): no segment
+        /// is announced to START past it — see <see cref="ProbeInfo.VideoEndSec"/>.</summary>
+        public static SegmentLayout Uniform(double totalSec, double segmentSec, double contentEndSec = 0)
+            => Build(totalSec, segmentSec, prefix: 0, anchorStart: 0, firstEnd: segmentSec, contentEndSec);
 
         /// <summary>
         /// Layout for a stream copy whose first run starts at key frame
@@ -383,30 +396,35 @@ public sealed partial class HlsSessionService
         /// to end — at most where ffmpeg will really cut it (see the caller),
         /// and past the resume point so the player asks for J first.
         /// </summary>
-        public static SegmentLayout Anchored(double totalSec, double segmentSec, double keyframeSec, double firstEndSec)
+        public static SegmentLayout Anchored(double totalSec, double segmentSec, double keyframeSec, double firstEndSec,
+            double contentEndSec = 0)
         {
-            if (totalSec <= 0 || segmentSec <= 0) return Uniform(totalSec, segmentSec);
+            if (totalSec <= 0 || segmentSec <= 0) return Uniform(totalSec, segmentSec, contentEndSec);
             var j = (int)Math.Floor(keyframeSec / segmentSec + 1e-6);
             // A key frame in the first segment: start from the file's beginning
             // (it has a key frame at 0) — there's no segment before it to stretch.
             var anchor = j == 0 ? 0 : Math.Max(keyframeSec, j * segmentSec);
             return Build(totalSec, segmentSec, prefix: j, anchorStart: anchor,
-                firstEnd: Math.Max(firstEndSec, anchor + segmentSec));
+                firstEnd: Math.Max(firstEndSec, anchor + segmentSec), contentEndSec);
         }
 
-        private static SegmentLayout Build(double total, double seg, int prefix, double anchorStart, double firstEnd)
+        private static SegmentLayout Build(double total, double seg, int prefix, double anchorStart, double firstEnd,
+            double contentEnd)
         {
             if (total <= 0 || seg <= 0) return new SegmentLayout([], 0, 0);
+            // Segments are only announced to START while there is still video
+            // to put in them; the last one's EXTINF still runs to `total`.
+            var end = contentEnd > 0 && contentEnd < total ? contentEnd : total;
             var starts = new List<double>();
-            for (int i = 0; i < prefix && i * seg < total; i++) starts.Add(i * seg);
-            if (anchorStart < total)
+            for (int i = 0; i < prefix && i * seg < end; i++) starts.Add(i * seg);
+            if (anchorStart < end)
             {
                 var anchorIndex = starts.Count;
                 starts.Add(anchorStart);
-                for (var s = firstEnd; s < total; s += seg) starts.Add(s);
+                for (var s = firstEnd; s < end; s += seg) starts.Add(s);
                 // Fold a tail shorter than MinTailSec into the segment before it
                 // — never the anchor itself (a resume in the last second).
-                if (starts.Count - 1 > anchorIndex && total - starts[^1] < MinTailSec)
+                if (starts.Count - 1 > anchorIndex && end - starts[^1] < MinTailSec)
                     starts.RemoveAt(starts.Count - 1);
                 return new SegmentLayout(starts.ToArray(), total, anchorIndex);
             }
