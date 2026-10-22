@@ -11,19 +11,21 @@ namespace Animarr.Web.Services;
 ///
 /// Strategy: **pre-computed VOD playlist + sequential segment encode**, with
 /// a per-source choice of container/codec pipeline (<see cref="HlsPlan"/>):
-///   • <c>TsStreamCopy</c>       — H.264 source → MPEG-TS HLS, stream-copy.
-///     The Jellyfin/Emby/Plex Direct Stream path. PCR timestamps inside TS
-///     packets give the player rock-solid A/V sync without any -itsoffset
-///     gymnastics; no GPU usage. Audio passes through when the codec is
-///     browser-friendly (AAC/AC3/E-AC3/MP3), else re-encoded to AAC.
-///   • <c>Fmp4VaapiReencode</c>  — HEVC 8-bit + VAAPI present → fMP4 HLS with
-///     h264_vaapi -bf 0 re-encode. Eliminates the B-frame display reorder
-///     that caused ~83ms audio-ahead wobble on stream-copy fMP4.
-///   • <c>Fmp4StreamCopy</c>     — HEVC 10-bit HDR/DV (Vega 11 can't encode
-///     Main10) → fMP4 stream-copy. Accepts residual A/V wobble; recommend
-///     DLNA cast for sync-critical viewing of these titles.
+///   • <c>TsStreamCopy</c>       — 8-bit H.264 → MPEG-TS HLS, stream-copy.
+///     The Jellyfin/Emby/Plex Direct Stream path; PCR timestamps keep A/V
+///     sync, no GPU.
+///   • <c>Fmp4StreamCopy</c>     — HEVC / AV1 / VP9 the client decodes (8- or
+///     10-bit, HDR, Dolby Vision per DolbyVision.For) → fMP4 stream-copy.
+///   • <c>Fmp4NvencReencode</c> / <c>Fmp4VaapiReencode</c> /
+///     <c>Fmp4SoftwareReencode</c> — everything else, and any quality /
+///     bitrate cap, burn-in or deinterlace: fMP4 re-encode to H.264 (or HEVC
+///     Main10 where client and encoder can, ChooseVideoTarget), GPU first.
+/// Both copies cut on the file's key frames (task 6.2, Keyframes.cs) unless
+/// <c>Playback:KeyframeHls</c> is off; the audio follows AudioPolicy (copy
+/// what the client decodes and the container carries, else 5.1 / stereo
+/// transcode), or comes as separate renditions (Renditions.cs).
 ///
-/// In all three branches:
+/// In every plan:
 ///   1. <see cref="StartAsync"/> probes the source with ffprobe to learn
 ///      duration, video codec, audio codec, and resolution.
 ///   2. We synthesise <c>master.m3u8</c> + <c>media.m3u8</c> ourselves —
@@ -740,8 +742,11 @@ public sealed partial class HlsSessionService : IDisposable
         if (!videoOk) return false;
 
         // Audio: native playback can't transcode, so the track must be a codec
-        // every browser decodes inside MP4. AC3/E-AC3 is spotty, DTS/TrueHD not
-        // at all → those keep the file on the HLS path (audio re-encoded there).
+        // every browser decodes inside MP4. This is the rule for a client that
+        // sent no token list; AC-3 / E-AC-3 decode only where the platform
+        // brings a decoder (Edge, Safari, some Chrome builds) — a client that
+        // has one says so in its tokens (the branch above). DTS / TrueHD play
+        // in no browser → those keep the file on the HLS path.
         var ac = (probe.AudioCodec ?? "").ToLowerInvariant();
         if (ac != "aac" && ac != "mp3" && ac != "mp4a") return false;
 
@@ -952,11 +957,10 @@ public sealed partial class HlsSessionService : IDisposable
         // tell the player to begin playback at `seekSec` while still seeing
         // the full timeline.
         var totalDuration = probe?.DurationSec ?? 0;
-        // Pick the playback strategy from the probe. Three branches, see HlsPlan:
-        //   • TsStreamCopy        — H.264 source, MPEG-TS HLS, no GPU, PCR sync
-        //   • Fmp4VaapiReencode   — HEVC 8-bit, fMP4 + h264_vaapi, -bf 0 sync
-        //   • Fmp4StreamCopy      — HEVC 10-bit HDR/DV, fMP4 stream-copy
-        // The plan affects ffmpeg argv, segment file extension, and what CODECS
+        // Pick the playback strategy from the probe (ChoosePlan, see HlsPlan):
+        // the TS copy for 8-bit H.264, the fMP4 copy for what the client
+        // decodes, else an fMP4 re-encode (NVENC → VAAPI → libx264). The plan
+        // affects ffmpeg argv, segment file extension, and what CODECS
         // attribute we advertise in master.m3u8.
         // Effective downscale target: only when the requested cap is BELOW the
         // source height. 0 = native resolution (no scaling).

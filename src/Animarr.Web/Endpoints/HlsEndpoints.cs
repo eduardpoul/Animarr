@@ -31,11 +31,12 @@ internal static class HlsEndpoints
     //   POST /api/hls/keepalive?token=T        → bump idle timer
     //   DELETE /api/hls/{token}                → stop session + free /tmp
     //
-    // HlsSessionService picks one of three plans per source: MPEG-TS stream-copy
-    // for H.264 (most files; PCR-sync, no GPU), fMP4 + VAAPI re-encode for HEVC
-    // 8-bit (tight sync via -bf 0), or fMP4 stream-copy fallback for HEVC 10-bit
-    // HDR/DV. The endpoint above is plan-agnostic — the manifest tells the
-    // player what to fetch and we just serve files from the session dir.
+    // HlsSessionService picks the plan per source and client (HlsPlan):
+    // MPEG-TS stream-copy for 8-bit H.264 (most files; PCR sync, no GPU), fMP4
+    // stream-copy for HEVC / AV1 / VP9 the client decodes, else an fMP4
+    // re-encode (NVENC → VAAPI → libx264). The endpoints are plan-agnostic —
+    // the manifest tells the player what to fetch and we just serve files from
+    // the session dir.
     app.MapPost("/api/hls/start", async (
             string path,
             MediaPathValidator pathValidator,

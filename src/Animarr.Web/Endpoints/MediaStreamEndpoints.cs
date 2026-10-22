@@ -404,7 +404,8 @@ internal static class MediaStreamEndpoints
     .RequireAuthorization(MediaAuth.Policies.Media);
     // ─── /api/subtitle — extract one subtitle track as VTT (default) or ASS ───
     // Browsers only render WebVTT natively via <track>. For ASS/SSA (anime
-    // fansubs) the front-end uses libass-wasm and asks for `?format=ass` here.
+    // fansubs) the web player renders with JASSUB (fonts from
+    // /api/subtitle/fonts) and asks for `?format=ass` here.
     app.MapGet("/api/subtitle", async (
             string path,
             MediaPathValidator pathValidator,
