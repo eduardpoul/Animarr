@@ -240,10 +240,21 @@ public sealed class TrackPreferenceService
     public static TrackDefaultsDto? MarkApplied(TrackDefaultsDto? defaults, bool applied)
         => defaults?.Audio is { } a ? defaults with { Audio = a with { Applied = applied } } : defaults;
 
+    /// <summary><see cref="TrackDefaultsDto.AudioOffsetSkipReason"/>: Direct Play
+    /// kept for a <c>localTracks</c> client — the device applies the offset
+    /// itself if it can.</summary>
+    public const string OffsetSkippedLocalTracks = "local_tracks";
+    /// <summary><see cref="TrackDefaultsDto.AudioOffsetSkipReason"/>: the plan
+    /// the stream got takes no offset (TS copy of the file's own audio).</summary>
+    public const string OffsetSkippedPlan = "plan";
+
     /// <summary><paramref name="defaults"/> with <see cref="TrackDefaultsDto.AudioOffsetApplied"/>
-    /// set — whether the start added its audio offset to the stream's sync.</summary>
-    public static TrackDefaultsDto? MarkOffsetApplied(TrackDefaultsDto? defaults, bool applied)
-        => defaults is null ? null : defaults with { AudioOffsetApplied = applied };
+    /// set — whether the start added its audio offset to the stream's sync —
+    /// and, when it didn't although it was asked to, why
+    /// (<paramref name="skipReason"/>).</summary>
+    public static TrackDefaultsDto? MarkOffsetApplied(TrackDefaultsDto? defaults, bool applied, string? skipReason = null)
+        => defaults is null ? null
+         : defaults with { AudioOffsetApplied = applied, AudioOffsetSkipReason = applied ? null : skipReason };
 
     private static TrackDefaultAudioDto? ResolveAudio(List<EmbeddedTrack> emb, List<ExternalTrackDto> ext,
         TrackPreference? seasonRow, TrackPreference? titleRow, UserPreferences? profile)

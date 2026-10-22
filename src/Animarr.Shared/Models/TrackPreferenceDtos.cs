@@ -95,9 +95,16 @@ public sealed record TrackSubtitlePrefDto(
 /// <c>usePrefs=1</c> and no explicit audio choice: true when the server added
 /// <paramref name="AudioOffsetMs"/> to the stream's sync itself (on top of the
 /// hw / sw baseline the client sent) — don't add it again. False when the
-/// client chose the audio explicitly or the plan takes no offset (Direct Play,
-/// Direct Stream, TS copy of the file's own audio). Always false from
-/// <c>/resolve</c>.</param>
+/// client chose the audio explicitly or the plan takes no offset. A non-zero
+/// offset of an embedded track never stays on Direct Play / Direct Stream: the
+/// start switches to the HLS copy that can apply it (<c>output.transcodeReasonCode
+/// = "audio_sync"</c>) — except Direct Play for a <c>localTracks=1</c> client.
+/// Always false from <c>/resolve</c>.</param>
+/// <param name="AudioOffsetSkipReason">Set when a usePrefs start had a non-zero
+/// offset to apply but didn't: "local_tracks" (Direct Play kept for a
+/// <c>localTracks=1</c> client — delay the audio on the device if it can) or
+/// "plan" (the stream's plan takes no offset, e.g. TS copy of the file's own
+/// audio when HLS was needed anyway). Null otherwise.</param>
 /// <param name="Aspect">The remembered aspect / zoom preset, as the client
 /// stored it (null = the player's default). The web writes
 /// <c>&lt;mode&gt;[_z&lt;zoom&gt;][_p&lt;pan&gt;]</c>, at most 24 chars — e.g.
@@ -113,7 +120,8 @@ public sealed record TrackDefaultsDto(
     int AudioOffsetMs,
     string? Aspect,
     string AudioOffsetSource = "none",
-    bool AudioOffsetApplied = false);
+    bool AudioOffsetApplied = false,
+    string? AudioOffsetSkipReason = null);
 
 /// <param name="Kind">"embedded" | "external".</param>
 /// <param name="Index">Embedded: a:N (what <c>audioTrackIndex</c> takes).</param>

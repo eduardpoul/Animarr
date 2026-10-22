@@ -187,6 +187,22 @@ internal static class HlsEndpoints
                         maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex)
                     : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             }
+            // A remembered sync offset of an embedded track needs a plan that
+            // takes one, which Direct Play / Direct Stream (and TS copy of the
+            // file's own audio) don't: start the HLS copy instead, with the track
+            // read as a second input of the same file — the input every plan
+            // offsets (sw channel), TS copy included. A localTracks client keeps
+            // Direct Play (it switches tracks itself; the offset is its to apply).
+            bool syncForced = false;
+            if (prefsOffset && prefsOffsetMs != 0 && externalAudioFull is null
+                && trackDefaults?.Audio is { Kind: TrackPreferenceService.KindEmbedded }
+                && decision.DirectUrl is not null && (decision.DirectStream || decision.DirectPlay)
+                && !(decision.DirectPlay && Flag(localTracks)))
+            {
+                externalAudioFull = fullPath;   // audioTrackIndex picks the track in it
+                decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
+                syncForced = true;
+            }
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
                 return Results.Ok(new
@@ -202,7 +218,9 @@ internal static class HlsEndpoints
                     // tags etc. are preserved here.
                     output        = decision.Output,
                     // The player picks the tracks of a raw file itself.
-                    trackDefaults = TrackPreferenceService.MarkApplied(trackDefaults, false),
+                    trackDefaults = TrackPreferenceService.MarkOffsetApplied(
+                        TrackPreferenceService.MarkApplied(trackDefaults, false), false,
+                        prefsOffset && prefsOffsetMs != 0 ? TrackPreferenceService.OffsetSkippedLocalTracks : null),
                 });
             }
 
@@ -283,16 +301,17 @@ internal static class HlsEndpoints
                 // What the player actually receives — drives the HUD plashka.
                 // For re-encode plans this differs from /api/probe output (e.g.
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
-                output       = result.Output,
+                output       = syncForced ? WithAudioSyncReason(result.Output) : result.Output,
                 trackDefaults = TrackPreferenceService.MarkOffsetApplied(TrackPreferenceService.MarkApplied(trackDefaults, trackDefaults?.Audio switch
                 {
                     { Kind: TrackPreferenceService.KindExternal, Path: { } dub } =>
                         externalAudioFull is not null && string.Equals(Path.GetFullPath(dub), externalAudioFull, StringComparison.OrdinalIgnoreCase),
-                    { Index: int index } => externalAudioFull is null && (audioTrackIndex ?? 0) == index,
+                    { Index: int index } => (externalAudioFull is null || syncForced) && (audioTrackIndex ?? 0) == index,
                     _ => false,
                 }),
                     // TS copy of the file's own audio takes no offset (PCR sync).
-                    prefsOffset && (externalAudioFull is not null || result.Output?.Plan != "ts-copy")),
+                    prefsOffset && (externalAudioFull is not null || result.Output?.Plan != "ts-copy"),
+                    prefsOffset && prefsOffsetMs != 0 ? TrackPreferenceService.OffsetSkippedPlan : null),
             });
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
@@ -461,6 +480,27 @@ internal static class HlsEndpoints
     /// <summary>Range of the per-audio sync offset (task 2.8) on top of the
     /// hw / sw pipeline envelopes — the same ± range track memory stores.</summary>
     private const int PerAudioOffsetMaxMs = 3000;
+
+    /// <summary>Output reason of a stream started as HLS only so a remembered
+    /// audio sync offset applies (the track read as a second input reads as
+    /// "external_audio" to the session).</summary>
+    private const string AudioSyncReason = "audio_sync";
+
+    private static HlsSessionService.PlayerOutputInfo WithAudioSyncReason(HlsSessionService.PlayerOutputInfo o)
+    {
+        var codes = (o.TranscodeReasonCodes ?? [])
+            .Select(c => c == HlsSessionService.ReasonCodes.ExternalAudio ? AudioSyncReason : c)
+            .Prepend(AudioSyncReason)
+            .Distinct()
+            .ToArray();
+        bool main = o.TranscodeReasonCode is null or HlsSessionService.ReasonCodes.ExternalAudio;
+        return o with
+        {
+            TranscodeReasonCode  = main ? AudioSyncReason : o.TranscodeReasonCode,
+            TranscodeReasonCodes = main ? codes : [o.TranscodeReasonCode!, .. codes.Where(c => c != o.TranscodeReasonCode)],
+            TranscodeReason      = main ? "remuxed to apply the remembered audio sync" : o.TranscodeReason,
+        };
+    }
 
     /// <summary>A "1" / "true" query flag.</summary>
     private static bool Flag(string? value)
