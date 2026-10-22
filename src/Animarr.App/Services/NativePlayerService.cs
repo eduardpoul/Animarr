@@ -855,6 +855,7 @@ public sealed class NativePlayerService : IDisposable
                 }
                 // A new player page starts on a fresh surface: no geometry yet.
                 _sizeKnown = false; _vidW = _vidH = 0; _vidPar = 1f;
+                ResetFrameRate();
                 // Release() drops the decoder buffers (~50-200MB on a 4K HDR
                 // stream — lives in C++ JNI heap, not the .NET GC reachable
                 // heap). Without this call the buffers leak between play
@@ -922,18 +923,148 @@ public sealed class NativePlayerService : IDisposable
         // (org.jellyfin.media3:media3-ffmpeg-decoder) only takes AC-3 / E-AC-3 /
         // DTS / TrueHD / … when the SoC has no decoder for them. Decoder
         // fallback lets a codec that fails to init fall through to the next one.
-        var renderers = new global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory(ctx)
+        // Passthrough "Авто" is Media3's default (the HDMI sink's reported
+        // AudioCapabilities); "Выкл" builds the audio sink with stereo-PCM-only
+        // capabilities, so everything is decoded on the device.
+        bool pcmOnly = TvPlaybackPrefs.PassthroughOff;
+        var renderers = (pcmOnly ? new PcmOnlyRenderersFactory(ctx) : new global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory(ctx))
             .SetExtensionRendererMode(global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory.ExtensionRendererModeOn)!
             .SetEnableDecoderFallback(true)!;
         var builder = new ExoPlayerBuilder(ctx, renderers)
             .SetAudioAttributes(attrs, handleAudioFocus: true)!
             .SetLoadControl(load)!;
         var player = (IExoPlayer)builder.Build()!;
+        // Frame-rate matching sets the surface's rate itself (ALWAYS, which may
+        // switch the display mode); Media3's own seamless-only vote would
+        // compete with it.
+        bool matchFps = TvPlaybackPrefs.MatchFrameRate && OperatingSystem.IsAndroidVersionAtLeast(31);
+        if (matchFps) player.VideoChangeFrameRateStrategy = global::AndroidX.Media3.Common.C.VideoChangeFrameRateStrategyOff;
+        global::Android.Util.Log.Info("Animarr.NativePlayer",
+            $"player: passthrough={(pcmOnly ? "off (PCM only)" : "auto")} matchFrameRate={TvPlaybackPrefs.MatchFrameRate}");
         // Cues → SubtitleView, track changes → the player page.
         player.AddListener(new PlayerEvents());
         return player;
     }
+
+    /// <summary>Audio passthrough "Выкл": the default sink, but told the output
+    /// takes stereo PCM only (AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES), so
+    /// no encoded format is ever passed through.</summary>
+    private sealed class PcmOnlyRenderersFactory : global::AndroidX.Media3.ExoPlayer.DefaultRenderersFactory
+    {
+        public PcmOnlyRenderersFactory(Context ctx) : base(ctx) { }
+
+        protected override global::AndroidX.Media3.ExoPlayer.Audio.IAudioSink? BuildAudioSink(
+            Context context, bool enableFloatOutput, bool enableAudioOutputPlaybackParameters)
+            => new global::AndroidX.Media3.ExoPlayer.Audio.DefaultAudioSink.Builder(context)
+                .SetAudioCapabilities(global::AndroidX.Media3.ExoPlayer.Audio.AudioCapabilities.DefaultAudioCapabilities)!
+                .SetEnableFloatOutput(enableFloatOutput)!
+                .SetEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)!
+                .Build();
+    }
+
+    // ── Frame-rate matching (setting, off by default) ──────────────────────
+    // API 31+: the surface votes for the video's rate with
+    // CHANGE_FRAME_RATE_ALWAYS — the system may switch the display mode even
+    // when that isn't seamless. API 23–30 (the projector is 30): the window's
+    // preferredDisplayModeId = a mode of the same resolution whose refresh
+    // rate is a whole multiple of the frame rate. Reset when the player goes.
+
+    private float _appliedFps;
+    private float _fpsHint;
+
+    private void MaybeMatchFrameRate(float fps)
+    {
+        if (!TvPlaybackPrefs.MatchFrameRate || fps <= 1f || Math.Abs(fps - _appliedFps) < 0.01f) return;
+        _appliedFps = fps;
+        try
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(31))
+            {
+                if (s_surfaceView?.Holder?.Surface is { IsValid: true } surface)
+                {
+                    surface.SetFrameRate(fps, (int)SurfaceFrameRateCompatibility.FixedSource, (int)SurfaceChangeFrameRate.Always);
+                    global::Android.Util.Log.Info("Animarr.NativePlayer", $"frame rate: surface → {fps:0.###} fps (ALWAYS)");
+                }
+                return;
+            }
+            if (!OperatingSystem.IsAndroidVersionAtLeast(23)) return;
+            var activity = Microsoft.Maui.ApplicationModel.Platform.CurrentActivity;
+            if (activity?.Window is not { } window) return;
+#pragma warning disable CA1422 // Activity.Display is API 30+; DefaultDisplay works on 23–30
+            var display = activity.WindowManager?.DefaultDisplay;
+#pragma warning restore CA1422
+            if (display?.GetMode() is not { } current) return;
+            var mode = PickDisplayMode(display.GetSupportedModes() ?? Array.Empty<Display.Mode>(), current, fps);
+            if (mode is null)
+            {
+                global::Android.Util.Log.Info("Animarr.NativePlayer",
+                    $"frame rate: no {current.PhysicalWidth}x{current.PhysicalHeight} mode for {fps:0.###} fps");
+                return;
+            }
+            var lp = window.Attributes!;
+            lp.PreferredDisplayModeId = mode.ModeId;
+            window.Attributes = lp;
+            global::Android.Util.Log.Info("Animarr.NativePlayer",
+                $"frame rate: {fps:0.###} fps → display mode {mode.ModeId} ({mode.PhysicalWidth}x{mode.PhysicalHeight}@{mode.RefreshRate:0.###})");
+        }
+        catch (System.Exception ex)
+        {
+            global::Android.Util.Log.Warn("Animarr.NativePlayer", $"frame rate: {ex.Message}");
+        }
+    }
+
+    /// <summary>Same resolution, refresh rate a whole multiple of the frame
+    /// rate: exact matches (23.976 on 23.976 / 47.952 Hz) before near ones
+    /// (23.976 on 24 Hz, within 0.2 %), then the lowest multiple.</summary>
+    private static Display.Mode? PickDisplayMode(Display.Mode[] modes, Display.Mode current, float fps)
+    {
+        Display.Mode? best = null;
+        (int Bucket, int K) bestKey = (int.MaxValue, int.MaxValue);
+        foreach (var m in modes)
+        {
+            if (m.PhysicalWidth != current.PhysicalWidth || m.PhysicalHeight != current.PhysicalHeight) continue;
+            int k = (int)Math.Round(m.RefreshRate / fps);
+            if (k < 1) continue;
+            double err = Math.Abs(m.RefreshRate - k * fps) / m.RefreshRate;
+            if (err > 0.002) continue;
+            var key = (err > 0.0005 ? 1 : 0, k);
+            if (key.CompareTo(bestKey) < 0) { best = m; bestKey = key; }
+        }
+        return best;
+    }
+
+    /// <summary>Back to the system's choice when the player goes.</summary>
+    private void ResetFrameRate()
+    {
+        if (_appliedFps == 0) return;
+        _appliedFps = 0;
+        try
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(31))
+            {
+                if (s_surfaceView?.Holder?.Surface is { IsValid: true } surface)
+                    surface.SetFrameRate(0, (int)SurfaceFrameRateCompatibility.Default, (int)SurfaceChangeFrameRate.OnlyIfSeamless);
+                return;
+            }
+            if (Microsoft.Maui.ApplicationModel.Platform.CurrentActivity?.Window is { } window && window.Attributes is { } lp)
+            {
+                lp.PreferredDisplayModeId = 0;
+                window.Attributes = lp;
+            }
+        }
+        catch { }
+    }
 #endif
+
+    /// <summary>The current file's frame rate from the server's probe — used
+    /// for frame-rate matching when the container doesn't carry one in the
+    /// Format (Media3's Matroska extractor never sets it). 0 = unknown.</summary>
+    public void SetFrameRateHint(float fps)
+    {
+#if ANDROID
+        _fpsHint = fps;
+#endif
+    }
 
     /// <summary>
     /// Read live player state for the HUD's polling timer. JS-side NativeAdapter
@@ -992,6 +1123,10 @@ public sealed class NativePlayerService : IDisposable
                             OnVideoSize(turned ? actualHeight : actualWidth, turned ? actualWidth : actualHeight,
                                         turned ? 1f / par : par, $"format rot={fmt.RotationDegrees}");
                         }
+                        // Polled on the UI thread (the HUD tick): the display
+                        // follows the video's frame rate when that's enabled
+                        // (the container's, else the server probe's).
+                        MaybeMatchFrameRate(fmt.FrameRate > 1f ? fmt.FrameRate : _fpsHint);
                         // ColorInfo's bit-depth fields aren't directly exposed
                         // as ints; pix_fmt detection happens server-side. Best
                         // we can do here is mark 10-bit when colorTransfer

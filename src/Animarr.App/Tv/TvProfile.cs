@@ -61,7 +61,7 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
     private readonly LinearLayout _profiles;
     private readonly LinearLayout _folders;
     private readonly TextView _status, _defaultHint;
-    private readonly TextView _defaultBtn, _langBtn, _scaleBtn;
+    private readonly TextView _defaultBtn, _langBtn, _scaleBtn, _fpsBtn, _passBtn;
     private DeviceStateDto? _device;
     private string _lang = "ru";
 
@@ -123,6 +123,22 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
         _scaleBtn = TvUi.Button(ctx, "…", false, () => _ = PickScaleAsync(), sp: 15);
         ui.AddView(_langBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44)));
         ui.AddView(_scaleBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
+
+        // playback on this device (its display / HDMI chain, not the profile)
+        Section(TvL.T("tv.playback", "Воспроизведение на этом устройстве", "Playback on this device"), null);
+        var pb = Buttons();
+        _fpsBtn = TvUi.Button(ctx, "…", false, ToggleFrameRate, sp: 15);
+        _passBtn = TvUi.Button(ctx, "…", false, TogglePassthrough, sp: 15);
+        pb.AddView(_fpsBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44)));
+        pb.AddView(_passBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
+        _col.AddView(TvUi.Text_(ctx, 13, TvUi.TextFaint, TvUi.Regular, 4,
+            TvL.T("tv.playback_hint",
+                "Частота кадров: экран переключается на частоту видео (24 / 25 / 50 Гц) — движение плавнее, но при запуске и смене серии экран гаснет на 1–2 с.\n" +
+                "Передача звука: «Авто» отправляет AC-3 / E-AC-3 / DTS на ресивер или саундбар как есть, если он их принимает; «Выкл» — всё декодируется в PCM на устройстве.",
+                "Frame rate: the display switches to the video's rate (24 / 25 / 50 Hz) — smoother motion, but the screen blanks for 1–2 s at start and between episodes.\n" +
+                "Audio passthrough: \"Auto\" sends AC-3 / E-AC-3 / DTS to the receiver or soundbar as they are when it takes them; \"Off\" decodes everything to PCM on the device.")),
+            TvUi.Lp(-1, -2, 0, TvUi.Dp(ctx, 10)));
+        PaintPlayback();
 
         // server
         Section(TvL.T("profile.server", "Сервер", "Server"), _data.Base.Replace("http://", "").Replace("https://", ""));
@@ -365,6 +381,27 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
             TvRoot.Go(TvRoot.Home());   // pages bake strings at construction — rebuild the shell
         }
         catch { _status.Text = TvL.T("profile.language_error", "Не удалось сменить язык", "Couldn't change the language"); }
+    }
+
+    // ── playback (device-local, read by the next player) ─────────────────────
+    private void PaintPlayback()
+    {
+        _fpsBtn.Text = TvL.T("tv.match_fps", "Частота кадров под видео", "Match frame rate") + ":  " +
+                       (Services.TvPlaybackPrefs.MatchFrameRate ? TvL.T("common.on", "Вкл.", "On") : TvL.T("common.off", "Выкл.", "Off"));
+        _passBtn.Text = TvL.T("tv.passthrough", "Передача звука (passthrough)", "Audio passthrough") + ":  " +
+                        (Services.TvPlaybackPrefs.PassthroughOff ? TvL.T("common.off", "Выкл.", "Off") : TvL.T("tv.auto", "Авто", "Auto"));
+    }
+
+    private void ToggleFrameRate()
+    {
+        Services.TvPlaybackPrefs.MatchFrameRate = !Services.TvPlaybackPrefs.MatchFrameRate;
+        PaintPlayback();
+    }
+
+    private void TogglePassthrough()
+    {
+        Services.TvPlaybackPrefs.PassthroughOff = !Services.TvPlaybackPrefs.PassthroughOff;
+        PaintPlayback();
     }
 
     private static (string Label, float Scale)[] Scales => new[]

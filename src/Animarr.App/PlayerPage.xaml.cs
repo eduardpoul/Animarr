@@ -809,6 +809,7 @@ public partial class PlayerPage : ContentPage
         _subNeedsServer.Clear();
         _audioNeedsServer.Clear();
         _directPlayable = null;
+        NativePlayerService.Instance?.SetFrameRateHint(0);   // the new file's comes with its probe
         return _catalogTask = LoadCatalogAsync(_filePath);
     }
 
@@ -819,6 +820,7 @@ public partial class PlayerPage : ContentPage
         var extTask = _http.GetFromJsonAsync<List<ExternalTrackDto>>($"{ApiRoutes.ExternalTracks}?path={p}", Json);
         List<ProbeTrack> audio = new(), subs = new();
         bool ok = false;
+        float fps = 0;
         try
         {
             using var doc = JsonDocument.Parse(await probeTask);
@@ -827,6 +829,10 @@ public partial class PlayerPage : ContentPage
                 foreach (var s in streams.EnumerateArray())
                 {
                     var type = Str(s, "codec_type");
+                    // The video's frame rate, for frame-rate matching: Media3's
+                    // Matroska extractor leaves Format.frameRate unset.
+                    if (type == "video" && fps == 0 && !Flag(s.TryGetProperty("disposition", out var vd) ? vd : default, "attached_pic"))
+                        fps = Rate(Str(s, "r_frame_rate")) is > 0 and var r ? r : Rate(Str(s, "avg_frame_rate"));
                     if (type is not ("audio" or "subtitle")) continue;
                     var tags = s.TryGetProperty("tags", out var t) ? t : default;
                     var disp = s.TryGetProperty("disposition", out var d) ? d : default;
@@ -847,6 +853,7 @@ public partial class PlayerPage : ContentPage
         catch (Exception ex) { Log($"external-tracks failed: {ex.Message}"); }
 
         if (!string.Equals(path, _filePath, StringComparison.Ordinal) || _closed) return;   // episode changed
+        NativePlayerService.Instance?.SetFrameRateHint(fps);
         _probeAudio = audio;
         _probeSubs = subs;
         _probeOk = ok;
@@ -869,6 +876,16 @@ public partial class PlayerPage : ContentPage
                 ? v.GetString() : null;
         static bool Flag(JsonElement e, string name) =>
             e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) && i != 0;
+        // ffprobe rational "24000/1001" → 23.976.
+        static float Rate(string? r)
+        {
+            var parts = (r ?? "").Split('/');
+            return parts.Length == 2
+                   && float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                   && float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d)
+                   && d > 0 && n / d is > 1 and < 300
+                ? n / d : 0;
+        }
     }
 
     // ── Audio ───────────────────────────────────────────────────────────────
