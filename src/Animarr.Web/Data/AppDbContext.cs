@@ -29,6 +29,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
+    /// <summary>Per-profile audio / subtitle / offset / aspect memory per title.</summary>
+    public DbSet<TrackPreference> TrackPreferences => Set<TrackPreference>();
     public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
     public DbSet<RecDismissal> RecDismissals => Set<RecDismissal>();
     public DbSet<FranchiseNode> FranchiseNodes => Set<FranchiseNode>();
@@ -321,6 +323,40 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(x => x.MediaItemId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.UserId);
+        });
+
+        modelBuilder.Entity<TrackPreference>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaItem)
+             .WithMany()
+             .HasForeignKey(x => x.MediaItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.AudioKind).HasMaxLength(16);
+            e.Property(x => x.AudioLanguage).HasMaxLength(16);
+            e.Property(x => x.AudioTitle).HasMaxLength(256);
+            e.Property(x => x.AudioCodec).HasMaxLength(32);
+            e.Property(x => x.AudioGroupKey).HasMaxLength(512);
+            e.Property(x => x.SubtitleKind).HasMaxLength(16);
+            e.Property(x => x.SubtitleLanguage).HasMaxLength(16);
+            e.Property(x => x.SubtitleType).HasMaxLength(16);
+            e.Property(x => x.SubtitleTitle).HasMaxLength(256);
+            e.Property(x => x.SubtitleGroupKey).HasMaxLength(512);
+            e.Property(x => x.Aspect).HasMaxLength(32);
+            // One title row (Season NULL) + at most one row per season. SQLite
+            // treats NULLs as distinct in a unique index, so the title row gets
+            // its own filtered index (same pattern as FolderWatcher.Path).
+            e.HasIndex(x => new { x.UserId, x.MediaItemId, x.Season })
+             .IsUnique()
+             .HasFilter("\"Season\" IS NOT NULL");
+            e.HasIndex(x => new { x.UserId, x.MediaItemId })
+             .IsUnique()
+             .HasFilter("\"Season\" IS NULL");
         });
 
         modelBuilder.Entity<WatchlistItem>(e =>

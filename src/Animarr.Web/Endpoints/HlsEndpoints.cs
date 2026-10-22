@@ -76,6 +76,17 @@ internal static class HlsEndpoints
             // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
+            // "1" = start with the profile's track defaults (task 2.2: title
+            // memory → profile settings → flags) when the client passes no
+            // explicit audioTrackIndex / externalAudio. Absent = as before; the
+            // answer reports them as trackDefaults either way.
+            string? usePrefs,
+            // "1" = the client switches EMBEDDED tracks itself on Direct Play
+            // (the TV's Media3): a remembered embedded track then keeps Direct
+            // Play and is only reported. Elsewhere the server still maps it.
+            string? localTracks,
+            TrackPreferenceService trackPrefs,
+            IUserContext userCtx,
             HlsSessionService hls,
             DeviceTrust deviceTrust,
             HttpContext http,
@@ -83,6 +94,21 @@ internal static class HlsEndpoints
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
         if (!ok) return earlyResult!;
+
+        // Per-profile track defaults — reported on every answer below; applied
+        // to this stream only with usePrefs=1 and no explicit audio choice.
+        var trackDefaults = await trackPrefs.TryResolveAsync(userCtx.CurrentUserId, fullPath!, http.RequestAborted);
+        int localAudioIndex = 0;
+        if (Flag(usePrefs) && audioTrackIndex is null && string.IsNullOrWhiteSpace(externalAudio)
+            && trackDefaults?.Audio is { } defaultAudio)
+        {
+            if (defaultAudio.Kind == TrackPreferenceService.KindExternal) externalAudio = defaultAudio.Path;
+            else if (defaultAudio.Index is int ai && ai > 0)
+            {
+                if (Flag(localTracks)) localAudioIndex = ai;
+                else audioTrackIndex = ai;
+            }
+        }
 
         // Reject nonsense knobs up front with a 400 instead of starting a
         // stream that is silent (an audio index past the last track — checked
@@ -142,6 +168,14 @@ internal static class HlsEndpoints
             var decision = externalAudioFull is null && !wantCap && !wantTrack
                 ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, http.RequestAborted, nativeCaps: caps)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
+            // localTracks: the client switches the remembered track itself only
+            // on Direct Play; Direct Stream maps 0:a:0, so anything else goes
+            // through the HLS mux with that track.
+            if (localAudioIndex > 0 && !(decision.DirectPlay && decision.DirectUrl is not null))
+            {
+                audioTrackIndex = localAudioIndex;
+                decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
+            }
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
                 return Results.Ok(new
@@ -156,6 +190,8 @@ internal static class HlsEndpoints
                     // Direct Play means source passes through unchanged, so HDR
                     // tags etc. are preserved here.
                     output        = decision.Output,
+                    // The player picks the tracks of a raw file itself.
+                    trackDefaults = TrackPreferenceService.MarkApplied(trackDefaults, false),
                 });
             }
 
@@ -172,6 +208,9 @@ internal static class HlsEndpoints
                     totalDuration   = decision.DurationSec,
                     resumeSec       = seekSec,
                     output          = decision.Output,
+                    // /api/video carries 0:a:0 only.
+                    trackDefaults   = TrackPreferenceService.MarkApplied(trackDefaults,
+                        trackDefaults?.Audio is { Kind: TrackPreferenceService.KindEmbedded, Index: 0 }),
                 });
             }
 
@@ -227,6 +266,13 @@ internal static class HlsEndpoints
                 // For re-encode plans this differs from /api/probe output (e.g.
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
                 output       = result.Output,
+                trackDefaults = TrackPreferenceService.MarkApplied(trackDefaults, trackDefaults?.Audio switch
+                {
+                    { Kind: TrackPreferenceService.KindExternal, Path: { } dub } =>
+                        externalAudioFull is not null && string.Equals(Path.GetFullPath(dub), externalAudioFull, StringComparison.OrdinalIgnoreCase),
+                    { Index: int index } => externalAudioFull is null && (audioTrackIndex ?? 0) == index,
+                    _ => false,
+                }),
             });
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
@@ -391,6 +437,10 @@ internal static class HlsEndpoints
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint));
         return new(user, "a:" + Convert.ToHexString(hash, 0, 8).ToLowerInvariant());
     }
+
+    /// <summary>A "1" / "true" query flag.</summary>
+    private static bool Flag(string? value)
+        => value == "1" || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Error shape of <c>/api/hls/start</c>: RFC 7807 problem details with a

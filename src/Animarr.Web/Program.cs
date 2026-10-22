@@ -190,6 +190,8 @@ builder.Services.AddScoped<ExternalTrackService>();
 // Directory listings + episode parses of the external-track sweep, reused
 // while every folder's mtime is unchanged.
 builder.Services.AddSingleton<ExternalTrackListingCache>();
+// Per-profile track memory + start-time track defaults (/api/me/track-prefs).
+builder.Services.AddScoped<TrackPreferenceService>();
 
 // ─── Skip intro/credits — segment detection ───────────────────────────────
 // AniSkip: crowd-sourced OP/ED timestamps by MAL id (free, no auth). Needs an
@@ -595,6 +597,7 @@ app.MapLlmEndpoints();
 app.MapFolderEndpoints();
 app.MapMediaEndpoints();
 app.MapWatchStateEndpoints();
+app.MapTrackPreferenceEndpoints();
 app.MapRecsEndpoints();
 app.MapCalendarEndpoints();
 app.MapFranchiseEndpoints();

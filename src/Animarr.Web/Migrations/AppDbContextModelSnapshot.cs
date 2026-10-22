@@ -949,6 +949,92 @@ namespace Animarr.Web.Migrations
                     b.ToTable("TorrentRecords");
                 });
 
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrackPreference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Aspect")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AudioChannels")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AudioCodec")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AudioGroupKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AudioKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AudioLanguage")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AudioOffsetsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AudioTitle")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SubtitleGroupKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SubtitleKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SubtitleLanguage")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SubtitleOffsetMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SubtitleTitle")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SubtitleType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId")
+                        .IsUnique()
+                        .HasFilter("\"Season\" IS NULL");
+
+                    b.HasIndex("UserId", "MediaItemId", "Season")
+                        .IsUnique()
+                        .HasFilter("\"Season\" IS NOT NULL");
+
+                    b.ToTable("TrackPreferences");
+                });
+
             modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1486,6 +1572,25 @@ namespace Animarr.Web.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("FolderWatcher");
+                });
+
+            modelBuilder.Entity("Animarr.Web.Data.Models.TrackPreference", b =>
+                {
+                    b.HasOne("Animarr.Web.Data.Models.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Animarr.Web.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Animarr.Web.Data.Models.TrickplayAsset", b =>
