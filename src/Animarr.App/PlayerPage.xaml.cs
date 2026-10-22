@@ -560,6 +560,11 @@ public partial class PlayerPage : ContentPage
             var seekSec = resumeMs / 1000;
             trackParams = AudioStartParams(maxHeight);
             burning = BurnStartParam().Length > 0;
+            // Audio as live-switchable HLS renditions — only where it can't
+            // cost a Direct Play, which the file's dubs decide (the catalog;
+            // a file's first start waits for it briefly).
+            if (!catalog.IsCompleted) await Task.WhenAny(catalog, Task.Delay(1200));
+            bool renditions = WantRenditions(maxHeight, burning);
             // usePrefs: with no explicit track the server starts with this
             // profile's memory for the title (else the profile's languages /
             // the container flags) and reports it as trackDefaults; localTracks:
@@ -575,7 +580,7 @@ public partial class PlayerPage : ContentPage
                       // video) as the key-frame-exact HLS copy rather than the
                       // /api/video pipe, where every seek was a reload. An
                       // older server ignores it and still answers Direct Stream.
-                      "&remux=hls";
+                      "&remux=hls" + (renditions ? "&audioRenditions=1" : "");
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
@@ -588,7 +593,7 @@ public partial class PlayerPage : ContentPage
 
             Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}" +
                 (trackParams.Length > 0 && _audio is { } sentAudio ? $" audio={DescribeAudio(sentAudio)}" : "") +
-                $"{Services.TvCodecCaps.HevcParams().Replace('&', ' ')}{(capsSent ? " +caps" : "")}");
+                $"{Services.TvCodecCaps.HevcParams().Replace('&', ' ')}{(capsSent ? " +caps" : "")}{(renditions ? " +renditions" : "")}");
             // Two attempts, like the web player, but only where a second try
             // can help: a network error or a 5xx such as start_failed /
             // too_many_sessions (a start racing the cleanup of the previous
@@ -683,7 +688,8 @@ public partial class PlayerPage : ContentPage
         // Sent without the chosen track to see whether the file Direct Plays —
         // it doesn't: restart with the track before anything plays (the wrong
         // language is never heard). This answer's HLS session is not used.
-        if (NeedsTrackRestart(directPlay, trackParams) && !CarriesChosenAudio(b))
+        if (NeedsTrackRestart(directPlay, trackParams) && !CarriesChosenAudio(b)
+            && RenditionFor(directPlay || directStream ? null : b.AudioRenditions, _audio) is null)
         {
             if (directStream && b.TrackDefaults is not null
                 && !b.DirectStreamUrl!.Contains("audioTrackIndex=", StringComparison.Ordinal))
@@ -729,12 +735,20 @@ public partial class PlayerPage : ContentPage
         _outputSegmentation = b.Output?.Segmentation;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
+        _renditions = _kind == StreamKind.Hls && b.AudioRenditions is { Count: > 0 } rl ? rl : null;
+        _renditionSwitch = null;
+        if (_renditions is { } rs)
+            Log($"start #{gen}: {rs.Count} audio renditions " +
+                string.Join(", ", rs.Select(r => $"{r.Id}{(r.Default ? "*" : "")} {r.Codec}/{r.Channels}")));
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}" +
             (b.Output?.Segmentation is { } seg ? $" segmentation={seg}" : ""));
         // Only a start the server was free to Direct Play tells whether it can
         // (track 0 named explicitly doesn't change that).
         if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent && !burning)
             _directPlayable = directPlay;
+        // Episodes of a title are alike: one that streams as HLS anyway makes
+        // the next one ask for renditions from its first start.
+        if (maxHeight == 0 && !burning) _preferRenditions = !directPlay && !directStream;
         _isDirectStream = directStream;
         ClearError();
 
@@ -1018,6 +1032,13 @@ public partial class PlayerPage : ContentPage
     /// Play, else the index the stream was started with.</summary>
     private AudioSel CurrentAudio()
     {
+        if (_renditions is { } rs && NativePlayerService.Instance is { } rnps)
+        {
+            var media3 = rnps.GetAudioTracks();
+            for (int k = 0; k < rs.Count; k++)
+                if (MapRendition(rs, k, media3) is { Selected: true })
+                    return rs[k].Kind == "external" ? new AudioSel(-1, rs[k].Path) : new AudioSel(rs[k].Index ?? 0, null);
+        }
         if (_audio is { External: not null } ext) return ext;
         if (_kind == StreamKind.DirectPlay && NativePlayerService.Instance is { } nps)
         {
@@ -1055,6 +1076,18 @@ public partial class PlayerPage : ContentPage
         var previousActual = CurrentAudio();
         Log($"audio chosen: {DescribeAudio(sel)} (tier {_kind})");
         QueueTrackPrefs(p => p with { Audio = AudioChoice(sel) });
+        // HLS renditions: every track / dub is in the stream — a track
+        // selection, the video plays on (the external dub included).
+        if (_renditions is { } rs && RenditionFor(rs, sel) is { } r && NativePlayerService.Instance is { } rnps
+            && MapRendition(rs, rs.IndexOf(r), rnps.GetAudioTracks()) is { Supported: true } rt)
+        {
+            _audio = sel;
+            _renditionSwitch = (r.Id, DateTime.UtcNow);
+            rnps.SelectTrack(rt.GroupIndex, rt.TrackIndex);
+            Log($"audio rendition → {r.Id} (Media3 {rt.GroupIndex}/{rt.TrackIndex})");
+            FlashInfo($"Аудио: {label}");
+            return;
+        }
         if (sel.External is null && _kind == StreamKind.DirectPlay && !_audioNeedsServer.Contains(sel.Embedded)
             && NativePlayerService.Instance is { } nps
             && MapEmbeddedAudio(sel.Embedded, nps.GetAudioTracks()) is { } t)
@@ -1088,7 +1121,28 @@ public partial class PlayerPage : ContentPage
     /// per prepare). A track the device can't decode → the server transcodes it.</summary>
     private void ApplyAudioOnTracks(NativePlayerService nps)
     {
+        if (_renditionSwitch is { } sw && _renditions is { } swr
+            && MapRendition(swr, swr.FindIndex(r => r.Id == sw.Id), nps.GetAudioTracks()) is { Selected: true })
+        {
+            _renditionSwitch = null;
+            Log($"audio rendition {sw.Id} selected in {(DateTime.UtcNow - sw.At).TotalMilliseconds:0} ms");
+        }
         if (_audioApplied) return;
+        if (_renditions is { } rs)
+        {
+            // The chosen track (else the server's default rendition) — Media3
+            // may have auto-selected another one by language.
+            var media3r = nps.GetAudioTracks();
+            if (media3r.Count == 0) return;   // not prepared yet
+            _audioApplied = true;
+            var want = RenditionFor(rs, _audio) ?? rs.FirstOrDefault(r => r.Default);
+            if (want is not null && MapRendition(rs, rs.IndexOf(want), media3r) is { Selected: false, Supported: true } wt)
+            {
+                nps.SelectTrack(wt.GroupIndex, wt.TrackIndex);
+                Log($"audio: rendition {want.Id} selected (Media3 {wt.GroupIndex}/{wt.TrackIndex})");
+            }
+            return;
+        }
         if (_kind != StreamKind.DirectPlay) { _audioApplied = true; return; }   // the server muxed it
         var media3 = nps.GetAudioTracks();
         if (media3.Count == 0) return;   // not prepared yet
@@ -1106,6 +1160,62 @@ public partial class PlayerPage : ContentPage
         FlashInfo("Дорожку не декодирует устройство — перекодирую на сервере");
         var st = nps.GetState();
         _ = StartStreamAsync(_streamBaseMs + st.PositionMs, _maxHeight);
+    }
+
+    // ── HLS audio renditions (audioRenditions=1, plan 6.3) ──────────────────
+    // A video-only HLS stream plus one EXT-X-MEDIA audio playlist per embedded
+    // track and dub: Media3 lists each as its own audio track (label = the
+    // rendition's NAME, id "aud:NAME"), so a switch is a track selection
+    // while the video keeps playing; the server starts a rendition's ffmpeg
+    // when it is first fetched. Direct Play keeps its local switch, a stream
+    // without renditions its restart.
+
+    /// <summary>The current HLS stream's renditions, in playlist order (null:
+    /// audio muxed in, or not HLS).</summary>
+    private List<AudioRenditionDto>? _renditions;
+    /// <summary>A rendition switch waiting for Media3 to report it selected (logged with its time).</summary>
+    private (string Id, DateTime At)? _renditionSwitch;
+    /// <summary>The previous uncapped stream (this file's or the previous
+    /// episode's) was HLS: ask for renditions even before this file is known.</summary>
+    private bool _preferRenditions;
+
+    /// <summary>Ask for renditions only where they can't cost a Direct Play:
+    /// with localTracks the server then skips Direct Play only for a file with
+    /// dubs, so — unless the start is HLS anyway (a dub, a cap, a burn-in, a
+    /// file known not to Direct Play, an episode after one that streamed as
+    /// HLS, no caps) — only when the file has none. A first start that comes
+    /// back HLS without them (the title's memory named a dub) teaches
+    /// _directPlayable: the first switch restarts with renditions, the next
+    /// ones are live.</summary>
+    private bool WantRenditions(int maxHeight, bool burning)
+    {
+        if (Bench.BenchLog.Has("norenditions")) return false;
+        if (_audio is { External: not null } || maxHeight > 0 || burning || _forceTranscode
+            || _directPlayable == false || _preferRenditions || Bench.BenchLog.Has("nocaps"))
+            return true;
+        return _catalogPath == _filePath && _catalogTask.IsCompletedSuccessfully && _probeOk && _extAudio.Count == 0;
+    }
+
+    private static AudioRenditionDto? RenditionFor(IReadOnlyList<AudioRenditionDto>? rs, AudioSel? sel)
+    {
+        if (rs is null || sel is not { } s) return null;
+        return s.External is { } dub
+            ? rs.FirstOrDefault(r => r.Kind == "external" && SamePath(r.Path, dub))
+            : rs.FirstOrDefault(r => r.Kind == "embedded" && r.Index == Math.Max(0, s.Embedded));
+    }
+
+    private static bool SamePath(string? a, string? b) =>
+        a is not null && b is not null
+        && string.Equals(a.Replace('\\', '/'), b.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Media3's audio track for rendition #k: by its NAME (Format
+    /// label / id "aud:NAME"), else by position when the counts match.</summary>
+    private static TrackOption? MapRendition(IReadOnlyList<AudioRenditionDto> rs, int k, IReadOnlyList<TrackOption> media3)
+    {
+        if (k < 0 || k >= rs.Count) return null;
+        var name = (rs[k].Name ?? "").Replace("\"", "'");
+        return media3.FirstOrDefault(t => t.Name == name || t.Id == "aud:" + name)
+               ?? (media3.Count == rs.Count ? media3[k] : null);
     }
 
     // ── Per-title track memory (server, per profile — plan 2.2 / 6.5) ───────
@@ -2611,6 +2721,7 @@ public partial class PlayerPage : ContentPage
                                        + (_outputSegmentation == "keyframe" ? " (по ключевым кадрам)" : ""),
             _                       => "",
         });
+        if (_renditions is { Count: > 0 } rs) parts.Add($"аудио: {rs.Count} рендишн(а), без перезапуска");
         if (Math.Abs(_speed - 1f) > 0.01f) parts.Add(SpeedText(_speed));
         FlashInfo(string.Join(" · ", parts.Where(p => p.Length > 0)));
     }
@@ -2791,7 +2902,12 @@ public partial class PlayerPage : ContentPage
     private sealed record StartResponse(
         string? DirectPlayUrl, string? DirectStreamUrl, string? ManifestUrl,
         double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output,
-        TrackDefaultsDto? TrackDefaults = null);
+        TrackDefaultsDto? TrackDefaults = null, List<AudioRenditionDto>? AudioRenditions = null);
+
+    /// <summary>One audioRenditions[] entry: Id "a{N}" (embedded 0:a:N) or
+    /// "x{N}" (a dub), Kind "embedded" / "external", Uri relative to the master.</summary>
+    private sealed record AudioRenditionDto(string Id, string? Kind, int? Index, string? Path, string? Name,
+        string? Language, string? Codec, int Channels, bool Default, int OffsetMs, string? Uri);
 
     /// <param name="Segmentation">HLS: "keyframe" (segments cut on the file's
     /// key frames — the remux copy) or "grid" (4 s, a re-encode).</param>
