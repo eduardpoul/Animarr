@@ -582,6 +582,8 @@ html:has(.vp-backdrop) { overflow: hidden; }
     color: #fff;
 }
 .vp-panel__hint { margin-top: -4px; font-size: 11px; color: rgba(255,255,255,0.5); }
+/* A hint heading the panel (which audio the Sync panel is for). */
+.vp-panel__hint--top { margin-top: 0; font-size: 12px; color: #c4c8ce; }
 .vp-chip {
     all: unset;
     box-sizing: border-box;

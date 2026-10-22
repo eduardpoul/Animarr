@@ -997,7 +997,8 @@
                 case 'directplay':     return null;     // no transcode
                 case 'ts-copy':        return null;     // PCR-sync, no -itsoffset
                 case 'vaapi-reencode':
-                case 'nvenc-reencode': return 'hw';     // -bf 0 + browser chain latency
+                case 'nvenc-reencode':
+                case 'sw-reencode':    return 'hw';     // -bf 0 + browser chain latency
                 case 'fmp4-copy':      return 'sw';     // B-frames preserved, fMP4 TFDT residual
                 default:               return null;
             }
@@ -1604,61 +1605,42 @@
         }, 0);
     }
 
-    // ── audio-offset slider popup ─────────────────────────────────────
-    // `labelOverride` lets the caller relabel the slider (e.g. "External dub")
-    // when the 'sw' channel is being reused for external-audio sync rather than
-    // its usual HDR/10-bit stream-copy role.
-    function openOffsetPopup(root, anchor, channel, labelOverride) {
-        const existing = root.querySelector('.vp-hud-popup');
-        if (existing) {
-            const wasFor = existing.getAttribute('data-anchor');
-            existing.remove();
-            if (wasFor === anchor) return;
-        }
-        if (!window.animarrCalibrate) return;
-        const current = window.animarrCalibrate.getCached(channel)
-            ?? (channel === 'hw' ? 70 : 0);
-        const min = -200;
-        const max = channel === 'sw' ? 700 : 300;
-        const label = labelOverride || (channel === 'sw'
-            ? t('sync_copy')
-            : t('sync_reencode'));
-
-        const popup = document.createElement('div');
-        popup.className = 'vp-hud-popup vp-hud-popup--slider';
-        popup.setAttribute('data-anchor', anchor);
-        popup.innerHTML = `
-            <div class="vp-hud-popup__title">${escapeHtml(t('hud_sync'))} · ${escapeHtml(label)}</div>
-            <div class="vp-hud-popup__slider-row">
-                <input type="range" min="${min}" max="${max}" step="5" value="${current}">
-                <span class="vp-hud-popup__slider-value">${current} ms</span>
-            </div>
-            <div class="vp-hud-popup__hint">${escapeHtml(t('sync_hint'))}</div>
-        `;
-        const range = popup.querySelector('input[type=range]');
-        const valueEl = popup.querySelector('.vp-hud-popup__slider-value');
-        range.addEventListener('input', () => {
-            const v = parseInt(range.value, 10);
-            valueEl.textContent = v + ' ms';
-            window.animarrCalibrate.setManual(channel, v);
-        });
-        popup.addEventListener('mousedown', e => e.stopPropagation());
-        popup.addEventListener('click',     e => e.stopPropagation());
-        root.appendChild(popup);
-        setTimeout(() => {
-            const onDoc = (e) => {
-                if (!popup.isConnected) {
-                    document.removeEventListener('click', onDoc, true);
-                    return;
-                }
-                if (!popup.contains(e.target) &&
-                    !e.target.closest(`[data-act="${anchor}"]`)) {
-                    popup.remove();
-                    document.removeEventListener('click', onDoc, true);
-                }
+    // ── audio sync popup (task 2.8) ───────────────────────────────────
+    // The offset of the CURRENT audio — this embedded track or this dub —
+    // for this title, ±3000 ms (+ = the sound plays later). `onChange(ms)`
+    // stores it (setAudioOffset: remembered via track memory, applied with a
+    // seamless restart at the same position once the user stops changing it).
+    // `label` names the audio it is for.
+    function openAudioSyncPopup(root, anchor, entry, label, onChange) {
+        openPanelPopup(root, anchor, t('hud_sync'), (body, ready) => {
+            if (label) body.appendChild(mkEl('div', 'vp-panel__hint vp-panel__hint--top', label));
+            const fmt = (ms) => (ms > 0 ? '+' : ms < 0 ? '−' : '±') + Math.abs(ms) + ' ' + t('unit_ms');
+            const ctl = panelRow(body, t('sync_offset'));
+            const range = document.createElement('input');
+            range.type = 'range';
+            range.min = String(-AUDIO_OFFSET_MAX); range.max = String(AUDIO_OFFSET_MAX); range.step = '10';
+            range.value = String(entry.audioOffsetMs || 0);
+            range.setAttribute('aria-label', t('sync_offset'));
+            const set = (ms) => {
+                const v = onChange(ms);
+                range.value = String(v);
+                stepper.set(v);
+                return v;
             };
-            document.addEventListener('click', onDoc, true);
-        }, 0);
+            const stepper = panelStepper(ctl, entry.audioOffsetMs || 0,
+                [{ label: '−100', delta: -100 }, { label: '−10', delta: -10 },
+                 { label: '+10', delta: 10 }, { label: '+100', delta: 100 }],
+                fmt, ready, (d) => set((entry.audioOffsetMs || 0) + d));
+            const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
+            reset.type = 'button';
+            reset.addEventListener('click', () => { if (ready()) set(0); });
+            ctl.appendChild(reset);
+            const rangeRow = mkEl('div', 'vp-panel__ctl');
+            rangeRow.appendChild(range);
+            body.appendChild(rangeRow);
+            range.addEventListener('input', () => set(parseInt(range.value, 10) || 0));
+            body.appendChild(mkEl('div', 'vp-panel__hint', t('sync_hint_live')));
+        });
     }
 
     // ── volume slider popup ───────────────────────────────────────────
@@ -2903,10 +2885,10 @@
         up_next_dismiss:    'Dismiss',
         cast_title:         'Send to TV',
         cast_none:          '(No DLNA devices found on the network)',
-        sync_copy:          'HDR / 10-bit (stream-copy)',
-        sync_reencode:      'Standard (re-encode)',
-        sync_external:      'External dub',
-        sync_hint:          'Reopen the video to apply (saves immediately)',
+        sync_offset:        'Offset',
+        sync_hint_live:     '+ plays the sound later, − earlier. Applied in a moment: the stream restarts at the same spot.',
+        unit_ms:            'ms',
+        error_sync:         "Couldn't apply the audio sync, staying on the previous one",
         info_none:          'No media info available',
         info_resolution:    'Resolution',
         info_video:         'Video',
@@ -3203,6 +3185,94 @@
         return { hw, sw };
     }
 
+    // ── Audio sync per audio (task 2.8) ───────────────────────────────
+    // Each audio of a title — an embedded track or a dub — has its own sync
+    // offset (± AUDIO_OFFSET_MAX ms, + = the sound later): remembered in the
+    // profile's track memory (PUT audioOffsetMs) and, while nothing is, a
+    // dub's "DELAY Nms" from its file name. The server applies an offset only
+    // when it starts a stream, on the channel its plan uses (hw = re-encode,
+    // sw = fMP4 copy and every external dub; Direct Play / Direct Stream /
+    // TS copy of the file's own audio take none), so the per-audio value
+    // rides on top of the pipeline baseline above in BOTH channels, and a
+    // change is applied by a seamless restart at the same position.
+    const AUDIO_OFFSET_MAX = 3000;
+    function audioOffsetsFor(ms) {
+        const base = readAudioOffsets();
+        const v = Math.round(Number(ms) || 0);
+        return { hw: base.hw + v, sw: base.sw + v };
+    }
+    /** The offset track defaults name for their audio: remembered, else the
+     *  dub's DELAY from its name, else 0. */
+    function defaultAudioOffset(td) {
+        if (!td || !td.audio) return 0;
+        return td.audioOffsetMs || (td.audio.kind === 'external' && td.audio.delayMs) || 0;
+    }
+    function dubDelayMs(entry, path) {
+        const x = (entry.externalAudioList || []).find(t => samePath(t.path, path));
+        return (x && x.delayMs) || 0;
+    }
+    /** The Sync control changed the current audio's offset: shown at once,
+     *  remembered (debounced PUT), applied by a restart once the user has
+     *  stopped changing it for a moment. Returns the clamped value. */
+    function setAudioOffset(elementId, ms) {
+        const entry = WIRED.get(elementId);
+        if (!entry) return 0;
+        const v = Math.max(-AUDIO_OFFSET_MAX, Math.min(AUDIO_OFFSET_MAX, Math.round((Number(ms) || 0) / 10) * 10));
+        entry.audioOffsetMs = v;
+        queueTrackPrefs(elementId, { audioOffsetMs: v });
+        const kept = keepFor(elementId);
+        clearTimeout(kept.syncTimer);
+        kept.syncTimer = setTimeout(() => applyAudioOffset(elementId), 1200);
+        return v;
+    }
+    async function applyAudioOffset(elementId) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.adapter || (entry.audioOffsetMs || 0) === (entry.streamAudioOffsetMs || 0)) return;
+        // The panel lives in the stream's player element, which the restart
+        // replaces: open it again on the new one if it was up.
+        const wasOpen = !!(entry.hudRoot && entry.hudRoot.querySelector('.vp-hud-popup[data-anchor="offset"]'));
+        const want = entry.audioOffsetMs || 0;
+        const ok = await restartStream(elementId, { audioOffsetMs: want }, 'sync');
+        const now = WIRED.get(elementId);
+        if (!ok) {
+            // Kept the previous stream: it — and the memory — keep its offset.
+            if (now === entry && (entry.audioOffsetMs || 0) === want) {
+                entry.audioOffsetMs = entry.streamAudioOffsetMs || 0;
+                queueTrackPrefs(elementId, { audioOffsetMs: entry.audioOffsetMs });
+            }
+            return;
+        }
+        if (wasOpen && now && now.hud && now.hud.hud) {
+            const btn = now.hud.hud.querySelector('[data-act="offset"]');
+            if (btn && btn.style.display !== 'none') btn.click();
+        }
+    }
+    /** The user picked another audio / dub: remember it, look up ITS sync
+     *  offset (track memory → the dub's DELAY → 0), restart onto it. A switch
+     *  that fails puts the previous choice back into the memory. */
+    async function chooseAudio(elementId, sel) {
+        const entry = WIRED.get(elementId);
+        if (!entry) return false;
+        const ext = (sel && sel.externalAudioPath) || null;
+        const index = ext ? 0 : Math.max(0, (sel && sel.audioTrackIndex) | 0);
+        const prevChoice = audioChoice(entry.currentExternalAudioPath, entry.currentAudIdx);
+        let offsetMs = ext ? dubDelayMs(entry, ext) : 0;
+        if (entry.mediaItemId && queueTrackPrefs(elementId, { audio: audioChoice(ext, index) })) {
+            await flushTrackPrefs(elementId);
+            let td = null;
+            try { td = await entry.dotnetRef.invokeMethodAsync('ResolveTrackPrefs', entry.mediaPath); } catch {}
+            const a = td && td.audio;
+            const same = a && (ext ? a.kind === 'external' && samePath(a.path, ext)
+                                   : a.kind === 'embedded' && (a.index | 0) === index);
+            if (same) offsetMs = defaultAudioOffset(td);
+        }
+        if (WIRED.get(elementId) !== entry) return false;   // closed / next episode meanwhile
+        const ok = await restartStream(elementId,
+            { audioTrackIndex: index, externalAudioPath: ext, audioOffsetMs: offsetMs }, 'audio');
+        if (!ok && entry.mediaItemId) queueTrackPrefs(elementId, { audio: prevChoice });
+        return ok;
+    }
+
     function abortError() {
         try { return new DOMException('aborted', 'AbortError'); }
         catch { const e = new Error('aborted'); e.name = 'AbortError'; return e; }
@@ -3468,6 +3538,11 @@
         // switchQuality so changing quality doesn't silently drop the dub.
         let externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
             ? opts.externalAudioPath : null;
+        // The current audio's own sync offset (2.8): a restart carries it; a
+        // fresh open takes the one MediaDetail's pre-start resolve names for
+        // the audio the start will pick.
+        const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs
+            : usePrefs ? defaultAudioOffset(opts && opts.trackDefaults) : 0;
         if (typeof window.Artplayer !== 'function' || !window.Hls) {
             // Loaded on demand (see PLAYER_LIBS) — usually already warm from
             // MediaDetail's preload(), else this is the first-use fetch.
@@ -3489,6 +3564,9 @@
             totalDuration: 0, resumeOffset: 0, hud: null, clockTimer: null,
             mediaInfo: null, subtitleList: [], audioList: [],
             currentSubIdx: null, currentAudIdx: audioTrackIndex,
+            // Sync offset of the current audio: what the Sync control shows /
+            // the next start sends, and what this stream was started with.
+            audioOffsetMs, streamAudioOffsetMs: audioOffsetMs,
             currentMaxHeight: maxHeight,
             currentMaxBitrate: maxBitrate,
             // External-track state. currentExternalAudioPath != null means the
@@ -3510,7 +3588,7 @@
         // open's retry is a fresh open again: the profile picks the audio).
         const retryOpts = (resumeAt) => ({
             audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
-            forceResumeSec: resumeAt, usePrefs,
+            forceResumeSec: resumeAt, usePrefs, audioOffsetMs,
             trackDefaults: opts && opts.trackDefaults,
         });
 
@@ -3535,8 +3613,8 @@
         }
         if (stale()) return;
 
-        // ── 2) Audio-sync offsets (see readAudioOffsets) + client caps ─
-        const offsets = readAudioOffsets();
+        // ── 2) Audio-sync offsets (audioOffsetsFor) + client caps ─────
+        const offsets = audioOffsetsFor(audioOffsetMs);
         // Usually cached already (preload / an earlier attach); a first-ever
         // probe gets a short budget, after which the start goes without.
         const caps = await clientCapsWithin(1200);
@@ -3613,6 +3691,10 @@
                 entry.currentAudIdx = audioTrackIndex;
                 entry.currentExternalAudioPath = externalAudioPath;
             }
+            // The pre-start resolve missed (or disagreed): the right offset
+            // comes in with the next restart (scheduled once the HUD is up).
+            const want = defaultAudioOffset(td);
+            if (started.trackDefaults && want !== audioOffsetMs) entry.audioOffsetMs = want;
         }
         if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
             showStartError(elementId, el, entry, { reason: t('error_empty') },
@@ -4101,9 +4183,10 @@
             },
             getView: () => ({ zoom: entry.zoom || 1, pan: entry.pan || 0 }),
             offset: () => {
-                if (!offsetChannel || !window.animarrCalibrate) return;
-                openOffsetPopup(hudRoot, 'offset', offsetChannel,
-                    entry.currentExternalAudioPath ? t('sync_external') : null);
+                if (!offsetChannel) return;
+                const cur = buildAudioOptions(entry).find(o => o.current);
+                openAudioSyncPopup(hudRoot, 'offset', entry, cur ? cur.label : '',
+                    (ms) => setAudioOffset(elementId, ms));
             },
             audio: () => {
                 const aopts = buildAudioOptions(entry);
@@ -4118,16 +4201,12 @@
                         // tear the session down and restart, mapping either the
                         // chosen in-file stream (`-map 0:a:N`) or the external
                         // dub file (`-map 1:a:0`), carrying the position over.
-                        switchAudio(elementId, {
+                        // Remembered for the title, with its own sync offset
+                        // (chooseAudio; a failed switch puts the previous
+                        // audio back into the memory).
+                        chooseAudio(elementId, {
                             audioTrackIndex:   o.kind === 'embedded' ? o.index : 0,
                             externalAudioPath: o.kind === 'external' ? o.path : null,
-                        }).then((ok) => {
-                            // Remembered for the title once it actually plays
-                            // (a failed switch keeps — and keeps remembering —
-                            // the previous audio).
-                            if (ok) queueTrackPrefs(elementId, {
-                                audio: audioChoice(o.kind === 'external' ? o.path : null, o.index),
-                            });
                         });
                     });
             },
@@ -4252,6 +4331,11 @@
 
         // Hide buttons that don't apply to current playback.
         hudCtl.setOffsetEnabled(!!offsetChannel);
+        // A remembered sync offset the start didn't carry (see the track
+        // defaults above): apply it now, seamlessly.
+        if (offsetChannel && (entry.audioOffsetMs || 0) !== (entry.streamAudioOffsetMs || 0)) {
+            setTimeout(() => { if (WIRED.get(elementId) === entry) applyAudioOffset(elementId); }, 600);
+        }
         // Initial volume icon + wire the mute toggle (hotkey 'm' or external
         // changes) to keep the icon in sync.
         hudCtl.setVolumeIcon(adapter.volume, adapter.muted);
@@ -4316,6 +4400,10 @@
                     aParts.push((core ? core + ' · ' : '') + t('track_external'));
                 }
                 if (aParts.length) lines.push(t('info_audio') + ': ' + aParts.join(' · '));
+                // The audio's own sync offset (2.8), when it has one.
+                if (entry.streamAudioOffsetMs)
+                    lines.push(t('hud_sync') + ': ' + (entry.streamAudioOffsetMs > 0 ? '+' : '−')
+                        + Math.abs(entry.streamAudioOffsetMs) + ' ' + t('unit_ms'));
                 // What was chosen in the Quality menu, then how the server
                 // delivers it and why (plan 4.2 — the same on the button).
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
@@ -4635,6 +4723,7 @@
             externalAudioPath: entry.currentExternalAudioPath || null,
             maxHeight:         entry.currentMaxHeight || 0,
             maxBitrate:        entry.currentMaxBitrate || 0,
+            audioOffsetMs:     entry.audioOffsetMs || 0,
         };
     }
 
@@ -4695,7 +4784,7 @@
      * one's start, and Back / Next / close (detach) make it stale, so a late
      * answer stops its own session instead of resurrecting a player.
      *
-     * @param {'audio'|'quality'} kind  Picks the failure message.
+     * @param {'audio'|'quality'|'sync'} kind  Picks the failure message.
      * @returns {Promise<boolean>} true once the new plan plays (false: kept
      *                              the previous one, superseded, or stale).
      */
@@ -4721,7 +4810,7 @@
         try {
             started = await startStream(entry.mediaPath,
                 Object.assign({
-                    resumeSec: snap.pos, offsets: readAudioOffsets(), caps: CAPS,
+                    resumeSec: snap.pos, offsets: audioOffsetsFor(plan.audioOffsetMs), caps: CAPS,
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
                 }, plan), ctl.signal);
@@ -4750,7 +4839,7 @@
             return false;
         }
         console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
-        const title  = t(kind === 'audio' ? 'error_audio' : 'error_quality');
+        const title  = t(kind === 'audio' ? 'error_audio' : kind === 'sync' ? 'error_sync' : 'error_quality');
         const detail = (failure && failure.reason) || '';
         // The server keeps the previous session alive until a replacement
         // actually plays, so this is normally true and the old stream simply
@@ -4775,9 +4864,14 @@
      * position, keeping the quality caps — see restartStream.
      */
     async function switchAudio(elementId, sel) {
+        const entry = WIRED.get(elementId);
+        const ext = (sel && sel.externalAudioPath) || null;
         return restartStream(elementId, {
             audioTrackIndex:   (sel && Number.isFinite(sel.audioTrackIndex)) ? Math.max(0, sel.audioTrackIndex) : 0,
-            externalAudioPath: (sel && sel.externalAudioPath) || null,
+            externalAudioPath: ext,
+            // That audio's own sync: a dub's DELAY, else none (no memory here —
+            // the user's picks go through chooseAudio).
+            audioOffsetMs:     ext && entry ? dubDelayMs(entry, ext) : 0,
         }, 'audio');
     }
 
