@@ -8,9 +8,26 @@ namespace Animarr.App.Services;
 /// instead of burning the server CPU on the transcode a browser would need.
 ///
 /// Containers are static per Media3 version (the bundled extractors demux
-/// MP4/MKV/WebM/TS/PS/AVI/FLV/Ogg/WAV regardless of device); codecs come from
+/// MP4/MKV/WebM/TS/AVI/FLV/Ogg/WAV regardless of device); codecs come from
 /// <c>MediaCodecList</c> at runtime, so a phone without an AC3 license simply
 /// doesn't advertise "ac3" and the server remuxes audio for it.
+///
+/// Honest about what a TV SoC really plays (B28):
+/// <list type="bullet">
+///   <item>HEVC / AV1 / VP9 count only with a HARDWARE decoder — the software
+///         ones (c2.android.*) list 4K but can't keep up on a TV-class CPU —
+///         and add a <c>&lt;codec&gt;.max=WxH</c> token: the largest picture a
+///         hardware decoder takes (<c>hevc.max=1920x1088</c> on a 1080p
+///         projector SoC). The server ignores tokens it doesn't know.</item>
+///   <item>MPEG-4 Part 2 only with a hardware decoder that has Advanced Simple
+///         Profile (XviD / DivX): the software one is Simple Profile up to
+///         352×288.</item>
+///   <item>No <c>m2ts</c>: Media3's TsExtractor reads 188-byte packets only,
+///         not Blu-ray's 192-byte BDAV packets.</item>
+/// </list>
+/// <see cref="CanDecodeSize"/> applies the same decoder rules to a concrete
+/// picture size, and <see cref="HevcParams"/> derives the clientHevc flags
+/// from them instead of always claiming HEVC Main10.
 /// </summary>
 internal static class TvCodecCaps
 {
@@ -23,11 +40,11 @@ internal static class TvCodecCaps
         var tokens = new List<string>
         {
             // Media3 bundled extractors (device-independent).
-            "mp4", "m4v", "mov", "mkv", "webm", "ts", "m2ts", "avi", "flv", "ogg", "wav",
+            "mp4", "m4v", "mov", "mkv", "webm", "ts", "avi", "flv", "ogg", "wav",
         };
 
         // mime → server token. Decoder presence probed per-device below.
-        (string Mime, string Token)[] probes =
+        (string Mime, string Token)[] video =
         {
             ("video/avc",           "h264"),
             ("video/hevc",          "hevc"),
@@ -36,6 +53,9 @@ internal static class TvCodecCaps
             ("video/x-vnd.on2.vp8", "vp8"),
             ("video/x-vnd.on2.vp9", "vp9"),
             ("video/av01",          "av1"),
+        };
+        (string Mime, string Token)[] audio =
+        {
             ("audio/mp4a-latm",     "aac"),
             ("audio/mpeg",          "mp3"),
             ("audio/ac3",           "ac3"),
@@ -50,37 +70,21 @@ internal static class TvCodecCaps
 
         try
         {
+            foreach (var (mime, token) in video)
+            {
+                var usable = Usable(mime);
+                LogDecoders(mime, usable);
+                if (usable.Count == 0) continue;
+                tokens.Add(token);
+                if (HwOnly.Contains(mime) && MaxSize(usable) is { } max) tokens.Add($"{token}.max={max}");
+            }
+            // HEVC Main10 → the separate "hevc10" token (10-bit HDR gate).
+            if (Usable("video/hevc").Any(d => Has10BitProfile("video/hevc", d.Caps))) tokens.Add("hevc10");
+
             var list = new global::Android.Media.MediaCodecList(global::Android.Media.MediaCodecListKind.RegularCodecs);
             var infos = list.GetCodecInfos();
-            bool hevc10 = false;
-            foreach (var (mime, token) in probes)
-            {
-                var supported = false;
-                foreach (var info in infos)
-                {
-                    if (info.IsEncoder) continue;
-                    string[] types;
-                    try { types = info.GetSupportedTypes(); } catch { continue; }
-                    if (!types.Any(t => string.Equals(t, mime, StringComparison.OrdinalIgnoreCase)))
-                        continue;
-                    supported = true;
-                    // HEVC Main10 → the separate "hevc10" token (10-bit HDR gate).
-                    if (token == "hevc")
-                    {
-                        try
-                        {
-                            var caps = info.GetCapabilitiesForType(mime);
-                            if (caps?.ProfileLevels?.Any(p =>
-                                    (int)p.Profile == (int)global::Android.Media.MediaCodecProfileType.Hevcprofilemain10) == true)
-                                hevc10 = true;
-                        }
-                        catch { }
-                    }
-                    break;
-                }
-                if (supported) tokens.Add(token);
-            }
-            if (hevc10) tokens.Add("hevc10");
+            foreach (var (mime, token) in audio)
+                if (infos.Any(i => !i.IsEncoder && SupportsType(i, mime))) tokens.Add(token);
         }
         catch
         {
@@ -92,8 +96,8 @@ internal static class TvCodecCaps
         // media3-ffmpeg-decoder): the player falls back to it when the SoC has
         // no MediaCodec decoder, so these files can Direct Play as-is instead
         // of a server-side AAC 2.0 remux.
-        foreach (var (mime, token) in probes)
-            if (mime.StartsWith("audio/", StringComparison.Ordinal) && FfmpegSupports(mime))
+        foreach (var (mime, token) in audio)
+            if (FfmpegSupports(mime))
                 tokens.Add(token);
         if (FfmpegSupports("audio/vnd.dts.hd")) tokens.Add("dts");
 
@@ -107,14 +111,25 @@ internal static class TvCodecCaps
         return _cached;
     }
 
-    /// <summary>False when the device has decoders for <paramref name="codec"/>
-    /// (a server codec name: hevc, h264 …) but none takes a
-    /// <paramref name="width"/>×<paramref name="height"/> picture at
-    /// <paramref name="bitDepth"/> — 4K HEVC Main10 on a 1080p-only SoC, which
-    /// Media3 rejects with NO_EXCEEDS_CAPABILITIES. The bit depth matters: the
+    /// <summary><c>&amp;clientHevc=1</c> / <c>&amp;clientHevc10=1</c> for
+    /// /api/hls/start when this device plays HEVC (Main10) — what the server's
+    /// HLS plans copy instead of re-encoding to H.264. Derived from the same
+    /// probe as the caps: it used to be sent unconditionally.</summary>
+    public static string HevcParams()
+    {
+        var caps = Get().Split(',');
+        return (caps.Contains("hevc") ? "&clientHevc=1" : "") + (caps.Contains("hevc10") ? "&clientHevc10=1" : "");
+    }
+
+    /// <summary>False when no decoder that counts for <paramref name="codec"/>
+    /// (a server codec name: hevc, h264 …; hardware only for HEVC / AV1 / VP9,
+    /// see the class summary) takes a <paramref name="width"/>×<paramref name="height"/>
+    /// picture at <paramref name="bitDepth"/> — 4K HEVC Main10 on a 1080p-only
+    /// SoC, which Media3 rejects with NO_EXCEEDS_CAPABILITIES (or a software
+    /// decoder would play at a few frames a second). The bit depth matters: the
     /// software c2.android.hevc.decoder claims 4096×3072 but decodes Main only.
-    /// Unknown codec or a failed probe → true: let the player try, the runtime
-    /// fallback still catches a failure.</summary>
+    /// Unknown codec, no decoder at all or a failed probe → true: let the
+    /// player try, the runtime fallback still catches a failure.</summary>
     public static bool CanDecodeSize(string? codec, int width, int height, int bitDepth)
     {
 #if ANDROID
@@ -132,28 +147,19 @@ internal static class TvCodecCaps
         if (mime is null || width <= 0 || height <= 0) return true;
         try
         {
-            bool anyDecoder = false;
-            var list = new global::Android.Media.MediaCodecList(global::Android.Media.MediaCodecListKind.RegularCodecs);
-            foreach (var info in list.GetCodecInfos())
+            if (!Decoders().TryGetValue(mime, out var all) || all.Count == 0) return true;
+            foreach (var d in Usable(mime))
             {
-                if (info.IsEncoder) continue;
-                string[] types;
-                try { types = info.GetSupportedTypes(); } catch { continue; }
-                if (!types.Any(t => string.Equals(t, mime, StringComparison.OrdinalIgnoreCase)))
-                    continue;
-                anyDecoder = true;
-                var caps = info.GetCapabilitiesForType(mime);
-                var video = caps?.VideoCapabilities;
-                if (video is null) return true;
+                var vc = d.Caps.VideoCapabilities;
+                if (vc is null) return true;
                 // Media3 also accepts the rotated size (portrait-encoded video).
-                if (!video.IsSizeSupported(width, height) && !video.IsSizeSupported(height, width))
-                    continue;
-                if (bitDepth >= 10 && !Has10BitProfile(mime, caps!)) continue;
+                if (!vc.IsSizeSupported(width, height) && !vc.IsSizeSupported(height, width)) continue;
+                if (bitDepth >= 10 && !Has10BitProfile(mime, d.Caps)) continue;
                 return true;
             }
-            if (anyDecoder)
-                global::Android.Util.Log.Info("Animarr.Caps", $"{codec} {width}x{height} exceeds every decoder");
-            return !anyDecoder;
+            global::Android.Util.Log.Info("Animarr.Caps",
+                $"{codec} {width}x{height} {bitDepth}-bit exceeds every {(HwOnly.Contains(mime) ? "hardware " : "")}decoder");
+            return false;
         }
         catch { return true; }
 #else
@@ -162,6 +168,108 @@ internal static class TvCodecCaps
     }
 
 #if ANDROID
+    /// <summary>Codecs a TV-class CPU can't decode in software at video
+    /// resolutions: only hardware decoders count.</summary>
+    private static readonly HashSet<string> HwOnly = new(StringComparer.Ordinal)
+        { "video/hevc", "video/av01", "video/x-vnd.on2.vp9" };
+
+    /// <summary>MediaCodecInfo.CodecProfileLevel.MPEG4ProfileAdvancedSimple.</summary>
+    private const int Mpeg4ProfileAdvancedSimple = 0x8000;
+
+    private sealed record VideoDecoder(string Name, bool Hardware,
+        global::Android.Media.MediaCodecInfo.CodecCapabilities Caps);
+
+    private static readonly object s_lock = new();
+    private static Dictionary<string, List<VideoDecoder>>? s_decoders;
+
+    /// <summary>Every video decoder by mime type (MediaCodecList is read once).</summary>
+    private static Dictionary<string, List<VideoDecoder>> Decoders()
+    {
+        lock (s_lock)
+        {
+            if (s_decoders is not null) return s_decoders;
+            var map = new Dictionary<string, List<VideoDecoder>>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var list = new global::Android.Media.MediaCodecList(global::Android.Media.MediaCodecListKind.RegularCodecs);
+                foreach (var info in list.GetCodecInfos())
+                {
+                    if (info.IsEncoder) continue;
+                    string[] types;
+                    try { types = info.GetSupportedTypes(); } catch { continue; }
+                    foreach (var t in types)
+                    {
+                        if (!t.StartsWith("video/", StringComparison.OrdinalIgnoreCase)) continue;
+                        global::Android.Media.MediaCodecInfo.CodecCapabilities? caps;
+                        try { caps = info.GetCapabilitiesForType(t); } catch { continue; }
+                        if (caps is null) continue;
+                        if (!map.TryGetValue(t, out var l)) map[t] = l = new();
+                        l.Add(new VideoDecoder(info.Name, IsHardware(info), caps));
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                global::Android.Util.Log.Warn("Animarr.Caps", $"MediaCodecList failed: {ex.Message}");
+            }
+            return s_decoders = map;
+        }
+    }
+
+    /// <summary>The decoders that count for <paramref name="mime"/>.</summary>
+    private static List<VideoDecoder> Usable(string mime)
+    {
+        if (!Decoders().TryGetValue(mime, out var all)) return new();
+        if (HwOnly.Contains(mime)) return all.Where(d => d.Hardware).ToList();
+        if (mime == "video/mp4v-es")
+            return all.Where(d => d.Hardware && d.Caps.ProfileLevels?.Any(p => (int)p.Profile == Mpeg4ProfileAdvancedSimple) == true).ToList();
+        return all;
+    }
+
+    /// <summary>API 29+: the platform's flag. Before that, Media3's name rule
+    /// (MediaCodecUtil.isSoftwareOnly): OMX.google / c2.android / c2.google,
+    /// OMX.ffmpeg, Samsung's *.sw.*, and anything outside the OMX. / c2.
+    /// namespaces are software.</summary>
+    private static bool IsHardware(global::Android.Media.MediaCodecInfo info)
+    {
+        if (OperatingSystem.IsAndroidVersionAtLeast(29)) return info.IsHardwareAccelerated;
+        var n = (info.Name ?? "").ToLowerInvariant();
+        if (n.StartsWith("arc.", StringComparison.Ordinal)) return true;
+        bool software = n.StartsWith("omx.google.", StringComparison.Ordinal)
+                        || n.StartsWith("omx.ffmpeg.", StringComparison.Ordinal)
+                        || (n.StartsWith("omx.sec.", StringComparison.Ordinal) && n.Contains(".sw."))
+                        || n == "omx.qcom.video.decoder.hevcswvdec"
+                        || n.StartsWith("c2.android.", StringComparison.Ordinal)
+                        || n.StartsWith("c2.google.", StringComparison.Ordinal)
+                        || (!n.StartsWith("omx.", StringComparison.Ordinal) && !n.StartsWith("c2.", StringComparison.Ordinal));
+        return !software;
+    }
+
+    private static bool SupportsType(global::Android.Media.MediaCodecInfo info, string mime)
+    {
+        try { return info.GetSupportedTypes().Any(t => string.Equals(t, mime, StringComparison.OrdinalIgnoreCase)); }
+        catch { return false; }
+    }
+
+    /// <summary>The largest common picture any of <paramref name="decoders"/>
+    /// takes, as "WxH".</summary>
+    private static string? MaxSize(List<VideoDecoder> decoders)
+    {
+        (int W, int H)[] sizes = { (7680, 4320), (4096, 2160), (3840, 2160), (2560, 1440), (1920, 1088), (1920, 1080), (1280, 720) };
+        foreach (var (w, h) in sizes)
+            if (decoders.Any(d => d.Caps.VideoCapabilities?.IsSizeSupported(w, h) == true)) return $"{w}x{h}";
+        var vc = decoders.Select(d => d.Caps.VideoCapabilities).FirstOrDefault(v => v is not null);
+        return vc is null ? null : $"{(int)vc.SupportedWidths!.Upper!}x{(int)vc.SupportedHeights!.Upper!}";
+    }
+
+    private static void LogDecoders(string mime, List<VideoDecoder> usable)
+    {
+        if (!Decoders().TryGetValue(mime, out var all) || all.Count == 0) return;
+        var desc = string.Join(", ", all.Select(d =>
+            $"{d.Name}[{(d.Hardware ? "hw" : "sw")} ≤{MaxSize(new List<VideoDecoder> { d }) ?? "?"}{(Has10BitProfile(mime, d.Caps) && mime is "video/hevc" or "video/x-vnd.on2.vp9" ? " 10-bit" : "")}]"));
+        global::Android.Util.Log.Info("Animarr.Caps", $"{mime}: {desc} → {(usable.Count > 0 ? "advertised" : "not advertised")}");
+    }
+
     private static bool Has10BitProfile(string mime, global::Android.Media.MediaCodecInfo.CodecCapabilities caps)
     {
         // MediaCodecInfo.CodecProfileLevel values: HEVC Main10 / Main10HDR10 /

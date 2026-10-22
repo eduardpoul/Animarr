@@ -465,7 +465,7 @@ public partial class PlayerPage : ContentPage
             var seekSec = resumeMs / 1000;
             trackParams = AudioStartParams(maxHeight);
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
-                      $"&seek={seekSec}&maxHeight={maxHeight}&clientHevc=1&clientHevc10=1" + trackParams;
+                      $"&seek={seekSec}&maxHeight={maxHeight}" + Services.TvCodecCaps.HevcParams() + trackParams;
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
@@ -477,7 +477,8 @@ public partial class PlayerPage : ContentPage
             }
 
             Log($"start #{gen}: seek={seekSec} maxHeight={maxHeight} play={play}" +
-                (trackParams.Length > 0 && _audio is { } sentAudio ? $" audio={DescribeAudio(sentAudio)}" : ""));
+                (trackParams.Length > 0 && _audio is { } sentAudio ? $" audio={DescribeAudio(sentAudio)}" : "") +
+                $"{Services.TvCodecCaps.HevcParams().Replace('&', ' ')}{(capsSent ? " +caps" : "")}");
             // Two attempts, like the web player, but only where a second try
             // can help: a network error or a 5xx such as start_failed /
             // too_many_sessions (a start racing the cleanup of the previous
