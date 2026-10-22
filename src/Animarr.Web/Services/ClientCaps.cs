@@ -68,11 +68,24 @@ public sealed class ClientCaps
     public bool Has(string token) => _tokens.Contains(token);
 
     /// <summary>The decoder size limit of a codec token (hevc10 falls back to
-    /// hevc's); null = none reported.</summary>
+    /// hevc's); null = none reported. A video codec without a limit of its own,
+    /// from a client that reported limits for others, gets the largest of
+    /// those: a device whose HEVC/AV1/VP9 decoders stop at 1080p doesn't take
+    /// 4K AVC either — the projector (h264 sent without a size) failed a
+    /// 3840×2160 H.264 re-encode with NO_EXCEEDS_CAPABILITIES.</summary>
     public (int W, int H)? SizeLimit(string codec)
-        => _sizes.TryGetValue(codec, out var s) ? s
-         : codec == "hevc10" && _sizes.TryGetValue("hevc", out var h) ? h
-         : null;
+    {
+        if (_sizes.TryGetValue(codec, out var s)) return s;
+        if (codec == "hevc10" && _sizes.TryGetValue("hevc", out var h)) return h;
+        if (_sizes.Count == 0 || !VideoCodecTokens.Contains(codec)) return null;
+        (int W, int H) largest = (0, 0);
+        foreach (var v in _sizes.Values)
+            if ((long)v.W * v.H > (long)largest.W * largest.H) largest = v;
+        return largest;
+    }
+
+    private static readonly HashSet<string> VideoCodecTokens = new(StringComparer.Ordinal)
+        { "h264", "hevc", "hevc10", "av1", "vp9", "vp8", "mpeg4", "mpeg2" };
 
     /// <summary>Whether a <paramref name="width"/>×<paramref name="height"/>
     /// frame fits the codec's reported decoder limit (either orientation —
