@@ -1387,9 +1387,11 @@ public sealed partial class HlsSessionService : IDisposable
                 _logger.LogWarning(
                     "HLS {Token}: ffmpeg exited (code {Code}) before producing the first segment — plan={Plan}, source={Path}. stderr tail:\n{Tail}",
                     token, code, plan, fullPath, stderrTail.Text is { Length: > 0 } t ? t : "(empty)");
-                var why = stderrTail.LastLine;
+                // The reason stays in the log (the stderr tail above): an
+                // ffmpeg line names server paths and build details, so the
+                // client gets the code and a generic message only.
                 throw new StartFailedException(StartFailedException.FfmpegExited, StatusCodes.Status500InternalServerError,
-                    $"ffmpeg exited (code {code}) before producing the first segment" + (why is null ? "." : $": {why}"));
+                    $"ffmpeg exited (code {code}) before producing the first segment.");
             }
             if (DateTime.UtcNow >= hardDeadline)
             {
