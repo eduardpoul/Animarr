@@ -16,6 +16,10 @@
 
 .nur__row {
     display: flex;
+    /* Top-aligned: a card without the "S1 · E1" line (a movie) used to be
+       stretched to its neighbours' height and the <button> centred its
+       content, pushing the artwork half a line down. */
+    align-items: flex-start;
     gap: var(--space-6);
     overflow-x: auto;
     padding-bottom: 6px;
@@ -30,6 +34,9 @@
 
 .nur__card {
     flex: 0 0 auto;
+    /* Column from the top — a <button> centres its content vertically. */
+    display: flex;
+    flex-direction: column;
     width: 220px;
     padding: 0;
     background: transparent;
@@ -109,6 +116,8 @@
     text-overflow: ellipsis;
 }
 .nur__sub {
+    /* Kept even when empty (movies) so every card is the same height. */
+    min-height: 16px;
     font-size: 12px;
     line-height: 16px;
     color: var(--text-dim);
