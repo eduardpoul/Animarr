@@ -27,11 +27,26 @@ public sealed partial class HlsSessionService
     /// of a lossless track would otherwise fill the session dir to EOF.</summary>
     private const int AudioRunWindowSegments = 45;
 
-    /// <summary>Rendition ffmpeg runs one session keeps at once: the one being
-    /// played and the one being switched to. The playlist route is a
-    /// capability URL — without a cap a client could start a run of every
-    /// a{N} / x{N} at once.</summary>
-    private const int MaxRenditionRuns = 2;
+    /// <summary>Rendition ffmpeg runs one session keeps at once. The playlist
+    /// route is a capability URL — without a cap a client could start a run of
+    /// every a{N} / x{N} at once — but it can't be as low as "played + switched
+    /// to": Media3 prepares EVERY rendition at start by loading its first chunk
+    /// (the variant's CODECS lists several audio codecs, so it can't map them
+    /// to renditions without looking), and with a cap of 2 those runs evicted
+    /// each other before producing that chunk → 503/500 and no playback (a
+    /// 9-track BD remux on the projector). The extra runs go idle and stop
+    /// after <see cref="AudioRunIdle"/>.</summary>
+    private const int MaxRenditionRuns = 12;
+
+    /// <summary><see cref="Process.HasExited"/> that treats a disposed or
+    /// never-started process as exited: another request may dispose a
+    /// rendition's previous run while this one still holds a reference
+    /// (HasExited then throws "No process is associated with this object").</summary>
+    private static bool HasExitedSafe(Process p)
+    {
+        try { return p.HasExited; }
+        catch (InvalidOperationException) { return true; }
+    }
 
     /// <summary>A rendition nobody asked for this long has its ffmpeg stopped
     /// (the player switched away); the next request restarts it.</summary>
@@ -354,8 +369,8 @@ public sealed partial class HlsSessionService
             FinalizeRendition(r);
             if (File.Exists(full)) return full;
             var p = r.Proc;
-            if (p is null || (p.HasExited && SafeExitCode(p) != 0)) return null;
-            if (p.HasExited)
+            if (p is null || (HasExitedSafe(p) && SafeExitCode(p) != 0)) return null;
+            if (HasExitedSafe(p))
             {
                 FinalizeRendition(r);
                 return File.Exists(full) ? full : null;
@@ -378,15 +393,18 @@ public sealed partial class HlsSessionService
             if (session.Stopped) return;
             var p = r.Proc;
             int top = RenditionTop(r);
-            bool keep = p is not null && !p.HasExited && target >= r.RunStart && target < r.RunEnd
+            bool keep = p is not null && !HasExitedSafe(p) && target >= r.RunStart && target < r.RunEnd
                         && target <= top + RestartThresholdSegments;
             if (keep) return;
-            if (p is not null && p.HasExited && SafeExitCode(p) == 0 && target >= r.RunStart && target <= top) return;
+            if (p is not null && HasExitedSafe(p) && SafeExitCode(p) == 0 && target >= r.RunStart && target <= top) return;
 
-            try { if (p is not null && !p.HasExited) p.Kill(true); } catch { }
+            try { if (p is not null && !HasExitedSafe(p)) p.Kill(true); } catch { }
             if (p is not null)
             {
                 try { using var c = new CancellationTokenSource(2000); await p.WaitForExitAsync(c.Token); } catch { }
+                // Unlink before disposing, so no other request picks up a
+                // disposed Process from r.Proc.
+                lock (r.FinalizeLock) { if (ReferenceEquals(r.Proc, p)) r.Proc = null; }
                 try { p.Dispose(); } catch { }
             }
             // Stopped while the old run was being killed: no new run, and no
@@ -398,7 +416,7 @@ public sealed partial class HlsSessionService
             // Make room: the least recently requested other runs stop first
             // (and are gone before this one starts).
             var others = session.Renditions!
-                .Where(o => !ReferenceEquals(o, r) && o.Proc is { HasExited: false })
+                .Where(o => !ReferenceEquals(o, r) && o.Proc is { } op && !HasExitedSafe(op))
                 .OrderBy(o => o.LastRequest).ToList();
             for (int i = 0; i <= others.Count - MaxRenditionRuns; i++)
             {
@@ -608,7 +626,7 @@ public sealed partial class HlsSessionService
             var p = r.Proc;
             if (p is null) continue;
             bool idle = DateTime.UtcNow - r.LastRequest > AudioRunIdle;
-            if (!p.HasExited && idle && r.RunLock.Wait(0))
+            if (!HasExitedSafe(p) && idle && r.RunLock.Wait(0))
             {
                 try
                 {
@@ -617,7 +635,7 @@ public sealed partial class HlsSessionService
                 }
                 finally { r.RunLock.Release(); }
             }
-            else if (p.HasExited && SafeExitCode(p) == 0 && !idle && r.RunEnd < session.SegmentCount
+            else if (HasExitedSafe(p) && SafeExitCode(p) == 0 && !idle && r.RunEnd < session.SegmentCount
                      && r.Frontier >= r.RunEnd - AudioRunPrefetchSegments && r.RunLock.CurrentCount > 0)
             {
                 var next = r.RunEnd;
@@ -638,7 +656,7 @@ public sealed partial class HlsSessionService
         foreach (var r in session.Renditions)
         {
             if (r.Proc is not { } p) continue;
-            try { if (!p.HasExited) p.Kill(true); } catch { }
+            try { if (!HasExitedSafe(p)) p.Kill(true); } catch { }
             procs.Add(p);
         }
         return procs;
