@@ -167,12 +167,15 @@ internal static class HlsEndpoints
                     maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             // localTracks: the client switches the remembered track itself only
-            // on Direct Play; Direct Stream maps 0:a:0, so anything else goes
-            // through the HLS mux with that track.
+            // on Direct Play; anywhere else the server maps it — the Direct
+            // Stream remux takes the track too (B19), so decide again with it.
             if (localAudioIndex > 0 && !(decision.DirectPlay && decision.DirectUrl is not null))
             {
                 audioTrackIndex = localAudioIndex;
-                decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
+                decision = externalAudioFull is null
+                    ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
+                        maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex)
+                    : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             }
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
@@ -198,7 +201,8 @@ internal static class HlsEndpoints
                 return Results.Ok(new
                 {
                     // Direct Stream response: /api/video remuxes the source to
-                    // progressive fMP4 on the fly (video copy + audio→AAC). The
+                    // progressive fMP4 on the fly (video copy, audio copied or
+                    // transcoded — AudioPolicy). The
                     // client plays it on a native <video> — no HLS session, no
                     // keepalive — and seeks by re-requesting at ?seek=N. Video
                     // bitstream + HDR pass through unchanged.
@@ -206,9 +210,10 @@ internal static class HlsEndpoints
                     totalDuration   = decision.DurationSec,
                     resumeSec       = seekSec,
                     output          = decision.Output,
-                    // /api/video carries 0:a:0 only.
+                    // /api/video carries the one track it was asked for.
                     trackDefaults   = TrackPreferenceService.MarkApplied(trackDefaults,
-                        trackDefaults?.Audio is { Kind: TrackPreferenceService.KindEmbedded, Index: 0 }),
+                        trackDefaults?.Audio is { Kind: TrackPreferenceService.KindEmbedded, Index: int dsIndex }
+                        && dsIndex == (audioTrackIndex ?? 0)),
                 });
             }
 
