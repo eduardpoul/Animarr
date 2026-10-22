@@ -444,4 +444,9 @@ public static class AppConfigKeys
     /// Cues next to the media in .animarr, preferred by Direct Play). OFF by
     /// default; started per title by an admin.</summary>
     public const string TvRemuxEnabled = "playback.tv_remux_enabled";
+    /// <summary>"true" levels loudness (EBU R128 gain the server measures per
+    /// audio track / dub) for every profile on every player. OFF by default:
+    /// it squashes cinematic dynamics. Reported to clients as the
+    /// <c>NormalizeVolume</c> field of each profile's preferences.</summary>
+    public const string LoudnessNormalization = "playback.loudness_normalization";
 }

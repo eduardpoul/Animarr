@@ -127,6 +127,7 @@ internal static class AuthEndpoints
         app.MapGet(ApiRoutes.MePreferences, async (
             IUserContext userCtx,
             IDbContextFactory<AppDbContext> dbFactory,
+            IAppConfigService cfg,
             CancellationToken ct) =>
         {
             var uid = userCtx.CurrentUserId;
@@ -140,13 +141,14 @@ internal static class AuthEndpoints
                 db.UserPreferences.Add(prefs);
                 await db.SaveChangesAsync(ct);
             }
-            return Results.Ok(ToDto(prefs));
+            return Results.Ok(ToDto(prefs, await LoudnessNormalizationAsync(cfg, ct)));
         }).RequireAuthorization();
 
         app.MapMethods(ApiRoutes.MePreferences, new[] { "PATCH" }, async (
             UpdatePreferencesRequest req,
             IUserContext userCtx,
             IDbContextFactory<AppDbContext> dbFactory,
+            IAppConfigService cfg,
             CancellationToken ct) =>
         {
             var uid = userCtx.CurrentUserId;
@@ -170,7 +172,7 @@ internal static class AuthEndpoints
             if (req.SubtitleSize is int ss)               prefs.SubtitleSize       = Math.Clamp(ss, 10, 48);
             if (req.DefaultVolume is int vol)             prefs.DefaultVolume      = Math.Clamp(vol, 0, 100);
             if (req.AudioPassthrough is bool ap)          prefs.AudioPassthrough   = ap;
-            if (req.NormalizeVolume is bool nv)           prefs.NormalizeVolume    = nv;
+            // NormalizeVolume is server-wide now (AppConfig) — a client's value is ignored.
             if (req.Language is string lang)              prefs.Language           = lang;
             if (req.Theme is string th)                   prefs.Theme              = ValidateTheme(th);
             if (req.HeroPagerStyle is string hps)         prefs.HeroPagerStyle     = ValidatePagerStyle(hps);
@@ -186,7 +188,7 @@ internal static class AuthEndpoints
             if (req.FillerOverridesJson is string foj)    prefs.FillerOverridesJson = NormalizeFillerOverrides(foj);
             prefs.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
-            return Results.Ok(ToDto(prefs));
+            return Results.Ok(ToDto(prefs, await LoudnessNormalizationAsync(cfg, ct)));
         }).RequireAuthorization();
 
         // ─── Edit own profile (Name / Email / AvatarHue) ───────────────
@@ -607,7 +609,12 @@ internal static class AuthEndpoints
         return app;
     }
 
-    private static UserPreferencesDto ToDto(UserPreferences p) => new(
+    /// <summary>The server-wide loudness levelling switch, reported to every
+    /// profile as <see cref="UserPreferencesDto.NormalizeVolume"/>.</summary>
+    private static async Task<bool> LoudnessNormalizationAsync(IAppConfigService cfg, CancellationToken ct)
+        => string.Equals(await cfg.GetAsync(Animarr.Shared.AppConfigKeys.LoudnessNormalization, ct), "true", StringComparison.OrdinalIgnoreCase);
+
+    private static UserPreferencesDto ToDto(UserPreferences p, bool normalizeVolume) => new(
         p.AccentHue,
         p.BackdropEnabled,
         p.BackdropBlurPx,
@@ -619,7 +626,7 @@ internal static class AuthEndpoints
         p.SubtitleSize,
         p.DefaultVolume,
         p.AudioPassthrough,
-        p.NormalizeVolume,
+        normalizeVolume,
         p.Language,
         ValidateTheme(p.Theme),
         p.HeroPagerStyle,

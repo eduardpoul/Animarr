@@ -104,9 +104,10 @@ public class UserPreferences
     /// echo back in the player's audio-track selection logic).</summary>
     public bool AudioPassthrough { get; set; }
 
-    /// <summary>Apply EBU R128 loudness normalisation. Reduces dynamic range —
-    /// useful for late-night anime watching but loses cinematic mixing.</summary>
-    public bool NormalizeVolume { get; set; } = true;
+    /// <summary>Legacy per-profile flag, no longer read: loudness levelling is
+    /// a server-wide setting (<see cref="Animarr.Shared.AppConfigKeys.LoudnessNormalization"/>,
+    /// off by default) that the preferences DTO reports in its place.</summary>
+    public bool NormalizeVolume { get; set; }
 
     /// <summary>Play the title's theme music (anime OP/ED) when you open its
     /// detail page. Default off — autoplaying audio is intrusive, and browsers

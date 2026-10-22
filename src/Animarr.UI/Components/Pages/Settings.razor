@@ -778,6 +778,7 @@
         var segBlackFrame = Flag(AppConfigKeys.SegmentsBlackFrameEnabled, false);
         var dlnaServer    = Flag(AppConfigKeys.DlnaServerEnabled, false);
         var tvRemux       = Flag(AppConfigKeys.TvRemuxEnabled, false);
+        var loudness      = Flag(AppConfigKeys.LoudnessNormalization, false);
 
         @* UPnP MediaServer for LAN TVs. Opt-in: it can't authenticate its
            clients, so it serves the whole library to the local network. *@
@@ -792,6 +793,14 @@
         <SettingsGroup Title="@L["settings.tv_remux_title"]">
             <SettingsCard Icon="video" Title="@L["settings.tv_remux_label"]" Description="@L["settings.tv_remux_desc"]">
                 <Toggle Checked="@tvRemux" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.TvRemuxEnabled, v))" />
+            </SettingsCard>
+        </SettingsGroup>
+
+        @* Loudness levelling for every profile and player (EBU R128 gain the
+           server measures per track / dub). Off by default. *@
+        <SettingsGroup Title="@L["settings.loudness_title"]">
+            <SettingsCard Icon="audio" Title="@L["settings.loudness_label"]" Description="@L["settings.loudness_desc"]">
+                <Toggle Checked="@loudness" CheckedChanged="@((bool v) => SetFlagAsync(AppConfigKeys.LoudnessNormalization, v))" />
             </SettingsCard>
         </SettingsGroup>
 
