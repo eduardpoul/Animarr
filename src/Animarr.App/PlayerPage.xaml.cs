@@ -534,6 +534,7 @@ public partial class PlayerPage : ContentPage
         string trackParams = "";
         bool capsSent = false;
         bool superseded = false;
+        bool burning = false;
         StartResponse? body = null;
         try
         {
@@ -552,6 +553,7 @@ public partial class PlayerPage : ContentPage
             }
             var seekSec = resumeMs / 1000;
             trackParams = AudioStartParams(maxHeight);
+            burning = BurnStartParam().Length > 0;
             // usePrefs: with no explicit track the server starts with this
             // profile's memory for the title (else the profile's languages /
             // the container flags) and reports it as trackDefaults; localTracks:
@@ -559,7 +561,7 @@ public partial class PlayerPage : ContentPage
             // player selects it in Media3, the file keeps Direct Playing.
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
                       $"&seek={seekSec}&maxHeight={maxHeight}" + Services.TvCodecCaps.HevcParams() + trackParams +
-                      "&usePrefs=1&localTracks=1" +
+                      BurnStartParam() + "&usePrefs=1&localTracks=1" +
                       // What the audio output plays: ≥ 6 keeps 5.1 when the
                       // server has to transcode the audio.
                       $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}";
@@ -717,7 +719,8 @@ public partial class PlayerPage : ContentPage
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
         // Only a start the server was free to Direct Play tells whether it can
         // (track 0 named explicitly doesn't change that).
-        if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent) _directPlayable = directPlay;
+        if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent && !burning)
+            _directPlayable = directPlay;
         _isDirectStream = directStream;
         ClearError();
 
@@ -943,7 +946,7 @@ public partial class PlayerPage : ContentPage
         if (_audio is { Embedded: > 0 } a)
         {
             bool canDirectPlay = maxHeight == 0 && !_forceTranscode && !Bench.BenchLog.Has("nocaps")
-                                 && !_audioNeedsServer.Contains(a.Embedded);
+                                 && !_audioNeedsServer.Contains(a.Embedded) && _sub is not { Burn: true };
             if (!canDirectPlay || _directPlayable == false) return $"&audioTrackIndex={a.Embedded}";
         }
         // Track 0 picked here: say so — without it usePrefs would apply the
@@ -1246,11 +1249,17 @@ public partial class PlayerPage : ContentPage
 
     /// <summary>Subtitle choice: embedded track #Embedded (ffprobe subtitle
     /// order), a sidecar file, or off.</summary>
-    private readonly record struct SubSel(int Embedded, string? External)
+    /// <param name="Burn">Embedded track drawn into the picture by the server
+    /// (burnSubtitle=N, an HLS re-encode) — an image track (PGS / VobSub /
+    /// DVB) on a tier where Media3 can't render it.</param>
+    private readonly record struct SubSel(int Embedded, string? External, bool Burn = false)
     {
         public static SubSel Off => new(-1, null);
         public bool IsOff => Embedded < 0 && External is null;
     }
+
+    /// <summary>The start parameter for a burned-in subtitle ("" otherwise).</summary>
+    private string BurnStartParam() => _sub is { Burn: true, Embedded: >= 0 } b ? $"&burnSubtitle={b.Embedded}" : "";
 
     /// <summary>null = not decided for this file yet (catalog not loaded).</summary>
     private SubSel? _sub;
@@ -1340,7 +1349,7 @@ public partial class PlayerPage : ContentPage
     /// reloaded), Media3's own track (Direct Play, text on), or nothing.</summary>
     private (SideloadSubtitle? Sideload, bool TextOn) BuildSubPlan()
     {
-        if (_sub is not { } s || s.IsOff) return (null, false);
+        if (_sub is not { } s || s.IsOff || s.Burn) return (null, false);   // burned: part of the picture
         if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded))
             return (null, true);   // OnTracksChanged selects the Media3 track
         var rel = SubtitleRelUrl(s);
@@ -1371,7 +1380,7 @@ public partial class PlayerPage : ContentPage
     /// side-load but that isn't known to convert yet; null if none.</summary>
     private string? SideloadToCheck(bool directPlay)
     {
-        if (_sub is not { IsOff: false } s) return null;
+        if (_sub is not { IsOff: false, Burn: false } s) return null;
         if (directPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)) return null;
         return SubtitleRelUrl(s) is { } rel && !_goodSubs.Contains(rel) ? rel : null;
     }
@@ -1440,7 +1449,7 @@ public partial class PlayerPage : ContentPage
         if (NativePlayerService.Instance is not { } nps) return;
         ApplyAudioOnTracks(nps);
         if (_textApplied || _sub is not { } s) return;
-        if (s.IsOff) { _textApplied = true; return; }
+        if (s.IsOff || s.Burn) { _textApplied = true; return; }   // burned: no text track
         var text = nps.GetTextTracks();
         if (text.FirstOrDefault(t => t.Id?.Contains(NativePlayerService.SideloadTrackId) == true) is { } side)
         {
@@ -1500,13 +1509,23 @@ public partial class PlayerPage : ContentPage
     }
 
     private static string DescribeSub(SubSel s) =>
-        s.IsOff ? "off" : s.External is { } p ? $"external {FileName(p)}" : $"embedded #{s.Embedded}";
+        s.IsOff ? "off" : s.External is { } p ? $"external {FileName(p)}" : $"embedded #{s.Embedded}{(s.Burn ? " (burned in)" : "")}";
 
     /// <summary>Apply the current choice to the playing stream (CC sheet, or
     /// a default picked after the stream started).</summary>
     private void ApplySubChoice(SubSel? previous = null)
     {
         if (_sub is not { } s || NativePlayerService.Instance is not { } nps) return;
+        // Into or out of a burned-in subtitle: it's in the picture, so the
+        // stream is restarted at the position (burnSubtitle on or off) — a
+        // re-encode the server makes; a failed start keeps the old stream.
+        if (s.Burn || previous is { Burn: true })
+        {
+            if (s.Burn) FlashInfo("Субтитры вжигаются в картинку — перезапуск потока…");
+            var st = nps.GetState();
+            _ = StartStreamAsync(_streamBaseMs + st.PositionMs, _maxHeight, onFail: () => _sub = previous);
+            return;
+        }
         if (s.IsOff) { _textApplied = true; nps.DisableSubtitles(); return; }
         if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)
             && MapEmbeddedSub(s.Embedded, nps.GetTextTracks()) is { Supported: true } t)
@@ -2057,9 +2076,18 @@ public partial class PlayerPage : ContentPage
         {
             foreach (var s in _probeSubs)
             {
-                if (!SubListable(s, media3)) continue;
-                var sel = new SubSel(s.Index, null);
-                rows.Add(new SheetRow(SubLabel(sel), cur == sel, () => ChooseSub(sel)));
+                if (SubListable(s, media3))
+                {
+                    var sel = new SubSel(s.Index, null);
+                    rows.Add(new SheetRow(SubLabel(sel), cur == sel, () => ChooseSub(sel)));
+                }
+                // An image track Media3 can't show on this tier: the server
+                // draws it into the picture (bench "+burnall": text tracks too).
+                if (!SubListable(s, media3) || Bench.BenchLog.Has("burnall"))
+                {
+                    var burn = new SubSel(s.Index, null, Burn: true);
+                    rows.Add(new SheetRow($"{SubLabel(burn)} · вжечь в картинку", cur == burn, () => ChooseSub(burn)));
+                }
             }
         }
         else
