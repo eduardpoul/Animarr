@@ -1454,10 +1454,6 @@ else
     }
 
     [JSInvokable] public async Task ClosePlayerFromJs() => await InvokeAsync(ClosePlayer);
-    [JSInvokable] public Task ToggleCastMenuFromJs() => Task.CompletedTask;
-    [JSInvokable] public Task<string> GetMpvDeepLink() =>
-        Task.FromResult($"mpv://{ApiRoutes.File}?path={Uri.EscapeDataString(_playerPath ?? "")}");
-    [JSInvokable] public Task ReceiveMediaInfo(System.Text.Json.JsonElement info) => Task.CompletedTask;
 
     private async Task ReidentifyAsync()
     {

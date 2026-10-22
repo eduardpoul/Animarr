@@ -7,47 +7,6 @@
    Tokens scoped to .vp-hud so the rest of the app keeps its own accent.
    ───────────────────────────────────────────────────────────────── */
 
-/* ── Phase 2 native-playback transparency ────────────────────────── */
-/* On Android TV the JS-side NativeAdapter sets body[data-animarr-native]
-   while ExoPlayer is rendering into a TextureView behind the BlazorWebView.
-   The body needs to be transparent on this state so the video shows through.
-   The HUD overlay keeps its own painted backgrounds (gradients on .vp-hud__top
-   / __bottom) so controls remain readable over any frame.
-
-   On non-Android hosts (browser, MAUI desktop, iOS) the body attribute is
-   never set, so the existing dark-chrome backgrounds keep painting. */
-body[data-animarr-native="1"] {
-    background: transparent !important;
-}
-body[data-animarr-native="1"] .vp-art,
-body[data-animarr-native="1"] .vp-backdrop,
-body[data-animarr-native="1"] .vp-shell {
-    background: transparent !important;
-}
-
-/* The rules above only clear the player's OWN containers. The page hosting
-   the player (MediaDetail — poster, synopsis: the whole "movie card") still
-   paints behind the now-transparent .vp-backdrop and OCCLUDES the TextureView,
-   so the user sees the card instead of the video (audio plays, no picture).
-   Fix: hide the entire Blazor app subtree, then re-show ONLY the player
-   overlay (.vp-backdrop + its HUD descendants). visibility:hidden elements
-   don't paint, so the WebView is fully transparent everywhere except the HUD —
-   exposing the ExoPlayer video underneath. The explicit visibility:visible on
-   the overlay subtree overrides the inherited hidden (standard show-one-branch
-   trick) and keeps the HUD interactive (hidden elements drop pointer events,
-   visible ones keep them). */
-/* The :has(.vp-backdrop) guard is a safety net: #app is only hidden while the
-   player overlay actually exists in the DOM. If data-animarr-native ever leaks
-   (attribute not cleared on some teardown path) the app won't be left blank —
-   it un-hides the moment the overlay is gone. */
-body[data-animarr-native="1"]:has(.vp-backdrop) #app {
-    visibility: hidden !important;
-}
-body[data-animarr-native="1"] .vp-backdrop,
-body[data-animarr-native="1"] .vp-backdrop * {
-    visibility: visible !important;
-}
-
 /* ── Page behind the player ───────────────────────────────────────── */
 /* The document itself is the page scroller, so while the full-viewport
    player overlay is up its scrollbar was drawn OVER the video (and the wheel

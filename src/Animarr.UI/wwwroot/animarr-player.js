@@ -21,7 +21,7 @@
     // elementId → entry; see attach() for the shape.
     const WIRED = new Map();
     // elementId → what must outlive a stream restart on the same player element
-    // (audio / quality switch, native → web fallback). A restart tears the WIRED
+    // (audio / quality switch, a fallback rung). A restart tears the WIRED
     // entry down and builds a fresh one, so anything that lived only there —
     // all of setMediaSession's data: HUD title, skip intro/credits segments,
     // up-next + autoplay, trickplay previews, lock-screen metadata, prev/next —
@@ -743,10 +743,10 @@
     // ─────────────────────────────────────────────────────────────────
     //
     // The HUD (attachHud, button callbacks, autoCropIfUltrawide, progress
-    // reporter) talks to an abstract player surface so Phase 2 can swap in
-    // a native ExoPlayer-backed adapter on Android TV without rewriting any
-    // UI code. There's no formal abstract base in JS — adapters duck-type
-    // the following contract:
+    // reporter) talks to an abstract player surface rather than to
+    // Artplayer directly. (The WebView-side native ExoPlayer adapter this
+    // was made for is gone: the TV app plays natively in its own page, and
+    // the gate here was false everywhere.) The contract:
     //
     //   Properties (gettable):
     //     playing      : boolean
@@ -770,13 +770,12 @@
     //     setSubtitleVisible(bool)        → void
     //     setView({aspect, zoom, pan})    → void   (picture geometry)
     //     rawVideoElement()               → HTMLVideoElement|null
-    //                                              (only for canvas sampling
-    //                                               in letterbox detect; null
-    //                                               on native adapter)
+    //                                              (letterbox sampling,
+    //                                               buffered ranges, PiP)
     //     destroy()                       → void
     //
-    // Adapters store any underlying handles (Artplayer instance, hls.js,
-    // ExoPlayer bridge) privately; the HUD never touches them.
+    // The adapter keeps the underlying handles (Artplayer instance, hls.js)
+    // to itself; the HUD never touches them.
 
     /** Wraps an Artplayer 5 instance to expose the abstract surface above.
      *  Maps Artplayer's prefixed event names (`video:timeupdate`) onto the
@@ -984,198 +983,6 @@
         }
     }
 
-    /** Native (ExoPlayer/AVPlayer) adapter. Used on Android TV where
-     *  HDR / Dolby Vision passthrough through the WebView is unreliable;
-     *  the MAUI host (Animarr.App) draws video into a TextureView behind
-     *  the WebView, and the HUD floats on top inside the (now-transparent)
-     *  body. Bridge proxy: window.animarrNativePlayer (see MAUI index.html).
-     *
-     *  No <video> element exists on this path — `rawVideoElement()`
-     *  intentionally returns null so consumers (letterbox detection,
-     *  picture-in-picture) skip over the native adapter.
-     *
-     *  Play position + state come from polling the C# bridge every 250ms;
-     *  changes diff against the previous tick and fire 'timeupdate' /
-     *  'play' / 'pause' / 'ended' / 'durationchange' events to match the
-     *  ArtplayerAdapter contract that attachHud() consumes. */
-    class NativeAdapter {
-        constructor(bridge, opts) {
-            this.bridge = bridge;
-            this.container = opts.container;
-            this._listeners = new Map();
-            // Seed duration from the start-session response so the HUD's
-            // dur label paints right away (before the first poll lands).
-            this._state = {
-                positionMs:  Math.round((opts.resumeSec || 0) * 1000),
-                durationMs:  Math.round((opts.durationSec || 0) * 1000),
-                playing:     false,
-                ended:       false,
-                buffering:   false,
-            };
-            this._poll = null;
-        }
-
-        // Start the bridge playback then begin polling. Async so attach()
-        // can await both calls in sequence.
-        async _start(url, resumeSec) {
-            try { await this.bridge.play(url, { resumeSec }); }
-            catch (e) { console.warn('NativeAdapter: bridge.play failed', e); }
-            this._startPoll();
-        }
-
-        _startPoll() {
-            if (this._poll) return;
-            this._poll = setInterval(async () => {
-                let s;
-                try { s = await this.bridge.getState(); }
-                catch { return; }   // single tick failure — try again next time
-                if (!s) return;
-                const prev = this._state;
-                // The C# bridge sends camelCased keys via System.Text.Json's
-                // default policy: PositionMs → positionMs, Playing → playing.
-                this._state = {
-                    positionMs:    s.positionMs    ?? prev.positionMs,
-                    durationMs:    s.durationMs    ?? prev.durationMs,
-                    playing:       !!s.playing,
-                    ended:         !!s.ended,
-                    buffering:     !!s.buffering,
-                    errorMessage:  s.errorMessage  || null,
-                    actualCodec:   s.actualCodec   || '',
-                    actualBitDepth:s.actualBitDepth|| 0,
-                    actualWidth:   s.actualWidth   || 0,
-                    actualHeight:  s.actualHeight  || 0,
-                };
-                if (this._state.durationMs !== prev.durationMs) this._emit('durationchange');
-                if (this._state.positionMs !== prev.positionMs) this._emit('timeupdate');
-                if ( this._state.playing && !prev.playing)      this._emit('play');
-                if (!this._state.playing &&  prev.playing)      this._emit('pause');
-                if ( this._state.ended   && !prev.ended)        this._emit('ended');
-                // Fatal error transition — non-null Message means the native
-                // player won't recover on its own. We surface it once (diff
-                // against prev) so the HUD can toast / log without spam.
-                if (this._state.errorMessage && this._state.errorMessage !== prev.errorMessage) {
-                    console.error('NativePlayer error:', this._state.errorMessage);
-                    this._emit('error');
-                }
-            }, 250);
-        }
-        _emit(event) {
-            const list = this._listeners.get(event);
-            if (!list) return;
-            for (const fn of list) {
-                try { fn(); } catch (e) { console.warn('native adapter listener threw', e); }
-            }
-        }
-
-        // ── Properties (PlayerAdapter contract) ──────────────────────
-        get playing()       { return this._state.playing; }
-        get currentTime()   { return this._state.positionMs / 1000; }
-        set currentTime(t)  {
-            const ms = Math.max(0, Math.round((t || 0) * 1000));
-            this._state.positionMs = ms;
-            try { this.bridge.seek(ms); } catch {}
-        }
-        get duration()      { return this._state.durationMs / 1000; }
-        // Volume / mute cached locally because ExoPlayer doesn't push a
-        // change event back through our polling path. setter dispatches to
-        // bridge → ExoPlayer.Volume = v. Mute is modelled as volume 0 with
-        // the prev value remembered so un-mute restores.
-        get volume()        { return this._volume ?? 1; }
-        set volume(v)       {
-            const f = Math.max(0, Math.min(1, +v || 0));
-            this._volume = f;
-            try { this.bridge.setVolume(f); } catch {}
-        }
-        get muted()         { return !!this._muted; }
-        set muted(m)        {
-            const mute = !!m;
-            if (mute === this._muted) return;
-            if (mute) {
-                this._volumeBeforeMute = this.volume;
-                this._muted = true;
-                try { this.bridge.setVolume(0); } catch {}
-            } else {
-                this._muted = false;
-                const restore = this._volumeBeforeMute ?? 1;
-                this._volume = restore;
-                try { this.bridge.setVolume(restore); } catch {}
-            }
-        }
-        // Native player is intrinsically fullscreen (TextureView fills
-        // the activity), and Android's window IS fullscreen on TV — so
-        // the FS button is a no-op. We still expose `false` so the icon
-        // doesn't read as "Exit FS" on the HUD.
-        get fullscreen()    { return false; }
-        set fullscreen(_)   { /* no-op — already fullscreen on TV */ }
-
-        // ── Methods (PlayerAdapter contract) ─────────────────────────
-        async play()  { try { await this.bridge.resume(); } catch {} }
-        async pause() { try { await this.bridge.pause();  } catch {} }
-
-        on(event, fn) {
-            if (!this._listeners.has(event)) this._listeners.set(event, []);
-            this._listeners.get(event).push(fn);
-        }
-        off(event, fn) {
-            const list = this._listeners.get(event);
-            if (!list) return;
-            const i = list.indexOf(fn);
-            if (i >= 0) list.splice(i, 1);
-        }
-        once(event, fn) {
-            const wrap = () => { this.off(event, wrap); fn(); };
-            this.on(event, wrap);
-        }
-
-        // Subtitle (sideloaded WebVTT URL from /api/subtitle). Native player
-        // rebuilds the MediaItem on switch — a ~50ms gap, position carries
-        // over. Pass {url: null} to disable.
-        setSubtitle(opts) {
-            try {
-                this.bridge.setSubtitle(opts?.url || null, opts?.lang || null);
-            } catch (e) { console.warn('native setSubtitle failed', e); }
-        }
-        setSubtitleVisible(b) {
-            // ExoPlayer doesn't have a "hide subtitle" toggle separate from
-            // unloading — flipping visible=false means "no subtitle". If the
-            // caller has the URL in mind, calling setSubtitle({url:null})
-            // is the canonical "off". This is here for contract parity.
-            if (!b) { try { this.bridge.setSubtitle(null, null); } catch {} }
-        }
-        setView(view) {
-            const { ratio } = parseAspect(view && view.aspect);
-            try { this.bridge.setAspect(ratio || 'default'); }
-            catch (e) { console.warn('native setAspect failed', e); }
-        }
-
-        rawVideoElement()    { return null; }
-
-        destroy() {
-            if (this._poll) { clearInterval(this._poll); this._poll = null; }
-            try { this.bridge.detach(); } catch {}
-        }
-    }
-
-    /** Availability gate for the native (ExoPlayer/AVPlayer) adapter.
-     *  The MAUI host publishes `window.animarrNativePlayer`; on a plain browser
-     *  there's no such global so this resolves false (web player is used).
-     *
-     *  Async on purpose: the authoritative answer comes from a .NET call
-     *  (NativePlayerIsAvailable), and the Blazor call dispatcher isn't ready
-     *  during early boot — a one-shot boot probe races it and throws "No call
-     *  dispatcher has been set", leaving the native gate permanently off. By
-     *  awaiting this at attach() time (user just hit play) the dispatcher is
-     *  guaranteed ready, so the probe succeeds. Falls back to the cached sync
-     *  getter if the async variant isn't present. */
-    async function isNativeAdapterAvailable() {
-        const np = (typeof window !== 'undefined') ? window.animarrNativePlayer : null;
-        if (!np) return false;
-        if (typeof np.isAvailableAsync === 'function') {
-            try { return !!(await np.isAvailableAsync()); } catch { /* fall through */ }
-        }
-        return !!(typeof np.isAvailable === 'function' && np.isAvailable());
-    }
-
     /** Picks which audio-offset channel applies. Returns 'hw' / 'sw' / null.
      *  Server-side `output.plan` is authoritative — it tells us exactly which
      *  ffmpeg path was picked. Falls back to a probe-derived guess only if
@@ -1249,6 +1056,27 @@
         try { localStorage.setItem('animarr_player_volume', String(v)); } catch {}
     }
 
+    // Playback speed (plan stage 7): 0.5–2×, remembered across opens.
+    const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+    function readRatePref() {
+        try {
+            const v = parseFloat(localStorage.getItem('animarr_player_rate'));
+            if (SPEEDS.includes(v)) return v;
+        } catch {}
+        return 1;
+    }
+    function saveRatePref(v) {
+        try { localStorage.setItem('animarr_player_rate', String(v)); } catch {}
+    }
+    function applyRate(video, r) {
+        if (!video) return;
+        try { video.defaultPlaybackRate = r; video.playbackRate = r; } catch {}
+    }
+    /** "1.5×"; '' for normal speed (no badge). */
+    function speedBadge(rate) {
+        return rate === 1 ? '' : String(rate).replace(/^0\./, '.') + '×';
+    }
+
     // ── SVG icons (feather-style, 18px, stroke-based) ─────────────────
     // Kept as one big map so the icons-only mode renders crisply and both
     // modes look consistent. Each is a 24x24 viewBox so we can re-size
@@ -1271,6 +1099,7 @@
         fsEnter:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V5a2 2 0 0 1 2-2h4"/><path d="M15 3h4a2 2 0 0 1 2 2v4"/><path d="M21 15v4a2 2 0 0 1-2 2h-4"/><path d="M9 21H5a2 2 0 0 1-2-2v-4"/></svg>',
         fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
         info:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5" stroke-width="2.2"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/></svg>',
+        speed:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="M12 13.5 16 9"/><circle cx="12" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>',
         quality:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.7 7.7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.5 6.5 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.5 6.5 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.9 6.9 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>',
         settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 4.32c.42-1.76 2.92-1.76 3.34 0a1.72 1.72 0 0 0 2.58 1.07c1.54-.94 3.3.82 2.37 2.37a1.72 1.72 0 0 0 1.06 2.57c1.76.42 1.76 2.92 0 3.34a1.72 1.72 0 0 0-1.07 2.58c.94 1.54-.82 3.3-2.37 2.37a1.72 1.72 0 0 0-2.57 1.06c-.42 1.76-2.92 1.76-3.34 0a1.72 1.72 0 0 0-2.58-1.07c-1.54.94-3.3-.82-2.37-2.37a1.72 1.72 0 0 0-1.06-2.57c-1.76-.42-1.76-2.92 0-3.34a1.72 1.72 0 0 0 1.07-2.58c-.94-1.54.82-3.3 2.37-2.37a1.72 1.72 0 0 0 2.57-1.06z"/><circle cx="12" cy="12" r="3"/></svg>',
     };
@@ -1302,13 +1131,17 @@
         // The fwd10 button has a sibling `.vp-icon-text` span containing
         // literal "+10"; CSS hides the SVG and shows the text only in icons
         // mode so the action remains readable without a tooltip.
+        // Every string comes from the player.* lang pack (t(); English
+        // defaults in LABEL_DEFAULTS), key hints appended in brackets.
+        const T = (k) => escapeHtml(t(k));
+        const K = (k, key) => escapeHtml(t(k) + ' (' + key + ')');
         return `
 <div class="vp-hud vp-hud--hidden" data-visible="false" data-style="${escapeHtml(style)}">
   <div class="vp-hud__tap"></div>
   <div class="vp-hud__top">
     <button type="button" class="vp-btn vp-btn--g vp-btn--back" data-act="back"
-            aria-label="Back" title="Back (Esc)">
-      <span class="vp-glyph">${I.back}</span><span class="vp-label">Back</span>
+            aria-label="${T('back')}" title="${K('back', 'Esc')}">
+      <span class="vp-glyph">${I.back}</span><span class="vp-label">${T('back')}</span>
     </button>
     <div class="vp-hud__title">
       <div class="vp-hud__kicker" data-bind="kicker"></div>
@@ -1318,7 +1151,7 @@
   </div>
 
   <div class="vp-hud__center">
-    <button class="vp-hud__cplay" data-act="play" aria-label="Play / pause" title="Play / pause (Space)">
+    <button class="vp-hud__cplay" data-act="play" aria-label="${T('hud_play_pause')}" title="${K('hud_play_pause', t('key_space'))}">
       <span class="vp-glyph" data-bind="play-icon">${I.play}</span>
     </button>
   </div>
@@ -1340,85 +1173,90 @@
     <div class="vp-hud__controls">
       <div class="vp-hud__cluster vp-hud__cluster--primary">
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="back10"
-                aria-label="Back 10 seconds" title="Back 10s (←)">
+                aria-label="${T('hud_back10')}" title="${K('hud_back10', '←')}">
           <span class="vp-glyph">${I.back10}</span>
           <span class="vp-icon-text" aria-hidden="true">-10</span>
-          <span class="vp-label">-10s</span>
+          <span class="vp-label">-10 ${T('unit_s')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="prev"
-                aria-label="Previous episode" title="Previous episode (◄◄)">
-          <span class="vp-glyph">${I.prev}</span><span class="vp-label">Prev</span>
+                aria-label="${T('hud_prev')}" title="${K('hud_prev', '◄◄')}">
+          <span class="vp-glyph">${I.prev}</span><span class="vp-label">${T('hud_prev_short')}</span>
         </button>
         <button class="vp-btn vp-btn--p vp-btn--tv" data-act="play"
-                aria-label="Play / pause" title="Play / pause (Space)">
+                aria-label="${T('hud_play_pause')}" title="${K('hud_play_pause', t('key_space'))}">
           <span class="vp-glyph" data-bind="play-icon">${I.play}</span>
-          <span class="vp-label" data-bind="play-label">Play</span>
+          <span class="vp-label" data-bind="play-label">${T('hud_play')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="next"
-                aria-label="Next episode" title="Next episode (►►|)">
-          <span class="vp-glyph">${I.next}</span><span class="vp-label">Next</span>
+                aria-label="${T('hud_next')}" title="${K('hud_next', '►►|')}">
+          <span class="vp-glyph">${I.next}</span><span class="vp-label">${T('hud_next_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="fwd10"
-                aria-label="Forward 10 seconds" title="Forward 10s (→)">
+                aria-label="${T('hud_fwd10')}" title="${K('hud_fwd10', '→')}">
           <span class="vp-glyph">${I.fwd10}</span>
           <span class="vp-icon-text" aria-hidden="true">+10</span>
-          <span class="vp-label">+10s</span>
+          <span class="vp-label">+10 ${T('unit_s')}</span>
         </button>
       </div>
       <div class="vp-hud__cluster vp-hud__cluster--secondary">
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="volume"
-                aria-label="Volume" title="Volume" data-bind="volume-btn">
+                aria-label="${T('hud_volume')}" title="${K('hud_volume', 'M')}" data-bind="volume-btn">
           <span class="vp-glyph" data-bind="volume-icon">${I.volume}</span>
-          <span class="vp-label">Volume</span>
+          <span class="vp-label">${T('hud_volume')}</span>
+        </button>
+        <button class="vp-btn vp-btn--g vp-btn--tv" data-act="speed"
+                aria-label="${T('hud_speed')}" title="${K('hud_speed', '< >')}" data-bind="speed-btn">
+          <span class="vp-glyph">${I.speed}</span><span class="vp-label">${T('hud_speed')}</span>
+          <span class="vp-badge" data-bind="speed-badge" aria-hidden="true"></span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="quality"
-                aria-label="Quality" title="Quality (resolution)" data-bind="quality-btn">
-          <span class="vp-glyph">${I.quality}</span><span class="vp-label">Quality</span>
+                aria-label="${T('quality')}" title="${T('quality')}" data-bind="quality-btn">
+          <span class="vp-glyph">${I.quality}</span><span class="vp-label">${T('quality')}</span>
           <span class="vp-badge" data-bind="quality-badge" aria-hidden="true"></span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="aspect"
-                aria-label="Aspect ratio" title="Aspect ratio">
-          <span class="vp-glyph">${I.aspect}</span><span class="vp-label">Aspect</span>
+                aria-label="${T('picture')}" title="${T('picture')}">
+          <span class="vp-glyph">${I.aspect}</span><span class="vp-label">${T('picture')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cast"
-                aria-label="Cast to TV" title="Send video to TV (DLNA)"
+                aria-label="${T('hud_cast')}" title="${T('hud_cast_hint')}"
                 data-bind="cast-btn">
-          <span class="vp-glyph">${I.cast}</span><span class="vp-label">Cast</span>
+          <span class="vp-glyph">${I.cast}</span><span class="vp-label">${T('hud_cast_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="offset"
-                aria-label="Audio sync" title="Audio sync offset"
+                aria-label="${T('hud_sync')}" title="${T('hud_sync')}"
                 data-bind="offset-btn">
           <span class="vp-glyph">${I.offset}</span>
           <span class="vp-icon-text" aria-hidden="true">AS</span>
-          <span class="vp-label">Sync</span>
+          <span class="vp-label">${T('hud_sync_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="audio"
-                aria-label="Audio tracks" title="Audio tracks">
+                aria-label="${T('hud_audio')}" title="${T('hud_audio')}">
           <span class="vp-glyph">${I.audio}</span>
           <span class="vp-icon-text" aria-hidden="true">AT</span>
-          <span class="vp-label">Audio</span>
+          <span class="vp-label">${T('hud_audio_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cc"
-                aria-label="Subtitles" title="Subtitles">
+                aria-label="${T('subtitles')}" title="${T('subtitles')}">
           <span class="vp-glyph">${I.cc}</span>
           <span class="vp-icon-text" aria-hidden="true">CC</span>
-          <span class="vp-label">CC</span>
+          <span class="vp-label">${T('subtitles')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="info"
-                aria-label="Media info" title="Media info (codec, HDR, audio)">
+                aria-label="${T('hud_info')}" title="${T('hud_info_hint')}">
           <span class="vp-glyph">${I.info}</span>
           <span class="vp-icon-text" aria-hidden="true">i</span>
-          <span class="vp-label">Info</span>
+          <span class="vp-label">${T('hud_info_short')}</span>
         </button>
       </div>
       <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__gear" data-act="settings"
-              aria-label="Settings" title="Settings">
-        <span class="vp-glyph">${I.settings}</span><span class="vp-label">Settings</span>
+              aria-label="${T('hud_settings')}" title="${T('hud_settings')}">
+        <span class="vp-glyph">${I.settings}</span><span class="vp-label">${T('hud_settings')}</span>
       </button>
       <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__fs" data-act="fullscreen"
-              aria-label="Fullscreen" title="Fullscreen (F)" data-bind="fs-btn">
+              aria-label="${T('hud_fullscreen')}" title="${K('hud_fullscreen', 'F')}" data-bind="fs-btn">
         <span class="vp-glyph" data-bind="fs-icon">${I.fsEnter}</span>
-        <span class="vp-label" data-bind="fs-label">Fullscreen</span>
+        <span class="vp-label" data-bind="fs-label">${T('hud_fullscreen')}</span>
       </button>
     </div>
   </div>
@@ -1737,9 +1575,9 @@
         const popup = document.createElement('div');
         popup.className = 'vp-hud-popup vp-hud-popup--info';
         popup.setAttribute('data-anchor', anchor);
-        const rows = (lines && lines.length) ? lines : ['No media info available'];
+        const rows = (lines && lines.length) ? lines : [t('info_none')];
         popup.innerHTML = `
-            <div class="vp-hud-popup__title">Media info</div>
+            <div class="vp-hud-popup__title">${escapeHtml(t('hud_info'))}</div>
             <div class="vp-hud-popup__list">
                 ${rows.map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('')}
             </div>`;
@@ -1773,19 +1611,19 @@
         const min = -200;
         const max = channel === 'sw' ? 700 : 300;
         const label = labelOverride || (channel === 'sw'
-            ? 'HDR / 10-bit (stream-copy)'
-            : 'Standard (re-encode)');
+            ? t('sync_copy')
+            : t('sync_reencode'));
 
         const popup = document.createElement('div');
         popup.className = 'vp-hud-popup vp-hud-popup--slider';
         popup.setAttribute('data-anchor', anchor);
         popup.innerHTML = `
-            <div class="vp-hud-popup__title">Audio sync · ${escapeHtml(label)}</div>
+            <div class="vp-hud-popup__title">${escapeHtml(t('hud_sync'))} · ${escapeHtml(label)}</div>
             <div class="vp-hud-popup__slider-row">
                 <input type="range" min="${min}" max="${max}" step="5" value="${current}">
                 <span class="vp-hud-popup__slider-value">${current} ms</span>
             </div>
-            <div class="vp-hud-popup__hint">Reopen the video to apply (saves immediately)</div>
+            <div class="vp-hud-popup__hint">${escapeHtml(t('sync_hint'))}</div>
         `;
         const range = popup.querySelector('input[type=range]');
         const valueEl = popup.querySelector('.vp-hud-popup__slider-value');
@@ -1826,7 +1664,7 @@
         popup.className = 'vp-hud-popup vp-hud-popup--slider';
         popup.setAttribute('data-anchor', anchor);
         popup.innerHTML = `
-            <div class="vp-hud-popup__title">Volume</div>
+            <div class="vp-hud-popup__title">${escapeHtml(t('hud_volume'))}</div>
             <div class="vp-hud-popup__slider-row">
                 <input type="range" min="0" max="100" step="1" value="${cur}">
                 <span class="vp-hud-popup__slider-value">${cur}%</span>
@@ -1881,8 +1719,8 @@
 
         const labels = (renderers && renderers.length > 0)
             ? renderers.map(r => r.friendlyName || r.modelName || r.udn)
-            : ['(No DLNA devices found on the network)'];
-        openPickerPopup(root, anchor, 'Send to TV', labels,
+            : [t('cast_none')];
+        openPickerPopup(root, anchor, t('cast_title'), labels,
             -1, async (i) => {
                 if (!renderers[i]) return;
                 try {
@@ -2033,11 +1871,8 @@
     }
 
     // ── HUD controller — owns event wiring + DOM updates ──────────────
-    // Takes the abstract `adapter` (PlayerAdapter contract). Phase 1 made
-    // this swap-friendly: the previous version of this function depended on
-    // raw Artplayer API (`art.currentTime`, `art.on('video:…')`); now every
-    // playback interaction goes through the adapter so a future native
-    // ExoPlayer adapter can substitute Artplayer transparently.
+    // Takes the abstract `adapter` (PlayerAdapter contract): every playback
+    // interaction goes through it, never the raw Artplayer API.
     function attachHud(adapter, root, entry, callbacks) {
         const hud = root.querySelector('.vp-hud');
         if (!hud) {
@@ -2059,6 +1894,8 @@
             offsetBtn:  $('[data-bind="offset-btn"]'),
             qualityBtn:   $('[data-bind="quality-btn"]'),
             qualityBadge: $('[data-bind="quality-badge"]'),
+            speedBtn:     $('[data-bind="speed-btn"]'),
+            speedBadge:   $('[data-bind="speed-badge"]'),
             castBtn:    $('[data-bind="cast-btn"]'),
             volumeIcon: $('[data-bind="volume-icon"]'),
             fsIcon:     $('[data-bind="fs-icon"]'),
@@ -2120,18 +1957,20 @@
                 return !b || b.style.display === 'none';
             };
             const rows = [
-                { act: 'cc',      label: 'Subtitles',    run: callbacks.cc },
-                { act: 'audio',   label: 'Audio',        run: callbacks.audio },
+                { act: 'cc',      label: t('subtitles'), run: callbacks.cc },
+                { act: 'audio',   label: t('hud_audio_short'), run: callbacks.audio },
                 // The touch layout hides the Quality button: carry its badge.
-                { act: 'quality', label: 'Quality' + (refs.qualityBadge && refs.qualityBadge.textContent
+                { act: 'quality', label: t('quality') + (refs.qualityBadge && refs.qualityBadge.textContent
                                       ? ' · ' + refs.qualityBadge.textContent : ''), run: callbacks.quality },
-                { act: 'aspect',  label: 'Aspect ratio', run: callbacks.aspect },
-                { act: 'offset',  label: 'Audio sync',   run: callbacks.offset },
-                { act: 'volume',  label: 'Volume',       run: callbacks.volume },
-                { act: 'cast',    label: 'Cast to TV',   run: callbacks.cast },
-                { act: 'info',    label: 'Media info',   run: callbacks.info },
+                { act: 'aspect',  label: t('picture'),   run: callbacks.aspect },
+                { act: 'offset',  label: t('hud_sync'),  run: callbacks.offset },
+                { act: 'volume',  label: t('hud_volume'), run: callbacks.volume },
+                { act: 'speed',   label: t('hud_speed') + (refs.speedBadge && refs.speedBadge.textContent
+                                      ? ' · ' + refs.speedBadge.textContent : ''), run: callbacks.speed },
+                { act: 'cast',    label: t('hud_cast'),  run: callbacks.cast },
+                { act: 'info',    label: t('hud_info'),  run: callbacks.info },
             ].filter(r => !hidden(r.act) && typeof r.run === 'function');
-            openMenuPopup(root, 'settings', 'Settings', rows);
+            openMenuPopup(root, 'settings', t('hud_settings'), rows);
         }
 
         // ── auto-hide ─────────────────────────────────────────────────
@@ -2374,7 +2213,7 @@
                 // device), so reflect that on the FS button instead of the
                 // document-fullscreen state that syncFsIcon watches.
                 if (refs.fsIcon)  refs.fsIcon.innerHTML    = landscape ? I.fsExit  : I.fsEnter;
-                if (refs.fsLabel) refs.fsLabel.textContent = landscape ? 'Exit FS' : 'Fullscreen';
+                if (refs.fsLabel) refs.fsLabel.textContent = t(landscape ? 'hud_exit_fullscreen' : 'hud_fullscreen');
             };
             try { immersiveMql.addEventListener('change', onOrient); }
             catch { try { immersiveMql.addListener(onOrient); } catch {} }  // old WebView
@@ -2446,6 +2285,11 @@
                     toggleFullscreen(adapter);
                     e.preventDefault();
                     break;
+                case '<':
+                case '>':
+                    if (callbacks.speedStep) callbacks.speedStep(e.key === '>' ? 1 : -1);
+                    e.preventDefault();
+                    break;
                 case 'm':
                 case 'M':
                     adapter.muted = !adapter.muted;
@@ -2479,6 +2323,7 @@
                 case 'audio':  callbacks.audio(); break;
                 case 'cc':     callbacks.cc(); break;
                 case 'quality': callbacks.quality(); break;
+                case 'speed':  callbacks.speed(); break;
                 case 'info':   callbacks.info(); break;
                 case 'settings': openSettingsMenu(); break;
                 case 'fullscreen':
@@ -2580,13 +2425,13 @@
         const upNextEl = document.createElement('div');
         upNextEl.className = 'vp-upnext vp-upnext--hidden';
         upNextEl.innerHTML = `
-            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="Close">&times;</button>
+            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="${escapeHtml(t('up_next_dismiss'))}">&times;</button>
             <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
             <div class="vp-upnext__name" data-bind="un-name"></div>
             <div class="vp-upnext__actions">
-              <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">Skip credits</button>
+              <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">${escapeHtml(t('skip_credits'))}</button>
               <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
-                <span data-bind="un-play">Play next</span>
+                <span data-bind="un-play">${escapeHtml(t('up_next_play'))}</span>
               </button>
             </div>`;
         root.appendChild(upNextEl);
@@ -2612,10 +2457,10 @@
             if (upNextShown) return;
             upNextShown = true;
             const m = upNextLabels();
-            unRefs.eyebrow.textContent = m.eyebrow || 'Up next';
+            unRefs.eyebrow.textContent = m.eyebrow || t('up_next');
             unRefs.name.textContent    = m.name || '';
-            unRefs.play.textContent    = m.play || 'Play next';
-            unRefs.skip.textContent    = entry.skipCreditsLabel || 'Skip credits';
+            unRefs.play.textContent    = m.play || t('up_next_play');
+            unRefs.skip.textContent    = entry.skipCreditsLabel || t('skip_credits');
             // Announce phase: force it visible for ANNOUNCE_MS regardless of the
             // HUD, then hand off to "follow the HUD" for the rest of the credits
             // (applyFloatingVisibility — see its comment).
@@ -2656,7 +2501,7 @@
             const canSkip = !skipCreditsUsed && !!(sg && sg.creditsEnd > 0 && (dTime - sg.creditsEnd) > 5 && cTime < sg.creditsEnd);
             unRefs.skip.style.display = canSkip ? '' : 'none';
             const remaining = dTime - cTime;
-            const baseLabel = upNextLabels().play || 'Play next';
+            const baseLabel = upNextLabels().play || t('up_next_play');
             if (remaining <= UP_NEXT_COUNTDOWN) {
                 unRefs.play.textContent = baseLabel + ' · ' + Math.max(0, Math.ceil(remaining));
                 if (remaining <= 0.4) triggerUpNext();
@@ -2730,7 +2575,7 @@
         function updateSkip(cTime) {
             const s = entry.segments;
             if (!skipIntroUsed && s && s.introEnd > 0 && cTime >= (s.introStart || 0) && cTime < s.introEnd) {
-                setSkip(entry.skipIntroLabel || 'Skip intro', s.introEnd);
+                setSkip(entry.skipIntroLabel || t('skip_intro'), s.introEnd);
             } else {
                 hideSkip();
             }
@@ -2757,9 +2602,7 @@
             // End-of-episode autoplay card (credits start → show; last 10s → countdown).
             updateUpNext(cTime, dTime);
             updateSkip(cTime);
-            // Buffered range — only meaningful on the web adapter (raw <video>
-            // exposes TimeRanges). NativeAdapter (Phase 2) returns null from
-            // rawVideoElement so we just skip the buffer paint.
+            // Buffered range (the <video>'s TimeRanges).
             const video = adapter.rawVideoElement();
             if (video && video.buffered && video.buffered.length > 0) {
                 const end = video.buffered.end(video.buffered.length - 1);
@@ -2773,12 +2616,12 @@
         adapter.on('durationchange', updateProgress);
         adapter.on('play',  () => {
             hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.pause; });
-            refs.playLabel.textContent = 'Pause';
+            refs.playLabel.textContent = t('hud_pause');
             show();
         });
         adapter.on('pause', () => {
             hud.querySelectorAll('[data-bind="play-icon"]').forEach(e => { e.innerHTML = I.play; });
-            refs.playLabel.textContent = 'Play';
+            refs.playLabel.textContent = t('hud_play');
             // Paused → keep HUD visible.
             hud.classList.remove('vp-hud--hidden');
             hud.setAttribute('data-visible', 'true');
@@ -2794,7 +2637,7 @@
         function syncFsIcon() {
             const fs = !!document.fullscreenElement;
             if (refs.fsIcon)  refs.fsIcon.innerHTML    = fs ? I.fsExit  : I.fsEnter;
-            if (refs.fsLabel) refs.fsLabel.textContent = fs ? 'Exit FS' : 'Fullscreen';
+            if (refs.fsLabel) refs.fsLabel.textContent = t(fs ? 'hud_exit_fullscreen' : 'hud_fullscreen');
         }
         document.addEventListener('fullscreenchange', syncFsIcon);
         syncFsIcon();
@@ -2831,6 +2674,15 @@
             setMeta(text) { refs.meta.textContent = text || ''; },
             // Quality indicator (plan 4.2): badge text, re-encoded flag, and
             // the button's tooltip / accessible name.
+            // Speed badge ("1.5×", none at 1×) + tooltip.
+            setSpeed(rate) {
+                if (refs.speedBadge) refs.speedBadge.textContent = speedBadge(rate);
+                if (refs.speedBtn) {
+                    const title = t('hud_speed') + ': ' + (rate === 1 ? t('speed_normal') : rate + '×') + ' (< >)';
+                    refs.speedBtn.title = title;
+                    refs.speedBtn.setAttribute('aria-label', title);
+                }
+            },
             setQuality(badge, reencoded, title) {
                 if (refs.qualityBadge) {
                     refs.qualityBadge.textContent = badge || '';
@@ -2927,6 +2779,55 @@
         quality_original:   'Original',
         unit_mbps:          'Mbps',
         info_buffer:        'Buffer: {0} s ahead, {1} s back',
+        // HUD (buttons, tooltips, menus)
+        hud_play_pause:     'Play / pause',
+        hud_play:           'Play',
+        hud_pause:          'Pause',
+        key_space:          'Space',
+        hud_back10:         'Back 10 seconds',
+        hud_fwd10:          'Forward 10 seconds',
+        hud_prev:           'Previous episode',
+        hud_prev_short:     'Prev',
+        hud_next:           'Next episode',
+        hud_next_short:     'Next',
+        hud_volume:         'Volume',
+        hud_speed:          'Speed',
+        speed_normal:       'Normal',
+        hud_cast:           'Cast to TV',
+        hud_cast_hint:      'Send video to a TV (DLNA)',
+        hud_cast_short:     'Cast',
+        hud_sync:           'Audio sync',
+        hud_sync_short:     'Sync',
+        hud_audio:          'Audio tracks',
+        hud_audio_short:    'Audio',
+        hud_info:           'Media info',
+        hud_info_hint:      'Media info (codec, HDR, audio)',
+        hud_info_short:     'Info',
+        hud_settings:       'Settings',
+        hud_fullscreen:     'Fullscreen',
+        hud_exit_fullscreen:'Exit fullscreen',
+        skip_intro:         'Skip intro',
+        skip_credits:       'Skip credits',
+        up_next:            'Up next',
+        up_next_play:       'Play next',
+        up_next_dismiss:    'Dismiss',
+        cast_title:         'Send to TV',
+        cast_none:          '(No DLNA devices found on the network)',
+        sync_copy:          'HDR / 10-bit (stream-copy)',
+        sync_reencode:      'Standard (re-encode)',
+        sync_external:      'External dub',
+        sync_hint:          'Reopen the video to apply (saves immediately)',
+        info_none:          'No media info available',
+        info_resolution:    'Resolution',
+        info_video:         'Video',
+        info_audio:         'Audio',
+        info_playback:      'Playback',
+        info_reason:        'Reason',
+        info_caps:          'Client caps',
+        info_caps_none:     '(not detected)',
+        error_network:      'Network error',
+        error_lib:          'The player library failed to load',
+        error_empty:        'The server sent an empty start response',
         buffer_mobile:      'phone',
         buffer_metered:     'metered connection',
         buffer_saver:       'Data Saver',
@@ -3077,9 +2978,9 @@
     }
     /** One-line summary for the Info popup. */
     function describeCaps(caps) {
-        if (!caps) return 'Client caps: (not detected)';
+        if (!caps) return t('info_caps') + ': ' + t('info_caps_none');
         const uhd = Object.keys(caps.video).filter(t => caps.video[t].maxHeight >= 2160);
-        return 'Client caps: ' + caps.tokens.join(' ')
+        return t('info_caps') + ': ' + caps.tokens.join(' ')
             + (uhd.length ? ' · 4K: ' + uhd.join(',') : '')
             + ' · ' + caps.channels + 'ch'
             + (caps.source === 'mediaCapabilities' ? '' : ' · (canPlayType)');
@@ -3263,7 +3164,7 @@
                 res = await fetch(url, { method: 'POST', signal });
             } catch (err) {
                 if (err && err.name === 'AbortError') throw err;
-                lastErr = Object.assign(new Error('start: network error'), { status: 0, reason: 'Network error' });
+                lastErr = Object.assign(new Error('start: network error'), { status: 0, reason: t('error_network') });
                 continue;
             }
             if (!res.ok) {
@@ -3408,7 +3309,7 @@
 
     /**
      * Build a stream + player in `elementId`. Also the restart path (audio /
-     * quality switch, native fallback), which tears the current stream down
+     * quality switch, fallback rung), which tears the current stream down
      * first and passes the plan to keep:
      * @param {number} [opts.audioTrackIndex]  Index of audio stream in the source
      *                                          (0=first).
@@ -3436,7 +3337,7 @@
         if (opts && opts.labels) LABELS = opts.labels;
         if (opts && opts.uiLang) UI_LANG = String(opts.uiLang);
         if (WIRED.has(elementId)) {
-            // A restart (switchAudio / switchQuality / native fallback) lands
+            // A restart (switchAudio / switchQuality / fallback rung) lands
             // here on purpose; anything else is a missed detach. Either way
             // only the stream goes — KEEP (session metadata) stays.
             teardown(elementId);
@@ -3504,7 +3405,7 @@
 
         if (typeof window.Artplayer !== 'function') {
             console.error('animarrPlayer: Artplayer not loaded from CDN');
-            showStartError(elementId, el, entry, { reason: 'Player library failed to load' },
+            showStartError(elementId, el, entry, { reason: t('error_lib') },
                 () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(forceResumeSec), beginOp(elementId)));
             return;
         }
@@ -3581,7 +3482,7 @@
         const directPlayUrl   = started.directPlayUrl;
         const directStreamUrl = started.directStreamUrl;
         if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
-            showStartError(elementId, el, entry, { reason: 'Empty start response' },
+            showStartError(elementId, el, entry, { reason: t('error_empty') },
                 () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(resumeSec), beginOp(elementId)));
             return;
         }
@@ -3666,8 +3567,6 @@
                             audioLang:     audioList[0]?.lang || '',
                             playbackTier:  directPlayUrl ? 'directplay' : (directStreamUrl ? 'directstream' : 'hls'),
                         };
-                        dotnetRef.invokeMethodAsync('OnPlayerMediaInfo', mediaInfo)
-                            .catch(() => {});
                     }
                 }
             } catch (err) {
@@ -3728,8 +3627,7 @@
 
         let art = null;
         let adapter;
-        // Initial embedded subtitle track (-1 = none) — Artplayer path only;
-        // the native path starts without subtitles.
+        // Initial embedded subtitle track (-1 = none).
         let initialSubIdx = -1;
         // A restart carries the replaced stream's state over (captureState):
         // its subtitle choice instead of the account default, and no
@@ -3741,250 +3639,196 @@
         // A fresh open whose subtitle mode picked a sidecar file.
         let pickedExtSub = null;
 
-        // Codec capability gate: ask Android's MediaCodecList whether the
-        // device can decode whatever the server's output describes. If not,
-        // fall through to Artplayer (which might still fail, but at least
-        // gives us softare decode fallback through the WebView). Skipped
-        // entirely on hosts where the native bridge isn't published.
-        let nativeAllowed = !opts?.forceWebPlayer && await isNativeAdapterAvailable();
-        if (nativeAllowed && entry.output && typeof window.animarrNativePlayer.canDecode === 'function') {
-            try {
-                const o = entry.output;
-                const ok = await window.animarrNativePlayer.canDecode(
-                    o.videoCodec || '', o.bitDepth || 0, o.hdr || '',
-                    o.width || 0, o.height || 0);
-                if (!ok) {
-                    console.warn('animarr: device cannot decode', o.videoCodec,
-                        o.bitDepth + '-bit', o.hdr, '— falling back to Artplayer');
-                    nativeAllowed = false;
+        // Closed / superseded during the probe or the external-track fetch.
+        if (stale()) return;
+
+        // Initial subtitle track per the account's subtitle mode
+        // (pickDefaultSubtitle). Pure client-side overlay — never
+        // influences the video/audio pipeline. An embedded pick goes in
+        // as Artplayer's initial track; a sidecar one is switched to
+        // right after creation (as on a restart).
+        if (!(restore && restore.sub)) {
+            const playingAudio = externalAudioPath
+                ? normLang((externalAudioList.find(x => x.path === externalAudioPath) || {}).language)
+                : normLang((audioList.find(a => a.index === audioTrackIndex) || {}).lang);
+            const pick = pickDefaultSubtitle(subtitleList, externalSubList, playingAudio);
+            if (pick && pick.idx != null) initialSubIdx = pick.idx;
+            else if (pick && pick.ext) pickedExtSub = externalSubList.find(s => s.path === pick.ext) || null;
+        } else if (restore.sub.idx != null && restore.sub.idx < subtitleList.length) {
+            initialSubIdx = restore.sub.idx;
+        }   // else: was Off, or an external track (restoredExtSub, below)
+        const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
+        // hls.js buffer sizes (bufferProfile) — known up front so Info
+        // can show them from the first paint.
+        entry.bufferProfile = isHls ? bufferProfile() : null;
+        art = new window.Artplayer({
+        container: el,
+        url: playUrl,
+        // Direct Stream is served as fMP4 by /api/video regardless of the
+        // source extension (.mkv), so force 'mp4' — never the source ext.
+        type: isHls ? 'm3u8' : (isDirectStream ? 'mp4' : (fileExt || 'mp4')),
+        customType: isHls ? {
+            m3u8: (video, url) => {
+                if (!window.Hls || !window.Hls.isSupported()) {
+                    video.src = url;
+                    return;
                 }
-            } catch (e) { console.warn('canDecode probe threw', e); }
-        }
-
-        if (nativeAllowed) {
-            // ── Native (ExoPlayer / Android TV) path ──────────────────
-            // No Artplayer: ExoPlayer renders into the TextureView the MAUI
-            // host inserted at the bottom of DecorView. We inject the HUD
-            // straight into the existing `vp-art` container and flip the
-            // body's `data-animarr-native` attribute so the CSS in
-            // animarr-player.css drops the WebView's painted background —
-            // exposing the TextureView underneath.
-            document.body.dataset.animarrNative = '1';
-            el.innerHTML = buildHudHtml(stylePref);
-            const native = new NativeAdapter(window.animarrNativePlayer, {
-                container:   el,
-                resumeSec:   resumeSec,
-                durationSec: entry.totalDuration,
-            });
-            // Native runtime error → fall back to Artplayer at the same
-            // position. Without this, an ExoPlayer crash mid-stream leaves
-            // the user with a black screen and no recovery.
-            native.on('error', () => {
-                const pos = native.currentTime;
-                console.warn('animarr: native error — re-attaching as web at', pos, 's');
-                // Token taken now: a detach during the 200 ms gap makes it
-                // stale, so the timer can't resurrect a closed player.
-                const fallbackOp = beginOp(elementId);
-                teardown(elementId);
-                setTimeout(() => {
-                    if (!isLiveOp(elementId, fallbackOp)) return;
-                    attachStream(elementId, dotnetRef, mediaPath, {
-                        audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
-                        forceResumeSec:  pos,
-                        forceWebPlayer:  true,
-                    }, fallbackOp);
-                }, 200);
-            });
-            await native._start(playUrl, resumeSec);
-            adapter = native;
-        } else {
-            // ── Artplayer (browser / non-TV MAUI) path — unchanged ────
-            // Initial subtitle track per the account's subtitle mode
-            // (pickDefaultSubtitle). Pure client-side overlay — never
-            // influences the video/audio pipeline. An embedded pick goes in
-            // as Artplayer's initial track; a sidecar one is switched to
-            // right after creation (as on a restart).
-            if (!(restore && restore.sub)) {
-                const playingAudio = externalAudioPath
-                    ? normLang((externalAudioList.find(x => x.path === externalAudioPath) || {}).language)
-                    : normLang((audioList.find(a => a.index === audioTrackIndex) || {}).lang);
-                const pick = pickDefaultSubtitle(subtitleList, externalSubList, playingAudio);
-                if (pick && pick.idx != null) initialSubIdx = pick.idx;
-                else if (pick && pick.ext) pickedExtSub = externalSubList.find(s => s.path === pick.ext) || null;
-            } else if (restore.sub.idx != null && restore.sub.idx < subtitleList.length) {
-                initialSubIdx = restore.sub.idx;
-            }   // else: was Off, or an external track (restoredExtSub, below)
-            const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
-            // hls.js buffer sizes (bufferProfile) — known up front so Info
-            // can show them from the first paint.
-            entry.bufferProfile = isHls ? bufferProfile() : null;
-            art = new window.Artplayer({
-            container: el,
-            url: playUrl,
-            // Direct Stream is served as fMP4 by /api/video regardless of the
-            // source extension (.mkv), so force 'mp4' — never the source ext.
-            type: isHls ? 'm3u8' : (isDirectStream ? 'mp4' : (fileExt || 'mp4')),
-            customType: isHls ? {
-                m3u8: (video, url) => {
-                    if (!window.Hls || !window.Hls.isSupported()) {
-                        video.src = url;
-                        return;
+                // Buffer sizing (task 4.5, B23): see bufferProfile — a
+                // forward buffer that rides out segment-delivery /
+                // on-the-fly transcode hiccups without, on a stream-copy
+                // plan (segments ready as fast as the disk reads), pulling
+                // ten minutes ahead over a phone's mobile data.
+                const buf = entry.bufferProfile || bufferProfile();
+                const hls = new window.Hls({
+                    fragLoadingTimeOut:     60000,
+                    fragLoadingMaxRetry:    8,
+                    manifestLoadingTimeOut: 30000,
+                    levelLoadingTimeOut:    30000,
+                    maxBufferHole:          4,
+                    maxFragLookUpTolerance: 2,
+                    nudgeOffset:            0.5,
+                    nudgeMaxRetry:          10,
+                    maxBufferLength:        buf.ahead,
+                    maxMaxBufferLength:     buf.aheadMax,
+                    maxBufferSize:          buf.bytes,
+                    // Already-played media kept for instant small back-seeks.
+                    backBufferLength:       buf.back,
+                });
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                art.hls = hls;
+                // The network can change under a running stream (Wi-Fi →
+                // mobile data, Data Saver toggled): hls.js reads these per
+                // fragment, so just retune them.
+                const conn = navigator.connection;
+                const onConn = () => {
+                    const b = bufferProfile();
+                    entry.bufferProfile = b;
+                    Object.assign(hls.config, { maxBufferLength: b.ahead, maxMaxBufferLength: b.aheadMax,
+                                                maxBufferSize: b.bytes, backBufferLength: b.back });
+                };
+                try { conn && conn.addEventListener && conn.addEventListener('change', onConn); } catch {}
+                art.on('destroy', () => {
+                    try { conn && conn.removeEventListener && conn.removeEventListener('change', onConn); } catch {}
+                    try { hls.destroy(); } catch {}
+                });
+                // Autostart reliability: Artplayer's `autoplay` fires play()
+                // ONCE at construction — but on the HLS path the manifest +
+                // first segment may still be warming up on the server then, so
+                // that single attempt no-ops and the user has to press play.
+                // Re-kick play() the moment hls.js has parsed the manifest
+                // (media genuinely ready). Swallow the promise rejection —
+                // a NotAllowedError just means the browser's autoplay policy
+                // blocked it, in which case the visible play button is the
+                // fallback (nothing more we can do without a user gesture).
+                hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                    if (startPaused) return;   // restart of a paused stream
+                    const p = video.play();
+                    if (p && typeof p.catch === 'function') p.catch(() => {});
+                });
+                // Fatal hls.js errors used to be logged and left as a
+                // frozen / black player. A media (decode / MSE) error
+                // gets hls.js's own recovery once; then — or for any
+                // other fatal error — the fallback chain takes over
+                // (handleStreamFailure: network → same rung again,
+                // anything else → one rung down).
+                let mediaRecoveryUsed = false;
+                hls.on(window.Hls.Events.ERROR, (evt, data) => {
+                    if (!data.fatal) return;
+                    console.error('animarr hls fatal:', data.type, data.details);
+                    const T = window.Hls.ErrorTypes || {};
+                    if (data.type === T.MEDIA_ERROR && !mediaRecoveryUsed) {
+                        mediaRecoveryUsed = true;
+                        try { hls.recoverMediaError(); return; } catch {}
                     }
-                    // Buffer sizing (task 4.5, B23): see bufferProfile — a
-                    // forward buffer that rides out segment-delivery /
-                    // on-the-fly transcode hiccups without, on a stream-copy
-                    // plan (segments ready as fast as the disk reads), pulling
-                    // ten minutes ahead over a phone's mobile data.
-                    const buf = entry.bufferProfile || bufferProfile();
-                    const hls = new window.Hls({
-                        fragLoadingTimeOut:     60000,
-                        fragLoadingMaxRetry:    8,
-                        manifestLoadingTimeOut: 30000,
-                        levelLoadingTimeOut:    30000,
-                        maxBufferHole:          4,
-                        maxFragLookUpTolerance: 2,
-                        nudgeOffset:            0.5,
-                        nudgeMaxRetry:          10,
-                        maxBufferLength:        buf.ahead,
-                        maxMaxBufferLength:     buf.aheadMax,
-                        maxBufferSize:          buf.bytes,
-                        // Already-played media kept for instant small back-seeks.
-                        backBufferLength:       buf.back,
-                    });
-                    hls.loadSource(url);
-                    hls.attachMedia(video);
-                    art.hls = hls;
-                    // The network can change under a running stream (Wi-Fi →
-                    // mobile data, Data Saver toggled): hls.js reads these per
-                    // fragment, so just retune them.
-                    const conn = navigator.connection;
-                    const onConn = () => {
-                        const b = bufferProfile();
-                        entry.bufferProfile = b;
-                        Object.assign(hls.config, { maxBufferLength: b.ahead, maxMaxBufferLength: b.aheadMax,
-                                                    maxBufferSize: b.bytes, backBufferLength: b.back });
-                    };
-                    try { conn && conn.addEventListener && conn.addEventListener('change', onConn); } catch {}
-                    art.on('destroy', () => {
-                        try { conn && conn.removeEventListener && conn.removeEventListener('change', onConn); } catch {}
-                        try { hls.destroy(); } catch {}
-                    });
-                    // Autostart reliability: Artplayer's `autoplay` fires play()
-                    // ONCE at construction — but on the HLS path the manifest +
-                    // first segment may still be warming up on the server then, so
-                    // that single attempt no-ops and the user has to press play.
-                    // Re-kick play() the moment hls.js has parsed the manifest
-                    // (media genuinely ready). Swallow the promise rejection —
-                    // a NotAllowedError just means the browser's autoplay policy
-                    // blocked it, in which case the visible play button is the
-                    // fallback (nothing more we can do without a user gesture).
-                    hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-                        if (startPaused) return;   // restart of a paused stream
-                        const p = video.play();
-                        if (p && typeof p.catch === 'function') p.catch(() => {});
-                    });
-                    // Fatal hls.js errors used to be logged and left as a
-                    // frozen / black player. A media (decode / MSE) error
-                    // gets hls.js's own recovery once; then — or for any
-                    // other fatal error — the fallback chain takes over
-                    // (handleStreamFailure: network → same rung again,
-                    // anything else → one rung down).
-                    let mediaRecoveryUsed = false;
-                    hls.on(window.Hls.Events.ERROR, (evt, data) => {
-                        if (!data.fatal) return;
-                        console.error('animarr hls fatal:', data.type, data.details);
-                        const T = window.Hls.ErrorTypes || {};
-                        if (data.type === T.MEDIA_ERROR && !mediaRecoveryUsed) {
-                            mediaRecoveryUsed = true;
-                            try { hls.recoverMediaError(); return; } catch {}
-                        }
-                        handleStreamFailure(elementId, entry,
-                            data.type === T.NETWORK_ERROR ? 'network' : 'decode',
-                            'hls.js: ' + (data.details || data.type));
-                    });
-                },
-            } : {},
-            title: mediaPath.split(/[\/\\]/).pop(),
-            autoplay: !startPaused,
-            playsInline: true,
-            // Restore the user's last-set volume across sessions. Saved by the
-            // volume popup; defaults to 1.0 on first run.
-            volume: readVolumePref(),
-            // Mute survives a restart (it isn't persisted across opens).
-            muted: !!(restore && restore.muted),
-            setting: false,
-            playbackRate: false,
-            aspectRatio: false,
-            screenshot: false,
-            fullscreen: true,
-            fullscreenWeb: false,
-            pip: false,
-            airplay: false,
-            miniProgressBar: false,
-            mutex: true,
-            backdrop: false,
-            // We do hotkeys ourselves so arrows = 10s (not Artplayer's 5s)
-            // and TV-remote media keys all route through one handler.
-            hotkey: false,
-            // Match Artplayer's internal accent (loading spinner etc.) to the
-            // user's/theme's accent hue — same formula as the HUD's --hud-accent.
-            theme: accentThemeColor(),
-            lang: 'en',
-            moreVideoAttr: { crossorigin: 'anonymous' },
-            // MUST be an object — newer Artplayer 5.x validates `option.subtitle`
-            // and throws "require 'object' type, but got 'undefined'" when it's
-            // undefined (i.e. media with NO subtitle tracks). Without an initial
-            // track (none in the file, or subtitles Off) it carries no url, so
-            // nothing loads until the CC menu picks one; escape + style stay so
-            // that later switch() (which merges this object) inherits them.
-            subtitle: {
-                ...(initialSub ? {
-                    url: initialSub.url,
-                    // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
-                    // a recognised value and silently dropped on the loader
-                    // path — fix landed 2026-05-27 after subtitle.switch()
-                    // reported no-op effect on every track change.
-                    type: 'vtt',
-                    encoding: 'utf-8',
-                } : {}),
-                // Artplayer paints cues with innerHTML: escape:true keeps file
-                // text inert, and the 'subtitleAfterUpdate' hook below repaints
-                // them through renderCuesSafely so <b>/<i>/<u> still render.
-                escape: true,
-                // No inline style: size / colour / edge / position come from
-                // applySubStyle's CSS variables (an inline font-size would
-                // pin the size against the player's size step).
+                    handleStreamFailure(elementId, entry,
+                        data.type === T.NETWORK_ERROR ? 'network' : 'decode',
+                        'hls.js: ' + (data.details || data.type));
+                });
             },
-            layers: [{
-                name: 'animarr-hud',
-                html: buildHudHtml(stylePref),
-                style: { position: 'absolute', inset: '0', zIndex: '30',
-                         pointerEvents: 'none' },
-            }],
-            });
-            // Repaint every cue change through the safe renderer (see
-            // renderCuesSafely). Artplayer emits this synchronously right after
-            // its own (escaped) innerHTML write, so nothing paints in between.
-            art.on('subtitleAfterUpdate', (cues) => {
-                try { renderCuesSafely(art.template.$subtitle, cues); }
-                catch (e) { console.warn('subtitle render failed', e); }
-            });
-            // A freshly loaded track starts unshifted: put the offset back.
-            art.on('subtitleLoad', () => applySubtitleOffset(entry));
-            applySubStyle(art.template.$player);
-            adapter = new ArtplayerAdapter(art);
-            // Direct Stream: route seeks through a remux-reload (the source has
-            // no Range) and read duration off the server total, not the live
-            // stream (whose video.duration is Infinity).
-            if (isDirectStream) adapter.enableDirectStream(directStreamBase, entry.totalDuration);
-        }
+        } : {},
+        title: mediaPath.split(/[\/\\]/).pop(),
+        autoplay: !startPaused,
+        playsInline: true,
+        // Restore the user's last-set volume across sessions. Saved by the
+        // volume popup; defaults to 1.0 on first run.
+        volume: readVolumePref(),
+        // Mute survives a restart (it isn't persisted across opens).
+        muted: !!(restore && restore.muted),
+        setting: false,
+        playbackRate: false,
+        aspectRatio: false,
+        screenshot: false,
+        fullscreen: true,
+        fullscreenWeb: false,
+        pip: false,
+        airplay: false,
+        miniProgressBar: false,
+        mutex: true,
+        backdrop: false,
+        // We do hotkeys ourselves so arrows = 10s (not Artplayer's 5s)
+        // and TV-remote media keys all route through one handler.
+        hotkey: false,
+        // Match Artplayer's internal accent (loading spinner etc.) to the
+        // user's/theme's accent hue — same formula as the HUD's --hud-accent.
+        theme: accentThemeColor(),
+        lang: 'en',
+        moreVideoAttr: { crossorigin: 'anonymous' },
+        // MUST be an object — newer Artplayer 5.x validates `option.subtitle`
+        // and throws "require 'object' type, but got 'undefined'" when it's
+        // undefined (i.e. media with NO subtitle tracks). Without an initial
+        // track (none in the file, or subtitles Off) it carries no url, so
+        // nothing loads until the CC menu picks one; escape + style stay so
+        // that later switch() (which merges this object) inherits them.
+        subtitle: {
+            ...(initialSub ? {
+                url: initialSub.url,
+                // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
+                // a recognised value and silently dropped on the loader
+                // path — fix landed 2026-05-27 after subtitle.switch()
+                // reported no-op effect on every track change.
+                type: 'vtt',
+                encoding: 'utf-8',
+            } : {}),
+            // Artplayer paints cues with innerHTML: escape:true keeps file
+            // text inert, and the 'subtitleAfterUpdate' hook below repaints
+            // them through renderCuesSafely so <b>/<i>/<u> still render.
+            escape: true,
+            // No inline style: size / colour / edge / position come from
+            // applySubStyle's CSS variables (an inline font-size would
+            // pin the size against the player's size step).
+        },
+        layers: [{
+            name: 'animarr-hud',
+            html: buildHudHtml(stylePref),
+            style: { position: 'absolute', inset: '0', zIndex: '30',
+                     pointerEvents: 'none' },
+        }],
+        });
+        // Repaint every cue change through the safe renderer (see
+        // renderCuesSafely). Artplayer emits this synchronously right after
+        // its own (escaped) innerHTML write, so nothing paints in between.
+        art.on('subtitleAfterUpdate', (cues) => {
+            try { renderCuesSafely(art.template.$subtitle, cues); }
+            catch (e) { console.warn('subtitle render failed', e); }
+        });
+        // A freshly loaded track starts unshifted: put the offset back.
+        art.on('subtitleLoad', () => applySubtitleOffset(entry));
+        applySubStyle(art.template.$player);
+        adapter = new ArtplayerAdapter(art);
+        // Saved volume, set on the element itself: Artplayer skips a
+        // `volume: 0` option (falsy) and then applies its own stored level,
+        // which it never updates for 0 — a muted-by-volume player came back
+        // loud. Directly on <video>, so no Artplayer notice / storage write.
+        try { art.video.volume = readVolumePref(); } catch {}
+        // Playback speed (remembered): defaultPlaybackRate too, so a source
+        // reload (Direct Stream seek, new src) keeps it.
+        applyRate(art.video, readRatePref());
+        // Direct Stream: route seeks through a remux-reload (the source has
+        // no Range) and read duration off the server total, not the live
+        // stream (whose video.duration is Infinity).
+        if (isDirectStream) adapter.enableDirectStream(directStreamBase, entry.totalDuration);
 
-        if (stale()) {
-            // Closed while the native bridge was awaited: teardown ran before
-            // this adapter existed, so it never got destroyed.
-            if (WIRED.get(elementId) !== entry) { try { adapter.destroy(); } catch {} }
-            return;
-        }
         entry.art = art;
         entry.adapter = adapter;
 
@@ -4044,16 +3888,6 @@
             adapter.once('loadedmetadata', () => applyView(entry));
         }
 
-        // ── Restart: put the replaced stream's choices back ───────────
-        if (restore) {
-            // Artplayer took `muted` / `autoplay` as options; the native
-            // adapter needs telling.
-            if (!art) {
-                if (restore.muted) adapter.muted = true;
-                if (startPaused) adapter.pause();
-            }
-        }
-
         // ── Preferred audio language — HLS transcode path ONLY ──────────────
         // Direct Play / Direct Stream serve the raw container and the browser
         // plays its default audio track; switching to a non-default track there
@@ -4099,10 +3933,9 @@
         } catch {}
 
         // ── 5b) Wire HUD ──────────────────────────────────────────────
-        // Root element for HUD events: Artplayer's player wrapper on the web
-        // path, the bare `vp-art` container on the native path (where the
-        // HUD HTML was injected directly above).
-        const hudRoot = art ? (art.template.$player || art.container) : el;
+        // Root element for HUD events: Artplayer's player wrapper (the HUD
+        // layer lives inside it).
+        const hudRoot = art.template.$player || art.container;
         const hudCtl = attachHud(adapter, hudRoot, entry, {
             back:  () => refRef.current?.invokeMethodAsync('ClosePlayerFromJs').catch(() => {}),
             prev:  () => refRef.current?.invokeMethodAsync('InvokePrev').catch(() => {}),
@@ -4122,13 +3955,13 @@
             offset: () => {
                 if (!offsetChannel || !window.animarrCalibrate) return;
                 openOffsetPopup(hudRoot, 'offset', offsetChannel,
-                    entry.currentExternalAudioPath ? 'External dub sync' : null);
+                    entry.currentExternalAudioPath ? t('sync_external') : null);
             },
             audio: () => {
                 const aopts = buildAudioOptions(entry);
                 if (aopts.length === 0) return;
                 const curIdx = Math.max(0, aopts.findIndex(o => o.current));
-                openPickerPopup(hudRoot, 'audio', 'Audio tracks',
+                openPickerPopup(hudRoot, 'audio', t('hud_audio'),
                     aopts.map(o => o.label), curIdx,
                     (i) => {
                         const o = aopts[i];
@@ -4234,9 +4067,27 @@
                 });
             },
             info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || []),
+            speed: () => {
+                const cur = readRatePref();
+                openPickerPopup(hudRoot, 'speed', t('hud_speed'),
+                    SPEEDS.map(r => r === 1 ? t('speed_normal') : r + '×'), SPEEDS.indexOf(cur),
+                    (i) => setRate(SPEEDS[i]));
+            },
+            speedStep: (dir) => {
+                const i = SPEEDS.indexOf(readRatePref());
+                setRate(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + dir))]);
+            },
             fullscreen: () => toggleFullscreen(adapter),
         });
         entry.hud = hudCtl;
+        // Playback speed: remembered across opens (readRatePref), applied
+        // to the element, shown on the Speed button.
+        function setRate(r) {
+            saveRatePref(r);
+            applyRate(art.video, r);
+            hudCtl.setSpeed(r);
+        }
+        hudCtl.setSpeed(readRatePref());
         entry.hudRoot = hudRoot;
 
         // Hide buttons that don't apply to current playback.
@@ -4273,18 +4124,15 @@
             const o = entry.output;
             const lines = [];
             if (o) {
-                if (o.height) lines.push('Resolution: ' + o.height + 'p');
+                if (o.height) lines.push(t('info_resolution') + ': ' + o.height + 'p');
                 const vparts = [];
                 if (o.videoCodec) vparts.push(o.videoCodec.toUpperCase());
                 if (o.bitDepth >= 10) vparts.push('10-bit');
-                if (vparts.length) lines.push('Video: ' + vparts.join(' '));
+                if (vparts.length) lines.push(t('info_video') + ': ' + vparts.join(' '));
                 // The Info block reports what's actually ON SCREEN, not the
                 // source's flags. No browser renders Dolby Vision — the web
-                // player plays the HDR10/HLG base layer — so drop the DV tag on
-                // the Artplayer path. Native ExoPlayer (art == null) keeps it:
-                // DV-capable TVs do render it.
-                let hdrFormats = o.hdrFormats || [];
-                if (art) hdrFormats = hdrFormats.filter(f => f !== 'dolbyvision');
+                // player plays the HDR10/HLG base layer — so drop the DV tag.
+                const hdrFormats = (o.hdrFormats || []).filter(f => f !== 'dolbyvision');
                 const hdrs = hdrFormats.map(fmt =>
                     fmt === 'dolbyvision' ? 'Dolby Vision'
                   : fmt === 'hdr10' ? 'HDR10'
@@ -4307,12 +4155,12 @@
                     const core = exo ? externalLabelCore(exo) : '';
                     aParts.push((core ? core + ' · ' : '') + t('track_external'));
                 }
-                if (aParts.length) lines.push('Audio: ' + aParts.join(' · '));
+                if (aParts.length) lines.push(t('info_audio') + ': ' + aParts.join(' · '));
                 // What was chosen in the Quality menu, then how the server
                 // delivers it and why (plan 4.2 — the same on the button).
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
-                lines.push('Playback: ' + planName(o.plan));
-                if (o.transcoded && o.transcodeReason) lines.push('Reason: ' + o.transcodeReason);
+                lines.push(t('info_playback') + ': ' + planName(o.plan));
+                if (o.transcoded && o.transcodeReason) lines.push(t('info_reason') + ': ' + o.transcodeReason);
             }
             // hls.js forward / back buffer (only HLS has one we size).
             const bp = entry.bufferProfile;
@@ -4332,7 +4180,7 @@
             // tick also re-runs this).
             const openInfo = hudRoot.querySelector('.vp-hud-popup--info .vp-hud-popup__list');
             if (openInfo) {
-                openInfo.innerHTML = (lines.length ? lines : ['No media info available'])
+                openInfo.innerHTML = (lines.length ? lines : [t('info_none')])
                     .map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('');
             }
         }
@@ -4364,9 +4212,7 @@
                     try {
                         ms.setPositionState({
                             duration:     dur,
-                            // No playbackRate getter on the adapter (we don't
-                            // expose rate control) — default to 1.0.
-                            playbackRate: 1,
+                            playbackRate: (art.video && art.video.playbackRate) || 1,
                             position:     Math.min(adapter.currentTime, dur),
                         });
                     } catch {}
@@ -4376,7 +4222,7 @@
             }
         } catch (e) { console.warn('mediaSession wire-up failed', e); }
 
-        // A restart of an already-open player (audio / quality switch, native
+        // A restart of an already-open player (audio / quality switch, a
         // fallback): Blazor pushed setMediaSession once, after the FIRST attach,
         // and won't again — re-apply what it sent (no-op on a first attach,
         // where KEEP holds nothing yet and Blazor's call follows).
@@ -4482,7 +4328,7 @@
     }
 
     /** Stop the current stream on this element — HLS session DELETE, timers,
-     *  HUD, Artplayer / native adapter — but keep KEEP's session metadata so a
+     *  HUD, Artplayer — but keep KEEP's session metadata so a
      *  restart on the same element (attach again) can re-apply it. */
     function teardown(elementId) {
         const entry = WIRED.get(elementId);
@@ -4522,10 +4368,6 @@
         }
         entry.art = null;
         document.body.classList.remove('player-open');
-        // Native-playback attribute drives the CSS rule that wipes body bg
-        // so the TextureView shows through. Clear it on detach so other
-        // routes (non-player pages) paint their normal dark chrome.
-        try { delete document.body.dataset.animarrNative; } catch {}
         WIRED.delete(elementId);
     }
 
@@ -4822,10 +4664,10 @@
             entry.hud.setNav(!!(meta && meta.prevAvailable), !!(meta && meta.nextAvailable));
         }
         entry.upNext = {
-            eyebrow: (meta && meta.upNextEyebrow) || 'Up next',
+            eyebrow: (meta && meta.upNextEyebrow) || t('up_next'),
             name:    (meta && meta.upNextName)    || '',
-            play:    (meta && meta.upNextPlay)    || 'Play next',
-            dismiss: (meta && meta.upNextDismiss) || 'Dismiss',
+            play:    (meta && meta.upNextPlay)    || t('up_next_play'),
+            dismiss: (meta && meta.upNextDismiss) || t('up_next_dismiss'),
         };
         // Skip-intro/credits segment times (seconds). Read live by updateUpNext
         // (credits → next-up trigger) and updateSkipIntro (Skip button) on each
@@ -4842,8 +4684,8 @@
                 im.src = entry.trickplay.spriteUrl;
             }
         } catch { /* preload is best-effort */ }
-        entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || 'Skip intro';
-        entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || 'Skip credits';
+        entry.skipIntroLabel   = (meta && meta.skipIntroLabel)   || entry.skipIntroLabel   || t('skip_intro');
+        entry.skipCreditsLabel = (meta && meta.skipCreditsLabel) || entry.skipCreditsLabel || t('skip_credits');
         try {
             if (!('mediaSession' in navigator)) return;
             const ms = navigator.mediaSession;
