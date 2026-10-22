@@ -122,7 +122,12 @@ public sealed partial class HlsSessionService
     }
 
     /// <summary>One audio stream of a probed file.</summary>
-    private sealed record AudioStreamInfo(string? Codec, int Channels, string? Language, string? Profile = null);
+    private sealed record AudioStreamInfo(string? Codec, int Channels, string? Language, string? Profile = null)
+    {
+        /// <summary>The stream's title tag ("Commentary", a dub studio) — the
+        /// audio rendition's NAME.</summary>
+        public string? Title { get; init; }
+    }
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once

@@ -104,6 +104,16 @@ internal static class HlsEndpoints
             // (the TV's Media3): a remembered embedded track then keeps Direct
             // Play and is only reported. Elsewhere the server still maps it.
             string? localTracks,
+            // "1" = audio as separate HLS renditions (task 6.3): a video-only
+            // stream + one EXT-X-MEDIA TYPE=AUDIO playlist per embedded track and
+            // external dub, switched live (hls.audioTrack / Media3 track
+            // selection). The answer lists them as audioRenditions[]. A file with
+            // several audio options then skips Direct Play / Direct Stream.
+            string? audioRenditions,
+            // Sync offsets (ms) of the NON-default renditions, "a1:300,x0:-150"
+            // (ids from audioRenditions[]); the default one takes audioSyncMs /
+            // the remembered offset. Unlisted dubs use their DELAY tag.
+            string? renditionOffsets,
             TrackPreferenceService trackPrefs,
             IUserContext userCtx,
             TvRemuxService tvRemux,
@@ -224,6 +234,16 @@ internal static class HlsEndpoints
                 decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
                 syncForced = true;
             }
+            // audioRenditions=1: several audio options switch live only as HLS
+            // renditions — neither native path can.
+            bool renditionsForced = false;
+            if (Flag(audioRenditions) && !syncForced && externalAudioFull is null
+                && decision.DirectUrl is not null && (decision.DirectStream || decision.DirectPlay)
+                && await hls.HasAudioChoicesAsync(fullPath!, decision.DirectPlay && Flag(localTracks), http.RequestAborted))
+            {
+                decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
+                renditionsForced = true;
+            }
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
                 return Results.Ok(new
@@ -310,7 +330,10 @@ internal static class HlsEndpoints
                 owner:            await SessionOwnerAsync(http, deviceTrust),
                 burnSubtitle:     burnSubtitle ?? -1,
                 audioSyncSec:     syncMs / 1000.0,
-                forcedReason:     syncForced ? HlsSessionService.ReasonCodes.AudioSync : null);
+                forcedReason:     syncForced ? HlsSessionService.ReasonCodes.AudioSync
+                                : renditionsForced ? HlsSessionService.ReasonCodes.AudioRenditions : null,
+                audioRenditions:  Flag(audioRenditions),
+                renditionOffsets: HlsSessionService.ParseRenditionOffsets(renditionOffsets));
             return Results.Ok(new
             {
                 token        = result.Token,
@@ -327,6 +350,9 @@ internal static class HlsEndpoints
                 // For re-encode plans this differs from /api/probe output (e.g.
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
                 output       = result.Output,
+                // audioRenditions=1: the EXT-X-MEDIA group, in playlist order
+                // (= hls.audioTracks order). null = audio muxed in.
+                audioRenditions = result.AudioRenditions,
                 trackDefaults = TrackPreferenceService.MarkOffsetApplied(TrackPreferenceService.MarkApplied(trackDefaults, trackDefaults?.Audio switch
                 {
                     { Kind: TrackPreferenceService.KindExternal, Path: { } dub } =>
@@ -430,6 +456,38 @@ internal static class HlsEndpoints
     // Capability URL — see the class summary: the unguessable, short-lived
     // session id in the path is the authorization (only an authorised start
     // can mint one). No cookie / query token reaches relative segment fetches.
+    .AllowAnonymous();
+
+    // An audio rendition's playlist / init.mp4 / segment (audioRenditions=1):
+    // master.m3u8 points at audio/{id}/media.m3u8, which the player resolves
+    // relative to it. Started lazily — the first request of a rendition starts
+    // its ffmpeg.
+    app.MapGet("/api/hls/{token}/audio/{id}/{file}", async (
+            string token,
+            string id,
+            string file,
+            HttpContext http,
+            HlsSessionService hls) =>
+    {
+        if (token.Length is < 16 or > 64 || token.Any(c => !Uri.IsHexDigit(c)))
+            return Results.NotFound();
+        if (id.Length is < 2 or > 4 || id[0] is not ('a' or 'x') || !id.AsSpan(1).ToString().All(char.IsAsciiDigit))
+            return Results.NotFound();
+        var bare = Path.GetFileName(file);
+        if (string.IsNullOrEmpty(bare) || bare != file) return Results.NotFound();
+
+        var full = await hls.WaitForRenditionFileAsync(token, id, bare, http.RequestAborted);
+        if (full is null) return hls.GetSessionDir(token) is null ? Results.NotFound() : Results.StatusCode(503);
+        if (bare.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.Bytes(await File.ReadAllBytesAsync(full), "application/vnd.apple.mpegurl");
+        }
+        http.Response.Headers.CacheControl = "public, max-age=86400, immutable";
+        return Results.File(full, bare.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ? "video/MP2T" : "video/iso.segment",
+            enableRangeProcessing: true);
+    })
+    .WithName("GetHlsAudioRenditionFile")
     .AllowAnonymous();
 
     app.MapPost("/api/hls/keepalive", (string token, HlsSessionService hls) =>

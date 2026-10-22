@@ -144,16 +144,18 @@ public sealed partial class HlsSessionService
                         int channels = s.TryGetProperty("channels", out var ach) && ach.TryGetInt32(out var ci) ? ci : 0;
                         // Language tag: ffprobe puts it under tags.language, but
                         // MKV-from-Matroska sometimes uses LANGUAGE (uppercase).
-                        string? language = null;
+                        string? language = null, title = null;
                         if (s.TryGetProperty("tags", out var tags))
                         {
                             if (tags.TryGetProperty("language", out var langEl))
                                 language = langEl.GetString();
                             else if (tags.TryGetProperty("LANGUAGE", out var langElU))
                                 language = langElU.GetString();
+                            if (tags.TryGetProperty("title", out var titleEl) || tags.TryGetProperty("TITLE", out titleEl))
+                                title = titleEl.GetString();
                         }
                         string? aProfile = s.TryGetProperty("profile", out var apr) ? apr.GetString() : null;
-                        audioStreams.Add(new AudioStreamInfo(codec, channels, language, aProfile));
+                        audioStreams.Add(new AudioStreamInfo(codec, channels, language, aProfile) { Title = title });
 
                         if (aCodec is null)
                         {

@@ -55,6 +55,13 @@ public sealed partial class HlsSessionService
         public int RunWindowEnd = int.MaxValue;
         /// <summary>Runs started so far (names each run's list).</summary>
         public int RunCount;
+
+        // ── Audio renditions (HlsSessionService.Renditions.cs) ──
+        /// <summary>The video runs carry no audio: every audio option is its
+        /// own rendition with its own ffmpeg runs.</summary>
+        public bool VideoOnly { get; init; }
+        /// <summary>The session's audio renditions (null = audio muxed in).</summary>
+        public List<AudioRendition>? Renditions { get; init; }
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS

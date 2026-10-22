@@ -189,6 +189,15 @@ public sealed partial class HlsSessionService
             File.Move(raw, Path.Combine(session.OutputDir, $"seg-{n:D5}.ts"), overwrite: true);
             return;
         }
+        FinalizeMp4Raw(session.OutputDir, raw, n);
+    }
+
+    /// <summary>
+    /// One fMP4 raw file of the segment muxer → seg-N.m4s (from its first
+    /// moof / styp / sidx) and, once, init.mp4 (its ftyp + moov).
+    /// </summary>
+    private static void FinalizeMp4Raw(string dir, string raw, int n)
+    {
         var bytes = File.ReadAllBytes(raw);
         int mediaStart = -1, initEnd = -1;
         int pos = 0;
@@ -205,10 +214,10 @@ public sealed partial class HlsSessionService
             pos += (int)size;
         }
         if (mediaStart < 0 || initEnd < 0) throw new InvalidDataException($"{Path.GetFileName(raw)}: no moov / moof");
-        var init = Path.Combine(session.OutputDir, "init.mp4");
+        var init = Path.Combine(dir, "init.mp4");
         if (!File.Exists(init))
             WriteAtomic(init, bytes.AsSpan(0, initEnd));
-        WriteAtomic(Path.Combine(session.OutputDir, $"seg-{n:D5}.m4s"), bytes.AsSpan(mediaStart));
+        WriteAtomic(Path.Combine(dir, $"seg-{n:D5}.m4s"), bytes.AsSpan(mediaStart));
         TryDelete(raw);
     }
 

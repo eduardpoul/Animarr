@@ -152,7 +152,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// stored watch position on every replay.
     /// </summary>
     public sealed record StartResult(string Token, string ManifestRelativeUrl, double TotalDurationSec,
-        PlayerOutputInfo Output);
+        PlayerOutputInfo Output, IReadOnlyList<AudioRenditionInfo>? AudioRenditions = null);
 
     /// <summary>
     /// Who a session belongs to: the account (<paramref name="UserId"/>) and the
@@ -328,6 +328,9 @@ public sealed partial class HlsSessionService : IDisposable
         /// <summary>Streamed (instead of played natively) so an audio sync offset
         /// applies — e.g. the one track memory remembers for this audio.</summary>
         public const string AudioSync = "audio_sync";
+        /// <summary>Streamed (instead of played natively) so the audio options —
+        /// several tracks, external dubs — switch live as HLS renditions.</summary>
+        public const string AudioRenditions = "audio_renditions";
     }
 
     /// <summary>
@@ -780,7 +783,14 @@ public sealed partial class HlsSessionService : IDisposable
         double audioSyncSec = 0,
         // The caller's main reason for this HLS start when it isn't the plan's
         // own (ReasonCodes.AudioSync: the stream exists so the offset applies).
-        string? forcedReason = null)
+        string? forcedReason = null,
+        // Audio as separate renditions (task 6.3, HlsSessionService.Renditions.cs):
+        // a video-only stream plus one EXT-X-MEDIA TYPE=AUDIO playlist per audio
+        // option, switched by the player without a restart.
+        bool audioRenditions = false,
+        // Per-rendition sync offsets in ms ("a1" / "x0" → ms) for the
+        // non-default renditions; the default one takes audioSyncSec.
+        IReadOnlyDictionary<string, int>? renditionOffsets = null)
     {
         var who = owner ?? SessionOwner.Unknown;
         var caps = client ?? ClientCaps.Legacy;
@@ -1117,6 +1127,49 @@ public sealed partial class HlsSessionService : IDisposable
         _logger.LogInformation("HLS {Token}: plan={Plan} video={Target} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H} dv={Dv}/{DvHandling}) tonemap={ToneMap} client={Client} {Owner}",
             token, plan, target, audio, (int)Math.Round(audioOffsetSec * 1000),
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, probe?.Dovi, dovi, toneMapper, caps, who);
+        // Audio renditions (task 6.3): every audio option — each embedded track,
+        // each external dub — its own playlist and its own (lazy) ffmpeg runs;
+        // the video runs carry no audio. The master then lists them as one
+        // EXT-X-MEDIA group. Only with pre-written playlists (a probed file).
+        List<AudioRendition>? renditions = null;
+        if (audioRenditions && probe is not null && prewrittenPlaylists)
+        {
+            var planBaseline = reorderDelaySec + plan switch
+            {
+                HlsPlan.Fmp4VaapiReencode or HlsPlan.Fmp4NvencReencode or HlsPlan.Fmp4SoftwareReencode => audioOffsetHwSec,
+                HlsPlan.Fmp4StreamCopy => audioOffsetSwSec,
+                _ => 0.0,
+            };
+            renditions = await BuildRenditionsAsync(fullPath, probe, dir, plan, caps, audioTrackIndex, externalAudioPath,
+                planBaseline, reorderDelaySec + audioOffsetSwSec, audioSyncSec, renditionOffsets, ct);
+            try
+            {
+                if (renditions.Count == 0) renditions = null;
+                else
+                {
+                    var bandwidth = (isCopyPlan ? probe.BitRate
+                            : RateFor(targetHeight > 0 ? targetHeight : probe.Height, maxBitrate, probe).PeakKbps * 1000)
+                        + renditions.Max(r => r.Audio.Copy ? 640_000 : 384_000);
+                    var videoCodecs = (probeForPlaylist?.CodecsAttribute ?? "avc1.640028").Split(',')[0];
+                    File.WriteAllText(Path.Combine(dir, "master.m3u8"),
+                        BuildMasterPlaylistWithAudio(probeForPlaylist!, bandwidth, videoCodecs, renditions),
+                        new UTF8Encoding(false));   // NAMEs carry track titles: UTF-8, no BOM
+                    foreach (var r in renditions) WriteRenditionPlaylist(layout, null, r);
+                    _logger.LogInformation("HLS {Token}: audio renditions {Renditions}", token,
+                        string.Join("; ", renditions.Select(r => $"{r.Id}{(r.IsDefault ? "*" : "")} {r.Audio} {r.OffsetSec * 1000:F0}ms")));
+                }
+            }
+            catch (Exception ex)
+            {
+                // The muxed master written above stays: audio in the video stream.
+                _logger.LogWarning(ex, "HLS {Token}: audio renditions unavailable — muxing the audio", token);
+                renditions = null;
+                File.WriteAllText(Path.Combine(dir, "master.m3u8"),
+                    BuildMasterPlaylist(probeForPlaylist!, isCopyPlan ? probe.BitRate : 0), Encoding.ASCII);
+            }
+        }
+        bool videoOnly = renditions is not null;
+
         // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
         // at the resume point — the playlist's EXT-X-START still says seekSec.
         var (keyframeTimes, keyframeWindowEnd) = keyframeMode ? SegmentTimesFor(layout, startSegment) : ("", int.MaxValue);
@@ -1126,7 +1179,8 @@ public sealed partial class HlsSessionService : IDisposable
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
             externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio,
             dovi: dovi, target: target, burn: burn,
-            keyframeRun: keyframeMode ? (keyframeTimes, KeyframeListPath(dir, 0)) : null);
+            keyframeRun: keyframeMode ? (keyframeTimes, KeyframeListPath(dir, 0)) : null,
+            videoOnly: videoOnly);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -1154,6 +1208,8 @@ public sealed partial class HlsSessionService : IDisposable
             KeyframeListPath = keyframeMode ? KeyframeListPath(dir, 0) : null,
             RunWindowEnd = keyframeWindowEnd,
             RunCount = 1,
+            VideoOnly = videoOnly,
+            Renditions = renditions,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1161,6 +1217,16 @@ public sealed partial class HlsSessionService : IDisposable
         // ffmpeg right away instead of letting it encode on until the 5-min idle
         // GC. Scoped to the startup wait; disposed when this method returns.
         using var abandoned = ct.Register(() => Stop(token));
+        // The default rendition's first window starts with the video, so the
+        // player's first audio request finds it under way.
+        if (renditions?.FirstOrDefault(r => r.IsDefault) is { } defaultRendition)
+        {
+            try { await EnsureRenditionRunAsync(session, defaultRendition, startSegment, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "HLS {Token}: starting audio rendition {Id} failed", token, defaultRendition.Id);
+            }
+        }
 
         // 4. Wait for ffmpeg's initial output before returning the manifest URL.
         //    Two-phase wait:
@@ -1220,7 +1286,11 @@ public sealed partial class HlsSessionService : IDisposable
                 // say why. Give it a moment before reporting the tail.
                 try { await stderrDrain.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None); } catch { }
                 if (_sessions.TryRemove(token, out var dead))
+                {
                     try { dead.RestartLock.Dispose(); } catch { }
+                    // A rendition's ffmpeg writes into the same dir.
+                    foreach (var rp in StopRenditions(dead)) try { rp.WaitForExit(2000); } catch { }
+                }
                 TryRemoveDir(dir);
                 _logger.LogWarning(
                     "HLS {Token}: ffmpeg exited (code {Code}) before producing the first segment — plan={Plan}, source={Path}. stderr tail:\n{Tail}",
@@ -1280,7 +1350,8 @@ public sealed partial class HlsSessionService : IDisposable
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
                 segmentation: keyframeMode ? "keyframe" : "grid",
-                audio: audio, dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
+                audio: renditions?.FirstOrDefault(r => r.IsDefault)?.Audio ?? audio,
+                dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
                 extraReasons: [.. hasExternalAudio ? new[] { ReasonCodes.ExternalAudio } : [],
                                .. burn is not null ? new[] { ReasonCodes.BurnedSubtitle } : [],
                                .. forcedReason is not null ? new[] { forcedReason } : []])
@@ -1298,7 +1369,8 @@ public sealed partial class HlsSessionService : IDisposable
                 AudioLanguage:   "",
                 Transcoded:      true,
                 TranscodeReason: "Probe failed — output info unavailable");
-        return new StartResult(token, $"/api/hls/{token}/master.m3u8", probe?.DurationSec ?? 0, output);
+        return new StartResult(token, $"/api/hls/{token}/master.m3u8", probe?.DurationSec ?? 0, output,
+            renditions is null ? null : RenditionInfos(renditions));
     }
 
     public string? GetSessionDir(string token)
@@ -1546,7 +1618,8 @@ public sealed partial class HlsSessionService : IDisposable
                 dovi: session.Dovi,
                 target: session.Target,
                 burn: session.Burn,
-                keyframeRun: session.KeyframeMode ? (kfTimes, kfList!) : null);
+                keyframeRun: session.KeyframeMode ? (kfTimes, kfList!) : null,
+                videoOnly: session.VideoOnly);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;
@@ -1587,6 +1660,7 @@ public sealed partial class HlsSessionService : IDisposable
         if (!_sessions.TryRemove(token, out var s)) return;
         var proc = s.Process;
         try { if (!proc.HasExited) proc.Kill(true); } catch { }
+        var renditionProcs = StopRenditions(s);
         try { s.RestartLock.Dispose(); } catch { }
         _logger.LogInformation("HLS session {Token} stopped (by client / GC).", token);
 
@@ -1602,9 +1676,11 @@ public sealed partial class HlsSessionService : IDisposable
             {
                 using var exited = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 await proc.WaitForExitAsync(exited.Token);
+                foreach (var rp in renditionProcs) await rp.WaitForExitAsync(exited.Token);
             }
             catch { /* gone already, or didn't die in time — delete anyway */ }
             try { proc.Dispose(); } catch { }
+            foreach (var rp in renditionProcs) try { rp.Dispose(); } catch { }
             try { if (Directory.Exists(s.OutputDir)) Directory.Delete(s.OutputDir, recursive: true); }
             catch (Exception ex)
             {

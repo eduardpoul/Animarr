@@ -48,7 +48,10 @@ public sealed partial class HlsSessionService
         SubtitleBurn? burn = null,
         // Key-frame-exact copy run (task 6.2): the segment muxer with these
         // cut times and this CSV list instead of the HLS muxer. null = HLS muxer.
-        (string Times, string ListPath)? keyframeRun = null)
+        (string Times, string ListPath)? keyframeRun = null,
+        // Video only (audio renditions, task 6.3: each audio track is its own
+        // playlist and ffmpeg run, HlsSessionService.Renditions.cs).
+        bool videoOnly = false)
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
@@ -85,17 +88,17 @@ public sealed partial class HlsSessionService
         {
             case HlsPlan.TsStreamCopy:
                 BuildTsStreamCopyArgs(args, fullPath, seekSec, audioArgs, startNumber, audioTrackIndex,
-                    externalAudioPath, audioOffsetSec, videoMap);
+                    externalAudioPath, audioOffsetSec, videoMap, videoOnly);
                 if (H264AspectFix(probe) is { } sarFix) args.AddRange(["-bsf:v", sarFix]);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn, videoOnly);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn, videoOnly);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4StreamCopy:
@@ -105,11 +108,11 @@ public sealed partial class HlsSessionService
                 // needed the second -itsoffset input.
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec,
                     keyframeRun is not null && externalAudioPath is null ? 0 : audioOffsetSec, audioTrackIndex,
-                    externalAudioPath, videoMap, audioArgs, dovi);
+                    externalAudioPath, videoMap, audioArgs, dovi, videoOnly);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint, burn);
+                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint, burn, videoOnly);
                 break;
         }
 
@@ -119,7 +122,7 @@ public sealed partial class HlsSessionService
         // segment whose first audio went negative) — instead of reading the file
         // a second time with -itsoffset. Every packet keeps its place in its own
         // stream; only the A/V relation moves.
-        bool singleInputCopy = externalAudioPath is null
+        bool singleInputCopy = !videoOnly && externalAudioPath is null
             && (plan == HlsPlan.TsStreamCopy || (plan == HlsPlan.Fmp4StreamCopy && keyframeRun is not null));
         if (singleInputCopy && Math.Abs(audioOffsetSec) >= 0.0005)
             args.AddRange(audioOffsetSec > 0 ? ["-bsf:a", ShiftFilter(audioOffsetSec)] : ["-bsf:v", ShiftFilter(-audioOffsetSec)]);
@@ -250,7 +253,7 @@ public sealed partial class HlsSessionService
     /// needs a -filter_complex graph and an output label instead of -vf.
     /// </summary>
     private static string[] VideoGraph(string videoMap, string? deinterlacer, SubtitleBurn? burn, string vf,
-        double seekSec = 0)
+        double seekSec = 0, bool videoOnly = false)
     {
         if (burn is { Image: true })
         {
@@ -258,7 +261,7 @@ public sealed partial class HlsSessionService
             var pre = deinterlacer is null ? input : $"{input}{deinterlacer}[deint];[deint]";
             // A seeked run reads the subtitles from their own input (#2,
             // AddBurnInput); from the top they come with the video (#0).
-            var subs = (seekSec > 0 ? "2" : "0") + ":s:" + burn.Index.ToString(CultureInfo.InvariantCulture);
+            var subs = (seekSec > 0 ? videoOnly ? "1" : "2" : "0") + ":s:" + burn.Index.ToString(CultureInfo.InvariantCulture);
             var graph = $"{pre}[{subs}]overlay=eof_action=pass,{vf}[vout]";
             return ["-filter_complex", graph, "-map", "[vout]"];
         }
@@ -467,9 +470,10 @@ public sealed partial class HlsSessionService
     /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
     private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
         string[] audioArgs, int startNumber, int audioTrackIndex,
-        string? externalAudioPath = null, double audioOffsetSec = 0.0, string videoMap = "0:V:0?")
+        string? externalAudioPath = null, double audioOffsetSec = 0.0, string videoMap = "0:V:0?",
+        bool videoOnly = false)
     {
-        bool ext = externalAudioPath is not null;
+        bool ext = !videoOnly && externalAudioPath is not null;
 
         // Input #0 — source. Video always; its own audio too unless an external
         // dub replaces it.
@@ -510,14 +514,14 @@ public sealed partial class HlsSessionService
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
-            "-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
+        if (!videoOnly) args.AddRange(["-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?"]);
         // Audio as AudioPolicy decided for the mapped track: copied when the
         // client decodes it and the TS demuxer it uses takes it (hls.js: AAC /
         // MP3; a native player also AC-3 / E-AC-3 / DTS), else transcoded. An
         // external dub is always transcoded.
-        args.AddRange(audioArgs);
+        args.AddRange(videoOnly ? ["-an"] : audioArgs);
     }
 
     /// <summary>fMP4 HLS with VAAPI re-encode to H.264 + B-frames disabled.
@@ -527,7 +531,8 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null,
+        bool videoOnly = false)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -584,15 +589,18 @@ public sealed partial class HlsSessionService
         // demuxes audio so we don't fight VAAPI's audio path. When an external
         // dub is selected this input points at THAT file instead of the source
         // (its audio is mapped below); the same -ss/-itsoffset apply.
-        if (seekSec > 0)
+        if (!videoOnly)
         {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            if (seekSec > 0)
+            {
+                args.Add("-ss");
+                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            }
+            args.Add("-itsoffset");
+            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
+            args.Add("-i");
+            args.Add(externalAudioPath ?? fullPath);
         }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
         AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
@@ -637,10 +645,9 @@ public sealed partial class HlsSessionService
         // Deinterlace first, where the frames are: on the VAAPI surfaces for
         // GPU-decoded input, with the CPU bwdif before the upload otherwise.
         args.AddRange(VideoGraph(videoMap,
-            deinterlace ? (hwDecode ? Deinterlacer.Vaapi : Deinterlacer.Cpu) : null, burn, vf, seekSec));
+            deinterlace ? (hwDecode ? Deinterlacer.Vaapi : Deinterlacer.Cpu) : null, burn, vf, seekSec, videoOnly));
         args.AddRange(new[]
         {
-            "-map", $"1:a:{audioTrackIndex}?",
             "-c:v", main10 ? "hevc_vaapi" : "h264_vaapi",
             "-profile:v", main10 ? "main10" : "main",
             "-bf",     "0",
@@ -650,7 +657,8 @@ public sealed partial class HlsSessionService
             "-force_key_frames", ForceKeyFramesExpr,
         });
         if (main10) args.AddRange(new[] { "-tag:v", "hvc1" });   // Chrome/Edge refuse hev1 in fMP4
-        args.AddRange(audioArgs ?? DefaultAudioArgs);
+        args.AddRange(videoOnly ? ["-an"] : audioArgs ?? DefaultAudioArgs);
+        if (!videoOnly) args.AddRange(["-map", $"1:a:{audioTrackIndex}?"]);
         if (!main10 && toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -664,7 +672,8 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null,
+        bool videoOnly = false)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -689,15 +698,18 @@ public sealed partial class HlsSessionService
 
         // Input #1 — audio with -itsoffset (same trick as VAAPI/SW paths).
         // Points at the external dub file when one is selected.
-        if (seekSec > 0)
+        if (!videoOnly)
         {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            if (seekSec > 0)
+            {
+                args.Add("-ss");
+                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            }
+            args.Add("-itsoffset");
+            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
+            args.Add("-i");
+            args.Add(externalAudioPath ?? fullPath);
         }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
         AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
@@ -730,10 +742,9 @@ public sealed partial class HlsSessionService
         };
         // Deinterlace first: bwdif_cuda on NVDEC frames, the CPU bwdif otherwise.
         args.AddRange(VideoGraph(videoMap,
-            deinterlace ? (hwDecode ? Deinterlacer.Cuda : Deinterlacer.Cpu) : null, burn, vf, seekSec));
+            deinterlace ? (hwDecode ? Deinterlacer.Cuda : Deinterlacer.Cpu) : null, burn, vf, seekSec, videoOnly));
         args.AddRange(new[]
         {
-            "-map", $"1:a:{audioTrackIndex}?",
             "-c:v", main10 ? "hevc_nvenc" : "h264_nvenc",
             "-preset", "p4",          // p1=fastest, p7=highest quality; p4 is balanced
             "-tune", "hq",
@@ -751,7 +762,8 @@ public sealed partial class HlsSessionService
             "-force_key_frames", ForceKeyFramesExpr,
         });
         if (main10) args.AddRange(new[] { "-tag:v", "hvc1" });   // Chrome/Edge refuse hev1 in fMP4
-        args.AddRange(audioArgs ?? DefaultAudioArgs);
+        args.AddRange(videoOnly ? ["-an"] : audioArgs ?? DefaultAudioArgs);
+        if (!videoOnly) args.AddRange(["-map", $"1:a:{audioTrackIndex}?"]);
         if (!main10 && toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -767,7 +779,8 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, HdrToneMapper toneMapper = HdrToneMapper.None,
-        string videoMap = "0:V:0?", string[]? audioArgs = null, bool deinterlace = false, SubtitleBurn? burn = null)
+        string videoMap = "0:V:0?", string[]? audioArgs = null, bool deinterlace = false, SubtitleBurn? burn = null,
+        bool videoOnly = false)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -779,15 +792,18 @@ public sealed partial class HlsSessionService
 
         // Input #1 — audio with -itsoffset (same A/V-sync trick as the GPU paths).
         // Points at the external dub file when one is selected.
-        if (seekSec > 0)
+        if (!videoOnly)
         {
-            args.Add("-ss");
-            args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            if (seekSec > 0)
+            {
+                args.Add("-ss");
+                args.Add(seekSec.ToString("F3", CultureInfo.InvariantCulture));
+            }
+            args.Add("-itsoffset");
+            args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
+            args.Add("-i");
+            args.Add(externalAudioPath ?? fullPath);
         }
-        args.Add("-itsoffset");
-        args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
-        args.Add("-i");
-        args.Add(externalAudioPath ?? fullPath);
         AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
@@ -797,10 +813,9 @@ public sealed partial class HlsSessionService
         var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
         // HDR: CPU tone mapping after the (cheaper, smaller) downscale.
         if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;
-        args.AddRange(VideoGraph(videoMap, deinterlace ? Deinterlacer.Cpu : null, burn, vf, seekSec));
+        args.AddRange(VideoGraph(videoMap, deinterlace ? Deinterlacer.Cpu : null, burn, vf, seekSec, videoOnly));
         args.AddRange(new[]
         {
-            "-map", $"1:a:{audioTrackIndex}?",
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-profile:v", "main",
@@ -811,7 +826,8 @@ public sealed partial class HlsSessionService
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
         });
-        args.AddRange(audioArgs ?? DefaultAudioArgs);
+        args.AddRange(videoOnly ? ["-an"] : audioArgs ?? DefaultAudioArgs);
+        if (!videoOnly) args.AddRange(["-map", $"1:a:{audioTrackIndex}?"]);
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -825,13 +841,13 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
         int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
         string? externalAudioPath = null, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        DoviHandling dovi = DoviHandling.None)
+        DoviHandling dovi = DoviHandling.None, bool videoOnly = false)
     {
         // A second input is needed either to shift the source's own audio
         // (-itsoffset) OR to pull audio from an external dub file. The external
         // case forces dual-input regardless of offset.
         bool ext          = externalAudioPath is not null;
-        bool useDualInput = audioOffsetSec != 0.0 || ext;
+        bool useDualInput = !videoOnly && (audioOffsetSec != 0.0 || ext);
 
         // Input #0 — video (and audio when not using a second input)
         if (seekSec > 0)
@@ -862,10 +878,10 @@ public sealed partial class HlsSessionService
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
-            "-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
-        args.AddRange(audioArgs ?? DefaultAudioArgs);
+        if (!videoOnly) args.AddRange(["-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?"]);
+        args.AddRange(videoOnly ? ["-an"] : audioArgs ?? DefaultAudioArgs);
         // hvc1 tag for HEVC (Chrome / Edge refuse hev1 in fMP4), plus the Dolby
         // Vision treatment: dvh1 + dvcC for a DV client, the RPU strip for P7.
         args.AddRange(DolbyVision.CopyVideoArgs(dovi, videoCodec));

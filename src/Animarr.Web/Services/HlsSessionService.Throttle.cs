@@ -99,6 +99,7 @@ public sealed partial class HlsSessionService
         // rebuild it (RegenerateMediaPlaylist needs a segment count) — so keep
         // the legacy behaviour there: no pausing, no pruning.
         if (session.SegmentCount <= 0) return;
+        TickRenditions(session);
 
         // Hold the restart lock for the tick: a seek-restart swaps the process
         // and deletes/re-creates segment files, and pruning with a floor computed
