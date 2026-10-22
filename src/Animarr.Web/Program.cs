@@ -631,6 +631,7 @@ app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification)
 // Cookie-or-media-token policies + MediaPathValidator (see each file).
 app.MapMediaStreamEndpoints();
 app.MapHlsEndpoints();
+app.MapPlaybackFactsEndpoints();
 app.MapDlnaServerEndpoints();
 app.MapExternalPlayerEndpoints();
 

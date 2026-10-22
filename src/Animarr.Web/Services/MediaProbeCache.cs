@@ -57,6 +57,14 @@ public sealed class MediaProbeCache
     public Task<string?> GetStreamsJsonAsync(string fullPath, CancellationToken ct = default)
         => GetAsync("streams", StreamsArgs, fullPath, ct);
 
+    /// <summary><c>ffprobe -show_chapters</c> JSON (container metadata only —
+    /// no decoding); null when ffprobe failed. Feeds <c>/api/chapters</c>.</summary>
+    public Task<string?> GetChaptersJsonAsync(string fullPath, CancellationToken ct = default)
+        => GetAsync("chapters", ChaptersArgs, fullPath, ct);
+
+    private static readonly string[] ChaptersArgs =
+        ["-v", "error", "-print_format", "json", "-show_chapters"];
+
     /// <summary>pts,dts CSV of the first video packets — input for the fMP4
     /// stream-copy plan's reorder-delay measurement. null when ffprobe failed.
     /// <paramref name="videoStreamIndex"/> = absolute index of the main video

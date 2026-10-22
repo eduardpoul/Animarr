@@ -48,10 +48,23 @@ public static class MediaProbe
         {
             var r = await FfprobeRunner.RunAsync(
                 ["-v", "error", "-print_format", "json", "-show_chapters", filePath], ProbeTimeout, ct);
-            var stdout = r.StdOut;
-            if (string.IsNullOrWhiteSpace(stdout)) return Array.Empty<Chapter>();
+            return ParseChapters(r.StdOut);
+        }
+        catch
+        {
+            return Array.Empty<Chapter>();
+        }
+    }
 
-            using var doc = JsonDocument.Parse(stdout);
+    /// <summary>The chapters of <c>ffprobe -print_format json -show_chapters</c>
+    /// output (also what <see cref="MediaProbeCache.GetChaptersJsonAsync"/>
+    /// caches); empty for none / unparseable.</summary>
+    public static IReadOnlyList<Chapter> ParseChapters(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<Chapter>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("chapters", out var chapters) ||
                 chapters.ValueKind != JsonValueKind.Array)
                 return Array.Empty<Chapter>();
@@ -69,7 +82,7 @@ public static class MediaProbe
             }
             return list;
         }
-        catch
+        catch (JsonException)
         {
             return Array.Empty<Chapter>();
         }

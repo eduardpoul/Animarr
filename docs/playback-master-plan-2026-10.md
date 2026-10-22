@@ -514,7 +514,7 @@
 ### Этап 7 — по желанию
 
 - **Скорость** 0,5–2× (веб: `playbackRate`; ТВ: `PlaybackParameters`) с сохранением.
-- **Главы:** `-show_chapters` + метки на шкале.
+- **Главы:** `-show_chapters` + метки на шкале. ✅ 2026-10-22, сервер: `GET /api/chapters?path=` → `[{index, title, startSec, endSec}]` (ffprobe в `MediaProbeCache` по версии файла); метки на шкале — за клиентами.
 - **Громкость:**
   - LUFS при сканировании + усиление на клиенте — оживит `NormalizeVolume`;
   - буст выше 100 %;
