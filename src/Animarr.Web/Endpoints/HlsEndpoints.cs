@@ -238,11 +238,14 @@ internal static class HlsEndpoints
             //     +800ms. Going lower than -200ms makes no physical sense (audio
             //     would have to play BEFORE the file's first frame), so the
             //     negative side stays tight.
+            // On top of each envelope rides the per-audio sync offset of task 2.8
+            // (± PerAudioOffsetMaxMs — a dub authored against another cut can be
+            // seconds off), which the client adds to the channel value it sends.
             var audioOffsetHwSec = audioOffsetHwMs is int hwMs
-                ? Math.Clamp(hwMs, -500, 500) / 1000.0
+                ? Math.Clamp(hwMs, -500 - PerAudioOffsetMaxMs, 500 + PerAudioOffsetMaxMs) / 1000.0
                 : 0.07;  // default matches DEFAULT_OFFSET_MS in calibrate.js
             var audioOffsetSwSec = audioOffsetSwMs is int swMs
-                ? Math.Clamp(swMs, -200, 800) / 1000.0
+                ? Math.Clamp(swMs, -200 - PerAudioOffsetMaxMs, 800 + PerAudioOffsetMaxMs) / 1000.0
                 : 0.0;   // SW path has no sensible default — user must dial it in
             var result = await hls.StartAsync(fullPath!, seekSec,
                 audioOffsetHwSec: audioOffsetHwSec,
@@ -445,6 +448,10 @@ internal static class HlsEndpoints
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint));
         return new(user, "a:" + Convert.ToHexString(hash, 0, 8).ToLowerInvariant());
     }
+
+    /// <summary>Range of the per-audio sync offset (task 2.8) on top of the
+    /// hw / sw pipeline envelopes — the same ± range track memory stores.</summary>
+    private const int PerAudioOffsetMaxMs = 3000;
 
     /// <summary>A "1" / "true" query flag.</summary>
     private static bool Flag(string? value)
