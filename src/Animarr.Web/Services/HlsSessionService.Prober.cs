@@ -154,6 +154,11 @@ public sealed partial class HlsSessionService
                             if (tags.TryGetProperty("title", out var titleEl) || tags.TryGetProperty("TITLE", out titleEl))
                                 title = titleEl.GetString();
                         }
+                        // Tags are file content: a language is a short code or
+                        // nothing, a title loses control characters (both end
+                        // up in playlist lines, Renditions.PlaylistText).
+                        language = PlaylistLanguage(language) ?? (language == "und" ? "und" : null);
+                        if (title is not null) title = new string(title.Where(ch => !char.IsControl(ch)).ToArray());
                         string? aProfile = s.TryGetProperty("profile", out var apr) ? apr.GetString() : null;
                         audioStreams.Add(new AudioStreamInfo(codec, channels, language, aProfile) { Title = title });
 

@@ -228,9 +228,9 @@ public sealed partial class HlsSessionService
         sb.Append("#EXTM3U\n#EXT-X-VERSION:7\n");
         foreach (var r in renditions)
         {
-            sb.Append("#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aud\",NAME=\"").Append(r.Name.Replace("\"", "'")).Append('"');
-            if (!string.IsNullOrWhiteSpace(r.Language) && r.Language != "und")
-                sb.Append(",LANGUAGE=\"").Append(r.Language.Replace("\"", "")).Append('"');
+            sb.Append("#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aud\",NAME=\"").Append(PlaylistText(r.Name)).Append('"');
+            if (PlaylistLanguage(r.Language) is { } lang)
+                sb.Append(",LANGUAGE=\"").Append(lang).Append('"');
             sb.Append(r.IsDefault ? ",DEFAULT=YES" : ",DEFAULT=NO").Append(",AUTOSELECT=YES");
             sb.Append(",CHANNELS=\"").Append(r.Audio.Channels.ToString(CultureInfo.InvariantCulture)).Append('"');
             sb.Append(",URI=\"audio/").Append(r.Id).Append("/media.m3u8\"\n");
@@ -240,6 +240,25 @@ public sealed partial class HlsSessionService
         sb.Append("media.m3u8\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// A container tag / file name as a quoted playlist attribute value:
+    /// control characters (CR / LF would start a new playlist line — a tag
+    /// could inject #EXT-X-… lines) dropped, double quotes made single,
+    /// at most 128 characters.
+    /// </summary>
+    internal static string PlaylistText(string? text)
+    {
+        var s = new string((text ?? "").Where(ch => !char.IsControl(ch) && ch != '\u2028' && ch != '\u2029')
+            .Select(ch => ch == '"' ? '\'' : ch).Take(128).ToArray()).Trim();
+        return s.Length == 0 ? "Audio" : s;
+    }
+
+    /// <summary>A language tag fit for LANGUAGE= (<c>[A-Za-z-]{1,16}</c>, not
+    /// "und"); null otherwise.</summary>
+    internal static string? PlaylistLanguage(string? language)
+        => language is { Length: >= 1 and <= 16 } l && l != "und"
+           && l.All(ch => ch is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or '-') ? l : null;
 
     /// <summary>The start response's rendition list.</summary>
     private static List<AudioRenditionInfo> RenditionInfos(IEnumerable<AudioRendition> renditions)
