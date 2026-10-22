@@ -134,10 +134,20 @@ internal static class SubtitleAssetEndpoints
                     c => tracks.CodecOfAsync(fullPath!, index, c), ct);
                 if (r.Path is null)
                 {
+                    // ffmpeg's stderr names cache / temp paths: the log gets it,
+                    // the client a code and a fixed sentence.
+                    var code = r.FailureCode ?? SubtitleCache.ConvertFailed;
+                    loggerFactory.CreateLogger("ApiSubtitleSup").LogWarning(
+                        ".sup not available for {Path} track {Track} ({Code}, exit {Exit}): {Err}",
+                        fullPath, index, code, r.ExitCode, r.Error.Length > 2000 ? r.Error[^2000..] : r.Error);
                     http.Response.Headers.CacheControl = "no-store";
-                    return Results.Problem(detail: r.Error, statusCode: StatusCodes.Status422UnprocessableEntity,
+                    return Results.Problem(
+                        detail: code == SubtitleCache.NotPgs
+                            ? "This subtitle track isn't a PGS track."
+                            : "This subtitle track couldn't be extracted.",
+                        statusCode: StatusCodes.Status422UnprocessableEntity,
                         title: "Subtitle track not available as .sup",
-                        extensions: new Dictionary<string, object?> { ["code"] = r.FailureCode ?? SubtitleCache.ConvertFailed });
+                        extensions: new Dictionary<string, object?> { ["code"] = code });
                 }
                 http.Response.Headers.CacheControl = "private, max-age=3600";
                 return Results.File(r.Path, "application/octet-stream", enableRangeProcessing: true);
