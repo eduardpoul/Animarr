@@ -40,7 +40,11 @@ internal static class DlnaStreamEndpoints
                 var dub = (await externalTracks.FindForVideoAsync(fullPath!, probe: false, ct))
                     .FirstOrDefault(t => t.Kind == "audio" && string.Equals(Path.GetFullPath(t.Path), wanted, StringComparison.OrdinalIgnoreCase));
                 if (dub is null) return Results.BadRequest("external is not an external audio track of this video.");
-                externalFull = dub.Path;
+                // The discovered dub passes the same check as any requested file
+                // (library root, no link, the caller's folders).
+                var (dubOk, dubFull, dubError) = await pathValidator.ResolveLibraryFileAsync(dub.Path, ct);
+                if (!dubOk) return dubError!;
+                externalFull = dubFull;
             }
 
             // A renderer seeks by asking again with TimeSeekRange.dlna.org.

@@ -105,19 +105,27 @@ public sealed class ExternalTrackListingCache
     {
         RecurseSubdirectories = false,   // descent is decided per directory below
         MatchType             = MatchType.Win32,
-        AttributesToSkip      = 0,
+        // Symlinks / junctions (files and directories) are not followed: a
+        // link planted in the library would otherwise list — and hand to the
+        // players — files from outside it, and a directory link can loop.
+        AttributesToSkip      = FileAttributes.ReparsePoint,
         IgnoreInaccessible    = true,
     };
+
+    /// <summary>Directories one listing walks at most (a title's tree is a few dozen).</summary>
+    private const int MaxDirectories = 4096;
 
     private static Listing Scan(string root, bool recursive, Func<string, FileKind> kindOf)
     {
         var directories = new List<(string, DateTime)>();
         var files = new List<Entry>();
         var pending = new Stack<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         pending.Push(root);
-        while (pending.Count > 0)
+        while (pending.Count > 0 && directories.Count < MaxDirectories)
         {
             var dir = pending.Pop();
+            if (!visited.Add(dir)) continue;   // a cycle (bind mount) can't run away
             directories.Add((dir, Directory.GetLastWriteTimeUtc(dir)));
 
             IEnumerable<(string Path, bool IsDirectory)> entries;

@@ -188,6 +188,20 @@ internal static class HlsEndpoints
                 return StartProblem(StatusCodes.Status400BadRequest, HlsSessionService.StartFailedException.InvalidSubtitleTrack,
                     "burnSubtitlePath is not a subtitle file in the library.");
             burnSubtitleFull = subFull;
+            // VobSub is a pair: the .idx is what ffmpeg opens, and its demuxer
+            // reads the .sub beside it — both must be library files in their
+            // own right (a .sub request is served from its .idx).
+            var subExt = Path.GetExtension(subFull!).ToLowerInvariant();
+            var idxPath = Path.ChangeExtension(subFull!, ".idx");
+            if (subExt is ".sub" or ".idx" && File.Exists(idxPath))
+            {
+                var (idxOk, idxFull, _) = await pathValidator.ResolveLibraryFileAsync(idxPath);
+                var (pairOk, _, _) = await pathValidator.ResolveLibraryFileAsync(Path.ChangeExtension(subFull!, ".sub"));
+                if (!idxOk || !pairOk)
+                    return StartProblem(StatusCodes.Status400BadRequest, HlsSessionService.StartFailedException.InvalidSubtitleTrack,
+                        "burnSubtitlePath is not a subtitle file in the library.");
+                burnSubtitleFull = idxFull;
+            }
         }
         bool burning = burnSubtitle is not null || burnSubtitleFull is not null;
 

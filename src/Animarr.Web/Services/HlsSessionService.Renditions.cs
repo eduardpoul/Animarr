@@ -157,6 +157,24 @@ public sealed partial class HlsSessionService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { _logger.LogDebug(ex, "HLS renditions: external dubs of {Path} unavailable", fullPath); }
+        // A discovered dub is read by ffmpeg like any requested file: it must
+        // pass the same check (inside a library root, not a link, visible to
+        // the caller) — the discovery walk alone is not an access decision.
+        if (dubs.Count > 0 && _scopes is not null)
+        {
+            await using var scope = _scopes.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<MediaPathValidator>() is { } validator)
+            {
+                var allowed = new List<(string Path, string? Language, string? Label, string? Codec, int? Channels, int? DelayMs, double? Dur, string? GroupKey)>();
+                foreach (var d in dubs)
+                {
+                    var (ok, full, _) = await validator.ResolveLibraryFileAsync(d.Path, ct);
+                    if (ok) allowed.Add(d with { Path = full! });
+                    else _logger.LogInformation("HLS renditions: skipping dub {Path} — not a playable library file", d.Path);
+                }
+                dubs = allowed;
+            }
+        }
         if (externalAudioPath is not null
             && !dubs.Any(d => string.Equals(Path.GetFullPath(d.Path), Path.GetFullPath(externalAudioPath), StringComparison.OrdinalIgnoreCase)))
             dubs.Insert(0, (externalAudioPath, null, Path.GetFileNameWithoutExtension(externalAudioPath), null, null, null, null, null));
