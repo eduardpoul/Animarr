@@ -24,10 +24,15 @@ public sealed partial class HlsSessionService
             var root = doc.RootElement;
 
             double duration = 0;
-            if (root.TryGetProperty("format", out var fmt)
-                && fmt.TryGetProperty("duration", out var durEl)
-                && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                duration = d;
+            long bitRate = 0;
+            if (root.TryGetProperty("format", out var fmt))
+            {
+                if (fmt.TryGetProperty("duration", out var durEl)
+                    && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+                    duration = d;
+                bitRate = ParseBitRate(fmt);
+            }
+            long videoBitRate = 0;
 
             string? vCodec = null;
             string? aCodec = null;
@@ -109,6 +114,7 @@ public sealed partial class HlsSessionService
 
                         videoCodecsAttr = BuildVideoCodecsAttribute(vCodec, s);
                         videoEnd = StreamEndSec(s);
+                        videoBitRate = ParseBitRate(s);
                     }
                     else if (type == "audio")
                     {
@@ -164,6 +170,8 @@ public sealed partial class HlsSessionService
                 VideoStreamIndex = videoStreamIndex,
                 AudioStreams     = audioStreams,
                 VideoEndSec      = videoEnd,
+                BitRate          = bitRate,
+                VideoBitRate     = videoBitRate,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -244,6 +252,23 @@ public sealed partial class HlsSessionService
                 if (tag.Name.StartsWith("DURATION", StringComparison.OrdinalIgnoreCase)
                     && ParseClock(tag.Value.GetString()) is double sec && sec > 0)
                     return start + sec;
+        return 0;
+    }
+
+    /// <summary><c>bit_rate</c> of an ffprobe format / stream object, or the
+    /// Matroska <c>BPS</c> tag mkvmerge writes per track (bits/s; 0 = unknown).</summary>
+    private static long ParseBitRate(JsonElement el)
+    {
+        if (el.TryGetProperty("bit_rate", out var br)
+            && long.TryParse(br.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) && v > 0)
+            return v;
+        if (el.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Object)
+            foreach (var tag in tags.EnumerateObject())
+                if ((tag.Name.Equals("BPS", StringComparison.OrdinalIgnoreCase)
+                     || tag.Name.StartsWith("BPS-", StringComparison.OrdinalIgnoreCase))
+                    && long.TryParse(tag.Value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var t)
+                    && t > 0)
+                    return t;
         return 0;
     }
 

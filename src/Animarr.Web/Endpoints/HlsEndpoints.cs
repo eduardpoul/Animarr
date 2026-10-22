@@ -146,12 +146,13 @@ internal static class HlsEndpoints
             // path, so a direct file URL would silently drop the dub.
             bool wantHevc   = clientHevc   == "1" || string.Equals(clientHevc,   "true", StringComparison.OrdinalIgnoreCase);
             bool wantHevc10 = clientHevc10 == "1" || string.Equals(clientHevc10, "true", StringComparison.OrdinalIgnoreCase);
-            // A height/bitrate cap (the HUD's Quality menu) forces a re-encode —
-            // you can't shrink a stream-copy — so it must bypass BOTH native paths
-            // (Direct Play AND Direct Stream) and fall through to the HLS pipeline
-            // where maxHeight/maxBitrate actually apply. Same for an external dub,
-            // which needs the HLS mux to combine foreign audio with the video.
-            bool wantCap = effectiveMaxHeight > 0 || (maxBitrate ?? 0) > 0;
+            // A height/bitrate cap (the HUD's Quality menu) that really shrinks
+            // the stream forces a re-encode — you can't shrink a stream-copy —
+            // so ChoosePlaybackAsync then skips BOTH native paths (Direct Play
+            // AND Direct Stream) and the start falls through to the HLS pipeline
+            // where maxHeight/maxBitrate apply; a cap at/above the source's own
+            // height or bitrate keeps the native path. An external dub always
+            // needs the HLS mux to combine foreign audio with the video.
             // A non-default audio track likewise needs the HLS mux: Direct Play
             // serves the raw file (the browser plays ITS default track) and the
             // /api/video remux maps 0:a:0 — so picking e.g. the Russian dub in the
@@ -165,8 +166,9 @@ internal static class HlsEndpoints
                             .ToHashSet();
             // RequestAborted: an abandoned start (rapid Next/Prev) stops waiting on
             // the probe and falls into the OperationCanceledException catch below.
-            var decision = externalAudioFull is null && !wantCap && !wantTrack
-                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, http.RequestAborted, nativeCaps: caps)
+            var decision = externalAudioFull is null && !wantTrack
+                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, http.RequestAborted, nativeCaps: caps,
+                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             // localTracks: the client switches the remembered track itself only
             // on Direct Play; Direct Stream maps 0:a:0, so anything else goes

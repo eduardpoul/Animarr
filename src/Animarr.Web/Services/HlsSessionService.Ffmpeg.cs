@@ -30,8 +30,9 @@ public sealed partial class HlsSessionService
         // — re-encoded to browser-safe AAC — instead of the source's own audio.
         // The video pipeline (TS copy / fMP4 / re-encode) is unchanged.
         string? externalAudioPath = null,
-        // Output bitrate cap in Mbps (0 = use the resolution ladder). Threaded
-        // to the re-encode builders, which feed it to RateFor.
+        // Output bitrate cap in Mbps (0 = none) — the effective one
+        // (EffectiveBitrateCap). A ceiling on RateFor's ladder for the output
+        // height, computed once here for whichever re-encode builder runs.
         int maxBitrate = 0,
         // HDR → SDR tone mapping for the re-encode plans (None = SDR source or
         // off). Chosen once per session by ToneMapperFor.
@@ -50,6 +51,9 @@ public sealed partial class HlsSessionService
         // The exact stream the probe picked as the video (never a cover
         // picture in front of it); "0:V:0?" when there was no probe.
         var videoMap = probe?.VideoMap ?? "0:V:0?";
+        // Re-encode bitrate from the OUTPUT height: the downscale target, else
+        // the source's own height (see RateFor).
+        var rate = RateFor(targetHeight > 0 ? targetHeight : probe?.Height ?? 0, maxBitrate, probe);
 
         // PTS positioning rules (applies to fMP4 paths; TS doesn't need
         // -copyts because PCR carries absolute time inside each segment):
@@ -68,11 +72,11 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper, videoMap);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, maxBitrate, hwDecodeCodec, toneMapper, videoMap);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
@@ -80,7 +84,7 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, probe?.Height ?? 0, audioTrackIndex, externalAudioPath, maxBitrate, toneMapper, videoMap);
+                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap);
                 break;
         }
 
@@ -348,7 +352,7 @@ public sealed partial class HlsSessionService
     /// -itsoffset audio-sync compensation this is our pixel-perfect path.</summary>
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
+        string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
@@ -446,7 +450,6 @@ public sealed partial class HlsSessionService
             // Software-decoded frames: upload first, then scale ON the GPU.
             _ => "format=nv12,hwupload" + (targetHeight > 0 ? $",scale_vaapi=w=-2:h={targetHeight}" : ""),
         };
-        var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
@@ -472,7 +475,7 @@ public sealed partial class HlsSessionService
     /// reintroduce the fMP4 TFDT sync wobble.</summary>
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, string? videoCodec = null,
+        string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
@@ -528,7 +531,6 @@ public sealed partial class HlsSessionService
             // Software-decoded HDR: CPU tone mapping (tonemap_cuda would need an upload first).
             (false, _)                        => (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + HdrToneMap.TonemapxFilter,
         };
-        var rate = RateFor(targetHeight, maxBitrate);
         args.AddRange(new[]
         {
             "-map", videoMap,     // the probed main video, never a cover picture
@@ -564,8 +566,8 @@ public sealed partial class HlsSessionService
     /// than the source). HDR is flattened to SDR (no tonemap) — fine for a
     /// downscaled rung on a small screen.</summary>
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
-        double audioOffsetSec, int startNumber, int targetHeight, int sourceHeight, int audioTrackIndex,
-        string? externalAudioPath = null, int maxBitrate = 0, HdrToneMapper toneMapper = HdrToneMapper.None,
+        double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
+        string? externalAudioPath, EncodeRate rate, HdrToneMapper toneMapper = HdrToneMapper.None,
         string videoMap = "0:V:0?")
     {
         // Input #0 — video (software decode).
@@ -592,8 +594,6 @@ public sealed partial class HlsSessionService
         {
             args.Add("-copyts");
         }
-        var outH = targetHeight > 0 ? targetHeight : sourceHeight;
-        var rate = RateFor(outH, maxBitrate);
         var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
         // HDR: CPU tone mapping after the (cheaper, smaller) downscale.
         if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;

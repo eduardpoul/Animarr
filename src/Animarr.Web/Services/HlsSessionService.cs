@@ -274,11 +274,20 @@ public sealed partial class HlsSessionService : IDisposable
     /// </summary>
     public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath,
         bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default,
-        IReadOnlySet<string>? nativeCaps = null)
+        IReadOnlySet<string>? nativeCaps = null,
+        // The Quality / Bitrate menu's caps (0 = none). One that really shrinks
+        // the stream — a height below the source's, a bitrate below the
+        // source's — needs the HLS re-encode, so neither native path applies.
+        // One at/above the source (a "1080p" pick on a 1080p file, "≤ 20 Mbps"
+        // on a 6 Mbps one) changes nothing and keeps the native path.
+        int maxHeight = 0, int maxBitrate = 0)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
         if (probe is null) return new PlaybackDecision(false, null, duration, null);
+        if ((maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height)
+            || EffectiveBitrateCap(maxBitrate, probe) > 0)
+            return new PlaybackDecision(false, null, duration, null);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
 
@@ -589,6 +598,7 @@ public sealed partial class HlsSessionService : IDisposable
         // encoder-safe invariants for any other caller: even cap, no negatives.
         maxHeight = Math.Max(0, maxHeight) & ~1;
         maxBitrate = Math.Max(0, maxBitrate);
+        var requestedBitrate = maxBitrate;
         if (audioTrackIndex < 0)
             throw new StartFailedException(StartFailedException.InvalidAudioTrack, StatusCodes.Status400BadRequest,
                 $"audioTrackIndex must be 0 or greater (got {audioTrackIndex}).");
@@ -613,6 +623,12 @@ public sealed partial class HlsSessionService : IDisposable
         // MAPS (source track N, or the external dub's) instead of track 0, so
         // TS passthrough, CODECS, the Info block and the restart agree with it.
         probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
+        // A bitrate cap at/above the source's own bitrate can't shrink anything
+        // — it must not turn a copy into a transcode (EffectiveBitrateCap).
+        maxBitrate = EffectiveBitrateCap(maxBitrate, probe);
+        if (maxBitrate != requestedBitrate)
+            _logger.LogInformation("HLS: ignoring the {Cap} Mbps cap for {Path} — the source is only {Src:F1} Mbps",
+                requestedBitrate, fullPath, (probe?.BitRate ?? 0) / 1e6);
 
         // ─── Pre-flight: what this start replaces, then the cap ─────────────
         // 1) This CLIENT's existing sessions for the same source file — a
@@ -796,8 +812,11 @@ public sealed partial class HlsSessionService : IDisposable
         {
             try
             {
+                var bandwidth = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy
+                    ? probe.BitRate
+                    : RateFor(targetHeight > 0 ? targetHeight : probe.Height, maxBitrate, probe).PeakKbps * 1000 + 192_000;
                 File.WriteAllText(Path.Combine(dir, "master.m3u8"),
-                    BuildMasterPlaylist(probeForPlaylist!), Encoding.ASCII);
+                    BuildMasterPlaylist(probeForPlaylist!, bandwidth), Encoding.ASCII);
                 File.WriteAllText(Path.Combine(dir, "media.m3u8"),
                     BuildMediaPlaylist(layout, plan, startOffsetSec: seekSec), Encoding.ASCII);
                 prewrittenPlaylists = true;
@@ -881,6 +900,7 @@ public sealed partial class HlsSessionService : IDisposable
             startSegment: startSegment, toneMapper: toneMapper, owner: who)
         {
             VideoStreamIndex = probe?.VideoStreamIndex ?? -1,
+            Probe = probe,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1190,21 +1210,20 @@ public sealed partial class HlsSessionService : IDisposable
             var sourceSeekSec = segStart > 0 && session.Plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy
                 ? CopySeekTarget(segStart, next: null)
                 : segStart;
-            // We don't have the original probe on restart — but the plan is
-            // fixed for the session's lifetime and BuildFfmpegArgs only needs
-            // the video codec hint (for the `-tag:v hvc1` on stream-copy HEVC).
-            // Pass a minimal ProbeInfo carrying just that.
-            // AudioCodec too: with null the TS plan's passthrough decision
-            // flipped to re-encode after the first scrub (5.1 → AAC stereo,
-            // and MP3 no longer matching the CODECS the playlist advertised).
-            var miniProbe = new ProbeInfo(0, session.VideoCodec, session.AudioCodec, 0, 0, null, false, session.Is10Bit, null, 0, null)
-            {
-                VideoStreamIndex = session.VideoStreamIndex,
-            };
+            // The restart runs off the START's probe (the plan is fixed for the
+            // session's lifetime): same video map, codec, bit depth, height and
+            // bitrate, and the MAPPED audio track's codec — with that missing the
+            // TS passthrough decision flipped to re-encode after the first scrub.
+            // The minimal stand-in is only for a session started without one.
+            var restartProbe = session.Probe
+                ?? new ProbeInfo(0, session.VideoCodec, session.AudioCodec, 0, 0, null, false, session.Is10Bit, null, 0, null)
+                {
+                    VideoStreamIndex = session.VideoStreamIndex,
+                };
             var args = BuildFfmpegArgs(session.SourcePath, sourceSeekSec, session.OutputDir,
                 Path.Combine(session.OutputDir, "_ffmpeg.m3u8"),
                 "_ffmpeg_master.m3u8",
-                miniProbe,
+                restartProbe,
                 session.Plan,
                 startNumber: targetSegment,
                 reuseInit: true,

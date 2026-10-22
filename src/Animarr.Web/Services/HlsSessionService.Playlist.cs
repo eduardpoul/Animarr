@@ -42,6 +42,15 @@ public sealed partial class HlsSessionService
         /// </summary>
         public double VideoEndSec { get; init; }
 
+        /// <summary>Whole-file bitrate (bits/s, ffprobe <c>format.bit_rate</c>;
+        /// 0 = unknown) — what a copy plan puts on the wire. A bitrate cap at or
+        /// above it can't save anything and is ignored.</summary>
+        public long BitRate { get; init; }
+
+        /// <summary>The main video stream's own bitrate (bits/s; stream
+        /// <c>bit_rate</c> or Matroska's <c>BPS</c> tag; 0 = unknown).</summary>
+        public long VideoBitRate { get; init; }
+
         /// <summary>Every audio stream, index = ffmpeg's <c>a:N</c>. Empty for
         /// the seek-restart's minimal probe.</summary>
         public IReadOnlyList<AudioStreamInfo> AudioStreams { get; init; } = [];
@@ -111,32 +120,73 @@ public sealed partial class HlsSessionService
         Fmp4SoftwareReencode,
     }
 
-    /// <summary>H.264 bitrate ladder by OUTPUT height (video / maxrate / bufsize).
+    /// <summary>H.264 video bitrate ladder by OUTPUT height (target kbps).
     /// Used by every re-encode plan so a 720p stream isn't shipped at 4K
     /// bitrate (and vice-versa). Tuned for LAN delivery — the old ladder
     /// (5M @ 1080p) blocked badly on anime via the VAAPI encoder. On a local
     /// network bitrate is ~free, so aim high; the player's Bitrate menu caps it
-    /// when bandwidth actually matters.</summary>
-    private static (string V, string Max, string Buf) RateForHeight(int h) => h switch
+    /// when bandwidth actually matters.
+    /// maxrate = 1.25×, VBV buffer = 2× the target (EncodeRate).</summary>
+    private static long LadderKbps(int h) => h switch
     {
-        <= 0    => ("12M",    "15M",    "24M"),   // unknown → 1080-ish default
-        <= 480  => ("2500k",  "3200k",  "5M"),
-        <= 576  => ("3500k",  "4500k",  "7M"),
-        <= 720  => ("6M",     "7500k",  "12M"),
-        <= 1080 => ("12M",    "15M",    "24M"),
-        <= 1440 => ("24M",    "30M",    "48M"),
-        _       => ("40M",    "50M",    "80M"),   // 2160p+
+        <= 0    => 12_000,   // unknown → 1080-ish default
+        <= 480  => 2_500,
+        <= 576  => 3_500,
+        <= 720  => 6_000,
+        <= 1080 => 12_000,
+        <= 1440 => 24_000,
+        _       => 40_000,   // 2160p+
     };
 
-    /// <summary>Resolve the encode bitrate tuple. An explicit Mbps cap (from the
-    /// player's Bitrate menu) overrides the resolution-derived ladder;
-    /// <paramref name="maxBitrateMbps"/> = 0 → use the ladder for height h.</summary>
-    private static (string V, string Max, string Buf) RateFor(int h, int maxBitrateMbps)
+    /// <summary>One encode's video bitrate: target / peak (maxrate) / VBV buffer.</summary>
+    private readonly record struct EncodeRate(long Kbps)
     {
-        if (maxBitrateMbps <= 0) return RateForHeight(h);
-        long v = (long)maxBitrateMbps * 1000;          // kbps
-        return ($"{v}k", $"{(long)(v * 1.25)}k", $"{v * 2}k");
+        public string V   => $"{Kbps}k";
+        public string Max => $"{PeakKbps}k";
+        public string Buf => $"{Kbps * 2}k";
+        public long PeakKbps => Kbps * 5 / 4;
     }
+
+    /// <summary>Lowest video bitrate an encode is ever given (kbps): below this
+    /// even 480p falls apart.</summary>
+    private const long MinEncodeKbps = 800;
+
+    /// <summary>
+    /// The bitrate a re-encode runs at. Starts from the ladder for the OUTPUT
+    /// height (<paramref name="outHeight"/> — the downscale target, else the
+    /// SOURCE height: no-downscale GPU re-encodes used to fall on the "unknown"
+    /// rung, a fixed 12 Mbps for 480p and 4K alike, as did every software
+    /// re-encode after a seek-restart, whose minimal probe had no height), then:
+    ///   • never above what the source itself spends — re-encoding a 3 Mbps
+    ///     file at 12 Mbps adds bytes, not quality. H.264 is given 1.5× the
+    ///     budget of a HEVC / AV1 / VP9 source (same picture, older codec);
+    ///   • the player's Bitrate menu (<paramref name="maxBitrateMbps"/>) is a
+    ///     ceiling on top: "≤ N Mbps" — it no longer raises a 720p rung to N;
+    ///   • never below <see cref="MinEncodeKbps"/>.
+    /// </summary>
+    private static EncodeRate RateFor(int outHeight, int maxBitrateMbps, ProbeInfo? source = null)
+    {
+        long kbps = LadderKbps(outHeight);
+        var srcBps = source is null ? 0 : source.VideoBitRate > 0 ? source.VideoBitRate : source.BitRate;
+        if (srcBps > 0)
+        {
+            var efficient = (source!.VideoCodec ?? "").ToLowerInvariant() is "hevc" or "av1" or "vp9";
+            kbps = Math.Min(kbps, (long)(srcBps / 1000.0 * (efficient ? 1.5 : 1.0)));
+        }
+        if (maxBitrateMbps > 0) kbps = Math.Min(kbps, (long)maxBitrateMbps * 1000);
+        return new EncodeRate(Math.Max(kbps, MinEncodeKbps));
+    }
+
+    /// <summary>
+    /// The bitrate cap (Mbps) that actually applies: 0 when there is none or
+    /// when it is at/above the source's own bitrate. Such a cap can't make the
+    /// stream any smaller, so it must not force a re-encode either — it used
+    /// to turn a stream copy into a full transcode for nothing.
+    /// </summary>
+    private static int EffectiveBitrateCap(int maxBitrateMbps, ProbeInfo? probe)
+        => maxBitrateMbps > 0 && probe is { BitRate: > 0 } p && maxBitrateMbps * 1_000_000L >= p.BitRate
+            ? 0
+            : Math.Max(0, maxBitrateMbps);
 
     /// <summary>Pick the playback plan from the probe + detected hardware.
     ///   • Downscale OR bitrate cap requested → re-encode (GPU if available).
@@ -232,11 +282,12 @@ public sealed partial class HlsSessionService
     private static bool TsAudioPassthrough(string? mappedAudioCodec, bool externalAudio)
         => !externalAudio && IsBrowserCompatibleAudioInTs(mappedAudioCodec);
 
-    private static string BuildMasterPlaylist(ProbeInfo p)
+    private static string BuildMasterPlaylist(ProbeInfo p, long bandwidthBps = 0)
     {
-        // BANDWIDTH is a rough estimate based on resolution. hls.js requires
-        // the attribute to exist; it doesn't have to be exact.
-        var bandwidth = EstimatedBandwidth(p.Width, p.Height);
+        // BANDWIDTH: the real peak when known (the encode's maxrate, a copy's
+        // source bitrate), else a rough estimate from the resolution. hls.js
+        // requires the attribute to exist; it doesn't have to be exact.
+        var bandwidth = bandwidthBps > 0 ? bandwidthBps : EstimatedBandwidth(p.Width, p.Height);
         var codecs = p.CodecsAttribute ?? "avc1.640028,mp4a.40.2";
         var sb = new StringBuilder();
         sb.Append("#EXTM3U\n");

@@ -22,6 +22,12 @@ public sealed partial class HlsSessionService
         /// ffmpeg to <c>Layout.Start(N)</c>, and playlist rewrites reuse it.</summary>
         public SegmentLayout Layout { get; }
         public int     SegmentCount => Layout.Count;
+        /// <summary>The start's probe (audio fields = the mapped track's, see
+        /// ProbeInfo.ForAudioTrack). The seek-restart builds its ffmpeg run from
+        /// it, so it gets the same source height / bitrate / codec facts as the
+        /// first run — its old hand-made minimal probe had no height, and the
+        /// software re-encode fell back to 12 Mbps after every scrub.</summary>
+        public ProbeInfo? Probe { get; init; }
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS
