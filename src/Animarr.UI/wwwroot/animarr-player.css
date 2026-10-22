@@ -648,6 +648,8 @@ html:has(.vp-backdrop) { overflow: hidden; }
     color: oklch(0.85 0.12 var(--accent-hue, 245));
 }
 .vp-chip--step { font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; }
+/* An option that doesn't apply right now ("Remove black bars" with none found). */
+.vp-chip.is-off, .vp-chip:disabled { opacity: 0.4; cursor: default; }
 .vp-chip--swatch {
     width: 26px;
     height: 26px;

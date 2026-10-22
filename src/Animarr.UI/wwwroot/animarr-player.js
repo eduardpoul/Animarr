@@ -1050,7 +1050,7 @@
     //  Player adapter abstraction (Phase 1, 2026-05-27)
     // ─────────────────────────────────────────────────────────────────
     //
-    // The HUD (attachHud, button callbacks, autoCropIfUltrawide, progress
+    // The HUD (attachHud, button callbacks, autoRemoveBars, progress
     // reporter) talks to an abstract player surface rather than to
     // Artplayer directly. (The WebView-side native ExoPlayer adapter this
     // was made for is gone: the TV app plays natively in its own page, and
@@ -1078,7 +1078,7 @@
     //     setSubtitleVisible(bool)        → void
     //     setView({aspect, zoom, pan})    → void   (picture geometry)
     //     rawVideoElement()               → HTMLVideoElement|null
-    //                                              (letterbox sampling,
+    //                                              (WebAudio, renderers,
     //                                               buffered ranges, PiP)
     //     destroy()                       → void
     //
@@ -1259,7 +1259,10 @@
         //   force:R  the frame STRETCHED to display aspect R (an anamorphic /
         //            mis-flagged file), in the largest R box that fits
         //   crop:R   the frame COVERING an R box — crops baked-in bars
-        //            (the ultrawide auto-crop uses this)
+        //   crop:auto "Remove black bars": an R box of the picture's own
+        //            aspect inside its bars (view.bars, from /api/media-facts),
+        //            the frame covering it at the picture's position — so
+        //            letterbox AND pillarbox (and off-centre bars) go
         // The R box is Artplayer's aspectRatio (it sizes the <video> and
         // re-applies on resize); object-fit then maps the frame into it.
         // zoom (≥ 1) scales the picture about its centre; pan (−1…1, + =
@@ -1270,14 +1273,19 @@
             try {
                 const video = this.art.video || this.art.template?.$video;
                 if (!video) return;
-                const { mode, ratio } = parseAspect(view && view.aspect);
-                const want = ratio || 'default';
+                const { mode, ratio, auto } = parseAspect(view && view.aspect);
+                const bars = auto ? (view && view.bars) || null : null;
+                const want = auto ? (bars ? bars.ratio : 'default') : (ratio || 'default');
                 if (this.art.aspectRatio !== want) this.art.aspectRatio = want;
-                video.style.objectFit = (mode === 'fill' || mode === 'crop') ? 'cover'
+                video.style.objectFit = auto ? (bars ? 'cover' : '')
+                                      : (mode === 'fill' || mode === 'crop') ? 'cover'
                                       : (mode === 'stretch' || mode === 'force') ? 'fill' : '';
                 const z = Math.max(1, (view && view.zoom) || 1);
                 const p = Math.max(-1, Math.min(1, (view && view.pan) || 0));
-                video.style.objectPosition = p ? '50% ' + (50 + p * 50) + '%' : '';
+                // Without bars the cover overflow is panned by object-position;
+                // the bars crop uses it to pick the picture out of the frame.
+                video.style.objectPosition = bars ? bars.posX.toFixed(2) + '% ' + bars.posY.toFixed(2) + '%'
+                                           : p ? '50% ' + (50 + p * 50) + '%' : '';
                 video.style.transform = (z !== 1 || p)
                     ? 'scale(' + z + ') translateY(' + (-p * (z - 1) / (2 * z) * 100).toFixed(3) + '%)' : '';
             } catch (e) { console.warn('picture geometry failed', e); }
@@ -1836,6 +1844,8 @@
                     const b = mkEl('button', 'vp-chip', o.label);
                     b.type = 'button';
                     b.dataset.value = o.value;
+                    if (o.off) { b.disabled = true; b.classList.add('is-off'); }
+                    if (o.title) b.title = o.title;
                     b.addEventListener('click', () => {
                         if (!ready()) return;
                         entry.currentAspect = o.value;
@@ -1848,7 +1858,10 @@
                     all.push(b);
                 });
             };
-            pickRow(t('picture_mode'), ASPECT_MODES.map(m => ({ value: m, label: t('aspect_' + m) })));
+            pickRow(t('picture_mode'), [...ASPECT_MODES.map(m => ({ value: m, label: t('aspect_' + m) })),
+                { value: BARS_KEY, label: t('aspect_nobars'), off: !barsGeometry(entry.facts),
+                  title: barsGeometry(entry.facts) ? null
+                       : (entry.facts && entry.facts.video && entry.facts.video.cropStatus === 'pending') ? t('nobars_pending') : t('nobars_none') }]);
             pickRow(t('picture_force'), FORCE_RATIOS.map(r => ({ value: 'force:' + r, label: r })));
             pickRow(t('picture_crop'), CROP_RATIOS.map(r => ({ value: 'crop:' + r, label: r })));
             refresh();
@@ -2047,86 +2060,62 @@
             });
     }
 
-    // ── auto-detect letterbox + ultrawide → 21:9/2.35 crop ────────────
-    // Triggered once on the first decoded frame. Samples a 240-wide canvas
-    // of the video, counts black rows at top + bottom, infers the "real"
-    // content aspect ratio inside the source frame, and — IF the viewport
-    // is at least 21:9 — applies the closest standard aspect (21:9 or
-    // 2.35:1) via object-fit:cover so the baked-in bars get cropped off.
-    //
-    // Skips when:
-    //   • viewport is narrower than 21:9 (would crop a normal 16:9 movie
-    //     just because the user has a tall window),
-    //   • user already manually picked an aspect this session,
-    //   • first frame is too dark to meaningfully measure,
-    //   • the source frame doesn't have detectable letterbox bars.
-    //
-    // Caveats:
-    //   • The first decoded frame may be a black intro card — in that case
-    //     no letterbox is detected and we leave aspect alone (the user can
-    //     trigger the Aspect picker manually). Re-sampling several seconds
-    //     in would be more robust but adds latency to playback start.
-    //   • Requires the <video> to be CORS-clean (we set crossorigin on
-    //     moreVideoAttr); getImageData throws SecurityError otherwise and
-    //     we silently swallow it.
-    function detectLetterbox(adapter) {
-        const video = adapter && adapter.rawVideoElement();
-        if (!video || !video.videoWidth || !video.videoHeight) return null;
-        try {
-            const canvas = document.createElement('canvas');
-            const w = canvas.width = 240;
-            const h = canvas.height = Math.max(8,
-                Math.round(video.videoHeight * (w / video.videoWidth)));
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            ctx.drawImage(video, 0, 0, w, h);
-            const data = ctx.getImageData(0, 0, w, h).data;
-
-            // Average row brightness on the 0..255 scale (RGB averaged).
-            const rowBrightness = (y) => {
-                let sum = 0;
-                for (let x = 0; x < w; x++) {
-                    const i = (y * w + x) * 4;
-                    sum += data[i] + data[i + 1] + data[i + 2];
-                }
-                return sum / (w * 3);
-            };
-            // Frame-wide brightness — used to detect "this is a fully black
-            // intro frame, retry later" cases.
-            let totalBrightness = 0;
-            for (let y = 0; y < h; y++) totalBrightness += rowBrightness(y);
-            totalBrightness /= h;
-            if (totalBrightness < 6) return { tooDark: true };
-
-            const THRESHOLD = 12;  // tolerate slight noise above pure black
-            let topBlack = 0;
-            while (topBlack < h / 3 && rowBrightness(topBlack) < THRESHOLD) topBlack++;
-            let botBlack = 0;
-            while (botBlack < h / 3 && rowBrightness(h - 1 - botBlack) < THRESHOLD) botBlack++;
-
-            const totalBlack = topBlack + botBlack;
-            // Need ≥6% of frame height to be black — anything less is noise
-            // or padding from incorrect scaling.
-            if (totalBlack < h * 0.06) return { topBlack, botBlack, innerRatio: null };
-
-            const innerH = h - totalBlack;
-            const innerRatio = video.videoWidth / (video.videoHeight * innerH / h);
-            return { topBlack, botBlack, innerRatio };
-        } catch (e) {
-            console.warn('letterbox detect: getImageData threw', e);
-            return null;
-        }
-    }
-
     // Picture modes (entry.currentAspect holds one of these keys; see
     // ArtplayerAdapter.setView for what each does).
     const ASPECT_MODES  = ['fit', 'fill', 'stretch'];
     const FORCE_RATIOS  = ['16:9', '4:3', '21:9', '2.35:1', '1.85:1'];
     const CROP_RATIOS   = ['21:9', '2.35:1', '1.85:1', '16:9', '4:3'];
     const ZOOM_MAX      = 3;
+    const BARS_KEY      = 'crop:auto';   // "Remove black bars"
+    /** The picture inside the frame's baked-in bars, from /api/media-facts
+     *  (null: none detected / not known yet): the R box ratio for Artplayer,
+     *  the object-position that puts the picture in it, and the fractions. */
+    function barsGeometry(facts) {
+        const v = facts && facts.video;
+        if (!v || v.cropStatus !== 'detected' || !v.crop || !(v.contentAspect > 0) || !v.width || !v.height) return null;
+        const cx = v.crop.x / v.width, cy = v.crop.y / v.height;
+        const cw = v.crop.width / v.width, ch = v.crop.height / v.height;
+        if (!(cw > 0 && ch > 0) || (cw > 0.995 && ch > 0.995)) return null;
+        const pos = (o, size) => size < 0.995 ? Math.max(0, Math.min(100, o / (1 - size) * 100)) : 50;
+        return {
+            ratio: (Math.round(v.contentAspect * 10000) / 10000) + ':1',
+            posX: pos(cx, cw), posY: pos(cy, ch), cw, ch,
+            displayAspect: v.displayAspect || (v.width / v.height), contentAspect: v.contentAspect,
+            letterbox: !!v.letterbox, pillarbox: !!v.pillarbox,
+        };
+    }
+    /** How much larger the picture gets on this player with its bars cut
+     *  (1 = no gain): contained picture area / the area it has inside the
+     *  contained frame. */
+    function barsGain(entry) {
+        const b = barsGeometry(entry.facts);
+        const pl = entry.art && entry.art.template && entry.art.template.$player;
+        if (!b || !pl || !pl.clientWidth || !pl.clientHeight) return 1;
+        const R = pl.clientWidth / pl.clientHeight;
+        const fit = (a) => a > R ? [1, R / a] : [a / R, 1];      // a box of aspect a, contained
+        const [fw, fh] = fit(b.displayAspect);
+        const [pw, ph] = fit(b.contentAspect);
+        return (pw * ph) / Math.max(1e-6, b.cw * fw * b.ch * fh);
+    }
+    /** Cut the bars by itself when that clearly enlarges the picture here
+     *  (a letterboxed film on an ultrawide screen, a pillarboxed 4:3 show on
+     *  a phone in portrait…) — never over the user's own or a remembered
+     *  choice (viewPicked); undone again when the player's shape changes
+     *  so it no longer helps. */
+    function autoRemoveBars(entry) {
+        if (!entry || !entry.adapter || viewPicked(entry)) return;
+        const cur = entry.currentAspect || 'fit';
+        if (cur !== 'fit' && cur !== BARS_KEY) return;
+        const want = barsGain(entry) > 1.05 ? BARS_KEY : 'fit';
+        if (want === cur) return;
+        entry.currentAspect = want;
+        applyView(entry);
+    }
     /** 'fit' | 'fill' | 'stretch' | 'force:16:9' | 'crop:2.35:1' →
      *  { mode, ratio } (ratio null for the first three; unknown → fit). */
     function parseAspect(key) {
         const k = String(key || 'fit');
+        if (k === BARS_KEY) return { mode: 'crop', ratio: null, auto: true };
         const m = /^(force|crop):(.+)$/.exec(k);
         if (m && (m[1] === 'force' ? FORCE_RATIOS : CROP_RATIOS).includes(m[2])) return { mode: m[1], ratio: m[2] };
         return { mode: ASPECT_MODES.includes(k) ? k : 'fit', ratio: null };
@@ -2165,10 +2154,11 @@
     /** Push entry's picture state (aspect, zoom, pan) to the adapter. */
     function applyView(entry) {
         if (entry && entry.adapter && entry.adapter.setView)
-            entry.adapter.setView({ aspect: entry.currentAspect, zoom: entry.zoom, pan: entry.pan });
+            entry.adapter.setView({ aspect: entry.currentAspect, zoom: entry.zoom, pan: entry.pan,
+                                    bars: barsGeometry(entry.facts) });
     }
-    /** Has the user touched the picture (any mode pick, zoom or pan)? Then
-     *  the ultrawide auto-crop stays out of it. */
+    /** Has the user touched the picture (any mode pick, zoom or pan, or a
+     *  remembered picture)? Then the automatic bar cut stays out of it. */
     function viewPicked(entry) {
         return !!entry.aspectPicked || (entry.zoom || 1) !== 1 || (entry.pan || 0) !== 0;
     }
@@ -2177,37 +2167,6 @@
      *  (a standalone .srt/.ass exposes its single subtitle stream as 0:s:0). */
     function externalSubUrl(path) {
         return apiUrl('/api/subtitle?path=' + encodeURIComponent(path) + '&track=0&format=webvtt');
-    }
-
-    /** Map a measured inner-content aspect ratio onto a crop preset, or
-     *  null if none is a good fit. */
-    function bestCropFor(innerRatio) {
-        if (!Number.isFinite(innerRatio)) return null;
-        if (innerRatio >= 2.30) return 'crop:2.35:1';   // cinema
-        if (innerRatio >= 2.15) return 'crop:21:9';     // ultrawide
-        return null;                                    // not cinema/ultrawide content
-    }
-
-    /** Try the letterbox detection, apply best-matching crop if the
-     *  viewport is at least 21:9 wide AND content has clear letterbox.
-     *  Never over an explicit choice: any picture pick (even "Fit", kept
-     *  across stream restarts), zoom or pan wins; nor twice. */
-    function autoCropIfUltrawide(adapter, entry) {
-        if (viewPicked(entry) || (entry.currentAspect || 'fit') !== 'fit') return;
-        const screenRatio = window.innerWidth / Math.max(1, window.innerHeight);
-        if (screenRatio < 2.15) return;  // not ultrawide → don't crop 16:9
-
-        const sample = detectLetterbox(adapter);
-        if (!sample || sample.tooDark || sample.innerRatio == null) return;
-        const target = bestCropFor(sample.innerRatio);
-        if (!target) return;
-
-        entry.currentAspect = target;
-        applyView(entry);
-        console.info('animarr: auto-aspect →', target, {
-            innerRatio: sample.innerRatio.toFixed(3),
-            screenRatio: screenRatio.toFixed(3),
-        });
     }
 
     /** The chapter `t` falls in, with its display label ("Chapter 3" when
@@ -3299,6 +3258,9 @@
         aspect_fit:         'Fit',
         aspect_fill:        'Fill (zoom)',
         aspect_stretch:     'Stretch',
+        aspect_nobars:      'Remove black bars',
+        nobars_none:        'No black bars in this picture',
+        nobars_pending:     'Still measuring the black bars — try again in a moment',
     };
     function t(key) {
         return LABELS[key] || LABEL_DEFAULTS[key] || key;
@@ -4961,22 +4923,35 @@
             });
         }
 
-        // Auto-aspect on ultrawide screens. Runs ~600ms after the first
-        // decoded frame to give the decoder time to render real content
-        // (some files start on a few black frames). If that frame is
-        // also too dark to measure, retry once at ~3s for movies with
-        // a long black studio-logo intro.
-        adapter.once('loadeddata', () => {
-            setTimeout(() => {
-                autoCropIfUltrawide(adapter, entry);
-                // Still on Fit, untouched → one more look (dark intro frame).
-                if (entry.currentAspect === 'fit' && !viewPicked(entry)) {
-                    setTimeout(() => {
-                        if (WIRED.get(elementId) === entry) autoCropIfUltrawide(adapter, entry);
-                    }, 4000);
-                }
-            }, 600);
-        });
+        // Black bars baked into the frame (3.3): measured by the server
+        // (/api/media-facts — cropdetect at scan / first ask; "pending" is
+        // asked for again once). Feeds "Remove black bars" in the Picture
+        // panel and the automatic cut (autoRemoveBars), re-judged when the
+        // player's shape changes (rotation, window resize).
+        (async () => {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                let facts = null;
+                try {
+                    const r = await fetch(apiUrl('/api/media-facts?path=' + encodeURIComponent(mediaPath)
+                        + '&wait=' + (attempt === 0 ? 2 : 10)), { signal: abort.signal });
+                    facts = r.ok ? await r.json() : null;
+                } catch { return; }
+                if (WIRED.get(elementId) !== entry) return;
+                entry.facts = facts;
+                const status = facts && facts.video && facts.video.cropStatus;
+                if (status !== 'pending') break;
+            }
+            if (WIRED.get(elementId) !== entry) return;
+            if (entry.currentAspect === BARS_KEY) applyView(entry);   // a remembered / carried "remove bars"
+            autoRemoveBars(entry);
+        })();
+        let barsResizeTimer = null;
+        const onBarsResize = () => {
+            clearTimeout(barsResizeTimer);
+            barsResizeTimer = setTimeout(() => { if (WIRED.get(elementId) === entry) autoRemoveBars(entry); }, 300);
+        };
+        window.addEventListener('resize', onBarsResize);
+        entry.offResize = () => { clearTimeout(barsResizeTimer); window.removeEventListener('resize', onBarsResize); };
 
         let lastTick = 0;
         let lastPosForDelta = resumeSec;
@@ -5071,6 +5046,7 @@
                 });
             }
         } catch {}
+        if (entry.offResize) { try { entry.offResize(); } catch {} entry.offResize = null; }
         entry.subToken = (entry.subToken || 0) + 1;   // a libass start still loading backs out
         disposeSubRenderer(entry);
         disposeLoudness(entry);
