@@ -1850,6 +1850,32 @@ public partial class PlayerPage : ContentPage
         UpNextName.Text = next is null ? ""
             : next.Episode is { } n ? (next.Season is { } s && s != _season ? $"Сезон {s} · Серия {n}" : $"Серия {n}")
             : System.IO.Path.GetFileNameWithoutExtension(FileName(next.FilePath));
+        // The episode's name (TMDB metadata, cached on the server) when known.
+        if (next is { Episode: int ep } && await EpisodeTitleAsync(next.Season, ep, next.AbsoluteEpisode) is { } title
+            && file == _filePath && _nextEpisode == next)
+            UpNextName.Text += $" · {title}";
+    }
+
+    private Dictionary<(int Season, int Episode), string>? _episodeTitles;
+
+    /// <summary>TMDB episode title for a file, mapped like the detail page:
+    /// an absolutely numbered file → TMDB season 1 / its absolute number,
+    /// anything else straight through. Null when unknown.</summary>
+    private async Task<string?> EpisodeTitleAsync(int? season, int episode, int? absolute)
+    {
+        if (_episodeTitles is null)
+        {
+            try
+            {
+                var meta = await _api.GetEpisodeMetadataAsync(_mediaItemId);
+                _episodeTitles = meta.Where(m => !string.IsNullOrWhiteSpace(m.Title))
+                                     .GroupBy(m => (m.Season, m.Episode))
+                                     .ToDictionary(g => g.Key, g => g.First().Title!);
+            }
+            catch (Exception ex) { Log($"episode titles: {ex.Message}"); return null; }   // retried next time
+        }
+        var key = absolute is int abs ? (1, abs) : (season ?? 1, episode);
+        return _episodeTitles.TryGetValue(key, out var t) ? t : null;
     }
 
     private void ResetUpNext()

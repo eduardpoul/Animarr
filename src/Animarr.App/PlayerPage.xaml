@@ -182,7 +182,7 @@
             <VerticalStackLayout Spacing="10">
                 <Label Text="ДАЛЕЕ" TextColor="#f49157" FontFamily="sans-serif" FontSize="10" CharacterSpacing="2" />
                 <Label x:Name="UpNextName" Text="" TextColor="White" FontFamily="sans-serif-medium"
-                       FontAttributes="Bold" FontSize="17" MaxLines="1" LineBreakMode="TailTruncation" />
+                       FontAttributes="Bold" FontSize="17" MaxLines="2" LineBreakMode="TailTruncation" />
                 <HorizontalStackLayout Spacing="8">
                     <Border x:Name="UpNextPlayButton" HeightRequest="36" Padding="14,0" StrokeThickness="0"
                             StrokeShape="RoundRectangle 8" BackgroundColor="#E6bb5000">
