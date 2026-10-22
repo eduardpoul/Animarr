@@ -99,7 +99,12 @@ public sealed partial class HlsSessionService
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4StreamCopy:
-                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
+                // A key-frame copy of the file's own audio shifts it in place
+                // (setts below) — its segment files keep absolute timestamps, so
+                // the shift survives; the HLS muxer's fMP4 rebased each track and
+                // needed the second -itsoffset input.
+                BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec,
+                    keyframeRun is not null && externalAudioPath is null ? 0 : audioOffsetSec, audioTrackIndex,
                     externalAudioPath, videoMap, audioArgs, dovi);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
@@ -107,6 +112,18 @@ public sealed partial class HlsSessionService
                     targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint, burn);
                 break;
         }
+
+        // The audio offset of a single-input copy (the file's own audio): shift
+        // the audio packets — or, for a negative offset, the video ones the other
+        // way, so no timestamp goes below the start (the TS muxer re-based a
+        // segment whose first audio went negative) — instead of reading the file
+        // a second time with -itsoffset. Every packet keeps its place in its own
+        // stream; only the A/V relation moves.
+        bool singleInputCopy = externalAudioPath is null
+            && (plan == HlsPlan.TsStreamCopy || (plan == HlsPlan.Fmp4StreamCopy && keyframeRun is not null));
+        if (singleInputCopy && Math.Abs(audioOffsetSec) >= 0.0005)
+            args.AddRange(audioOffsetSec > 0 ? ["-bsf:a", ShiftFilter(audioOffsetSec)] : ["-bsf:v", ShiftFilter(-audioOffsetSec)]);
+        MergeBitstreamFilters(args);
 
         if (keyframeRun is { } kr)
         {
@@ -285,6 +302,38 @@ public sealed partial class HlsSessionService
     {
         var opt = path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");
         return "'" + opt.Replace("'", "'\\''") + "'";
+    }
+
+    /// <summary>setts bitstream filter delaying a stream by <paramref name="sec"/> (&gt; 0).</summary>
+    private static string ShiftFilter(double sec)
+    {
+        var s = sec.ToString("0.000###", CultureInfo.InvariantCulture);
+        return $"setts=pts=PTS+{s}/TB:dts=DTS+{s}/TB";
+    }
+
+    /// <summary>
+    /// One -bsf:v / -bsf:a per stream: ffmpeg keeps only the last of repeated
+    /// options, so the SAR fix, the RPU strip, the DTS core extract and the
+    /// sync shift each set on their own would have silently replaced one
+    /// another — joined into one chain here, in the order they were added.
+    /// </summary>
+    private static void MergeBitstreamFilters(List<string> args)
+    {
+        foreach (var opt in new[] { "-bsf:v", "-bsf:a" })
+        {
+            var values = new List<string>();
+            int first = -1;
+            for (int i = 0; i < args.Count - 1; i++)
+            {
+                if (args[i] != opt) continue;
+                if (first < 0) first = i;
+                values.Add(args[i + 1]);
+            }
+            if (values.Count < 2) continue;
+            for (int i = args.Count - 2; i > first; i--)
+                if (args[i] == opt) args.RemoveRange(i, 2);
+            args[first + 1] = string.Join(',', values);
+        }
     }
 
     /// <summary>The historical audio leg: AAC stereo 192k.</summary>

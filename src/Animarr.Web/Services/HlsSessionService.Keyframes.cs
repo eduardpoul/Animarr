@@ -96,8 +96,11 @@ public sealed partial class HlsSessionService
     /// disabled keeps the source timestamps exactly (the default shifted a
     /// B-frame file by its decode delay, 60 ms here, and every cut landed one
     /// key frame late). fMP4: fragments on key frames, an empty moov (the
-    /// shared init), no edit list (every file's moov must be the same init),
-    /// no trailer.
+    /// shared init), no trailer, and frag_discont: each file's tfdt is the
+    /// absolute decode time of its first sample — without it every file's
+    /// tracks restarted at 0 each, which threw away the audio / video offset
+    /// within the segment (and any audio sync shift). The edit list it writes
+    /// differs between files by well under a millisecond.
     /// </summary>
     private static IEnumerable<string> KeyframeMuxerArgs(HlsPlan plan, string sessionDir, int startSegment,
         string segmentTimes, string listPath)
@@ -106,7 +109,7 @@ public sealed partial class HlsSessionService
         var a = new List<string> { "-avoid_negative_ts", "disabled", "-f", "segment", "-segment_format", ts ? "mpegts" : "mp4" };
         if (!ts)
             a.AddRange(["-segment_format_options",
-                "movflags=+frag_keyframe+empty_moov+default_base_moof+delay_moov+skip_trailer:use_editlist=0"]);
+                "movflags=+frag_keyframe+empty_moov+default_base_moof+delay_moov+skip_trailer+frag_discont"]);
         if (segmentTimes.Length > 0) a.AddRange(["-segment_times", segmentTimes]);
         a.AddRange([
             // A key frame a hair off its listed time (3-decimal list, a demuxer

@@ -325,6 +325,9 @@ public sealed partial class HlsSessionService : IDisposable
         public const string HdrLost = "hdr_lost";
         /// <summary>A subtitle track is drawn into the picture (burnSubtitle) — needs a re-encode.</summary>
         public const string BurnedSubtitle = "burned_subtitle";
+        /// <summary>Streamed (instead of played natively) so an audio sync offset
+        /// applies — e.g. the one track memory remembers for this audio.</summary>
+        public const string AudioSync = "audio_sync";
     }
 
     /// <summary>
@@ -768,7 +771,16 @@ public sealed partial class HlsSessionService : IDisposable
         SessionOwner? owner = null,
         // Embedded subtitle track N (0:s:N) to draw into the picture, -1 = none.
         // Forces a video re-encode (PrepareBurnAsync / ChoosePlan).
-        int burnSubtitle = -1)
+        int burnSubtitle = -1,
+        // Sync offset of the audio itself (seconds, + = later) — a dub's or a
+        // track's remembered offset. Unlike the hw / sw baselines it applies on
+        // EVERY plan, the TS copy included: a single-input copy shifts the audio
+        // packets (setts bitstream filter) instead of reading the file a second
+        // time for -itsoffset (BuildFfmpegArgs).
+        double audioSyncSec = 0,
+        // The caller's main reason for this HLS start when it isn't the plan's
+        // own (ReasonCodes.AudioSync: the stream exists so the offset applies).
+        string? forcedReason = null)
     {
         var who = owner ?? SessionOwner.Unknown;
         var caps = client ?? ClientCaps.Legacy;
@@ -909,6 +921,7 @@ public sealed partial class HlsSessionService : IDisposable
         // dub that forced the HLS mux instead of a native path.
         bool copyPlan = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy;
         var reasonCode = probe is null ? null
+            : copyPlan && forcedReason is not null ? forcedReason
             : copyPlan && hasExternalAudio ? ReasonCodes.ExternalAudio
             // A copy for a client that opens this container: it's here for the
             // audio track (Direct Play plays the file's default one).
@@ -1079,7 +1092,7 @@ public sealed partial class HlsSessionService : IDisposable
         var reorderDelaySec = plan == HlsPlan.Fmp4StreamCopy && probe is not null
             ? Math.Clamp(await MeasureReorderDelayAsync(fullPath, probe.VideoStreamIndex, ct) ?? probe.ReorderDelaySec, 0.0, 1.0)
             : 0.0;
-        var audioOffsetSec = reorderDelaySec + (externalAudioPath is not null
+        var audioOffsetSec = audioSyncSec + reorderDelaySec + (externalAudioPath is not null
             // External dub sync is a different problem from the source's own A/V
             // wobble (it depends on how the dub was authored vs the video cut),
             // so we route it through the manual SW slider for EVERY video plan —
@@ -1269,7 +1282,8 @@ public sealed partial class HlsSessionService : IDisposable
                 segmentation: keyframeMode ? "keyframe" : "grid",
                 audio: audio, dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
                 extraReasons: [.. hasExternalAudio ? new[] { ReasonCodes.ExternalAudio } : [],
-                               .. burn is not null ? new[] { ReasonCodes.BurnedSubtitle } : []])
+                               .. burn is not null ? new[] { ReasonCodes.BurnedSubtitle } : [],
+                               .. forcedReason is not null ? new[] { forcedReason } : []])
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
