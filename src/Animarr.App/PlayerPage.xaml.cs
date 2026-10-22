@@ -1354,7 +1354,7 @@ public partial class PlayerPage : ContentPage
     private (SideloadSubtitle? Sideload, bool TextOn) BuildSubPlan()
     {
         if (_sub is not { } s || s.IsOff || s.Burn) return (null, false);   // burned: part of the picture
-        if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded))
+        if (MediaRendersSub(s, _kind == StreamKind.DirectPlay))
             return (null, true);   // OnTracksChanged selects the Media3 track
         var rel = SubtitleRelUrl(s);
         if (rel is null) return (null, false);
@@ -1363,7 +1363,45 @@ public partial class PlayerPage : ContentPage
             _ = VerifySubThenReloadAsync(rel, s);
             return (null, false);
         }
-        return (new SideloadSubtitle(TvMedia.Url(Abs(rel)!), SubLang(s), SubLabel(s)), true);
+        // With an offset: a time-shifted local copy of the server's WebVTT
+        // (Media3 has no cue offset, /api/subtitle no shift parameter).
+        var url = _subOffsetMs != 0 && ShiftedSubtitleFile(rel) is { } local ? local : TvMedia.Url(Abs(rel)!);
+        return (new SideloadSubtitle(url, SubLang(s), SubLabel(s)), true);
+    }
+
+    /// <summary>Media3 renders this embedded track itself (Direct Play, a
+    /// renderer for its codec) — text tracks only while there's no offset:
+    /// an offset needs the server's WebVTT, shifted here.</summary>
+    private bool MediaRendersSub(SubSel s, bool directPlay) =>
+        directPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)
+        && !(_subOffsetMs != 0 && IsTextSub(s));
+
+    private bool IsTextSub(SubSel s) =>
+        s.External is not null || (s.Embedded >= 0 && s.Embedded < _probeSubs.Count && TrackLabels.IsTextSubtitle(_probeSubs[s.Embedded].Codec));
+
+    /// <summary>/api/subtitle bodies already fetched (the convert check reads them).</summary>
+    private readonly Dictionary<string, string> _subBodies = new(StringComparer.Ordinal);
+
+    /// <summary>file:// URI of the WebVTT behind <paramref name="rel"/> with every
+    /// cue moved by the offset (later for +); null when the body isn't here.</summary>
+    private string? ShiftedSubtitleFile(string rel)
+    {
+        if (!_subBodies.TryGetValue(rel, out var body)) return null;
+        try
+        {
+            var dir = System.IO.Path.Combine(FileSystem.CacheDirectory, "subs");
+            System.IO.Directory.CreateDirectory(dir);
+            var name = $"{Services.TrackLabels.StableHash(rel):x8}_{_subOffsetMs}.vtt";
+            var file = System.IO.Path.Combine(dir, name);
+            if (!System.IO.File.Exists(file))
+            {
+                foreach (var old in System.IO.Directory.GetFiles(dir, $"{Services.TrackLabels.StableHash(rel):x8}_*.vtt"))
+                    try { System.IO.File.Delete(old); } catch { }
+                System.IO.File.WriteAllText(file, Services.TrackLabels.ShiftWebVtt(body, _subOffsetMs));
+            }
+            return new Uri(file).AbsoluteUri;
+        }
+        catch (Exception ex) { Log($"subtitle shift: {ex.Message}"); return null; }
     }
 
     private readonly Dictionary<string, Task<bool>> _subChecks = new(StringComparer.Ordinal);
@@ -1385,7 +1423,7 @@ public partial class PlayerPage : ContentPage
     private string? SideloadToCheck(bool directPlay)
     {
         if (_sub is not { IsOff: false, Burn: false } s) return null;
-        if (directPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)) return null;
+        if (MediaRendersSub(s, directPlay)) return null;
         return SubtitleRelUrl(s) is { } rel && !_goodSubs.Contains(rel) ? rel : null;
     }
 
@@ -1402,6 +1440,7 @@ public partial class PlayerPage : ContentPage
             var body = await resp.Content.ReadAsStringAsync(cts.Token);
             if (string.IsNullOrWhiteSpace(body)) return false;
             _goodSubs.Add(rel);
+            _subBodies[rel] = body;   // an offset is applied to a copy of it
             return true;
         }
         catch (Exception ex) { Log($"subtitle {rel}: {ex.Message}"); return false; }
@@ -1462,7 +1501,7 @@ public partial class PlayerPage : ContentPage
             Log($"subtitle: side-loaded track selected ({DescribeSub(s)})");
             return;
         }
-        if (_kind != StreamKind.DirectPlay || s.External is not null || _subNeedsServer.Contains(s.Embedded)) return;
+        if (!MediaRendersSub(s, _kind == StreamKind.DirectPlay)) return;
         // Wait for the prepared track list (the first callback can be empty).
         if (nps.GetAudioTracks().Count == 0 && nps.GetVideoTracks().Count == 0) return;
         _textApplied = true;
@@ -1531,7 +1570,7 @@ public partial class PlayerPage : ContentPage
             return;
         }
         if (s.IsOff) { _textApplied = true; nps.DisableSubtitles(); return; }
-        if (_kind == StreamKind.DirectPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)
+        if (MediaRendersSub(s, _kind == StreamKind.DirectPlay)
             && MapEmbeddedSub(s.Embedded, nps.GetTextTracks()) is { Supported: true } t)
         {
             // In place, no re-prepare.
@@ -1544,6 +1583,63 @@ public partial class PlayerPage : ContentPage
         if (_goodSubs.Contains(rel)) { ReloadForSubtitles(() => _sub = previous); return; }
         FlashInfo("Загрузка субтитров…");
         _ = VerifySubThenReloadAsync(rel, s, previous);
+    }
+
+    // ── Subtitle offset and look (plan 2.7) ─────────────────────────────────
+    // The offset is the title's (PUT subtitleOffsetMs); it moves text
+    // subtitles through a shifted copy of the server's WebVTT, so a change
+    // re-prepares the stream — 0.7 s after the last step. Image tracks keep
+    // their timing (no offset). Size / background are this device's.
+
+    private IDispatcherTimer? _subOffsetTimer;
+
+    private static string OffsetText(int ms) =>
+        ms == 0 ? "0.0 с" : $"{(ms > 0 ? "+" : "−")}{Math.Abs(ms) / 1000.0:0.0} с";
+
+    private void SetSubOffset(int ms)
+    {
+        ms = Math.Clamp(ms, -600_000, 600_000);
+        if (ms == _subOffsetMs) return;
+        _subOffsetMs = ms;
+        QueueTrackPrefs(p => p with { SubtitleOffsetMs = ms });
+        Log($"subtitle offset {ms} ms");
+        if (_sub is { IsOff: false } s && !IsTextSub(s)) { FlashInfo("Сдвиг для этих субтитров недоступен"); return; }
+        _subOffsetTimer ??= Dispatcher.CreateTimer();
+        _subOffsetTimer.Stop();
+        _subOffsetTimer.Interval = TimeSpan.FromMilliseconds(700);
+        _subOffsetTimer.IsRepeating = false;
+        _subOffsetTimer.Tick -= OnSubOffsetSettled;
+        _subOffsetTimer.Tick += OnSubOffsetSettled;
+        _subOffsetTimer.Start();
+    }
+
+    private void OnSubOffsetSettled(object? sender, EventArgs e)
+    {
+        if (_sub is not { IsOff: false, Burn: false } s) return;
+        FlashInfo($"Сдвиг субтитров: {OffsetText(_subOffsetMs)}");
+        if (SubtitleRelUrl(s) is { } rel && !_goodSubs.Contains(rel)) { _ = VerifySubThenReloadAsync(rel, s); return; }
+        ReloadForSubtitles();
+    }
+
+    private static readonly (float Size, string Name)[] SubSizes =
+        { (0.05f, "маленький"), (0.06f, "обычный"), (0.075f, "крупный"), (0.09f, "очень крупный") };
+
+    private static string SubSizeName(float v) =>
+        SubSizes.OrderBy(x => Math.Abs(x.Size - v)).First().Name;
+
+    private static string SubBgName(int bg) => bg switch { 1 => "полупрозрачный", 2 => "чёрный", _ => "нет (контур)" };
+
+    private void CycleSubSize()
+    {
+        var cur = SubSizes.Select((x, i) => (x, i)).OrderBy(t => Math.Abs(t.x.Size - TvPlaybackPrefs.SubtitleSize)).First().i;
+        TvPlaybackPrefs.SubtitleSize = SubSizes[(cur + 1) % SubSizes.Length].Size;
+        NativePlayerService.RefreshSubtitleStyle();
+    }
+
+    private void CycleSubBg()
+    {
+        TvPlaybackPrefs.SubtitleBackground = (TvPlaybackPrefs.SubtitleBackground + 1) % 3;
+        NativePlayerService.RefreshSubtitleStyle();
     }
 
     private void ChooseSub(SubSel sel)
@@ -1987,7 +2083,13 @@ public partial class PlayerPage : ContentPage
     private SheetMode _sheetMode = SheetMode.None;
     private View? _sheetOrigin;   // button to re-focus when the sheet closes
 
-    private sealed record SheetRow(string Label, bool Selected, Action? OnSelect);
+    /// <param name="KeepOpen">OK applies the row and rebuilds the sheet in
+    /// place (focus stays on the row) — steppers like the subtitle offset.</param>
+    private sealed record SheetRow(string Label, bool Selected, Action? OnSelect, bool KeepOpen = false);
+
+    /// <summary>Rebuilds the open list sheet with focus on row N (set by
+    /// sheets that have KeepOpen rows).</summary>
+    private Action<int>? _sheetReopen;
 
     // Volume ------------------------------------------------------------------
     private float _volume = 1f;
@@ -2066,7 +2168,9 @@ public partial class PlayerPage : ContentPage
         OpenListSheet("АУДИОДОРОЖКА", rows, AudioButton);
     }
 
-    private void OpenSubsSheet()
+    private void OpenSubsSheet() => OpenSubsSheet(-1);
+
+    private void OpenSubsSheet(int focusIndex)
     {
         // The file's tracks (probe) + sidecar files, not just what the current
         // stream carries: a Direct Stream / HLS stream has no subtitles of its
@@ -2111,7 +2215,15 @@ public partial class PlayerPage : ContentPage
             rows.Add(new SheetRow(ExternalLabel(x), cur == sel, () => ChooseSub(sel)));
         }
         if (!_catalogTask.IsCompleted) rows.Add(new SheetRow("Загрузка списка…", false, null));
-        OpenListSheet("СУБТИТРЫ", rows, SubsButton);
+        // Offset (remembered for the title) and the device's look.
+        rows.Add(new SheetRow($"Сдвиг: {OffsetText(_subOffsetMs)}  ·  OK — сбросить", false,
+                              () => SetSubOffset(0), KeepOpen: true));
+        foreach (var step in new[] { -500, -100, +100, +500 })
+            rows.Add(new SheetRow($"{(step < 0 ? "Раньше" : "Позже")} на {Math.Abs(step) / 1000.0:0.0} с",
+                                  false, () => SetSubOffset(_subOffsetMs + step), KeepOpen: true));
+        rows.Add(new SheetRow($"Размер: {SubSizeName(TvPlaybackPrefs.SubtitleSize)}", false, CycleSubSize, KeepOpen: true));
+        rows.Add(new SheetRow($"Фон: {SubBgName(TvPlaybackPrefs.SubtitleBackground)}", false, CycleSubBg, KeepOpen: true));
+        OpenListSheet("СУБТИТРЫ", rows, SubsButton, focusIndex, OpenSubsSheet);
     }
 
     // Aspect ratio ------------------------------------------------------------
@@ -2213,8 +2325,9 @@ public partial class PlayerPage : ContentPage
         _ = StartStreamAsync(absPos, maxHeight);
     }
 
-    private void OpenListSheet(string title, List<SheetRow> rows, View origin)
+    private void OpenListSheet(string title, List<SheetRow> rows, View origin, int focusIndex = -1, Action<int>? reopen = null)
     {
+        _sheetReopen = reopen;
         _sheetOrigin = origin;
         _hudTimer?.Stop();
         SheetTitle.Text = title;
@@ -2228,6 +2341,7 @@ public partial class PlayerPage : ContentPage
             SheetItems.Children.Add(row);
             if (r.Selected && focusRow is null) focusRow = row;
         }
+        if (focusIndex >= 0 && focusIndex < SheetItems.Children.Count) focusRow = SheetItems.Children[focusIndex] as View;
         focusRow ??= SheetItems.Children.Count > 0 ? SheetItems.Children[0] as View : null;
 
         // Focusing the row scrolls the ScrollView to it (native requestChildFocus).
@@ -2262,8 +2376,10 @@ public partial class PlayerPage : ContentPage
         var beh = new TvFocusBehavior { Radius = 8, FillOnFocus = true };
         beh.Command = new Command(() =>
         {
+            int index = SheetItems.Children.IndexOf(border);
             r.OnSelect?.Invoke();
-            CloseSheet();
+            if (r.KeepOpen && _sheetReopen is { } reopen && _sheetMode == SheetMode.List) reopen(index);
+            else CloseSheet();
         });
         border.Behaviors.Add(beh);
         return border;

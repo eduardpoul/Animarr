@@ -118,4 +118,50 @@ internal static class TrackLabels
         "subrip" or "srt" or "ass" or "ssa" or "webvtt" or "mov_text" or "text" or "microdvd"
         or "subviewer" or "subviewer1" or "sami" or "realtext" or "jacosub" or "mpl2" or "pjs"
         or "vplayer" or "stl";
+
+    private static readonly System.Text.RegularExpressions.Regex VttTime = new(
+        @"(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>A WebVTT document with every cue moved by <paramref name="offsetMs"/>
+    /// (+ = later). Cues that would end before 0 are dropped, starts are
+    /// clamped at 0; everything but the timing lines is kept as it is.</summary>
+    public static string ShiftWebVtt(string vtt, int offsetMs)
+    {
+        if (offsetMs == 0) return vtt;
+        var lines = vtt.Replace("\r\n", "\n").Split('\n');
+        var sb = new System.Text.StringBuilder(vtt.Length + 64);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            int arrow = line.IndexOf("-->", StringComparison.Ordinal);
+            if (arrow < 0) { sb.Append(line).Append('\n'); continue; }
+            var a = VttTime.Match(line, 0, arrow);
+            var b = VttTime.Match(line, arrow);
+            if (!a.Success || !b.Success) { sb.Append(line).Append('\n'); continue; }
+            long start = Ms(a) + offsetMs, end = Ms(b) + offsetMs;
+            if (end <= 0)
+            {
+                // Drop the whole cue: its timing line, text and the blank line after.
+                while (i + 1 < lines.Length && lines[i + 1].Length > 0) i++;
+                continue;
+            }
+            sb.Append(Fmt(Math.Max(0, start))).Append(" --> ").Append(Fmt(end))
+              .Append(line[(b.Index + b.Length)..]).Append('\n');
+        }
+        return sb.ToString();
+
+        static long Ms(System.Text.RegularExpressions.Match m) =>
+            (m.Groups[1].Success ? long.Parse(m.Groups[1].Value) : 0) * 3_600_000
+            + long.Parse(m.Groups[2].Value) * 60_000 + long.Parse(m.Groups[3].Value) * 1000 + long.Parse(m.Groups[4].Value);
+        static string Fmt(long ms) =>
+            $"{ms / 3_600_000:00}:{ms / 60_000 % 60:00}:{ms / 1000 % 60:00}.{ms % 1000:000}";
+    }
+
+    /// <summary>FNV-1a of a string — stable across runs (string.GetHashCode isn't).</summary>
+    public static uint StableHash(string s)
+    {
+        uint h = 2166136261;
+        foreach (var c in s) { h ^= c; h *= 16777619; }
+        return h;
+    }
 }

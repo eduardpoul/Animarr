@@ -73,18 +73,36 @@ public sealed class NativePlayerService : IDisposable
         // a little above Media3's default size (0.0533 of the view height).
         // Embedded ASS font sizes are ignored (scripts authored for a
         // 1080-line canvas come out huge), positions / colours are kept.
-        view.SetStyle(new global::AndroidX.Media3.UI.CaptionStyleCompat(
-            global::Android.Graphics.Color.White, global::Android.Graphics.Color.Transparent,
-            global::Android.Graphics.Color.Transparent,
-            1 /* CaptionStyleCompat.EDGE_TYPE_OUTLINE */, global::Android.Graphics.Color.Black,
-            global::Android.Graphics.Typeface.DefaultBold));
-        view.SetFractionalTextSize(0.06f);
+        ApplySubtitleStyle(view);
         view.SetApplyEmbeddedFontSizes(false);
         // The bottom margin is the view's own padding, not Media3's
         // bottomPaddingFraction: that one only moves cues WITHOUT a line
         // position (SRT / embedded), while WebVTT's default "line -1" cues sat
         // on the very edge of the screen (TV overscan).
         view.SetBottomPaddingFraction(0f);
+    }
+
+    /// <summary>Size / background from the device's settings (CC sheet):
+    /// white bold text with a black outline, on nothing, a translucent box
+    /// or a black box.</summary>
+    private static void ApplySubtitleStyle(global::AndroidX.Media3.UI.SubtitleView view)
+    {
+        var (bg, edge) = TvPlaybackPrefs.SubtitleBackground switch
+        {
+            1 => (global::Android.Graphics.Color.Argb(0x99, 0, 0, 0), 0 /* EDGE_TYPE_NONE */),
+            2 => (global::Android.Graphics.Color.Black, 0),
+            _ => (global::Android.Graphics.Color.Transparent, 1 /* EDGE_TYPE_OUTLINE */),
+        };
+        view.SetStyle(new global::AndroidX.Media3.UI.CaptionStyleCompat(
+            global::Android.Graphics.Color.White, bg, global::Android.Graphics.Color.Transparent,
+            edge, global::Android.Graphics.Color.Black, global::Android.Graphics.Typeface.DefaultBold));
+        view.SetFractionalTextSize(TvPlaybackPrefs.SubtitleSize);
+    }
+
+    /// <summary>Re-apply the subtitle style after the settings changed.</summary>
+    public static void RefreshSubtitleStyle()
+    {
+        if (s_subtitleView is { } v) ApplySubtitleStyle(v);
     }
 
     private static bool s_subtitlesRaised;
