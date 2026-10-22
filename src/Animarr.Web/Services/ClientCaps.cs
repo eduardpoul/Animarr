@@ -104,6 +104,22 @@ public sealed class ClientCaps
     }
 
     /// <summary>
+    /// These caps without the audio codecs this device failed to decode
+    /// (PlaybackFailureService, task 6.1): they then count as not decodable —
+    /// transcoded, and no longer a reason for Direct Play. A client without a
+    /// token list is returned as is.
+    /// </summary>
+    public ClientCaps WithoutAudio(IReadOnlySet<string> codecs)
+    {
+        if (codecs.Count == 0 || !HasTokens) return this;
+        var drop = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in codecs)
+            drop.Add(c switch { "mp2" => "mp3", _ when c.StartsWith("pcm", StringComparison.Ordinal) => "pcm", _ => c });
+        var tokens = _tokens.Where(t => !drop.Contains(t)).ToHashSet();
+        return tokens.Count == _tokens.Count ? this : new ClientCaps(tokens, MaxAudioChannels, Hevc, Hevc10, HlsRemux);
+    }
+
+    /// <summary>
     /// Parses the start request's caps. Unknown tokens are kept (harmless);
     /// <paramref name="maxAudioChannels"/> outside 1..8 means "not reported" (2).
     /// </summary>

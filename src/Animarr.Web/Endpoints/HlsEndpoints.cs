@@ -118,6 +118,7 @@ internal static class HlsEndpoints
             IUserContext userCtx,
             TvRemuxService tvRemux,
             HlsSessionService hls,
+            PlaybackFailureService failures,
             DeviceTrust deviceTrust,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
@@ -180,6 +181,13 @@ internal static class HlsEndpoints
             // combining foreign audio with the source video requires the HLS mux
             // path, so a direct file URL would silently drop the dub.
             var client = ClientCaps.Parse(nativeCaps, maxAudioChannels, clientHevc, clientHevc10, remux);
+            // Decoder failures this device reported before (task 6.1,
+            // POST /api/playback/failure): the tiers it failed on for this kind
+            // of stream are skipped, the audio codecs it failed on transcoded.
+            var owner = await SessionOwnerAsync(http, deviceTrust);
+            var steps = failures.StepsFor(owner.ClientId, await hls.DecodeSignatureAsync(fullPath!, http.RequestAborted));
+            var naturalClient = client;
+            client = client.WithoutAudio(steps.TranscodeAudio);
             // A height/bitrate cap (the HUD's Quality menu) that really shrinks
             // the stream forces a re-encode — you can't shrink a stream-copy —
             // so ChoosePlaybackAsync then skips BOTH native paths (Direct Play
@@ -194,7 +202,8 @@ internal static class HlsEndpoints
             // the probe and falls into the OperationCanceledException catch below.
             var decision = externalAudioFull is null && burnSubtitle is null
                 ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
-                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0)
+                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0,
+                    allowDirectPlay: !steps.NoDirectPlay, allowDirectStream: !steps.NoDirectStream)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             // An "optimize for TV" copy (TvRemuxService: MKV with Cues in
             // .animarr, same streams in the same order) is what Direct Play
@@ -203,7 +212,8 @@ internal static class HlsEndpoints
                 && await tvRemux.FreshCopyOfAsync(fullPath!, http.RequestAborted) is { } tvCopy)
             {
                 var copyDecision = await hls.ChoosePlaybackAsync(tvCopy, client, http.RequestAborted,
-                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0);
+                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0,
+                    allowDirectPlay: !steps.NoDirectPlay);
                 if (copyDecision.DirectPlay && copyDecision.DirectUrl is not null) decision = copyDecision;
             }
             // localTracks: the client switches the remembered track itself only
@@ -214,7 +224,8 @@ internal static class HlsEndpoints
                 audioTrackIndex = localAudioIndex;
                 decision = externalAudioFull is null && burnSubtitle is null
                     ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
-                        maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex)
+                        maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex,
+                        allowDirectPlay: !steps.NoDirectPlay, allowDirectStream: !steps.NoDirectStream)
                     : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             }
             // The audio's own sync offset (seconds, + = later): an explicit
@@ -244,6 +255,30 @@ internal static class HlsEndpoints
                 decision = new HlsSessionService.PlaybackDecision(false, null, 0, null);
                 renditionsForced = true;
             }
+            // Did a remembered failure move this start off the tier it would
+            // otherwise get? (Then that is the main reason.)
+            bool deviceStepped = false;
+            if (steps.Any && externalAudioFull is null && burnSubtitle is null && !syncForced && !renditionsForced)
+            {
+                var natural = await hls.ChoosePlaybackAsync(fullPath!, naturalClient, http.RequestAborted,
+                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0);
+                deviceStepped = (natural.DirectPlay && !decision.DirectPlay)
+                    || (natural.DirectStream && !decision.DirectStream && !decision.DirectPlay);
+            }
+            var requestReasons = new List<string>();
+            if (externalAudioFull is not null) requestReasons.Add(HlsSessionService.ReasonCodes.ExternalAudio);
+            if (syncForced) requestReasons.Add(HlsSessionService.ReasonCodes.AudioSync);
+            if (renditionsForced) requestReasons.Add(HlsSessionService.ReasonCodes.AudioRenditions);
+            // The ordered plan list with what ruled each out (debugging; never fails a start).
+            async Task<IReadOnlyList<HlsSessionService.PlanCandidate>?> CandidatesAsync(string? selected)
+            {
+                try
+                {
+                    return selected is null ? null : await hls.ExplainAsync(fullPath!, client, selected, audioTrackIndex ?? 0,
+                        effectiveMaxHeight, maxBitrate ?? 0, burnSubtitle is not null, steps, requestReasons, http.RequestAborted);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+            }
             if (decision.DirectPlay && decision.DirectUrl is not null)
             {
                 return Results.Ok(new
@@ -258,6 +293,7 @@ internal static class HlsEndpoints
                     // Direct Play means source passes through unchanged, so HDR
                     // tags etc. are preserved here.
                     output        = decision.Output,
+                    candidates    = await CandidatesAsync(decision.Output?.Plan ?? "directplay"),
                     // The player picks the tracks of a raw file itself.
                     trackDefaults = TrackPreferenceService.MarkOffsetApplied(
                         TrackPreferenceService.MarkApplied(trackDefaults, false), false,
@@ -278,7 +314,10 @@ internal static class HlsEndpoints
                     directStreamUrl = decision.DirectUrl,
                     totalDuration   = decision.DurationSec,
                     resumeSec       = seekSec,
-                    output          = decision.Output,
+                    output          = deviceStepped
+                        ? HlsSessionService.WithMainReason(decision.Output, HlsSessionService.ReasonCodes.DeviceFailedBefore)
+                        : decision.Output,
+                    candidates      = await CandidatesAsync(decision.Output?.Plan ?? "directstream"),
                     // /api/video carries the one track it was asked for.
                     trackDefaults   = TrackPreferenceService.MarkApplied(trackDefaults,
                         trackDefaults?.Audio is { Kind: TrackPreferenceService.KindEmbedded, Index: int dsIndex }
@@ -327,13 +366,24 @@ internal static class HlsEndpoints
                 // stops its ffmpeg instead of encoding on for the 5-min idle GC.
                 ct:               http.RequestAborted,
                 // Replaces only this client's earlier session on the same file.
-                owner:            await SessionOwnerAsync(http, deviceTrust),
+                owner:            owner,
                 burnSubtitle:     burnSubtitle ?? -1,
                 audioSyncSec:     syncMs / 1000.0,
-                forcedReason:     syncForced ? HlsSessionService.ReasonCodes.AudioSync
+                forcedReason:     deviceStepped ? HlsSessionService.ReasonCodes.DeviceFailedBefore
+                                : syncForced ? HlsSessionService.ReasonCodes.AudioSync
                                 : renditionsForced ? HlsSessionService.ReasonCodes.AudioRenditions : null,
+                noCopy:           steps.NoCopy,
+                noHevcOutput:     steps.NoHevcOutput,
                 audioRenditions:  Flag(audioRenditions),
                 renditionOffsets: HlsSessionService.ParseRenditionOffsets(renditionOffsets));
+            // The mapped track's codec is one this device failed to decode: it
+            // is transcoded because of that (WithoutAudio above).
+            var hlsOutput = result.Output;
+            if (steps.TranscodeAudio.Count > 0 && externalAudioFull is null
+                && PlaybackFailureService.NormalizeAudioCodec(
+                       await hls.AudioCodecAsync(fullPath!, audioTrackIndex ?? 0, http.RequestAborted)) is { } mappedCodec
+                && steps.TranscodeAudio.Contains(mappedCodec))
+                hlsOutput = HlsSessionService.WithExtraReason(hlsOutput, HlsSessionService.ReasonCodes.DeviceFailedBefore);
             return Results.Ok(new
             {
                 token        = result.Token,
@@ -349,7 +399,8 @@ internal static class HlsEndpoints
                 // What the player actually receives — drives the HUD plashka.
                 // For re-encode plans this differs from /api/probe output (e.g.
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
-                output       = result.Output,
+                output       = hlsOutput,
+                candidates   = await CandidatesAsync(result.Output.Plan),
                 // audioRenditions=1: the EXT-X-MEDIA group, in playlist order
                 // (= hls.audioTracks order). null = audio muxed in.
                 audioRenditions = result.AudioRenditions,
@@ -545,7 +596,7 @@ internal static class HlsEndpoints
     ///     remote address + User-Agent — stable for one device, distinct across
     ///     devices on the LAN.
     /// </summary>
-    private static async Task<HlsSessionService.SessionOwner> SessionOwnerAsync(HttpContext http, DeviceTrust deviceTrust)
+    internal static async Task<HlsSessionService.SessionOwner> SessionOwnerAsync(HttpContext http, DeviceTrust deviceTrust)
     {
         var user = http.User.FindFirst(AuthConstants.UserIdClaim)?.Value ?? "";
         Guid? device = null;

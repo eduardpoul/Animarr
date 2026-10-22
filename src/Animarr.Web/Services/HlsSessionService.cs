@@ -331,6 +331,10 @@ public sealed partial class HlsSessionService : IDisposable
         /// <summary>Streamed (instead of played natively) so the audio options —
         /// several tracks, external dubs — switch live as HLS renditions.</summary>
         public const string AudioRenditions = "audio_renditions";
+        /// <summary>This device reported a decoder failure on the plan that would
+        /// have been used (POST /api/playback/failure) — the next one down is
+        /// served (task 6.1).</summary>
+        public const string DeviceFailedBefore = "device_failed_before";
     }
 
     /// <summary>
@@ -356,7 +360,10 @@ public sealed partial class HlsSessionService : IDisposable
         // rules it out; the Direct Stream remux maps exactly the one asked for
         // (/api/video ?audioTrackIndex=), so a track switch keeps the cheap
         // remux instead of falling to an HLS session (B19).
-        int audioTrackIndex = 0)
+        int audioTrackIndex = 0,
+        // Off for a device that failed on that tier before (task 6.1,
+        // PlaybackFailureService): the next tier down is answered instead.
+        bool allowDirectPlay = true, bool allowDirectStream = true)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
@@ -412,13 +419,13 @@ public sealed partial class HlsSessionService : IDisposable
                 _ => false,
             };
 
-            if (audioTrackIndex == 0 && videoOk && rawOk && audioOk && containerOk)
+            if (allowDirectPlay && audioTrackIndex == 0 && videoOk && rawOk && audioOk && containerOk)
             {
                 var nativeUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
                 var nativeOut = BuildOutputInfo(probe, plan: null, isDirectPlay: true, dovi: dovi);
                 return new PlaybackDecision(true, nativeUrl, duration, nativeOut);
             }
-            if (videoOk && client.Has("mp4"))
+            if (allowDirectStream && videoOk && client.Has("mp4"))
             {
                 // Device decodes the video but not the audio (or can't demux the
                 // container, or wants another track) → /api/video: video
@@ -427,6 +434,8 @@ public sealed partial class HlsSessionService : IDisposable
                 var why = !containerOk ? ReasonCodes.ContainerUnsupported
                     : !audioOk ? ReasonCodes.AudioUnsupported
                     : audioTrackIndex > 0 ? ReasonCodes.AudioTrack
+                    // Direct Play was ruled out for this device (it failed on it).
+                    : !allowDirectPlay && rawOk ? ReasonCodes.DeviceFailedBefore
                     : ReasonCodes.DolbyVision;   // a DV stream the raw file can't carry (P7 strip, dvh1 entry)
                 // remux=hls: the same need, met by the key-frame HLS copy (StartAsync).
                 if (client.HlsRemux) return new PlaybackDecision(false, null, duration, null);
@@ -437,7 +446,7 @@ public sealed partial class HlsSessionService : IDisposable
         }
 
         bool clientHevc = client.Hevc, clientHevc10 = client.Hevc10;
-        if (audioTrackIndex == 0 && dovi == DoviHandling.None && !interlacedForBrowser
+        if (allowDirectPlay && audioTrackIndex == 0 && dovi == DoviHandling.None && !interlacedForBrowser
             && IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/file serves the raw bytes with Range support — exactly what
@@ -448,7 +457,7 @@ public sealed partial class HlsSessionService : IDisposable
             return new PlaybackDecision(true, directUrl, duration, output);
         }
 
-        if (dovi != DoviHandling.Reencode && !interlacedForBrowser
+        if (allowDirectStream && dovi != DoviHandling.Reencode && !interlacedForBrowser
             && IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/video remuxes the source to progressive fMP4 (video copy,
@@ -587,6 +596,7 @@ public sealed partial class HlsSessionService : IDisposable
             ReasonCodes.Interlaced     => "deinterlaced for the browser",
             ReasonCodes.DolbyVision    => "Dolby Vision profile 5 needs a DV decoder",
             ReasonCodes.BurnedSubtitle => "subtitles burned in",
+            ReasonCodes.DeviceFailedBefore => "this device failed to decode the original before",
             _                          => $"the client can't decode {DescribeVideo(probe)}",
         };
         string? reason = isDirectPlay ? null : isDirectStream
@@ -790,7 +800,10 @@ public sealed partial class HlsSessionService : IDisposable
         bool audioRenditions = false,
         // Per-rendition sync offsets in ms ("a1" / "x0" → ms) for the
         // non-default renditions; the default one takes audioSyncSec.
-        IReadOnlyDictionary<string, int>? renditionOffsets = null)
+        IReadOnlyDictionary<string, int>? renditionOffsets = null,
+        // Device failure steps (task 6.1, PlaybackFailureService): no stream
+        // copy — the re-encode instead; no HEVC re-encode output — H.264.
+        bool noCopy = false, bool noHevcOutput = false)
     {
         var who = owner ?? SessionOwner.Unknown;
         var caps = client ?? ClientCaps.Legacy;
@@ -919,6 +932,14 @@ public sealed partial class HlsSessionService : IDisposable
             ? maxHeight : 0;
         var plan = probe is not null ? ChoosePlan(probe, caps, maxHeight, maxBitrate, burning: burn is not null)
             : HlsPlan.Fmp4StreamCopy;
+        // This device failed on the copy of this kind of stream before: the
+        // re-encode it would get without a decoder for it.
+        bool deviceStepped = false;
+        if (noCopy && probe is not null && plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy)
+        {
+            plan = ReencodePlanFor(probe);
+            deviceStepped = true;
+        }
         // Dolby Vision on the fMP4 copy: dvh1 for a DV client, hvc1 base layer
         // for P8, RPU strip for P7 (ChoosePlan never copies P5 for a non-DV
         // client). Irrelevant to re-encodes — they decode the base layer.
@@ -927,10 +948,16 @@ public sealed partial class HlsSessionService : IDisposable
         // What a re-encode writes: H.264 8-bit, or HEVC Main10 where the client
         // and this plan's encoder can (ChooseVideoTarget).
         var target = ChooseVideoTarget(plan, probe, caps, burning: burn is not null);
+        if (noHevcOutput && target != VideoTarget.H264)
+        {
+            target = VideoTarget.H264;
+            deviceStepped = true;
+        }
         // Why (output.transcodeReasonCode): the plan's reason, or for a copy the
         // dub that forced the HLS mux instead of a native path.
         bool copyPlan = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy;
         var reasonCode = probe is null ? null
+            : deviceStepped ? ReasonCodes.DeviceFailedBefore
             : copyPlan && forcedReason is not null ? forcedReason
             : copyPlan && hasExternalAudio ? ReasonCodes.ExternalAudio
             // A copy for a client that opens this container: it's here for the

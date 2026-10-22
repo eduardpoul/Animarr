@@ -189,6 +189,7 @@ builder.Services.AddSingleton<TvRemuxService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TvRemuxService>());
 builder.Services.AddSingleton<KeyframeIndexService>();
 builder.Services.AddSingleton<HlsSessionService>();
+builder.Services.AddSingleton<PlaybackFailureService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.
 builder.Services.AddSingleton<PlaybackActivity>();
@@ -645,6 +646,7 @@ app.MapHub<IdentificationHub>(Animarr.Shared.ApiRoutes.HubIdentification)
 // Cookie-or-media-token policies + MediaPathValidator (see each file).
 app.MapMediaStreamEndpoints();
 app.MapHlsEndpoints();
+app.MapPlaybackFailureEndpoints();
 app.MapPlaybackFactsEndpoints();
 app.MapSubtitleAssetEndpoints();
 app.MapDlnaStreamEndpoints();
