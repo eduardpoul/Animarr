@@ -411,6 +411,9 @@ internal static class MediaStreamEndpoints
             MediaCachePaths cachePaths,
             MediaProbeCache probeCache,
             int track,
+            // Subtitle delay in ms (+ = later, ±10 min): every cue shifted
+            // server-side (SubtitleShift), so a player needs no shifted copy.
+            int? offsetMs,
             HttpContext http,
             ILoggerFactory loggerFactory) =>
     {
@@ -456,6 +459,13 @@ internal static class MediaStreamEndpoints
                 logger.LogInformation("Subtitle {Path} track {Track}: converted from {Charset} to UTF-8",
                     fullPath, track, r.Charset);
             http.Response.Headers.CacheControl = "private, max-age=3600";
+            var shift = Math.Clamp(offsetMs ?? 0, -SubtitleShift.MaxOffsetMs, SubtitleShift.MaxOffsetMs);
+            if (shift != 0)
+            {
+                var text = await File.ReadAllTextAsync(r.Path, System.Text.Encoding.UTF8, http.RequestAborted);
+                var shifted = outFormat == "ass" ? SubtitleShift.Ass(text, shift) : SubtitleShift.WebVtt(text, shift);
+                return Results.Bytes(new System.Text.UTF8Encoding(false).GetBytes(shifted), contentType);
+            }
             return Results.File(r.Path, contentType);
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
