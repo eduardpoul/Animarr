@@ -215,7 +215,7 @@
 - Поворот на ТВ игнорируется.
 - «Default» перебивается автокропом.
 - HUD не локализован.
-- DLNA: нет субтитров, игнорируется `StartTimeMs`, не выбрать дорожку.
+- ~~DLNA: нет субтитров, игнорируется `StartTimeMs`, не выбрать дорожку.~~ ✅ 2026-10-22 (6.6).
 - `/api/playlist.m3u` жёстко задаёт `http:8080`.
 - `maxHeight` не валидируется: нечётное значение роняет libx264.
 - CODECS захардкожены; MP2 объявляется как `mp4a.40.2`.
@@ -510,7 +510,7 @@
 | 6.3 | **Аудиорендишны `EXT-X-MEDIA`** — живая смена дорожки и озвучки без перезапуска видео (6.4) | S, W | M |
 | 6.4 | ✅ *tone mapping сделан (4f565ca); деинтерлейс — ещё нет.* **Tone mapping HDR→SDR, деинтерлейс** по `idet` (`bwdif` / `deinterlace_vaapi`), IVTC | S | M |
 | 6.5 | **Проверка возможностей ffmpeg и GPU при старте** (пробные кодирования, фильтры). Решение по jellyfin-ffmpeg | S | S–M |
-| 6.6 | **DLNA:** субтитры, `StartTimeMs`, выбор дорожки, перекодирование для неподходящих рендереров | S | M |
+| 6.6 | ✅ 2026-10-22. **DLNA:** субтитры, `StartTimeMs`, выбор дорожки, перекодирование для неподходящих рендереров<br>Сделано: «Отправить на ТВ» — SRT (`/api/subtitle/srt`) в метаданных (`sec:CaptionInfoEx`, `res text/srt`, `pv:subtitleFileUri`), Seek на `StartTimeMs` после PLAYING, `audioTrackIndex`/`externalAudio`/`usePrefs`/`transcode` в запросе → MPEG-TS ремукс `/api/dlna/stream` (видео copy или H.264, звук copy или AC-3, `TimeSeekRange.dlna.org`); ремукс и при отказе рендерера (Sink из `GetProtocolInfo`). MediaServer: вторая `res` с ремуксом + SRT-сайдкар | S | M |
 
 ### Этап 7 — по желанию
 

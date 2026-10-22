@@ -181,6 +181,8 @@ builder.Services.AddSingleton<SubtitleTrackInfoService>();
 // Measured per-file facts (black-bar crop, …), stored per file version.
 builder.Services.AddSingleton<FileFactsStore>();
 builder.Services.AddSingleton<MediaFactsService>();
+// DLNA renderers: MPEG-TS remux with a chosen audio track (/api/dlna/stream).
+builder.Services.AddSingleton<DlnaStreamService>();
 builder.Services.AddSingleton<HlsSessionService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.
@@ -640,6 +642,7 @@ app.MapMediaStreamEndpoints();
 app.MapHlsEndpoints();
 app.MapPlaybackFactsEndpoints();
 app.MapSubtitleAssetEndpoints();
+app.MapDlnaStreamEndpoints();
 app.MapDlnaServerEndpoints();
 app.MapExternalPlayerEndpoints();
 

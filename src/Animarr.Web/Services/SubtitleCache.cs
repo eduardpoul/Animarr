@@ -72,7 +72,8 @@ public static class SubtitleCache
         return failure;
     }
 
-    /// <param name="outFormat">ffmpeg muxer: <c>webvtt</c> or <c>ass</c>.</param>
+    /// <param name="outFormat">ffmpeg muxer: <c>webvtt</c>, <c>ass</c> or
+    /// <c>srt</c> (DLNA renderers).</param>
     /// <param name="codecLookup">ffprobe <c>codec_name</c> of subtitle stream
     /// <paramref name="track"/>: a bitmap track is refused before ffmpeg runs,
     /// an ASS / SSA one served as the original script, and on the non-UTF-8
@@ -242,7 +243,7 @@ public static class SubtitleCache
                    + (outFormat == "ass" ? "|orig1" : "");
         var hash = Convert.ToHexString(
             System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
-        var ext = outFormat switch { "ass" => "ass", "sup" => "sup", _ => "vtt" };
+        var ext = outFormat switch { "ass" => "ass", "sup" => "sup", "srt" => "srt", _ => "vtt" };
         return Path.Combine(dir, $"{hash}.{ext}");
     }
 

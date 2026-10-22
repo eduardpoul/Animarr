@@ -66,6 +66,50 @@ internal static class SubtitleAssetEndpoints
         .WithName("GetSubtitleFont")
         .RequireAuthorization(MediaAuth.Policies.Media);
 
+        // ─── /api/subtitle/srt — a text track as SRT (DLNA renderers) ─────────
+        // What TVs take as a sidecar (sec:CaptionInfoEx / text/srt res). Same
+        // cache, charset handling and bitmap refusal as /api/subtitle.
+        app.MapGet("/api/subtitle/srt", async (
+            string path,
+            int? track,
+            MediaPathValidator pathValidator,
+            SubtitleTrackInfoService tracks,
+            MediaCachePaths cachePaths,
+            HttpContext http,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path, ct);
+            if (!ok) return earlyResult!;
+            var index = track ?? 0;
+            if (index < 0) return Results.BadRequest();
+            try
+            {
+                var r = await SubtitleCache.GetOrExtractAsync(fullPath!, index, "srt", cachePaths.CacheRoot, ct,
+                    codecLookup: c => tracks.CodecOfAsync(fullPath!, index, c));
+                if (r.Path is null)
+                {
+                    http.Response.Headers.CacheControl = "no-store";
+                    return Results.Problem(detail: "This subtitle track can't be converted to text.",
+                        statusCode: StatusCodes.Status422UnprocessableEntity,
+                        extensions: new Dictionary<string, object?> { ["code"] = r.FailureCode ?? SubtitleCache.ConvertFailed });
+                }
+                http.Response.Headers.CacheControl = "private, max-age=3600";
+                return Results.File(r.Path, "text/srt; charset=utf-8");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Results.Empty;
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("ApiSubtitleSrt").LogError(ex, "SRT extract failed for {Path} track {Track}", fullPath, index);
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        })
+        .WithName("GetSubtitleSrt")
+        .RequireAuthorization(MediaAuth.Policies.Media);
+
         // ─── /api/subtitle/sup — a PGS track as raw .sup (for libbitsub) ──────
         // Embedded PGS: copied out once per file version (a full read of the
         // container) into the subtitle cache. A standalone .sup is served as is.

@@ -52,7 +52,8 @@ public sealed class DlnaCastService : IDisposable
         string? Manufacturer,
         string? ModelName,
         Uri    Location,
-        Uri    AvTransportControlUrl)
+        Uri    AvTransportControlUrl,
+        Uri?   ConnectionManagerControlUrl = null)
     {
         /// <summary>Wall-clock time of the latest SSDP frame that confirmed
         /// this renderer is online. RefreshAsync prunes entries older than
@@ -68,6 +69,11 @@ public sealed class DlnaCastService : IDisposable
     private const string SsdpAddr = "239.255.255.250";
     private const int    SsdpPort = 1900;
     private const string AvTransportType = "urn:schemas-upnp-org:service:AVTransport:1";
+    private const string ConnectionManagerType = "urn:schemas-upnp-org:service:ConnectionManager:1";
+
+    /// <summary>A renderer's Sink protocol list is asked once per this long.</summary>
+    private static readonly TimeSpan SinkTtl = TimeSpan.FromHours(1);
+    private readonly ConcurrentDictionary<string, (IReadOnlyList<string>? Sink, DateTime Until)> _sinks = new();
 
     /// <summary>A known renderer's LOCATION isn't re-fetched for this long —
     /// its re-announces just bump LastSeen.</summary>
@@ -346,8 +352,16 @@ public sealed class DlnaCastService : IDisposable
             // relative to the description location URI.
             var controlUri = new Uri(location, controlUrlText);
 
+            // ConnectionManager (optional): its GetProtocolInfo Sink list says
+            // which containers the renderer takes — see GetSinkProtocolsAsync.
+            Uri? cmUri = null;
+            var cmSvc = doc.SelectSingleNode("//d:service[d:serviceType='" + ConnectionManagerType + "']", ns);
+            var cmText = cmSvc?["controlURL", "urn:schemas-upnp-org:device-1-0"]?.InnerText?.Trim()
+                         ?? cmSvc?.SelectSingleNode("d:controlURL", ns)?.InnerText?.Trim();
+            if (!string.IsNullOrEmpty(cmText)) cmUri = new Uri(location, cmText);
+
             if (string.IsNullOrEmpty(udn) || string.IsNullOrEmpty(friendlyName)) return null;
-            return new RendererInfo(udn, friendlyName, manufacturer, modelName, location, controlUri);
+            return new RendererInfo(udn, friendlyName, manufacturer, modelName, location, controlUri, cmUri);
         }
         catch
         {
@@ -359,6 +373,20 @@ public sealed class DlnaCastService : IDisposable
 
     public async Task<bool> PlayAsync(string udn, string streamUrl, string title, string mime,
         CancellationToken ct = default)
+        => await PlayAsync(udn, streamUrl, title, mime, subtitleUrl: null, protocolFlags: null, startTimeMs: null, ct);
+
+    /// <summary>
+    /// SetAVTransportURI + Play, then (in the background) a Seek to
+    /// <paramref name="startTimeMs"/> once the renderer reports PLAYING — most
+    /// renderers refuse a Seek before that. <paramref name="subtitleUrl"/> (an
+    /// SRT) is announced in the item metadata the common ways renderers look
+    /// for it: Samsung's <c>sec:CaptionInfoEx</c> / <c>sec:CaptionInfo</c>, a
+    /// <c>text/srt</c> <c>res</c>, and PacketVideo's <c>pv:subtitleFileUri</c>.
+    /// <paramref name="protocolFlags"/> overrides the 4th protocolInfo field
+    /// (a transcoded stream: time-seek, no byte-seek).
+    /// </summary>
+    public async Task<bool> PlayAsync(string udn, string streamUrl, string title, string mime,
+        string? subtitleUrl, string? protocolFlags, long? startTimeMs, CancellationToken ct)
     {
         if (!_renderers.TryGetValue(udn, out var renderer))
         {
@@ -366,7 +394,7 @@ public sealed class DlnaCastService : IDisposable
             return false;
         }
 
-        var didl = BuildDidl(title, streamUrl, mime);
+        var didl = BuildDidl(title, streamUrl, mime, subtitleUrl, protocolFlags);
         var setOk = await SendSoapAsync(renderer.AvTransportControlUrl, "SetAVTransportURI", $"""
             <InstanceID>0</InstanceID>
             <CurrentURI>{Xml(streamUrl)}</CurrentURI>
@@ -377,10 +405,116 @@ public sealed class DlnaCastService : IDisposable
         // Some renderers need a beat between SetAVTransportURI and Play.
         await Task.Delay(250, ct);
 
-        return await SendSoapAsync(renderer.AvTransportControlUrl, "Play", """
+        var played = await SendSoapAsync(renderer.AvTransportControlUrl, "Play", """
             <InstanceID>0</InstanceID>
             <Speed>1</Speed>
             """, ct);
+        if (played && startTimeMs is > 1000)
+            _ = Task.Run(() => SeekWhenPlayingAsync(renderer, startTimeMs.Value));
+        return played;
+    }
+
+    /// <summary>Wait (≤ 15 s) for the renderer to report PLAYING, then seek
+    /// to the start position. Best effort — a renderer without Seek just
+    /// plays from the beginning.</summary>
+    private async Task SeekWhenPlayingAsync(RendererInfo renderer, long startTimeMs)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                var info = await SendSoapForBodyAsync(renderer.AvTransportControlUrl, AvTransportType, "GetTransportInfo",
+                    "<InstanceID>0</InstanceID>", cts.Token);
+                if (info is not null && info.Contains("PLAYING", StringComparison.OrdinalIgnoreCase)) break;
+                await Task.Delay(500, cts.Token);
+            }
+            var t = TimeSpan.FromMilliseconds(startTimeMs);
+            var target = $"{(int)t.TotalHours:00}:{t.Minutes:00}:{t.Seconds:00}";
+            var ok = await SendSoapAsync(renderer.AvTransportControlUrl, "Seek", $"""
+                <InstanceID>0</InstanceID>
+                <Unit>REL_TIME</Unit>
+                <Target>{target}</Target>
+                """, cts.Token);
+            _logger.LogInformation("DLNA-Cast: seek {Renderer} to {Target}: {Result}", renderer.FriendlyName, target, ok ? "ok" : "refused");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "DLNA-Cast: start-position seek failed on {Renderer}", renderer.FriendlyName);
+        }
+    }
+
+    /// <summary>
+    /// The renderer's ConnectionManager Sink protocol list
+    /// (<c>http-get:*:video/x-matroska:*</c>, …) — which containers it takes.
+    /// Cached per renderer; null when it has no ConnectionManager or didn't
+    /// answer (then nothing is known and the caller keeps the raw file).
+    /// </summary>
+    public async Task<IReadOnlyList<string>?> GetSinkProtocolsAsync(string udn, CancellationToken ct)
+    {
+        if (_sinks.TryGetValue(udn, out var known) && known.Until > DateTime.UtcNow) return known.Sink;
+        if (!_renderers.TryGetValue(udn, out var renderer) || renderer.ConnectionManagerControlUrl is null) return null;
+
+        IReadOnlyList<string>? sink = null;
+        var body = await SendSoapForBodyAsync(renderer.ConnectionManagerControlUrl, ConnectionManagerType,
+            "GetProtocolInfo", "", ct);
+        if (body is not null)
+        {
+            try
+            {
+                var doc = new XmlDocument();
+                doc.LoadXml(body);
+                var text = doc.GetElementsByTagName("Sink").Cast<XmlNode>().FirstOrDefault()?.InnerText;
+                if (!string.IsNullOrWhiteSpace(text))
+                    sink = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            }
+            catch (XmlException) { /* unparseable — unknown */ }
+        }
+        _sinks[udn] = (sink, DateTime.UtcNow + SinkTtl);
+        return sink;
+    }
+
+    /// <summary>True when a Sink list accepts <paramref name="mime"/> over
+    /// HTTP (exact, or a <c>*</c> wildcard entry).</summary>
+    public static bool SinkAccepts(IReadOnlyList<string> sink, string mime)
+    {
+        foreach (var entry in sink)
+        {
+            var parts = entry.Split(':');
+            if (parts.Length < 3 || !parts[0].Equals("http-get", StringComparison.OrdinalIgnoreCase)) continue;
+            if (parts[2] == "*" || parts[2].Equals(mime, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    private async Task<string?> SendSoapForBodyAsync(Uri controlUrl, string serviceType, string action, string innerBody,
+        CancellationToken ct)
+    {
+        var body = $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+              <s:Body>
+                <u:{action} xmlns:u="{serviceType}">{innerBody}</u:{action}>
+              </s:Body>
+            </s:Envelope>
+            """;
+        using var req = new HttpRequestMessage(HttpMethod.Post, controlUrl)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "text/xml"),
+        };
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue("text/xml") { CharSet = "utf-8" };
+        req.Headers.Add("SOAPAction", $"\"{serviceType}#{action}\"");
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync(ct) : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogDebug(ex, "DLNA-Cast: {Action} failed on {Url}", action, controlUrl);
+            return null;
+        }
     }
 
     private async Task<bool> SendSoapAsync(Uri controlUrl, string action, string innerBody, CancellationToken ct)
@@ -422,21 +556,33 @@ public sealed class DlnaCastService : IDisposable
 
     // ─── DIDL-Lite for the item we're casting ──────────────────────────────
 
-    private static string BuildDidl(string title, string url, string mime)
+    private static string BuildDidl(string title, string url, string mime, string? subtitleUrl = null,
+        string? protocolFlags = null)
     {
         // upnp:class must be present or many TVs reject the URI. videoItem
         // covers movies + episodes alike for cast purposes.
-        var proto = $"http-get:*:{mime}:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000";
+        var flags = protocolFlags ?? "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000";
+        var proto = $"http-get:*:{mime}:{flags}";
         return $"""
-            <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
+            <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" xmlns:sec="http://www.sec.co.kr/" xmlns:pv="http://www.pv.com/pvns/">
               <item id="0" parentID="-1" restricted="1">
                 <dc:title>{Xml(title)}</dc:title>
                 <upnp:class>object.item.videoItem</upnp:class>
-                <res protocolInfo="{Xml(proto)}">{Xml(url)}</res>
+                <res protocolInfo="{Xml(proto)}"{SubtitleResAttributes(subtitleUrl)}>{Xml(url)}</res>{SubtitleElements(subtitleUrl)}
               </item>
             </DIDL-Lite>
             """;
     }
+
+    /// <summary>PacketVideo-style attributes on the video <c>res</c>.</summary>
+    internal static string SubtitleResAttributes(string? subtitleUrl)
+        => subtitleUrl is null ? "" : $""" pv:subtitleFileType="SRT" pv:subtitleFileUri="{Xml(subtitleUrl)}" """.TrimEnd();
+
+    /// <summary>The subtitle announcements next to the video <c>res</c>
+    /// (namespaces <c>sec</c> / <c>pv</c> declared on DIDL-Lite).</summary>
+    internal static string SubtitleElements(string? subtitleUrl)
+        => subtitleUrl is null ? "" :
+            $"""<sec:CaptionInfoEx sec:type="srt">{Xml(subtitleUrl)}</sec:CaptionInfoEx><sec:CaptionInfo sec:type="srt">{Xml(subtitleUrl)}</sec:CaptionInfo><res protocolInfo="http-get:*:text/srt:*">{Xml(subtitleUrl)}</res>""";
 
     private static string Xml(string s) => System.Security.SecurityElement.Escape(s) ?? s;
 

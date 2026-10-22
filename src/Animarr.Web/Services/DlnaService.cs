@@ -507,7 +507,7 @@ public sealed class DlnaService : IHostedService, IDisposable
             // help; missing entries can cause the TV to skip / grey-out
             // perfectly playable content.
             "GetProtocolInfo" => SoapEnvelope("GetProtocolInfoResponse", "ConnectionManager:1",
-                "<Source>http-get:*:video/mp4:*,http-get:*:video/x-matroska:*,http-get:*:video/quicktime:*,http-get:*:video/x-m4v:*,http-get:*:video/webm:*,http-get:*:video/x-msvideo:*,http-get:*:video/mp2t:*,http-get:*:video/x-ms-wmv:*,http-get:*:video/x-flv:*,http-get:*:video/ogg:*,http-get:*:video/mpeg:*</Source><Sink></Sink>"),
+                "<Source>http-get:*:video/mp4:*,http-get:*:video/x-matroska:*,http-get:*:video/quicktime:*,http-get:*:video/x-m4v:*,http-get:*:video/webm:*,http-get:*:video/x-msvideo:*,http-get:*:video/mp2t:*,http-get:*:video/x-ms-wmv:*,http-get:*:video/x-flv:*,http-get:*:video/ogg:*,http-get:*:video/mpeg:*,http-get:*:text/srt:*</Source><Sink></Sink>"),
             _ => SoapFault($"Unknown action: {action.LocalName}"),
         };
     }
@@ -526,7 +526,7 @@ public sealed class DlnaService : IHostedService, IDisposable
         await using var ctx = await db.CreateDbContextAsync();
 
         var didl = new StringBuilder();
-        didl.Append(@"<DIDL-Lite xmlns=""urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"" xmlns:dc=""http://purl.org/dc/elements/1.1/"" xmlns:upnp=""urn:schemas-upnp-org:metadata-1-0/upnp/"" xmlns:dlna=""urn:schemas-dlna-org:metadata-1-0/"">");
+        didl.Append(@"<DIDL-Lite xmlns=""urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"" xmlns:dc=""http://purl.org/dc/elements/1.1/"" xmlns:upnp=""urn:schemas-upnp-org:metadata-1-0/upnp/"" xmlns:dlna=""urn:schemas-dlna-org:metadata-1-0/"" xmlns:sec=""http://www.sec.co.kr/"" xmlns:pv=""http://www.pv.com/pvns/"">");
 
         int total = 0;
         int returned = 0;
@@ -658,7 +658,43 @@ public sealed class DlnaService : IHostedService, IDisposable
         // DLNA.ORG_PN/SEEK/BYTE flags — bare-minimum profile that real clients accept.
         // We don't claim a specific profile (let the TV guess) but advertise byte-seek.
         var proto = $"http-get:*:{mime}:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000";
-        return $"""<item id="{Xml(id)}" parentID="{Xml(parentId)}" restricted="1"><dc:title>{Xml(title)}</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="{Xml(proto)}">{Xml(streamUrl)}</res></item>""";
+
+        // A second res for renderers that can't take the source container:
+        // the MPEG-TS remux (time-seek) — clients play the first res they
+        // support. Not for a source that already is MPEG-TS.
+        var remux = mime == "video/mp2t" ? "" :
+            $"""<res protocolInfo="{Xml($"http-get:*:{DlnaStreamService.ContentType}:{DlnaStreamService.ProtocolFlags}")}">{Xml(Animarr.Web.Services.Auth.MediaTokenService.AppendToUrl(
+                $"{baseUrl}/api/dlna/stream?path={Uri.EscapeDataString(canonical)}",
+                _tokens.IssueDlnaLink(canonical, DlnaLinkLifetime)))}</res>""";
+
+        // A text sidecar next to the file (same name + suffix) as SRT.
+        string? subtitleUrl = null;
+        if (FindSidecarSubtitle(canonical) is { } sidecar)
+            subtitleUrl = Animarr.Web.Services.Auth.MediaTokenService.AppendToUrl(
+                $"{baseUrl}/api/subtitle/srt?path={Uri.EscapeDataString(sidecar)}&track=0",
+                _tokens.IssueDlnaLink(sidecar, DlnaLinkLifetime));
+
+        return $"""<item id="{Xml(id)}" parentID="{Xml(parentId)}" restricted="1"><dc:title>{Xml(title)}</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="{Xml(proto)}"{DlnaCastService.SubtitleResAttributes(subtitleUrl)}>{Xml(streamUrl)}</res>{remux}{DlnaCastService.SubtitleElements(subtitleUrl)}</item>""";
+    }
+
+    /// <summary>The first text subtitle that is a sidecar of
+    /// <paramref name="videoPath"/> (<c>Movie.srt</c>, <c>Movie.rus.srt</c>),
+    /// SRT preferred; null when there is none. One directory listing.</summary>
+    private static string? FindSidecarSubtitle(string videoPath)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(videoPath);
+            if (dir is null) return null;
+            var stem = Path.GetFileNameWithoutExtension(videoPath);
+            return Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly)
+                .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".srt" or ".ass" or ".ssa" or ".vtt"
+                            && ExternalTrackNaming.TryMatchSidecar(Path.GetFileNameWithoutExtension(f), stem, out _))
+                .OrderBy(f => Path.GetExtension(f).Equals(".srt", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+        }
+        catch { return null; }
     }
 
     // ─── Path resolution per media item ────────────────────────────────────
