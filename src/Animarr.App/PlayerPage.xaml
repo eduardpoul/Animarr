@@ -227,7 +227,12 @@
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="InfoFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
                                 <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Info}" />
                             </Border>
-                            <!-- phone: picture-in-picture + the overflow (⋮) sheet -->
+                            <!-- phone: send to a TV (DLNA), picture-in-picture, the ⚙ sheet -->
+                            <Border x:Name="CastButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="CastFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Cast}" />
+                            </Border>
                             <Border x:Name="PipButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="PipFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
@@ -236,7 +241,7 @@
                             <Border x:Name="GearButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="GearFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.More}" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Settings}" />
                             </Border>
                         </HorizontalStackLayout>
                     </Grid>

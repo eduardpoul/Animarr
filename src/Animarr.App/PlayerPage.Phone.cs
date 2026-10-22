@@ -2,6 +2,8 @@ using System.Linq;
 using System.Net.Http.Json;
 using Animarr.App.Services;
 using Animarr.Shared;
+using Animarr.Shared.Models;
+using Animarr.Shared.Requests;
 
 namespace Animarr.App;
 
@@ -17,16 +19,16 @@ namespace Animarr.App;
 ///     tap on the left / right third seeks -10 / +10 s (each further tap in
 ///     the streak another 10 s), the middle toggles play / pause;
 ///   • ⏮ / big ▶❚❚ / ⏭ in the middle, a draggable seek bar with chapter
-///     ticks, picture-in-picture and an overflow ⋮ sheet with every
-///     secondary control (audio, subtitles, quality, aspect, speed, ⓘ, an
-///     external player, the web player);
+///     ticks, send-to-TV (DLNA), picture-in-picture and a ⚙ sheet with every
+///     other secondary control (audio, subtitles, quality, aspect, speed, ⓘ,
+///     an external player, the web player);
 ///   • picture-in-picture on its button and on Home (auto-enter on Android
 ///     12+, OnUserLeaveHint below), with ⏪ / ▶❚❚ / ⏩ in the PiP window;
 ///   • a MediaStyle notification on the player's MediaSession — lock screen,
 ///     shade and quick-settings controls;
 ///   • the web player stays the fallback: a start that never got to play
 ///     closes the page with "failed" and the WebView plays the file itself;
-///     ⋮ → "Смотреть в веб-плеере" hands back with "web".
+///     ⚙ → "Смотреть в веб-плеере" hands back with "web".
 /// </summary>
 public partial class PlayerPage
 {
@@ -61,11 +63,12 @@ public partial class PlayerPage
         _handOffPath = _filePath;
         TouchLayer.IsVisible = true;
         CenterControls.IsVisible = true;
-        // The secondary controls live in the ⋮ sheet (subtitles included).
+        // The secondary controls live in the ⚙ sheet (subtitles included).
         foreach (var v in new View[] { SeekBackButton, PrevButton, PlayPauseButton, NextButton, SeekFwdButton,
                                        SpeedButton, VolumeButton, AudioButton, SubsButton, QualityButton, AspectButton,
                                        InfoButton })
             v.IsVisible = false;
+        CastButton.IsVisible = true;
         PipButton.IsVisible = OperatingSystem.IsAndroidVersionAtLeast(26);
         GearButton.IsVisible = true;
         Scrubber.IsVisible = false;
@@ -92,6 +95,7 @@ public partial class PlayerPage
         // Long press: the previous / next chapter (the episode without chapters).
         CenterPrevFocus.LongCommand = new Command(() => { if (!GoChapter(-1)) GoAdjacentEpisode(-1); });
         CenterNextFocus.LongCommand = new Command(() => { if (!GoChapter(+1)) GoAdjacentEpisode(+1); });
+        CastFocus.Command = new Command(OpenCastSheet);
         PipFocus.Command = new Command(EnterPip);
         GearFocus.Command = new Command(OpenGearSheet);
 
@@ -450,7 +454,7 @@ public partial class PlayerPage
         SeekHintLeft.IsVisible = SeekHintRight.IsVisible = false;
     }
 
-    // ── ⋮ sheet ──────────────────────────────────────────────────────────────
+    // ── ⚙ sheet ──────────────────────────────────────────────────────────────
 
     private void OpenGearSheet()
     {
@@ -490,7 +494,7 @@ public partial class PlayerPage
         _               => a,
     };
 
-    /// <summary>⋮ → the web player (ASS styling by JASSUB, PGS, …) for this
+    /// <summary>⚙ → the web player (ASS styling by JASSUB, PGS, …) for this
     /// file, from where it was left — the progress is saved first.</summary>
     private async Task SwitchToWebPlayerAsync()
     {
@@ -503,6 +507,52 @@ public partial class PlayerPage
                                                   _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs),
                                Task.Delay(2000));
         Leave();
+    }
+
+    // ── Send to a TV (DLNA) ──────────────────────────────────────────────────
+    // The web player's "Send to TV": the server lists the DLNA renderers it
+    // found on the LAN and hands the chosen one this file at this position;
+    // playback here pauses so the scene doesn't run twice.
+
+    private const string CastTitle = "ТРАНСЛЯЦИЯ НА ТВ";
+
+    private void OpenCastSheet()
+    {
+        OpenListSheet(CastTitle, new List<SheetRow> { new("Ищу телевизоры…", false, null) }, CastButton);
+        _ = LoadCastTargetsAsync();
+    }
+
+    private async Task LoadCastTargetsAsync()
+    {
+        DlnaRendererDto[] renderers;
+        try { renderers = await _api.GetDlnaRenderersAsync(); }
+        catch (Exception ex) { Log($"cast: renderers {ex.Message}"); renderers = Array.Empty<DlnaRendererDto>(); }
+        // Closed (or replaced by another sheet) while the server searched.
+        if (_sheetMode != SheetMode.List || _sheetOrigin != CastButton) return;
+        var rows = renderers.Select(r => new SheetRow(CastName(r), false, () => _ = CastToAsync(r))).ToList();
+        if (rows.Count == 0) rows.Add(new SheetRow("Телевизоры не найдены (DLNA)", false, null));
+        OpenListSheet(CastTitle, rows, CastButton, focusIndex: 0);
+    }
+
+    private static string CastName(DlnaRendererDto r) =>
+        !string.IsNullOrWhiteSpace(r.FriendlyName) ? r.FriendlyName
+        : !string.IsNullOrWhiteSpace(r.ModelName) ? r.ModelName : r.Udn;
+
+    private async Task CastToAsync(DlnaRendererDto r)
+    {
+        if (NativePlayerService.Instance?.GetState() is not { } st) return;
+        long pos = _pendingSeekMs ?? _streamBaseMs + st.PositionMs;
+        try
+        {
+            await _api.DlnaPlayAsync(new DlnaPlayRequest(r.Udn, _filePath, pos));
+            SetPlaying(false);
+            FlashInfo($"Отправлено на «{CastName(r)}»");
+        }
+        catch (Exception ex)
+        {
+            Log($"cast: play {ex.Message}");
+            FlashInfo("Не удалось отправить на телевизор");
+        }
     }
 
     // ── External player (Этап 7) ─────────────────────────────────────────────

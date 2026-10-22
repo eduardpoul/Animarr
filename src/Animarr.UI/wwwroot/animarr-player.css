@@ -776,11 +776,11 @@ html:has(.vp-backdrop) { overflow: hidden; }
    Touch / phone layout — activated by [data-touch="1"] on the HUD (set in
    attachHud for a coarse pointer OR a narrow viewport, never on the Android-TV
    host, which needs the full d-pad button bar). Strips the bottom bar to:
-   scrubber, then prev/next on the LEFT and the overflow (⋮) menu + fullscreen on the
-   RIGHT. Play moves to a big centre overlay; ±10 becomes a double-tap on the
-   left/right thirds (handled in JS, ripple below). The secondary controls
-   (quality, aspect, cast, sync, audio, subtitles, info, volume) all move into
-   the overflow menu.
+   scrubber, then prev/next on the LEFT and cast + the settings gear +
+   fullscreen on the RIGHT. Play moves to a big centre overlay; ±10 becomes a
+   double-tap on the left/right thirds (handled in JS, ripple below). The other
+   secondary controls (quality, aspect, sync, audio, subtitles, info, volume)
+   all move into the gear menu.
    ───────────────────────────────────────────────────────────────────── */
 
 /* Gear + centre play are hidden on the default (desktop / TV) layout. */
@@ -789,7 +789,7 @@ html:has(.vp-backdrop) { overflow: hidden; }
 
 .vp-hud[data-touch="1"] .vp-btn[data-act="back10"],
 .vp-hud[data-touch="1"] .vp-btn[data-act="fwd10"],
-.vp-hud[data-touch="1"] .vp-hud__cluster--secondary,
+.vp-hud[data-touch="1"] .vp-hud__cluster--secondary > .vp-btn:not([data-act="cast"]),
 .vp-hud[data-touch="1"] .vp-hud__cluster--primary .vp-btn[data-act="play"] {
     display: none;
 }
@@ -845,6 +845,8 @@ html:has(.vp-backdrop) { overflow: hidden; }
     justify-content: flex-start;
     margin-right: auto;
 }
+/* Only cast is left of the secondary group: it sits next to the gear. */
+.vp-hud[data-touch="1"] .vp-hud__cluster--secondary { flex: 0 0 auto; }
 .vp-hud[data-touch="1"] .vp-hud__gear { display: inline-flex; }
 .vp-hud[data-touch="1"] .vp-hud__gear .vp-label { display: none; }
 

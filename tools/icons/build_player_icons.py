@@ -67,7 +67,6 @@ ICONS = [
     ('Dismiss',      'dismiss',   'dismiss_24_regular',               None),
     ('OpenExternal', None,        'open_24_regular',                  None),
     ('Globe',        None,        'globe_24_regular',                 None),
-    ('More',         'more',      'more_vertical_24_regular',         None),
 ]
 
 FIRST_CODEPOINT = 0xE000          # Private Use Area
