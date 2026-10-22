@@ -731,19 +731,61 @@ public sealed partial class HlsSessionService : IDisposable
                 : "mp4a.40.2";
             probeForPlaylist = probe with { CodecsAttribute = $"avc1.640028,{audioCodec}" };
         }
-        // A tail shorter than 0.5 s is folded into the previous segment — see
-        // SegmentLayout for the 503 loop a 0.023 s last segment caused.
-        var segCount = SegmentLayout.Count(totalDuration, SegmentDurationSec);
-        // ffmpeg starts encoding at the resume point, so the first segment
-        // it produces is seg-K where K = floor(seekSec / segDur). Earlier
-        // segments don't exist on disk; the player learns to skip past them
-        // via #EXT-X-START + the WaitForFileAsync seek-restart logic on
-        // backward scrubs. Clamped to the last announced segment: a resume
-        // point inside a folded tail belongs to it.
-        var startSegment = seekSec > 0
-            ? (int)Math.Floor(seekSec / SegmentDurationSec)
-            : 0;
-        if (segCount > 0) startSegment = Math.Min(startSegment, segCount - 1);
+        // Segment layout + where the first ffmpeg run starts (B18). The player
+        // places the first fragment it loads at that fragment's ANNOUNCED start,
+        // so that fragment must really begin there:
+        //   • re-encode: ffmpeg seeks to the segment boundary K*4 — not to the
+        //     resume point — and decodes from exactly there; forced key frames
+        //     then keep every later cut on the 4 s grid. Seeking to the resume
+        //     point itself started seg-K up to 4 s late and shifted the whole
+        //     timeline by that much.
+        //   • stream copy: video can only start on a key frame, so the run
+        //     starts at the last key frame before the resume point and the
+        //     layout is anchored there (SegmentLayout.Anchored). Its announced
+        //     end is where ffmpeg really cuts it — the next key frame after the
+        //     resume point (no key frame lies between the two), or at least 4 s
+        //     on — so the resume point sits inside it and the player asks for
+        //     it first. Without this a copy resume on a sparse-GOP file started
+        //     at a key frame 9 s early and the player's clock was off by that.
+        // Earlier segments don't exist on disk; a backward scrub reaches them
+        // via the WaitForFileAsync seek-restart. A resume point inside a folded
+        // tail belongs to the last announced segment.
+        bool isCopyPlan = plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy;
+        var layout = SegmentLayout.Uniform(totalDuration, SegmentDurationSec);
+        double ffmpegSeekSec = 0;
+        int startSegment = 0;
+        if (seekSec > 0 && layout.Count > 0)
+        {
+            var anchor = isCopyPlan && probe is not null
+                ? await FindCopyAnchorAsync(fullPath, probe.VideoStreamIndex, seekSec, ct)
+                : null;
+            if (anchor is (double kf, var nextKf))
+            {
+                // Where ffmpeg will cut the first segment: the first key frame
+                // at/after kf + 4 s — i.e. the next key frame after the resume
+                // point when that is further, else ≥ kf + 4 (or, with no key
+                // frame in the probe window, at least the window's end).
+                var firstEnd = Math.Max(kf + SegmentDurationSec,
+                    nextKf ?? seekSec + CopyAnchorWindowSec);
+                layout = SegmentLayout.Anchored(totalDuration, SegmentDurationSec, kf, firstEnd);
+                startSegment = layout.AnchorIndex;
+                // Land the demuxer seek ON kf (see CopySeekTarget); 0 = from the
+                // top, no seek at all. The first video packet copied IS that key
+                // frame: with -copyts ffmpeg keeps the key frame the input seek
+                // landed on (measured on E03: resume 19.94 s → seg-2 starts at
+                // the 10.427 s key frame).
+                ffmpegSeekSec = layout.Start(startSegment) > 0 ? CopySeekTarget(kf, nextKf) : 0;
+                _logger.LogDebug("HLS: copy resume at {Seek:F3}s anchored on key frame {Kf:F3}s (next {Next}) → seg-{Seg} announced {Start:F3}..{End:F3}",
+                    seekSec, kf, nextKf?.ToString("F3", CultureInfo.InvariantCulture) ?? "-",
+                    startSegment, layout.Start(startSegment), layout.Start(startSegment) + layout.Duration(startSegment));
+            }
+            else
+            {
+                startSegment = layout.IndexOf(seekSec);
+                ffmpegSeekSec = layout.Start(startSegment);
+            }
+        }
+        var segCount = layout.Count;
 
         // 2. Write synthetic master + media playlists. If we couldn't probe
         //    duration, skip this and let ffmpeg's HLS muxer write them
@@ -756,7 +798,7 @@ public sealed partial class HlsSessionService : IDisposable
                 File.WriteAllText(Path.Combine(dir, "master.m3u8"),
                     BuildMasterPlaylist(probeForPlaylist!), Encoding.ASCII);
                 File.WriteAllText(Path.Combine(dir, "media.m3u8"),
-                    BuildMediaPlaylist(totalDuration, segCount, plan, startOffsetSec: seekSec), Encoding.ASCII);
+                    BuildMediaPlaylist(layout, plan, startOffsetSec: seekSec), Encoding.ASCII);
                 prewrittenPlaylists = true;
             }
             catch (Exception ex)
@@ -813,7 +855,9 @@ public sealed partial class HlsSessionService : IDisposable
         _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap} {Owner}",
             token, plan, (int)Math.Round(audioOffsetSec * 1000),
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper, who);
-        var args = BuildFfmpegArgs(fullPath, seekSec, dir, ffmpegMediaPath, ffmpegMasterName,
+        // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
+        // at the resume point — the playlist's EXT-X-START still says seekSec.
+        var args = BuildFfmpegArgs(fullPath, ffmpegSeekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
@@ -830,7 +874,7 @@ public sealed partial class HlsSessionService : IDisposable
             throw;
         }
 
-        var session = new HlsSession(token, fullPath, dir, proc, seekSec, segCount,
+        var session = new HlsSession(token, fullPath, dir, proc, seekSec, layout,
             probe?.VideoCodec, plan, audioOffsetSec, totalDuration, audioTrackIndex, targetHeight,
             externalAudioPath, maxBitrate: maxBitrate, audioCodec: probe?.AudioCodec, is10Bit: probe?.Is10Bit ?? false,
             startSegment: startSegment, toneMapper: toneMapper, owner: who)
@@ -1053,6 +1097,26 @@ public sealed partial class HlsSessionService : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// <c>-ss</c> for a stream copy that must start ON the key frame at
+    /// <paramref name="keyframeSec"/>. ffmpeg's input seek picks the key frame
+    /// at or before its target, but for a container without exact pts seeking
+    /// (Matroska, MPEG-TS) whose video has B-frames it first moves the target
+    /// 3/23 s (≈ 0.13 s) EARLIER (the "dts heuristic" in fftools'
+    /// ffmpeg_demux.c) — so <c>-ss 40.001</c> on a file with a key frame at
+    /// exactly 40.0 started the copy at the 36.0 one (measured on E02), a whole
+    /// GOP before the segment the playlist announced. Aim past that, while
+    /// staying short of the next key frame (<paramref name="next"/>, when
+    /// known). The 3-decimal argv rounding is covered by the same margin.
+    /// </summary>
+    private static double CopySeekTarget(double keyframeSec, double? next)
+    {
+        const double past = 3.0 / 23 + 0.01;
+        return next is double n && n - keyframeSec <= past + 0.002
+            ? keyframeSec + (n - keyframeSec) / 2
+            : keyframeSec + past;
+    }
+
     private static int ParseSegmentNumber(string fileName)
     {
         // seg-NNNNN.{m4s|ts} → NNNNN. Returns -1 for non-segment files
@@ -1115,14 +1179,16 @@ public sealed partial class HlsSessionService : IDisposable
             // served as if they were its output.
             DeleteSegmentsFrom(session.OutputDir, targetSegment);
 
-            // The playlist now spans the full file duration, so playlist time
-            // for seg-K is exactly K*segDur — meaning ffmpeg should seek to
-            // K*segDur of the SOURCE, NOT to session.SeekSec + K*segDur. The
-            // old math (adding the initial resume offset) was a leftover from
-            // when the playlist was shortened by the resume seek; with the
-            // full-duration playlist that addition would double-count the
-            // offset and seek 22 min past the user's actual scrub target.
-            var sourceSeekSec = targetSegment * SegmentDurationSec;
+            // The playlist spans the full file duration, so ffmpeg seeks to the
+            // ANNOUNCED start of seg-K in the source (SegmentLayout — K*4 on
+            // the uniform grid, the key frame itself for an anchored copy
+            // segment), never session.SeekSec + K*4. A copy plan aims the
+            // demuxer seek just past that start (CopySeekTarget) so a key frame
+            // ON the boundary is the one picked, not the one a GOP before it.
+            var segStart = session.Layout.Start(targetSegment);
+            var sourceSeekSec = segStart > 0 && session.Plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy
+                ? CopySeekTarget(segStart, next: null)
+                : segStart;
             // We don't have the original probe on restart — but the plan is
             // fixed for the session's lifetime and BuildFfmpegArgs only needs
             // the video codec hint (for the `-tag:v hvc1` on stream-copy HEVC).
@@ -1164,7 +1230,7 @@ public sealed partial class HlsSessionService : IDisposable
             // to continue the previous decoder pipeline through the gap and
             // produces the ~300ms audio-ahead glitch after every scrub.
             session.AddRestartBoundary(targetSegment);
-            RegenerateMediaPlaylist(session, session.TotalDurationSec);
+            RegenerateMediaPlaylist(session);
         }
         finally
         {

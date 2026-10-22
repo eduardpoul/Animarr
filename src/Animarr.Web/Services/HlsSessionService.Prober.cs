@@ -240,6 +240,51 @@ public sealed partial class HlsSessionService
         return 0;
     }
 
+    /// <summary>How far past the resume point <see cref="FindCopyAnchorAsync"/>
+    /// looks for the next key frame. Bounds the read to one GOP plus this.</summary>
+    private const double CopyAnchorWindowSec = 10.0;
+
+    /// <summary>
+    /// For a stream copy that resumes at <paramref name="seekSec"/>: the last
+    /// key frame at or before it (where the copy has to start — the demuxer
+    /// seek lands there, exactly as ffmpeg's <c>-ss</c> does) and the first
+    /// key frame after it within <see cref="CopyAnchorWindowSec"/> (null = none
+    /// in the window). One ffprobe over ~one GOP of packets; null on failure.
+    /// </summary>
+    private async Task<(double Keyframe, double? Next)?> FindCopyAnchorAsync(string fullPath, int videoStreamIndex,
+        double seekSec, CancellationToken ct)
+    {
+        try
+        {
+            var inv = CultureInfo.InvariantCulture;
+            var r = await FfprobeRunner.RunAsync(
+            [
+                "-v", "error",
+                "-select_streams", videoStreamIndex >= 0 ? videoStreamIndex.ToString(inv) : "V:0",
+                "-read_intervals", $"{seekSec.ToString("F3", inv)}%{(seekSec + CopyAnchorWindowSec).ToString("F3", inv)}",
+                "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", fullPath,
+            ], TimeSpan.FromSeconds(15), ct);
+            if (r.ExitCode != 0) return null;
+
+            double? keyframe = null, next = null;
+            foreach (var line in r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var c = line.IndexOf(',');
+                if (c <= 0 || line.IndexOf('K', c) < 0) continue;
+                if (!double.TryParse(line.AsSpan(0, c), NumberStyles.Float, inv, out var pts)) continue;
+                if (pts <= seekSec + 0.001) keyframe = pts;
+                else { next = pts; break; }
+            }
+            return keyframe is double kf ? (kf, next) : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "HLS: key frame lookup failed for {Path} @ {Seek}", fullPath, seekSec);
+            return null;
+        }
+    }
+
     /// <summary>Measure the real B-pyramid composition delay by probing the
     /// opening video packets and taking max(pts − dts). On a stream-copy this
     /// is how far video presentation lags decode — i.e. how far audio runs

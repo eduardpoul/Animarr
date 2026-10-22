@@ -18,7 +18,10 @@ public sealed partial class HlsSessionService
         public string OutputDir   { get; }
         public Process Process    { get; private set; }
         public double  SeekSec    { get; }
-        public int     SegmentCount { get; }
+        /// <summary>Where each announced seg-N starts — the seek-restart seeks
+        /// ffmpeg to <c>Layout.Start(N)</c>, and playlist rewrites reuse it.</summary>
+        public SegmentLayout Layout { get; }
+        public int     SegmentCount => Layout.Count;
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS
@@ -104,7 +107,7 @@ public sealed partial class HlsSessionService
         /// lists the dir when the floor moved. Reset by a restart.</summary>
         public int LastPruneFloor = int.MinValue;
 
-        public HlsSession(string token, string source, string dir, Process proc, double seekSec, int segCount,
+        public HlsSession(string token, string source, string dir, Process proc, double seekSec, SegmentLayout layout,
             string? videoCodec, HlsPlan plan, double audioOffsetSec, double totalDurationSec,
             int audioTrackIndex, int maxHeight, string? externalAudioPath = null, int maxBitrate = 0,
             string? audioCodec = null, bool is10Bit = false, int startSegment = 0,
@@ -120,7 +123,7 @@ public sealed partial class HlsSessionService
             OutputDir   = dir;
             Process     = proc;
             SeekSec     = seekSec;
-            SegmentCount = segCount;
+            Layout      = layout;
             VideoCodec  = videoCodec;
             AudioCodec  = audioCodec;
             Is10Bit     = is10Bit;

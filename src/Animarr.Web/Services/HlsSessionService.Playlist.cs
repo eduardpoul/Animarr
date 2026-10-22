@@ -236,12 +236,14 @@ public sealed partial class HlsSessionService
         return sb.ToString();
     }
 
-    private static string BuildMediaPlaylist(double totalDuration, int segCount, HlsPlan plan,
+    private static string BuildMediaPlaylist(SegmentLayout layout, HlsPlan plan,
         double startOffsetSec = 0, IReadOnlyCollection<int>? restartBoundaries = null)
     {
         // TARGETDURATION must be >= every #EXTINF value (HLS spec). We round
-        // up the segment length to be safe.
-        var target = (int)Math.Ceiling(SegmentDurationSec) + 1;
+        // up the segment length to be safe; an anchored layout can announce a
+        // longer segment around its anchor.
+        var target = Math.Max((int)Math.Ceiling(SegmentDurationSec) + 1, (int)Math.Ceiling(layout.MaxDuration));
+        var segCount = layout.Count;
 
         var sb = new StringBuilder();
         sb.Append("#EXTM3U\n");
@@ -293,7 +295,7 @@ public sealed partial class HlsSessionService
             bool emitMarker = i > 0 && (emitDiscontinuityEverywhere
                                      || (boundarySet?.Contains(i) ?? false));
             if (emitMarker) sb.Append("#EXT-X-DISCONTINUITY\n");
-            var dur = SegmentLayout.Duration(i, segCount, totalDuration, SegmentDurationSec);
+            var dur = layout.Duration(i);
             sb.Append($"#EXTINF:{dur.ToString("F3", CultureInfo.InvariantCulture)},\n");
             sb.Append($"seg-{i:D5}.{ext}\n");
         }
@@ -302,51 +304,127 @@ public sealed partial class HlsSessionService
     }
 
     /// <summary>
-    /// Segment layout of the synthetic VOD playlist: fixed-length segments with
-    /// the remainder in the last one — except that a remainder shorter than
-    /// <see cref="MinTailSec"/> is folded into the previous segment instead of
-    /// being announced on its own.
+    /// Segment layout of the synthetic VOD playlist — where each seg-N starts.
     ///
-    /// Why: the format duration is usually a hair longer than the video (audio
-    /// runs on for a few ms), e.g. 180.023 s → a 46th segment of 0.023 s. ffmpeg
-    /// starts a segment only at a key frame past the boundary, so with no frame
-    /// left after 180.0 it never writes seg-45: the player got 503 for it, kept
+    /// <b>Uniform</b>: fixed-length segments with the remainder in the last one,
+    /// except that a remainder shorter than <see cref="MinTailSec"/> is folded
+    /// into the previous segment instead of being announced on its own. The
+    /// format duration is usually a hair longer than the video (audio runs on
+    /// for a few ms), e.g. 180.023 s → a 46th segment of 0.023 s. ffmpeg starts
+    /// a segment only at a key frame past the boundary, so with no frame left
+    /// after 180.0 it never wrote seg-45: the player got 503 for it, kept
     /// retrying, and the retries turned into seek-jump restarts. Folded, seg-44
-    /// is announced as 4.023 s — what ffmpeg really writes there (everything up
-    /// to EOF). If ffmpeg does cut a tiny last segment after all (a key frame
-    /// right at the boundary), only those &lt;0.5 s at the very end go unplayed.
-    /// TARGETDURATION (segment length + 1) still covers the longer last EXTINF.
+    /// is announced as 4.023 s — what ffmpeg really writes there (up to EOF).
+    ///
+    /// <b>Anchored</b> (a stream-copy run that starts mid-file): segment J
+    /// starts exactly at the key frame the copy has to start from, and its
+    /// announced end lies inside what ffmpeg really writes into it. Why it must:
+    /// hls.js (and ExoPlayer) place the FIRST fragment they load at its
+    /// announced start — they compute the timestamp offset from it — so a copy
+    /// that starts at a key frame 6 s before its announced start shifted the
+    /// whole timeline by 6 s (the resume point, the external subtitles and the
+    /// progress reports all off), and with sparse key frames the start
+    /// position wasn't buffered at all. Segments before J keep the 4 s grid,
+    /// with seg-(J-1) stretched to end at the anchor; segments after J continue
+    /// the 4 s grid from J's end.
     /// </summary>
-    public static class SegmentLayout
+    public sealed class SegmentLayout
     {
         public const double MinTailSec = 0.5;
 
-        /// <summary>Number of segments the playlist announces (0 = unknown duration).</summary>
-        public static int Count(double totalDurationSec, double segmentSec)
+        private readonly double[] _starts;
+
+        /// <summary>Full file duration the playlist spans.</summary>
+        public double TotalSec { get; }
+
+        /// <summary>First segment of the anchored part (0 for a uniform layout).</summary>
+        public int AnchorIndex { get; }
+
+        public int Count => _starts.Length;
+
+        /// <summary>Announced start of segment <paramref name="index"/> (seconds).</summary>
+        public double Start(int index) => _starts[index];
+
+        /// <summary>EXTINF of segment <paramref name="index"/>.</summary>
+        public double Duration(int index)
+            => Math.Max((index + 1 < _starts.Length ? _starts[index + 1] : TotalSec) - _starts[index], 0);
+
+        /// <summary>Longest EXTINF — TARGETDURATION must cover it.</summary>
+        public double MaxDuration { get; }
+
+        /// <summary>Segment whose announced range contains <paramref name="t"/>
+        /// (clamped to the first / last segment).</summary>
+        public int IndexOf(double t)
         {
-            if (totalDurationSec <= 0 || segmentSec <= 0) return 0;
-            var n = (int)Math.Ceiling(totalDurationSec / segmentSec);
-            if (n > 1 && totalDurationSec - (n - 1) * segmentSec < MinTailSec) n--;
-            return Math.Max(n, 1);
+            if (_starts.Length == 0) return 0;
+            var i = Array.BinarySearch(_starts, t);
+            if (i < 0) i = ~i - 1;
+            return Math.Clamp(i, 0, _starts.Length - 1);
         }
 
-        /// <summary>EXTINF of segment <paramref name="index"/> of <paramref name="count"/>.</summary>
-        public static double Duration(int index, int count, double totalDurationSec, double segmentSec)
-            => index < count - 1
-                ? segmentSec
-                : Math.Max(totalDurationSec - (count - 1) * segmentSec, 0);
+        private SegmentLayout(double[] starts, double total, int anchorIndex)
+        {
+            _starts = starts;
+            TotalSec = total;
+            AnchorIndex = anchorIndex;
+            double max = 0;
+            for (int i = 0; i < starts.Length; i++) max = Math.Max(max, Duration(i));
+            MaxDuration = max;
+        }
+
+        /// <summary>The plain 4 s grid (0 segments = unknown duration).</summary>
+        public static SegmentLayout Uniform(double totalSec, double segmentSec)
+            => Build(totalSec, segmentSec, prefix: 0, anchorStart: 0, firstEnd: segmentSec);
+
+        /// <summary>
+        /// Layout for a stream copy whose first run starts at key frame
+        /// <paramref name="keyframeSec"/> (the last one at or before the resume
+        /// point). <paramref name="firstEndSec"/> = where segment J is announced
+        /// to end — at most where ffmpeg will really cut it (see the caller),
+        /// and past the resume point so the player asks for J first.
+        /// </summary>
+        public static SegmentLayout Anchored(double totalSec, double segmentSec, double keyframeSec, double firstEndSec)
+        {
+            if (totalSec <= 0 || segmentSec <= 0) return Uniform(totalSec, segmentSec);
+            var j = (int)Math.Floor(keyframeSec / segmentSec + 1e-6);
+            // A key frame in the first segment: start from the file's beginning
+            // (it has a key frame at 0) — there's no segment before it to stretch.
+            var anchor = j == 0 ? 0 : Math.Max(keyframeSec, j * segmentSec);
+            return Build(totalSec, segmentSec, prefix: j, anchorStart: anchor,
+                firstEnd: Math.Max(firstEndSec, anchor + segmentSec));
+        }
+
+        private static SegmentLayout Build(double total, double seg, int prefix, double anchorStart, double firstEnd)
+        {
+            if (total <= 0 || seg <= 0) return new SegmentLayout([], 0, 0);
+            var starts = new List<double>();
+            for (int i = 0; i < prefix && i * seg < total; i++) starts.Add(i * seg);
+            if (anchorStart < total)
+            {
+                var anchorIndex = starts.Count;
+                starts.Add(anchorStart);
+                for (var s = firstEnd; s < total; s += seg) starts.Add(s);
+                // Fold a tail shorter than MinTailSec into the segment before it
+                // — never the anchor itself (a resume in the last second).
+                if (starts.Count - 1 > anchorIndex && total - starts[^1] < MinTailSec)
+                    starts.RemoveAt(starts.Count - 1);
+                return new SegmentLayout(starts.ToArray(), total, anchorIndex);
+            }
+            if (starts.Count == 0) starts.Add(0);
+            return new SegmentLayout(starts.ToArray(), total, 0);
+        }
     }
 
     /// <summary>Atomically rewrite media.m3u8 with the current set of restart
     /// boundaries baked in as EXT-X-DISCONTINUITY markers. Atomic so a
     /// concurrent player fetch can never see a half-written playlist.</summary>
-    private void RegenerateMediaPlaylist(HlsSession session, double totalDurationForPlaylist)
+    private void RegenerateMediaPlaylist(HlsSession session)
     {
         var path = Path.Combine(session.OutputDir, "media.m3u8");
         var tmp  = path + ".tmp";
         try
         {
-            var content = BuildMediaPlaylist(totalDurationForPlaylist, session.SegmentCount,
+            var content = BuildMediaPlaylist(session.Layout,
                 session.Plan,
                 startOffsetSec: session.SeekSec,
                 restartBoundaries: session.GetRestartBoundaries());

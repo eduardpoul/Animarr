@@ -138,6 +138,22 @@ public sealed partial class HlsSessionService
     }
 
     /// <summary>
+    /// Key frame on every segment boundary of a re-encode, so the HLS muxer can
+    /// cut exactly where the playlist says a segment starts. ffmpeg evaluates
+    /// <c>t</c> RELATIVE to the first frame it encodes (fftools' ref_pts —
+    /// measured on BtbN N-124716 and jellyfin-ffmpeg 8.1.3: <c>-ss 41</c> +
+    /// <c>-copyts</c> gives key frames at 41, 45, 49 …; an absolute
+    /// <c>gte(t,40+4*n)</c> fired nothing until 80 s), and hlsenc measures its
+    /// cuts from the run's first packet too. Both therefore line up with the
+    /// announced grid as long as the run STARTS on a segment boundary — which
+    /// is why StartAsync and the seek-restart seek re-encodes to
+    /// <c>SegmentLayout.Start(K)</c> = K*4, not to the resume point (B18: a
+    /// resume at 41 s cut at 41/45/49 under a playlist saying 40/44/48).
+    /// </summary>
+    private static readonly string ForceKeyFramesExpr =
+        $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})";
+
+    /// <summary>
     /// An output path in the form ffmpeg's HLS muxer can split. hlsenc finds
     /// the directory the init segment goes into with <c>strrchr(path, '/')</c>
     /// — forward slash only — so on Windows a <c>C:\…\_ffmpeg.m3u8</c> had "no
@@ -442,7 +458,7 @@ public sealed partial class HlsSessionService
             "-b:v",    rate.V,
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
+            "-force_key_frames", ForceKeyFramesExpr,
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
@@ -523,10 +539,16 @@ public sealed partial class HlsSessionService
             "-tune", "hq",
             "-profile:v", "main",
             "-bf",     "0",           // no B-frames → tight A/V sync per segment
+            // A forced key frame must be an IDR: NVENC makes it a plain I frame
+            // by default, which isn't flagged as a key frame, so the HLS muxer
+            // never cut there — measured: 10.4 s segments (NVENC's 250-frame
+            // GOP) behind a playlist announcing 4 s ones, i.e. seg-1 held
+            // 10.4–20.8 s while the player placed it at 4 s.
+            "-forced-idr", "1",
             "-b:v",    rate.V,
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
+            "-force_key_frames", ForceKeyFramesExpr,
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
@@ -588,7 +610,7 @@ public sealed partial class HlsSessionService
             "-b:v",    rate.V,
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
-            "-force_key_frames", $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})",
+            "-force_key_frames", ForceKeyFramesExpr,
             "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
