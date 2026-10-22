@@ -26,6 +26,11 @@ namespace Animarr.Web.Services;
 /// player that gives up and retries joins the running read instead of killing
 /// it (bounded by <see cref="ExtractTimeout"/>; progress at Debug).
 ///
+/// The first request for an embedded TEXT track of a container extracts all
+/// of its text tracks in that one read (and the original script of each ASS /
+/// SSA track), so switching to another language afterwards is a cache hit
+/// instead of another full read.
+///
 /// Text that isn't UTF-8 (a Windows-1251 SRT, say) is re-encoded to UTF-8
 /// before ffmpeg reads it — see <see cref="SubtitleCharset"/> for the detection
 /// and for why that beats <c>-sub_charenc</c>:
@@ -141,8 +146,13 @@ public static class SubtitleCache
     /// an ASS / SSA one served as the original script, and on the non-UTF-8
     /// fallback for an embedded track it picks the muxer its raw packets are
     /// copied out with.</param>
+    /// <param name="subtitleCodecs">ffprobe <c>codec_name</c> of every
+    /// subtitle stream of the file, in <c>s:N</c> order. Given (with
+    /// <paramref name="codecLookup"/>), a text track is extracted together with
+    /// all the file's other text tracks in one read.</param>
     public static async Task<Result> GetOrExtractAsync(string sourcePath, int track, string outFormat,
-        string cacheRoot, CancellationToken ct, Func<CancellationToken, Task<string?>>? codecLookup = null)
+        string cacheRoot, CancellationToken ct, Func<CancellationToken, Task<string?>>? codecLookup = null,
+        Func<CancellationToken, Task<IReadOnlyList<string?>>>? subtitleCodecs = null)
     {
         var dir = Path.Combine(cacheRoot, "subtitles");
         Directory.CreateDirectory(dir);
@@ -172,8 +182,117 @@ public static class SubtitleCache
             return Remember(cached, new Result(null, -1,
                 $"Bitmap subtitle ({sourceCodec}) can't be converted to text.", FailureCode: ImageSubtitle));
 
-        return await Join(Shared(cached, $"{sourcePath} s:{track} → {outFormat}",
-            t => ConvertOneAsync(sourcePath, track, outFormat, dir, cached, fi, codecLookup, t)), ct);
+        Task<Result> One() => Shared(cached, $"{sourcePath} s:{track} → {outFormat}",
+            t => ConvertOneAsync(sourcePath, track, outFormat, dir, cached, fi, codecLookup, t));
+
+        // An embedded text track: every text track of the file in one read
+        // first — then this one is normally a cache hit.
+        if (subtitleCodecs is not null && codecLookup is not null && !SubtitleCharset.IsTextSubtitleFile(sourcePath)
+            && AllTracksFormat(outFormat, await codecLookup(ct)) is { } allFormat)
+        {
+            async Task<Result> AllThenOne()
+            {
+                await AllTextTracksAsync(sourcePath, fi, dir, allFormat, subtitleCodecs);
+                return File.Exists(cached) ? new Result(cached, 0, "") : await One();
+            }
+            return await Join(AllThenOne(), ct);
+        }
+        return await Join(One(), ct);
+    }
+
+    /// <summary>The format the all-tracks read writes for a request in
+    /// <paramref name="outFormat"/> of a track with <paramref name="codec"/>;
+    /// null = no all-tracks read (a bitmap track, or a text track asked as
+    /// ASS that isn't ASS — the burn-in's conversion).</summary>
+    private static string? AllTracksFormat(string outFormat, string? codec)
+    {
+        if (!SubtitleCodecs.IsText(codec)) return null;
+        return outFormat switch
+        {
+            "webvtt" or "srt" => outFormat,
+            "ass" when SubtitleCodecs.IsAss(codec) => "webvtt",   // the ASS copies come along
+            _ => null,
+        };
+    }
+
+    /// <summary>All-tracks reads already made per file version + format, so a
+    /// track that failed in one isn't the reason for another full read.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> AllTracksTried =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static async Task AllTextTracksAsync(string sourcePath, FileInfo fi, string dir, string format,
+        Func<CancellationToken, Task<IReadOnlyList<string?>>> subtitleCodecs)
+    {
+        var key = $"all|{sourcePath}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|{format}";
+        if (AllTracksTried.TryGetValue(key, out var until) && until > DateTime.UtcNow) return;
+        await Shared(key, $"{sourcePath} all text tracks → {format}",
+            t => ExtractAllTextTracksAsync(sourcePath, fi, dir, format, subtitleCodecs, key, t));
+    }
+
+    /// <summary>
+    /// One ffmpeg over the container writing every text track not cached yet:
+    /// <c>-map 0:s:N -f &lt;format&gt;</c> per track, plus <c>-c:s copy -f ass</c>
+    /// for each ASS / SSA track (its original script). Only a clean run is
+    /// published. When ffmpeg reports text that isn't UTF-8 it can't say which
+    /// track, so the converted text is dropped (the ASS copies are re-encoded
+    /// as usual) and those tracks take the one-track path with its charset
+    /// fallback; a track already known to be in a legacy code page is left out.
+    /// </summary>
+    private static async Task<Result> ExtractAllTextTracksAsync(string sourcePath, FileInfo fi, string dir, string format,
+        Func<CancellationToken, Task<IReadOnlyList<string?>>> subtitleCodecs, string key, CancellationToken ct)
+    {
+        var codecs = await subtitleCodecs(ct);
+        var outputs = new List<(string Cached, string Tmp, bool AssCopy)>();
+        var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-i", sourcePath };
+        void Add(int index, string fmt, bool assCopy)
+        {
+            var cached = CachedPath(dir, sourcePath, index, fmt, fi);
+            if (File.Exists(cached) || Running.ContainsKey(cached) || KnownFailure(cached) is not null) return;
+            var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
+            outputs.Add((cached, tmp, assCopy));
+            args.AddRange(assCopy
+                ? ["-map", $"0:s:{index}", "-c:s", "copy", "-f", "ass", "-y", tmp]
+                : ["-map", $"0:s:{index}", "-f", fmt, "-y", tmp]);
+        }
+        for (int i = 0; i < codecs.Count; i++)
+        {
+            if (!SubtitleCodecs.IsText(codecs[i])) continue;
+            if (SubtitleCharset.TryGetCached(SubtitleCharset.CacheKey(sourcePath, i), out var cs) && cs.NeedsConversion)
+                continue;
+            Add(i, format, assCopy: false);
+            if (SubtitleCodecs.IsAss(codecs[i])) Add(i, "ass", assCopy: true);
+        }
+        if (outputs.Count == 0) return new Result(null, 0, "");
+        try
+        {
+            var r = await RunAsync(args, outputs[0].Tmp, ct);
+            if (r.FailureCode == Busy) return r;   // not tried: the next request may
+            if (AllTracksTried.Count > 4096) AllTracksTried.Clear();
+            AllTracksTried[key] = DateTime.UtcNow + FailureTtl;
+            if (r.ExitCode != 0)
+            {
+                Logger.LogDebug("All-tracks subtitle read of {Path} failed (exit {Exit}) — tracks go one by one", sourcePath, r.ExitCode);
+                return r;
+            }
+            bool legacy = r.Error.Contains("Invalid UTF-8", StringComparison.OrdinalIgnoreCase);
+            int published = 0;
+            foreach (var o in outputs)
+            {
+                if (!File.Exists(o.Tmp) || new FileInfo(o.Tmp).Length == 0) continue;
+                if (o.AssCopy) await EnsureUtf8Async(o.Tmp, ct);
+                else if (legacy) continue;
+                Publish(o.Tmp, o.Cached);
+                NoteWrite(dir, o.Cached);
+                published++;
+            }
+            Logger.LogDebug("All-tracks subtitle read of {Path}: {Published} of {Outputs} outputs cached{Legacy}", sourcePath,
+                published, outputs.Count, legacy ? " (non-UTF-8 text: conversions left to the one-track path)" : "");
+            return new Result(null, 0, "");
+        }
+        finally
+        {
+            foreach (var o in outputs) TryDelete(o.Tmp);
+        }
     }
 
     /// <summary>The conversion behind <see cref="GetOrExtractAsync"/> — run

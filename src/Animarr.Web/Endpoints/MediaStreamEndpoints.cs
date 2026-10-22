@@ -444,7 +444,8 @@ internal static class MediaStreamEndpoints
             // used when an EMBEDDED track turns out not to be UTF-8.
             var r = await SubtitleCache.GetOrExtractAsync(fullPath!, track, outFormat,
                 cachePaths.CacheRoot, http.RequestAborted,
-                codecLookup: c => SubtitleCodecAsync(probeCache, fullPath!, track, c));
+                codecLookup: c => SubtitleCodecAsync(probeCache, fullPath!, track, c),
+                subtitleCodecs: c => SubtitleCodecsAsync(probeCache, fullPath!, c));
             if (r.Path is null)
             {
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
@@ -510,6 +511,27 @@ internal static class MediaStreamEndpoints
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return null; }
+    }
+
+    /// <summary>codec_name of every subtitle stream, in s:N order (cached
+    /// probe) — lets SubtitleCache extract all text tracks in one read.</summary>
+    private static async Task<IReadOnlyList<string?>> SubtitleCodecsAsync(MediaProbeCache probeCache, string fullPath,
+        CancellationToken ct)
+    {
+        var codecs = new List<string?>();
+        try
+        {
+            var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
+            if (json is null) return codecs;
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return codecs;
+            foreach (var s in streams.EnumerateArray())
+                if (s.TryGetProperty("codec_type", out var type) && type.GetString() == "subtitle")
+                    codecs.Add(s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { codecs.Clear(); }
+        return codecs;
     }
 
     /// <summary>The last <paramref name="count"/> lines of an ffmpeg stderr dump —

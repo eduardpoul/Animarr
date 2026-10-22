@@ -20,6 +20,16 @@ public static class SubtitleCodecs
         => string.Equals(codec, "hdmv_pgs_subtitle", StringComparison.OrdinalIgnoreCase)
            || string.Equals(codec, "pgssub", StringComparison.OrdinalIgnoreCase);
 
+    private static readonly HashSet<string> Text = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "microdvd", "subviewer", "subviewer1",
+        "sami", "realtext", "mpl2", "pjs", "vplayer", "jacosub", "stl",
+    };
+
+    /// <summary>True for the text codecs ffmpeg converts to WebVTT / SRT
+    /// (an unknown codec counts as not text: it could fail a shared run).</summary>
+    public static bool IsText(string? codec) => codec is not null && Text.Contains(codec);
+
     /// <summary>True for ASS / SSA scripts.</summary>
     public static bool IsAss(string? codec)
         => string.Equals(codec, "ass", StringComparison.OrdinalIgnoreCase)

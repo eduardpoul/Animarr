@@ -125,6 +125,10 @@ public sealed class SubtitleTrackInfoService
     public async Task<string?> CodecOfAsync(string fullPath, int track, CancellationToken ct)
         => SubtitleStreams(await _probeCache.GetStreamsJsonAsync(fullPath, ct)).FirstOrDefault(s => s.Index == track)?.Codec;
 
+    /// <summary>codec_name of every subtitle stream, in s:N order.</summary>
+    public async Task<IReadOnlyList<string?>> CodecsAsync(string fullPath, CancellationToken ct)
+        => SubtitleStreams(await _probeCache.GetStreamsJsonAsync(fullPath, ct)).OrderBy(s => s.Index).Select(s => s.Codec).ToList();
+
     public async Task<IReadOnlyList<SubtitleFontDto>> FontsAsync(string fullPath, CancellationToken ct)
     {
         var escaped = Uri.EscapeDataString(fullPath);

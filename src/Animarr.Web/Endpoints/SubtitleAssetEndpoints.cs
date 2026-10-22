@@ -86,7 +86,8 @@ internal static class SubtitleAssetEndpoints
             try
             {
                 var r = await SubtitleCache.GetOrExtractAsync(fullPath!, index, "srt", cachePaths.CacheRoot, ct,
-                    codecLookup: c => tracks.CodecOfAsync(fullPath!, index, c));
+                    codecLookup: c => tracks.CodecOfAsync(fullPath!, index, c),
+                    subtitleCodecs: c => tracks.CodecsAsync(fullPath!, c));
                 if (r.Path is null)
                 {
                     http.Response.Headers.CacheControl = "no-store";
