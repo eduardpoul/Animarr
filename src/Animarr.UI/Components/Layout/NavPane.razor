@@ -49,8 +49,10 @@
     </a>
 
     <div class="d-nav__list">
-        @Item("", "home", "home-f", L["nav.home"], IsHomeActive())
-        @Item("library", "library", "library-f", L["nav.library"], IsRoute("/library") && FolderJump.ActiveFolderName is null)
+        @* Home and Library are where "all folders" lives: they clear the
+           folder filter a folder item below set. *@
+        @Item("", "home", "home-f", L["nav.home"], IsHomeActive(), onClick: ClearFiltersForHome)
+        @Item("library", "library", "library-f", L["nav.library"], IsRoute("/library") && FolderJump.ActiveFolderName is null, onClick: ClearFolder)
         @Item("calendar", "calendar", "calendar-f", L["calendar.title"], IsRoute("/calendar"))
         @Item("watchlist", "bookmark", "bookmark-f", L["watchlist.title"], IsRoute("/watchlist"))
         @Item("stats", "stats", "stats-f", L["stats.title"], IsRoute("/stats"))
@@ -67,7 +69,7 @@
                 var active = IsFolderActive(n);
                 <button type="button"
                         class="@($"d-nav__item tv-focus {(active ? "is-active" : "")}")"
-                        aria-pressed="@(active ? "true" : "false")"
+                        aria-current="@(active ? "page" : null)"
                         title="@n"
                         @onclick="@(() => OnPickFolder(n))">
                     <span class="d-nav__ic"><DIcon Name="folder" Size="20" /></span>
@@ -208,10 +210,13 @@
         catch { }
     }
 
-    /// <summary>A route item: filled icon + accent indicator when active.</summary>
-    private RenderFragment Item(string href, string icon, string iconActive, string label, bool active) => __builder =>
+    /// <summary>A route item: filled icon + accent indicator when active.
+    /// <paramref name="onClick"/> runs before the link navigates.</summary>
+    private RenderFragment Item(string href, string icon, string iconActive, string label, bool active,
+        Action? onClick = null) => __builder =>
     {
         <a href="@href"
+           @onclick="@(() => onClick?.Invoke())"
            class="@($"d-nav__item tv-focus {(active ? "is-active" : "")}")"
            aria-current="@(active ? "page" : null)"
            title="@label">
@@ -242,13 +247,22 @@
         => IsCatalogRoute()
         && string.Equals(FolderJump.ActiveFolderName, name, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Pick a root folder: filters Home / Library in place. Clicking
-    /// the active folder again clears the filter (back to "all").</summary>
+    /// <summary>Pick a root folder: filters Home / Library in place. A nav
+    /// item, not a toggle — clicking the active folder again keeps it (it used
+    /// to clear the filter and drop the user back on "all"); Home / Library
+    /// are the way back to every folder.</summary>
     private void OnPickFolder(string name)
     {
-        var next = IsFolderActive(name) ? null : name;
-        FolderJump.SetActiveFolder(next);
+        FolderJump.SetActiveFolder(name);
         if (!IsCatalogRoute()) Nav.NavigateTo("/");
+    }
+
+    private void ClearFolder() => FolderJump.SetActiveFolder(null);
+
+    private void ClearFiltersForHome()
+    {
+        FolderJump.SetActiveFolder(null);
+        CategoryNav.SetActiveCategory(null);
     }
 
     private void GoHome()
