@@ -218,7 +218,7 @@
 - ~~DLNA: нет субтитров, игнорируется `StartTimeMs`, не выбрать дорожку.~~ ✅ 2026-10-22 (6.6).
 - `/api/playlist.m3u` жёстко задаёт `http:8080`.
 - `maxHeight` не валидируется: нечётное значение роняет libx264.
-- CODECS захардкожены; MP2 объявляется как `mp4a.40.2`.
+- CODECS захардкожены; MP2 объявляется как `mp4a.40.2`. ⚠️ 2026-10-22: правка в `HlsSessionService.cs` (TS-ветка CODECS: `"mp2" => "mp4a.40.33"` — MPEG-1 Layer II; `mp4a.40.34` уже стоит для MP3) — передано агенту HLS.
 - `SubtitleSize`: ограничение 10–48 против документированных 12–32.
 - На ТВ ⏭ игнорирует сохранённую позицию.
 - На ТВ в `ⓘ` битность определяется эвристикой.
@@ -531,7 +531,7 @@
 - **Чистка:**
   - мёртвый код (NativeAdapter, `NativePlayerBridge`, TextureView-путь, заглушки MD);
   - устаревшие комментарии;
-  - `/api/playlist.m3u` с реальными схемой и хостом.
+  - `/api/playlist.m3u` с реальными схемой и хостом. ⚠️ 2026-10-22: код в `MediaStreamEndpoints.cs` (его правит агент HLS) — передано ему: `$"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}"` вместо `http://{host}:8080` (схему из `X-Forwarded-Proto` уже подставляет `UseForwardedHeaders` при `ANIMARR_TRUSTED_PROXIES`).
 
 **Не делать:** ffmpeg.wasm / WebCodecs для старых кодеков, программное FFmpeg-видео на ТВ (nextlib).
 
