@@ -160,15 +160,16 @@
     }
     // Normalise any track language tag (ISO-639-2/B or /T, ISO-639-1, or a full
     // English name) to a 639-1 2-letter code so preference matching is tolerant
-    // of how a muxer tagged the stream. Scope mirrors LanguageNameMap.
+    // of how a muxer tagged the stream. Scope mirrors LanguageNameMap, plus
+    // Ukrainian (a UI language with its own dubs).
     const LANG_2TO1 = {
-        jpn:'ja', ja:'ja', eng:'en', en:'en', rus:'ru', ru:'ru',
+        jpn:'ja', ja:'ja', eng:'en', en:'en', rus:'ru', ru:'ru', ukr:'uk', uk:'uk',
         ger:'de', deu:'de', de:'de', fre:'fr', fra:'fr', fr:'fr',
         spa:'es', es:'es', ita:'it', it:'it', por:'pt', pt:'pt',
         chi:'zh', zho:'zh', cmn:'zh', yue:'zh', zh:'zh', cn:'zh',
         kor:'ko', ko:'ko', tha:'th', th:'th', vie:'vi', vi:'vi',
         ind:'id', id:'id', ara:'ar', ar:'ar', hin:'hi', hi:'hi', tur:'tr', tr:'tr',
-        japanese:'ja', english:'en', russian:'ru', german:'de', french:'fr',
+        japanese:'ja', english:'en', russian:'ru', ukrainian:'uk', german:'de', french:'fr',
         spanish:'es', italian:'it', portuguese:'pt', mandarin:'zh', chinese:'zh',
         korean:'ko', thai:'th', vietnamese:'vi', indonesian:'id', arabic:'ar',
         hindi:'hi', turkish:'tr',
@@ -178,6 +179,134 @@
         const k = String(l).trim().toLowerCase();
         if (k === 'und' || k === '') return '';
         return LANG_2TO1[k] || (k.length === 2 ? k : '');
+    }
+
+    // ── Track labels (task 2.10) ──────────────────────────────────────
+    // "Japanese · AC-3 5.1 · default", "Russian · AniLibria · MKA · external":
+    // the full language name in the UI language (Intl.DisplayNames; MediaDetail
+    // passes the UI language as opts.uiLang), the track title when it says
+    // more than the language, codec, channel layout and the default / forced
+    // / commentary flags.
+    let UI_LANG = 'en';
+    const DISPLAY_NAMES = new Map();   // locale → Intl.DisplayNames | null
+    function displayNames(locale) {
+        if (!DISPLAY_NAMES.has(locale)) {
+            let dn = null;
+            try { dn = new Intl.DisplayNames([locale], { type: 'language', fallback: 'none' }); } catch {}
+            DISPLAY_NAMES.set(locale, dn);
+        }
+        return DISPLAY_NAMES.get(locale);
+    }
+    /** Full language name for a track tag ("jpn", "ja", "japanese") in
+     *  `locale` (default: the UI language); '' for none / und; the raw tag
+     *  upper-cased when nothing knows it. */
+    function languageName(tag, locale) {
+        const raw = String(tag || '').trim();
+        if (!raw || raw.toLowerCase() === 'und') return '';
+        const loc = locale || UI_LANG;
+        const code = normLang(raw) || raw.toLowerCase();
+        const dn = displayNames(loc);
+        let name = null;
+        try { name = dn ? dn.of(code) : null; } catch { /* not a language tag */ }
+        if (!name) return raw.toUpperCase();
+        return name.charAt(0).toLocaleUpperCase(loc) + name.slice(1);
+    }
+    const CODEC_NAMES = {
+        aac: 'AAC', ac3: 'AC-3', eac3: 'E-AC-3', dts: 'DTS', truehd: 'TrueHD', mlp: 'MLP',
+        flac: 'FLAC', alac: 'ALAC', opus: 'Opus', vorbis: 'Vorbis', mp3: 'MP3', mp2: 'MP2',
+        subrip: 'SRT', srt: 'SRT', ass: 'ASS', ssa: 'SSA', webvtt: 'WebVTT', vtt: 'WebVTT',
+        mov_text: 'TX3G', hdmv_pgs_subtitle: 'PGS', pgssub: 'PGS', sup: 'PGS',
+        dvd_subtitle: 'VobSub', dvdsub: 'VobSub', dvb_subtitle: 'DVB', dvb_teletext: 'Teletext',
+        eia_608: 'CC 608',
+    };
+    /** "AC-3", "DTS-HD MA", "TrueHD Atmos"… from ffprobe's codec_name (+ profile). */
+    function codecName(codec, profile) {
+        const c = String(codec || '').toLowerCase();
+        if (!c) return '';
+        const p = String(profile || '');
+        if (c.startsWith('pcm_')) return 'PCM';
+        if (c === 'dts') {
+            if (/HD MA/i.test(p)) return 'DTS-HD MA';
+            if (/HD HRA|HD HR/i.test(p)) return 'DTS-HD HRA';
+            if (/DTS:X|DTS-X/i.test(p)) return 'DTS:X';
+        }
+        const base = CODEC_NAMES[c] || c.toUpperCase();
+        return /atmos/i.test(p) ? base + ' Atmos' : base;
+    }
+    /** "2.0", "5.1", "7.1"… */
+    function channelLabel(ch) {
+        ch = ch | 0;
+        if (ch <= 0) return '';
+        return ({ 1: '1.0', 2: '2.0', 3: '2.1', 6: '5.1', 7: '6.1', 8: '7.1' })[ch] || ch + 'ch';
+    }
+    /** Is a track title only a restatement of its language (or of a flag
+     *  shown anyway)? "English", "eng", "Русский", "Forced" → drop it. */
+    function titleIsRedundant(title, langTag, flagged) {
+        const tl = String(title || '').trim().toLowerCase();
+        if (!tl) return true;
+        if (langTag) {
+            const names = [langTag, normLang(langTag), languageName(langTag), languageName(langTag, 'en')];
+            if (names.some(n => n && n.toLowerCase() === tl)) return true;
+        }
+        return (flagged.forced && tl === 'forced') || (flagged.default && tl === 'default');
+    }
+    function trackFlagWords(f) {
+        const out = [];
+        if (f.default)    out.push(t('track_default'));
+        if (f.forced)     out.push(t('track_forced'));
+        if (f.commentary) out.push(t('track_commentary'));
+        return out;
+    }
+    /** Label for an embedded audio / subtitle stream (ffprobe stream). */
+    function embeddedTrackLabel(s, idx, forcedOverride) {
+        const tags = s.tags || {};
+        const lang  = tags.language || tags.LANGUAGE || '';
+        const title = tags.title || tags.TITLE || '';
+        const d = s.disposition || {};
+        const flags = {
+            default:    !!d.default,
+            forced:     forcedOverride != null ? !!forcedOverride : !!d.forced,
+            commentary: !!d.comment || /\bcommentary\b|комментар/i.test(title),
+        };
+        const parts = [];
+        const ln = languageName(lang);
+        if (ln) parts.push(ln);
+        if (!titleIsRedundant(title, lang, flags)) parts.push(title.trim());
+        const codec = codecName(s.codec_name, s.profile);
+        const ch = s.codec_type === 'audio' ? channelLabel(s.channels) : '';
+        const tech = [codec, ch].filter(Boolean).join(' ');
+        if (!parts.length) parts.push(tf('track_n', idx + 1));
+        if (tech) parts.push(tech);
+        return parts.concat(trackFlagWords(flags)).join(' · ');
+    }
+    /** The part of a sidecar file's server label that isn't its language
+     *  (the server prepends "Russian · " or answers just "Russian" / its
+     *  "External audio" fallback). */
+    function externalLabelCore(x) {
+        let label = String(x.label || '').trim();
+        const en = x.language ? languageName(x.language, 'en') : '';
+        if (en && label.toLowerCase().startsWith(en.toLowerCase() + ' · ')) label = label.slice(en.length + 3).trim();
+        // A folder named after the language ("Russian Dub") → "Dub".
+        else if (en && label.toLowerCase().startsWith(en.toLowerCase() + ' ')) label = label.slice(en.length + 1).trim();
+        if (/^External (audio|subtitle)$/i.test(label)) return '';
+        return titleIsRedundant(label, x.language, {}) ? '' : label;
+    }
+    /** Label for a sidecar dub / subtitle file (ExternalTrackDto). Uses codec
+     *  / channels when the server reports them (plan 2.9), else the file
+     *  extension. */
+    function externalTrackLabel(x) {
+        const parts = [];
+        const ln = languageName(x.language);
+        if (ln) parts.push(ln);
+        const core = externalLabelCore(x);
+        if (core) parts.push(core);
+        if (!parts.length) parts.push(x.fileName || x.label || '?');
+        const tech = [x.codec ? codecName(x.codec) : String(x.ext || '').toUpperCase(),
+                      channelLabel(x.channels)].filter(Boolean).join(' ');
+        if (tech) parts.push(tech);
+        if (FORCED_NAME_RE.test((x.fileName || '') + ' ' + (x.label || ''))) parts.push(t('track_forced'));
+        parts.push(t('track_external'));
+        return parts.join(' · ');
     }
 
     // Prefer the MAUI loopback media-proxy base when present
@@ -1058,9 +1187,9 @@
 
     /** Merge in-file audio streams and discovered external dub files into one
      *  ordered list for the Audio picker. Embedded streams come first (their
-     *  source index preserved); external entries follow, each labelled with its
-     *  file extension in parentheses (e.g. "Russian · AniLilia (mka)") so the
-     *  user can tell a sideload dub from a muxed track. Each option carries a
+     *  source index preserved); external entries follow, labelled by
+     *  externalTrackLabel ("Russian · AniLibria · MKA · external") so the user
+     *  can tell a sideload dub from a muxed track. Each option carries a
      *  `current` flag so the popup highlights the active selection.
      *  Shape: { kind:'embedded', index, label, current }
      *       | { kind:'external', path,  label, current } */
@@ -1076,7 +1205,7 @@
         (entry.externalAudioList || []).forEach(t => {
             opts.push({
                 kind: 'external', path: t.path,
-                label: t.label + ' (' + t.ext + ')',
+                label: externalTrackLabel(t),
                 current: extActive === t.path,
             });
         });
@@ -2640,9 +2769,18 @@
         edge_none:          'None',
         unit_s:             's',
         reset:              'Reset',
+        track_n:            'Track {0}',
+        track_default:      'default',
+        track_forced:       'forced',
+        track_commentary:   'commentary',
+        track_external:     'external',
     };
     function t(key) {
         return LABELS[key] || LABEL_DEFAULTS[key] || key;
+    }
+    /** t() with "{0}", "{1}"… placeholders (the lang packs' format). */
+    function tf(key, ...args) {
+        return t(key).replace(/\{(\d+)\}/g, (m, i) => (args[i] != null ? String(args[i]) : m));
     }
 
     // ── Client capabilities (plan §6.1, task 1.2) ─────────────────────
@@ -3107,6 +3245,7 @@
         }
         if (!isLiveOp(elementId, op)) return;
         if (opts && opts.labels) LABELS = opts.labels;
+        if (opts && opts.uiLang) UI_LANG = String(opts.uiLang);
         if (WIRED.has(elementId)) {
             // A restart (switchAudio / switchQuality / native fallback) lands
             // here on purpose; anything else is a missed detach. Either way
@@ -3281,9 +3420,9 @@
                     subtitleList = subs.map((s, idx) => {
                         const lang  = (s.tags && (s.tags.language || s.tags.LANGUAGE)) || 'und';
                         const title = (s.tags && (s.tags.title    || s.tags.TITLE))    || '';
-                        const label = title || `Track ${idx + 1}`;
+                        const forced = !!(s.disposition && s.disposition.forced) || FORCED_NAME_RE.test(title);
                         return {
-                            name: label + (lang !== 'und' ? ` (${lang})` : ''),
+                            name: embeddedTrackLabel(s, idx, forced),
                             lang,
                             url:  apiUrl('/api/subtitle?path=' + encodeURIComponent(mediaPath))
                                 + '&track=' + idx + '&format=webvtt',
@@ -3292,32 +3431,19 @@
                             default: !!(s.disposition && s.disposition.default),
                             // Forced flag, or a "Signs" / "Надписи" track that
                             // many releases ship without setting the flag.
-                            forced: !!(s.disposition && s.disposition.forced)
-                                 || FORCED_NAME_RE.test(title),
+                            forced,
                         };
                     });
 
                     // Audio
                     const auds = streams.filter(s => s.codec_type === 'audio');
-                    audioList = auds.map((s, idx) => {
-                        const lang  = (s.tags && (s.tags.language || s.tags.LANGUAGE)) || '';
-                        const title = (s.tags && (s.tags.title    || s.tags.TITLE))    || '';
-                        const codec = (s.codec_name || '').toUpperCase();
-                        const ch    = s.channels || 0;
-                        const chLab = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
-                                    : ch === 6 ? '5.1' : ch === 8 ? '7.1'
-                                    : ch > 0 ? `${ch}ch` : '';
-                        const parts = [];
-                        if (lang)  parts.push(lang.toUpperCase());
-                        if (codec) parts.push(codec);
-                        if (chLab) parts.push(chLab);
-                        if (title) parts.push(title);
-                        return {
-                            index: idx,
-                            lang, codec, channels: ch,
-                            label: parts.join(' · ') || `Track ${idx + 1}`,
-                        };
-                    });
+                    audioList = auds.map((s, idx) => ({
+                        index: idx,
+                        lang: (s.tags && (s.tags.language || s.tags.LANGUAGE)) || '',
+                        codec: (s.codec_name || '').toUpperCase(),
+                        channels: s.channels || 0,
+                        label: embeddedTrackLabel(s, idx),
+                    }));
 
                     // Video / audio media-info
                     const v = streams.find(s => s.codec_type === 'video');
@@ -3818,7 +3944,7 @@
                 const settingsIdx = entry.art ? 1 + emb.length + ext.length : -1;
                 const items = [t('sub_off'),
                     ...emb.map(s => s.name),
-                    ...ext.map(s => s.label + ' (' + s.ext + ')'),
+                    ...ext.map(s => externalTrackLabel(s)),
                     ...(settingsIdx > 0 ? [{ label: t('sub_settings') + '…', cls: 'vp-hud-popup__item--more' }] : [])];
                 let cur = 0;
                 if (entry.currentExtSubPath != null) {
@@ -3941,23 +4067,24 @@
                   : fmt === 'hdr10' ? 'HDR10'
                   : fmt === 'hlg' ? 'HLG' : fmt.toUpperCase());
                 if (hdrs.length) lines.push('HDR: ' + hdrs.join(', '));
-                if (o.audioCodec) {
-                    const ch = o.audioChannels || 0;
-                    const chLabel = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo'
-                                  : ch === 6 ? '5.1' : ch === 8 ? '7.1'
-                                  : ch > 0 ? ch + 'ch' : '';
-                    let a = o.audioCodec.toUpperCase() + (chLabel ? ' ' + chLabel : '');
-                    if (o.audioLanguage) a += ' (' + o.audioLanguage.toUpperCase() + ')';
-                    lines.push('Audio: ' + a);
-                }
-                // When an external dub is muxed in, `o.audioCodec` still
-                // describes the SOURCE audio (the server probes the source),
-                // so add an explicit line for the active sideload track.
+                // The audio the player receives: the server reports the
+                // SELECTED track (an external dub included — it probes the
+                // mapped file), so one line covers it; for a dub only the part
+                // the codec / language can't say is added (which dub). This
+                // used to need a separate "Dub:" line, when audio* still
+                // described the source's first track.
+                const exo = entry.currentExternalAudioPath
+                    ? (entry.externalAudioList || []).find(x => x.path === entry.currentExternalAudioPath) : null;
+                const aParts = [];
+                const aTech = [codecName(o.audioCodec), channelLabel(o.audioChannels)].filter(Boolean).join(' ');
+                if (aTech) aParts.push(aTech);
+                const aLang = languageName(o.audioLanguage || (exo && exo.language) || '');
+                if (aLang) aParts.push(aLang);
                 if (entry.currentExternalAudioPath) {
-                    const exo = (entry.externalAudioList || [])
-                        .find(t => t.path === entry.currentExternalAudioPath);
-                    lines.push('Dub: ' + (exo ? exo.label + ' (' + exo.ext + ')' : 'External file'));
+                    const core = exo ? externalLabelCore(exo) : '';
+                    aParts.push((core ? core + ' · ' : '') + t('track_external'));
                 }
+                if (aParts.length) lines.push('Audio: ' + aParts.join(' · '));
                 const planTag = {
                     'directplay':     'Direct Play',
                     'directstream':   'Direct Stream · remux',

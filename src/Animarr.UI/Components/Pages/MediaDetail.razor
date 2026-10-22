@@ -1167,12 +1167,13 @@ else
                 }
 
                 // labels: every "player.*" string (keyed without the prefix)
-                // for the HUD, its menus, toasts and error panel.
+                // for the HUD, its menus, toasts and error panel; uiLang names
+                // the track languages ("Japanese" / "Японский").
                 var playerLabels = L.WithPrefix("player.");
                 playerLabels["back"] = L["media_detail.btn_back"];
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath,
-                    new { autoAudio = true, labels = playerLabels });
+                    new { autoAudio = true, labels = playerLabels, uiLang = L.CurrentLanguage });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title
