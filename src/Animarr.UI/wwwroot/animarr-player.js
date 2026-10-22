@@ -943,7 +943,31 @@
         entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
         if (!adapter) return;
         if (!choice || !plan) { adapter.setSubtitle(null); return; }
-        if (plan.kind === 'text') { adapter.setSubtitle({ url: plan.url, name: plan.name, type: 'vtt' }); return; }
+        if (plan.kind === 'text') {
+            // Fetched here first: Artplayer reads any answer as WebVTT, so a
+            // 422 (code convert_failed / image_subtitle) became an empty
+            // track with no word said. The body goes on as a blob URL (no
+            // second request; Artplayer revokes it on the next switch).
+            try {
+                const res = await fetch(plan.url, { signal: entry.abort && entry.abort.signal });
+                if (entry.subToken !== token) return;
+                if (!res.ok) {
+                    let code = '';
+                    try { const pd = await res.json(); code = (pd && pd.code) || ''; } catch {}
+                    adapter.setSubtitle(null);
+                    entry.currentSubIdx = null; entry.currentExtSubPath = null;
+                    showToast(entry.hudRoot, t(code === 'image_subtitle' ? 'sub_unsupported' : 'sub_convert_failed'), plan.name);
+                    return;
+                }
+                const blobUrl = URL.createObjectURL(await res.blob());
+                if (entry.subToken !== token) { URL.revokeObjectURL(blobUrl); return; }
+                adapter.setSubtitle({ url: blobUrl, name: plan.name, type: 'vtt' });
+            } catch (e) {
+                if (e && e.name === 'AbortError') return;
+                if (entry.subToken === token) adapter.setSubtitle({ url: plan.url, name: plan.name, type: 'vtt' });
+            }
+            return;
+        }
         adapter.setSubtitle(null);   // Artplayer's own overlay stays empty
         if (plan.kind === 'bitmap') {
             try {
@@ -3182,6 +3206,7 @@
         sub_burn_hint:      'Pick “burn in” under Subtitles to have the server draw them into the picture',
         sub_unsupported:    "These subtitles can't be shown on this device",
         sub_bitmap_failed:  "Couldn't draw these subtitles",
+        sub_convert_failed: "Couldn't read these subtitles",
         error_burn:         "Couldn't burn the subtitles in, staying on the previous stream",
         sub_styled_hint:    'This track is drawn with its own ASS styles and fonts; size and colour apply to plain text tracks.',
         track_n:            'Track {0}',
@@ -3195,6 +3220,18 @@
         unit_mbps:          'Mbps',
         info_buffer:        'Buffer: {0} s ahead, {1} s back',
         info_loudness:      'Loudness: {0} LUFS, levelled {1} dB',
+        reason_user_quality_cap:      'quality limited by your choice',
+        reason_user_bitrate_cap:      'bitrate limited by your choice',
+        reason_codec_unsupported:     "this device can't decode the video",
+        reason_dolby_vision:          'Dolby Vision adapted for this device',
+        reason_interlaced:            'deinterlaced',
+        reason_burned_subtitle:       'subtitles burned into the picture',
+        reason_container_unsupported: 'repackaged for the browser (picture untouched)',
+        reason_audio_unsupported:     'audio converted for this device',
+        reason_audio_track:           'another audio track',
+        reason_external_audio:        'external dub mixed in',
+        reason_hdr_tonemap:           'HDR tone-mapped to SDR',
+        reason_hdr_lost:              'HDR lost',
         // HUD (buttons, tooltips, menus)
         hud_play_pause:     'Play / pause',
         hud_play:           'Play',
@@ -3626,6 +3663,23 @@
             { audioTrackIndex: index, externalAudioPath: ext, audioOffsetMs: offsetMs }, 'audio');
         if (!ok && entry.mediaItemId) queueTrackPrefs(elementId, { audio: prevChoice });
         return ok;
+    }
+
+    /** A stream whose tail can't be loaded: play to the end of what is
+     *  buffered, then fire the element's 'ended' so Up Next, autoplay and the
+     *  progress report treat it as the end of the episode. */
+    function endAtBufferedTail(video) {
+        if (!video || video.__animarrTailEnd) return;
+        video.__animarrTailEnd = true;
+        const timer = setInterval(() => {
+            if (!video.isConnected) { clearInterval(timer); return; }
+            const b = video.buffered;
+            const bufferedEnd = b && b.length ? b.end(b.length - 1) : 0;
+            if (bufferedEnd - video.currentTime > 0.35) return;
+            clearInterval(timer);
+            try { video.pause(); } catch {}
+            video.dispatchEvent(new Event('ended'));
+        }, 400);
     }
 
     // How long a first open answered 409 `superseded` waits for the newer
@@ -4362,6 +4416,21 @@
                         mediaRecoveryUsed = true;
                         try { hls.recoverMediaError(); return; } catch {}
                     }
+                    // The LAST fragment failing to load is the stream's end,
+                    // not a broken stream: a stream copy of a file whose GOPs
+                    // run longer than a segment (until the server cuts copy
+                    // segments on keyframes) can announce a tail it never
+                    // serves. Play out what is buffered, then end as usual
+                    // (Up Next / autoplay) instead of stepping down a rung.
+                    const frag = data.frag;
+                    const mediaEnd = (video && Number.isFinite(video.duration) && video.duration) || 0;
+                    if (/^fragLoad/.test(data.details || '') && frag && mediaEnd > 0
+                        && frag.start + frag.duration >= mediaEnd - 1.5) {
+                        console.info('animarrPlayer: the tail segment is missing, ending there');
+                        try { hls.stopLoad(); } catch {}
+                        endAtBufferedTail(video);
+                        return;
+                    }
                     handleStreamFailure(elementId, entry,
                         data.type === T.NETWORK_ERROR ? 'network' : 'decode',
                         'hls.js: ' + (data.details || data.type));
@@ -4828,7 +4897,8 @@
                 // delivers it and why (plan 4.2 — the same on the button).
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
                 lines.push(t('info_playback') + ': ' + planName(o.plan));
-                if (o.transcoded && o.transcodeReason) lines.push(t('info_reason') + ': ' + o.transcodeReason);
+                const why = reasonText(o);
+                if (why) lines.push(t('info_reason') + ': ' + why);
             }
             // hls.js forward / back buffer (only HLS has one we size).
             const bp = entry.bufferProfile;
@@ -4840,7 +4910,7 @@
             // video is re-encoded; the tooltip names the plan and reason.
             hudCtl.setQuality(qualityBadge(entry), isVideoReencode(o),
                 t('quality') + ': ' + qualityChoiceText(entry)
-                + (o ? ' — ' + planName(o.plan) + (o.transcoded && o.transcodeReason ? ' (' + o.transcodeReason + ')' : '') : ''));
+                + (o ? ' — ' + planName(o.plan) + (reasonText(o) ? ' (' + reasonText(o) + ')' : '') : ''));
             // What this browser reported (debugging Direct Play decisions).
             lines.push(describeCaps(entry.caps));
             entry.infoLines = lines;
@@ -5139,6 +5209,21 @@
     /** The plan's video was re-encoded (not Direct Play / remux / copy). */
     function isVideoReencode(output) {
         return !!(output && /-reencode$/.test(output.plan || ''));
+    }
+    // output.transcodeReasonCodes (main reason first, then side notes) →
+    // the player.reason_* strings; the server's English transcodeReason is
+    // the fallback for a code this player doesn't know yet.
+    const REASON_CODES = ['user_quality_cap', 'user_bitrate_cap', 'codec_unsupported', 'dolby_vision', 'interlaced',
+        'burned_subtitle', 'container_unsupported', 'audio_unsupported', 'audio_track', 'external_audio',
+        'hdr_tonemap', 'hdr_lost'];
+    /** Why the stream isn't the file as is, localized; '' for Direct Play. */
+    function reasonText(output) {
+        if (!output) return '';
+        const codes = Array.isArray(output.transcodeReasonCodes) && output.transcodeReasonCodes.length
+            ? output.transcodeReasonCodes : output.transcodeReasonCode ? [output.transcodeReasonCode] : [];
+        if (codes.length && codes.every(c => REASON_CODES.includes(c)))
+            return codes.map(c => t('reason_' + c)).join(' · ');
+        return output.transcoded || codes.length ? (output.transcodeReason || '') : '';
     }
     /** Human name of output.plan. */
     function planName(plan) {
