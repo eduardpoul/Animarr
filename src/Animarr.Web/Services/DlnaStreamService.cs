@@ -43,8 +43,12 @@ public sealed partial class DlnaStreamService
     /// <summary>The ffmpeg command for one request, or why there is none.</summary>
     public sealed record Plan(IReadOnlyList<string> Args, double? DurationSec, bool VideoCopied, bool AudioCopied);
 
+    /// <param name="audioOffsetMs">Sync offset of the audio (+ = the sound
+    /// later): the audio comes from its own input (the dub, or the video file
+    /// opened a second time) shifted by <c>-itsoffset</c> — copied audio stays
+    /// copied.</param>
     public async Task<(Plan? Plan, string? Error)> BuildAsync(string videoPath, int audioIndex, string? externalAudio,
-        bool transcodeVideo, double seekSec, CancellationToken ct)
+        bool transcodeVideo, double seekSec, CancellationToken ct, int audioOffsetMs = 0)
     {
         var json = await _probeCache.GetStreamsJsonAsync(videoPath, ct);
         var video = CropDetector.MainVideo(json);
@@ -63,24 +67,33 @@ public sealed partial class DlnaStreamService
         bool copyAudio = audioCodec is not null && TsAudio.Contains(audioCodec);
         var ss = seekSec > 0 ? seekSec.ToString("0.###", CultureInfo.InvariantCulture) : null;
 
+        // An offset needs the audio on an input of its own: -itsoffset shifts
+        // every stream of the input it precedes.
+        bool shifted = audioOffsetMs != 0 && (externalAudio is not null || audioCodecs.Count > 0);
+        string? audioInput = externalAudio ?? (shifted ? videoPath : null);
         var a = new List<string> { "-hide_banner", "-loglevel", "error", "-nostdin" };
         if (ss is not null) a.AddRange(["-ss", ss]);
         a.AddRange(["-i", videoPath]);
-        if (externalAudio is not null)
+        if (audioInput is not null)
         {
             if (ss is not null) a.AddRange(["-ss", ss]);
-            a.AddRange(["-i", externalAudio]);
+            if (shifted) a.AddRange(["-itsoffset", (audioOffsetMs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture)]);
+            a.AddRange(["-i", audioInput]);
         }
         a.AddRange(["-map", $"0:{video.StreamIndex.ToString(CultureInfo.InvariantCulture)}"]);
         if (externalAudio is not null) a.AddRange(["-map", "1:a:0?"]);
-        else if (audioCodecs.Count > 0) a.AddRange(["-map", $"0:a:{audioIndex.ToString(CultureInfo.InvariantCulture)}"]);
+        else if (audioCodecs.Count > 0)
+            a.AddRange(["-map", $"{(shifted ? 1 : 0)}:a:{audioIndex.ToString(CultureInfo.InvariantCulture)}"]);
 
         if (copyVideo) a.AddRange(["-c:v", "copy"]);
         else a.AddRange(["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
                          "-vf", "scale='min(1920,iw)':-2", "-g", "48"]);
         if (copyAudio) a.AddRange(["-c:a", "copy"]);
         else a.AddRange(["-c:a", "ac3", "-b:a", "448k"]);
-        a.AddRange(["-sn", "-dn", "-f", "mpegts", "-mpegts_flags", "+resend_headers",
+        a.AddRange(["-sn", "-dn"]);
+        // A negative offset puts the first sound before 0: lift both streams.
+        if (shifted && audioOffsetMs < 0) a.AddRange(["-avoid_negative_ts", "make_zero"]);
+        a.AddRange(["-f", "mpegts", "-mpegts_flags", "+resend_headers",
                     "-muxdelay", "0", "-muxpreload", "0", "pipe:1"]);
         return (new Plan(a, video.DurationSec, copyVideo, copyAudio), null);
     }

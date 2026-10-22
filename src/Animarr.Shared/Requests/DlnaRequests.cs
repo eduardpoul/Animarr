@@ -16,6 +16,10 @@ namespace Animarr.Shared.Requests;
 /// from the profile's track defaults (/api/me/track-prefs/resolve).</param>
 /// <param name="Transcode">True: re-encode the video to H.264 for a renderer
 /// that can't decode the source (software, ≤ 1080p).</param>
+/// <param name="AudioOffsetMs">Sync offset of the chosen audio (ms, + = the
+/// sound later, ±3000); null = the track defaults' offset when the audio came
+/// from them (UsePrefs), else the DELAY an external dub's name states. Not 0
+/// means a remux.</param>
 public sealed record DlnaPlayRequest(
     string RendererUdn,
     string FilePath,
@@ -25,4 +29,5 @@ public sealed record DlnaPlayRequest(
     int? SubtitleTrack = null,
     string? SubtitlePath = null,
     bool? UsePrefs = null,
-    bool? Transcode = null);
+    bool? Transcode = null,
+    int? AudioOffsetMs = null);

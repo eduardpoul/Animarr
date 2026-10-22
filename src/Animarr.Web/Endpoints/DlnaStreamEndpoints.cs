@@ -21,6 +21,7 @@ internal static class DlnaStreamEndpoints
             string? external,
             string? transcode,
             double? seek,
+            int? offset,
             MediaPathValidator pathValidator,
             ExternalTrackService externalTracks,
             DlnaStreamService streams,
@@ -47,7 +48,8 @@ internal static class DlnaStreamEndpoints
             var start = DlnaStreamService.ParseTimeSeekStart(seekHeader) ?? Math.Max(0, seek ?? 0);
             bool reencode = transcode == "1" || string.Equals(transcode, "true", StringComparison.OrdinalIgnoreCase);
 
-            var (plan, error) = await streams.BuildAsync(fullPath!, audio ?? 0, externalFull, reencode, start, ct);
+            int offsetMs = Math.Clamp(offset ?? 0, -TrackPreferenceService.MaxAudioOffsetMs, TrackPreferenceService.MaxAudioOffsetMs);
+            var (plan, error) = await streams.BuildAsync(fullPath!, audio ?? 0, externalFull, reencode, start, ct, offsetMs);
             if (plan is null) return Results.BadRequest(error);
 
             http.Response.ContentType = DlnaStreamService.ContentType;

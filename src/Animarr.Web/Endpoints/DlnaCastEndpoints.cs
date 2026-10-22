@@ -21,7 +21,8 @@ namespace Animarr.Web.Endpoints;
 /// What the renderer gets (plan 6.6): the raw file (<c>/api/file</c>) when it
 /// takes the container and the default audio is wanted; otherwise an MPEG-TS
 /// remux (<c>/api/dlna/stream</c>) with the chosen audio track / external dub
-/// (AVTransport has no track selection) or a re-encoded video. A chosen text
+/// (AVTransport has no track selection), shifted by its sync offset, or a
+/// re-encoded video. A chosen text
 /// subtitle goes along as an SRT URL in the item metadata, and the start
 /// position as a Seek once the renderer plays.
 /// </summary>
@@ -77,6 +78,9 @@ internal static class DlnaCastEndpoints
             string? subtitlePath = string.IsNullOrWhiteSpace(request.SubtitlePath) ? null : request.SubtitlePath;
             bool audioGiven = request.AudioTrackIndex is not null || externalAudio is not null;
             bool subtitleGiven = subtitleTrack is not null || subtitlePath is not null;
+            // The audio's sync offset: asked for, else the defaults' one (with
+            // the audio they picked), else a dub's DELAY (below).
+            int? audioOffsetMs = request.AudioOffsetMs;
             if (request.UsePrefs == true && (!audioGiven || !subtitleGiven)
                 && await trackPrefs.TryResolveAsync(uid, fullPath!, ct) is { } defaults)
             {
@@ -84,6 +88,7 @@ internal static class DlnaCastEndpoints
                 {
                     if (a.Kind == TrackPreferenceService.KindExternal) externalAudio = a.Path;
                     else audioIndex = a.Index ?? 0;
+                    audioOffsetMs ??= defaults.AudioOffsetMs;
                 }
                 if (!subtitleGiven && defaults.Subtitle is { } s)
                 {
@@ -101,7 +106,9 @@ internal static class DlnaCastEndpoints
                 var dub = external.FirstOrDefault(t => t.Kind == "audio" && SamePath(t.Path, externalAudio));
                 if (dub is null) return Results.BadRequest("ExternalAudio is not an external audio track of this file.");
                 externalAudio = dub.Path;
+                audioOffsetMs ??= dub.DelayMs;
             }
+            int offsetMs = Math.Clamp(audioOffsetMs ?? 0, -TrackPreferenceService.MaxAudioOffsetMs, TrackPreferenceService.MaxAudioOffsetMs);
 
             // ── Subtitles: an SRT URL — text tracks only ──────────────────────
             var baseUrl = dlna.AdvertisedHost ?? "http://localhost:8080";
@@ -133,7 +140,7 @@ internal static class DlnaCastEndpoints
             // origin already, so we know they can hit it.
             var ext  = Path.GetExtension(fullPath!).ToLowerInvariant();
             var mime = MediaMime.ForVideoExtension(ext);
-            bool remux = audioIndex > 0 || externalAudio is not null || request.Transcode == true;
+            bool remux = audioIndex > 0 || externalAudio is not null || offsetMs != 0 || request.Transcode == true;
             if (!remux && await cast.GetSinkProtocolsAsync(request.RendererUdn, ct) is { } sink
                 && !DlnaCastService.SinkAccepts(sink, mime))
                 remux = true;   // the renderer says it doesn't take this container
@@ -144,6 +151,7 @@ internal static class DlnaCastEndpoints
                 var q = $"path={Uri.EscapeDataString(fullPath!)}&audio={audioIndex}";
                 if (externalAudio is not null) q += "&external=" + Uri.EscapeDataString(externalAudio);
                 if (request.Transcode == true) q += "&transcode=1";
+                if (offsetMs != 0) q += "&offset=" + offsetMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 streamUrl = MediaTokenService.AppendToUrl($"{baseUrl}/api/dlna/stream?{q}", link);
                 mime = DlnaStreamService.ContentType;
             }

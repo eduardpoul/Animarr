@@ -55,7 +55,7 @@ public sealed class TrackPreferenceService
     public const string KindOff      = "off";
     public const string KindAuto     = "auto";
 
-    private const int MaxAudioOffsetMs    = 3_000;
+    internal const int MaxAudioOffsetMs   = 3_000;
     private const int MaxSubtitleOffsetMs = 600_000;
 
     /// <summary>What <see cref="TrackPrefsUpdateRequest.Clear"/> may name:
