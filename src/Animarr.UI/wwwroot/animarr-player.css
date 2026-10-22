@@ -529,11 +529,6 @@ html:has(.vp-backdrop) { overflow: hidden; }
     overflow-wrap: anywhere;
 }
 .vp-hud-popup--info { min-width: 220px; max-width: min(520px, calc(100% - 32px)); }
-/* The server's plan candidates, collapsed under the info rows. */
-.vp-hud-popup__details { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; }
-.vp-hud-popup__details > summary { cursor: pointer; list-style: revert; color: #bfc4cc; }
-.vp-hud-popup__details > summary:hover { color: #fff; }
-.vp-hud-popup__info--sub { font-size: 12px; font-weight: 400; color: #bfc4cc; padding-top: 3px; padding-bottom: 3px; }
 
 /* Slider variant (audio-offset). Used by the .vp-hud-popup--slider class. */
 .vp-hud-popup--slider {

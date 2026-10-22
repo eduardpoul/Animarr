@@ -72,7 +72,7 @@
                     <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Back}" FontSize="22" />
                 </Border>
                 <VerticalStackLayout x:Name="TitleBlock" HorizontalOptions="Center" VerticalOptions="Start" Margin="0,28,0,0" Spacing="2">
-                    <Label x:Name="EyebrowLabel" Text="NOW PLAYING" TextColor="#f49157"
+                    <Label x:Name="EyebrowLabel" TextColor="#f49157"
                            FontFamily="sans-serif" FontSize="10" CharacterSpacing="2"
                            HorizontalOptions="Center" />
                     <Label x:Name="TitleLabel" TextColor="White" FontFamily="sans-serif-medium" FontAttributes="Bold"

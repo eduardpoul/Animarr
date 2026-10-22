@@ -59,9 +59,8 @@ public partial class PlayerPage : ContentPage
     /// <summary>HLS segmentation of the current stream ("keyframe" / "grid").</summary>
     private string? _outputSegmentation;
     /// <summary>The current stream's codecs and main transcode reason (start
-    /// answer's output), and the server's plan list — for ⓘ and failure reports.</summary>
+    /// answer's output) — for ⓘ and failure reports.</summary>
     private string? _outputVideoCodec, _outputAudioCodec, _outputReason;
-    private List<PlanCandidateDto>? _candidates;
 
     // Playback timeline. All three tiers expose ExoPlayer positions on the file's
     // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
@@ -117,9 +116,7 @@ public partial class PlayerPage : ContentPage
         _title = title ?? "";
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
-        EyebrowLabel.Text = episode is not null
-            ? $"NOW PLAYING · S{season ?? 1} · EP {episode}"
-            : "NOW PLAYING";
+        EyebrowLabel.Text = Eyebrow(season, episode);
 
         BackFocus.Command      = new Command(Leave);
         SeekBackFocus.Command  = new Command(() => SeekBy(-10_000));
@@ -776,7 +773,6 @@ public partial class PlayerPage : ContentPage
         _outputVideoCodec = b.Output?.VideoCodec;
         _outputAudioCodec = b.Output?.AudioCodec;
         _outputReason = b.Output?.TranscodeReasonCode;
-        _candidates = b.Candidates;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         UpdateQualityBadge();
@@ -1909,9 +1905,7 @@ public partial class PlayerPage : ContentPage
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
         ResetUpNext();
-        EyebrowLabel.Text = _episode is not null
-            ? $"NOW PLAYING · S{_season ?? 1} · EP {_episode}"
-            : "NOW PLAYING";
+        EyebrowLabel.Text = Eyebrow(_season, _episode);
         FlashInfo(_episode is not null ? $"Серия {_episode}" : "Воспроизведение");
         _ = ResolveAdjacentAsync();
         // ⏭ / ⏮ / Up Next continue an episode where it was left (it always
@@ -2349,8 +2343,21 @@ public partial class PlayerPage : ContentPage
         _recoveringSinceUtc = null;
     }
 
+    /// <summary>The line over the title, as the web player's kicker:
+    /// "СЕЙЧАС ИГРАЕТ · S1 · ЭП. 5" (just the first part for a movie).</summary>
+    private static string Eyebrow(int? season, int? episode)
+    {
+        var bits = new List<string> { TvL.T("media_detail.now_playing", "Сейчас играет", "Now playing") };
+        if (episode is not null)
+        {
+            bits.Add($"S{season ?? 1}");
+            bits.Add(TvL.F("common.episode_short_fmt", "Эп. {0}", "Ep {0}", episode));
+        }
+        return string.Join(" · ", bits).ToUpperInvariant();
+    }
+
     /// <summary>"directplay ✗ container_unsupported · ts-copy ✓ · sw-reencode" —
-    /// the start's candidates[] for the log and ⓘ.</summary>
+    /// the start's candidates[] for the log.</summary>
     private static string DescribeCandidates(IEnumerable<PlanCandidateDto> cands) =>
         string.Join(" · ", cands.Select(c => c.Status switch
         {
@@ -2929,8 +2936,6 @@ public partial class PlayerPage : ContentPage
         if (Math.Abs(_speed - 1f) > 0.01f) parts.Add(SpeedText(_speed));
         if (_outputReason is { Length: > 0 } why) parts.Add($"причина: {why}");
         var text = string.Join(" · ", parts.Where(p => p.Length > 0));
-        // The server's plan list: what it tried and why it skipped the rest.
-        if (_candidates is { Count: > 0 } cands) text += "\n" + DescribeCandidates(cands);
         FlashInfo(text, seconds: 6);
     }
 
