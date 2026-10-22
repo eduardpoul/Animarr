@@ -3326,6 +3326,8 @@
         info_audio:         'Audio',
         info_playback:      'Playback',
         info_renditions:    'audio switches live',
+        info_seg_keyframe:  'key-frame segments',
+        info_seg_grid:      'fixed 4 s segments',
         info_reason:        'Reason',
         info_caps:          'Client caps',
         info_caps_none:     '(not detected)',
@@ -3575,6 +3577,12 @@
             q += '&nativeCaps=' + encodeURIComponent(tokens.join(','))
                + '&maxAudioChannels=' + (caps ? caps.channels : 2);
         }
+        // remux=hls: a needed remux (a container this browser can't open, a
+        // non-default audio track) comes as the key-frame-exact HLS copy, not
+        // the progressive /api/video Direct Stream — a seek is a segment
+        // fetch instead of a reload at ?seek=N. Only where hls.js plays the
+        // HLS; Safari's native HLS keeps Direct Stream.
+        if (hlsJsPlays()) q += '&remux=hls';
         return q;
     }
 
@@ -5107,7 +5115,11 @@
                 // delivers it and why (plan 4.2 — the same on the button).
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
                 lines.push(t('info_playback') + ': ' + planName(o.plan)
-                    + (entry.renditions ? ' · ' + t('info_renditions') : ''));
+                    // A copy's segments: cut on the file's key frames (seeks
+                    // land exactly) or the old fixed grid.
+                    + (o.segmentation === 'keyframe' ? ' · ' + t('info_seg_keyframe')
+                       : o.segmentation === 'grid' ? ' · ' + t('info_seg_grid') : '')
+                    + (entry.renditions && entry.renditions.length > 1 ? ' · ' + t('info_renditions') : ''));
                 const why = reasonText(o);
                 if (why) lines.push(t('info_reason') + ': ' + why);
             }

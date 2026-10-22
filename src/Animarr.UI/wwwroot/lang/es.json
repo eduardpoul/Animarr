@@ -652,6 +652,8 @@
   "player.info_audio": "Audio",
   "player.info_playback": "Reproducción",
   "player.info_renditions": "el audio cambia al instante",
+  "player.info_seg_keyframe": "segmentos en fotogramas clave",
+  "player.info_seg_grid": "segmentos fijos de 4 s",
   "player.info_reason": "Motivo",
   "player.info_caps": "Capacidades del cliente",
   "player.info_caps_none": "(no detectadas)",

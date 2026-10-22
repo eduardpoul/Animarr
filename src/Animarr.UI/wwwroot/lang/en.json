@@ -653,6 +653,8 @@
   "player.info_audio": "Audio",
   "player.info_playback": "Playback",
   "player.info_renditions": "audio switches live",
+  "player.info_seg_keyframe": "key-frame segments",
+  "player.info_seg_grid": "fixed 4 s segments",
   "player.info_reason": "Reason",
   "player.info_caps": "Client caps",
   "player.info_caps_none": "(not detected)",

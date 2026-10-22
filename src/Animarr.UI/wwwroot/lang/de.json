@@ -652,6 +652,8 @@
   "player.info_audio": "Ton",
   "player.info_playback": "Wiedergabe",
   "player.info_renditions": "Ton wechselt ohne Neustart",
+  "player.info_seg_keyframe": "Segmente an Keyframes",
+  "player.info_seg_grid": "feste 4-s-Segmente",
   "player.info_reason": "Grund",
   "player.info_caps": "Client-Fähigkeiten",
   "player.info_caps_none": "(nicht ermittelt)",

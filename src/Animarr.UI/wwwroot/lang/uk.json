@@ -652,6 +652,8 @@
   "player.info_audio": "Звук",
   "player.info_playback": "Відтворення",
   "player.info_renditions": "звук перемикається на льоту",
+  "player.info_seg_keyframe": "сегменти за ключовими кадрами",
+  "player.info_seg_grid": "сегменти по 4 с",
   "player.info_reason": "Причина",
   "player.info_caps": "Можливості клієнта",
   "player.info_caps_none": "(не визначено)",
