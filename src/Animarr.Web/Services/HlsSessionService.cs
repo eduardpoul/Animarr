@@ -84,6 +84,8 @@ public sealed partial class HlsSessionService : IDisposable
     private readonly HardwareInfoService? _hardware;
     private readonly string _toneMapMode;
     private readonly MediaProbeCache _probeCache;
+    private readonly MediaCachePaths? _cachePaths;
+    private readonly SubtitleFontService? _fonts;
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, HlsSession> _sessions = new();
     private readonly Timer _gcTimer;
@@ -96,9 +98,14 @@ public sealed partial class HlsSessionService : IDisposable
 
     public HlsSessionService(ILogger<HlsSessionService> logger, HardwareInfoService? hardware = null,
         MediaProbeCache? probeCache = null,
-        Microsoft.Extensions.Options.IOptions<Configuration.AppSettings>? appOptions = null)
+        Microsoft.Extensions.Options.IOptions<Configuration.AppSettings>? appOptions = null,
+        // Subtitle burn-in (burnSubtitle): the subtitle cache's root and the
+        // attached-fonts extractor. Without them a burn request is refused.
+        MediaCachePaths? cachePaths = null, SubtitleFontService? fonts = null)
     {
         _logger  = logger;
+        _cachePaths = cachePaths;
+        _fonts = fonts;
         _hardware = hardware;
         _toneMapMode = (appOptions?.Value.HdrToneMapping ?? "auto").Trim().ToLowerInvariant();
         _probeCache = probeCache
@@ -210,6 +217,11 @@ public sealed partial class HlsSessionService : IDisposable
         public const string InvalidMaxHeight = "invalid_max_height";
         /// <summary>maxBitrate negative (400).</summary>
         public const string InvalidMaxBitrate = "invalid_max_bitrate";
+        /// <summary>burnSubtitle negative or past the last subtitle track (400).</summary>
+        public const string InvalidSubtitleTrack = "invalid_subtitle_track";
+        /// <summary>The text subtitle to burn in couldn't be converted (422;
+        /// the detail says why).</summary>
+        public const string SubtitleUnavailable = "subtitle_unavailable";
 
         public string Code { get; } = code;
         public int StatusCode { get; } = statusCode;
@@ -299,6 +311,8 @@ public sealed partial class HlsSessionService : IDisposable
         public const string HdrTonemap = "hdr_tonemap";
         /// <summary>HDR was re-encoded to SDR without a tone mapper (washed-out colours).</summary>
         public const string HdrLost = "hdr_lost";
+        /// <summary>A subtitle track is drawn into the picture (burnSubtitle) — needs a re-encode.</summary>
+        public const string BurnedSubtitle = "burned_subtitle";
     }
 
     /// <summary>
@@ -550,6 +564,7 @@ public sealed partial class HlsSessionService : IDisposable
             ReasonCodes.UserBitrateCap => $"bitrate limited to {capMbps} Mbps",
             ReasonCodes.Interlaced     => "deinterlaced for the browser",
             ReasonCodes.DolbyVision    => "Dolby Vision profile 5 needs a DV decoder",
+            ReasonCodes.BurnedSubtitle => "subtitles burned in",
             _                          => $"the client can't decode {DescribeVideo(probe)}",
         };
         string? reason = isDirectPlay ? null : isDirectStream
@@ -733,7 +748,10 @@ public sealed partial class HlsSessionService : IDisposable
         // Whose session this is (account + client device, see SessionOwner).
         // Dedup and cap eviction only ever replace the caller's own sessions
         // or idle ones — never another client's live playback.
-        SessionOwner? owner = null)
+        SessionOwner? owner = null,
+        // Embedded subtitle track N (0:s:N) to draw into the picture, -1 = none.
+        // Forces a video re-encode (PrepareBurnAsync / ChoosePlan).
+        int burnSubtitle = -1)
     {
         var who = owner ?? SessionOwner.Unknown;
         var caps = client ?? ClientCaps.Legacy;
@@ -767,6 +785,11 @@ public sealed partial class HlsSessionService : IDisposable
         // MAPS (source track N, or the external dub's) instead of track 0, so
         // TS passthrough, CODECS, the Info block and the restart agree with it.
         probe = probe?.ForAudioTrack(audioTrackIndex, externalProbe, hasExternalAudio);
+        // Burn-in: checked and prepared (ASS conversion, fonts) before anything
+        // is torn down, so a bad track number is a plain 400.
+        var burn = burnSubtitle >= 0 || burnSubtitle < -1
+            ? await PrepareBurnAsync(fullPath, probe, burnSubtitle, ct)
+            : null;
         // A bitrate cap at/above the source's own bitrate can't shrink anything
         // — it must not turn a copy into a transcode (EffectiveBitrateCap).
         maxBitrate = EffectiveBitrateCap(maxBitrate, probe);
@@ -855,7 +878,8 @@ public sealed partial class HlsSessionService : IDisposable
         // source height. 0 = native resolution (no scaling).
         var targetHeight = (maxHeight > 0 && (probe?.Height ?? 0) > 0 && maxHeight < probe!.Height)
             ? maxHeight : 0;
-        var plan = probe is not null ? ChoosePlan(probe, caps, maxHeight, maxBitrate) : HlsPlan.Fmp4StreamCopy;
+        var plan = probe is not null ? ChoosePlan(probe, caps, maxHeight, maxBitrate, burning: burn is not null)
+            : HlsPlan.Fmp4StreamCopy;
         // Dolby Vision on the fMP4 copy: dvh1 for a DV client, hvc1 base layer
         // for P8, RPU strip for P7 (ChoosePlan never copies P5 for a non-DV
         // client). Irrelevant to re-encodes — they decode the base layer.
@@ -863,12 +887,12 @@ public sealed partial class HlsSessionService : IDisposable
             ? DolbyVision.For(probe.Dovi, caps) : DoviHandling.None;
         // What a re-encode writes: H.264 8-bit, or HEVC Main10 where the client
         // and this plan's encoder can (ChooseVideoTarget).
-        var target = ChooseVideoTarget(plan, probe, caps);
+        var target = ChooseVideoTarget(plan, probe, caps, burning: burn is not null);
         // Why (output.transcodeReasonCode): the plan's reason, or for a copy the
         // dub that forced the HLS mux instead of a native path.
         var reasonCode = probe is null ? null
             : plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy && hasExternalAudio ? ReasonCodes.ExternalAudio
-            : PlanReason(plan, probe, caps, maxHeight, maxBitrate);
+            : PlanReason(plan, probe, caps, maxHeight, maxBitrate, burning: burn is not null);
         // The audio half (AudioPolicy): copy the mapped track when the client
         // decodes it and the plan's container (TS / fMP4) carries it, else
         // transcode — 5.1 for a 5.1-capable client, else a stereo downmix. An
@@ -1047,7 +1071,7 @@ public sealed partial class HlsSessionService : IDisposable
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
             externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio,
-            dovi: dovi, target: target);
+            dovi: dovi, target: target, burn: burn);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -1070,6 +1094,7 @@ public sealed partial class HlsSessionService : IDisposable
             Audio = audio,
             Dovi = dovi,
             Target = target,
+            Burn = burn,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1194,7 +1219,8 @@ public sealed partial class HlsSessionService : IDisposable
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
                 audio: audio, dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
-                extraReasons: hasExternalAudio ? [ReasonCodes.ExternalAudio] : null)
+                extraReasons: [.. hasExternalAudio ? new[] { ReasonCodes.ExternalAudio } : [],
+                               .. burn is not null ? new[] { ReasonCodes.BurnedSubtitle } : []])
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -1308,6 +1334,44 @@ public sealed partial class HlsSessionService : IDisposable
             : keyframeSec + past;
     }
 
+    /// <summary>
+    /// Checks and prepares a subtitle burn-in of embedded track
+    /// <paramref name="index"/> (0:s:N). Bitmap tracks need nothing up front
+    /// (the overlay reads the source's own stream); a text / ASS track is
+    /// converted to ASS through SubtitleCache (cached — usually the player's
+    /// own /api/subtitle?format=ass fetch made it already) and gets the file's
+    /// attached fonts as libass's fontsdir.
+    /// </summary>
+    private async Task<SubtitleBurn> PrepareBurnAsync(string fullPath, ProbeInfo? probe, int index, CancellationToken ct)
+    {
+        var count = probe?.SubtitleCodecs.Count ?? 0;
+        if (index < 0 || index >= count)
+            throw new StartFailedException(StartFailedException.InvalidSubtitleTrack, StatusCodes.Status400BadRequest,
+                $"burnSubtitle {index} is out of range: the source has {count} subtitle track{(count == 1 ? "" : "s")}.");
+        var codec = probe!.SubtitleCodecs[index];
+        if (Animarr.Web.Services.SubtitleCodecs.IsImage(codec)) return new SubtitleBurn(index, Image: true, null, null);
+        if (_cachePaths is null)
+            throw new StartFailedException(StartFailedException.SubtitleUnavailable,
+                StatusCodes.Status422UnprocessableEntity, "Subtitle burn-in isn't available on this server.");
+
+        var root = _cachePaths.CacheRoot;
+        var ass = SubtitleCache.TryGetCached(fullPath, index, "ass", root);
+        if (ass is null)
+        {
+            var r = await SubtitleCache.GetOrExtractAsync(fullPath, index, "ass", root, ct);
+            if (r.Path is null)
+                throw new StartFailedException(StartFailedException.SubtitleUnavailable,
+                    StatusCodes.Status422UnprocessableEntity,
+                    $"Subtitle track {index} can't be burned in ({r.FailureCode ?? SubtitleCache.ConvertFailed}).");
+            ass = r.Path;
+        }
+        string? fontsDir = null;
+        try { if (_fonts is not null) fontsDir = await _fonts.FontDirectoryAsync(fullPath, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) { _logger.LogDebug(ex, "HLS burn-in: no attached fonts for {Path}", fullPath); }
+        return new SubtitleBurn(index, Image: false, ass, fontsDir);
+    }
+
     private static int ParseSegmentNumber(string fileName)
     {
         // seg-NNNNN.{m4s|ts} → NNNNN. Returns -1 for non-segment files
@@ -1405,7 +1469,8 @@ public sealed partial class HlsSessionService : IDisposable
                 toneMapper: session.ToneMapper,
                 audio: session.Audio,
                 dovi: session.Dovi,
-                target: session.Target);
+                target: session.Target,
+                burn: session.Burn);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;

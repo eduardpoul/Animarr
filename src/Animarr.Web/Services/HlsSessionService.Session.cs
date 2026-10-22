@@ -37,6 +37,9 @@ public sealed partial class HlsSessionService
         public DoviHandling Dovi { get; init; }
         /// <summary>The re-encode's output format (H.264 / HEVC Main10).</summary>
         public VideoTarget Target { get; init; }
+        /// <summary>Subtitle burned into the picture (null = none) — the restart
+        /// draws it too.</summary>
+        public SubtitleBurn? Burn { get; init; }
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS

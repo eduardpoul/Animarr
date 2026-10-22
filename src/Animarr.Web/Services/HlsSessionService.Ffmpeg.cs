@@ -43,7 +43,9 @@ public sealed partial class HlsSessionService
         // Dolby Vision treatment of the fMP4 copy (DolbyVision.For).
         DoviHandling dovi = DoviHandling.None,
         // What the GPU re-encodes write (ChooseVideoTarget).
-        VideoTarget target = VideoTarget.H264)
+        VideoTarget target = VideoTarget.H264,
+        // Subtitle drawn into the picture (null = none).
+        SubtitleBurn? burn = null)
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
@@ -52,8 +54,11 @@ public sealed partial class HlsSessionService
         // re-encoders as a non-hw-decodable input so it takes their software-
         // decode + upload path (as legacy codecs do) instead of failing in
         // -hwaccel init.
-        var hwDecodeCodec = probe?.Is10Bit == true
-            && string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase)
+        // A burn-in decodes in software too: libass / overlay draw on
+        // system-memory frames, and burning at the source size before any
+        // scaling keeps bitmap subtitles where their canvas puts them.
+        var hwDecodeCodec = burn is not null || (probe?.Is10Bit == true
+            && string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase))
             ? null : videoCodec;
         // The exact stream the probe picked as the video (never a cover
         // picture in front of it); "0:V:0?" when there was no probe.
@@ -82,12 +87,12 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target, deint, burn);
                 if (target == VideoTarget.Hevc10Hdr) args.AddRange(HdrOutputTags(probe));
                 break;
             case HlsPlan.Fmp4StreamCopy:
@@ -96,7 +101,7 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint);
+                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs, deint, burn);
                 break;
         }
 
@@ -207,6 +212,70 @@ public sealed partial class HlsSessionService
         public const string Cpu   = "bwdif=mode=send_frame:parity=auto:deint=interlaced";
         public const string Cuda  = "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced";
         public const string Vaapi = "deinterlace_vaapi=rate=frame:auto=1";
+    }
+
+    /// <summary>
+    /// The video mapping + filters of a re-encode: deinterlace first (on the
+    /// woven fields nothing else should touch), then the burned-in subtitle
+    /// (at the source size, before scaling / tone mapping), then the plan's
+    /// own chain <paramref name="vf"/>. A text / ASS burn is one more -vf step
+    /// (libass via the ass filter); a bitmap burn overlays the source's
+    /// 0:s:N stream (ffmpeg turns it into a video stream — sub2video), which
+    /// needs a -filter_complex graph and an output label instead of -vf.
+    /// </summary>
+    private static string[] VideoGraph(string videoMap, string? deinterlacer, SubtitleBurn? burn, string vf,
+        double seekSec = 0)
+    {
+        if (burn is { Image: true })
+        {
+            var input = "[" + videoMap.TrimEnd('?') + "]";
+            var pre = deinterlacer is null ? input : $"{input}{deinterlacer}[deint];[deint]";
+            // A seeked run reads the subtitles from their own input (#2,
+            // AddBurnInput); from the top they come with the video (#0).
+            var subs = (seekSec > 0 ? "2" : "0") + ":s:" + burn.Index.ToString(CultureInfo.InvariantCulture);
+            var graph = $"{pre}[{subs}]overlay=eof_action=pass,{vf}[vout]";
+            return ["-filter_complex", graph, "-map", "[vout]"];
+        }
+        var chain = new List<string>();
+        if (deinterlacer is not null) chain.Add(deinterlacer);
+        if (burn is { AssPath: { } ass })
+            chain.Add("ass=filename=" + FilterPath(ass) + (burn.FontsDir is { } fd ? ":fontsdir=" + FilterPath(fd) : ""));
+        chain.Add(vf);
+        return ["-map", videoMap, "-vf", string.Join(',', chain)];
+    }
+
+    /// <summary>How far before a seeked run's start a bitmap burn-in reads
+    /// its subtitle stream (see AddBurnInput).</summary>
+    private const double BurnSubtitleLookbackSec = 30;
+
+    /// <summary>
+    /// A bitmap burn-in on a seeked run gets the subtitles from a third input
+    /// that starts <see cref="BurnSubtitleLookbackSec"/> earlier: the input
+    /// seek skips every subtitle event that began before the seek point, so a
+    /// resume or scrub into a line already on screen showed nothing until the
+    /// next one (measured: a PGS event 7–11 s, seek to 9 s → no subtitle).
+    /// With -copyts both inputs keep source time and overlay matches them up.
+    /// A text burn needs none — libass reads the whole .ass itself.
+    /// </summary>
+    private static void AddBurnInput(List<string> args, string fullPath, double seekSec, SubtitleBurn? burn)
+    {
+        if (burn is not { Image: true } || seekSec <= 0) return;
+        var from = Math.Max(0, seekSec - BurnSubtitleLookbackSec);
+        if (from > 0) args.AddRange(["-ss", from.ToString("F3", CultureInfo.InvariantCulture)]);
+        args.AddRange(["-i", fullPath]);
+    }
+
+    /// <summary>
+    /// A file path as a filter option value inside a filter graph. Two parsers
+    /// read it: the graph level (quotes protect , ; [ ]) and the filter's own
+    /// option level (backslash escapes ':' — a drive letter — and quotes).
+    /// Forward slashes only (Windows ffmpeg takes them), escaped for the option
+    /// level, then single-quoted for the graph level.
+    /// </summary>
+    private static string FilterPath(string path)
+    {
+        var opt = path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");
+        return "'" + opt.Replace("'", "'\\''") + "'";
     }
 
     /// <summary>The historical audio leg: AAC stereo 192k.</summary>
@@ -400,7 +469,7 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264, bool deinterlace = false)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -466,6 +535,7 @@ public sealed partial class HlsSessionService
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
         args.Add(externalAudioPath ?? fullPath);
+        AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
         {
@@ -508,12 +578,11 @@ public sealed partial class HlsSessionService
         };
         // Deinterlace first, where the frames are: on the VAAPI surfaces for
         // GPU-decoded input, with the CPU bwdif before the upload otherwise.
-        if (deinterlace) vf = (hwDecode ? Deinterlacer.Vaapi : Deinterlacer.Cpu) + "," + vf;
+        args.AddRange(VideoGraph(videoMap,
+            deinterlace ? (hwDecode ? Deinterlacer.Vaapi : Deinterlacer.Cpu) : null, burn, vf, seekSec));
         args.AddRange(new[]
         {
-            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
             "-c:v", main10 ? "hevc_vaapi" : "h264_vaapi",
             "-profile:v", main10 ? "main10" : "main",
             "-bf",     "0",
@@ -537,7 +606,7 @@ public sealed partial class HlsSessionService
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
         HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
-        VideoTarget target = VideoTarget.H264, bool deinterlace = false)
+        VideoTarget target = VideoTarget.H264, bool deinterlace = false, SubtitleBurn? burn = null)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -571,6 +640,7 @@ public sealed partial class HlsSessionService
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
         args.Add(externalAudioPath ?? fullPath);
+        AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
         {
@@ -601,12 +671,11 @@ public sealed partial class HlsSessionService
             (false, _)                        => (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + HdrToneMap.TonemapxFilter,
         };
         // Deinterlace first: bwdif_cuda on NVDEC frames, the CPU bwdif otherwise.
-        if (deinterlace) vf = (hwDecode ? Deinterlacer.Cuda : Deinterlacer.Cpu) + "," + vf;
+        args.AddRange(VideoGraph(videoMap,
+            deinterlace ? (hwDecode ? Deinterlacer.Cuda : Deinterlacer.Cpu) : null, burn, vf, seekSec));
         args.AddRange(new[]
         {
-            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
             "-c:v", main10 ? "hevc_nvenc" : "h264_nvenc",
             "-preset", "p4",          // p1=fastest, p7=highest quality; p4 is balanced
             "-tune", "hq",
@@ -640,7 +709,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, HdrToneMapper toneMapper = HdrToneMapper.None,
-        string videoMap = "0:V:0?", string[]? audioArgs = null, bool deinterlace = false)
+        string videoMap = "0:V:0?", string[]? audioArgs = null, bool deinterlace = false, SubtitleBurn? burn = null)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -661,6 +730,7 @@ public sealed partial class HlsSessionService
         args.Add(audioOffsetSec.ToString("F3", CultureInfo.InvariantCulture));
         args.Add("-i");
         args.Add(externalAudioPath ?? fullPath);
+        AddBurnInput(args, fullPath, seekSec, burn);
 
         if (startNumber > 0)
         {
@@ -669,12 +739,10 @@ public sealed partial class HlsSessionService
         var vf = targetHeight > 0 ? $"scale=-2:{targetHeight}" : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
         // HDR: CPU tone mapping after the (cheaper, smaller) downscale.
         if (toneMapper != HdrToneMapper.None) vf += "," + HdrToneMap.TonemapxFilter;
-        if (deinterlace) vf = Deinterlacer.Cpu + "," + vf;
+        args.AddRange(VideoGraph(videoMap, deinterlace ? Deinterlacer.Cpu : null, burn, vf, seekSec));
         args.AddRange(new[]
         {
-            "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
-            "-vf", vf,
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-profile:v", "main",

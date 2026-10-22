@@ -81,6 +81,10 @@ internal static class HlsEndpoints
             // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
+            // Embedded subtitle track N (0:s:N) to burn into the picture — an
+            // explicit variant (iPhone fullscreen, a renderer without subtitle
+            // support): always a video re-encode, never a native path.
+            int? burnSubtitle,
             // "1" = start with the profile's track defaults (task 2.2: title
             // memory → profile settings → flags) when the client passes no
             // explicit audioTrackIndex / externalAudio. Absent = as before; the
@@ -162,7 +166,7 @@ internal static class HlsEndpoints
             // the requested track (ChoosePlaybackAsync puts it in the URL).
             // RequestAborted: an abandoned start (rapid Next/Prev) stops waiting on
             // the probe and falls into the OperationCanceledException catch below.
-            var decision = externalAudioFull is null
+            var decision = externalAudioFull is null && burnSubtitle is null
                 ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
                     maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
@@ -172,7 +176,7 @@ internal static class HlsEndpoints
             if (localAudioIndex > 0 && !(decision.DirectPlay && decision.DirectUrl is not null))
             {
                 audioTrackIndex = localAudioIndex;
-                decision = externalAudioFull is null
+                decision = externalAudioFull is null && burnSubtitle is null
                     ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
                         maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: localAudioIndex)
                     : new HlsSessionService.PlaybackDecision(false, null, 0, null);
@@ -252,7 +256,8 @@ internal static class HlsEndpoints
                 // stops its ffmpeg instead of encoding on for the 5-min idle GC.
                 ct:               http.RequestAborted,
                 // Replaces only this client's earlier session on the same file.
-                owner:            await SessionOwnerAsync(http, deviceTrust));
+                owner:            await SessionOwnerAsync(http, deviceTrust),
+                burnSubtitle:     burnSubtitle ?? -1);
             return Results.Ok(new
             {
                 token        = result.Token,

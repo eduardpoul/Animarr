@@ -46,6 +46,10 @@ public sealed partial class HlsSessionService
         /// <see cref="HasDolbyVision"/> is false).</summary>
         public DoviInfo Dovi { get; init; } = DoviInfo.None;
 
+        /// <summary>ffprobe codec of every subtitle stream, index = ffmpeg's
+        /// <c>s:N</c> (the burn-in's track number).</summary>
+        public IReadOnlyList<string?> SubtitleCodecs { get; init; } = [];
+
         /// <summary>The video is interlaced (ffprobe field_order tt / bb / tb /
         /// bt). Browsers don't deinterlace — combing on every motion — so for
         /// them it is re-encoded, and every re-encode deinterlaces it (bwdif /
@@ -152,6 +156,15 @@ public sealed partial class HlsSessionService
         Fmp4SoftwareReencode,
     }
 
+    /// <summary>
+    /// A subtitle track drawn into the picture (<c>burnSubtitle=N</c>): a
+    /// bitmap track (PGS / VobSub / DVB) is overlaid from the source's own
+    /// <c>0:s:N</c> stream; a text / ASS track is rendered by libass from its
+    /// ASS conversion (<see cref="AssPath"/>) with the file's attached fonts
+    /// (<see cref="FontsDir"/>, null = none).
+    /// </summary>
+    private sealed record SubtitleBurn(int Index, bool Image, string? AssPath, string? FontsDir);
+
     /// <summary>What a re-encode plan writes (decided once per session, see
     /// <see cref="ChooseVideoTarget"/>).</summary>
     private enum VideoTarget
@@ -177,7 +190,7 @@ public sealed partial class HlsSessionService
     /// and the CPU plan never (x265 is far too slow for real time). Otherwise
     /// today's H.264 8-bit.
     /// </summary>
-    private VideoTarget ChooseVideoTarget(HlsPlan plan, ProbeInfo? probe, ClientCaps client)
+    private VideoTarget ChooseVideoTarget(HlsPlan plan, ProbeInfo? probe, ClientCaps client, bool burning = false)
     {
         if (probe is null || !client.Hevc10) return VideoTarget.H264;
         bool main10 = plan switch
@@ -190,7 +203,9 @@ public sealed partial class HlsSessionService
         // HDR10 / HLG — including DV P8 / P7, whose base layer is one — keeps
         // its HDR for an HDR display (`hdr` token) instead of being tone-mapped.
         // DV P5 has no such base (IPTPQc2): it is always tone-mapped.
-        if (client.Hdr && HdrTransferOf(probe) is not null) return VideoTarget.Hevc10Hdr;
+        // (Not with a burned-in subtitle: libass / overlay draw SDR white,
+        // which in a PQ picture is a 10 000-nit glare — those are tone-mapped.)
+        if (client.Hdr && !burning && HdrTransferOf(probe) is not null) return VideoTarget.Hevc10Hdr;
         bool hi10p = string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && probe.Is10Bit;
         return hi10p ? VideoTarget.Hevc10 : VideoTarget.H264;
     }
@@ -293,11 +308,13 @@ public sealed partial class HlsSessionService
     /// source for a browser, else Dolby Vision P5, else a codec the client
     /// can't decode.
     /// </summary>
-    private static string PlanReason(HlsPlan plan, ProbeInfo probe, ClientCaps client, int maxHeight, int maxBitrate)
+    private static string PlanReason(HlsPlan plan, ProbeInfo probe, ClientCaps client, int maxHeight, int maxBitrate,
+        bool burning = false)
     {
         if (plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy) return ReasonCodes.ContainerUnsupported;
         if (maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height) return ReasonCodes.UserQualityCap;
         if (maxBitrate > 0) return ReasonCodes.UserBitrateCap;
+        if (burning) return ReasonCodes.BurnedSubtitle;
         if (probe.Interlaced && !client.NativePlayer) return ReasonCodes.Interlaced;
         if (DolbyVision.For(probe.Dovi, client) == DoviHandling.Reencode) return ReasonCodes.DolbyVision;
         return ReasonCodes.CodecUnsupported;
@@ -314,7 +331,8 @@ public sealed partial class HlsSessionService
     ///     compatibility, HDR tone-mapped to SDR; otherwise stream-copy (best
     ///     effort — needs a HEVC client or cast).
     /// clientHevc = MediaSource.isTypeSupported('…hvc1…') on the client.</summary>
-    private HlsPlan ChoosePlan(ProbeInfo probe, ClientCaps client, int maxHeight = 0, int maxBitrate = 0)
+    private HlsPlan ChoosePlan(ProbeInfo probe, ClientCaps client, int maxHeight = 0, int maxBitrate = 0,
+        bool burning = false)
     {
         bool clientHevc = client.Hevc;
         // Quality-ladder downscale: the user picked a resolution below the
@@ -326,7 +344,8 @@ public sealed partial class HlsSessionService
         //            encode H.264 8-bit so the Main10-ENCODE limitation doesn't
         //            apply. HDR is tone-mapped to SDR (libplacebo / tonemapx).
         //   libx264 — CPU fallback when no GPU encoder is present.
-        if ((maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height) || maxBitrate > 0)
+        // A burned-in subtitle changes the picture: it needs a re-encode too.
+        if ((maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height) || maxBitrate > 0 || burning)
         {
             if (_hardware?.Current.Nvenc.Available == true) return HlsPlan.Fmp4NvencReencode;
             if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;

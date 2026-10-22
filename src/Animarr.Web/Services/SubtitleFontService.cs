@@ -123,6 +123,20 @@ public sealed class SubtitleFontService
 
     // ─── Extraction ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The directory the fonts attached to <paramref name="fullPath"/> are
+    /// extracted into (this file version) — for libass outside the browser,
+    /// e.g. the HLS subtitle burn-in's <c>fontsdir</c>. Extracts them first;
+    /// null when the file has no font attachments (or they couldn't be
+    /// extracted).
+    /// </summary>
+    public async Task<string?> FontDirectoryAsync(string fullPath, CancellationToken ct)
+    {
+        var fonts = await ListAsync(fullPath, ct);
+        var dir = DirFor(fullPath);
+        return fonts.Count > 0 && dir is not null && Directory.Exists(dir) ? dir : null;
+    }
+
     /// <summary>Cache directory of this file version; null when the file is gone.</summary>
     private string? DirFor(string fullPath)
     {

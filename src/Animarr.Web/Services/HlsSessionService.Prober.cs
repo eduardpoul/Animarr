@@ -42,6 +42,7 @@ public sealed partial class HlsSessionService
             string? videoTag = null;      // MP4 sample entry (hvc1 / hev1 / dvh1 / dvhe …)
             string? sar = null;           // pixel aspect ratio, container's first (ProbeInfo.SampleAspectRatio)
             bool interlaced = false;      // explicit field order (ProbeInfo.Interlaced)
+            var subtitleCodecs = new List<string?>();   // every subtitle stream, 0:s:N order
             bool is10Bit = false;
             string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
             int audioChannels = 0;
@@ -126,6 +127,10 @@ public sealed partial class HlsSessionService
                         videoEnd = StreamEndSec(s);
                         videoBitRate = ParseBitRate(s);
                     }
+                    else if (type == "subtitle")
+                    {
+                        subtitleCodecs.Add(s.TryGetProperty("codec_name", out var scn) ? scn.GetString() : null);
+                    }
                     else if (type == "audio")
                     {
                         // EVERY audio stream, in order — index N here is ffmpeg's
@@ -190,6 +195,7 @@ public sealed partial class HlsSessionService
                 VideoCodecTag    = videoTag,
                 SampleAspectRatio = sar,
                 Interlaced       = interlaced,
+                SubtitleCodecs   = subtitleCodecs,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
