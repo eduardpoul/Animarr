@@ -87,8 +87,9 @@ internal static class HlsEndpoints
             int? burnSubtitle,
             // "1" = start with the profile's track defaults (task 2.2: title
             // memory → profile settings → flags) when the client passes no
-            // explicit audioTrackIndex / externalAudio. Absent = as before; the
-            // answer reports them as trackDefaults either way.
+            // explicit audioTrackIndex / externalAudio — that audio AND its sync
+            // offset (added to the hw / sw baseline sent). Absent = as before;
+            // the answer reports them as trackDefaults either way.
             string? usePrefs,
             // "1" = the client switches EMBEDDED tracks itself on Direct Play
             // (the TV's Media3): a remembered embedded track then keeps Direct
@@ -108,9 +109,14 @@ internal static class HlsEndpoints
         // to this stream only with usePrefs=1 and no explicit audio choice.
         var trackDefaults = await trackPrefs.TryResolveAsync(userCtx.CurrentUserId, fullPath!, http.RequestAborted);
         int localAudioIndex = 0;
+        // That audio's own sync offset, added below on top of the client's
+        // hw / sw baseline (reported as trackDefaults.audioOffsetApplied).
+        int prefsOffsetMs = 0;
+        bool prefsOffset = false;
         if (Flag(usePrefs) && audioTrackIndex is null && string.IsNullOrWhiteSpace(externalAudio)
             && trackDefaults?.Audio is { } defaultAudio)
         {
+            (prefsOffsetMs, prefsOffset) = (trackDefaults.AudioOffsetMs, true);
             if (defaultAudio.Kind == TrackPreferenceService.KindExternal) externalAudio = defaultAudio.Path;
             else if (defaultAudio.Index is int ai && ai > 0)
             {
@@ -241,12 +247,13 @@ internal static class HlsEndpoints
             // On top of each envelope rides the per-audio sync offset of task 2.8
             // (± PerAudioOffsetMaxMs — a dub authored against another cut can be
             // seconds off), which the client adds to the channel value it sends.
-            var audioOffsetHwSec = audioOffsetHwMs is int hwMs
-                ? Math.Clamp(hwMs, -500 - PerAudioOffsetMaxMs, 500 + PerAudioOffsetMaxMs) / 1000.0
-                : 0.07;  // default matches DEFAULT_OFFSET_MS in calibrate.js
-            var audioOffsetSwSec = audioOffsetSwMs is int swMs
-                ? Math.Clamp(swMs, -200 - PerAudioOffsetMaxMs, 800 + PerAudioOffsetMaxMs) / 1000.0
-                : 0.0;   // SW path has no sensible default — user must dial it in
+            // With usePrefs the server adds the remembered one (prefsOffsetMs).
+            // Baselines without a value: hw 70 ms (DEFAULT_OFFSET_MS in
+            // calibrate.js), sw 0 (no sensible default — the user dials it in).
+            var audioOffsetHwSec = Math.Clamp((audioOffsetHwMs ?? 70) + prefsOffsetMs,
+                -500 - PerAudioOffsetMaxMs, 500 + PerAudioOffsetMaxMs) / 1000.0;
+            var audioOffsetSwSec = Math.Clamp((audioOffsetSwMs ?? 0) + prefsOffsetMs,
+                -200 - PerAudioOffsetMaxMs, 800 + PerAudioOffsetMaxMs) / 1000.0;
             var result = await hls.StartAsync(fullPath!, seekSec,
                 audioOffsetHwSec: audioOffsetHwSec,
                 audioOffsetSwSec: audioOffsetSwSec,
@@ -277,13 +284,15 @@ internal static class HlsEndpoints
                 // For re-encode plans this differs from /api/probe output (e.g.
                 // HEVC 10-bit DV source → H.264 8-bit SDR here).
                 output       = result.Output,
-                trackDefaults = TrackPreferenceService.MarkApplied(trackDefaults, trackDefaults?.Audio switch
+                trackDefaults = TrackPreferenceService.MarkOffsetApplied(TrackPreferenceService.MarkApplied(trackDefaults, trackDefaults?.Audio switch
                 {
                     { Kind: TrackPreferenceService.KindExternal, Path: { } dub } =>
                         externalAudioFull is not null && string.Equals(Path.GetFullPath(dub), externalAudioFull, StringComparison.OrdinalIgnoreCase),
                     { Index: int index } => externalAudioFull is null && (audioTrackIndex ?? 0) == index,
                     _ => false,
                 }),
+                    // TS copy of the file's own audio takes no offset (PCR sync).
+                    prefsOffset && (externalAudioFull is not null || result.Output?.Plan != "ts-copy")),
             });
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)

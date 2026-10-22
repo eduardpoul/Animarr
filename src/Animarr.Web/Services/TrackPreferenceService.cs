@@ -207,25 +207,37 @@ public sealed class TrackPreferenceService
         var audio    = ResolveAudio(embedded.Audio, extAudio, seasonRow, titleRow, profile);
         var subtitle = ResolveSubtitle(embedded.Subtitles, extSubs, seasonRow, titleRow, profile, audio?.Language);
 
+        // The audio's sync offset: remembered for it (0 included), else the
+        // DELAY a dub's file name states, else none.
         var offsets = ReadOffsets(titleRow?.AudioOffsetsJson);
         foreach (var (k, v) in ReadOffsets(seasonRow?.AudioOffsetsJson)) offsets[k] = v;
-        int audioOffset = audio is not null && offsets.TryGetValue(AudioKey(audio.Kind, audio.Language, audio.GroupKey), out var ms)
-            ? ms : 0;
+        int audioOffset = 0;
+        string offsetSource = "none";
+        if (audio is not null && offsets.TryGetValue(AudioKey(audio.Kind, audio.Language, audio.GroupKey), out var ms))
+            (audioOffset, offsetSource) = (Math.Clamp(ms, -MaxAudioOffsetMs, MaxAudioOffsetMs), "memory");
+        else if (audio is { Kind: KindExternal, DelayMs: int delay } && delay != 0)
+            (audioOffset, offsetSource) = (Math.Clamp(delay, -MaxAudioOffsetMs, MaxAudioOffsetMs), "delay");
 
         return new TrackDefaultsDto(
-            MediaItemId:      loc?.MediaItemId,
-            Season:           loc?.Season,
-            Audio:            audio,
-            Subtitle:         subtitle,
-            SubtitleOffsetMs: seasonRow?.SubtitleOffsetMs ?? titleRow?.SubtitleOffsetMs ?? 0,
-            AudioOffsetMs:    audioOffset,
-            Aspect:           seasonRow?.Aspect ?? titleRow?.Aspect);
+            MediaItemId:       loc?.MediaItemId,
+            Season:            loc?.Season,
+            Audio:             audio,
+            Subtitle:          subtitle,
+            SubtitleOffsetMs:  seasonRow?.SubtitleOffsetMs ?? titleRow?.SubtitleOffsetMs ?? 0,
+            AudioOffsetMs:     audioOffset,
+            Aspect:            seasonRow?.Aspect ?? titleRow?.Aspect,
+            AudioOffsetSource: offsetSource);
     }
 
     /// <summary><paramref name="defaults"/> with <see cref="TrackDefaultAudioDto.Applied"/>
     /// set — whether the stream a start returned already carries that audio.</summary>
     public static TrackDefaultsDto? MarkApplied(TrackDefaultsDto? defaults, bool applied)
         => defaults?.Audio is { } a ? defaults with { Audio = a with { Applied = applied } } : defaults;
+
+    /// <summary><paramref name="defaults"/> with <see cref="TrackDefaultsDto.AudioOffsetApplied"/>
+    /// set — whether the start added its audio offset to the stream's sync.</summary>
+    public static TrackDefaultsDto? MarkOffsetApplied(TrackDefaultsDto? defaults, bool applied)
+        => defaults is null ? null : defaults with { AudioOffsetApplied = applied };
 
     private static TrackDefaultAudioDto? ResolveAudio(List<EmbeddedTrack> emb, List<ExternalTrackDto> ext,
         TrackPreference? seasonRow, TrackPreference? titleRow, UserPreferences? profile)

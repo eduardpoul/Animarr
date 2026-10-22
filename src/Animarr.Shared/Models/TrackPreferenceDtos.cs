@@ -74,7 +74,18 @@ public sealed record TrackSubtitlePrefDto(
 /// <param name="Season">The file's season (null for a movie / unknown).</param>
 /// <param name="Audio">Null when the file has no audio at all.</param>
 /// <param name="Subtitle">Never null: kind "off" when nothing should show.</param>
-/// <param name="AudioOffsetMs">Remembered sync offset of <paramref name="Audio"/>.</param>
+/// <param name="AudioOffsetMs">Sync offset of <paramref name="Audio"/> (ms,
+/// + = the sound later, ±3000): the remembered one, else an external dub's
+/// <c>DELAY Nms</c> from its name, else 0 — see <paramref name="AudioOffsetSource"/>.</param>
+/// <param name="AudioOffsetSource">"memory" (remembered for this audio — 0
+/// included), "delay" (the dub's DELAY tag) or "none".</param>
+/// <param name="AudioOffsetApplied">On a <c>/api/hls/start</c> answer with
+/// <c>usePrefs=1</c> and no explicit audio choice: true when the server added
+/// <paramref name="AudioOffsetMs"/> to the stream's sync itself (on top of the
+/// hw / sw baseline the client sent) — don't add it again. False when the
+/// client chose the audio explicitly or the plan takes no offset (Direct Play,
+/// Direct Stream, TS copy of the file's own audio). Always false from
+/// <c>/resolve</c>.</param>
 public sealed record TrackDefaultsDto(
     Guid? MediaItemId,
     int? Season,
@@ -82,7 +93,9 @@ public sealed record TrackDefaultsDto(
     TrackDefaultSubtitleDto Subtitle,
     int SubtitleOffsetMs,
     int AudioOffsetMs,
-    string? Aspect);
+    string? Aspect,
+    string AudioOffsetSource = "none",
+    bool AudioOffsetApplied = false);
 
 /// <param name="Kind">"embedded" | "external".</param>
 /// <param name="Index">Embedded: a:N (what <c>audioTrackIndex</c> takes).</param>
