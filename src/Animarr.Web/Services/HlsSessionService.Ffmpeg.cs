@@ -76,6 +76,7 @@ public sealed partial class HlsSessionService
             case HlsPlan.TsStreamCopy:
                 BuildTsStreamCopyArgs(args, fullPath, seekSec, audioArgs, startNumber, audioTrackIndex,
                     externalAudioPath, audioOffsetSec, videoMap);
+                if (H264AspectFix(probe) is { } sarFix) args.AddRange(["-bsf:v", sarFix]);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
@@ -165,6 +166,30 @@ public sealed partial class HlsSessionService
     /// </summary>
     private static readonly string ForceKeyFramesExpr =
         $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})";
+
+    /// <summary>
+    /// Anamorphic H.264 whose pixel aspect lives only in the container (a
+    /// Matroska DisplayWidth of 853 over a 720×480 picture, the SPS saying 1:1
+    /// or nothing): MPEG-TS has no container field for it — the SPS VUI is the
+    /// only place hls.js and ExoPlayer read it from — so the TS copy showed a
+    /// 3:2 picture squashed from 16:9. h264_metadata rewrites the SPS with the
+    /// container's ratio while copying (no re-encode; measured: 1:1 → 32:27,
+    /// DAR 16:9). Chosen over routing these files to the fMP4 copy, which
+    /// carries the ratio in its pasp box by itself but would trade the TS
+    /// plan's PCR-based A/V sync for the fMP4 copy's B-frame offset guess.
+    /// The MP4 outputs (fMP4 copy, /api/video) and the re-encodes keep the
+    /// container ratio already. null = square / unknown — no filter.
+    /// </summary>
+    private static string? H264AspectFix(ProbeInfo? probe)
+    {
+        var parts = (probe?.SampleAspectRatio ?? "").Split(':');
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var num)
+            || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var den)
+            || num <= 0 || den <= 0 || num == den)
+            return null;
+        return $"h264_metadata=sample_aspect_ratio={num}/{den}";
+    }
 
     /// <summary>The historical audio leg: AAC stereo 192k.</summary>
     private static readonly string[] DefaultAudioArgs = ["-c:a", "aac", "-ac", "2", "-b:a", "192k"];

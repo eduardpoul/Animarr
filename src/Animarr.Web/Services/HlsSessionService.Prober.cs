@@ -40,6 +40,7 @@ public sealed partial class HlsSessionService
             bool hasDv = false;
             var dovi = DoviInfo.None;
             string? videoTag = null;      // MP4 sample entry (hvc1 / hev1 / dvh1 / dvhe …)
+            string? sar = null;           // pixel aspect ratio, container's first (ProbeInfo.SampleAspectRatio)
             bool is10Bit = false;
             string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
             int audioChannels = 0;
@@ -96,6 +97,7 @@ public sealed partial class HlsSessionService
                         dovi = DoviInfo.FromStream(s);
                         hasDv = dovi.Present;
                         videoTag = s.TryGetProperty("codec_tag_string", out var tagEl) ? tagEl.GetString() : null;
+                        sar = s.TryGetProperty("sample_aspect_ratio", out var sarEl) ? sarEl.GetString() : null;
                         // B-frame reorder delay → default audio itsoffset for the
                         // fMP4 stream-copy path. has_b_frames is the decoder's
                         // reorder depth; × frame duration = how far video
@@ -179,6 +181,7 @@ public sealed partial class HlsSessionService
                 VideoCodecsAttribute = videoCodecsAttr,
                 Dovi             = dovi,
                 VideoCodecTag    = videoTag,
+                SampleAspectRatio = sar,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

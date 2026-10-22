@@ -46,6 +46,11 @@ public sealed partial class HlsSessionService
         /// <see cref="HasDolbyVision"/> is false).</summary>
         public DoviInfo Dovi { get; init; } = DoviInfo.None;
 
+        /// <summary>Pixel aspect ratio as ffprobe reports it ("32:27"): the
+        /// CONTAINER's when it has one (Matroska DisplayWidth/Height, MP4 pasp),
+        /// else the bitstream's. null / "1:1" / "0:1" = square or unknown.</summary>
+        public string? SampleAspectRatio { get; init; }
+
         /// <summary>ffprobe codec_tag_string of the video (MP4 sample entry:
         /// hvc1 / hev1 / dvh1 / dvhe; "[0][0][0][0]" for Matroska).</summary>
         public string? VideoCodecTag { get; init; }
