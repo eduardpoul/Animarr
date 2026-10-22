@@ -181,6 +181,7 @@ builder.Services.AddSingleton<SubtitleTrackInfoService>();
 // Measured per-file facts (black-bar crop, …), stored per file version.
 builder.Services.AddSingleton<FileFactsStore>();
 builder.Services.AddSingleton<MediaFactsService>();
+builder.Services.AddSingleton<LoudnessService>();
 // DLNA renderers: MPEG-TS remux with a chosen audio track (/api/dlna/stream).
 builder.Services.AddSingleton<DlnaStreamService>();
 builder.Services.AddSingleton<HlsSessionService>();

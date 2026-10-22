@@ -517,7 +517,7 @@
 - **Скорость** 0,5–2× (веб: `playbackRate`; ТВ: `PlaybackParameters`) с сохранением.
 - **Главы:** `-show_chapters` + метки на шкале. ✅ 2026-10-22, сервер: `GET /api/chapters?path=` → `[{index, title, startSec, endSec}]` (ffprobe в `MediaProbeCache` по версии файла); метки на шкале — за клиентами.
 - **Громкость:**
-  - LUFS при сканировании + усиление на клиенте — оживит `NormalizeVolume`;
+  - LUFS при сканировании + усиление на клиенте — оживит `NormalizeVolume`; ✅ 2026-10-22, сервер: `GET /api/loudness?path=&track=N[&wait=S]` → `integratedLufs`, `loudnessRangeLu`, `truePeakDbtp`, `gainDb` (к −16 LUFS, пик ≤ −1 dBTP); `ebur128` лениво в фоне, по одному, хранится по версии файла + дорожке. Усиление на клиенте — за клиентами;
   - буст выше 100 %;
   - `DefaultVolume`;
   - реализовать `AudioPassthrough` или убрать эту настройку.

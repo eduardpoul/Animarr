@@ -73,6 +73,30 @@ internal static class PlaybackFactsEndpoints
         .WithName("GetMediaFacts")
         .RequireAuthorization(MediaAuth.Policies.Media);
 
+        // ─── /api/loudness — EBU R128 loudness of one audio track ─────────────
+        // A full decode of the track: the first request starts the measurement
+        // in the background (wait = seconds to wait for it, default 0) and
+        // answers "pending"; once done it is stored per file version + track.
+        app.MapGet("/api/loudness", async (
+            string path,
+            int? track,
+            int? wait,
+            MediaPathValidator pathValidator,
+            LoudnessService loudness,
+            CancellationToken ct) =>
+        {
+            var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path, ct);
+            if (!ok) return earlyResult!;
+            var index = track ?? 0;
+            var count = await loudness.AudioTrackCountAsync(fullPath!, ct);
+            if (index < 0 || index >= count)
+                return Results.BadRequest($"track must be 0..{Math.Max(0, count - 1)} for this file.");
+            var waitSec = Math.Clamp(wait ?? 0, 0, MaxWaitSec);
+            return Results.Ok(await loudness.GetAsync(fullPath!, index, TimeSpan.FromSeconds(waitSec), ct));
+        })
+        .WithName("GetLoudness")
+        .RequireAuthorization(MediaAuth.Policies.Media);
+
         return app;
     }
 }

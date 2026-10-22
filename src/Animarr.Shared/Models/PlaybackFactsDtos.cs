@@ -48,6 +48,19 @@ public sealed record VideoFactsDto(
 
 public sealed record CropRectDto(int X, int Y, int Width, int Height);
 
+/// <summary><c>GET /api/loudness?path=&amp;track=N[&amp;wait=S]</c>: EBU R128
+/// loudness of audio track a:N (or of an external audio file, track 0).</summary>
+/// <param name="Status">"measured", "pending" (measuring in the background —
+/// ask again later; a full decode of the track takes a while) or "unknown"
+/// (could not be measured).</param>
+/// <param name="IntegratedLufs">Integrated loudness, LUFS (e.g. -23.4).</param>
+/// <param name="LoudnessRangeLu">Loudness range, LU.</param>
+/// <param name="TruePeakDbtp">True peak, dBTP.</param>
+/// <param name="GainDb">Suggested playback gain: towards -16 LUFS, limited so
+/// the true peak stays at or below -1 dBTP (may be negative = attenuate).</param>
+public sealed record LoudnessDto(int Track, string Status, double? IntegratedLufs, double? LoudnessRangeLu,
+    double? TruePeakDbtp, double? GainDb);
+
 /// <summary><c>GET /api/subtitle/tracks?path=[&amp;analyze=1]</c>: the subtitle
 /// tracks of a video (or of a standalone subtitle file — then one track,
 /// index 0) and the fonts attached to it.</summary>
