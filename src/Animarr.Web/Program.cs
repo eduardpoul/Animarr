@@ -495,8 +495,11 @@ builder.Services.AddHostedService<MdnsPublisherService>();
 
 var app = builder.Build();
 // Build the gate now: static helpers (SubtitleCache) reach it through
-// AnalysisGate.Default, which the DI instance sets.
+// AnalysisGate.Default, which the DI instance sets. SubtitleCache's logger
+// comes from DI the same way.
 app.Services.GetRequiredService<AnalysisGate>();
+Animarr.Web.Services.SubtitleCache.Logger = app.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Animarr.Web.Services.SubtitleCache");
 
 // Apply EF Core migrations on startup. Skipped only when the DB is already up-to-date
 // — we check by looking for the latest expected migration row, since the migration lock

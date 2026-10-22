@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Animarr.Web.Services;
 
@@ -21,6 +22,9 @@ namespace Animarr.Web.Services;
 /// converted awaits that job instead of starting a second ffmpeg over the same
 /// file (a player retrying, a second tab, the TV and the web at once), and a
 /// finished file is published once — a later writer keeps the published copy.
+/// The job belongs to the server, not to the request that started it: a
+/// player that gives up and retries joins the running read instead of killing
+/// it (bounded by <see cref="ExtractTimeout"/>; progress at Debug).
 ///
 /// Text that isn't UTF-8 (a Windows-1251 SRT, say) is re-encoded to UTF-8
 /// before ffmpeg reads it — see <see cref="SubtitleCharset"/> for the detection
@@ -68,23 +72,42 @@ public static class SubtitleCache
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Result Result, DateTime Until)> Failures = new();
     private static readonly TimeSpan FailureTtl = TimeSpan.FromHours(1);
 
+    /// <summary>Longest one extraction may take — a full read of a 50 GB remux
+    /// off a slow disk is minutes; past this it is a stuck share, not a read.</summary>
+    public static readonly TimeSpan ExtractTimeout = TimeSpan.FromMinutes(20);
+
+    /// <summary>Set at startup (Program.cs); a static helper has no DI.</summary>
+    public static ILogger Logger { get; set; } = NullLogger.Instance;
+
     /// <summary>Conversions running now, per cache file: later callers await
     /// the first one's task.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<Result>>> Running =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The job for <paramref name="key"/>: the running one, else
-    /// <paramref name="work"/> started now. It leaves the map when it ends.</summary>
-    private static Task<Result> Shared(string key, Func<CancellationToken, Task<Result>> work, CancellationToken ct)
+    /// <paramref name="work"/> started now, on its own token — bounded by
+    /// <see cref="ExtractTimeout"/>, never by a request (the caller only stops
+    /// waiting, see <see cref="Join"/>). It leaves the map when it ends.</summary>
+    private static Task<Result> Shared(string key, string what, Func<CancellationToken, Task<Result>> work)
     {
         Lazy<Task<Result>>? mine = null;
         mine = new Lazy<Task<Result>>(async () =>
         {
-            try { return await work(ct); }
+            using var cts = new CancellationTokenSource(ExtractTimeout);
+            try { return await work(cts.Token); }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                Logger.LogWarning("Subtitle extraction of {What} gave up after {Minutes} min", what, ExtractTimeout.TotalMinutes);
+                return Remember(key, new Result(null, -1, "The extraction timed out.", FailureCode: ConvertFailed));
+            }
             finally { Running.TryRemove(new KeyValuePair<string, Lazy<Task<Result>>>(key, mine!)); }
         });
         return Running.GetOrAdd(key, mine).Value;
     }
+
+    /// <summary>Await a shared job; <paramref name="ct"/> (the request) ends
+    /// only this wait — the job runs on for the next caller.</summary>
+    private static Task<Result> Join(Task<Result> job, CancellationToken ct) => job.WaitAsync(ct);
 
     /// <summary>Move a finished temp file to its cache name. A copy already
     /// published there (another writer got there first) wins: it is complete
@@ -149,7 +172,8 @@ public static class SubtitleCache
             return Remember(cached, new Result(null, -1,
                 $"Bitmap subtitle ({sourceCodec}) can't be converted to text.", FailureCode: ImageSubtitle));
 
-        return await Shared(cached, t => ConvertOneAsync(sourcePath, track, outFormat, dir, cached, fi, codecLookup, t), ct);
+        return await Join(Shared(cached, $"{sourcePath} s:{track} → {outFormat}",
+            t => ConvertOneAsync(sourcePath, track, outFormat, dir, cached, fi, codecLookup, t)), ct);
     }
 
     /// <summary>The conversion behind <see cref="GetOrExtractAsync"/> — run
@@ -262,7 +286,7 @@ public static class SubtitleCache
             return Remember(cached, new Result(null, -1,
                 codec is null ? "No such subtitle track." : $"Subtitle track {track} is {codec}, not PGS.", FailureCode: NotPgs));
 
-        return await Shared(cached, async t =>
+        return await Join(Shared(cached, $"{sourcePath} s:{track} → sup", async t =>
         {
             if (File.Exists(cached)) return new Result(cached, 0, "");
             var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
@@ -280,7 +304,7 @@ public static class SubtitleCache
                 return r with { Path = cached };
             }
             finally { TryDelete(tmp); }
-        }, ct);
+        }), ct);
     }
 
     /// <summary>Where track <paramref name="track"/> of <paramref name="sourcePath"/>
@@ -487,38 +511,66 @@ public static class SubtitleCache
 
     private static async Task<Result> RunNowAsync(IEnumerable<string> args, string output, CancellationToken ct)
     {
+        var list = args.ToList();
+        int input = list.IndexOf("-i");
+        var what = $"{(input >= 0 && input + 1 < list.Count ? list[input + 1] : "?")} ({list.Count(a => a == "-y")} output(s))";
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
-            // Output goes to a file, nothing to read on stdout.
-            RedirectStandardOutput = false,
+            // Outputs go to files; stdout carries -progress (Debug log).
+            RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
-        foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (var a in new[] { "-nostats", "-progress", "pipe:1", "-stats_period", "15" }) psi.ArgumentList.Add(a);
+        foreach (var a in list) psi.ArgumentList.Add(a);
 
+        var clock = Stopwatch.StartNew();
+        Logger.LogDebug("Subtitle extraction started: {What}", what);
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg did not start");
-        // Drain stderr alongside the run — a full stderr pipe stalls ffmpeg.
+        // Drain both pipes alongside the run — a full pipe stalls ffmpeg.
         var stderr = p.StandardError.ReadToEndAsync();
+        var progress = LogProgressAsync(p.StandardOutput, what, clock);
         try
         {
             await p.WaitForExitAsync(ct);
         }
         catch
         {
-            // Client went away (or worse): stop the full-file read; the caller
-            // drops the partial output.
+            // Timed out (or worse): stop the full-file read; the caller drops
+            // the partial output.
             try { if (!p.HasExited) p.Kill(true); } catch { }
             try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
             throw;
         }
         var err = await stderr;
+        try { await progress.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+        Logger.LogDebug("Subtitle extraction finished: {What}, exit {Exit} after {Seconds:0.0} s", what, p.ExitCode,
+            clock.Elapsed.TotalSeconds);
 
         var length = File.Exists(output) ? new FileInfo(output).Length : 0;
         return p.ExitCode == 0 && length > 0
             ? new Result(output, 0, err)
             : new Result(null, p.ExitCode, err);
+    }
+
+    /// <summary>ffmpeg's <c>-progress</c> blocks → one Debug line each: how far
+    /// into the file the read is.</summary>
+    private static async Task LogProgressAsync(StreamReader stdout, string what, Stopwatch clock)
+    {
+        try
+        {
+            string? at = null;
+            while (await stdout.ReadLineAsync() is { } line)
+            {
+                if (line.StartsWith("out_time=", StringComparison.Ordinal)) at = line[9..];
+                else if (line.StartsWith("progress=continue", StringComparison.Ordinal) && at is not null)
+                    Logger.LogDebug("Subtitle extraction of {What}: at {At} after {Seconds:0} s", what, at,
+                        clock.Elapsed.TotalSeconds);
+            }
+        }
+        catch { /* diagnostics only */ }
     }
 
     /// <summary>Refresh mtime at most daily so the size-cap sweep evicts the
