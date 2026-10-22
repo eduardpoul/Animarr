@@ -462,6 +462,7 @@ public partial class PlayerPage
             new($"Формат: {AspectName(_aspect)}", false, () => Then(OpenAspectSheet)),
             new($"Скорость: {SpeedText(_speed)}", false, () => Then(OpenSpeedSheet)),
             new("Сведения о потоке", false, () => Then(ShowInfo)),
+            new("Открыть во внешнем плеере…", false, () => Then(OpenExternalSheet)),
         };
         // The web player can take back the file it handed over.
         if (Outcome is not null && _filePath == _handOffPath)
@@ -501,4 +502,109 @@ public partial class PlayerPage
                                Task.Delay(2000));
         Leave();
     }
+
+    // ── External player (Этап 7) ─────────────────────────────────────────────
+
+    private void OpenExternalSheet()
+    {
+#if ANDROID
+        var ctx = Platform.CurrentActivity ?? Platform.AppContext;
+        var players = ExternalPlayers.Installed(ctx);
+        var rows = players.Select(p => new SheetRow(p.Name, false, () => _ = OpenExternalAsync(p))).ToList();
+        rows.Add(new SheetRow(players.Count == 0 ? "Выбрать приложение… (VLC, mpv, MX Player не найдены)" : "Другое приложение…",
+                              false, () => _ = OpenExternalAsync(null)));
+        OpenListSheet("ВНЕШНИЙ ПЛЕЕР", rows, GearButton, focusIndex: 0);
+#endif
+    }
+
+#if ANDROID
+    private async Task OpenExternalAsync(ExternalPlayers.Player? player)
+    {
+        if (Platform.CurrentActivity is not { } activity || NativePlayerService.Instance?.GetState() is not { } st) return;
+        long pos = _pendingSeekMs ?? _streamBaseMs + st.PositionMs;
+        var file = _filePath;
+        SetPlaying(false);
+        UpdatePipParams(force: true);   // paused: no auto PiP when the other app opens
+        FlashInfo("Открываю во внешнем плеере…");
+        var (url, token, fromStart) = await ExternalStreamAsync(pos);
+        if (url is null || file != _filePath || _closed)
+        {
+            if (token is not null) StopHlsSession(token);
+            if (url is null) FlashInfo("Не удалось получить поток для внешнего плеера");
+            return;
+        }
+        // The chosen subtitle as a file the player adds (shifted by the server).
+        var subs = new List<(string Url, string Name)>();
+        if (_sub is { IsOff: false, Burn: false } sub && SubtitleRelUrl(sub) is { } rel)
+            subs.Add((TvMedia.Url(Abs(_subOffsetMs != 0 ? rel + $"&offsetMs={_subOffsetMs}" : rel)!), SubLabel(sub)));
+        var title = _episode is not null ? $"{_title} · S{_season ?? 1}E{_episode}" : _title;
+        bool started = ExternalPlayers.Launch(activity, player, url, title, fromStart ? 0 : pos, subs,
+                                              r => OnExternalResult(r, token, file, pos));
+        if (!started)
+        {
+            if (token is not null) StopHlsSession(token);
+            FlashInfo(player is null ? "Нет приложения, которое откроет видео" : $"{player.Name} не открылся");
+        }
+    }
+
+    /// <summary>The URL for the other app: the raw file (Direct Play, the
+    /// player demuxes and decodes it all itself and seeks in it) unless the
+    /// choice needs the server — a sidecar dub, a burned-in subtitle, a
+    /// quality cap: then an HLS session of its own (full-length playlist,
+    /// so the position stays absolute). Returns that session's token (to stop
+    /// it afterwards) and whether the stream starts at the position already.</summary>
+    private async Task<(string? Url, string? Token, bool FromStart)> ExternalStreamAsync(long posMs)
+    {
+        try
+        {
+            await TvMedia.EnsureTokenAsync();
+            bool needsServer = _audio is { External: not null } || _sub is { Burn: true } || _maxHeight > 0;
+            if (!needsServer)
+                return (TvMedia.Url(Abs($"{ApiRoutes.File}?path={Uri.EscapeDataString(_filePath)}")!), null, false);
+            var audio = _audio switch
+            {
+                { External: { } dub } => $"&externalAudio={Uri.EscapeDataString(dub)}",
+                { Embedded: > 0 } a   => $"&audioTrackIndex={a.Embedded}",
+                _                     => "",
+            };
+            var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}&seek={posMs / 1000}&maxHeight={_maxHeight}" +
+                      audio + BurnStartParam() + "&clientHevc=1&clientHevc10=1&remux=hls" +
+                      $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}";
+            using var resp = await _http.PostAsync(url, null);
+            if (!resp.IsSuccessStatusCode) { Log($"external start: HTTP {(int)resp.StatusCode}"); return (null, null, false); }
+            var b = await resp.Content.ReadFromJsonAsync<StartResponse>(Json);
+            if (b?.ManifestUrl is { } m) return (TvMedia.Url(Abs(m)!), b.Token, false);
+            if (b?.DirectPlayUrl is { } dp) return (TvMedia.Url(Abs(dp)!), null, false);
+            if (b?.DirectStreamUrl is { } ds) return (TvMedia.Url(Abs(ds + $"&seek={posMs / 1000}")!), null, true);
+        }
+        catch (Exception ex) { Log($"external start: {ex.Message}"); }
+        return (null, null, false);
+    }
+
+    /// <summary>Back from the other app: its position becomes the watch
+    /// progress, and this player waits there (paused).</summary>
+    private void OnExternalResult(ExternalResult r, string? token, string file, long startedAt)
+    {
+        if (token is not null) StopHlsSession(token);
+        if (_closed || file != _filePath) return;
+        long dur = r.DurationMs is > 0 ? r.DurationMs.Value : _knownDurationMs;
+        if (r.Completed && dur > 0)
+        {
+            RecordProgress(dur, dur);
+            FlashInfo("Досмотрено во внешнем плеере");
+            _ = StartStreamAsync(Math.Max(0, dur - 5_000), _maxHeight, playWhenReady: false);
+            return;
+        }
+        if (r.PositionMs is long reported && reported > 0)
+        {
+            long pos = dur > 0 ? Math.Min(reported, Math.Max(0, dur - 1_000)) : reported;
+            RecordProgress(pos, dur);
+            FlashInfo($"Внешний плеер: остановлено на {Fmt(pos)}");
+            _ = StartStreamAsync(pos, _maxHeight, playWhenReady: false);
+            return;
+        }
+        // The chooser / a player that reports nothing: stay where it was.
+        FlashInfo($"Внешний плеер закрыт — продолжить с {Fmt(startedAt)}");
+    }
+#endif
 }

@@ -52,6 +52,20 @@
          grant, so the app never prompts for it. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- "Открыть во внешнем плеере": package visibility (Android 11+) for the
+         players the phone player offers by name, and any app that views video
+         (the chooser). -->
+    <queries>
+        <package android:name="org.videolan.vlc" />
+        <package android:name="is.xyz.mpv" />
+        <package android:name="com.mxtech.videoplayer.ad" />
+        <package android:name="com.mxtech.videoplayer.pro" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" android:mimeType="video/*" />
+        </intent>
+    </queries>
+
     <!-- Declare Leanback support so the app shows in Android-TV launchers.
          required="false" so it still installs on phones. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

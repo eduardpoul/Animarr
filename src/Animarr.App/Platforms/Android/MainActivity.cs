@@ -661,6 +661,13 @@ public class MainActivity : MauiAppCompatActivity
         PlayerPage.OnPipModeChangedGlobal(isInPictureInPictureMode);
     }
 
+    /// <summary>An external player (VLC / mpv / MX) returned with the position it stopped at.</summary>
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        if (Services.ExternalPlayers.HandleResult(requestCode, resultCode, data)) return;
+        base.OnActivityResult(requestCode, resultCode, data);
+    }
+
     protected override void OnDestroy()
     {
         try { Services.NativePlayerService.Instance?.OnHostActivityDestroyed(); }
