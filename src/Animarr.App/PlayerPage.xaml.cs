@@ -519,6 +519,7 @@ public partial class PlayerPage : ContentPage
                                         Action? onFail = null)
     {
         int gen = ++_startGen;
+        var startFile = _filePath;
         _startCts?.Cancel();
         var cts = _startCts = new CancellationTokenSource();
         var ct = cts.Token;
@@ -551,8 +552,14 @@ public partial class PlayerPage : ContentPage
             }
             var seekSec = resumeMs / 1000;
             trackParams = AudioStartParams(maxHeight);
+            // usePrefs: with no explicit track the server starts with this
+            // profile's memory for the title (else the profile's languages /
+            // the container flags) and reports it as trackDefaults; localTracks:
+            // a remembered EMBEDDED track on Direct Play is only reported — the
+            // player selects it in Media3, the file keeps Direct Playing.
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
-                      $"&seek={seekSec}&maxHeight={maxHeight}" + Services.TvCodecCaps.HevcParams() + trackParams;
+                      $"&seek={seekSec}&maxHeight={maxHeight}" + Services.TvCodecCaps.HevcParams() + trackParams +
+                      "&usePrefs=1&localTracks=1";
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
@@ -669,6 +676,10 @@ public partial class PlayerPage : ContentPage
             return;
         }
 
+        // The title's track memory (once per file): before the subtitle
+        // default below, which it decides.
+        if (startFile == _filePath) ApplyTrackDefaults(b.TrackDefaults, directPlay);
+
         // A file's first start waits briefly for its track catalog, and any
         // start for the check of a subtitle it must side-load, so the subtitle
         // goes out with the stream instead of a second prepare right after.
@@ -690,8 +701,9 @@ public partial class PlayerPage : ContentPage
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
-        // Only a start the server was free to Direct Play tells whether it can.
-        if (maxHeight == 0 && trackParams.Length == 0 && capsSent) _directPlayable = directPlay;
+        // Only a start the server was free to Direct Play tells whether it can
+        // (track 0 named explicitly doesn't change that).
+        if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent) _directPlayable = directPlay;
         _isDirectStream = directStream;
         ClearError();
 
@@ -852,9 +864,10 @@ public partial class PlayerPage : ContentPage
                        is "srt" or "ass" or "ssa" or "vtt" or "webvtt" or "sub" or "smi" or "txt").ToList();
         Log($"catalog: {audio.Count} audio, {subs.Count} subs, {_extAudio.Count} ext audio, {_extSubs.Count} ext subs");
 
-        // A stream that started before the catalog arrived: pick its default
-        // subtitle now.
-        if (_sub is null && _kind != StreamKind.None)
+        // A stream of THIS file that started before the catalog arrived: pick
+        // its default subtitle now (not while the previous episode still
+        // plays — the new file's start answer, with its memory, decides then).
+        if (_sub is null && _kind != StreamKind.None && _streamFilePath == _filePath)
         {
             DecideSubIfNeeded();
             if (_sub is { IsOff: false }) ApplySubChoice();
@@ -919,6 +932,10 @@ public partial class PlayerPage : ContentPage
                                  && !_audioNeedsServer.Contains(a.Embedded);
             if (!canDirectPlay || _directPlayable == false) return $"&audioTrackIndex={a.Embedded}";
         }
+        // Track 0 picked here: say so — without it usePrefs would apply the
+        // title's memory, which may still name the previous pick (the PUT is
+        // debounced). 0 keeps Direct Play on the server.
+        if (_audio is { Embedded: 0, External: null } && _serverPrefs) return "&audioTrackIndex=0";
         return "";
     }
 
@@ -996,7 +1013,9 @@ public partial class PlayerPage : ContentPage
     {
         if (CurrentAudio() == sel) { FlashInfo("Уже выбрано"); return; }
         var previous = _audio;
+        var previousActual = CurrentAudio();
         Log($"audio chosen: {DescribeAudio(sel)} (tier {_kind})");
+        QueueTrackPrefs(p => p with { Audio = AudioChoice(sel) });
         if (sel.External is null && _kind == StreamKind.DirectPlay && !_audioNeedsServer.Contains(sel.Embedded)
             && NativePlayerService.Instance is { } nps
             && MapEmbeddedAudio(sel.Embedded, nps.GetAudioTracks()) is { } t)
@@ -1019,7 +1038,11 @@ public partial class PlayerPage : ContentPage
         _audio = sel;
         FlashInfo($"Аудио: {label} — перезапуск потока…");
         var st = NativePlayerService.Instance?.GetState();
-        _ = StartStreamAsync(_streamBaseMs + (st?.PositionMs ?? 0), _maxHeight, onFail: () => _audio = previous);
+        _ = StartStreamAsync(_streamBaseMs + (st?.PositionMs ?? 0), _maxHeight, onFail: () =>
+        {
+            _audio = previous;
+            QueueTrackPrefs(p => p with { Audio = AudioChoice(previousActual) });   // the pick didn't take
+        });
     }
 
     /// <summary>Direct Play prepared: put the chosen embedded track on (once
@@ -1044,6 +1067,154 @@ public partial class PlayerPage : ContentPage
         FlashInfo("Дорожку не декодирует устройство — перекодирую на сервере");
         var st = nps.GetState();
         _ = StartStreamAsync(_streamBaseMs + st.PositionMs, _maxHeight);
+    }
+
+    // ── Per-title track memory (server, per profile — plan 2.2 / 6.5) ───────
+    // Every /api/hls/start answer carries trackDefaults: what this file should
+    // start with — the title's memory, else the profile's languages / subtitle
+    // mode, else the container flags. The stream already carries that audio
+    // (except an embedded one on Direct Play, which Media3 selects here); the
+    // subtitle, aspect and subtitle offset are applied by the player. Every
+    // pick the user makes goes back as a debounced partial PUT, so the next
+    // episode (or another device) starts with it — this replaces the old
+    // carry-by-language, which stays for servers without track memory.
+
+    /// <summary>The current file's trackDefaults (null: old server / not answered yet).</summary>
+    private TrackDefaultsDto? _trackDefaults;
+    /// <summary>The file <see cref="_trackDefaults"/> belong to — applied once per file.</summary>
+    private string? _trackDefaultsFor;
+    /// <summary>The server answers trackDefaults (else the client carries choices itself).</summary>
+    private bool _serverPrefs;
+    /// <summary>Remembered subtitle delay for the title (ms, + = later).</summary>
+    private int _subOffsetMs;
+
+    private bool TitleRemembered => _trackDefaults?.MediaItemId is not null && _trackDefaultsFor == _filePath;
+
+    private void ApplyTrackDefaults(TrackDefaultsDto? td, bool directPlay)
+    {
+        if (_trackDefaultsFor == _filePath) return;
+        _trackDefaultsFor = _filePath;
+        _trackDefaults = td;
+        if (td is null) return;
+        _serverPrefs = true;
+        if (_audio is null && td.Audio is { } a)
+        {
+            // What plays: the dub / embedded track the server mapped into the
+            // stream, or — Direct Play — the one Media3 should select.
+            if (a is { Kind: "external", Applied: true, Path: { } dub }) _audio = new AudioSel(-1, dub);
+            else if (a is { Kind: "embedded", Index: int i } && (directPlay || a.Applied)) _audio = new AudioSel(i, null);
+            if (_audio is { } sel)
+                Log($"track memory: audio {DescribeAudio(sel)} ({a.Source}, {(a.Applied ? "in the stream" : "selected locally")})");
+        }
+        Log($"track memory: subtitle {td.Subtitle.Kind} {td.Subtitle.Index}{td.Subtitle.Path} {td.Subtitle.Language}/{td.Subtitle.Type} ({td.Subtitle.Source})" +
+            $", offset {td.SubtitleOffsetMs} ms, aspect {td.Aspect ?? "—"}");
+        _subOffsetMs = td.SubtitleOffsetMs;
+        if (td.Aspect is { Length: > 0 } stored && FromWebAspect(stored) is { } mode && mode != _aspect)
+        {
+            _aspect = mode;   // the title's, not written to the device default
+            _ = NativePlayerService.Instance?.SetAspectRatioAsync(mode);
+            Log($"track memory: aspect {stored} → {mode}");
+        }
+    }
+
+    /// <summary>The remembered subtitle for this file, if this tier can show
+    /// it (null: no memory answer, or a track that isn't listable here).</summary>
+    private SubSel? SubFromTrackDefaults()
+    {
+        if (_trackDefaults is not { } td || _trackDefaultsFor != _filePath) return null;
+        var s = td.Subtitle;
+        if (s.Kind == "off") return SubSel.Off;
+        if (s is { Kind: "embedded", Index: int i } && i < _probeSubs.Count && SubListable(_probeSubs[i]))
+            return new SubSel(i, null);
+        if (s is { Kind: "external", Path: { } p } && _extSubs.Any(x => x.Path == p)) return new SubSel(-1, p);
+        return null;
+    }
+
+    private TrackPrefsUpdateRequest? _prefsPatch;
+    private Guid _prefsItem;
+    private IDispatcherTimer? _prefsTimer;
+
+    private static readonly JsonSerializerOptions PrefsJson = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    /// <summary>Merge a user's pick into the pending PUT for this title (sent
+    /// 1 s after the last change, or right away on an episode switch / close).</summary>
+    private void QueueTrackPrefs(Func<TrackPrefsUpdateRequest, TrackPrefsUpdateRequest> change)
+    {
+        if (!TitleRemembered || _trackDefaults!.MediaItemId is not Guid id) return;
+        if (_prefsPatch is not null && (_prefsItem != id || _prefsPatch.Path != _filePath)) _ = FlushTrackPrefsAsync();
+        _prefsItem = id;
+        _prefsPatch = change(_prefsPatch ?? new TrackPrefsUpdateRequest(Path: _filePath));
+        _prefsTimer ??= Dispatcher.CreateTimer();
+        _prefsTimer.Stop();
+        _prefsTimer.Interval = TimeSpan.FromSeconds(1);
+        _prefsTimer.IsRepeating = false;
+        _prefsTimer.Tick -= OnPrefsTimer;
+        _prefsTimer.Tick += OnPrefsTimer;
+        _prefsTimer.Start();
+    }
+
+    private void OnPrefsTimer(object? sender, EventArgs e) => _ = FlushTrackPrefsAsync();
+
+    private async Task FlushTrackPrefsAsync()
+    {
+        _prefsTimer?.Stop();
+        if (_prefsPatch is not { } patch) return;
+        _prefsPatch = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resp = await _http.PutAsJsonAsync($"/api/me/track-prefs/{_prefsItem}", patch, PrefsJson, cts.Token);
+            Log($"track memory saved: HTTP {(int)resp.StatusCode} audio={patch.Audio?.Kind}{patch.Audio?.Index}" +
+                $" sub={patch.Subtitle?.Kind}{patch.Subtitle?.Index} offset={patch.SubtitleOffsetMs} aspect={patch.Aspect}");
+        }
+        catch (Exception ex) { Log($"track memory save failed: {ex.Message}"); }
+    }
+
+    private static TrackChoiceRequest AudioChoice(AudioSel s) =>
+        s.External is { } dub ? new TrackChoiceRequest("external", Path: dub) : new TrackChoiceRequest("embedded", s.Embedded);
+
+    private static TrackChoiceRequest SubChoice(SubSel s) =>
+        s.IsOff ? new TrackChoiceRequest("off")
+        : s.External is { } p ? new TrackChoiceRequest("external", Path: p)
+        : new TrackChoiceRequest("embedded", s.Embedded);
+
+    /// <summary>The TV's aspect values ⇄ the vocabulary the web stores in the
+    /// memory: <c>fit</c> / <c>fill</c> / <c>stretch</c> / <c>force:R</c> /
+    /// <c>crop:R</c>, plus <c>_z…</c> / <c>_p…</c> zoom and pan the TV ignores.</summary>
+    private static string ToWebAspect(string tv) => tv switch
+    {
+        "" or "default" => "fit",
+        "zoom"          => "fill",
+        "stretch"       => "stretch",
+        "crop:2.35"     => "crop:2.35:1",
+        _ when tv.StartsWith("crop:", StringComparison.Ordinal) => tv,
+        _               => "force:" + tv,
+    };
+
+    private static string? FromWebAspect(string web)
+    {
+        var mode = web.Split('_')[0];
+        return mode switch
+        {
+            "fit"     => "default",
+            "fill"    => "zoom",
+            "stretch" => "stretch",
+            _ when mode.StartsWith("force:", StringComparison.Ordinal) && IsRatio(mode[6..]) => mode[6..],
+            _ when mode.StartsWith("crop:", StringComparison.Ordinal) && IsRatio(mode[5..]) => mode,
+            _         => null,
+        };
+
+        static bool IsRatio(string r)
+        {
+            var p = r.Split(':');
+            return p.Length == 2
+                   && double.TryParse(p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var w)
+                   && double.TryParse(p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var h)
+                   && w > 0 && h > 0;
+        }
     }
 
     // ── Subtitles ───────────────────────────────────────────────────────────
@@ -1086,6 +1257,9 @@ public partial class PlayerPage : ContentPage
 
     private SubSel PickDefaultSub()
     {
+        // The server's answer for this file: memory → profile mode / language
+        // → flags (the same order as the web).
+        if (SubFromTrackDefaults() is { } remembered) return remembered;
         if (_subCarry is { } carry)
         {
             if (carry.Off || carry.Lang is null) return SubSel.Off;
@@ -1338,6 +1512,7 @@ public partial class PlayerPage : ContentPage
         _sub = sel;
         Log($"subtitle chosen: {DescribeSub(sel)}");
         FlashInfo(sel.IsOff ? "Субтитры выключены" : $"Субтитры: {SubLabel(sel)}");
+        QueueTrackPrefs(p => p with { Subtitle = SubChoice(sel) });
         ApplySubChoice(previous);
     }
 
@@ -1402,6 +1577,7 @@ public partial class PlayerPage : ContentPage
 
     private async void SwitchToEpisode(MediaFileDto f)
     {
+        bool remembered = TitleRemembered;   // of the episode being left
         // The episode being left: its last seconds count too (90 % = watched).
         if (_streamFilePath == _filePath && NativePlayerService.Instance?.GetState() is { } st)
             RecordProgress(_streamBaseMs + st.PositionMs, _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
@@ -1414,10 +1590,13 @@ public partial class PlayerPage : ContentPage
         _isDirectStream = false; _forceTranscode = false; _capFallback = false;   // per-file decisions
         _recoveringSinceUtc = null;
         _pendingSeekMs = null; _seekTimer?.Stop();   // a seek pressed on the old episode
-        // Tracks are per file: carry the subtitle choice by language (or off).
-        if (_sub is { } sub) _subCarry = (sub.IsOff, sub.IsOff ? null : TrackLabels.NormLang(SubLang(sub)));
+        // Tracks are per file. A remembered title: the server's memory (PUT on
+        // every pick) gives the next episode its tracks. Otherwise (an older
+        // server, a file outside any title) carry the choice by language.
+        _subCarry = null; _audioCarry = null;
+        if (!remembered && _sub is { } sub) _subCarry = (sub.IsOff, sub.IsOff ? null : TrackLabels.NormLang(SubLang(sub)));
         _sub = null;
-        if (_audio is { } aud)
+        if (!remembered && _audio is { } aud)
             _audioCarry = TrackLabels.NormLang(aud.External is { } dub
                 ? _extAudio.FirstOrDefault(x => x.Path == dub)?.Language
                 : aud.Embedded < _probeAudio.Count ? _probeAudio[aud.Embedded].Lang : null);
@@ -1433,7 +1612,11 @@ public partial class PlayerPage : ContentPage
         // ⏭ / ⏮ / Up Next continue an episode where it was left (it always
         // started at 0:00).
         int sw = ++_switchGen;
+        // The picks made on the episode just left must be in the memory before
+        // the next start asks for it.
+        var flush = FlushTrackPrefsAsync();
         long resume = await SavedPositionAsync(f);
+        await Task.WhenAny(flush, Task.Delay(2000));
         if (sw != _switchGen || _closed) return;
         if (resume > 0) Log($"episode switch: resume at {resume} ms");
         _ = StartStreamAsync(resume, 0, playWhenReady: true);
@@ -1893,9 +2076,15 @@ public partial class PlayerPage : ContentPage
         {
             new("Авто (вписать)",             _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
             new("Заполнить экран (обрезать)", _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
-            new("Обрезать до 21:9 / 2.35",    _aspect == "crop:2.35",     () => ApplyAspect("crop:2.35", "обрезка до 2.35")),
+            new("Обрезать до 21:9 / 2.35",    _aspect is "crop:2.35" or "crop:2.35:1", () => ApplyAspect("crop:2.35:1", "обрезка до 2.35")),
             new("Растянуть на экран",         _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
         };
+        // Another crop ratio, remembered from the web player for this title.
+        if (_aspect.StartsWith("crop:", StringComparison.Ordinal) && _aspect is not ("crop:2.35" or "crop:2.35:1"))
+        {
+            var other = _aspect;
+            rows.Insert(3, new SheetRow($"Обрезать до {other[5..]}", true, () => ApplyAspect(other, $"обрезка до {other[5..]}")));
+        }
         foreach (var r in new[] { "2.35:1", "21:9", "1.85:1", "16:9", "4:3" })
         {
             var ratio = r;
@@ -1907,7 +2096,9 @@ public partial class PlayerPage : ContentPage
     private void ApplyAspect(string value, string label)
     {
         _aspect = value;
+        // The device default for titles without a memory, and this title's.
         Preferences.Default.Set("player_aspect", value);
+        QueueTrackPrefs(p => p with { Aspect = ToWebAspect(value) });
         _ = NativePlayerService.Instance?.SetAspectRatioAsync(value);
         FlashInfo($"Формат: {label}");
     }
@@ -2231,6 +2422,7 @@ public partial class PlayerPage : ContentPage
                            _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
         _ = NativePlayerService.Instance?.DetachAsync();
         if (_hlsToken is { } tok) { _hlsToken = null; StopHlsSession(tok); }
+        _ = FlushTrackPrefsAsync();
     }
 
     private async Task KeepAliveAsync(string token)
@@ -2255,7 +2447,8 @@ public partial class PlayerPage : ContentPage
 
     private sealed record StartResponse(
         string? DirectPlayUrl, string? DirectStreamUrl, string? ManifestUrl,
-        double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output);
+        double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output,
+        TrackDefaultsDto? TrackDefaults = null);
 
     private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height);
 

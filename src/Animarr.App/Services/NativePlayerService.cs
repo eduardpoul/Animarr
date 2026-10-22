@@ -156,10 +156,11 @@ public sealed class NativePlayerService : IDisposable
     ///   <item>"stretch" — the whole screen, distorted;</item>
     ///   <item>"16:9" / "2.35:1" … — forced display aspect: the picture is
     ///         stretched to that ratio, fitted;</item>
-    ///   <item>"crop:2.35" — cut bars baked into the picture: the centre
-    ///         2.35:1 band of a taller frame is what gets fitted, so on a
-    ///         2.35 screen (or a 4:3 frame with a scope film inside) it fills
-    ///         the width. A frame already that wide is just fitted.</item>
+    ///   <item>"crop:2.35:1" (any "crop:R", the web's vocabulary) — cut bars
+    ///         baked into the picture: the frame covers an R box fitted in the
+    ///         screen, so the centre 2.35:1 band of a taller frame fills the
+    ///         width (a 4:3 frame with a scope film inside, a 2.35 screen); a
+    ///         wider frame loses its sides.</item>
     /// </list></summary>
     private void ApplySurfaceAspect(SurfaceView sv)
     {
@@ -190,13 +191,16 @@ public sealed class NativePlayerService : IDisposable
         var mode = _aspectValue ?? "default";
         if (mode.StartsWith("crop:", StringComparison.Ordinal))
         {
+            // The web's crop:R: the frame COVERS an R box fitted in the screen.
             float band = ParseAspect(mode[5..]);
-            if (videoAspect > 0f && band > videoAspect)
+            if (videoAspect > 0f && band > 0f)
             {
-                // Width u fits the band (u × u/band) in the screen; the frame
-                // (u × u/videoAspect) is taller and its bars overflow.
-                float u = Math.Min(W, H * band);
-                return ((int)Math.Round(u), (int)Math.Round(u / videoAspect));
+                float boxW = Math.Min(W, H * band), boxH = boxW / band;
+                // A frame taller than the box overflows above / below it (its
+                // baked-in bars), a wider one left / right.
+                return band > videoAspect
+                    ? ((int)Math.Round(boxW), (int)Math.Round(boxW / videoAspect))
+                    : ((int)Math.Round(boxH * videoAspect), (int)Math.Round(boxH));
             }
             mode = "default";
         }
