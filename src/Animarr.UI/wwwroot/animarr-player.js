@@ -910,17 +910,18 @@
             if (!x) return null;
             const ext = String(x.ext || '').toLowerCase();
             if (x.image) {
-                // A sidecar can't be burned in (burnSubtitle names a track of
-                // the video): drawn here or not at all.
-                if (!canDrawBitmaps()) return { kind: 'none', name: x.label };
+                // Drawn here (libbitsub) where it can be; anything else — no
+                // libbitsub, a format it doesn't take — the server burns into
+                // the picture from the file itself (burnSubtitlePath).
+                if (!canDrawBitmaps()) return { kind: 'burn', name: x.label, burnPath: x.path };
                 if (ext === 'sup')
-                    return { kind: 'bitmap', format: 'pgs', name: x.label,
+                    return { kind: 'bitmap', format: 'pgs', name: x.label, burnPath: x.path,
                              subUrl: apiUrl('/api/subtitle/sup?path=' + encodeURIComponent(x.path) + '&track=0') };
                 if (ext === 'idx' && x.companionPath)
-                    return { kind: 'bitmap', format: 'vobsub', name: x.label,
+                    return { kind: 'bitmap', format: 'vobsub', name: x.label, burnPath: x.path,
                              idxUrl: apiUrl('/api/file?path=' + encodeURIComponent(x.path)),
                              subUrl: apiUrl('/api/file?path=' + encodeURIComponent(x.companionPath)) };
-                return { kind: 'none', name: x.label };
+                return { kind: 'burn', name: x.label, burnPath: x.path };
             }
             if (ext === 'ass' || ext === 'ssa') {
                 return { kind: 'ass', url: apiUrl('/api/subtitle?path=' + encodeURIComponent(x.path) + '&track=0&format=ass'),
@@ -955,7 +956,10 @@
         const plan = choice ? subtitlePlan(entry, choice) : null;
         const adapter = entry.adapter;
         if (plan && plan.kind === 'burn') {
-            if (user && entry.elementId) { burnSubtitleIn(entry.elementId, plan.burnIndex); return; }
+            if (user && entry.elementId) {
+                burnSubtitleIn(entry.elementId, plan.burnPath ? { path: plan.burnPath } : plan.burnIndex);
+                return;
+            }
             choice = null;   // nothing can show it without a re-encode
             laterToast(entry, t('sub_burn_needed'), plan.name);
         }
@@ -1016,7 +1020,7 @@
                         entry.currentSubIdx = null;
                         entry.currentExtSubPath = null;
                     }
-                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null || plan.burnPath ? t('sub_burn_hint') : plan.name);
                 };
                 const inst = new Ctor({
                     video,
@@ -1040,7 +1044,7 @@
                 if (entry.subToken === token) {
                     entry.currentSubIdx = null;
                     entry.currentExtSubPath = null;
-                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null || plan.burnPath ? t('sub_burn_hint') : plan.name);
                 }
             }
             return;
@@ -3924,6 +3928,7 @@
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
             + (Number.isFinite(p.burnSubtitle) && p.burnSubtitle >= 0 ? '&burnSubtitle=' + p.burnSubtitle : '')
+            + (p.burnSubtitlePath ? '&burnSubtitlePath=' + encodeURIComponent(p.burnSubtitlePath) : '')
             + capsQuery(p.caps, tier));
         let lastErr = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -4155,6 +4160,8 @@
         const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs : 0;
         // Subtitle track s:N burned into the picture by the server (2.6), or none.
         const burnSubtitle = (opts && Number.isFinite(opts.burnSubtitle) && opts.burnSubtitle >= 0) ? opts.burnSubtitle : null;
+        // …or a sidecar subtitle FILE burned in (burnSubtitlePath).
+        const burnSubtitlePath = (opts && typeof opts.burnSubtitlePath === 'string' && opts.burnSubtitlePath) || null;
         // Audio renditions (6.3): the known offsets of the non-default ones
         // (whether to ask is decided once hls.js is loaded, below).
         const renditionOffsetMap = (opts && opts.renditionOffsetMap) || null;
@@ -4183,6 +4190,7 @@
             // the next start sends, and what this stream was started with.
             audioOffsetMs, streamAudioOffsetMs: audioOffsetMs,
             currentBurnSub: burnSubtitle,
+            currentBurnSubPath: burnSubtitlePath,
             currentMaxHeight: maxHeight,
             currentMaxBitrate: maxBitrate,
             // External-track state. currentExternalAudioPath != null means the
@@ -4204,7 +4212,7 @@
         // open's retry is a fresh open again: the profile picks the audio).
         const retryOpts = (resumeAt) => ({
             audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
-            forceResumeSec: resumeAt, usePrefs, audioOffsetMs, burnSubtitle,
+            forceResumeSec: resumeAt, usePrefs, audioOffsetMs, burnSubtitle, burnSubtitlePath,
             audioRenditions: opts && opts.audioRenditions, renditionOffsetMap,
             trackDefaults: opts && opts.trackDefaults,
         });
@@ -4269,6 +4277,7 @@
             try {
                 started = await startStream(mediaPath, {
                     resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs, burnSubtitle,
+                    burnSubtitlePath,
                     audioOffsetMs,
                     // The caller's say (a restart), else by file (wantRenditions).
                     renditions: wantRenditions({ audioRenditions: opts && opts.audioRenditions,
@@ -4916,20 +4925,33 @@
                 // Embedded bitmap tracks also get an explicit "burn in" row
                 // (2.6) after the list; one the player can't draw at all is
                 // labelled so in its own row.
-                const burnRows = emb.map((s, idx) => ({ idx, plan: subtitlePlan(entry, { idx }) }))
-                    .filter(r => r.plan && (r.plan.kind === 'bitmap' || r.plan.kind === 'burn'));
+                // Image sidecars (.sup / .idx+.sub) get one too — the server
+                // burns the file itself (burnSubtitlePath).
+                const isImagePlan = (pl) => pl && (pl.kind === 'bitmap' || pl.kind === 'burn');
+                const burnRows = [
+                    ...emb.map((s, idx) => ({ idx, name: s.name, plan: subtitlePlan(entry, { idx }) }))
+                        .filter(r => isImagePlan(r.plan)),
+                    ...ext.map(s => ({ path: s.path, name: externalTrackLabel(s), plan: subtitlePlan(entry, { ext: s.path }) }))
+                        .filter(r => isImagePlan(r.plan) && r.plan.burnPath),
+                ];
                 const settingsIdx = entry.art ? 1 + emb.length + ext.length + burnRows.length : -1;
                 const items = [t('sub_off'),
                     ...emb.map((s, idx) => {
                         const pl = burnRows.find(r => r.idx === idx);
                         return pl && pl.plan.kind === 'burn' ? s.name + ' · ' + t('sub_burn_in') : s.name;
                     }),
-                    ...ext.map(s => externalTrackLabel(s)),
-                    ...burnRows.map(r => ({ label: t('sub_burn_in') + ': ' + emb[r.idx].name, cls: 'vp-hud-popup__item--more' })),
+                    ...ext.map((s) => {
+                        const pl = burnRows.find(r => r.path === s.path);
+                        const label = externalTrackLabel(s);
+                        return pl && pl.plan.kind === 'burn' ? label + ' · ' + t('sub_burn_in') : label;
+                    }),
+                    ...burnRows.map(r => ({ label: t('sub_burn_in') + ': ' + r.name, cls: 'vp-hud-popup__item--more' })),
                     ...(settingsIdx > 0 ? [{ label: t('sub_settings') + '…', cls: 'vp-hud-popup__item--more' }] : [])];
+                const burned = entry.currentBurnSub != null || !!entry.currentBurnSubPath;
                 let cur = 0;
-                if (entry.currentBurnSub != null) {
-                    const bi = burnRows.findIndex(r => r.idx === entry.currentBurnSub);
+                if (burned) {
+                    const bi = burnRows.findIndex(r => entry.currentBurnSubPath
+                        ? r.path && samePath(r.path, entry.currentBurnSubPath) : r.idx === entry.currentBurnSub);
                     if (bi >= 0) cur = 1 + emb.length + ext.length + bi;
                 } else if (entry.currentExtSubPath != null) {
                     const ei = ext.findIndex(s => s.path === entry.currentExtSubPath);
@@ -4940,11 +4962,12 @@
                 openPickerPopup(hudRoot, 'cc', t('subtitles'), items, cur, (i) => {
                     const burnAt = i - (1 + emb.length + ext.length);
                     if (burnAt >= 0 && burnAt < burnRows.length) {
-                        burnSubtitleIn(elementId, burnRows[burnAt].idx);
+                        const r = burnRows[burnAt];
+                        burnSubtitleIn(elementId, r.path ? { path: r.path } : r.idx);
                         return;
                     }
                     // Any other pick while a track is burned in: restart without it.
-                    if (entry.currentBurnSub != null && i !== settingsIdx) {
+                    if (burned && i !== settingsIdx) {
                         const idx = i - 1;
                         const choice = i === 0 ? null : idx < emb.length ? { idx } : { ext: ext[idx - emb.length].path };
                         unburnSubtitle(elementId, choice);
@@ -5574,6 +5597,7 @@
             maxBitrate:        entry.currentMaxBitrate || 0,
             audioOffsetMs:     entry.audioOffsetMs || 0,
             burnSubtitle:      entry.currentBurnSub != null ? entry.currentBurnSub : null,
+            burnSubtitlePath:  entry.currentBurnSubPath || null,
             // Audio renditions stay on (6.3), the current audio the default.
             audioRenditions:   entry.renditions ? true : null,
             renditionOffsetMap: entry.renditions ? Object.assign({}, entry.renditionOwn || {}) : null,
@@ -5727,17 +5751,21 @@
         return false;
     }
 
-    /** Restart with embedded subtitle track s:N burned into the picture
-     *  (nothing on top of it), remembered as that subtitle choice. */
-    async function burnSubtitleIn(elementId, index) {
+    /** Restart with a subtitle burned into the picture (nothing on top of
+     *  it), remembered as that subtitle choice. `target`: embedded track s:N
+     *  (a number) or { path } — a sidecar file (burnSubtitlePath). */
+    async function burnSubtitleIn(elementId, target) {
         const entry = WIRED.get(elementId);
-        if (!entry || entry.currentBurnSub === index) return false;
+        const path = target && typeof target === 'object' ? target.path : null;
+        const index = path ? null : target;
+        if (!entry || (path ? samePath(entry.currentBurnSubPath, path) : entry.currentBurnSub === index)) return false;
         const prev = { idx: entry.currentSubIdx, ext: entry.currentExtSubPath };
         disposeSubRenderer(entry);
         if (entry.adapter) entry.adapter.setSubtitle(null);
         entry.currentSubIdx = null; entry.currentExtSubPath = null;
-        const ok = await restartStream(elementId, { burnSubtitle: index }, 'burn');
-        if (ok) queueTrackPrefs(elementId, { subtitle: { kind: 'embedded', index } });
+        const ok = await restartStream(elementId, path ? { burnSubtitle: null, burnSubtitlePath: path }
+                                                       : { burnSubtitle: index, burnSubtitlePath: null }, 'burn');
+        if (ok) queueTrackPrefs(elementId, { subtitle: path ? { kind: 'external', path } : { kind: 'embedded', index } });
         else if (WIRED.get(elementId) === entry) {
             applySubtitleChoice(entry, prev.idx != null ? { idx: prev.idx } : prev.ext ? { ext: prev.ext } : null);
         }
@@ -5751,7 +5779,7 @@
         // captureState carries these into the restarted stream (restore.sub).
         entry.currentSubIdx = choice && choice.idx != null ? choice.idx : null;
         entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
-        return restartStream(elementId, { burnSubtitle: null }, 'burn');
+        return restartStream(elementId, { burnSubtitle: null, burnSubtitlePath: null }, 'burn');
     }
 
     /**
